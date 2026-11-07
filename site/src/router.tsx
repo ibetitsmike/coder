@@ -70,6 +70,10 @@ const TokensPage = lazy(
 const SecretsPage = lazy(
 	() => import("./pages/UserSettingsPage/SecretsPage/SecretsPage"),
 );
+const LinkedAccountsPage = lazy(
+	() =>
+		import("./pages/UserSettingsPage/LinkedAccountsPage/LinkedAccountsPage"),
+);
 const WorkspaceProxyPage = lazy(
 	() =>
 		import("./pages/UserSettingsPage/WorkspaceProxyPage/WorkspaceProxyPage"),
@@ -718,6 +722,7 @@ export const router = createBrowserRouter(
 							<Route path="new" element={<CreateTokenPage />} />
 						</Route>
 						<Route path="secrets" element={<SecretsPage />} />
+						<Route path="linked-accounts" element={<LinkedAccountsPage />} />
 						<Route path="notifications" element={<UserNotificationsPage />} />
 					</Route>
 
