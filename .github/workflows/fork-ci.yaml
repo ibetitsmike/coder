@@ -1,0 +1,96 @@
+# CI for the ibetitsmike/coder fork. Upstream's workflows stay disabled in the
+# fork. See coderd/database/migrations/chatdmig/README.md.
+name: fork-ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Validate the chatd graph
+        run: go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check
+      - name: Unit tests
+        run: go test -count=1 ./coderd/database/migrations/chatdmig/...
+
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # The runner's pg_dump is 16. pg_dump refuses a newer server.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CHATDMIG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check pg_dump
+        run: pg_dump --version | grep -q ' 16\.'
+      - name: Schema equivalence
+        run: go test -count=1 -v -run 'TestRoutedSchemaMatchesUpstream|TestUpgradeMatchesFresh|TestRoutingMatchesUpstream' ./coderd/database/migrations/chatdmig/
+
+  chat-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # dbtestutil uses postgres:postgres@127.0.0.1:5432 when it answers.
+      - name: Chat and database packages
+        run: go test -count=1 ./coderd/x/... ./coderd/database/...
+      - name: Chat API tests
+        run: go test -count=1 -run '(?i)chat|skill|mcp' ./coderd ./enterprise/coderd
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build coder
+        run: go build -o /dev/null ./enterprise/cmd/coder

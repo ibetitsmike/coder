@@ -2731,7 +2731,7 @@ func ConnectToPostgres(ctx context.Context, logger slog.Logger, driver string, d
 	for r := retry.New(time.Second, 3*time.Second); r.Wait(ctx); {
 		tries++
 
-		sqlDB, err = sql.Open(driver, dbURL)
+		sqlDB, err = sql.Open(driver, migrations.WithChatdSearchPath(dbURL))
 		if err != nil {
 			logger.Warn(ctx, "connect to postgres: retrying", slog.Error(err), slog.F("try", tries))
 			continue
@@ -2781,7 +2781,7 @@ func ConnectToPostgres(ctx context.Context, logger slog.Logger, driver string, d
 		}
 	}
 
-	err = migrations.EnsureClean(sqlDB)
+	err = migrations.EnsureCleanAll(sqlDB)
 	if err != nil {
 		return nil, xerrors.Errorf("migrations in database: %w", err)
 	}
@@ -3243,7 +3243,7 @@ func getAndMigratePostgresDB(ctx context.Context, logger slog.Logger, postgresUR
 		}
 	}
 
-	sqlDB, err := ConnectToPostgres(ctx, logger, sqlDriver, dbURL, migrations.Up, opts...)
+	sqlDB, err := ConnectToPostgres(ctx, logger, sqlDriver, dbURL, migrations.UpAll, opts...)
 	if err != nil {
 		return nil, "", xerrors.Errorf("connect to postgres: %w", err)
 	}

@@ -57,7 +57,7 @@ func TestOpen_ValidDBFrom(t *testing.T) {
 	err = db.Ping()
 	require.NoError(t, err)
 
-	templateDBName := "tpl_" + migrations.GetMigrationsHash()[:32]
+	templateDBName := "tpl_" + migrations.GetAllMigrationsHash()[:32]
 	tplDBExistsRes, err := db.Query("SELECT 1 FROM pg_database WHERE datname = $1", templateDBName)
 	if err != nil {
 		require.NoError(t, err)

@@ -36,7 +36,7 @@ type ConnectionParams struct {
 }
 
 func (p ConnectionParams) DSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", p.Username, p.Password, p.Host, p.Port, p.DBName)
+	return migrations.WithChatdSearchPath(fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", p.Username, p.Password, p.Host, p.Port, p.DBName))
 }
 
 // These variables are global because all tests share them.
@@ -182,7 +182,7 @@ func createDatabaseFromTemplate(t TBSubset, connParams ConnectionParams, db *sql
 
 	emptyTemplateDBName := templateDBName == ""
 	if emptyTemplateDBName {
-		templateDBName = fmt.Sprintf("tpl_%s", migrations.GetMigrationsHash()[:32])
+		templateDBName = fmt.Sprintf("tpl_%s", migrations.GetAllMigrationsHash()[:32])
 	}
 	_, err := db.Exec("CREATE DATABASE " + newDBName + " WITH TEMPLATE " + templateDBName)
 	if err == nil {
@@ -202,7 +202,7 @@ func createDatabaseFromTemplate(t TBSubset, connParams ConnectionParams, db *sql
 
 	// The templateDBName is empty, so we need to create the template database.
 	err = createAndInitDatabase(t, connParams, db, templateDBName, func(tplDb *sql.DB) error {
-		if err := migrations.Up(tplDb); err != nil {
+		if err := migrations.UpAll(tplDb); err != nil {
 			return xerrors.Errorf("migrate template db: %w", err)
 		}
 		return nil
