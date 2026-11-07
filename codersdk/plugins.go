@@ -2,7 +2,6 @@ package codersdk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -100,10 +99,10 @@ type CreatePluginRequest struct {
 }
 
 // UpdatePluginRequest changes a plugin. A nil field does not change. A
-// non-nil Config replaces all config values.
+// non-nil Config replaces all config values, so an empty map clears them.
 type UpdatePluginRequest struct {
-	Enabled *bool             `json:"enabled,omitempty"`
-	Config  map[string]string `json:"config,omitempty"`
+	Enabled *bool              `json:"enabled,omitempty"`
+	Config  *map[string]string `json:"config,omitempty"`
 }
 
 // PluginLinkCode is a one-time code that links an external account, for
@@ -145,7 +144,7 @@ func (c *ExperimentalClient) InspectPlugin(ctx context.Context, organizationID u
 		return InspectPluginResponse{}, ReadBodyAsError(res)
 	}
 	var resp InspectPluginResponse
-	return resp, json.NewDecoder(res.Body).Decode(&resp)
+	return resp, ReadBodyAsJSON(res, &resp)
 }
 
 // CreatePlugin installs a plugin in an organization.

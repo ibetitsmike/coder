@@ -1435,6 +1435,133 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/experimental/organizations/{organization}/plugins": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List plugins of an organization",
+                "operationId": "list-organization-plugins",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.Plugin"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Install a plugin",
+                "operationId": "install-plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Install request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.CreatePluginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Plugin"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/organizations/{organization}/plugins/inspect": {
+            "post": {
+                "consumes": [
+                    "application/wasm"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Inspect a plugin module",
+                "operationId": "inspect-plugin-module",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.InspectPluginResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/experimental/organizations/{organization}/skill-settings": {
             "get": {
                 "produces": [
@@ -1901,6 +2028,267 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/experimental/plugins/{plugin}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a plugin",
+                "operationId": "get-plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Plugin"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Delete a plugin",
+                "operationId": "delete-plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update a plugin",
+                "operationId": "update-plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdatePluginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Plugin"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/plugins/{plugin}/link-codes": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Create a plugin link code",
+                "operationId": "create-plugin-link-code",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.PluginLinkCode"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/plugins/{plugin}/links": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List the links of a plugin",
+                "operationId": "list-plugin-links",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.PluginUserLink"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/plugins/{plugin}/links/{externalID}": {
+            "delete": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Delete a plugin link",
+                "operationId": "delete-plugin-link",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "External ID",
+                        "name": "externalID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/plugins/{plugin}/webhook": {
+            "post": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Send a webhook to a plugin",
+                "operationId": "plugin-webhook",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                },
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/experimental/users/email": {
             "put": {
                 "consumes": [
@@ -1925,6 +2313,37 @@ const docTemplate = `{
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/experimental/users/me/plugins": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List plugins the user can link to",
+                "operationId": "list-linkable-plugins",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.LinkablePlugin"
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -24961,6 +25380,26 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.CreatePluginRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "grants": {
+                    "$ref": "#/definitions/codersdk.PluginGrants"
+                },
+                "wasm": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "codersdk.CreateProvisionerKeyResponse": {
             "type": "object",
             "properties": {
@@ -27348,6 +27787,20 @@ const docTemplate = `{
                 "InsightsReportIntervalWeek"
             ]
         },
+        "codersdk.InspectPluginResponse": {
+            "type": "object",
+            "properties": {
+                "manifest": {
+                    "$ref": "#/definitions/codersdk.PluginManifest"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
         "codersdk.InvalidatePresetsResponse": {
             "type": "object",
             "properties": {
@@ -27453,6 +27906,40 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.LinkablePlugin": {
+            "type": "object",
+            "properties": {
+                "chats": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.PluginUserLink"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "organization_name": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -29733,6 +30220,179 @@ const docTemplate = `{
                 },
                 "resource_type": {
                     "$ref": "#/definitions/codersdk.RBACResource"
+                }
+            }
+        },
+        "codersdk.Plugin": {
+            "type": "object",
+            "properties": {
+                "config_keys_set": {
+                    "description": "ConfigKeysSet lists the config keys that have a value.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "created_by": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "file_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "grants": {
+                    "$ref": "#/definitions/codersdk.PluginGrants"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "manifest": {
+                    "$ref": "#/definitions/codersdk.PluginManifest"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "runner_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.PluginGrants": {
+            "type": "object",
+            "properties": {
+                "chats": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "config_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "http_origins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "private_cidrs": {
+                    "description": "PrivateCIDRs lets HTTP requests of the plugin reach these private\naddress ranges, for example a signal-cli-rest-api in the cluster.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tick_seconds": {
+                    "type": "integer"
+                },
+                "webhook": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "codersdk.PluginLinkCode": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "codersdk.PluginManifest": {
+            "type": "object",
+            "properties": {
+                "chats": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "config_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "http_origins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tick_seconds": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "string"
+                },
+                "webhook": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "codersdk.PluginUserLink": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "external_id": {
+                    "type": "string"
+                },
+                "plugin_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "user_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
@@ -33354,6 +34014,20 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "members_can_disable_skills": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "codersdk.UpdatePluginRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "enabled": {
                     "type": "boolean"
                 }
             }

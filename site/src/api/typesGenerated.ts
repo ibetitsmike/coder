@@ -11457,7 +11457,7 @@ export interface UpdateOrganizationSkillSettingsRequest {
 // From codersdk/plugins.go
 /**
  * UpdatePluginRequest changes a plugin. A nil field does not change. A
- * non-nil Config replaces all config values.
+ * non-nil Config replaces all config values, so an empty map clears them.
  */
 export interface UpdatePluginRequest {
 	readonly enabled?: boolean;

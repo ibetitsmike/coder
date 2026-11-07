@@ -106,6 +106,7 @@ import (
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/mcpclient"
 	"github.com/coder/coder/v2/coderd/x/gitsync"
+	"github.com/coder/coder/v2/coderd/x/plugins"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/drpcsdk"
 	"github.com/coder/coder/v2/codersdk/healthsdk"
@@ -279,6 +280,9 @@ type Options struct {
 	// ChatWorkerDisabled skips starting the chat daemon's background
 	// worker.
 	ChatWorkerDisabled bool
+	// PluginStartHost starts one plugin-host process. Nil runs
+	// `coder plugin-host` from the current executable.
+	PluginStartHost plugins.StartHostFunc
 
 	UpdateAgentMetrics func(ctx context.Context, labels prometheusmetrics.AgentMetricLabels, metrics []*agentproto.Stats_Metric)
 	StatsBatcher       workspacestats.Batcher
@@ -1408,7 +1412,32 @@ func New(options *Options) *API {
 				r.Get("/", api.getOrganizationSkillPreferences)
 				r.Patch("/", api.patchOrganizationSkillPreferences)
 			})
+			r.Route("/plugins", func(r chi.Router) {
+				r.Use(httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentPlugins))
+				r.Get("/", api.getOrganizationPlugins)
+				r.Post("/", api.postOrganizationPlugin)
+				r.Post("/inspect", api.postOrganizationPluginInspect)
+			})
 		})
+		r.Route("/plugins/{plugin}", func(r chi.Router) {
+			r.Use(httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentPlugins))
+			// The plugin checks its own secret, for example
+			// X-Telegram-Bot-Api-Secret-Token.
+			r.Post("/webhook", api.postPluginWebhook)
+			r.Group(func(r chi.Router) {
+				r.Use(apiKeyMiddleware)
+				r.Get("/", api.getPlugin)
+				r.Patch("/", api.patchPlugin)
+				r.Delete("/", api.deletePlugin)
+				r.Get("/links", api.getPluginLinks)
+				r.Delete("/links/{externalID}", api.deletePluginLink)
+				r.Post("/link-codes", api.postPluginLinkCode)
+			})
+		})
+		r.With(
+			apiKeyMiddleware,
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentPlugins),
+		).Get("/users/me/plugins", api.getLinkablePlugins)
 
 		r.Route("/mcp", func(r chi.Router) {
 			// Providers pin the redirect URI when a session is established,
@@ -2232,6 +2261,20 @@ func New(options *Options) *API {
 
 	api.RootHandler = r
 
+	if api.Experiments.Enabled(codersdk.ExperimentPlugins) {
+		api.pluginManager = plugins.New(plugins.Options{
+			Logger:     options.Logger.Named("plugins"),
+			Database:   options.Database,
+			Pubsub:     options.Pubsub,
+			ReplicaID:  api.ID,
+			AccessURL:  options.AccessURL,
+			Handler:    func() http.Handler { return api.RootHandler },
+			HTTPClient: options.HTTPClient,
+			StartHost:  options.PluginStartHost,
+		})
+		api.pluginManager.Start()
+	}
+
 	return api
 }
 
@@ -2246,6 +2289,7 @@ type API struct {
 
 	*Options
 	mcpHTTPClient *http.Client
+	pluginManager *plugins.Manager
 	// ID is a uniquely generated ID on initialization.
 	// This is used to associate objects with a specific
 	// Coder API instance, like workspace agents to a
@@ -2420,6 +2464,11 @@ func (api *API) Close() error {
 	case <-time.After(10 * time.Second):
 		api.Logger.Warn(context.Background(),
 			"chat diff refresh worker did not exit in time")
+	}
+	if api.pluginManager != nil {
+		if err := api.pluginManager.Close(); err != nil {
+			api.Logger.Warn(api.ctx, "close plugin manager", slog.Error(err))
+		}
 	}
 	if api.chatDaemon != nil {
 		if err := api.chatDaemon.Close(); err != nil {

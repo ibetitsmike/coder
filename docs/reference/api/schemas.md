@@ -7359,6 +7359,48 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `icon`         | string | false    |              |                                                                        |
 | `name`         | string | true     |              |                                                                        |
 
+## codersdk.CreatePluginRequest
+
+```json
+{
+  "config": {
+    "property1": "string",
+    "property2": "string"
+  },
+  "grants": {
+    "chats": [
+      "string"
+    ],
+    "config_keys": [
+      "string"
+    ],
+    "events": [
+      "string"
+    ],
+    "http_origins": [
+      "string"
+    ],
+    "private_cidrs": [
+      "string"
+    ],
+    "tick_seconds": 0,
+    "webhook": true
+  },
+  "wasm": [
+    0
+  ]
+}
+```
+
+### Properties
+
+| Name               | Type                                           | Required | Restrictions | Description |
+|--------------------|------------------------------------------------|----------|--------------|-------------|
+| `config`           | object                                         | false    |              |             |
+| » `[any property]` | string                                         | false    |              |             |
+| `grants`           | [codersdk.PluginGrants](#codersdkplugingrants) | false    |              |             |
+| `wasm`             | array of integer                               | false    |              |             |
+
 ## codersdk.CreateProvisionerKeyResponse
 
 ```json
@@ -10932,6 +10974,41 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 |---------------|
 | `day`, `week` |
 
+## codersdk.InspectPluginResponse
+
+```json
+{
+  "manifest": {
+    "chats": [
+      "string"
+    ],
+    "config_keys": [
+      "string"
+    ],
+    "events": [
+      "string"
+    ],
+    "http_origins": [
+      "string"
+    ],
+    "name": "string",
+    "tick_seconds": 0,
+    "version": "string",
+    "webhook": true
+  },
+  "sha256": "string",
+  "size_bytes": 0
+}
+```
+
+### Properties
+
+| Name         | Type                                               | Required | Restrictions | Description |
+|--------------|----------------------------------------------------|----------|--------------|-------------|
+| `manifest`   | [codersdk.PluginManifest](#codersdkpluginmanifest) | false    |              |             |
+| `sha256`     | string                                             | false    |              |             |
+| `size_bytes` | integer                                            | false    |              |             |
+
 ## codersdk.InvalidatePresetsResponse
 
 ```json
@@ -11060,6 +11137,41 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 |------------|-------------------------------|
 | `icon`     | `bug`, `chat`, `docs`, `star` |
 | `location` | `dropdown`, `navbar`          |
+
+## codersdk.LinkablePlugin
+
+```json
+{
+  "chats": [
+    "string"
+  ],
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "links": [
+    {
+      "created_at": "2019-08-24T14:15:22Z",
+      "external_id": "string",
+      "plugin_id": "8b176ba5-fa8e-458e-94ad-85d1ae8f3be0",
+      "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5"
+    }
+  ],
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "organization_name": "string",
+  "version": "string"
+}
+```
+
+### Properties
+
+| Name                | Type                                                        | Required | Restrictions | Description |
+|---------------------|-------------------------------------------------------------|----------|--------------|-------------|
+| `chats`             | array of string                                             | false    |              |             |
+| `id`                | string                                                      | false    |              |             |
+| `links`             | array of [codersdk.PluginUserLink](#codersdkpluginuserlink) | false    |              |             |
+| `name`              | string                                                      | false    |              |             |
+| `organization_id`   | string                                                      | false    |              |             |
+| `organization_name` | string                                                      | false    |              |             |
+| `version`           | string                                                      | false    |              |             |
 
 ## codersdk.ListInboxNotificationsResponse
 
@@ -13591,6 +13703,191 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `action`        | [codersdk.RBACAction](#codersdkrbacaction)     | false    |              |                                         |
 | `negate`        | boolean                                        | false    |              | Negate makes this a negative permission |
 | `resource_type` | [codersdk.RBACResource](#codersdkrbacresource) | false    |              |                                         |
+
+## codersdk.Plugin
+
+```json
+{
+  "config_keys_set": [
+    "string"
+  ],
+  "created_at": "2019-08-24T14:15:22Z",
+  "created_by": "ee824cad-d7a6-4f48-87dc-e8461a9201c4",
+  "enabled": true,
+  "file_id": "8a0cfb4f-ddc9-436d-91bb-75133c583767",
+  "grants": {
+    "chats": [
+      "string"
+    ],
+    "config_keys": [
+      "string"
+    ],
+    "events": [
+      "string"
+    ],
+    "http_origins": [
+      "string"
+    ],
+    "private_cidrs": [
+      "string"
+    ],
+    "tick_seconds": 0,
+    "webhook": true
+  },
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "last_error": "string",
+  "manifest": {
+    "chats": [
+      "string"
+    ],
+    "config_keys": [
+      "string"
+    ],
+    "events": [
+      "string"
+    ],
+    "http_origins": [
+      "string"
+    ],
+    "name": "string",
+    "tick_seconds": 0,
+    "version": "string",
+    "webhook": true
+  },
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "runner_id": "9d0962d6-7c33-45b9-936f-62727b39a370",
+  "updated_at": "2019-08-24T14:15:22Z",
+  "version": "string"
+}
+```
+
+### Properties
+
+| Name              | Type                                               | Required | Restrictions | Description                                              |
+|-------------------|----------------------------------------------------|----------|--------------|----------------------------------------------------------|
+| `config_keys_set` | array of string                                    | false    |              | Config keys set lists the config keys that have a value. |
+| `created_at`      | string                                             | false    |              |                                                          |
+| `created_by`      | string                                             | false    |              |                                                          |
+| `enabled`         | boolean                                            | false    |              |                                                          |
+| `file_id`         | string                                             | false    |              |                                                          |
+| `grants`          | [codersdk.PluginGrants](#codersdkplugingrants)     | false    |              |                                                          |
+| `id`              | string                                             | false    |              |                                                          |
+| `last_error`      | string                                             | false    |              |                                                          |
+| `manifest`        | [codersdk.PluginManifest](#codersdkpluginmanifest) | false    |              |                                                          |
+| `name`            | string                                             | false    |              |                                                          |
+| `organization_id` | string                                             | false    |              |                                                          |
+| `runner_id`       | string                                             | false    |              |                                                          |
+| `updated_at`      | string                                             | false    |              |                                                          |
+| `version`         | string                                             | false    |              |                                                          |
+
+## codersdk.PluginGrants
+
+```json
+{
+  "chats": [
+    "string"
+  ],
+  "config_keys": [
+    "string"
+  ],
+  "events": [
+    "string"
+  ],
+  "http_origins": [
+    "string"
+  ],
+  "private_cidrs": [
+    "string"
+  ],
+  "tick_seconds": 0,
+  "webhook": true
+}
+```
+
+### Properties
+
+| Name            | Type            | Required | Restrictions | Description                                                                                                                          |
+|-----------------|-----------------|----------|--------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `chats`         | array of string | false    |              |                                                                                                                                      |
+| `config_keys`   | array of string | false    |              |                                                                                                                                      |
+| `events`        | array of string | false    |              |                                                                                                                                      |
+| `http_origins`  | array of string | false    |              |                                                                                                                                      |
+| `private_cidrs` | array of string | false    |              | Private cidrs lets HTTP requests of the plugin reach these private address ranges, for example a signal-cli-rest-api in the cluster. |
+| `tick_seconds`  | integer         | false    |              |                                                                                                                                      |
+| `webhook`       | boolean         | false    |              |                                                                                                                                      |
+
+## codersdk.PluginLinkCode
+
+```json
+{
+  "code": "string",
+  "expires_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name         | Type   | Required | Restrictions | Description |
+|--------------|--------|----------|--------------|-------------|
+| `code`       | string | false    |              |             |
+| `expires_at` | string | false    |              |             |
+
+## codersdk.PluginManifest
+
+```json
+{
+  "chats": [
+    "string"
+  ],
+  "config_keys": [
+    "string"
+  ],
+  "events": [
+    "string"
+  ],
+  "http_origins": [
+    "string"
+  ],
+  "name": "string",
+  "tick_seconds": 0,
+  "version": "string",
+  "webhook": true
+}
+```
+
+### Properties
+
+| Name           | Type            | Required | Restrictions | Description |
+|----------------|-----------------|----------|--------------|-------------|
+| `chats`        | array of string | false    |              |             |
+| `config_keys`  | array of string | false    |              |             |
+| `events`       | array of string | false    |              |             |
+| `http_origins` | array of string | false    |              |             |
+| `name`         | string          | false    |              |             |
+| `tick_seconds` | integer         | false    |              |             |
+| `version`      | string          | false    |              |             |
+| `webhook`      | boolean         | false    |              |             |
+
+## codersdk.PluginUserLink
+
+```json
+{
+  "created_at": "2019-08-24T14:15:22Z",
+  "external_id": "string",
+  "plugin_id": "8b176ba5-fa8e-458e-94ad-85d1ae8f3be0",
+  "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5"
+}
+```
+
+### Properties
+
+| Name          | Type   | Required | Restrictions | Description |
+|---------------|--------|----------|--------------|-------------|
+| `created_at`  | string | false    |              |             |
+| `external_id` | string | false    |              |             |
+| `plugin_id`   | string | false    |              |             |
+| `user_id`     | string | false    |              |             |
 
 ## codersdk.PostOAuth2ProviderAppRequest
 
@@ -17576,6 +17873,26 @@ The cursor is owner-scoped, so only the chat owner may set this. Opening a chat'
 | Name                         | Type    | Required | Restrictions | Description |
 |------------------------------|---------|----------|--------------|-------------|
 | `members_can_disable_skills` | boolean | false    |              |             |
+
+## codersdk.UpdatePluginRequest
+
+```json
+{
+  "config": {
+    "property1": "string",
+    "property2": "string"
+  },
+  "enabled": true
+}
+```
+
+### Properties
+
+| Name               | Type    | Required | Restrictions | Description |
+|--------------------|---------|----------|--------------|-------------|
+| `config`           | object  | false    |              |             |
+| » `[any property]` | string  | false    |              |             |
+| `enabled`          | boolean | false    |              |             |
 
 ## codersdk.UpdateRoles
 

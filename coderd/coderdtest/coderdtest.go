@@ -94,6 +94,8 @@ import (
 	"github.com/coder/coder/v2/coderd/workspaceapps/appurl"
 	"github.com/coder/coder/v2/coderd/workspacestats"
 	"github.com/coder/coder/v2/coderd/wsbuilder"
+	"github.com/coder/coder/v2/coderd/x/plugins"
+	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/coder/v2/codersdk/drpcsdk"
@@ -208,6 +210,10 @@ type Options struct {
 	ProvisionerdServerMetrics *provisionerdserver.Metrics
 	WorkspaceBuilderMetrics   *wsbuilder.Metrics
 	UsageInserter             usage.Inserter
+
+	// PluginStartHost starts plugin hosts. Nil runs them in-process,
+	// because the test binary has no plugin-host command.
+	PluginStartHost plugins.StartHostFunc
 }
 
 // New constructs a codersdk client connected to an in-memory API instance.
@@ -257,6 +263,12 @@ func NewOptions(t testing.TB, options *Options) (func(http.Handler), context.Can
 	if options.Logger == nil {
 		logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}).Leveled(slog.LevelDebug).Named("coderd")
 		options.Logger = &logger
+	}
+	if options.PluginStartHost == nil {
+		hostLogger := options.Logger.Named("pluginhost")
+		options.PluginStartHost = func(ctx context.Context) (*pluginhost.Client, error) {
+			return pluginhost.StartInProcess(ctx, hostLogger)
+		}
 	}
 	if options.GoogleTokenValidator == nil {
 		ctx, cancelFunc := context.WithCancel(context.Background())
@@ -629,6 +641,7 @@ func NewOptions(t testing.TB, options *Options) (func(http.Handler), context.Can
 			AgentInactiveDisconnectTimeout: testutil.WaitShort,
 			MCPAllowedPrivateCIDRs:         options.MCPAllowedPrivateCIDRs,
 			ChatWorkerDisabled:             options.ChatWorkerDisabled,
+			PluginStartHost:                options.PluginStartHost,
 			AccessURL:                      accessURL,
 			AppHostname:                    options.AppHostname,
 			AppHostnameRegex:               appHostnameRegex,
