@@ -1,0 +1,142 @@
+# Merges upstream coder/coder main into the fork once a day, through a PR that
+# merges itself when fork-ci passes. See
+# coderd/database/migrations/chatdmig/README.md.
+name: fork-sync
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-sync
+
+jobs:
+  # A sync can add upstream workflows. They would deploy, release or fail in
+  # the fork, so only fork-* workflows stay on.
+  quiet-upstream-workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Disable upstream workflows
+        run: |
+          set -euo pipefail
+          gh workflow list -R "$GITHUB_REPOSITORY" --all --limit 500 --json id,path,state \
+            --jq '.[] | select(.state == "active" and (.path | startswith(".github/workflows/")) and (.path | test("/fork-[^/]*$") | not)) | .id' |
+            while read -r id; do
+              gh workflow disable -R "$GITHUB_REPOSITORY" "$id"
+            done
+
+  sync:
+    needs: quiet-upstream-workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # GITHUB_TOKEN cannot push upstream's workflow changes, and a PR that
+      # it opens starts no workflows, so fork-ci would never run.
+      GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+      GOTOOLCHAIN: auto
+    steps:
+      - name: Require FORK_SYNC_TOKEN
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set the FORK_SYNC_TOKEN secret. See chatdmig/README.md."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Merge upstream
+        run: |
+          set -euo pipefail
+          git config user.name "fork-sync"
+          git config user.email "fork-sync@users.noreply.github.com"
+          gh label create sync --color 0e8a16 --description "Upstream sync" --force
+          gh label create needs-mike --color d93f0b --description "A person must act" --force
+          gh label create sync-blocked --color b60205 --description "Upstream sync is blocked" --force
+
+          # One sync PR at a time. A red or mixed one waits for Mike.
+          open=$(gh pr list --label sync --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            # gh pr checks exits non-zero while a check fails or runs.
+            failed=$(gh pr checks "$open" --json bucket --jq 'any(.[]; .bucket == "fail")' || true)
+            if [ "$failed" = true ]; then
+              gh pr edit "$open" --add-label needs-mike
+            fi
+            echo "::warning::Sync PR #$open is still open. Merge or close it first."
+            exit 0
+          fi
+
+          git fetch --no-tags https://github.com/coder/coder.git main
+          # Upstream fixes a duplicate migration number within hours. Take
+          # only commits that are a day old.
+          target=$(git rev-list -1 --first-parent --before="24 hours ago" FETCH_HEAD)
+          if git merge-base --is-ancestor "$target" HEAD; then
+            echo "main has every upstream commit up to $target."
+            exit 0
+          fi
+          short=${target:0:10}
+          branch="sync/$(date -u +%F)-$short"
+          git switch -c "$branch"
+
+          if ! git merge --no-edit -m "chore: merge upstream $short" "$target"; then
+            files=$(git diff --name-only --diff-filter=U)
+            git merge --abort
+            fence='```'
+            body=$(printf 'Merging upstream %s into main conflicts in:\n\n%s\n%s\n%s\n\nMerge it by hand. See coderd/database/migrations/chatdmig/README.md.' "$target" "$fence" "$files" "$fence")
+            issue=$(gh issue list --label sync-blocked --state open --json number --jq '.[0].number // empty')
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "$body"
+            else
+              gh issue create --label sync-blocked --title "sync: upstream $short conflicts" --body "$body"
+            fi
+            exit 1
+          fi
+
+          rc=0
+          go run ./coderd/database/migrations/chatdmig/cmd/chatdmig route > "$RUNNER_TEMP/route.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/route.txt"
+          # 3: a mixed migration needs an override. Open the PR for Mike.
+          if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then
+            exit "$rc"
+          fi
+          git add -A coderd/database/migrations/chatdmig
+          git diff --cached --quiet || git commit -m "chore: route upstream migrations"
+          git push origin "HEAD:refs/heads/$branch"
+
+          {
+            echo "Merges upstream \`coder/coder\` main up to $target."
+            echo
+            echo "New upstream migrations and their routes:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/route.txt"
+            echo '```'
+            echo
+            if [ "$rc" = 3 ]; then
+              echo "A migration is mixed. Write its override, push it to this branch, then merge."
+            else
+              echo "This PR merges itself when fork-ci passes."
+            fi
+            echo
+            echo "Opened by the fork-sync workflow."
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "$branch" --title "chore: sync upstream $short" \
+            --body-file "$RUNNER_TEMP/body.md" --label sync
+          if [ "$rc" = 3 ]; then
+            gh pr edit "$branch" --add-label needs-mike
+          else
+            gh pr merge "$branch" --auto --merge
+          fi

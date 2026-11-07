@@ -1,0 +1,6 @@
+# Routes of upstream migrations after the split. chatdmig route appends a line
+# for each new upstream migration. Versions up to the split ran in core before
+# the fork existed. See README.md.
+#
+# <version> <name> <ledger: core, chatd or mixed>
+split mcp_server_oauth2_client_registration

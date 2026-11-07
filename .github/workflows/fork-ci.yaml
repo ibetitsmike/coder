@@ -1,0 +1,86 @@
+# CI for the ibetitsmike/coder fork. Upstream's workflows stay disabled in the
+# fork. See coderd/database/migrations/chatdmig/README.md.
+name: fork-ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Validate the chatd graph
+        run: go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check
+      - name: Unit tests
+        run: go test -count=1 ./coderd/database/migrations/chatdmig/...
+
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CHATDMIG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Start Postgres
+        run: ./.github/fork/start-postgres.sh
+      # pg_dump refuses a server newer than itself.
+      - name: Check pg_dump
+        run: |
+          pg_dump --version
+          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 16
+      - name: Schema and runner tests
+        run: go test -count=1 -v ./coderd/database/migrations/chatdmig/
+
+  chat-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # dbtestutil uses postgres:postgres@127.0.0.1:5432 when it answers.
+      - name: Start Postgres
+        run: ./.github/fork/start-postgres.sh
+      - name: Chat and database packages
+        run: go test -count=1 ./coderd/x/... ./coderd/database/...
+      - name: Chat API tests
+        run: go test -count=1 -run '(?i)chat|skill|mcp' ./coderd ./enterprise/coderd
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build coder
+        run: go build -o /dev/null ./enterprise/cmd/coder
