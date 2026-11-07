@@ -1,0 +1,107 @@
+syntax = "proto3";
+option go_package = "github.com/coder/coder/v2/codersdk/x/pluginsdk/pluginproto";
+
+package coder.plugins.v1;
+
+// Manifest describes a plugin and the capabilities it requests. It is
+// returned by the coder_manifest export.
+message Manifest {
+  string name = 1;
+  string version = 2;
+  repeated string events = 3;
+  repeated string chats = 4;
+  repeated string http_origins = 5;
+  uint32 tick_seconds = 6;
+  bool webhook = 7;
+  repeated string config_keys = 8;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}
+
+message HTTPRequest {
+  string method = 1;
+  string url = 2;
+  repeated Header headers = 3;
+  bytes body = 4;
+}
+
+message HTTPResponse {
+  int32 status = 1;
+  repeated Header headers = 2;
+  bytes body = 3;
+}
+
+message ChatSend {
+  string external_id = 1;
+  string text = 2;
+  bool new_chat = 3;
+}
+
+message ChatSendResult {
+  string chat_id = 1;
+}
+
+message LinkComplete {
+  string external_id = 1;
+  string code = 2;
+}
+
+message LinkCompleteResult {
+  string username = 1;
+}
+
+message LogLine {
+  enum Level {
+    LEVEL_INFO = 0;
+    LEVEL_DEBUG = 1;
+    LEVEL_WARN = 2;
+    LEVEL_ERROR = 3;
+  }
+  Level level = 1;
+  string message = 2;
+}
+
+// HostCall is sent by the guest through the coder.call import.
+message HostCall {
+  oneof call {
+    ChatSend chat_send = 1;
+    LinkComplete link_complete = 2;
+    HTTPRequest http_fetch = 3;
+    string config_get = 4;
+    LogLine log = 5;
+  }
+}
+
+// HostResult is the reply to a HostCall, copied into the guest through the
+// coder.result import.
+message HostResult {
+  string error = 1;
+  oneof result {
+    ChatSendResult chat_send = 2;
+    LinkCompleteResult link_complete = 3;
+    HTTPResponse http_fetch = 4;
+    string config_value = 5;
+  }
+}
+
+message ChatText {
+  int64 id = 1;
+  string text = 2;
+}
+
+// ChatEvent is the input of the coder_on_event export.
+message ChatEvent {
+  string chat_id = 1;
+  string external_id = 2;
+  string status = 3;
+  repeated ChatText messages = 4;
+  string title = 5;
+}
+
+// Result is the output of the coder_on_event and coder_on_tick exports.
+message Result {
+  string error = 1;
+}
