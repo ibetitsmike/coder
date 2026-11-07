@@ -24233,6 +24233,866 @@ func (q *sqlQuerier) GetParameterSchemasByJobID(ctx context.Context, jobID uuid.
 	return items, nil
 }
 
+const acquirePluginLeases = `-- name: AcquirePluginLeases :many
+UPDATE plugins
+SET
+    runner_id = $1::uuid,
+    lease_expires_at = now() + make_interval(secs => $2::int)
+WHERE id IN (
+    SELECT p.id
+    FROM plugins p
+    WHERE p.enabled
+        AND (
+            p.runner_id = $1::uuid
+            OR p.lease_expires_at IS NULL
+            OR p.lease_expires_at < now()
+        )
+    ORDER BY p.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $3::int
+)
+RETURNING id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at
+`
+
+type AcquirePluginLeasesParams struct {
+	RunnerID     uuid.UUID `db:"runner_id" json:"runner_id"`
+	LeaseSeconds int32     `db:"lease_seconds" json:"lease_seconds"`
+	MaxPlugins   int32     `db:"max_plugins" json:"max_plugins"`
+}
+
+// Leases enabled plugins to a replica. A replica renews its own leases on
+// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
+// concurrent replicas from blocking on, or double leasing, the same rows.
+func (q *sqlQuerier) AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error) {
+	rows, err := q.db.QueryContext(ctx, acquirePluginLeases, arg.RunnerID, arg.LeaseSeconds, arg.MaxPlugins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Plugin
+	for rows.Next() {
+		var i Plugin
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.Name,
+			&i.Version,
+			&i.FileID,
+			&i.Manifest,
+			&i.Grants,
+			&i.Config,
+			&i.ConfigKeyID,
+			&i.Enabled,
+			&i.RunnerID,
+			&i.LeaseExpiresAt,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const consumePluginLinkCode = `-- name: ConsumePluginLinkCode :one
+DELETE FROM plugin_link_codes
+WHERE plugin_id = $1
+    AND code_hash = $2
+    AND expires_at > now()
+RETURNING code_hash, plugin_id, user_id, expires_at, created_at
+`
+
+type ConsumePluginLinkCodeParams struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	CodeHash []byte    `db:"code_hash" json:"code_hash"`
+}
+
+func (q *sqlQuerier) ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error) {
+	row := q.db.QueryRowContext(ctx, consumePluginLinkCode, arg.PluginID, arg.CodeHash)
+	var i PluginLinkCode
+	err := row.Scan(
+		&i.CodeHash,
+		&i.PluginID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteExpiredPluginLinkCodes = `-- name: DeleteExpiredPluginLinkCodes :exec
+DELETE FROM plugin_link_codes WHERE expires_at <= now()
+`
+
+func (q *sqlQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPluginLinkCodes)
+	return err
+}
+
+const deletePluginByID = `-- name: DeletePluginByID :exec
+DELETE FROM plugins WHERE id = $1
+`
+
+func (q *sqlQuerier) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deletePluginByID, id)
+	return err
+}
+
+const deletePluginLinkCodesByUser = `-- name: DeletePluginLinkCodesByUser :exec
+DELETE FROM plugin_link_codes WHERE plugin_id = $1 AND user_id = $2
+`
+
+type DeletePluginLinkCodesByUserParams struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	UserID   uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+func (q *sqlQuerier) DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error {
+	_, err := q.db.ExecContext(ctx, deletePluginLinkCodesByUser, arg.PluginID, arg.UserID)
+	return err
+}
+
+const deletePluginUserLink = `-- name: DeletePluginUserLink :exec
+DELETE FROM plugin_user_links WHERE plugin_id = $1 AND external_id = $2
+`
+
+type DeletePluginUserLinkParams struct {
+	PluginID   uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ExternalID string    `db:"external_id" json:"external_id"`
+}
+
+func (q *sqlQuerier) DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error {
+	_, err := q.db.ExecContext(ctx, deletePluginUserLink, arg.PluginID, arg.ExternalID)
+	return err
+}
+
+const ensurePluginChatBindings = `-- name: EnsurePluginChatBindings :exec
+INSERT INTO plugin_chat_bindings (plugin_id, chat_id, sent_message_id, sent_status)
+SELECT DISTINCT ON (c.id)
+    l.plugin_id,
+    c.id,
+    CASE
+        WHEN c.created_at >= l.created_at THEN 0
+        ELSE COALESCE((SELECT max(m.id) FROM chat_messages m WHERE m.chat_id = c.id), 0)
+    END,
+    CASE
+        WHEN c.created_at >= l.created_at THEN NULL
+        ELSE c.status
+    END
+FROM plugin_user_links l
+JOIN plugins p ON p.id = l.plugin_id
+JOIN chats c ON c.owner_id = l.user_id AND c.organization_id = p.organization_id
+WHERE l.plugin_id = $1
+    AND c.parent_chat_id IS NULL
+    AND NOT c.archived
+ORDER BY c.id, l.created_at
+ON CONFLICT (plugin_id, chat_id) DO NOTHING
+`
+
+// Binds every top-level, unarchived chat of a linked user in the plugin's
+// organization. Chats created after the link start at cursor 0 so their whole
+// history is delivered. Older chats start at their newest message so linking
+// does not replay history.
+func (q *sqlQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, ensurePluginChatBindings, pluginID)
+	return err
+}
+
+const getPluginByID = `-- name: GetPluginByID :one
+SELECT id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at FROM plugins WHERE id = $1
+`
+
+func (q *sqlQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error) {
+	row := q.db.QueryRowContext(ctx, getPluginByID, id)
+	var i Plugin
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Name,
+		&i.Version,
+		&i.FileID,
+		&i.Manifest,
+		&i.Grants,
+		&i.Config,
+		&i.ConfigKeyID,
+		&i.Enabled,
+		&i.RunnerID,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPluginChatBindingsDue = `-- name: GetPluginChatBindingsDue :many
+SELECT
+    b.plugin_id,
+    b.chat_id,
+    b.sent_message_id,
+    b.sent_status,
+    b.attempts,
+    b.next_attempt_at,
+    c.status AS chat_status,
+    c.title AS chat_title,
+    c.owner_id AS chat_owner_id
+FROM plugin_chat_bindings b
+JOIN chats c ON c.id = b.chat_id
+WHERE b.plugin_id = $1
+    AND b.next_attempt_at <= now()
+    AND c.status IN ('waiting', 'error', 'paused')
+    AND NOT c.archived
+    AND (
+        EXISTS (
+            SELECT 1
+            FROM chat_messages m
+            WHERE m.chat_id = b.chat_id
+                AND m.id > b.sent_message_id
+                AND m.role = 'assistant'
+                AND m.visibility IN ('user', 'both')
+                AND NOT m.deleted
+        )
+        OR c.status IS DISTINCT FROM b.sent_status
+    )
+ORDER BY b.next_attempt_at
+LIMIT $2::int
+`
+
+type GetPluginChatBindingsDueParams struct {
+	PluginID   uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	LimitCount int32     `db:"limit_count" json:"limit_count"`
+}
+
+type GetPluginChatBindingsDueRow struct {
+	PluginID      uuid.UUID      `db:"plugin_id" json:"plugin_id"`
+	ChatID        uuid.UUID      `db:"chat_id" json:"chat_id"`
+	SentMessageID int64          `db:"sent_message_id" json:"sent_message_id"`
+	SentStatus    NullChatStatus `db:"sent_status" json:"sent_status"`
+	Attempts      int32          `db:"attempts" json:"attempts"`
+	NextAttemptAt time.Time      `db:"next_attempt_at" json:"next_attempt_at"`
+	ChatStatus    ChatStatus     `db:"chat_status" json:"chat_status"`
+	ChatTitle     string         `db:"chat_title" json:"chat_title"`
+	ChatOwnerID   uuid.UUID      `db:"chat_owner_id" json:"chat_owner_id"`
+}
+
+// A binding is due when its chat is idle and has undelivered user-visible
+// assistant messages or a status that was not delivered yet.
+func (q *sqlQuerier) GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginChatBindingsDue, arg.PluginID, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPluginChatBindingsDueRow
+	for rows.Next() {
+		var i GetPluginChatBindingsDueRow
+		if err := rows.Scan(
+			&i.PluginID,
+			&i.ChatID,
+			&i.SentMessageID,
+			&i.SentStatus,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ChatStatus,
+			&i.ChatTitle,
+			&i.ChatOwnerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPluginChatMessagesAfter = `-- name: GetPluginChatMessagesAfter :many
+SELECT id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, content_version, total_cost_micros, runtime_ms, deleted, provider_response_id, revision, reasoning_effort, search_tsv, search_tsv_config, queued_message_id
+FROM chat_messages
+WHERE chat_id = $1
+    AND id > $2::bigint
+    AND role = 'assistant'
+    AND visibility IN ('user', 'both')
+    AND NOT deleted
+ORDER BY id ASC
+LIMIT $3::int
+`
+
+type GetPluginChatMessagesAfterParams struct {
+	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
+	AfterID    int64     `db:"after_id" json:"after_id"`
+	LimitCount int32     `db:"limit_count" json:"limit_count"`
+}
+
+func (q *sqlQuerier) GetPluginChatMessagesAfter(ctx context.Context, arg GetPluginChatMessagesAfterParams) ([]ChatMessage, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginChatMessagesAfter, arg.ChatID, arg.AfterID, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ChatMessage
+	for rows.Next() {
+		var i ChatMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatID,
+			&i.ModelConfigID,
+			&i.CreatedAt,
+			&i.Role,
+			&i.Content,
+			&i.Visibility,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.ReasoningTokens,
+			&i.CacheCreationTokens,
+			&i.CacheReadTokens,
+			&i.ContextLimit,
+			&i.Compressed,
+			&i.CreatedBy,
+			&i.ContentVersion,
+			&i.TotalCostMicros,
+			&i.RuntimeMs,
+			&i.Deleted,
+			&i.ProviderResponseID,
+			&i.Revision,
+			&i.ReasoningEffort,
+			&i.SearchTsv,
+			&i.SearchTsvConfig,
+			&i.QueuedMessageID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPluginUserLink = `-- name: GetPluginUserLink :one
+SELECT plugin_id, external_id, user_id, active_chat_id, created_at FROM plugin_user_links WHERE plugin_id = $1 AND external_id = $2
+`
+
+type GetPluginUserLinkParams struct {
+	PluginID   uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ExternalID string    `db:"external_id" json:"external_id"`
+}
+
+func (q *sqlQuerier) GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error) {
+	row := q.db.QueryRowContext(ctx, getPluginUserLink, arg.PluginID, arg.ExternalID)
+	var i PluginUserLink
+	err := row.Scan(
+		&i.PluginID,
+		&i.ExternalID,
+		&i.UserID,
+		&i.ActiveChatID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPluginUserLinksByPluginAndUser = `-- name: GetPluginUserLinksByPluginAndUser :many
+SELECT plugin_id, external_id, user_id, active_chat_id, created_at FROM plugin_user_links
+WHERE plugin_id = $1 AND user_id = $2
+ORDER BY external_id
+`
+
+type GetPluginUserLinksByPluginAndUserParams struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	UserID   uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+func (q *sqlQuerier) GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginUserLinksByPluginAndUser, arg.PluginID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PluginUserLink
+	for rows.Next() {
+		var i PluginUserLink
+		if err := rows.Scan(
+			&i.PluginID,
+			&i.ExternalID,
+			&i.UserID,
+			&i.ActiveChatID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPluginUserLinksByPluginID = `-- name: GetPluginUserLinksByPluginID :many
+SELECT plugin_id, external_id, user_id, active_chat_id, created_at FROM plugin_user_links WHERE plugin_id = $1 ORDER BY external_id
+`
+
+func (q *sqlQuerier) GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginUserLinksByPluginID, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PluginUserLink
+	for rows.Next() {
+		var i PluginUserLink
+		if err := rows.Scan(
+			&i.PluginID,
+			&i.ExternalID,
+			&i.UserID,
+			&i.ActiveChatID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPluginUserLinksByUserID = `-- name: GetPluginUserLinksByUserID :many
+SELECT plugin_id, external_id, user_id, active_chat_id, created_at FROM plugin_user_links WHERE user_id = $1 ORDER BY plugin_id, external_id
+`
+
+func (q *sqlQuerier) GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginUserLinksByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PluginUserLink
+	for rows.Next() {
+		var i PluginUserLink
+		if err := rows.Scan(
+			&i.PluginID,
+			&i.ExternalID,
+			&i.UserID,
+			&i.ActiveChatID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPluginsByOrganizationID = `-- name: GetPluginsByOrganizationID :many
+SELECT id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at FROM plugins WHERE organization_id = $1 ORDER BY name
+`
+
+func (q *sqlQuerier) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginsByOrganizationID, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Plugin
+	for rows.Next() {
+		var i Plugin
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.Name,
+			&i.Version,
+			&i.FileID,
+			&i.Manifest,
+			&i.Grants,
+			&i.Config,
+			&i.ConfigKeyID,
+			&i.Enabled,
+			&i.RunnerID,
+			&i.LeaseExpiresAt,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertPlugin = `-- name: InsertPlugin :one
+INSERT INTO plugins (
+    id,
+    organization_id,
+    name,
+    version,
+    file_id,
+    manifest,
+    grants,
+    config,
+    config_key_id,
+    enabled,
+    created_by,
+    created_at,
+    updated_at
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    $12,
+    $13
+)
+RETURNING id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at
+`
+
+type InsertPluginParams struct {
+	ID             uuid.UUID       `db:"id" json:"id"`
+	OrganizationID uuid.UUID       `db:"organization_id" json:"organization_id"`
+	Name           string          `db:"name" json:"name"`
+	Version        string          `db:"version" json:"version"`
+	FileID         uuid.UUID       `db:"file_id" json:"file_id"`
+	Manifest       json.RawMessage `db:"manifest" json:"manifest"`
+	Grants         json.RawMessage `db:"grants" json:"grants"`
+	Config         string          `db:"config" json:"config"`
+	ConfigKeyID    sql.NullString  `db:"config_key_id" json:"config_key_id"`
+	Enabled        bool            `db:"enabled" json:"enabled"`
+	CreatedBy      uuid.UUID       `db:"created_by" json:"created_by"`
+	CreatedAt      time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time       `db:"updated_at" json:"updated_at"`
+}
+
+func (q *sqlQuerier) InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error) {
+	row := q.db.QueryRowContext(ctx, insertPlugin,
+		arg.ID,
+		arg.OrganizationID,
+		arg.Name,
+		arg.Version,
+		arg.FileID,
+		arg.Manifest,
+		arg.Grants,
+		arg.Config,
+		arg.ConfigKeyID,
+		arg.Enabled,
+		arg.CreatedBy,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Plugin
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Name,
+		&i.Version,
+		&i.FileID,
+		&i.Manifest,
+		&i.Grants,
+		&i.Config,
+		&i.ConfigKeyID,
+		&i.Enabled,
+		&i.RunnerID,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertPluginLinkCode = `-- name: InsertPluginLinkCode :exec
+INSERT INTO plugin_link_codes (code_hash, plugin_id, user_id, expires_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertPluginLinkCodeParams struct {
+	CodeHash  []byte    `db:"code_hash" json:"code_hash"`
+	PluginID  uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+}
+
+func (q *sqlQuerier) InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error {
+	_, err := q.db.ExecContext(ctx, insertPluginLinkCode,
+		arg.CodeHash,
+		arg.PluginID,
+		arg.UserID,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const releasePluginLeases = `-- name: ReleasePluginLeases :exec
+UPDATE plugins
+SET
+    runner_id = NULL,
+    lease_expires_at = NULL
+WHERE runner_id = $1::uuid
+`
+
+func (q *sqlQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, releasePluginLeases, runnerID)
+	return err
+}
+
+const setPluginUserLinkActiveChat = `-- name: SetPluginUserLinkActiveChat :exec
+UPDATE plugin_user_links
+SET active_chat_id = $1
+WHERE plugin_id = $2 AND external_id = $3
+`
+
+type SetPluginUserLinkActiveChatParams struct {
+	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
+	PluginID     uuid.UUID     `db:"plugin_id" json:"plugin_id"`
+	ExternalID   string        `db:"external_id" json:"external_id"`
+}
+
+func (q *sqlQuerier) SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error {
+	_, err := q.db.ExecContext(ctx, setPluginUserLinkActiveChat, arg.ActiveChatID, arg.PluginID, arg.ExternalID)
+	return err
+}
+
+const setPluginUserLinksActiveChatByUser = `-- name: SetPluginUserLinksActiveChatByUser :exec
+UPDATE plugin_user_links
+SET active_chat_id = $1
+WHERE plugin_id = $2 AND user_id = $3
+`
+
+type SetPluginUserLinksActiveChatByUserParams struct {
+	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
+	PluginID     uuid.UUID     `db:"plugin_id" json:"plugin_id"`
+	UserID       uuid.UUID     `db:"user_id" json:"user_id"`
+}
+
+func (q *sqlQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error {
+	_, err := q.db.ExecContext(ctx, setPluginUserLinksActiveChatByUser, arg.ActiveChatID, arg.PluginID, arg.UserID)
+	return err
+}
+
+const updatePluginChatBindingDelivered = `-- name: UpdatePluginChatBindingDelivered :exec
+UPDATE plugin_chat_bindings
+SET
+    sent_message_id = $1,
+    sent_status = $2,
+    attempts = 0,
+    next_attempt_at = now()
+WHERE plugin_id = $3 AND chat_id = $4
+`
+
+type UpdatePluginChatBindingDeliveredParams struct {
+	SentMessageID int64          `db:"sent_message_id" json:"sent_message_id"`
+	SentStatus    NullChatStatus `db:"sent_status" json:"sent_status"`
+	PluginID      uuid.UUID      `db:"plugin_id" json:"plugin_id"`
+	ChatID        uuid.UUID      `db:"chat_id" json:"chat_id"`
+}
+
+func (q *sqlQuerier) UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error {
+	_, err := q.db.ExecContext(ctx, updatePluginChatBindingDelivered,
+		arg.SentMessageID,
+		arg.SentStatus,
+		arg.PluginID,
+		arg.ChatID,
+	)
+	return err
+}
+
+const updatePluginChatBindingFailed = `-- name: UpdatePluginChatBindingFailed :exec
+UPDATE plugin_chat_bindings
+SET
+    attempts = attempts + 1,
+    next_attempt_at = $1
+WHERE plugin_id = $2 AND chat_id = $3
+`
+
+type UpdatePluginChatBindingFailedParams struct {
+	NextAttemptAt time.Time `db:"next_attempt_at" json:"next_attempt_at"`
+	PluginID      uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ChatID        uuid.UUID `db:"chat_id" json:"chat_id"`
+}
+
+func (q *sqlQuerier) UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error {
+	_, err := q.db.ExecContext(ctx, updatePluginChatBindingFailed, arg.NextAttemptAt, arg.PluginID, arg.ChatID)
+	return err
+}
+
+const updatePluginConfig = `-- name: UpdatePluginConfig :one
+UPDATE plugins
+SET
+    config = $1,
+    config_key_id = $2,
+    updated_at = $3
+WHERE id = $4
+RETURNING id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at
+`
+
+type UpdatePluginConfigParams struct {
+	Config      string         `db:"config" json:"config"`
+	ConfigKeyID sql.NullString `db:"config_key_id" json:"config_key_id"`
+	UpdatedAt   time.Time      `db:"updated_at" json:"updated_at"`
+	ID          uuid.UUID      `db:"id" json:"id"`
+}
+
+func (q *sqlQuerier) UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error) {
+	row := q.db.QueryRowContext(ctx, updatePluginConfig,
+		arg.Config,
+		arg.ConfigKeyID,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var i Plugin
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Name,
+		&i.Version,
+		&i.FileID,
+		&i.Manifest,
+		&i.Grants,
+		&i.Config,
+		&i.ConfigKeyID,
+		&i.Enabled,
+		&i.RunnerID,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updatePluginEnabled = `-- name: UpdatePluginEnabled :one
+UPDATE plugins
+SET
+    enabled = $1,
+    updated_at = $2
+WHERE id = $3
+RETURNING id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at
+`
+
+type UpdatePluginEnabledParams struct {
+	Enabled   bool      `db:"enabled" json:"enabled"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	ID        uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *sqlQuerier) UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error) {
+	row := q.db.QueryRowContext(ctx, updatePluginEnabled, arg.Enabled, arg.UpdatedAt, arg.ID)
+	var i Plugin
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Name,
+		&i.Version,
+		&i.FileID,
+		&i.Manifest,
+		&i.Grants,
+		&i.Config,
+		&i.ConfigKeyID,
+		&i.Enabled,
+		&i.RunnerID,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updatePluginLastError = `-- name: UpdatePluginLastError :exec
+UPDATE plugins SET last_error = $1 WHERE id = $2
+`
+
+type UpdatePluginLastErrorParams struct {
+	LastError string    `db:"last_error" json:"last_error"`
+	ID        uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *sqlQuerier) UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error {
+	_, err := q.db.ExecContext(ctx, updatePluginLastError, arg.LastError, arg.ID)
+	return err
+}
+
+const upsertPluginUserLink = `-- name: UpsertPluginUserLink :one
+INSERT INTO plugin_user_links (plugin_id, external_id, user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (plugin_id, external_id) DO UPDATE
+SET
+    user_id = EXCLUDED.user_id,
+    active_chat_id = NULL,
+    created_at = now()
+RETURNING plugin_id, external_id, user_id, active_chat_id, created_at
+`
+
+type UpsertPluginUserLinkParams struct {
+	PluginID   uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ExternalID string    `db:"external_id" json:"external_id"`
+	UserID     uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+// Relinking an external identity to another user clears the active chat so
+// replies never reach a chat the new user does not own.
+func (q *sqlQuerier) UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error) {
+	row := q.db.QueryRowContext(ctx, upsertPluginUserLink, arg.PluginID, arg.ExternalID, arg.UserID)
+	var i PluginUserLink
+	err := row.Scan(
+		&i.PluginID,
+		&i.ExternalID,
+		&i.UserID,
+		&i.ActiveChatID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const claimPrebuiltWorkspace = `-- name: ClaimPrebuiltWorkspace :one
 UPDATE workspaces w
 SET owner_id   = $1::uuid,

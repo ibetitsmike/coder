@@ -268,6 +268,10 @@ func (m MCPServerConfig) RBACObject() rbac.Object {
 		WithACLUserList(m.UserACL.RBACACL())
 }
 
+func (p Plugin) RBACObject() rbac.Object {
+	return rbac.ResourcePlugin.WithID(p.ID).InOrg(p.OrganizationID)
+}
+
 func (c Chat) IsSubChat() bool {
 	return c.RootChatID.Valid || c.ParentChatID.Valid
 }

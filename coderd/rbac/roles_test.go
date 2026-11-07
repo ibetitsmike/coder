@@ -891,6 +891,15 @@ func TestRolePermissions(t *testing.T) {
 			},
 		},
 		{
+			Name:     "Plugin",
+			Actions:  []policy.Action{policy.ActionCreate, policy.ActionRead, policy.ActionUpdate, policy.ActionDelete},
+			Resource: rbac.ResourcePlugin.WithID(uuid.New()).InOrg(orgID),
+			AuthorizeMap: map[bool][]hasAuthSubjects{
+				true:  {owner},
+				false: {setOtherOrg, orgAdmin, orgAuditor, auditor, orgMemberMe, memberMe, orgWorkspaceAccessUser, orgUserAdmin, orgTemplateAdmin, templateAdmin, userAdmin},
+			},
+		},
+		{
 			Name:     "DebugInfo",
 			Actions:  []policy.Action{policy.ActionRead},
 			Resource: rbac.ResourceDebugInfo,

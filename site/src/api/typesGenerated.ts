@@ -822,6 +822,7 @@ export type APIKeyScope =
 	| "coder:all"
 	| "coder:apikeys.manage_self"
 	| "coder:application_connect"
+	| "coder:chats.converse"
 	| "coder:templates.author"
 	| "coder:templates.build"
 	| "coder:workspaces.access"
@@ -911,6 +912,11 @@ export type APIKeyScope =
 	| "organization_skill:share"
 	| "organization_skill:update"
 	| "organization:update"
+	| "plugin:*"
+	| "plugin:create"
+	| "plugin:delete"
+	| "plugin:read"
+	| "plugin:update"
 	| "prebuilt_workspace:*"
 	| "prebuilt_workspace:delete"
 	| "prebuilt_workspace:update"
@@ -1090,6 +1096,7 @@ export const APIKeyScopes: APIKeyScope[] = [
 	"coder:all",
 	"coder:apikeys.manage_self",
 	"coder:application_connect",
+	"coder:chats.converse",
 	"coder:templates.author",
 	"coder:templates.build",
 	"coder:workspaces.access",
@@ -1179,6 +1186,11 @@ export const APIKeyScopes: APIKeyScope[] = [
 	"organization_skill:share",
 	"organization_skill:update",
 	"organization:update",
+	"plugin:*",
+	"plugin:create",
+	"plugin:delete",
+	"plugin:read",
+	"plugin:update",
 	"prebuilt_workspace:*",
 	"prebuilt_workspace:delete",
 	"prebuilt_workspace:update",
@@ -5769,6 +5781,7 @@ export type Experiment =
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
+	| "plugins"
 	| "workspace-build-updates"
 	| "workspace-capable-licensing"
 	| "workspace-usage";
@@ -5848,6 +5861,7 @@ export const Experiments: Experiment[] = [
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",
+	"plugins",
 	"workspace-build-updates",
 	"workspace-capable-licensing",
 	"workspace-usage",
@@ -9153,6 +9167,7 @@ export type RBACResource =
 	| "organization"
 	| "organization_member"
 	| "organization_skill"
+	| "plugin"
 	| "prebuilt_workspace"
 	| "provisioner_daemon"
 	| "provisioner_jobs"
@@ -9211,6 +9226,7 @@ export const RBACResources: RBACResource[] = [
 	"organization",
 	"organization_member",
 	"organization_skill",
+	"plugin",
 	"prebuilt_workspace",
 	"provisioner_daemon",
 	"provisioner_jobs",

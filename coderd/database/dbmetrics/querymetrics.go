@@ -128,6 +128,14 @@ func (m queryMetricsStore) AcquireNotificationMessages(ctx context.Context, arg 
 	return r0, r1
 }
 
+func (m queryMetricsStore) AcquirePluginLeases(ctx context.Context, arg database.AcquirePluginLeasesParams) ([]database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.AcquirePluginLeases(ctx, arg)
+	m.queryLatencies.WithLabelValues("AcquirePluginLeases").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "AcquirePluginLeases").Inc()
+	return r0, r1
+}
+
 func (m queryMetricsStore) AcquireProvisionerJob(ctx context.Context, arg database.AcquireProvisionerJobParams) (database.ProvisionerJob, error) {
 	start := time.Now()
 	r0, r1 := m.s.AcquireProvisionerJob(ctx, arg)
@@ -326,6 +334,14 @@ func (m queryMetricsStore) ClearWorkspaceSecretsByWorkspaceID(ctx context.Contex
 	m.queryLatencies.WithLabelValues("ClearWorkspaceSecretsByWorkspaceID").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ClearWorkspaceSecretsByWorkspaceID").Inc()
 	return r0
+}
+
+func (m queryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg database.ConsumePluginLinkCodeParams) (database.PluginLinkCode, error) {
+	start := time.Now()
+	r0, r1 := m.s.ConsumePluginLinkCode(ctx, arg)
+	m.queryLatencies.WithLabelValues("ConsumePluginLinkCode").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ConsumePluginLinkCode").Inc()
+	return r0, r1
 }
 
 func (m queryMetricsStore) CountAIBridgeSessions(ctx context.Context, arg database.CountAIBridgeSessionsParams) (int64, error) {
@@ -656,6 +672,14 @@ func (m queryMetricsStore) DeleteExpiredAPIKeys(ctx context.Context, arg databas
 	return r0, r1
 }
 
+func (m queryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
+	start := time.Now()
+	r0 := m.s.DeleteExpiredPluginLinkCodes(ctx)
+	m.queryLatencies.WithLabelValues("DeleteExpiredPluginLinkCodes").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "DeleteExpiredPluginLinkCodes").Inc()
+	return r0
+}
+
 func (m queryMetricsStore) DeleteExternalAuthLink(ctx context.Context, arg database.DeleteExternalAuthLinkParams) error {
 	start := time.Now()
 	r0 := m.s.DeleteExternalAuthLink(ctx, arg)
@@ -912,6 +936,30 @@ func (m queryMetricsStore) DeleteOrganizationSkillByOrganizationIDAndName(ctx co
 	return r0, r1
 }
 
+func (m queryMetricsStore) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
+	start := time.Now()
+	r0 := m.s.DeletePluginByID(ctx, id)
+	m.queryLatencies.WithLabelValues("DeletePluginByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "DeletePluginByID").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) DeletePluginLinkCodesByUser(ctx context.Context, arg database.DeletePluginLinkCodesByUserParams) error {
+	start := time.Now()
+	r0 := m.s.DeletePluginLinkCodesByUser(ctx, arg)
+	m.queryLatencies.WithLabelValues("DeletePluginLinkCodesByUser").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "DeletePluginLinkCodesByUser").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) DeletePluginUserLink(ctx context.Context, arg database.DeletePluginUserLinkParams) error {
+	start := time.Now()
+	r0 := m.s.DeletePluginUserLink(ctx, arg)
+	m.queryLatencies.WithLabelValues("DeletePluginUserLink").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "DeletePluginUserLink").Inc()
+	return r0
+}
+
 func (m queryMetricsStore) DeleteProjectSkillByProjectIDAndName(ctx context.Context, arg database.DeleteProjectSkillByProjectIDAndNameParams) (database.Skill, error) {
 	start := time.Now()
 	r0, r1 := m.s.DeleteProjectSkillByProjectIDAndName(ctx, arg)
@@ -1101,6 +1149,14 @@ func (m queryMetricsStore) EnqueueNotificationMessage(ctx context.Context, arg d
 	r0 := m.s.EnqueueNotificationMessage(ctx, arg)
 	m.queryLatencies.WithLabelValues("EnqueueNotificationMessage").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "EnqueueNotificationMessage").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
+	start := time.Now()
+	r0 := m.s.EnsurePluginChatBindings(ctx, pluginID)
+	m.queryLatencies.WithLabelValues("EnsurePluginChatBindings").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "EnsurePluginChatBindings").Inc()
 	return r0
 }
 
@@ -2928,6 +2984,70 @@ func (m queryMetricsStore) GetParameterSchemasByJobID(ctx context.Context, jobID
 	return r0, r1
 }
 
+func (m queryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginByID(ctx, id)
+	m.queryLatencies.WithLabelValues("GetPluginByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginByID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginChatBindingsDue(ctx context.Context, arg database.GetPluginChatBindingsDueParams) ([]database.GetPluginChatBindingsDueRow, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginChatBindingsDue(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetPluginChatBindingsDue").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginChatBindingsDue").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginChatMessagesAfter(ctx context.Context, arg database.GetPluginChatMessagesAfterParams) ([]database.ChatMessage, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginChatMessagesAfter(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetPluginChatMessagesAfter").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginChatMessagesAfter").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginUserLink(ctx context.Context, arg database.GetPluginUserLinkParams) (database.PluginUserLink, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginUserLink(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetPluginUserLink").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginUserLink").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginUserLinksByPluginAndUser(ctx context.Context, arg database.GetPluginUserLinksByPluginAndUserParams) ([]database.PluginUserLink, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginUserLinksByPluginAndUser(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetPluginUserLinksByPluginAndUser").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginUserLinksByPluginAndUser").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]database.PluginUserLink, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginUserLinksByPluginID(ctx, pluginID)
+	m.queryLatencies.WithLabelValues("GetPluginUserLinksByPluginID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginUserLinksByPluginID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]database.PluginUserLink, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginUserLinksByUserID(ctx, userID)
+	m.queryLatencies.WithLabelValues("GetPluginUserLinksByUserID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginUserLinksByUserID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetPluginsByOrganizationID(ctx, organizationID)
+	m.queryLatencies.WithLabelValues("GetPluginsByOrganizationID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetPluginsByOrganizationID").Inc()
+	return r0, r1
+}
+
 func (m queryMetricsStore) GetPrebuildMetrics(ctx context.Context) ([]database.GetPrebuildMetricsRow, error) {
 	start := time.Now()
 	r0, r1 := m.s.GetPrebuildMetrics(ctx)
@@ -4720,6 +4840,22 @@ func (m queryMetricsStore) InsertOrganizationSkill(ctx context.Context, arg data
 	return r0, r1
 }
 
+func (m queryMetricsStore) InsertPlugin(ctx context.Context, arg database.InsertPluginParams) (database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.InsertPlugin(ctx, arg)
+	m.queryLatencies.WithLabelValues("InsertPlugin").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InsertPlugin").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) InsertPluginLinkCode(ctx context.Context, arg database.InsertPluginLinkCodeParams) error {
+	start := time.Now()
+	r0 := m.s.InsertPluginLinkCode(ctx, arg)
+	m.queryLatencies.WithLabelValues("InsertPluginLinkCode").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InsertPluginLinkCode").Inc()
+	return r0
+}
+
 func (m queryMetricsStore) InsertPreset(ctx context.Context, arg database.InsertPresetParams) (database.TemplateVersionPreset, error) {
 	start := time.Now()
 	r0, r1 := m.s.InsertPreset(ctx, arg)
@@ -5432,6 +5568,14 @@ func (m queryMetricsStore) ReleaseExternalAuthLinkRefreshLease(ctx context.Conte
 	return r0
 }
 
+func (m queryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
+	start := time.Now()
+	r0 := m.s.ReleasePluginLeases(ctx, runnerID)
+	m.queryLatencies.WithLabelValues("ReleasePluginLeases").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ReleasePluginLeases").Inc()
+	return r0
+}
+
 func (m queryMetricsStore) RemoveUserFromGroups(ctx context.Context, arg database.RemoveUserFromGroupsParams) ([]uuid.UUID, error) {
 	start := time.Now()
 	r0, r1 := m.s.RemoveUserFromGroups(ctx, arg)
@@ -5485,6 +5629,22 @@ func (m queryMetricsStore) SetChatContextSnapshot(ctx context.Context, arg datab
 	r0 := m.s.SetChatContextSnapshot(ctx, arg)
 	m.queryLatencies.WithLabelValues("SetChatContextSnapshot").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "SetChatContextSnapshot").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, arg database.SetPluginUserLinkActiveChatParams) error {
+	start := time.Now()
+	r0 := m.s.SetPluginUserLinkActiveChat(ctx, arg)
+	m.queryLatencies.WithLabelValues("SetPluginUserLinkActiveChat").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "SetPluginUserLinkActiveChat").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg database.SetPluginUserLinksActiveChatByUserParams) error {
+	start := time.Now()
+	r0 := m.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
+	m.queryLatencies.WithLabelValues("SetPluginUserLinksActiveChatByUser").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "SetPluginUserLinksActiveChatByUser").Inc()
 	return r0
 }
 
@@ -6047,6 +6207,46 @@ func (m queryMetricsStore) UpdateOrganizationWorkspaceSharingSettings(ctx contex
 	m.queryLatencies.WithLabelValues("UpdateOrganizationWorkspaceSharingSettings").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdateOrganizationWorkspaceSharingSettings").Inc()
 	return r0, r1
+}
+
+func (m queryMetricsStore) UpdatePluginChatBindingDelivered(ctx context.Context, arg database.UpdatePluginChatBindingDeliveredParams) error {
+	start := time.Now()
+	r0 := m.s.UpdatePluginChatBindingDelivered(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdatePluginChatBindingDelivered").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdatePluginChatBindingDelivered").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) UpdatePluginChatBindingFailed(ctx context.Context, arg database.UpdatePluginChatBindingFailedParams) error {
+	start := time.Now()
+	r0 := m.s.UpdatePluginChatBindingFailed(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdatePluginChatBindingFailed").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdatePluginChatBindingFailed").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) UpdatePluginConfig(ctx context.Context, arg database.UpdatePluginConfigParams) (database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.UpdatePluginConfig(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdatePluginConfig").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdatePluginConfig").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg database.UpdatePluginEnabledParams) (database.Plugin, error) {
+	start := time.Now()
+	r0, r1 := m.s.UpdatePluginEnabled(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdatePluginEnabled").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdatePluginEnabled").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) UpdatePluginLastError(ctx context.Context, arg database.UpdatePluginLastErrorParams) error {
+	start := time.Now()
+	r0 := m.s.UpdatePluginLastError(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdatePluginLastError").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdatePluginLastError").Inc()
+	return r0
 }
 
 func (m queryMetricsStore) UpdatePrebuildProvisionerJobWithCancel(ctx context.Context, arg database.UpdatePrebuildProvisionerJobWithCancelParams) ([]database.UpdatePrebuildProvisionerJobWithCancelRow, error) {
@@ -7039,6 +7239,14 @@ func (m queryMetricsStore) UpsertOrganizationMemberSkillSettings(ctx context.Con
 	m.queryLatencies.WithLabelValues("UpsertOrganizationMemberSkillSettings").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpsertOrganizationMemberSkillSettings").Inc()
 	return r0
+}
+
+func (m queryMetricsStore) UpsertPluginUserLink(ctx context.Context, arg database.UpsertPluginUserLinkParams) (database.PluginUserLink, error) {
+	start := time.Now()
+	r0, r1 := m.s.UpsertPluginUserLink(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpsertPluginUserLink").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpsertPluginUserLink").Inc()
+	return r0, r1
 }
 
 func (m queryMetricsStore) UpsertPrebuildsSettings(ctx context.Context, value string) error {

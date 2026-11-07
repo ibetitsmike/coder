@@ -2103,6 +2103,29 @@ func WorkspaceSecret(t testing.TB, db database.Store, seed database.WorkspaceSec
 	return secret
 }
 
+func Plugin(t testing.TB, db database.Store, seed database.Plugin) database.Plugin {
+	t.Helper()
+
+	now := dbtime.Now()
+	plugin, err := db.InsertPlugin(genCtx, database.InsertPluginParams{
+		ID:             takeFirst(seed.ID, uuid.New()),
+		OrganizationID: takeFirst(seed.OrganizationID, uuid.New()),
+		Name:           takeFirst(seed.Name, testutil.GetRandomName(t)),
+		Version:        seed.Version,
+		FileID:         takeFirst(seed.FileID, uuid.New()),
+		Manifest:       takeFirstSlice(seed.Manifest, []byte("{}")),
+		Grants:         takeFirstSlice(seed.Grants, []byte("{}")),
+		Config:         seed.Config,
+		ConfigKeyID:    seed.ConfigKeyID,
+		Enabled:        seed.Enabled,
+		CreatedBy:      takeFirst(seed.CreatedBy, uuid.New()),
+		CreatedAt:      takeFirst(seed.CreatedAt, now),
+		UpdatedAt:      takeFirst(seed.UpdatedAt, now),
+	})
+	require.NoError(t, err, "insert plugin")
+	return plugin
+}
+
 func ClaimPrebuild(
 	t testing.TB,
 	db database.Store,

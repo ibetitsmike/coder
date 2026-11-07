@@ -7027,6 +7027,158 @@ func (s *MethodTestSuite) TestWorkspaceSecrets() {
 	}))
 }
 
+func (s *MethodTestSuite) TestPlugins() {
+	s.Run("InsertPlugin", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		arg := database.InsertPluginParams{ID: plugin.ID, OrganizationID: plugin.OrganizationID, Name: plugin.Name}
+		dbm.EXPECT().InsertPlugin(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourcePlugin.InOrg(plugin.OrganizationID), policy.ActionCreate).Returns(plugin)
+	}))
+	s.Run("GetPluginByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		dbm.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+		check.Args(plugin.ID).Asserts(plugin, policy.ActionRead).Returns(plugin)
+	}))
+	s.Run("GetPluginsByOrganizationID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		dbm.EXPECT().GetPluginsByOrganizationID(gomock.Any(), plugin.OrganizationID).Return([]database.Plugin{plugin}, nil).AnyTimes()
+		check.Args(plugin.OrganizationID).
+			Asserts(rbac.ResourcePlugin.InOrg(plugin.OrganizationID), policy.ActionRead).
+			Returns([]database.Plugin{plugin})
+	}))
+	s.Run("UpdatePluginConfig", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		arg := database.UpdatePluginConfigParams{ID: plugin.ID, Config: `{"k":"v"}`}
+		dbm.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+		dbm.EXPECT().UpdatePluginConfig(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+		check.Args(arg).Asserts(plugin, policy.ActionUpdate).Returns(plugin)
+	}))
+	s.Run("UpdatePluginEnabled", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		arg := database.UpdatePluginEnabledParams{ID: plugin.ID, Enabled: false}
+		dbm.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+		dbm.EXPECT().UpdatePluginEnabled(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+		check.Args(arg).Asserts(plugin, policy.ActionUpdate).Returns(plugin)
+	}))
+	s.Run("DeletePluginByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		dbm.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+		dbm.EXPECT().DeletePluginByID(gomock.Any(), plugin.ID).Return(nil).AnyTimes()
+		check.Args(plugin.ID).Asserts(plugin, policy.ActionDelete).Returns()
+	}))
+	s.Run("UpdatePluginLastError", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.UpdatePluginLastErrorParams{ID: uuid.New(), LastError: "boom"}
+		dbm.EXPECT().UpdatePluginLastError(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+	s.Run("AcquirePluginLeases", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		plugin := testutil.Fake(s.T(), faker, database.Plugin{})
+		arg := database.AcquirePluginLeasesParams{RunnerID: uuid.New(), LeaseSeconds: 30, MaxPlugins: 10}
+		dbm.EXPECT().AcquirePluginLeases(gomock.Any(), arg).Return([]database.Plugin{plugin}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns([]database.Plugin{plugin})
+	}))
+	s.Run("ReleasePluginLeases", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		runnerID := uuid.New()
+		dbm.EXPECT().ReleasePluginLeases(gomock.Any(), runnerID).Return(nil).AnyTimes()
+		check.Args(runnerID).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+	s.Run("InsertPluginLinkCode", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.InsertPluginLinkCodeParams{CodeHash: []byte("hash"), PluginID: uuid.New(), UserID: uuid.New(), ExpiresAt: dbtime.Now()}
+		dbm.EXPECT().InsertPluginLinkCode(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
+	}))
+	s.Run("ConsumePluginLinkCode", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		code := testutil.Fake(s.T(), faker, database.PluginLinkCode{})
+		arg := database.ConsumePluginLinkCodeParams{PluginID: code.PluginID, CodeHash: code.CodeHash}
+		dbm.EXPECT().ConsumePluginLinkCode(gomock.Any(), arg).Return(code, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(code)
+	}))
+	s.Run("DeleteExpiredPluginLinkCodes", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		dbm.EXPECT().DeleteExpiredPluginLinkCodes(gomock.Any()).Return(nil).AnyTimes()
+		check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+	}))
+	s.Run("DeletePluginLinkCodesByUser", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.DeletePluginLinkCodesByUserParams{PluginID: uuid.New(), UserID: uuid.New()}
+		dbm.EXPECT().DeletePluginLinkCodesByUser(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+	}))
+	s.Run("UpsertPluginUserLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.PluginUserLink{})
+		arg := database.UpsertPluginUserLinkParams{PluginID: link.PluginID, ExternalID: link.ExternalID, UserID: link.UserID}
+		dbm.EXPECT().UpsertPluginUserLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(link)
+	}))
+	s.Run("GetPluginUserLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.PluginUserLink{})
+		arg := database.GetPluginUserLinkParams{PluginID: link.PluginID, ExternalID: link.ExternalID}
+		dbm.EXPECT().GetPluginUserLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(link)
+	}))
+	s.Run("GetPluginUserLinksByPluginID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.PluginUserLink{})
+		dbm.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), link.PluginID).Return([]database.PluginUserLink{link}, nil).AnyTimes()
+		check.Args(link.PluginID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]database.PluginUserLink{link})
+	}))
+	s.Run("GetPluginUserLinksByUserID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.PluginUserLink{})
+		dbm.EXPECT().GetPluginUserLinksByUserID(gomock.Any(), link.UserID).Return([]database.PluginUserLink{link}, nil).AnyTimes()
+		check.Args(link.UserID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]database.PluginUserLink{link})
+	}))
+	s.Run("GetPluginUserLinksByPluginAndUser", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.PluginUserLink{})
+		arg := database.GetPluginUserLinksByPluginAndUserParams{PluginID: link.PluginID, UserID: link.UserID}
+		dbm.EXPECT().GetPluginUserLinksByPluginAndUser(gomock.Any(), arg).Return([]database.PluginUserLink{link}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]database.PluginUserLink{link})
+	}))
+	s.Run("DeletePluginUserLink", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.DeletePluginUserLinkParams{PluginID: uuid.New(), ExternalID: "+15550100"}
+		dbm.EXPECT().DeletePluginUserLink(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+	}))
+	s.Run("SetPluginUserLinkActiveChat", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.SetPluginUserLinkActiveChatParams{PluginID: uuid.New(), ExternalID: "+15550100", ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+		dbm.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+	s.Run("SetPluginUserLinksActiveChatByUser", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.SetPluginUserLinksActiveChatByUserParams{PluginID: uuid.New(), UserID: uuid.New(), ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+		dbm.EXPECT().SetPluginUserLinksActiveChatByUser(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+	s.Run("EnsurePluginChatBindings", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		pluginID := uuid.New()
+		dbm.EXPECT().EnsurePluginChatBindings(gomock.Any(), pluginID).Return(nil).AnyTimes()
+		check.Args(pluginID).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
+	}))
+	s.Run("GetPluginChatBindingsDue", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		row := testutil.Fake(s.T(), faker, database.GetPluginChatBindingsDueRow{})
+		arg := database.GetPluginChatBindingsDueParams{PluginID: row.PluginID, LimitCount: 10}
+		dbm.EXPECT().GetPluginChatBindingsDue(gomock.Any(), arg).Return([]database.GetPluginChatBindingsDueRow{row}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]database.GetPluginChatBindingsDueRow{row})
+	}))
+	s.Run("GetPluginChatMessagesAfter", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		msg := testutil.Fake(s.T(), faker, database.ChatMessage{})
+		arg := database.GetPluginChatMessagesAfterParams{ChatID: msg.ChatID, AfterID: 0, LimitCount: 10}
+		dbm.EXPECT().GetPluginChatMessagesAfter(gomock.Any(), arg).Return([]database.ChatMessage{msg}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]database.ChatMessage{msg})
+	}))
+	s.Run("UpdatePluginChatBindingDelivered", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.UpdatePluginChatBindingDeliveredParams{
+			PluginID:      uuid.New(),
+			ChatID:        uuid.New(),
+			SentMessageID: 42,
+			SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusWaiting, Valid: true},
+		}
+		dbm.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+	s.Run("UpdatePluginChatBindingFailed", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.UpdatePluginChatBindingFailedParams{PluginID: uuid.New(), ChatID: uuid.New(), NextAttemptAt: dbtime.Now()}
+		dbm.EXPECT().UpdatePluginChatBindingFailed(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	}))
+}
+
 func (s *MethodTestSuite) TestUserSkills() {
 	s.Run("GetUserSkillByUserIDAndName", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 		user := testutil.Fake(s.T(), faker, database.User{})

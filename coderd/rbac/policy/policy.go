@@ -144,6 +144,14 @@ var RBACPermissions = map[string]PermissionDefinition{
 	"chat": {
 		Actions: chatActions,
 	},
+	"plugin": {
+		Actions: map[Action]ActionDefinition{
+			ActionCreate: "install a plugin",
+			ActionRead:   "read plugins and their grants",
+			ActionUpdate: "change the config of a plugin or disable it",
+			ActionDelete: "remove a plugin",
+		},
+	},
 	"chat_project": {
 		Actions: chatProjectActions,
 	},

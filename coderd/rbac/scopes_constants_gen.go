@@ -123,6 +123,10 @@ const (
 	ScopeOrganizationSkillRead               ScopeName = "organization_skill:read"
 	ScopeOrganizationSkillShare              ScopeName = "organization_skill:share"
 	ScopeOrganizationSkillUpdate             ScopeName = "organization_skill:update"
+	ScopePluginCreate                        ScopeName = "plugin:create"
+	ScopePluginDelete                        ScopeName = "plugin:delete"
+	ScopePluginRead                          ScopeName = "plugin:read"
+	ScopePluginUpdate                        ScopeName = "plugin:update"
 	ScopePrebuiltWorkspaceDelete             ScopeName = "prebuilt_workspace:delete"
 	ScopePrebuiltWorkspaceUpdate             ScopeName = "prebuilt_workspace:update"
 	ScopeProvisionerDaemonCreate             ScopeName = "provisioner_daemon:create"
@@ -334,6 +338,10 @@ func (e ScopeName) Valid() bool {
 		ScopeOrganizationSkillRead,
 		ScopeOrganizationSkillShare,
 		ScopeOrganizationSkillUpdate,
+		ScopePluginCreate,
+		ScopePluginDelete,
+		ScopePluginRead,
+		ScopePluginUpdate,
 		ScopePrebuiltWorkspaceDelete,
 		ScopePrebuiltWorkspaceUpdate,
 		ScopeProvisionerDaemonCreate,
@@ -546,6 +554,10 @@ func AllScopeNameValues() []ScopeName {
 		ScopeOrganizationSkillRead,
 		ScopeOrganizationSkillShare,
 		ScopeOrganizationSkillUpdate,
+		ScopePluginCreate,
+		ScopePluginDelete,
+		ScopePluginRead,
+		ScopePluginUpdate,
 		ScopePrebuiltWorkspaceDelete,
 		ScopePrebuiltWorkspaceUpdate,
 		ScopeProvisionerDaemonCreate,
