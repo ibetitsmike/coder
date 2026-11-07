@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -80,10 +81,13 @@ func StartProcess(ctx context.Context, logger slog.Logger, opts ProcessOptions) 
 		return nil, xerrors.Errorf("start plugin host: %w", err)
 	}
 	logger = logger.With(slog.F("pid", cmd.Process.Pid))
+	kill := func() {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			logger.Warn(context.Background(), "failed to kill plugin host", slog.Error(err))
+		}
+	}
 
-	c := newClient(logger, &pipeConn{Reader: stdoutR, Writer: stdinW}, func() {
-		_ = cmd.Process.Kill()
-	})
+	c := newClient(logger, &pipeConn{Reader: stdoutR, Writer: stdinW}, kill)
 	go func() {
 		err := cmd.Wait()
 		_ = stdoutR.Close()
@@ -94,7 +98,7 @@ func StartProcess(ctx context.Context, logger slog.Logger, opts ProcessOptions) 
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = cmd.Process.Kill()
+			kill()
 		case <-c.done:
 		}
 	}()

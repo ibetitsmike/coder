@@ -128,7 +128,7 @@ var requiredExports = map[string]struct {
 
 // New compiles wasm and instantiates it. Module stdout and stderr are written
 // to logs, subject to Limits.MaxLogBytes.
-func New(ctx context.Context, wasm []byte, limits Limits, logs io.Writer) (*Module, error) {
+func New(ctx context.Context, wasm []byte, limits Limits, logs io.Writer) (_ *Module, err error) {
 	limits = limits.withDefaults()
 	if logs == nil {
 		logs = io.Discard
@@ -141,7 +141,7 @@ func New(ctx context.Context, wasm []byte, limits Limits, logs io.Writer) (*Modu
 	ok := false
 	defer func() {
 		if !ok {
-			_ = m.release(ctx)
+			err = errors.Join(err, m.release(ctx))
 		}
 	}()
 
@@ -350,7 +350,10 @@ func (m *Module) hostCall(ctx context.Context, mod api.Module, stack []uint64) {
 	result := m.runHostCall(ctx, state.host, mod, ptr, size)
 	out, err := proto.Marshal(result)
 	if err != nil {
-		out, _ = proto.Marshal(&pluginproto.HostResult{Error: "encode host result: " + err.Error()})
+		out, err = proto.Marshal(&pluginproto.HostResult{Error: "encode host result: " + err.Error()})
+		if err != nil {
+			panic(xerrors.Errorf("encode host result error: %w", err))
+		}
 	}
 	state.pending = out
 	stack[0] = api.EncodeU32(uint32(len(out))) //nolint:gosec // Bounded by guest memory, which is at most 4 GiB.

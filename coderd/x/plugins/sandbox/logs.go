@@ -12,8 +12,8 @@ const logWindow = time.Minute
 
 var logTruncatedMarker = []byte("\n[plugin output truncated: log limit reached]\n")
 
-// logLimiter caps the bytes written to w per minute. It always reports full
-// writes so the guest never sees an error from its stdout or stderr.
+// logLimiter caps the bytes written to w per minute. Dropped bytes are
+// reported as written so the guest does not retry them.
 type logLimiter struct {
 	mu          sync.Mutex
 	w           io.Writer
@@ -43,12 +43,16 @@ func (l *logLimiter) Write(p []byte) (int, error) {
 		n = max(remaining, 0)
 	}
 	if n > 0 {
-		_, _ = l.w.Write(p[:n])
 		l.used += n
+		if written, err := l.w.Write(p[:n]); err != nil {
+			return written, err
+		}
 	}
 	if n < int64(len(p)) && !l.truncated {
 		l.truncated = true
-		_, _ = l.w.Write(logTruncatedMarker)
+		if _, err := l.w.Write(logTruncatedMarker); err != nil {
+			return int(n), err
+		}
 	}
 	return len(p), nil
 }

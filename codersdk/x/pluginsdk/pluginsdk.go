@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime/debug"
+	"strings"
 
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
@@ -209,10 +211,15 @@ func (h host) doJSON(req HTTPRequest, v any) error {
 }
 
 func (h host) Logf(format string, args ...any) {
-	_, _ = h.send(&pluginproto.HostCall{Call: &pluginproto.HostCall_Log{Log: &pluginproto.LogLine{
+	msg := validUTF8(fmt.Sprintf(format, args...))
+	res, err := h.send(&pluginproto.HostCall{Call: &pluginproto.HostCall_Log{Log: &pluginproto.LogLine{
 		Level:   pluginproto.LogLine_LEVEL_INFO,
-		Message: fmt.Sprintf(format, args...),
+		Message: msg,
 	}}})
+	if err != nil || res.GetError() != "" {
+		// The sandbox still captures stderr when the host rejects the line.
+		_, _ = fmt.Fprintln(os.Stderr, msg)
+	}
 }
 
 func handleManifest(p *Plugin) []byte {
@@ -286,18 +293,30 @@ func handleHTTP(p *Plugin, send hostTransport, input []byte) (out []byte) {
 	if res.StatusCode == 0 {
 		res.StatusCode = http.StatusOK
 	}
-	return mustMarshal(responseToProto(res))
+	out, err := proto.Marshal(responseToProto(res))
+	if err != nil {
+		return mustMarshal(&pluginproto.HTTPResponse{
+			Status: http.StatusInternalServerError,
+			Body:   fmt.Appendf(nil, "encode response: %v", err),
+		})
+	}
+	return out
+}
+
+// validUTF8 makes s safe for a proto3 string field, which must be UTF-8.
+func validUTF8(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 func resultBytes(fn func() error) (out []byte) {
 	defer func() {
 		if r := recover(); r != nil {
-			out = mustMarshal(&pluginproto.Result{Error: fmt.Sprintf("plugin panic: %v\n%s", r, debug.Stack())})
+			out = mustMarshal(&pluginproto.Result{Error: validUTF8(fmt.Sprintf("plugin panic: %v\n%s", r, debug.Stack()))})
 		}
 	}()
 	var res pluginproto.Result
 	if err := fn(); err != nil {
-		res.Error = err.Error()
+		res.Error = validUTF8(err.Error())
 		if res.Error == "" {
 			res.Error = "plugin returned an error with an empty message"
 		}
