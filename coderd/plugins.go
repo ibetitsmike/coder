@@ -1,6 +1,7 @@
 package coderd
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -217,7 +219,7 @@ func (api *API) postOrganizationPlugin(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	api.publishPluginsChanged()
-	httpapi.Write(ctx, rw, http.StatusCreated, convertPlugin(plugin))
+	writePlugin(ctx, rw, http.StatusCreated, plugin)
 }
 
 // pluginConfigJSON validates config values against the manifest and
@@ -271,7 +273,12 @@ func (api *API) getOrganizationPlugins(rw http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]codersdk.Plugin, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, convertPlugin(p))
+		converted, err := convertPlugin(p)
+		if err != nil {
+			httpapi.InternalServerError(rw, err)
+			return
+		}
+		out = append(out, converted)
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, out)
 }
@@ -332,7 +339,7 @@ func (api *API) getPlugin(rw http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	httpapi.Write(r.Context(), rw, http.StatusOK, convertPlugin(p))
+	writePlugin(r.Context(), rw, http.StatusOK, p)
 }
 
 // @Summary Update a plugin
@@ -395,7 +402,7 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.publishPluginsChanged()
-	httpapi.Write(ctx, rw, http.StatusOK, convertPlugin(p))
+	writePlugin(ctx, rw, http.StatusOK, p)
 }
 
 // @Summary Delete a plugin
@@ -687,7 +694,9 @@ func (api *API) postPluginWebhook(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Type", ct)
 	}
 	rw.WriteHeader(resp.StatusCode)
-	_, _ = rw.Write(resp.Body)
+	if _, err := rw.Write(resp.Body); err != nil {
+		api.Logger.Debug(ctx, "write plugin webhook response", slog.Error(err))
+	}
 }
 
 func (api *API) publishPluginsChanged() {
@@ -696,7 +705,16 @@ func (api *API) publishPluginsChanged() {
 	}
 }
 
-func convertPlugin(p database.Plugin) codersdk.Plugin {
+func writePlugin(ctx context.Context, rw http.ResponseWriter, status int, p database.Plugin) {
+	out, err := convertPlugin(p)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	httpapi.Write(ctx, rw, status, out)
+}
+
+func convertPlugin(p database.Plugin) (codersdk.Plugin, error) {
 	out := codersdk.Plugin{
 		ID:             p.ID,
 		OrganizationID: p.OrganizationID,
@@ -710,8 +728,12 @@ func convertPlugin(p database.Plugin) codersdk.Plugin {
 		UpdatedAt:      p.UpdatedAt,
 		ConfigKeysSet:  []string{},
 	}
-	_ = json.Unmarshal(p.Manifest, &out.Manifest)
-	_ = json.Unmarshal(p.Grants, &out.Grants)
+	if err := json.Unmarshal(p.Manifest, &out.Manifest); err != nil {
+		return codersdk.Plugin{}, xerrors.Errorf("decode plugin manifest: %w", err)
+	}
+	if err := json.Unmarshal(p.Grants, &out.Grants); err != nil {
+		return codersdk.Plugin{}, xerrors.Errorf("decode plugin grants: %w", err)
+	}
 	if p.Config != "" {
 		var config map[string]string
 		if json.Unmarshal([]byte(p.Config), &config) == nil {
@@ -722,7 +744,7 @@ func convertPlugin(p database.Plugin) codersdk.Plugin {
 		id := p.RunnerID.UUID
 		out.RunnerID = &id
 	}
-	return out
+	return out, nil
 }
 
 func convertPluginLinks(links []database.PluginUserLink) []codersdk.PluginUserLink {
