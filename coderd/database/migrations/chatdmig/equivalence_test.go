@@ -256,10 +256,19 @@ func earlySplitGraph(t *testing.T, split uint) *chatdmig.Graph {
 	adopt, err := os.ReadFile(adoptFile)
 	require.NoError(t, err)
 	adopt = regexp.MustCompile(`(?m)^-- requires: upstream:\w+$`).ReplaceAll(adopt, []byte("-- requires: upstream:"+splitName))
-	g, err := chatdmig.LoadFS(os.DirFS(".."), fstest.MapFS{
+	fork := fstest.MapFS{
 		"routes.txt": {Data: []byte("split " + splitName + "\n" + routes.String())},
 		adoptFile:    {Data: adopt},
-	})
+	}
+	// A mixed migration runs its override.
+	overrides, err := fs.Glob(os.DirFS("."), "override/*.up.sql")
+	require.NoError(t, err)
+	for _, f := range overrides {
+		b, err := os.ReadFile(f)
+		require.NoError(t, err)
+		fork[f] = &fstest.MapFile{Data: b}
+	}
+	g, err := chatdmig.LoadFS(os.DirFS(".."), fork)
 	require.NoError(t, err)
 	return g
 }
