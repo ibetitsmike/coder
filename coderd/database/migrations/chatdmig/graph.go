@@ -59,6 +59,17 @@ func UpstreamNodeID(name string) uuid.UUID {
 
 const defaultSearchPath = "chatd, public"
 
+// Phase says when a node runs.
+type Phase string
+
+const (
+	// PhaseStartup nodes run before the server starts.
+	PhaseStartup Phase = "startup"
+	// PhaseBackground nodes run while the server serves, for backfills that
+	// would hold up startup. A startup node cannot require one.
+	PhaseBackground Phase = "background"
+)
+
 // Requirement is one parent of a node: another node, or a core version.
 type Requirement struct {
 	Ref         string
@@ -75,6 +86,13 @@ type Node struct {
 	SearchPath      string
 	Requires        []Requirement
 	Checksum        []byte
+	Phase           Phase
+	// NoTransaction runs the one statement of the node outside a
+	// transaction, for CREATE INDEX CONCURRENTLY.
+	NoTransaction bool
+	// Repeat runs the one statement of the node, each time in its own
+	// transaction, until it changes no rows.
+	Repeat bool
 }
 
 type Route struct {
@@ -293,6 +311,7 @@ func (g *Graph) routedNodes(upstream fs.FS, overrides map[string][]byte) ([]*Nod
 			UpstreamVersion: r.Version,
 			SQL:             body,
 			SearchPath:      defaultSearchPath,
+			Phase:           PhaseStartup,
 			Requires: []Requirement{
 				{Ref: fmt.Sprintf("core %d", r.Version), CoreVersion: r.Version},
 				{Ref: prev.String(), Node: prev},
@@ -321,6 +340,7 @@ func parseForkNode(file string, body []byte) (*Node, error) {
 		SQL:        body,
 		SearchPath: defaultSearchPath,
 		Checksum:   checksum(body),
+		Phase:      PhaseStartup,
 	}
 	sc := bufio.NewScanner(bytes.NewReader(body))
 	for sc.Scan() {
@@ -341,9 +361,45 @@ func parseForkNode(file string, body []byte) (*Node, error) {
 				return nil, xerrors.Errorf("bad search_path %q", value)
 			}
 			n.SearchPath = value
+		case "phase":
+			n.Phase = Phase(value)
+			if n.Phase != PhaseStartup && n.Phase != PhaseBackground {
+				return nil, xerrors.Errorf("phase %q: want startup or background", value)
+			}
+		case "transaction":
+			if value != "none" {
+				return nil, xerrors.Errorf("transaction %q: want none", value)
+			}
+			n.NoTransaction = true
+		case "repeat":
+			if value != "until-no-rows" {
+				return nil, xerrors.Errorf("repeat %q: want until-no-rows", value)
+			}
+			n.Repeat = true
 		}
 	}
-	return n, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if n.NoTransaction && n.Repeat {
+		return nil, xerrors.New("repeat runs each batch in a transaction, so it cannot use transaction: none")
+	}
+	if (n.NoTransaction || n.Repeat) && statementCount(string(body)) != 1 {
+		return nil, xerrors.New("transaction: none and repeat need exactly one statement")
+	}
+	return n, nil
+}
+
+// statementCount counts the statements of sql, ignoring semicolons in
+// comments and quotes.
+func statementCount(sql string) int {
+	n := 0
+	for _, s := range strings.Split(stripLiterals(sql), ";") {
+		if strings.TrimSpace(s) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // resolve turns the refs of a fork node into nodes or core versions.
@@ -379,8 +435,15 @@ func (g *Graph) validate(nodes []*Node) error {
 	}
 	for _, n := range nodes {
 		for _, r := range n.Requires {
-			if r.Node != uuid.Nil && g.byID[r.Node] == nil {
+			if r.Node == uuid.Nil {
+				continue
+			}
+			p := g.byID[r.Node]
+			if p == nil {
 				return xerrors.Errorf("%s requires unknown %s", n.Name, r.Ref)
+			}
+			if n.Phase == PhaseStartup && p.Phase == PhaseBackground {
+				return xerrors.Errorf("%s runs at startup, so it cannot require background node %s", n.Name, p.Name)
 			}
 		}
 	}

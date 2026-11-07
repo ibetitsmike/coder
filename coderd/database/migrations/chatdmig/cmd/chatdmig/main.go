@@ -65,7 +65,21 @@ func check(dir string) error {
 	}
 	fmt.Printf("split %06d_%s, %d routes, %d nodes\n", g.SplitVersion, g.SplitName, len(g.Routes), len(g.Nodes))
 	for _, n := range g.Nodes {
-		fmt.Printf("  %s  %s\n", n.ID, n.Name)
+		var flags []string
+		if n.Phase == chatdmig.PhaseBackground {
+			flags = append(flags, "background")
+		}
+		if n.NoTransaction {
+			flags = append(flags, "no transaction")
+		}
+		if n.Repeat {
+			flags = append(flags, "repeat")
+		}
+		if len(flags) > 0 {
+			fmt.Printf("  %s  %s  (%s)\n", n.ID, n.Name, strings.Join(flags, ", "))
+		} else {
+			fmt.Printf("  %s  %s\n", n.ID, n.Name)
+		}
 	}
 	return nil
 }

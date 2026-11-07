@@ -52,12 +52,43 @@ Without it, a query fails with `relation "chats" does not exist`, and a
    or past each upstream version that it requires.
 2. Move core forward by one upstream version with golang-migrate.
 
+`coder server` calls `migrations.ServerMigrate`. It runs the same loop
+without background nodes, then starts `RunBackground` in a goroutine (see
+[Node options](#node-options)).
+
 The ledger of applied nodes is `chatd.migration_nodes`. It stores a checksum
 of each node. `UpAll` refuses to start if a fork node changed after it ran.
-`EnsureCleanAll` fails while a node is pending.
+`EnsureCleanAll` fails while a startup node is pending.
 
-There are no down migrations for nodes. To go back, restore the database
-snapshot that the deploy took.
+### One transaction per migration
+
+Upstream's `migrations.Up` runs every pending version in one transaction, so
+each lock that it takes lasts until the whole upgrade ends. `UpAll` commits
+each core version and each node on its own:
+
+- A lock lasts only for the migration that took it.
+- A server that dies or gives up keeps the versions that it finished, and the
+  next start continues from there.
+- An upgrade can stop between two versions. The old binary then refuses the
+  database (`database needs migration`). To go back, restore the database
+  snapshot that the deploy took. `coder-local rollback` does this.
+
+There are no down migrations for nodes.
+
+### Lock timeouts
+
+Postgres queues every later query on a table behind an `ALTER` that waits
+for its lock. A migration that waits for a long transaction of an old server
+stalls all traffic on that table. So every migration transaction, core or
+node, starts with `SET LOCAL lock_timeout`. After a lock timeout or a
+deadlock, the transaction rolls back, the waiting queries run, and the
+migration tries again after a pause.
+
+`chatdmig.DefaultLockPolicy` waits at most 5 seconds per attempt and makes 10
+attempts, with pauses from 1 to 30 seconds. After that, startup fails with
+`no lock after 10 attempts` and the error that names the migration. Find the
+blocking session with `pg_stat_activity` and `pg_locks`, end it, and start
+again.
 
 ## Routes: upstream migrations after the split
 
@@ -106,6 +137,50 @@ ALTER TABLE chats ADD COLUMN tags text[] NOT NULL DEFAULT '{}';
   (`CREATE TABLE public.foo`).
 - Never edit a node after it ran on a database. Add a new node.
 
+### Node options
+
+Startup waits for every startup node, so keep them to quick schema changes.
+Three header lines change how a node runs:
+
+| Header                      | Effect                                                                                                         |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-- phase: background`      | The node runs after the server starts, in `RunBackground`, one server at a time (`chatdmig.BackgroundLockID`). A startup node cannot require it. `EnsureCleanAll` ignores it. |
+| `-- repeat: until-no-rows`  | The node's one statement runs again, each time in its own transaction, until it changes no rows. The node is recorded with the last run. |
+| `-- transaction: none`      | The node's one statement runs outside a transaction, for `CREATE INDEX CONCURRENTLY`. It has no lock timeout. |
+
+A backfill is a background node that repeats a bounded batch. Each batch
+commits, so no lock lasts longer than one batch, and a restart continues
+where the last batch stopped:
+
+```sql
+-- requires: 0193f0aa-..._chat_tags
+-- phase: background
+-- repeat: until-no-rows
+
+UPDATE chats SET tags = '{}'
+WHERE id IN (SELECT id FROM chats WHERE tags IS NULL LIMIT 1000);
+```
+
+The statement must change fewer rows each time, or it never stops. Code that
+reads the new column must handle rows that the backfill has not reached.
+Tests and `dbtestutil` run `UpAll` without `DeferBackground`, so background
+nodes run inline there.
+
+An index on a large table:
+
+```sql
+-- requires: 0193f0aa-..._chat_tags
+-- transaction: none
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS chats_tags_idx ON chats USING gin (tags);
+```
+
+Use `IF NOT EXISTS`: the node is recorded after the statement, so a crash in
+between runs it again. A failed `CREATE INDEX CONCURRENTLY` leaves an invalid
+index that `IF NOT EXISTS` would skip. The runner checks for invalid indexes
+after the statement and stops with the index name. Drop it with
+`DROP INDEX CONCURRENTLY` and start again.
+
 Check the graph and print its order:
 
 ```sh
@@ -152,7 +227,7 @@ it opens starts no workflows.
 | Job          | Checks                                                                                                   |
 |--------------|----------------------------------------------------------------------------------------------------------|
 | `graph`      | `chatdmig check` and the unit tests of this package.                                                     |
-| `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version) or from the split equals a fresh database. |
+| `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version) or from the split equals a fresh database. Lock timeouts, retries and the node options work on a real database. |
 | `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, and the chat, skill and MCP tests of `./coderd` and `./enterprise/coderd`. |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
 

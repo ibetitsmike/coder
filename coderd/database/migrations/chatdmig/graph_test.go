@@ -5,6 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database/migrations/chatdmig"
@@ -78,6 +79,22 @@ func TestLoadRejectsBadGraphs(t *testing.T) {
 		{"NoPathToAdopt", validRoutes, map[string]string{
 			a: "-- requires: upstream:users\n",
 		}, "must require the adopt node"},
+		{"StartupRequiresBackground", validRoutes, map[string]string{
+			a: requireAdopt + "-- phase: background\nSELECT 1;\n",
+			b: requireAdopt + "-- requires: 0193f0aa-0000-7000-8000-00000000000a\nSELECT 1;\n",
+		}, "cannot require background node"},
+		{"UnknownPhase", validRoutes, map[string]string{
+			a: requireAdopt + "-- phase: later\nSELECT 1;\n",
+		}, "want startup or background"},
+		{"NoTransactionTwoStatements", validRoutes, map[string]string{
+			a: requireAdopt + "-- transaction: none\nCREATE INDEX CONCURRENTLY a ON chats (id);\nCREATE INDEX CONCURRENTLY b ON chats (id);\n",
+		}, "exactly one statement"},
+		{"RepeatTwoStatements", validRoutes, map[string]string{
+			a: requireAdopt + "-- repeat: until-no-rows\nUPDATE chats SET x = 1;\nUPDATE chats SET y = 1;\n",
+		}, "exactly one statement"},
+		{"RepeatWithoutTransaction", validRoutes, map[string]string{
+			a: requireAdopt + "-- transaction: none\n-- repeat: until-no-rows\nUPDATE chats SET x = 1;\n",
+		}, "cannot use transaction: none"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -85,4 +102,26 @@ func TestLoadRejectsBadGraphs(t *testing.T) {
 			require.ErrorContains(t, err, tc.err)
 		})
 	}
+}
+
+func TestLoadReadsRunDirectives(t *testing.T) {
+	t.Parallel()
+	const index = "nodes/0193f0aa-0000-7000-8000-00000000000a_index.up.sql"
+	const backfill = "nodes/0193f0aa-0000-7000-8000-00000000000b_backfill.up.sql"
+	g, err := chatdmig.LoadFS(upstreamFS(), forkFS(validRoutes, map[string]string{
+		index: "-- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8\n-- transaction: none\n" +
+			"-- A semicolon in a comment; or 'a string;' is not a statement.\n" +
+			"CREATE INDEX CONCURRENTLY IF NOT EXISTS chats_x ON chats ((title || ';'));\n",
+		backfill: "-- requires: 0193f0aa-0000-7000-8000-00000000000a_index\n-- phase: background\n-- repeat: until-no-rows\n" +
+			"UPDATE chats SET x = 1 WHERE id IN (SELECT id FROM chats WHERE x IS NULL LIMIT 1000)\n",
+	}))
+	require.NoError(t, err)
+	idx := g.Node(uuid.MustParse("0193f0aa-0000-7000-8000-00000000000a"))
+	require.True(t, idx.NoTransaction)
+	require.False(t, idx.Repeat)
+	require.Equal(t, chatdmig.PhaseStartup, idx.Phase)
+	bf := g.Node(uuid.MustParse("0193f0aa-0000-7000-8000-00000000000b"))
+	require.True(t, bf.Repeat)
+	require.False(t, bf.NoTransaction)
+	require.Equal(t, chatdmig.PhaseBackground, bf.Phase)
 }
