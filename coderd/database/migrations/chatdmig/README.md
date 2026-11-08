@@ -198,7 +198,8 @@ The package does not exist yet. Create it with the first fork query.
 
 `.github/workflows/fork-sync.yaml` runs at 05:00 UTC and on demand:
 
-1. It runs `fork-quiet`. See [Upstream workflows](#upstream-workflows).
+1. It runs `fork-quiet` when fork-sync runs on GitHub. See
+   [Upstream workflows](#upstream-workflows).
 2. It stops if a sync PR is open. It labels a red one `needs-mike`.
 3. It merges the newest upstream `main` commit that is at least 24 hours old.
    Upstream fixes a duplicate migration number within hours.
@@ -227,7 +228,9 @@ that matches it, and an unregistered workflow cannot be disabled in advance.
 `.github/workflows/fork-quiet.yaml` disables every active workflow that is not
 `fork-*` and cancels its unfinished runs. It runs hourly, on pushes, branch and
 tag creation, PRs from this repository, issues, comments and releases, and
-before every sync. A new upstream workflow can still finish one short run
+before a fork-sync run on GitHub. A sync by the local `coder-local-sync` does
+not run it before the merge: it runs on the sync branch's push and PR and on
+the push to `main`. A new upstream workflow can still finish one short run
 before it is cancelled, and one that a PR from another repository or a
 schedule registers stays active until the next hourly pass.
 
