@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"slices"
 	"strings"
 
@@ -11,13 +10,17 @@ import (
 )
 
 const (
-	accountKey = "account"
+	// deviceName is the name of Coder in the linked devices of an account.
+	deviceName = "Coder"
 
-	botHelp = "Send /link CODE with a code from Coder to link this number. " +
-		"Then send any text to talk to your agent, or /new TEXT to start a new chat."
-	deviceHelp = "Send /link CODE here with a code from Coder to link this account. " +
+	helpText = "Send /link CODE here with a code from Coder to link this account. " +
 		"Then send any text here to talk to your agent, or /new TEXT to start a new chat."
-	welcomeText = "Coder is now a linked device of this account. " + deviceHelp
+	welcomeText = "Coder is now a linked device of this account. " + helpText
+	// connectInstructions go with the QR code and the link code that Coder
+	// shows a user who connects an account.
+	connectInstructions = "In Signal on your phone, open Settings > Linked devices, select " +
+		"Link a new device and scan this code. Then send the /link command below to Note to Self. " +
+		"Coder can read the messages of your account until you remove the Coder device in Signal."
 
 	// replyMarker starts each message that the plugin writes to a Note to
 	// Self chat. The user and the plugin write there as the same account,
@@ -46,9 +49,9 @@ type sentKey struct {
 // handler at a time, so it needs no lock.
 type bridge struct {
 	apiURL string
-	// devices are the accounts on the server other than the bot account,
-	// sorted by ID. Each one is a Signal account that Coder is a linked
-	// device of, and its owner talks to the plugin in Note to Self.
+	// devices are the accounts on the server, sorted by ID. Each one is a
+	// Signal account that Coder is a linked device of, and its owner talks to
+	// the plugin in Note to Self.
 	devices []account
 	// known has the ID of each device. It is nil until the first list, so
 	// devices that existed before the plugin started get no welcome.
@@ -73,39 +76,24 @@ func (b *bridge) api(h pluginsdk.Host) signalAPI {
 	return signalAPI{h: h, baseURL: b.apiURL}
 }
 
-// onTick polls the bot account and the devices for new messages and routes
-// each one.
+// onTick polls the devices for new messages and routes each one.
 func (b *bridge) onTick(h pluginsdk.Host) error {
 	api := b.api(h)
-	bot := h.Config(accountKey)
-	var errs []error
-	if err := b.refreshDevices(h, api, bot); err != nil {
-		errs = append(errs, err)
-	}
-	budget := maxReceivesPerTick
-	if bot != "" {
-		budget--
-		msgs, err := api.receive(bot)
-		if err != nil {
-			errs = append(errs, xerrors.Errorf("receive for bot account %s: %w", bot, err))
-		}
-		for _, m := range msgs {
-			b.handleBotMessage(h, api, bot, m)
-		}
-	}
-	for _, d := range b.devicesToPoll(budget) {
+	// A failed list keeps polling the devices of the last list.
+	listErr := b.refreshDevices(h, api)
+	for _, d := range b.devicesToPoll(maxReceivesPerTick) {
 		msgs, err := api.receive(d.id())
 		b.noteReceiveError(h, d.id(), err)
 		for _, m := range msgs {
-			b.handleDeviceMessage(h, api, d, m)
+			handleMessage(h, api, d, m)
 		}
 	}
-	return errors.Join(errs...)
+	return listErr
 }
 
 // refreshDevices lists the accounts on the server and welcomes each device
 // that appeared since the last list.
-func (b *bridge) refreshDevices(h pluginsdk.Host, api signalAPI, bot string) error {
+func (b *bridge) refreshDevices(h pluginsdk.Host, api signalAPI) error {
 	accounts, err := api.accounts()
 	if err != nil {
 		return err
@@ -115,13 +103,13 @@ func (b *bridge) refreshDevices(h pluginsdk.Host, api signalAPI, bot string) err
 	known := make(map[string]bool, len(accounts))
 	for _, a := range accounts {
 		id := a.id()
-		if id == "" || id == bot || known[id] {
+		if id == "" || known[id] {
 			continue
 		}
 		known[id] = true
 		devices = append(devices, a)
 		if greet && !b.known[id] {
-			if err := b.sendToSelf(api, id, welcomeText); err != nil {
+			if err := api.sendToSelf(id, welcomeText); err != nil {
 				h.Logf("welcome %s: %v", id, err)
 			}
 		}
@@ -157,31 +145,10 @@ func (b *bridge) noteReceiveError(h pluginsdk.Host, id string, err error) {
 	h.Logf("receive for %s: %v", id, err)
 }
 
-// handleBotMessage handles a direct message to the bot account.
-func (*bridge) handleBotMessage(h pluginsdk.Host, api signalAPI, bot string, m receivedMessage) {
-	env := m.Envelope
-	if env.DataMessage == nil || len(env.DataMessage.GroupInfo) > 0 {
-		return
-	}
-	sender := env.SourceNumber
-	if sender == "" {
-		sender = env.SourceUUID
-	}
-	text := strings.TrimSpace(env.DataMessage.Message)
-	if sender == "" || text == "" {
-		return
-	}
-	if reply := handleText(h, sender, text, botHelp); reply != "" {
-		if err := api.send(bot, sender, reply); err != nil {
-			h.Logf("reply to %s: %v", sender, err)
-		}
-	}
-}
-
-// handleDeviceMessage handles a message that the owner of a device wrote to
-// Note to Self on another device. The plugin ignores every other message of
-// the account: those are the owner's private conversations.
-func (b *bridge) handleDeviceMessage(h pluginsdk.Host, api signalAPI, d account, m receivedMessage) {
+// handleMessage handles a message that the owner of a device wrote to Note
+// to Self on another device. The plugin ignores every other message of the
+// account: those are the owner's private conversations.
+func handleMessage(h pluginsdk.Host, api signalAPI, d account, m receivedMessage) {
 	sync := m.Envelope.SyncMessage
 	if sync == nil || sync.SentMessage == nil || !sync.SentMessage.toSelf(d) {
 		return
@@ -190,8 +157,8 @@ func (b *bridge) handleDeviceMessage(h pluginsdk.Host, api signalAPI, d account,
 	if text == "" || strings.HasPrefix(text, strings.TrimSpace(replyMarker)) {
 		return
 	}
-	if reply := handleText(h, d.id(), text, deviceHelp); reply != "" {
-		if err := b.sendToSelf(api, d.id(), reply); err != nil {
+	if reply := handleText(h, d.id(), text); reply != "" {
+		if err := api.sendToSelf(d.id(), reply); err != nil {
 			h.Logf("reply to %s: %v", d.id(), err)
 		}
 	}
@@ -199,56 +166,47 @@ func (b *bridge) handleDeviceMessage(h pluginsdk.Host, api signalAPI, d account,
 
 // handleText runs a command or sends text to a chat, and returns the text to
 // send back to the user, if any.
-func handleText(h pluginsdk.Host, externalID, text, help string) string {
+func handleText(h pluginsdk.Host, externalID, text string) string {
 	command, arg, _ := strings.Cut(text, " ")
 	arg = strings.TrimSpace(arg)
 	switch strings.ToLower(command) {
 	case "/help":
-		return help
+		return helpText
 	case "/link":
 		username, err := h.LinkComplete(externalID, arg)
 		if err != nil {
 			return "Could not link: " + err.Error()
 		}
-		return "Linked to Coder user " + username + ". " + help
+		return "Linked to Coder user " + username + ". " + helpText
 	case "/new":
 		if arg == "" {
 			return "Send /new TEXT to start a new chat."
 		}
 		if _, err := h.ChatSendNew(externalID, arg); err != nil {
-			return "Could not start a chat: " + err.Error() + "\n" + help
+			return "Could not start a chat: " + err.Error() + "\n" + helpText
 		}
 		return ""
 	default:
 		if _, err := h.ChatSend(externalID, text); err != nil {
-			return "Could not send: " + err.Error() + "\n" + help
+			return "Could not send: " + err.Error() + "\n" + helpText
 		}
 		return ""
 	}
 }
 
-// onEvent sends the replies of the agent to the linked Signal account: to
-// Note to Self when Coder is a linked device of the account, and from the
-// bot account otherwise.
+// onEvent sends the replies of the agent to Note to Self of the linked
+// Signal account.
 func (b *bridge) onEvent(h pluginsdk.Host, ev pluginsdk.ChatEvent) error {
 	api := b.api(h)
-	bot := h.Config(accountKey)
 	// coderd delivers missed events before the first tick.
 	if b.known == nil {
-		if err := b.refreshDevices(h, api, bot); err != nil {
+		if err := b.refreshDevices(h, api); err != nil {
 			return err
 		}
 	}
-	send := func(text string) error {
-		if b.known[ev.ExternalID] {
-			return b.sendToSelf(api, ev.ExternalID, text)
-		}
-		if bot == "" {
-			return xerrors.Errorf("%s is not a linked device and config key %q is not set", ev.ExternalID, accountKey)
-		}
-		return api.send(bot, ev.ExternalID, text)
+	if !b.known[ev.ExternalID] {
+		return xerrors.Errorf("%s is not a linked device on the signal-cli-rest-api server", ev.ExternalID)
 	}
-
 	title := ev.Title
 	if title == "" {
 		title = "New chat"
@@ -258,7 +216,7 @@ func (b *bridge) onEvent(h pluginsdk.Host, ev pluginsdk.ChatEvent) error {
 		if _, ok := b.sent[key]; ok {
 			continue
 		}
-		if err := send("[" + title + "] " + m.Text); err != nil {
+		if err := api.sendToSelf(ev.ExternalID, "["+title+"] "+m.Text); err != nil {
 			return err
 		}
 		if len(b.sent) >= maxSent {
@@ -267,11 +225,17 @@ func (b *bridge) onEvent(h pluginsdk.Host, ev pluginsdk.ChatEvent) error {
 		b.sent[key] = struct{}{}
 	}
 	if len(ev.Messages) == 0 && ev.Status == "error" {
-		return send("[" + title + "] The chat stopped with an error. Open it in Coder for details.")
+		return api.sendToSelf(ev.ExternalID, "["+title+"] The chat stopped with an error. Open it in Coder for details.")
 	}
 	return nil
 }
 
-func (*bridge) sendToSelf(api signalAPI, id, text string) error {
-	return api.send(id, id, replyMarker+text)
+// onConnect asks the server for a QR code that adds it as a linked device of
+// the user's Signal account.
+func (b *bridge) onConnect(h pluginsdk.Host) (pluginsdk.ConnectPrompt, error) {
+	png, err := b.api(h).linkQRCode(deviceName)
+	if err != nil {
+		return pluginsdk.ConnectPrompt{}, err
+	}
+	return pluginsdk.ConnectPrompt{QRCodePNG: png, Instructions: connectInstructions}, nil
 }

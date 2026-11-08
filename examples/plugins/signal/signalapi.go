@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -51,27 +53,20 @@ func (a account) id() string {
 // receivedMessage is one item of GET /v1/receive/{account}.
 type receivedMessage struct {
 	Envelope struct {
-		SourceNumber string       `json:"sourceNumber"`
-		SourceUUID   string       `json:"sourceUuid"`
-		DataMessage  *dataMessage `json:"dataMessage"`
-		SyncMessage  *struct {
+		SyncMessage *struct {
 			SentMessage *sentMessage `json:"sentMessage"`
 		} `json:"syncMessage"`
 	} `json:"envelope"`
 }
 
-type dataMessage struct {
-	Message   string          `json:"message"`
-	GroupInfo json.RawMessage `json:"groupInfo"`
-}
-
 // sentMessage is a message that another device of the account sent.
 type sentMessage struct {
 	// Destination is deprecated; older signal-cli versions set only it.
-	Destination       string `json:"destination"`
-	DestinationNumber string `json:"destinationNumber"`
-	DestinationUUID   string `json:"destinationUuid"`
-	dataMessage
+	Destination       string          `json:"destination"`
+	DestinationNumber string          `json:"destinationNumber"`
+	DestinationUUID   string          `json:"destinationUuid"`
+	Message           string          `json:"message"`
+	GroupInfo         json.RawMessage `json:"groupInfo"`
 }
 
 // toSelf reports whether the account sent the message to its own Note to
@@ -122,12 +117,34 @@ func (s signalAPI) receive(id string) ([]receivedMessage, error) {
 	return out, nil
 }
 
-func (s signalAPI) send(from, to, text string) error {
+// sendToSelf writes text to Note to Self of an account, after replyMarker.
+func (s signalAPI) sendToSelf(id, text string) error {
 	return s.h.PostJSON(s.baseURL+"/v2/send", sendRequest{
-		Message:    text,
-		Number:     from,
-		Recipients: []string{to},
+		Message:    replyMarker + text,
+		Number:     id,
+		Recipients: []string{id},
 	}, nil)
+}
+
+// linkQRCode starts to link a new device to an account and returns the QR
+// code that the owner of the account scans, as a PNG image.
+func (s signalAPI) linkQRCode(deviceName string) ([]byte, error) {
+	res, err := s.h.Fetch(pluginsdk.HTTPRequest{
+		Method: http.MethodGet,
+		URL:    s.baseURL + "/v1/qrcodelink?device_name=" + url.QueryEscape(deviceName),
+		Header: http.Header{"Accept": {"image/png"}},
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("get link QR code: %w", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		body := res.Body
+		if len(body) > 512 {
+			body = body[:512]
+		}
+		return nil, xerrors.Errorf("get link QR code: unexpected status %d: %s", res.StatusCode, bytes.TrimSpace(body))
+	}
+	return res.Body, nil
 }
 
 func trimBaseURL(raw string) string {

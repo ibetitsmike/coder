@@ -18,10 +18,12 @@ import (
 
 const (
 	testAPIURL = "http://signal.test"
-	botNumber  = "+15550000000"
 	alice      = "+15550000001"
 	bob        = "+15550000002"
 )
+
+// qrCodePNG is what the fake server returns for a link QR code.
+var qrCodePNG = []byte("\x89PNG\r\n\x1a\nqr")
 
 // fakeSignal is a signal-cli-rest-api server with one queue of messages for
 // each account.
@@ -32,6 +34,8 @@ type fakeSignal struct {
 	failing  map[string]bool
 	polled   []string
 	sent     []sendRequest
+	// linkError makes the QR code endpoint fail.
+	linkError bool
 }
 
 func newFakeSignal(t *testing.T, accounts ...string) *fakeSignal {
@@ -60,6 +64,14 @@ func (f *fakeSignal) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 		delete(f.queues, id)
 		_ = json.NewEncoder(rw).Encode(items)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/qrcodelink":
+		assert.Equal(f.t, deviceName, r.URL.Query().Get("device_name"))
+		if f.linkError {
+			http.Error(rw, `{"error":"signal-cli exited"}`, http.StatusBadRequest)
+			return
+		}
+		rw.Header().Set("Content-Type", "image/png")
+		_, _ = rw.Write(qrCodePNG)
 	case r.Method == http.MethodPost && r.URL.Path == "/v2/send":
 		var req sendRequest
 		require.NoError(f.t, json.NewDecoder(r.Body).Decode(&req))
@@ -87,7 +99,6 @@ type chatCall struct {
 // fakeHost is the coderd side of the plugin. Its Fetch serves requests with
 // the fake signal-cli-rest-api server.
 type fakeHost struct {
-	config  map[string]string
 	signal  http.Handler
 	codes   map[string]string
 	linked  map[string]string
@@ -98,7 +109,7 @@ type fakeHost struct {
 
 var _ pluginsdk.Host = (*fakeHost)(nil)
 
-func (h *fakeHost) Config(key string) string { return h.config[key] }
+func (*fakeHost) Config(string) string { return "" }
 
 func (h *fakeHost) ChatSend(externalID, text string) (string, error) {
 	return h.chat(externalID, text, false)
@@ -169,10 +180,10 @@ func (h *fakeHost) Logf(format string, args ...any) {
 	h.logs = append(h.logs, fmt.Sprintf(format, args...))
 }
 
-func newTest(t *testing.T, bot string, accounts ...string) (*bridge, *fakeHost, *fakeSignal) {
+func newTest(t *testing.T, accounts ...string) (*bridge, *fakeHost, *fakeSignal) {
 	t.Helper()
 	signal := newFakeSignal(t, accounts...)
-	h := &fakeHost{config: map[string]string{accountKey: bot}, signal: signal, codes: map[string]string{}}
+	h := &fakeHost{signal: signal, codes: map[string]string{}}
 	return newBridge(testAPIURL + "/"), h, signal
 }
 
@@ -192,36 +203,10 @@ func sentTo(account, destination, text string) string {
 		`{"destination":%q,"destinationNumber":%q,"message":%q}}}`, account, destination, destination, text)
 }
 
-func TestBotAccount(t *testing.T) {
+func TestNoteToSelf(t *testing.T) {
 	t.Parallel()
 
-	b, h, signal := newTest(t, botNumber, botNumber)
-	h.codes["K7Q-2MX"] = "dana"
-	signal.queue(botNumber,
-		directMessage(alice, "/link K7Q-2MX"),
-		directMessage(alice, "fix the flaky test"),
-		directMessage(alice, "/new bump Go"),
-		`{"sourceNumber":"`+bob+`","dataMessage":{"message":"hi all","groupInfo":{"groupId":"g1"}}}`,
-	)
-
-	require.NoError(t, b.onTick(h))
-	assert.Equal(t, map[string]string{alice: "dana"}, h.linked)
-	assert.Equal(t, []chatCall{
-		{externalID: alice, text: "fix the flaky test"},
-		{externalID: alice, text: "bump Go", newChat: true},
-	}, h.chats, "group messages must be ignored")
-	assert.Equal(t, []string{botNumber + ">" + alice + ": Linked to Coder user dana. " + botHelp}, signal.sentTexts())
-
-	require.NoError(t, b.onEvent(h, pluginsdk.ChatEvent{
-		ExternalID: alice, Title: "Flaky test", Messages: []pluginsdk.ChatText{{ID: 7, Text: "Fixed."}},
-	}))
-	assert.Equal(t, botNumber+">"+alice+": [Flaky test] Fixed.", signal.sentTexts()[1])
-}
-
-func TestOwnAccount(t *testing.T) {
-	t.Parallel()
-
-	b, h, signal := newTest(t, "", alice)
+	b, h, signal := newTest(t, alice)
 	h.codes["K7Q-2MX"] = "dana"
 	signal.queue(alice,
 		noteToSelf(alice, "/link K7Q-2MX"),
@@ -238,7 +223,7 @@ func TestOwnAccount(t *testing.T) {
 	require.NoError(t, b.onTick(h))
 	assert.Equal(t, map[string]string{alice: "dana"}, h.linked)
 	assert.Equal(t, []chatCall{{externalID: alice, text: "why does TestChatWatch flake?"}}, h.chats)
-	assert.Equal(t, []string{alice + ">" + alice + ": " + replyMarker + "Linked to Coder user dana. " + deviceHelp}, signal.sentTexts())
+	assert.Equal(t, []string{alice + ">" + alice + ": " + replyMarker + "Linked to Coder user dana. " + helpText}, signal.sentTexts())
 
 	require.NoError(t, b.onEvent(h, pluginsdk.ChatEvent{
 		ExternalID: alice, Title: "TestChatWatch", Messages: []pluginsdk.ChatText{{ID: 1, Text: "The test reads too early."}},
@@ -250,11 +235,11 @@ func TestOwnAccount(t *testing.T) {
 	}, signal.sentTexts()[1:])
 }
 
-func TestOwnAccountWithoutNumber(t *testing.T) {
+func TestAccountWithoutNumber(t *testing.T) {
 	t.Parallel()
 
 	const aci = "11111111-1111-4111-8111-111111111111"
-	b, h, signal := newTest(t, "")
+	b, h, signal := newTest(t)
 	h.signal = http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/accounts" {
 			_, _ = rw.Write([]byte(`[{"number":"","aci":"` + aci + `"}]`))
@@ -271,7 +256,7 @@ func TestOwnAccountWithoutNumber(t *testing.T) {
 func TestNewDeviceGetsWelcome(t *testing.T) {
 	t.Parallel()
 
-	b, h, signal := newTest(t, botNumber, botNumber, alice)
+	b, h, signal := newTest(t, alice)
 	require.NoError(t, b.onTick(h))
 	assert.Empty(t, signal.sent, "devices that existed before the plugin started get no welcome")
 
@@ -285,14 +270,14 @@ func TestDevicePollingRotates(t *testing.T) {
 	t.Parallel()
 
 	devices := []string{"+15550000011", "+15550000012", "+15550000013", "+15550000014", "+15550000015"}
-	b, h, signal := newTest(t, botNumber, append([]string{botNumber}, devices...)...)
+	b, h, signal := newTest(t, devices...)
 	signal.failing[devices[0]] = true
 
 	require.NoError(t, b.onTick(h), "a failing device must not fail the tick")
 	require.NoError(t, b.onTick(h))
 	assert.Equal(t, []string{
-		botNumber, devices[0], devices[1], devices[2],
-		botNumber, devices[3], devices[4], devices[0],
+		devices[0], devices[1], devices[2], devices[3],
+		devices[4], devices[0], devices[1], devices[2],
 	}, signal.polled)
 	require.Len(t, h.logs, 1, "a device that keeps failing logs once")
 	assert.Contains(t, h.logs[0], devices[0])
@@ -301,7 +286,7 @@ func TestDevicePollingRotates(t *testing.T) {
 func TestEventWithoutRoute(t *testing.T) {
 	t.Parallel()
 
-	b, h, signal := newTest(t, "", alice)
+	b, h, signal := newTest(t, alice)
 	err := b.onEvent(h, pluginsdk.ChatEvent{ExternalID: bob, Messages: []pluginsdk.ChatText{{ID: 1, Text: "hi"}}})
 	require.ErrorContains(t, err, "is not a linked device")
 	assert.Empty(t, signal.sent)
@@ -310,7 +295,7 @@ func TestEventWithoutRoute(t *testing.T) {
 func TestEventRetrySkipsSentReplies(t *testing.T) {
 	t.Parallel()
 
-	b, h, signal := newTest(t, botNumber, botNumber)
+	b, h, signal := newTest(t, alice)
 	ev := pluginsdk.ChatEvent{ExternalID: alice, Title: "T", Messages: []pluginsdk.ChatText{{ID: 1, Text: "one"}, {ID: 2, Text: "two"}}}
 	fail := true
 	h.signal = http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -325,7 +310,21 @@ func TestEventRetrySkipsSentReplies(t *testing.T) {
 	require.Error(t, b.onEvent(h, ev))
 	require.NoError(t, b.onEvent(h, ev))
 	assert.Equal(t, []string{
-		botNumber + ">" + alice + ": [T] one",
-		botNumber + ">" + alice + ": [T] two",
+		alice + ">" + alice + ": " + replyMarker + "[T] one",
+		alice + ">" + alice + ": " + replyMarker + "[T] two",
 	}, signal.sentTexts())
+}
+
+func TestConnect(t *testing.T) {
+	t.Parallel()
+
+	b, h, signal := newTest(t)
+	prompt, err := b.onConnect(h)
+	require.NoError(t, err)
+	assert.Equal(t, qrCodePNG, prompt.QRCodePNG)
+	assert.Equal(t, connectInstructions, prompt.Instructions)
+
+	signal.linkError = true
+	_, err = b.onConnect(h)
+	require.ErrorContains(t, err, "signal-cli exited")
 }
