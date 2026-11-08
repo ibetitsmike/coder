@@ -23,8 +23,9 @@ var warmOnce sync.Once
 
 func newModule(t *testing.T, limits sandbox.Limits) (*sandbox.Module, *bytes.Buffer) {
 	t.Helper()
-	ctx := testutil.Context(t, testutil.WaitSuperLong)
+	// A cold build of the test plugin can take longer than the deadline.
 	wasm := plugintest.TestPlugin(t)
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
 	// Compiling the test plugin takes about 20s with -race. A module that
 	// stays open keeps the compiled code in the shared cache so other tests
 	// reuse it.
