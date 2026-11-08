@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,11 +78,13 @@ func TestRouteEarly(t *testing.T) {
 		require.Equal(t, routesHeader+"000640 chat_queued_message_busy_behavior chatd\n000641 after core\n", string(got))
 	})
 
-	t.Run("BadEarlyLineFails", func(t *testing.T) {
-		t.Parallel()
-		dir := writeMigrations(t, routesHeader, nil)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("640 short\n"), 0o600))
+	for _, line := range []string{"640 short", "00064x chat_x coder/coder#1", "640 chat_x coder/coder#1"} {
+		t.Run("BadEarlyLineFails/"+line, func(t *testing.T) {
+			t.Parallel()
+			dir := writeMigrations(t, routesHeader, nil)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte(line+"\n"), 0o600))
 
-		require.ErrorContains(t, route(dir), `early.txt: bad line "640 short"`)
-	})
+			require.ErrorContains(t, route(dir), fmt.Sprintf("early.txt: bad line %q", line))
+		})
+	}
 }

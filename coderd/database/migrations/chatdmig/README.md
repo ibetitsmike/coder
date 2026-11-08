@@ -217,13 +217,17 @@ The package does not exist yet. Create it with the first fork query.
 5. It opens a PR labeled `sync` from `sync/<date>-<sha>`. A clean PR merges
    itself with a merge commit when fork-ci passes.
 
-A person takes over in two cases:
+A person takes over in three cases:
 
 - **Conflict.** The job opens or updates an issue labeled `sync-blocked`.
   Merge upstream by hand on a branch and open a PR.
 - **Mixed migration.** The PR is labeled `needs-mike`. Write
   `override/<name>.up.sql` (see [override/README.md](override/README.md)),
   push it to the PR branch and merge the PR.
+- **Migration below an early one.** The job fails with the route output,
+  which names the upstream migration and the `early.txt` entry. Renumber or
+  move the migration on a branch, update `early.txt`, and open a PR (see
+  [Migrations taken early](#migrations-taken-early)).
 
 The job pushes with the `FORK_SYNC_TOKEN` secret, a fine-grained token for
 this repository with Contents, Pull requests, Issues and Workflows write
