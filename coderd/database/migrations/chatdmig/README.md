@@ -27,6 +27,11 @@ from `public` to `chatd`:
 `SET SCHEMA` changes the catalog only. No row is copied, so the move takes
 seconds on a large database.
 
+Fork nodes add:
+
+- [`nodes/<id>_chat_subagents.up.sql`](nodes/), the table `chat_subagents`
+  (one row per subagent chat the fork tracks).
+
 ## Every connection needs chatd on its search path
 
 Upstream's queries and the moved functions name tables without a schema.
@@ -192,7 +197,32 @@ go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check
 Put queries for fork columns or tables in a separate sqlc package,
 `coderd/database/forkdb`, so that upstream's `queries.sql.go` never conflicts.
 Its `sqlc.yaml` reads `../dump.sql` and then the fork nodes in graph order.
-The package does not exist yet. Create it with the first fork query.
+When you add a node, add its file to that list. `TestSQLCSchemaOrder` fails
+when the list and the graph disagree.
+
+`make gen` does not know forkdb. After you change `forkdb/queries/*.sql` or
+a fork node, run `./coderd/database/forkdb/generate.sh`. It needs the coder
+sqlc version that `mise.toml` pins. It runs sqlc and regenerates
+`forkdbmock`.
+
+Code gets the fork queries of a store with `forkdb.From(db)`. They run on the
+connection or transaction of `db`, behind the same wrappers as upstream's
+queries:
+
+- `dbauthz` authorizes each fork query in `dbauthz/fork_forkdb.go`.
+  `TestForkQuerier` in `dbauthz/fork_forkdb_test.go` asserts the checks and
+  fails for a fork query that has no case.
+- `dbmetrics` measures each fork query in `dbmetrics/fork_forkdb.go`.
+- `dbcrypt` passes fork queries through in
+  `enterprise/dbcrypt/fork_forkdb.go`. Add overrides when a fork table holds
+  a secret.
+
+Each wrapper implements `forkdb.Wrapper`. `From` fails for a store that
+wraps another without it, so a new wrapper cannot skip a fork query by
+accident. The dbauthz and dbmetrics wrappers do not embed `forkdb.Store`, so
+a new fork query does not compile until both handle it.
+`forkdb.InTx(db, func(tx, ftx))` runs upstream and fork queries in one
+transaction.
 
 ## Upstream sync
 
@@ -228,8 +258,9 @@ it opens starts no workflows.
 |--------------|----------------------------------------------------------------------------------------------------------|
 | `graph`      | `chatdmig check` and the unit tests of this package.                                                     |
 | `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version) or from the split equals a fresh database. Lock timeouts, retries and the node options work on a real database. |
-| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, and the chat, skill and MCP tests of `./coderd` and `./enterprise/coderd`. |
+| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, and the chat, skill and MCP tests of `./coderd` and `./enterprise/coderd`. |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
+| `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
 
 Run the schema tests locally against a Postgres role that can create
 databases. `pg_dump` must be at least the server's version:

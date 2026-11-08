@@ -493,6 +493,10 @@ func TestDBAuthzRecursive(t *testing.T) {
 			method.Name == "PGLocks" {
 			continue
 		}
+		// Fork: the forkdb.Wrapper methods take no context.
+		if method.Name == "ForkUnwrap" || method.Name == "ForkWrap" {
+			continue
+		}
 		// easy to know which method failed.
 		// t.Log(method.Name)
 		// Call the function. Any infinite recursion will stack overflow.
