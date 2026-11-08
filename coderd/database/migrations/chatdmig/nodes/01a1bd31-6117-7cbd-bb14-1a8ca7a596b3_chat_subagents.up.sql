@@ -1,6 +1,5 @@
 -- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema
 
-
 -- One row per subagent chat that the fork tracks. A child chat without a
 -- row is a legacy shared child of its built-in type.
 CREATE TABLE chat_subagents (
