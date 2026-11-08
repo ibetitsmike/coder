@@ -79,6 +79,18 @@ func TestRouteEarly(t *testing.T) {
 		require.Equal(t, routes, string(got))
 	})
 
+	t.Run("MigrationRoutedBeforeEarlyEntryRoutes", func(t *testing.T) {
+		t.Parallel()
+		routes := routesHeader + "000640 a core\n000641 b core\n"
+		dir := writeMigrations(t, routes, map[string]string{
+			"000640_a.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
+			"000641_b.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
+		})
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000642 chat_x coder/coder#1\n"), 0o600))
+
+		require.NoError(t, route(dir))
+	})
+
 	t.Run("EarlyAtOrBelowSplitFails", func(t *testing.T) {
 		t.Parallel()
 		dir := writeMigrations(t, routesHeader, nil)
