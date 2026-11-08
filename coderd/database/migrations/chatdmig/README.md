@@ -198,7 +198,7 @@ The package does not exist yet. Create it with the first fork query.
 
 `.github/workflows/fork-sync.yaml` runs at 05:00 UTC and on demand:
 
-1. It runs `fork-quiet` (see Upstream workflows).
+1. It runs `fork-quiet`. See [Upstream workflows](#upstream-workflows).
 2. It stops if a sync PR is open. It labels a red one `needs-mike`.
 3. It merges the newest upstream `main` commit that is at least 24 hours old.
    Upstream fixes a duplicate migration number within hours.
