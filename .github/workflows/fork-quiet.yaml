@@ -37,7 +37,12 @@ jobs:
           gh workflow list -R "$GITHUB_REPOSITORY" --all --limit 500 --json id,path,state \
             --jq ".[] | select(.state == \"active\" and $UPSTREAM) | .id" |
             while read -r id; do
-              gh workflow disable -R "$GITHUB_REPOSITORY" "$id"
+              # A parallel fork-quiet run may disable it first, and disabling
+              # a disabled workflow fails.
+              if ! gh workflow disable -R "$GITHUB_REPOSITORY" "$id"; then
+                state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$id" --jq .state)
+                test "$state" != active
+              fi
             done
       - name: Cancel unfinished upstream runs
         run: |

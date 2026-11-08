@@ -226,8 +226,10 @@ workflows stay on. GitHub registers a workflow, active, on the first event
 that matches it, and an unregistered workflow cannot be disabled in advance.
 `.github/workflows/fork-quiet.yaml` disables every active workflow that is not
 `fork-*` and cancels its unfinished runs. It runs hourly, on pushes, branch and
-tag creation, PRs, issues, comments and releases, and before every sync. A new
-upstream workflow can still finish one short run before it is cancelled.
+tag creation, PRs from this repository, issues, comments and releases, and
+before every sync. A new upstream workflow can still finish one short run
+before it is cancelled, and one that a PR from another repository or a
+schedule registers stays active until the next hourly pass.
 
 ## CI
 
