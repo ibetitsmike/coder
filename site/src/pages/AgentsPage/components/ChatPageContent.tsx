@@ -39,6 +39,8 @@ import {
 	isUploadInProgress,
 	type UploadState,
 } from "./AgentChatInput";
+import { AskUserQuestionDock } from "./AskUserQuestionDock";
+import { deriveAskUserQuestionState } from "./ChatConversation/askUserQuestionState";
 import { ConversationTimeline } from "./ChatConversation/ConversationTimeline";
 import type { ChatDetailError } from "./ChatConversation/chatError";
 import { getLatestContextUsage } from "./ChatConversation/chatHelpers";
@@ -57,12 +59,16 @@ import {
 	useChatMessages,
 	useChatSelector,
 	type useChatStore,
+	useUndeliveredQueuedMessages,
 } from "./ChatConversation/chatStore";
 import {
 	LiveStreamTailContent,
 	TerminalStatusRow,
 } from "./ChatConversation/LiveStreamTail";
-import { deriveLiveStatus } from "./ChatConversation/liveStatusModel";
+import {
+	deriveLiveStatus,
+	showsStreamOutput,
+} from "./ChatConversation/liveStatusModel";
 import {
 	buildSubagentMaps,
 	getPendingToolCallIDs,
@@ -78,6 +84,7 @@ import {
 	ACPContext,
 	buildACPSessionDescriptors,
 } from "./ChatElements/tools/ACPContext";
+import { isAsyncAnswerPrompt } from "./ChatElements/tools/asyncAnswer";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ChatMessageScroller } from "./ChatMessageScroller";
 import { getWorkspaceOptionsWithLinkedWorkspace } from "./workspaceOptions";
@@ -126,6 +133,8 @@ type ChatPageTimelineProps = {
 	editingMessageId?: number | null;
 	onImplementPlan?: () => Promise<void> | void;
 	onSendAskUserQuestionResponse?: (message: string) => Promise<void> | void;
+	/** The viewer cannot act on this chat: it is archived, or another user's. */
+	isReadOnly: boolean;
 	urlTransform: UrlTransform;
 	mcpServers: readonly TypesGen.MCPServerConfig[];
 	footer?: React.ReactNode;
@@ -146,6 +155,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 	editingMessageId,
 	onImplementPlan,
 	onSendAskUserQuestionResponse,
+	isReadOnly,
 	urlTransform,
 	mcpServers,
 	footer,
@@ -166,6 +176,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		store,
 		selectSubagentStatusOverrides,
 	);
+	const undeliveredQueuedMessages = useUndeliveredQueuedMessages(store);
 	const isChatCompleted = !hasStream;
 
 	const liveStreamState =
@@ -190,6 +201,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		pendingToolCallIDs,
 		liveToolResults: streamState?.toolResults,
 	});
+
 	const { titles: subagentTitles, variants: subagentVariants } =
 		buildSubagentMaps(parsedMessages);
 	const acpSessions = buildACPSessionDescriptors([
@@ -197,6 +209,18 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		...streamTools,
 	]);
 	const onRenderProfiler = useOnRenderProfiler();
+
+	const askUserQuestionState = deriveAskUserQuestionState(
+		parsedMessages,
+		showsStreamOutput(liveStatus) ? streamTools : [],
+		undeliveredQueuedMessages,
+	);
+	const dockedQuestion = isReadOnly
+		? undefined
+		: askUserQuestionState.openAsyncQuestion;
+	const queuedAnswerText =
+		dockedQuestion &&
+		askUserQuestionState.responseTextByTool.get(dockedQuestion);
 
 	return (
 		<ACPContext value={acpSessions}>
@@ -234,9 +258,13 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 						isChatCompleted={isChatCompleted}
 						hasActiveStream={hasStream}
 						isAwaitingFirstStreamChunk={isAwaitingFirstStreamChunk}
+						askUserQuestionState={askUserQuestionState}
 						urlTransform={urlTransform}
 						mcpServers={mcpServers}
 						showDesktopPreviews={false}
+						dockedAskUserQuestion={
+							queuedAnswerText === undefined ? dockedQuestion : undefined
+						}
 					/>
 					<TerminalStatusRow liveStatus={liveStatus} />
 				</ChatMessageScroller>
@@ -251,6 +279,20 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 					/>
 					{footer}
 				</div>
+				{dockedQuestion && (
+					<AskUserQuestionDock
+						question={dockedQuestion}
+						queuedAnswerText={queuedAnswerText}
+						// Saving a history edit clears the queue and deletes every
+						// message after the edited one, so an answer sent meanwhile
+						// would be lost.
+						onSubmitAnswer={
+							editingMessageId == null
+								? onSendAskUserQuestionResponse
+								: undefined
+						}
+					/>
+				)}
 			</Profiler>
 		</ACPContext>
 	);
@@ -418,8 +460,11 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 	const messages = useChatMessages(store);
 	// Source the composer's prompt-history cycle from the dedicated /prompts endpoint.
 	const { data: promptsData } = useQuery(chatPromptsQuery(chatId));
+	// Sending an async answer again would answer its call again.
 	const userPromptHistory: readonly string[] =
-		promptsData?.prompts.map((prompt) => prompt.text) ?? [];
+		promptsData?.prompts
+			.map((prompt) => prompt.text)
+			.filter((text) => !isAsyncAnswerPrompt(text)) ?? [];
 
 	const rawUsage = getLatestContextUsage(
 		messages,
