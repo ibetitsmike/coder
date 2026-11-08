@@ -114,6 +114,16 @@ when a mixed migration has no override.
 `dump.sql` stays upstream's file. `make gen` still runs only upstream's
 migrations, so sqlc and the generated queries do not change.
 
+### Migrations taken early
+
+`early.txt` lists the upstream migrations that the fork took from an open
+coder/coder branch before upstream main merged them, one
+`<version> <name> <source>` per line. golang-migrate keeps one version per
+database, so a database that ran one of them skips every later upstream
+migration at or below its version. `chatdmig route` fails when upstream brings
+such a migration, and the sync stops. A person then renumbers or moves the
+migration before the sync continues.
+
 ## Add a fork migration
 
 ```sh

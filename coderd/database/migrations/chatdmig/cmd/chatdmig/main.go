@@ -1,6 +1,7 @@
 // Command chatdmig manages the fork's chatd migrations.
 //
-//	chatdmig route        route new upstream migrations; exit 3 if one is mixed
+//	chatdmig route        route new upstream migrations; exit 3 if one is mixed,
+//	                     1 if one is at or below a migration in early.txt
 //	chatdmig new <name>   create a fork node; -requires adds a parent
 //	chatdmig check        validate the graph and print its order
 package main
@@ -99,6 +100,10 @@ func route(dir string) error {
 		return err
 	}
 	classifier := chatdmig.NewClassifier(string(dump))
+	early, err := readEarly(filepath.Join(dir, "chatdmig", "early.txt"))
+	if err != nil {
+		return err
+	}
 
 	var header []string
 	var split string
@@ -145,7 +150,7 @@ func route(dir string) error {
 	}
 
 	out := header
-	var mixed []string
+	var mixed, skipped []string
 	for _, e := range entries {
 		if e.version <= splitVersion {
 			continue
@@ -158,6 +163,12 @@ func route(dir string) error {
 			}
 			led = classifier.Classify(string(sql))
 			fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
+			for _, x := range early {
+				if e.name != x.name && e.version <= x.version {
+					skipped = append(skipped, fmt.Sprintf("upstream %06d_%s is at or below %06d_%s, which the fork took early from %s: a database that ran it would skip %06d_%s",
+						e.version, e.name, x.version, x.name, x.source, e.version, e.name))
+				}
+			}
 		}
 		out = append(out, fmt.Sprintf("%06d %s %s", e.version, e.name, led))
 		if led == chatdmig.LedgerMixed {
@@ -165,6 +176,9 @@ func route(dir string) error {
 				mixed = append(mixed, e.name)
 			}
 		}
+	}
+	if len(skipped) > 0 {
+		return xerrors.Errorf("renumber or move the migration before syncing:\n%s", strings.Join(skipped, "\n"))
 	}
 	if err := os.WriteFile(routesPath, []byte(strings.Join(out, "\n")+"\n"), 0o600); err != nil {
 		return err
@@ -174,6 +188,34 @@ func route(dir string) error {
 	}
 	_, err = load(dir)
 	return err
+}
+
+type earlyMigration struct {
+	version uint64
+	name    string
+	source  string
+}
+
+// readEarly parses early.txt, the upstream migrations that the fork took
+// before upstream main merged them.
+func readEarly(path string) ([]earlyMigration, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, xerrors.Errorf("read early.txt: %w", err)
+	}
+	var early []earlyMigration
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		v, err := strconv.ParseUint(f[0], 10, 32)
+		if len(f) != 3 || len(f[0]) != 6 || err != nil {
+			return nil, xerrors.Errorf("early.txt: bad line %q", line)
+		}
+		early = append(early, earlyMigration{v, f[1], f[2]})
+	}
+	return early, nil
 }
 
 func newNode(dir string, args []string) error {

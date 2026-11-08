@@ -1,0 +1,7 @@
+# Upstream migrations that the fork took from an open coder/coder branch
+# before upstream main merged them. golang-migrate keeps one version per
+# database, so a database that ran one of them skips every later upstream
+# migration at or below its version. chatdmig route fails when upstream
+# brings such a migration. See README.md.
+#
+# <version> <name> <source>
