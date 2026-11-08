@@ -2,6 +2,7 @@
 # before upstream main merged them. golang-migrate keeps one version per
 # database, so a database that ran one of them skips every later upstream
 # migration at or below its version. chatdmig route fails when upstream
-# brings such a migration. See README.md.
+# brings a new or renumbered migration at or below an early version. Each
+# version must be above the split. See README.md.
 #
 # <version> <name> <source>

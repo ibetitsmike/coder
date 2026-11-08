@@ -108,6 +108,7 @@ func route(dir string) error {
 	var header []string
 	var split string
 	known := map[string]chatdmig.Ledger{}
+	routedAt := map[string]string{}
 	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
 		f := strings.Fields(line)
 		switch {
@@ -118,6 +119,7 @@ func route(dir string) error {
 			header = append(header, line)
 		case len(f) == 3:
 			known[f[1]] = chatdmig.Ledger(f[2])
+			routedAt[f[1]] = f[0]
 		default:
 			return xerrors.Errorf("routes.txt: bad line %q", line)
 		}
@@ -148,6 +150,11 @@ func route(dir string) error {
 	if splitVersion == 0 {
 		return xerrors.Errorf("split migration %q not found in %s", split, dir)
 	}
+	for _, x := range early {
+		if x.version <= splitVersion {
+			return xerrors.Errorf("early.txt: %06d_%s is at or below the split, which route does not check", x.version, x.name)
+		}
+	}
 
 	out := header
 	var mixed, skipped []string
@@ -163,6 +170,10 @@ func route(dir string) error {
 			}
 			led = classifier.Classify(string(sql))
 			fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
+		}
+		// A migration routed before an early entry was added may sit below it,
+		// so only new or renumbered migrations are checked.
+		if routedAt[e.name] != fmt.Sprintf("%06d", e.version) {
 			for _, x := range early {
 				if e.name != x.name && e.version <= x.version {
 					skipped = append(skipped, fmt.Sprintf("upstream %06d_%s is at or below %06d_%s, which the fork took early from %s: a database that ran it would skip %06d_%s",

@@ -65,6 +65,28 @@ func TestRouteEarly(t *testing.T) {
 		require.Equal(t, routes, string(got))
 	})
 
+	t.Run("RoutedMigrationRenumberedBelowEarlyFails", func(t *testing.T) {
+		t.Parallel()
+		routes := routesHeader + "000641 after core\n000642 chat_queued_message_busy_behavior chatd\n"
+		dir := writeMigrations(t, routes, map[string]string{
+			"000640_after.up.sql":                             "ALTER TABLE users ADD COLUMN y int;\n",
+			"000642_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text;\n",
+		})
+
+		require.ErrorContains(t, route(dir), "000640_after")
+		got, err := os.ReadFile(filepath.Join(dir, "chatdmig", "routes.txt"))
+		require.NoError(t, err)
+		require.Equal(t, routes, string(got))
+	})
+
+	t.Run("EarlyAtOrBelowSplitFails", func(t *testing.T) {
+		t.Parallel()
+		dir := writeMigrations(t, routesHeader, nil)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000639 chat_x coder/coder#1\n"), 0o600))
+
+		require.ErrorContains(t, route(dir), "000639_chat_x is at or below the split")
+	})
+
 	t.Run("EarlyMigrationRoutes", func(t *testing.T) {
 		t.Parallel()
 		dir := writeMigrations(t, routesHeader, map[string]string{

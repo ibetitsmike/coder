@@ -121,8 +121,11 @@ coder/coder branch before upstream main merged them, one
 `<version> <name> <source>` per line. golang-migrate keeps one version per
 database, so a database that ran one of them skips every later upstream
 migration at or below its version. `chatdmig route` fails when upstream brings
-such a migration, and the sync stops. A person then renumbers or moves the
-migration before the sync continues.
+a new or renumbered migration at or below an early version, and the sync stops.
+A person then renumbers or moves the migration before the sync continues.
+Migrations that were routed before the early entry was added are not checked.
+An early version must be above the split, because route ignores the
+migrations at or below it.
 
 ## Add a fork migration
 
