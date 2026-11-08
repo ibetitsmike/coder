@@ -67,7 +67,7 @@ func check(dir string) error {
 	if _, err := loadEarly(dir, uint64(g.SplitVersion)); err != nil {
 		return err
 	}
-	fmt.Printf("split %06d_%s, %d routes, %d nodes\n", g.SplitVersion, g.SplitName, len(g.Routes), len(g.Nodes))
+	_, _ = fmt.Printf("split %06d_%s, %d routes, %d nodes\n", g.SplitVersion, g.SplitName, len(g.Routes), len(g.Nodes))
 	for _, n := range g.Nodes {
 		var flags []string
 		if n.Phase == chatdmig.PhaseBackground {
@@ -80,9 +80,9 @@ func check(dir string) error {
 			flags = append(flags, "repeat")
 		}
 		if len(flags) > 0 {
-			fmt.Printf("  %s  %s  (%s)\n", n.ID, n.Name, strings.Join(flags, ", "))
+			_, _ = fmt.Printf("  %s  %s  (%s)\n", n.ID, n.Name, strings.Join(flags, ", "))
 		} else {
-			fmt.Printf("  %s  %s\n", n.ID, n.Name)
+			_, _ = fmt.Printf("  %s  %s\n", n.ID, n.Name)
 		}
 	}
 	return nil
@@ -175,7 +175,7 @@ func route(dir string) error {
 				return err
 			}
 			led = classifier.Classify(string(sql))
-			fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
+			_, _ = fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
 		}
 		// A migration routed before an early entry was added may sit below it,
 		// so only new or renumbered migrations are checked. Databases that ran
@@ -271,11 +271,11 @@ func newNode(dir string, args []string) error {
 	for _, r := range requires {
 		_, _ = fmt.Fprintf(&b, "-- requires: %s\n", r)
 	}
-	b.WriteString("\n")
+	_, _ = b.WriteString("\n")
 	path := filepath.Join(dir, "chatdmig", "nodes", fmt.Sprintf("%s_%s.up.sql", id, name))
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
-	fmt.Println(path)
+	_, _ = fmt.Println(path)
 	return nil
 }

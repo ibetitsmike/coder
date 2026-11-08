@@ -145,6 +145,7 @@ var chatdQualifier = regexp.MustCompile(`(\W)chatd\.([a-z_"])`)
 
 // dumpBlocks splits a schema dump into blocks. With stripChatd, it removes
 // the chatd schema name, the schema and the ledger.
+//nolint:revive // stripChatd is a control flag, and that is OK in a test helper.
 func dumpBlocks(t *testing.T, dsn string, stripChatd bool) map[string]int {
 	t.Helper()
 	dump, err := dbtestutil.PGDumpSchemaOnly(dsn)
@@ -246,9 +247,9 @@ func earlySplitGraph(t *testing.T, split uint) *chatdmig.Graph {
 		case v == split:
 			splitName = name
 		case v > split:
-			sql, err := os.ReadFile("../" + f)
+			up, err := os.ReadFile("../" + f)
 			require.NoError(t, err)
-			_, _ = fmt.Fprintf(&routes, "%06d %s %s\n", v, name, classifier.Classify(string(sql)))
+			_, _ = fmt.Fprintf(&routes, "%06d %s %s\n", v, name, classifier.Classify(string(up)))
 		}
 	}
 	require.NotEmpty(t, splitName)

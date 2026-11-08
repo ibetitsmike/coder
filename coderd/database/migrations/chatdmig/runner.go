@@ -221,7 +221,7 @@ type execer interface {
 func (*Runner) record(ctx context.Context, e execer, n *Node) error {
 	var version sql.NullInt64
 	if n.Source == SourceUpstream {
-		version = sql.NullInt64{Int64: int64(n.UpstreamVersion), Valid: true}
+		version = sql.NullInt64{Int64: int64(n.UpstreamVersion), Valid: true} //nolint:gosec // G115: upstream versions are six-digit migration numbers.
 	}
 	if _, err := e.ExecContext(ctx,
 		`INSERT INTO chatd.migration_nodes (id, name, source, upstream_version, checksum) VALUES ($1, $2, $3, $4, $5)`,
