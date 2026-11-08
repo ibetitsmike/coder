@@ -46,6 +46,12 @@ jobs:
             gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?status=$status&per_page=100" \
               --jq ".workflow_runs[] | select($UPSTREAM) | .id"
           done | sort -u | while read -r id; do
-            # A run can finish between the list and the cancel.
-            gh run cancel -R "$GITHUB_REPOSITORY" "$id" || echo "::warning::Could not cancel run $id."
+            # A plain cancel still runs always() steps and does not stop a run
+            # whose runner is gone. A run can finish between the list and the
+            # cancel.
+            if gh api --silent -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/force-cancel"; then
+              echo "Cancelled run $id."
+            else
+              echo "::warning::Could not cancel run $id."
+            fi
           done
