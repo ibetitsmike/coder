@@ -198,8 +198,7 @@ The package does not exist yet. Create it with the first fork query.
 
 `.github/workflows/fork-sync.yaml` runs at 05:00 UTC and on demand:
 
-1. It disables every workflow that is not `fork-*`. Upstream's workflows
-   deploy, release or fail in the fork.
+1. It runs `fork-quiet`. See [Upstream workflows](#upstream-workflows).
 2. It stops if a sync PR is open. It labels a red one `needs-mike`.
 3. It merges the newest upstream `main` commit that is at least 24 hours old.
    Upstream fixes a duplicate migration number within hours.
@@ -219,6 +218,18 @@ The job pushes with the `FORK_SYNC_TOKEN` secret, a fine-grained token for
 this repository with Contents, Pull requests, Issues and Workflows write
 access. `GITHUB_TOKEN` cannot push upstream's workflow changes, and a PR that
 it opens starts no workflows.
+
+## Upstream workflows
+
+Upstream's workflows deploy, release or fail in the fork, so only `fork-*`
+workflows stay on. GitHub registers a workflow, active, on the first event
+that matches it, and an unregistered workflow cannot be disabled in advance.
+`.github/workflows/fork-quiet.yaml` disables every active workflow that is not
+`fork-*` and cancels its unfinished runs. It runs hourly, on pushes, branch and
+tag creation, PRs from this repository, issues, comments and releases, and
+before every sync. A new upstream workflow can still finish one short run
+before it is cancelled, and one that a PR from another repository or a
+schedule registers stays active until the next hourly pass.
 
 ## CI
 

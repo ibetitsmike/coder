@@ -8,8 +8,7 @@ on:
     - cron: "0 5 * * *"
   workflow_dispatch: {}
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: fork-sync
@@ -18,26 +17,16 @@ jobs:
   # A sync can add upstream workflows. They would deploy, release or fail in
   # the fork, so only fork-* workflows stay on.
   quiet-upstream-workflows:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
     permissions:
       actions: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Disable upstream workflows
-        run: |
-          set -euo pipefail
-          gh workflow list -R "$GITHUB_REPOSITORY" --all --limit 500 --json id,path,state \
-            --jq '.[] | select(.state == "active" and (.path | startswith(".github/workflows/")) and (.path | test("/fork-[^/]*$") | not)) | .id' |
-            while read -r id; do
-              gh workflow disable -R "$GITHUB_REPOSITORY" "$id"
-            done
+    uses: ./.github/workflows/fork-quiet.yaml
 
   sync:
     needs: quiet-upstream-workflows
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     env:
       # GITHUB_TOKEN cannot push upstream's workflow changes, and a PR that
       # it opens starts no workflows, so fork-ci would never run.
