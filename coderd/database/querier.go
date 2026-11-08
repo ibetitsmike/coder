@@ -32,10 +32,6 @@ type sqlcQuerier interface {
 	// See: https://www.postgresql.org/docs/9.5/sql-select.html#SQL-FOR-UPDATE-SHARE
 	//
 	AcquireNotificationMessages(ctx context.Context, arg AcquireNotificationMessagesParams) ([]AcquireNotificationMessagesRow, error)
-	// Leases enabled plugins to a replica. A replica renews its own leases on
-	// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
-	// concurrent replicas from blocking on, or double leasing, the same rows.
-	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	// Acquires the lock for a single job that isn't started, completed,
 	// canceled, and that matches an array of provisioner types.
 	//
@@ -107,7 +103,6 @@ type sqlcQuerier interface {
 	// Drops the values of every live row of the workspace, keeping the rows as
 	// history. Used when the workspace is deleted.
 	ClearWorkspaceSecretsByWorkspaceID(ctx context.Context, workspaceID uuid.UUID) error
-	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountAIBridgeSessions(ctx context.Context, arg CountAIBridgeSessionsParams) (int64, error)
 	CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error)
 	// Excluding the candidate keeps ownership takeover capacity-neutral.
@@ -187,7 +182,6 @@ type sqlcQuerier interface {
 	DeleteCryptoKey(ctx context.Context, arg DeleteCryptoKeyParams) (CryptoKey, error)
 	DeleteCustomRole(ctx context.Context, arg DeleteCustomRoleParams) error
 	DeleteExpiredAPIKeys(ctx context.Context, arg DeleteExpiredAPIKeysParams) (int64, error)
-	DeleteExpiredPluginLinkCodes(ctx context.Context) error
 	DeleteExternalAuthLink(ctx context.Context, arg DeleteExternalAuthLinkParams) error
 	DeleteGroupAIBudget(ctx context.Context, groupID uuid.UUID) (GroupAIBudget, error)
 	DeleteGroupByID(ctx context.Context, id uuid.UUID) error
@@ -257,9 +251,6 @@ type sqlcQuerier interface {
 	DeleteOrganizationMember(ctx context.Context, arg DeleteOrganizationMemberParams) error
 	DeleteOrganizationMemberDisabledSkill(ctx context.Context, arg DeleteOrganizationMemberDisabledSkillParams) error
 	DeleteOrganizationSkillByOrganizationIDAndName(ctx context.Context, arg DeleteOrganizationSkillByOrganizationIDAndNameParams) (Skill, error)
-	DeletePluginByID(ctx context.Context, id uuid.UUID) error
-	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
-	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
 	DeleteProjectSkillByProjectIDAndName(ctx context.Context, arg DeleteProjectSkillByProjectIDAndNameParams) (Skill, error)
 	DeleteProvisionerKey(ctx context.Context, id uuid.UUID) error
 	DeleteReplicasUpdatedBefore(ctx context.Context, updatedAt time.Time) error
@@ -299,11 +290,6 @@ type sqlcQuerier interface {
 	// of the test-only in-memory database. Do not use this in new code.
 	DisableForeignKeysAndTriggers(ctx context.Context) error
 	EnqueueNotificationMessage(ctx context.Context, arg EnqueueNotificationMessageParams) error
-	// Binds every top-level, unarchived chat of a linked user in the plugin's
-	// organization. Chats created after the link start at cursor 0 so their whole
-	// history is delivered. Older chats start at their newest message so linking
-	// does not replay history.
-	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
 	// Firstly, collect api_keys owned by the prebuilds user that correlate
 	// to workspaces no longer owned by the prebuilds user.
 	// Next, collect api_keys that belong to the prebuilds user but have no token name.
@@ -837,16 +823,6 @@ type sqlcQuerier interface {
 	// TODO(AIGOV-527): unify effective group resolution in a single place.
 	GetOverBudgetUsersPerGroup(ctx context.Context, periodStart time.Time) ([]GetOverBudgetUsersPerGroupRow, error)
 	GetParameterSchemasByJobID(ctx context.Context, jobID uuid.UUID) ([]ParameterSchema, error)
-	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
-	// A binding is due when its chat is idle and has undelivered user-visible
-	// assistant messages or a status that was not delivered yet.
-	GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error)
-	GetPluginChatMessagesAfter(ctx context.Context, arg GetPluginChatMessagesAfterParams) ([]ChatMessage, error)
-	GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error)
-	GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error)
-	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
-	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
-	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetPrebuildMetrics(ctx context.Context) ([]GetPrebuildMetricsRow, error)
 	GetPrebuildsSettings(ctx context.Context) (string, error)
 	GetPresetByID(ctx context.Context, presetID uuid.UUID) (GetPresetByIDRow, error)
@@ -1318,8 +1294,6 @@ type sqlcQuerier interface {
 	// Stores nothing unless the skill belongs to the organization.
 	InsertOrganizationMemberDisabledSkill(ctx context.Context, arg InsertOrganizationMemberDisabledSkillParams) error
 	InsertOrganizationSkill(ctx context.Context, arg InsertOrganizationSkillParams) (Skill, error)
-	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
-	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertPreset(ctx context.Context, arg InsertPresetParams) (TemplateVersionPreset, error)
 	InsertPresetParameters(ctx context.Context, arg InsertPresetParametersParams) ([]TemplateVersionPresetParameter, error)
 	InsertPresetPrebuildSchedule(ctx context.Context, arg InsertPresetPrebuildScheduleParams) (TemplateVersionPresetPrebuildSchedule, error)
@@ -1523,7 +1497,6 @@ type sqlcQuerier interface {
 	ReindexStaleChatMessagesSearchTsv(ctx context.Context, batchSize int32) (int64, error)
 	// The lease is only removed if it is the current lease.
 	ReleaseExternalAuthLinkRefreshLease(ctx context.Context, arg ReleaseExternalAuthLinkRefreshLeaseParams) error
-	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	RemoveUserFromGroups(ctx context.Context, arg RemoveUserFromGroupsParams) ([]uuid.UUID, error)
 	// Renews (chat_id, runner_id) leases that are still fresh and still own
 	// their chat, and returns the renewed pairs. A stale lease is never
@@ -1550,8 +1523,6 @@ type sqlcQuerier interface {
 	// refresh endpoint. Does not bump updated_at: context pinning is
 	// background state and must not reorder chat lists.
 	SetChatContextSnapshot(ctx context.Context, arg SetChatContextSnapshotParams) error
-	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
-	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
 	// Bounds how long later lock waits in the current transaction may block.
 	// A wait longer than lock_timeout_ms fails with lock_not_available
 	// instead of blocking. The setting reverts when the transaction ends.
@@ -1728,11 +1699,6 @@ type sqlcQuerier interface {
 	UpdateOrganizationSkillACLByID(ctx context.Context, arg UpdateOrganizationSkillACLByIDParams) (Skill, error)
 	UpdateOrganizationSkillByOrganizationIDAndName(ctx context.Context, arg UpdateOrganizationSkillByOrganizationIDAndNameParams) (Skill, error)
 	UpdateOrganizationWorkspaceSharingSettings(ctx context.Context, arg UpdateOrganizationWorkspaceSharingSettingsParams) (Organization, error)
-	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
-	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
-	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
-	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
-	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
 	// Cancels all pending provisioner jobs for prebuilt workspaces on a specific preset from an
 	// inactive template version.
 	// This is an optimization to clean up stale pending jobs.
@@ -1900,9 +1866,6 @@ type sqlcQuerier interface {
 	// are left untouched, and a new live row is inserted beside them.
 	UpsertOrganizationAIProviderModelConfig(ctx context.Context, arg UpsertOrganizationAIProviderModelConfigParams) error
 	UpsertOrganizationMemberSkillSettings(ctx context.Context, arg UpsertOrganizationMemberSkillSettingsParams) error
-	// Relinking an external identity to another user clears the active chat so
-	// replies never reach a chat the new user does not own.
-	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)
 	UpsertPrebuildsSettings(ctx context.Context, value string) error
 	UpsertProvisionerDaemon(ctx context.Context, arg UpsertProvisionerDaemonParams) (ProvisionerDaemon, error)
 	UpsertRuntimeConfig(ctx context.Context, arg UpsertRuntimeConfigParams) error

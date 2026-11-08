@@ -612,12 +612,6 @@ const (
 	ApiKeyScopeWorkspaceSecretRead                 APIKeyScope = "workspace_secret:read"
 	ApiKeyScopeWorkspaceSecretReadSecret           APIKeyScope = "workspace_secret:read_secret"
 	ApiKeyScopeWorkspaceSecretUpdate               APIKeyScope = "workspace_secret:update"
-	ApiKeyScopePlugin                              APIKeyScope = "plugin:*"
-	ApiKeyScopePluginCreate                        APIKeyScope = "plugin:create"
-	ApiKeyScopePluginRead                          APIKeyScope = "plugin:read"
-	ApiKeyScopePluginUpdate                        APIKeyScope = "plugin:update"
-	ApiKeyScopePluginDelete                        APIKeyScope = "plugin:delete"
-	ApiKeyScopeCoderChatsconverse                  APIKeyScope = "coder:chats.converse"
 )
 
 func (e *APIKeyScope) Scan(src interface{}) error {
@@ -920,13 +914,7 @@ func (e APIKeyScope) Valid() bool {
 		ApiKeyScopeWorkspaceSecretCreate,
 		ApiKeyScopeWorkspaceSecretRead,
 		ApiKeyScopeWorkspaceSecretReadSecret,
-		ApiKeyScopeWorkspaceSecretUpdate,
-		ApiKeyScopePlugin,
-		ApiKeyScopePluginCreate,
-		ApiKeyScopePluginRead,
-		ApiKeyScopePluginUpdate,
-		ApiKeyScopePluginDelete,
-		ApiKeyScopeCoderChatsconverse:
+		ApiKeyScopeWorkspaceSecretUpdate:
 		return true
 	}
 	return false
@@ -1198,12 +1186,6 @@ func AllAPIKeyScopeValues() []APIKeyScope {
 		ApiKeyScopeWorkspaceSecretRead,
 		ApiKeyScopeWorkspaceSecretReadSecret,
 		ApiKeyScopeWorkspaceSecretUpdate,
-		ApiKeyScopePlugin,
-		ApiKeyScopePluginCreate,
-		ApiKeyScopePluginRead,
-		ApiKeyScopePluginUpdate,
-		ApiKeyScopePluginDelete,
-		ApiKeyScopeCoderChatsconverse,
 	}
 }
 
@@ -6199,59 +6181,6 @@ type ParameterValue struct {
 	SourceScheme      ParameterSourceScheme      `db:"source_scheme" json:"source_scheme"`
 	SourceValue       string                     `db:"source_value" json:"source_value"`
 	DestinationScheme ParameterDestinationScheme `db:"destination_scheme" json:"destination_scheme"`
-}
-
-type Plugin struct {
-	ID             uuid.UUID `db:"id" json:"id"`
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	Name           string    `db:"name" json:"name"`
-	Version        string    `db:"version" json:"version"`
-	FileID         uuid.UUID `db:"file_id" json:"file_id"`
-	// Capabilities the plugin module requests.
-	Manifest json.RawMessage `db:"manifest" json:"manifest"`
-	// Capabilities the owner granted to the plugin.
-	Grants json.RawMessage `db:"grants" json:"grants"`
-	// JSON object of string to string. Encrypted by dbcrypt when config_key_id is set.
-	Config      string         `db:"config" json:"config"`
-	ConfigKeyID sql.NullString `db:"config_key_id" json:"config_key_id"`
-	Enabled     bool           `db:"enabled" json:"enabled"`
-	// Replica that holds the lease to run the plugin.
-	RunnerID       uuid.NullUUID `db:"runner_id" json:"runner_id"`
-	LeaseExpiresAt sql.NullTime  `db:"lease_expires_at" json:"lease_expires_at"`
-	LastError      string        `db:"last_error" json:"last_error"`
-	CreatedBy      uuid.UUID     `db:"created_by" json:"created_by"`
-	CreatedAt      time.Time     `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time     `db:"updated_at" json:"updated_at"`
-}
-
-type PluginChatBinding struct {
-	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
-	ChatID   uuid.UUID `db:"chat_id" json:"chat_id"`
-	// Highest chat_messages.id delivered to the external service.
-	SentMessageID int64 `db:"sent_message_id" json:"sent_message_id"`
-	// Chat status last delivered to the external service.
-	SentStatus    NullChatStatus `db:"sent_status" json:"sent_status"`
-	Attempts      int32          `db:"attempts" json:"attempts"`
-	NextAttemptAt time.Time      `db:"next_attempt_at" json:"next_attempt_at"`
-}
-
-type PluginLinkCode struct {
-	// SHA-256 of the link code.
-	CodeHash  []byte    `db:"code_hash" json:"code_hash"`
-	PluginID  uuid.UUID `db:"plugin_id" json:"plugin_id"`
-	UserID    uuid.UUID `db:"user_id" json:"user_id"`
-	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-}
-
-type PluginUserLink struct {
-	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
-	// Identity of the user on the external service, for example a phone number.
-	ExternalID string    `db:"external_id" json:"external_id"`
-	UserID     uuid.UUID `db:"user_id" json:"user_id"`
-	// Chat that last spoke to the external identity. Replies go to this chat.
-	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
-	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }
 
 type ProvisionerDaemon struct {

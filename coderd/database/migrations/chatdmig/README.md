@@ -27,10 +27,19 @@ from `public` to `chatd`:
 `SET SCHEMA` changes the catalog only. No row is copied, so the move takes
 seconds on a large database.
 
-Fork nodes add:
+Fork nodes add these objects:
 
-- [`nodes/<id>_chat_subagents.up.sql`](nodes/), the table `chat_subagents`
-  (one row per subagent chat the fork tracks).
+- [`nodes/01a1bc7b-…_plugins.up.sql`](nodes/), for chat plugins
+  (`coderd/x/plugins`): the tables `plugins`, `plugin_user_links`,
+  `plugin_link_codes` and `plugin_chat_bindings` in chatd, and the values
+  `plugin:*`, `plugin:{create,read,update,delete}` and `coder:chats.converse`
+  of the core enum `public.api_key_scope`.
+- [`nodes/01a1bd31-…_chat_subagents.up.sql`](nodes/), the table
+  `chat_subagents` (one row per subagent chat the fork tracks).
+
+A fork node may create objects in chatd and add values to an enum, and
+nothing else, so upstream's `dump.sql` still describes every core object.
+`TestForkNodesOnlyAddToChatd` checks this.
 
 ## Every connection needs chatd on its search path
 
@@ -227,16 +236,21 @@ queries:
   `TestForkQuerier` in `dbauthz/fork_forkdb_test.go` asserts the checks and
   fails for a fork query that has no case.
 - `dbmetrics` measures each fork query in `dbmetrics/fork_forkdb.go`.
-- `dbcrypt` passes fork queries through in
-  `enterprise/dbcrypt/fork_forkdb.go`. Add overrides when a fork table holds
-  a secret.
+- `dbcrypt` encrypts fork secrets in `enterprise/dbcrypt/fork_forkdb.go`.
 
 Each wrapper implements `forkdb.Wrapper`. `From` fails for a store that
 wraps another without it, so a new wrapper cannot skip a fork query by
 accident. The dbauthz and dbmetrics wrappers do not embed `forkdb.Store`, so
-a new fork query does not compile until both handle it.
-`forkdb.InTx(db, func(tx, ftx))` runs upstream and fork queries in one
-transaction.
+a new fork query does not compile until both handle it. The dbcrypt wrapper
+embeds it, like upstream's, and overrides only the queries that read or
+write a secret. `forkdb.InTx(db, func(tx, ftx))`
+runs upstream and fork queries in one transaction.
+
+Upstream's generated `database.APIKeyScope.Valid` does not know the scopes
+that fork nodes add. `forkdb.APIKeyScopeValues` lists them, and
+`forkdb.ValidAPIKeyScope` accepts both sets, so `apikey.Generate` uses it.
+`scripts/check-scopes` reads the `ALTER TYPE api_key_scope ADD VALUE` lines
+of the fork nodes next to `dump.sql`.
 
 ## Upstream sync
 
@@ -288,9 +302,9 @@ schedule registers stays active until the next hourly pass.
 
 | Job          | Checks                                                                                                   |
 |--------------|----------------------------------------------------------------------------------------------------------|
-| `graph`      | `chatdmig check` and the unit tests of this package.                                                     |
-| `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version) or from the split equals a fresh database. Lock timeouts, retries and the node options work on a real database. |
-| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, and the chat, skill and MCP tests of `./coderd` and `./enterprise/coderd`. |
+| `graph`      | `chatdmig check`, the unit tests of this package and `scripts/check-scopes`.                             |
+| `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version), from the split, or from a database without one fork node equals a fresh database. Fork nodes only add chatd objects and enum values. Lock timeouts, retries and the node options work on a real database. |
+| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP and plugin tests of `./coderd` and `./enterprise/coderd`, and `TestExpPlugins` of `./cli`. |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
 | `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
 

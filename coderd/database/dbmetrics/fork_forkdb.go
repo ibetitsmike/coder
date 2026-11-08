@@ -52,7 +52,132 @@ func (f forkQueryMetricsStore) observe(ctx context.Context, query string, start 
 	f.m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), query).Inc()
 }
 
+func (f forkQueryMetricsStore) AcquirePluginLeases(ctx context.Context, arg forkdb.AcquirePluginLeasesParams) ([]forkdb.Plugin, error) {
+	defer f.observe(ctx, "AcquirePluginLeases", time.Now())
+	return f.s.AcquirePluginLeases(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
+	defer f.observe(ctx, "ConsumePluginLinkCode", time.Now())
+	return f.s.ConsumePluginLinkCode(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
+	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
+	return f.s.DeleteExpiredPluginLinkCodes(ctx)
+}
+
+func (f forkQueryMetricsStore) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
+	defer f.observe(ctx, "DeletePluginByID", time.Now())
+	return f.s.DeletePluginByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) DeletePluginLinkCodesByUser(ctx context.Context, arg forkdb.DeletePluginLinkCodesByUserParams) error {
+	defer f.observe(ctx, "DeletePluginLinkCodesByUser", time.Now())
+	return f.s.DeletePluginLinkCodesByUser(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
+	defer f.observe(ctx, "DeletePluginUserLink", time.Now())
+	return f.s.DeletePluginUserLink(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
+	defer f.observe(ctx, "EnsurePluginChatBindings", time.Now())
+	return f.s.EnsurePluginChatBindings(ctx, pluginID)
+}
+
 func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "GetChatSubagentByChatID", time.Now())
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
+	defer f.observe(ctx, "GetPluginByID", time.Now())
+	return f.s.GetPluginByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetPluginChatBindingsDue(ctx context.Context, arg forkdb.GetPluginChatBindingsDueParams) ([]forkdb.GetPluginChatBindingsDueRow, error) {
+	defer f.observe(ctx, "GetPluginChatBindingsDue", time.Now())
+	return f.s.GetPluginChatBindingsDue(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
+	defer f.observe(ctx, "GetPluginUserLink", time.Now())
+	return f.s.GetPluginUserLink(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetPluginUserLinksByPluginAndUser(ctx context.Context, arg forkdb.GetPluginUserLinksByPluginAndUserParams) ([]forkdb.PluginUserLink, error) {
+	defer f.observe(ctx, "GetPluginUserLinksByPluginAndUser", time.Now())
+	return f.s.GetPluginUserLinksByPluginAndUser(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]forkdb.PluginUserLink, error) {
+	defer f.observe(ctx, "GetPluginUserLinksByPluginID", time.Now())
+	return f.s.GetPluginUserLinksByPluginID(ctx, pluginID)
+}
+
+func (f forkQueryMetricsStore) GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.PluginUserLink, error) {
+	defer f.observe(ctx, "GetPluginUserLinksByUserID", time.Now())
+	return f.s.GetPluginUserLinksByUserID(ctx, userID)
+}
+
+func (f forkQueryMetricsStore) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.Plugin, error) {
+	defer f.observe(ctx, "GetPluginsByOrganizationID", time.Now())
+	return f.s.GetPluginsByOrganizationID(ctx, organizationID)
+}
+
+func (f forkQueryMetricsStore) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
+	defer f.observe(ctx, "InsertPlugin", time.Now())
+	return f.s.InsertPlugin(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertPluginLinkCode(ctx context.Context, arg forkdb.InsertPluginLinkCodeParams) error {
+	defer f.observe(ctx, "InsertPluginLinkCode", time.Now())
+	return f.s.InsertPluginLinkCode(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
+	defer f.observe(ctx, "ReleasePluginLeases", time.Now())
+	return f.s.ReleasePluginLeases(ctx, runnerID)
+}
+
+func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, arg forkdb.SetPluginUserLinkActiveChatParams) error {
+	defer f.observe(ctx, "SetPluginUserLinkActiveChat", time.Now())
+	return f.s.SetPluginUserLinkActiveChat(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
+	defer f.observe(ctx, "SetPluginUserLinksActiveChatByUser", time.Now())
+	return f.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginChatBindingDelivered(ctx context.Context, arg forkdb.UpdatePluginChatBindingDeliveredParams) error {
+	defer f.observe(ctx, "UpdatePluginChatBindingDelivered", time.Now())
+	return f.s.UpdatePluginChatBindingDelivered(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginChatBindingFailed(ctx context.Context, arg forkdb.UpdatePluginChatBindingFailedParams) error {
+	defer f.observe(ctx, "UpdatePluginChatBindingFailed", time.Now())
+	return f.s.UpdatePluginChatBindingFailed(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginConfig(ctx context.Context, arg forkdb.UpdatePluginConfigParams) (forkdb.Plugin, error) {
+	defer f.observe(ctx, "UpdatePluginConfig", time.Now())
+	return f.s.UpdatePluginConfig(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg forkdb.UpdatePluginEnabledParams) (forkdb.Plugin, error) {
+	defer f.observe(ctx, "UpdatePluginEnabled", time.Now())
+	return f.s.UpdatePluginEnabled(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
+	defer f.observe(ctx, "UpdatePluginLastError", time.Now())
+	return f.s.UpdatePluginLastError(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {
+	defer f.observe(ctx, "UpsertPluginUserLink", time.Now())
+	return f.s.UpsertPluginUserLink(ctx, arg)
 }

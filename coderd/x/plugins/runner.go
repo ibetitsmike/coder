@@ -13,8 +13,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"cdr.dev/slog/v3"
-	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/codersdk"
@@ -39,7 +39,7 @@ type WebhookResponse struct {
 // runner runs one plugin in one plugin-host process.
 type runner struct {
 	m        *Manager
-	plugin   database.Plugin
+	plugin   forkdb.Plugin
 	manifest codersdk.PluginManifest
 	grants   codersdk.PluginGrants
 	config   map[string]string
@@ -67,7 +67,7 @@ type runner struct {
 	subs   map[uuid.UUID]func()
 }
 
-func (m *Manager) startRunner(p database.Plugin, prev *runner) *runner {
+func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
 	ctx, cancel := context.WithCancel(m.ctx)
 	r := &runner{
 		m:           m,
@@ -130,7 +130,7 @@ func (r *runner) setLastError(msg string) {
 	// The run context can be done; the error must still be stored.
 	ctx, cancel := context.WithTimeout(sys(context.Background()), 5*time.Second)
 	defer cancel()
-	err := r.m.db.UpdatePluginLastError(ctx, database.UpdatePluginLastErrorParams{ID: r.plugin.ID, LastError: msg})
+	err := r.m.fdb.UpdatePluginLastError(ctx, forkdb.UpdatePluginLastErrorParams{ID: r.plugin.ID, LastError: msg})
 	if err != nil {
 		r.logger.Warn(ctx, "store plugin error", slog.Error(err))
 	}
@@ -268,7 +268,7 @@ func (r *runner) wakeDelivery() {
 }
 
 func (r *runner) syncSubscriptions(ctx context.Context) {
-	links, err := r.m.db.GetPluginUserLinksByPluginID(sys(ctx), r.plugin.ID)
+	links, err := r.m.fdb.GetPluginUserLinksByPluginID(sys(ctx), r.plugin.ID)
 	if err != nil {
 		r.logger.Warn(ctx, "list plugin links", slog.Error(err))
 		return

@@ -312,13 +312,7 @@ CREATE TYPE api_key_scope AS ENUM (
     'workspace_secret:create',
     'workspace_secret:read',
     'workspace_secret:read_secret',
-    'workspace_secret:update',
-    'plugin:*',
-    'plugin:create',
-    'plugin:read',
-    'plugin:update',
-    'plugin:delete',
-    'coder:chats.converse'
+    'workspace_secret:update'
 );
 
 CREATE TYPE app_sharing_level AS ENUM (
@@ -3197,68 +3191,6 @@ CREATE TABLE parameter_values (
     destination_scheme parameter_destination_scheme NOT NULL
 );
 
-CREATE TABLE plugin_chat_bindings (
-    plugin_id uuid NOT NULL,
-    chat_id uuid NOT NULL,
-    sent_message_id bigint NOT NULL,
-    sent_status chat_status,
-    attempts integer DEFAULT 0 NOT NULL,
-    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON COLUMN plugin_chat_bindings.sent_message_id IS 'Highest chat_messages.id delivered to the external service.';
-
-COMMENT ON COLUMN plugin_chat_bindings.sent_status IS 'Chat status last delivered to the external service.';
-
-CREATE TABLE plugin_link_codes (
-    code_hash bytea NOT NULL,
-    plugin_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON COLUMN plugin_link_codes.code_hash IS 'SHA-256 of the link code.';
-
-CREATE TABLE plugin_user_links (
-    plugin_id uuid NOT NULL,
-    external_id text NOT NULL,
-    user_id uuid NOT NULL,
-    active_chat_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON COLUMN plugin_user_links.external_id IS 'Identity of the user on the external service, for example a phone number.';
-
-COMMENT ON COLUMN plugin_user_links.active_chat_id IS 'Chat that last spoke to the external identity. Replies go to this chat.';
-
-CREATE TABLE plugins (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    organization_id uuid NOT NULL,
-    name text NOT NULL,
-    version text DEFAULT ''::text NOT NULL,
-    file_id uuid NOT NULL,
-    manifest jsonb NOT NULL,
-    grants jsonb NOT NULL,
-    config text DEFAULT ''::text NOT NULL,
-    config_key_id text,
-    enabled boolean DEFAULT true NOT NULL,
-    runner_id uuid,
-    lease_expires_at timestamp with time zone,
-    last_error text DEFAULT ''::text NOT NULL,
-    created_by uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON COLUMN plugins.manifest IS 'Capabilities the plugin module requests.';
-
-COMMENT ON COLUMN plugins.grants IS 'Capabilities the owner granted to the plugin.';
-
-COMMENT ON COLUMN plugins.config IS 'JSON object of string to string. Encrypted by dbcrypt when config_key_id is set.';
-
-COMMENT ON COLUMN plugins.runner_id IS 'Replica that holds the lease to run the plugin.';
-
 CREATE TABLE provisioner_daemons (
     id uuid NOT NULL,
     created_at timestamp with time zone NOT NULL,
@@ -4918,21 +4850,6 @@ ALTER TABLE ONLY parameter_values
 ALTER TABLE ONLY parameter_values
     ADD CONSTRAINT parameter_values_scope_id_name_key UNIQUE (scope_id, name);
 
-ALTER TABLE ONLY plugin_chat_bindings
-    ADD CONSTRAINT plugin_chat_bindings_pkey PRIMARY KEY (plugin_id, chat_id);
-
-ALTER TABLE ONLY plugin_link_codes
-    ADD CONSTRAINT plugin_link_codes_pkey PRIMARY KEY (code_hash);
-
-ALTER TABLE ONLY plugin_user_links
-    ADD CONSTRAINT plugin_user_links_pkey PRIMARY KEY (plugin_id, external_id);
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_organization_id_name_key UNIQUE (organization_id, name);
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_pkey PRIMARY KEY (id);
-
 ALTER TABLE ONLY provisioner_daemons
     ADD CONSTRAINT provisioner_daemons_pkey PRIMARY KEY (id);
 
@@ -5408,8 +5325,6 @@ CREATE INDEX idx_workspace_builds_initiator_id ON workspace_builds USING btree (
 CREATE UNIQUE INDEX notification_messages_dedupe_hash_idx ON notification_messages USING btree (dedupe_hash);
 
 CREATE UNIQUE INDEX organizations_single_default_org ON organizations USING btree (is_default) WHERE (is_default = true);
-
-CREATE INDEX plugin_user_links_user_id_idx ON plugin_user_links USING btree (user_id);
 
 CREATE INDEX provisioner_job_logs_id_job_id_idx ON provisioner_job_logs USING btree (job_id, id);
 
@@ -5918,39 +5833,6 @@ ALTER TABLE ONLY organization_members
 
 ALTER TABLE ONLY parameter_schemas
     ADD CONSTRAINT parameter_schemas_job_id_fkey FOREIGN KEY (job_id) REFERENCES provisioner_jobs(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_chat_bindings
-    ADD CONSTRAINT plugin_chat_bindings_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_chat_bindings
-    ADD CONSTRAINT plugin_chat_bindings_plugin_id_fkey FOREIGN KEY (plugin_id) REFERENCES plugins(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_link_codes
-    ADD CONSTRAINT plugin_link_codes_plugin_id_fkey FOREIGN KEY (plugin_id) REFERENCES plugins(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_link_codes
-    ADD CONSTRAINT plugin_link_codes_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_user_links
-    ADD CONSTRAINT plugin_user_links_active_chat_id_fkey FOREIGN KEY (active_chat_id) REFERENCES chats(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY plugin_user_links
-    ADD CONSTRAINT plugin_user_links_plugin_id_fkey FOREIGN KEY (plugin_id) REFERENCES plugins(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugin_user_links
-    ADD CONSTRAINT plugin_user_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_config_key_id_fkey FOREIGN KEY (config_key_id) REFERENCES dbcrypt_keys(active_key_digest);
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_file_id_fkey FOREIGN KEY (file_id) REFERENCES files(id);
-
-ALTER TABLE ONLY plugins
-    ADD CONSTRAINT plugins_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY provisioner_daemons
     ADD CONSTRAINT provisioner_daemons_key_id_fkey FOREIGN KEY (key_id) REFERENCES provisioner_keys(id) ON DELETE CASCADE;

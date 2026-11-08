@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/plugins"
 	"github.com/coder/coder/v2/coderd/x/plugins/plugintest"
 	"github.com/coder/coder/v2/codersdk"
@@ -170,7 +171,7 @@ func TestPlugins(t *testing.T) {
 		ctx := testutil.Context(t, testutil.WaitLong)
 		_, token := dbgen.APIKey(t, api.Database, database.APIKey{
 			UserID: member.ID,
-			Scopes: database.APIKeyScopes{database.ApiKeyScopeCoderChatsconverse},
+			Scopes: database.APIKeyScopes{forkdb.APIKeyScopeCoderChatsConverse},
 		})
 		scoped := codersdk.NewExperimentalClient(codersdk.New(ownerClient.URL, codersdk.WithSessionToken(token)))
 		_, err := scoped.CreateChat(ctx, codersdk.CreateChatRequest{

@@ -62,6 +62,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbrollup"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/entitlements"
 	experimentrules "github.com/coder/coder/v2/coderd/experiments"
@@ -2267,15 +2268,20 @@ func New(options *Options) *API {
 	api.RootHandler = r
 
 	if api.Experiments.Enabled(codersdk.ExperimentPlugins) {
+		api.pluginDB, err = forkdb.From(options.Database)
+		if err != nil {
+			panic(xerrors.Errorf("fork queries for plugins: %w", err))
+		}
 		api.pluginManager = plugins.New(plugins.Options{
-			Logger:     options.Logger.Named("plugins"),
-			Database:   options.Database,
-			Pubsub:     options.Pubsub,
-			ReplicaID:  api.ID,
-			AccessURL:  options.AccessURL,
-			Handler:    func() http.Handler { return api.RootHandler },
-			HTTPClient: options.HTTPClient,
-			StartHost:  options.PluginStartHost,
+			Logger:       options.Logger.Named("plugins"),
+			Database:     options.Database,
+			ForkDatabase: api.pluginDB,
+			Pubsub:       options.Pubsub,
+			ReplicaID:    api.ID,
+			AccessURL:    options.AccessURL,
+			Handler:      func() http.Handler { return api.RootHandler },
+			HTTPClient:   options.HTTPClient,
+			StartHost:    options.PluginStartHost,
 
 			ReplicaAddress:    options.PluginReplicaAddress,
 			ReplicaHTTPClient: options.PluginReplicaHTTPClient,
@@ -2298,6 +2304,8 @@ type API struct {
 	*Options
 	mcpHTTPClient *http.Client
 	pluginManager *plugins.Manager
+	// pluginDB runs the plugin queries. It is set when pluginManager is.
+	pluginDB forkdb.Store
 	// ID is a uniquely generated ID on initialization.
 	// This is used to associate objects with a specific
 	// Coder API instance, like workspace agents to a

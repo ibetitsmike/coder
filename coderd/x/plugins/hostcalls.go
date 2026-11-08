@@ -21,6 +21,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/apikey"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/x/pluginsdk/pluginproto"
 )
@@ -88,7 +89,7 @@ func (r *runner) chatSend(ctx context.Context, req *pluginproto.ChatSend) (*plug
 	if len(text) > maxChatTextBytes {
 		return nil, xerrors.Errorf("text is longer than %d bytes", maxChatTextBytes)
 	}
-	link, err := r.m.db.GetPluginUserLink(sys(ctx), database.GetPluginUserLinkParams{
+	link, err := r.m.fdb.GetPluginUserLink(sys(ctx), forkdb.GetPluginUserLinkParams{
 		PluginID:   r.plugin.ID,
 		ExternalID: req.GetExternalId(),
 	})
@@ -128,7 +129,7 @@ func (r *runner) chatSend(ctx context.Context, req *pluginproto.ChatSend) (*plug
 	if err != nil {
 		return nil, xerrors.Errorf("create chat: %w", err)
 	}
-	err = r.m.db.SetPluginUserLinkActiveChat(sys(ctx), database.SetPluginUserLinkActiveChatParams{
+	err = r.m.fdb.SetPluginUserLinkActiveChat(sys(ctx), forkdb.SetPluginUserLinkActiveChatParams{
 		PluginID:     r.plugin.ID,
 		ExternalID:   link.ExternalID,
 		ActiveChatID: uuid.NullUUID{UUID: chat.ID, Valid: true},
@@ -136,7 +137,7 @@ func (r *runner) chatSend(ctx context.Context, req *pluginproto.ChatSend) (*plug
 	if err != nil {
 		return nil, xerrors.Errorf("set active chat: %w", err)
 	}
-	if err := r.m.db.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
+	if err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
 		return nil, xerrors.Errorf("bind chat: %w", err)
 	}
 	return &pluginproto.ChatSendResult{ChatId: chat.ID.String()}, nil
@@ -172,8 +173,8 @@ func (r *runner) linkComplete(ctx context.Context, req *pluginproto.LinkComplete
 		return nil, xerrors.New("too many link attempts, try again later")
 	}
 	var user database.User
-	err := r.m.db.InTx(func(tx database.Store) error {
-		code, err := tx.ConsumePluginLinkCode(sys(ctx), database.ConsumePluginLinkCodeParams{
+	err := forkdb.InTx(r.m.db, func(tx database.Store, ftx forkdb.Store) error {
+		code, err := ftx.ConsumePluginLinkCode(sys(ctx), forkdb.ConsumePluginLinkCodeParams{
 			PluginID: r.plugin.ID,
 			CodeHash: HashLinkCode(req.GetCode()),
 		})
@@ -187,7 +188,7 @@ func (r *runner) linkComplete(ctx context.Context, req *pluginproto.LinkComplete
 		if err != nil {
 			return xerrors.Errorf("get user: %w", err)
 		}
-		_, err = tx.UpsertPluginUserLink(sys(ctx), database.UpsertPluginUserLinkParams{
+		_, err = ftx.UpsertPluginUserLink(sys(ctx), forkdb.UpsertPluginUserLinkParams{
 			PluginID:   r.plugin.ID,
 			ExternalID: externalID,
 			UserID:     code.UserID,
@@ -195,7 +196,7 @@ func (r *runner) linkComplete(ctx context.Context, req *pluginproto.LinkComplete
 		if err != nil {
 			return xerrors.Errorf("store link: %w", err)
 		}
-		return tx.EnsurePluginChatBindings(sys(ctx), r.plugin.ID)
+		return ftx.EnsurePluginChatBindings(sys(ctx), r.plugin.ID)
 	}, nil)
 	if err != nil {
 		return nil, err
@@ -314,7 +315,7 @@ func (r *runner) clientFor(ctx context.Context, userID uuid.UUID) (*codersdk.Exp
 		ExpiresAt:       expiresAt,
 		LifetimeSeconds: int64(pluginKeyLifetime.Seconds()),
 		TokenName:       fmt.Sprintf("plugin_%s", r.plugin.ID),
-		Scopes:          database.APIKeyScopes{database.ApiKeyScopeCoderChatsconverse},
+		Scopes:          database.APIKeyScopes{forkdb.APIKeyScopeCoderChatsConverse},
 	})
 	if err != nil {
 		return nil, xerrors.Errorf("generate key: %w", err)

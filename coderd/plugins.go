@@ -22,6 +22,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac"
@@ -170,8 +171,8 @@ func (api *API) postOrganizationPlugin(rw http.ResponseWriter, r *http.Request) 
 
 	sum := sha256.Sum256(req.Wasm)
 	hash := hex.EncodeToString(sum[:])
-	var plugin database.Plugin
-	err = api.Database.InTx(func(tx database.Store) error {
+	var plugin forkdb.Plugin
+	err = forkdb.InTx(api.Database, func(tx database.Store, ftx forkdb.Store) error {
 		file, err := tx.GetFileByHashAndCreator(ctx, database.GetFileByHashAndCreatorParams{
 			Hash:      hash,
 			CreatedBy: apiKey.UserID,
@@ -190,7 +191,7 @@ func (api *API) postOrganizationPlugin(rw http.ResponseWriter, r *http.Request) 
 			return err
 		}
 		now := dbtime.Now()
-		plugin, err = tx.InsertPlugin(ctx, database.InsertPluginParams{
+		plugin, err = ftx.InsertPlugin(ctx, forkdb.InsertPluginParams{
 			ID:             uuid.New(),
 			OrganizationID: org.ID,
 			Name:           manifest.Name,
@@ -266,7 +267,7 @@ func (api *API) getOrganizationPlugins(rw http.ResponseWriter, r *http.Request) 
 		httpapi.Forbidden(rw)
 		return
 	}
-	rows, err := api.Database.GetPluginsByOrganizationID(ctx, org.ID)
+	rows, err := api.pluginDB.GetPluginsByOrganizationID(ctx, org.ID)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
@@ -285,40 +286,40 @@ func (api *API) getOrganizationPlugins(rw http.ResponseWriter, r *http.Request) 
 
 // pluginParam reads the {plugin} route parameter. It reads the row as the
 // system, so each handler must make its own authorization check.
-func (api *API) pluginParam(rw http.ResponseWriter, r *http.Request) (database.Plugin, bool) {
+func (api *API) pluginParam(rw http.ResponseWriter, r *http.Request) (forkdb.Plugin, bool) {
 	ctx := r.Context()
 	id, err := uuid.Parse(chi.URLParam(r, "plugin"))
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "Plugin ID must be a UUID."})
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	//nolint:gocritic // Members link to plugins they cannot read; handlers authorize.
-	p, err := api.Database.GetPluginByID(dbauthz.AsSystemRestricted(ctx), id)
+	p, err := api.pluginDB.GetPluginByID(dbauthz.AsSystemRestricted(ctx), id)
 	if httpapi.Is404Error(err) {
 		httpapi.ResourceNotFound(rw)
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	return p, true
 }
 
 // ownedPlugin reads the {plugin} parameter and requires the action on it.
 // A caller without read access gets 404.
-func (api *API) ownedPlugin(rw http.ResponseWriter, r *http.Request, action policy.Action) (database.Plugin, bool) {
+func (api *API) ownedPlugin(rw http.ResponseWriter, r *http.Request, action policy.Action) (forkdb.Plugin, bool) {
 	p, ok := api.pluginParam(rw, r)
 	if !ok {
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	if !api.Authorize(r, policy.ActionRead, p) {
 		httpapi.ResourceNotFound(rw)
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	if action != policy.ActionRead && !api.Authorize(r, action, p) {
 		httpapi.Forbidden(rw)
-		return database.Plugin{}, false
+		return forkdb.Plugin{}, false
 	}
 	return p, true
 }
@@ -374,10 +375,10 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	err := api.Database.InTx(func(tx database.Store) error {
+	err := forkdb.InTx(api.Database, func(_ database.Store, ftx forkdb.Store) error {
 		var err error
 		if req.Config != nil {
-			p, err = tx.UpdatePluginConfig(ctx, database.UpdatePluginConfigParams{
+			p, err = ftx.UpdatePluginConfig(ctx, forkdb.UpdatePluginConfigParams{
 				ID:     p.ID,
 				Config: config,
 				// ConfigKeyID is set by the dbcrypt wrapper.
@@ -389,7 +390,7 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.Enabled != nil {
-			p, err = tx.UpdatePluginEnabled(ctx, database.UpdatePluginEnabledParams{
+			p, err = ftx.UpdatePluginEnabled(ctx, forkdb.UpdatePluginEnabledParams{
 				ID:        p.ID,
 				Enabled:   *req.Enabled,
 				UpdatedAt: dbtime.Now(),
@@ -419,7 +420,7 @@ func (api *API) deletePlugin(rw http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := api.Database.DeletePluginByID(ctx, p.ID); err != nil {
+	if err := api.pluginDB.DeletePluginByID(ctx, p.ID); err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
@@ -445,7 +446,7 @@ func (api *API) getPluginLinks(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	//nolint:gocritic // The caller can read the plugin; links are system rows.
-	links, err := api.Database.GetPluginUserLinksByPluginID(dbauthz.AsSystemRestricted(ctx), p.ID)
+	links, err := api.pluginDB.GetPluginUserLinksByPluginID(dbauthz.AsSystemRestricted(ctx), p.ID)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
@@ -455,7 +456,7 @@ func (api *API) getPluginLinks(rw http.ResponseWriter, r *http.Request) {
 
 // linkablePlugin reports whether a member can link to the plugin: it runs
 // in an organization of the member and acts in chats.
-func (api *API) linkablePlugin(r *http.Request, p database.Plugin) bool {
+func (api *API) linkablePlugin(r *http.Request, p forkdb.Plugin) bool {
 	if !p.Enabled {
 		return false
 	}
@@ -509,15 +510,15 @@ func (api *API) postPluginLinkCode(rw http.ResponseWriter, r *http.Request) {
 	expiresAt := dbtime.Now().Add(pluginLinkCodeTTL)
 	//nolint:gocritic // Link codes are system rows; the caller is a member.
 	sysCtx := dbauthz.AsSystemRestricted(ctx)
-	err = api.Database.InTx(func(tx database.Store) error {
-		err := tx.DeletePluginLinkCodesByUser(sysCtx, database.DeletePluginLinkCodesByUserParams{
+	err = forkdb.InTx(api.Database, func(_ database.Store, ftx forkdb.Store) error {
+		err := ftx.DeletePluginLinkCodesByUser(sysCtx, forkdb.DeletePluginLinkCodesByUserParams{
 			PluginID: p.ID,
 			UserID:   apiKey.UserID,
 		})
 		if err != nil {
 			return err
 		}
-		return tx.InsertPluginLinkCode(sysCtx, database.InsertPluginLinkCodeParams{
+		return ftx.InsertPluginLinkCode(sysCtx, forkdb.InsertPluginLinkCodeParams{
 			CodeHash:  plugins.HashLinkCode(code),
 			PluginID:  p.ID,
 			UserID:    apiKey.UserID,
@@ -568,7 +569,7 @@ func (api *API) deletePluginLink(rw http.ResponseWriter, r *http.Request) {
 	}
 	//nolint:gocritic // Links are system rows; ownership is checked below.
 	sysCtx := dbauthz.AsSystemRestricted(ctx)
-	link, err := api.Database.GetPluginUserLink(sysCtx, database.GetPluginUserLinkParams{
+	link, err := api.pluginDB.GetPluginUserLink(sysCtx, forkdb.GetPluginUserLinkParams{
 		PluginID:   p.ID,
 		ExternalID: chi.URLParam(r, "externalID"),
 	})
@@ -584,7 +585,7 @@ func (api *API) deletePluginLink(rw http.ResponseWriter, r *http.Request) {
 		httpapi.ResourceNotFound(rw)
 		return
 	}
-	err = api.Database.DeletePluginUserLink(sysCtx, database.DeletePluginUserLinkParams{
+	err = api.pluginDB.DeletePluginUserLink(sysCtx, forkdb.DeletePluginUserLinkParams{
 		PluginID:   p.ID,
 		ExternalID: link.ExternalID,
 	})
@@ -618,18 +619,18 @@ func (api *API) getLinkablePlugins(rw http.ResponseWriter, r *http.Request) {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	links, err := api.Database.GetPluginUserLinksByUserID(sysCtx, apiKey.UserID)
+	links, err := api.pluginDB.GetPluginUserLinksByUserID(sysCtx, apiKey.UserID)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	linksByPlugin := map[uuid.UUID][]database.PluginUserLink{}
+	linksByPlugin := map[uuid.UUID][]forkdb.PluginUserLink{}
 	for _, l := range links {
 		linksByPlugin[l.PluginID] = append(linksByPlugin[l.PluginID], l)
 	}
 	out := []codersdk.LinkablePlugin{}
 	for _, org := range orgs {
-		rows, err := api.Database.GetPluginsByOrganizationID(sysCtx, org.ID)
+		rows, err := api.pluginDB.GetPluginsByOrganizationID(sysCtx, org.ID)
 		if err != nil {
 			httpapi.InternalServerError(rw, err)
 			return
@@ -708,7 +709,7 @@ func (api *API) publishPluginsChanged() {
 	}
 }
 
-func writePlugin(ctx context.Context, rw http.ResponseWriter, status int, p database.Plugin) {
+func writePlugin(ctx context.Context, rw http.ResponseWriter, status int, p forkdb.Plugin) {
 	out, err := convertPlugin(p)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
@@ -717,7 +718,7 @@ func writePlugin(ctx context.Context, rw http.ResponseWriter, status int, p data
 	httpapi.Write(ctx, rw, status, out)
 }
 
-func convertPlugin(p database.Plugin) (codersdk.Plugin, error) {
+func convertPlugin(p forkdb.Plugin) (codersdk.Plugin, error) {
 	out := codersdk.Plugin{
 		ID:             p.ID,
 		OrganizationID: p.OrganizationID,
@@ -750,7 +751,7 @@ func convertPlugin(p database.Plugin) (codersdk.Plugin, error) {
 	return out, nil
 }
 
-func convertPluginLinks(links []database.PluginUserLink) []codersdk.PluginUserLink {
+func convertPluginLinks(links []forkdb.PluginUserLink) []codersdk.PluginUserLink {
 	out := make([]codersdk.PluginUserLink, 0, len(links))
 	for _, l := range links {
 		out = append(out, codersdk.PluginUserLink{

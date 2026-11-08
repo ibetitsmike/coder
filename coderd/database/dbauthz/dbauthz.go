@@ -1850,13 +1850,6 @@ func (q *querier) AcquireNotificationMessages(ctx context.Context, arg database.
 	return q.db.AcquireNotificationMessages(ctx, arg)
 }
 
-func (q *querier) AcquirePluginLeases(ctx context.Context, arg database.AcquirePluginLeasesParams) ([]database.Plugin, error) {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.AcquirePluginLeases(ctx, arg)
-}
-
 func (q *querier) AcquireProvisionerJob(ctx context.Context, arg database.AcquireProvisionerJobParams) (database.ProvisionerJob, error) {
 	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceProvisionerJobs); err != nil {
 		return database.ProvisionerJob{}, err
@@ -2077,13 +2070,6 @@ func (q *querier) ClearWorkspaceSecretsByWorkspaceID(ctx context.Context, worksp
 		return err
 	}
 	return q.db.ClearWorkspaceSecretsByWorkspaceID(ctx, workspaceID)
-}
-
-func (q *querier) ConsumePluginLinkCode(ctx context.Context, arg database.ConsumePluginLinkCodeParams) (database.PluginLinkCode, error) {
-	if err := q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
-		return database.PluginLinkCode{}, err
-	}
-	return q.db.ConsumePluginLinkCode(ctx, arg)
 }
 
 func (q *querier) CountAIBridgeSessions(ctx context.Context, arg database.CountAIBridgeSessionsParams) (int64, error) {
@@ -2457,13 +2443,6 @@ func (q *querier) DeleteExpiredAPIKeys(ctx context.Context, arg database.DeleteE
 	return q.db.DeleteExpiredAPIKeys(ctx, arg)
 }
 
-func (q *querier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
-	if err := q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.DeleteExpiredPluginLinkCodes(ctx)
-}
-
 func (q *querier) DeleteExternalAuthLink(ctx context.Context, arg database.DeleteExternalAuthLinkParams) error {
 	return fetchAndExec(q.log, q.auth, policy.ActionUpdatePersonal, func(ctx context.Context, arg database.DeleteExternalAuthLinkParams) (database.ExternalAuthLink, error) {
 		return q.db.GetExternalAuthLink(ctx, database.GetExternalAuthLinkParams(arg))
@@ -2715,24 +2694,6 @@ func (q *querier) DeleteOrganizationSkillByOrganizationIDAndName(ctx context.Con
 	return fetchAndQuery(q.log, q.auth, policy.ActionDelete, fetch, q.db.DeleteOrganizationSkillByOrganizationIDAndName)(ctx, arg)
 }
 
-func (q *querier) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
-	return deleteQ(q.log, q.auth, q.db.GetPluginByID, q.db.DeletePluginByID)(ctx, id)
-}
-
-func (q *querier) DeletePluginLinkCodesByUser(ctx context.Context, arg database.DeletePluginLinkCodesByUserParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.DeletePluginLinkCodesByUser(ctx, arg)
-}
-
-func (q *querier) DeletePluginUserLink(ctx context.Context, arg database.DeletePluginUserLinkParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.DeletePluginUserLink(ctx, arg)
-}
-
 func (q *querier) DeleteProjectSkillByProjectIDAndName(ctx context.Context, arg database.DeleteProjectSkillByProjectIDAndNameParams) (database.Skill, error) {
 	if err := q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
 		return database.Skill{}, err
@@ -2953,13 +2914,6 @@ func (q *querier) EnqueueNotificationMessage(ctx context.Context, arg database.E
 		return err
 	}
 	return q.db.EnqueueNotificationMessage(ctx, arg)
-}
-
-func (q *querier) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
-	if err := q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
 func (q *querier) ExpirePrebuildsAPIKeys(ctx context.Context, now time.Time) error {
@@ -4839,59 +4793,6 @@ func (q *querier) GetParameterSchemasByJobID(ctx context.Context, jobID uuid.UUI
 		return nil, err
 	}
 	return q.db.GetParameterSchemasByJobID(ctx, jobID)
-}
-
-func (q *querier) GetPluginByID(ctx context.Context, id uuid.UUID) (database.Plugin, error) {
-	return fetch(q.log, q.auth, q.db.GetPluginByID)(ctx, id)
-}
-
-func (q *querier) GetPluginChatBindingsDue(ctx context.Context, arg database.GetPluginChatBindingsDueParams) ([]database.GetPluginChatBindingsDueRow, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginChatBindingsDue(ctx, arg)
-}
-
-func (q *querier) GetPluginChatMessagesAfter(ctx context.Context, arg database.GetPluginChatMessagesAfterParams) ([]database.ChatMessage, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginChatMessagesAfter(ctx, arg)
-}
-
-func (q *querier) GetPluginUserLink(ctx context.Context, arg database.GetPluginUserLinkParams) (database.PluginUserLink, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return database.PluginUserLink{}, err
-	}
-	return q.db.GetPluginUserLink(ctx, arg)
-}
-
-func (q *querier) GetPluginUserLinksByPluginAndUser(ctx context.Context, arg database.GetPluginUserLinksByPluginAndUserParams) ([]database.PluginUserLink, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginUserLinksByPluginAndUser(ctx, arg)
-}
-
-func (q *querier) GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]database.PluginUserLink, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginUserLinksByPluginID(ctx, pluginID)
-}
-
-func (q *querier) GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]database.PluginUserLink, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginUserLinksByUserID(ctx, userID)
-}
-
-func (q *querier) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]database.Plugin, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourcePlugin.InOrg(organizationID)); err != nil {
-		return nil, err
-	}
-	return q.db.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
 func (q *querier) GetPrebuildMetrics(ctx context.Context) ([]database.GetPrebuildMetricsRow, error) {
@@ -6891,20 +6792,6 @@ func (q *querier) InsertOrganizationSkill(ctx context.Context, arg database.Inse
 	return q.db.InsertOrganizationSkill(ctx, arg)
 }
 
-func (q *querier) InsertPlugin(ctx context.Context, arg database.InsertPluginParams) (database.Plugin, error) {
-	if err := q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourcePlugin.InOrg(arg.OrganizationID)); err != nil {
-		return database.Plugin{}, err
-	}
-	return q.db.InsertPlugin(ctx, arg)
-}
-
-func (q *querier) InsertPluginLinkCode(ctx context.Context, arg database.InsertPluginLinkCodeParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.InsertPluginLinkCode(ctx, arg)
-}
-
 func (q *querier) InsertPreset(ctx context.Context, arg database.InsertPresetParams) (database.TemplateVersionPreset, error) {
 	err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceTemplate)
 	if err != nil {
@@ -7756,13 +7643,6 @@ func (q *querier) ReleaseExternalAuthLinkRefreshLease(ctx context.Context, arg d
 	return fetchAndExec(q.log, q.auth, policy.ActionUpdatePersonal, fetch, q.db.ReleaseExternalAuthLinkRefreshLease)(ctx, arg)
 }
 
-func (q *querier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.ReleasePluginLeases(ctx, runnerID)
-}
-
 func (q *querier) RemoveUserFromGroups(ctx context.Context, arg database.RemoveUserFromGroupsParams) ([]uuid.UUID, error) {
 	// This is a system function to clear user groups in group sync.
 	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
@@ -7825,20 +7705,6 @@ func (q *querier) SetChatContextSnapshot(ctx context.Context, arg database.SetCh
 		return err
 	}
 	return q.db.SetChatContextSnapshot(ctx, arg)
-}
-
-func (q *querier) SetPluginUserLinkActiveChat(ctx context.Context, arg database.SetPluginUserLinkActiveChatParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.SetPluginUserLinkActiveChat(ctx, arg)
-}
-
-func (q *querier) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg database.SetPluginUserLinksActiveChatByUserParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
 }
 
 // SetTransactionLockTimeout changes a session setting of the current
@@ -8626,41 +8492,6 @@ func (q *querier) UpdateOrganizationWorkspaceSharingSettings(ctx context.Context
 		return q.db.GetOrganizationByID(ctx, arg.ID)
 	}
 	return updateWithReturn(q.log, q.auth, fetch, q.db.UpdateOrganizationWorkspaceSharingSettings)(ctx, arg)
-}
-
-func (q *querier) UpdatePluginChatBindingDelivered(ctx context.Context, arg database.UpdatePluginChatBindingDeliveredParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.UpdatePluginChatBindingDelivered(ctx, arg)
-}
-
-func (q *querier) UpdatePluginChatBindingFailed(ctx context.Context, arg database.UpdatePluginChatBindingFailedParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.UpdatePluginChatBindingFailed(ctx, arg)
-}
-
-func (q *querier) UpdatePluginConfig(ctx context.Context, arg database.UpdatePluginConfigParams) (database.Plugin, error) {
-	fetch := func(ctx context.Context, arg database.UpdatePluginConfigParams) (database.Plugin, error) {
-		return q.db.GetPluginByID(ctx, arg.ID)
-	}
-	return updateWithReturn(q.log, q.auth, fetch, q.db.UpdatePluginConfig)(ctx, arg)
-}
-
-func (q *querier) UpdatePluginEnabled(ctx context.Context, arg database.UpdatePluginEnabledParams) (database.Plugin, error) {
-	fetch := func(ctx context.Context, arg database.UpdatePluginEnabledParams) (database.Plugin, error) {
-		return q.db.GetPluginByID(ctx, arg.ID)
-	}
-	return updateWithReturn(q.log, q.auth, fetch, q.db.UpdatePluginEnabled)(ctx, arg)
-}
-
-func (q *querier) UpdatePluginLastError(ctx context.Context, arg database.UpdatePluginLastErrorParams) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return q.db.UpdatePluginLastError(ctx, arg)
 }
 
 func (q *querier) UpdatePrebuildProvisionerJobWithCancel(ctx context.Context, arg database.UpdatePrebuildProvisionerJobWithCancelParams) ([]database.UpdatePrebuildProvisionerJobWithCancelRow, error) {
@@ -9958,13 +9789,6 @@ func (q *querier) UpsertOrganizationMemberSkillSettings(ctx context.Context, arg
 		return err
 	}
 	return q.db.UpsertOrganizationMemberSkillSettings(ctx, arg)
-}
-
-func (q *querier) UpsertPluginUserLink(ctx context.Context, arg database.UpsertPluginUserLinkParams) (database.PluginUserLink, error) {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return database.PluginUserLink{}, err
-	}
-	return q.db.UpsertPluginUserLink(ctx, arg)
 }
 
 func (q *querier) UpsertPrebuildsSettings(ctx context.Context, value string) error {

@@ -11,7 +11,43 @@ import (
 )
 
 type Querier interface {
+	// Leases enabled plugins to a replica. A replica renews its own leases on
+	// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
+	// concurrent replicas from blocking on, or double leasing, the same rows.
+	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
+	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
+	DeleteExpiredPluginLinkCodes(ctx context.Context) error
+	DeletePluginByID(ctx context.Context, id uuid.UUID) error
+	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
+	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
+	// Binds every top-level, unarchived chat of a linked user in the plugin's
+	// organization. Chats created after the link start at cursor 0 so their whole
+	// history is delivered. Older chats start at their newest message so linking
+	// does not replay history.
+	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
+	// A binding is due when its chat is idle and has undelivered user-visible
+	// assistant messages or a status that was not delivered yet.
+	GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error)
+	GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error)
+	GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error)
+	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
+	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
+	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
+	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
+	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
+	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
+	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
+	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
+	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
+	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
+	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
+	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
+	// Relinking an external identity to another user clears the active chat so
+	// replies never reach a chat the new user does not own.
+	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)
 }
 
 var _ Querier = (*Queries)(nil)

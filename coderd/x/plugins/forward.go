@@ -12,7 +12,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
-	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
 // RelaySourceHeader carries the ID of the replica that forwarded a webhook.
@@ -31,7 +31,7 @@ var hopHeaders = []string{
 // forwardWebhook sends a webhook to the replica that holds the lease of the
 // plugin and returns that replica's response. A replica it can't reach
 // gives ErrNotRunningHere, so the sender retries.
-func (m *Manager) forwardWebhook(ctx context.Context, p database.Plugin, req *http.Request) (*WebhookResponse, error) {
+func (m *Manager) forwardWebhook(ctx context.Context, p forkdb.Plugin, req *http.Request) (*WebhookResponse, error) {
 	body, err := readWebhookBody(req)
 	if err != nil {
 		return nil, err

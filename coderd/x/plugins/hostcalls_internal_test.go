@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/x/pluginsdk/pluginproto"
 	"github.com/coder/coder/v2/testutil"
@@ -61,7 +61,7 @@ func newFetchRunner(t *testing.T, origins, privateCIDRs []string) *runner {
 	require.NoError(t, err)
 	r := &runner{
 		m:      &Manager{opts: Options{HTTPClient: &http.Client{}}},
-		plugin: database.Plugin{Manifest: []byte(`{}`), Grants: grants},
+		plugin: forkdb.Plugin{Manifest: []byte(`{}`), Grants: grants},
 	}
 	require.NoError(t, r.decode())
 	return r

@@ -1,4 +1,4 @@
-package database_test
+package forkdb_test
 
 import (
 	"crypto/sha256"
@@ -13,6 +13,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -20,6 +21,7 @@ func TestPluginChatBindings(t *testing.T) {
 	t.Parallel()
 
 	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitMedium)
 
 	org := dbgen.Organization(t, db, database.Organization{})
@@ -28,7 +30,7 @@ func TestPluginChatBindings(t *testing.T) {
 	otherUser := dbgen.User(t, db, database.User{})
 	modelCfg := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
 	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
-	plugin := dbgen.Plugin(t, db, database.Plugin{
+	plugin := dbgen.Plugin(t, db, forkdb.Plugin{
 		OrganizationID: org.ID,
 		FileID:         file.ID,
 		CreatedBy:      user.ID,
@@ -58,7 +60,7 @@ func TestPluginChatBindings(t *testing.T) {
 	otherOrgChat := newChat(otherOrg.ID, user.ID, uuid.NullUUID{})
 	unlinkedUserChat := newChat(org.ID, otherUser.ID, uuid.NullUUID{})
 
-	_, err = db.UpsertPluginUserLink(ctx, database.UpsertPluginUserLinkParams{
+	_, err = fdb.UpsertPluginUserLink(ctx, forkdb.UpsertPluginUserLinkParams{
 		PluginID:   plugin.ID,
 		ExternalID: "+15550100",
 		UserID:     user.ID,
@@ -70,15 +72,15 @@ func TestPluginChatBindings(t *testing.T) {
 	childChat := newChat(org.ID, user.ID, uuid.NullUUID{UUID: freshChat.ID, Valid: true})
 
 	// Running twice must not reset existing cursors.
-	require.NoError(t, db.EnsurePluginChatBindings(ctx, plugin.ID))
-	require.NoError(t, db.EnsurePluginChatBindings(ctx, plugin.ID))
+	require.NoError(t, fdb.EnsurePluginChatBindings(ctx, plugin.ID))
+	require.NoError(t, fdb.EnsurePluginChatBindings(ctx, plugin.ID))
 
 	type binding struct {
 		sentMessageID int64
 		sentStatus    database.NullChatStatus
 	}
 	rows, err := sqlDB.QueryContext(ctx,
-		"SELECT chat_id, sent_message_id, sent_status FROM plugin_chat_bindings WHERE plugin_id = $1", plugin.ID)
+		"SELECT chat_id, sent_message_id, sent_status FROM chatd.plugin_chat_bindings WHERE plugin_id = $1", plugin.ID)
 	require.NoError(t, err)
 	got := map[uuid.UUID]binding{}
 	for rows.Next() {
@@ -102,7 +104,7 @@ func TestPluginChatBindings(t *testing.T) {
 	}
 
 	dueChatIDs := func() []uuid.UUID {
-		due, err := db.GetPluginChatBindingsDue(ctx, database.GetPluginChatBindingsDueParams{
+		due, err := fdb.GetPluginChatBindingsDue(ctx, forkdb.GetPluginChatBindingsDueParams{
 			PluginID:   plugin.ID,
 			LimitCount: 100,
 		})
@@ -121,10 +123,12 @@ func TestPluginChatBindings(t *testing.T) {
 	newReply := addMessage(oldChat.ID, database.ChatMessageRoleAssistant)
 	require.ElementsMatch(t, []uuid.UUID{freshChat.ID, oldChat.ID}, dueChatIDs())
 
-	msgs, err := db.GetPluginChatMessagesAfter(ctx, database.GetPluginChatMessagesAfterParams{
-		ChatID:     oldChat.ID,
-		AfterID:    oldLast.ID,
-		LimitCount: 10,
+	// Delivery reads the reply with upstream's paginated query, after the
+	// cursor of the binding.
+	msgs, err := db.GetChatMessagesByChatIDAscPaginated(ctx, database.GetChatMessagesByChatIDAscPaginatedParams{
+		ChatID:   oldChat.ID,
+		AfterID:  oldLast.ID,
+		LimitVal: 10,
 	})
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -136,7 +140,7 @@ func TestPluginChatBindings(t *testing.T) {
 	require.ElementsMatch(t, []uuid.UUID{freshChat.ID}, dueChatIDs())
 
 	// Delivering the fresh chat's status clears it.
-	require.NoError(t, db.UpdatePluginChatBindingDelivered(ctx, database.UpdatePluginChatBindingDeliveredParams{
+	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
 		PluginID:      plugin.ID,
 		ChatID:        freshChat.ID,
 		SentMessageID: 0,
@@ -149,41 +153,42 @@ func TestPluginLinkCodes(t *testing.T) {
 	t.Parallel()
 
 	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
 	org := dbgen.Organization(t, db, database.Organization{})
 	user := dbgen.User(t, db, database.User{})
 	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
-	plugin := dbgen.Plugin(t, db, database.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID})
+	plugin := dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID})
 
 	validHash := sha256.Sum256([]byte("valid-code"))
-	require.NoError(t, db.InsertPluginLinkCode(ctx, database.InsertPluginLinkCodeParams{
+	require.NoError(t, fdb.InsertPluginLinkCode(ctx, forkdb.InsertPluginLinkCodeParams{
 		CodeHash:  validHash[:],
 		PluginID:  plugin.ID,
 		UserID:    user.ID,
 		ExpiresAt: dbtime.Now().Add(time.Hour),
 	}))
 
-	consumed, err := db.ConsumePluginLinkCode(ctx, database.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: validHash[:]})
+	consumed, err := fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: validHash[:]})
 	require.NoError(t, err)
 	require.Equal(t, user.ID, consumed.UserID)
 
-	_, err = db.ConsumePluginLinkCode(ctx, database.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: validHash[:]})
+	_, err = fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: validHash[:]})
 	require.ErrorIs(t, err, sql.ErrNoRows, "a code can be consumed only once")
 
 	expiredHash := sha256.Sum256([]byte("expired-code"))
-	require.NoError(t, db.InsertPluginLinkCode(ctx, database.InsertPluginLinkCodeParams{
+	require.NoError(t, fdb.InsertPluginLinkCode(ctx, forkdb.InsertPluginLinkCodeParams{
 		CodeHash:  expiredHash[:],
 		PluginID:  plugin.ID,
 		UserID:    user.ID,
 		ExpiresAt: dbtime.Now().Add(-time.Minute),
 	}))
-	_, err = db.ConsumePluginLinkCode(ctx, database.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: expiredHash[:]})
+	_, err = fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: expiredHash[:]})
 	require.ErrorIs(t, err, sql.ErrNoRows, "an expired code cannot be consumed")
 
-	require.NoError(t, db.DeleteExpiredPluginLinkCodes(ctx))
+	require.NoError(t, fdb.DeleteExpiredPluginLinkCodes(ctx))
 	var remaining int
-	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM plugin_link_codes WHERE plugin_id = $1", plugin.ID).Scan(&remaining))
+	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.plugin_link_codes WHERE plugin_id = $1", plugin.ID).Scan(&remaining))
 	require.Zero(t, remaining)
 }
 
@@ -191,17 +196,18 @@ func TestPluginLeases(t *testing.T) {
 	t.Parallel()
 
 	db, _ := dbtestutil.NewDB(t)
+	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
 	org := dbgen.Organization(t, db, database.Organization{})
 	user := dbgen.User(t, db, database.User{})
 	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
-	enabled := dbgen.Plugin(t, db, database.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: true})
-	dbgen.Plugin(t, db, database.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: false})
+	enabled := dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: true})
+	dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: false})
 
 	runnerA, runnerB := uuid.New(), uuid.New()
-	acquire := func(runner uuid.UUID) []database.Plugin {
-		plugins, err := db.AcquirePluginLeases(ctx, database.AcquirePluginLeasesParams{
+	acquire := func(runner uuid.UUID) []forkdb.Plugin {
+		plugins, err := fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
 			RunnerID:     runner,
 			LeaseSeconds: 60,
 			MaxPlugins:   10,
@@ -218,8 +224,15 @@ func TestPluginLeases(t *testing.T) {
 	require.Empty(t, acquire(runnerB), "a live lease is not stolen")
 	require.Len(t, acquire(runnerA), 1, "the holder renews its lease")
 
-	require.NoError(t, db.ReleasePluginLeases(ctx, runnerA))
+	require.NoError(t, fdb.ReleasePluginLeases(ctx, runnerA))
 	leased = acquire(runnerB)
 	require.Len(t, leased, 1)
 	require.Equal(t, runnerB, leased[0].RunnerID.UUID)
+}
+
+func mustFrom(t *testing.T, db database.Store) forkdb.Store {
+	t.Helper()
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	return fdb
 }

@@ -10,6 +10,7 @@ import (
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/x/pluginsdk/pluginproto"
@@ -36,11 +37,11 @@ func (r *runner) deliver(ctx context.Context) {
 	if !r.delivers() {
 		return
 	}
-	if err := r.m.db.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
+	if err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
 		r.logger.Warn(ctx, "bind chats to plugin", slog.Error(err))
 		return
 	}
-	due, err := r.m.db.GetPluginChatBindingsDue(sys(ctx), database.GetPluginChatBindingsDueParams{
+	due, err := r.m.fdb.GetPluginChatBindingsDue(sys(ctx), forkdb.GetPluginChatBindingsDueParams{
 		PluginID:   r.plugin.ID,
 		LimitCount: deliveryBatch,
 	})
@@ -59,12 +60,8 @@ func (r *runner) deliver(ctx context.Context) {
 	}
 }
 
-func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindingsDueRow) {
-	msgs, err := r.m.db.GetPluginChatMessagesAfter(sys(ctx), database.GetPluginChatMessagesAfterParams{
-		ChatID:     b.ChatID,
-		AfterID:    b.SentMessageID,
-		LimitCount: messagesPerEvent,
-	})
+func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow) {
+	msgs, err := r.chatMessagesAfter(ctx, b)
 	if err != nil {
 		r.logger.Warn(ctx, "list chat messages", slog.F("chat_id", b.ChatID), slog.Error(err))
 		return
@@ -73,6 +70,11 @@ func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindin
 	texts := make([]*pluginproto.ChatText, 0, len(msgs))
 	for _, msg := range msgs {
 		cursor = max(cursor, msg.ID)
+		// The page holds every message the user can see. Only assistant
+		// replies go out.
+		if msg.Role != database.ChatMessageRoleAssistant {
+			continue
+		}
 		if text := messageText(msg); text != "" {
 			texts = append(texts, &pluginproto.ChatText{Id: msg.ID, Text: text})
 		}
@@ -88,7 +90,7 @@ func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindin
 	send := (len(texts) > 0 && slices.Contains(r.grants.Events, codersdk.PluginEventChatMessagesAdded)) ||
 		(statusChanged && slices.Contains(r.grants.Events, codersdk.PluginEventChatStatusChanged))
 	if send {
-		links, err := r.m.db.GetPluginUserLinksByPluginAndUser(sys(ctx), database.GetPluginUserLinksByPluginAndUserParams{
+		links, err := r.m.fdb.GetPluginUserLinksByPluginAndUser(sys(ctx), forkdb.GetPluginUserLinksByPluginAndUserParams{
 			PluginID: r.plugin.ID,
 			UserID:   b.ChatOwnerID,
 		})
@@ -110,7 +112,7 @@ func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindin
 			}
 		}
 		if len(texts) > 0 && len(links) > 0 {
-			err := r.m.db.SetPluginUserLinksActiveChatByUser(sys(ctx), database.SetPluginUserLinksActiveChatByUserParams{
+			err := r.m.fdb.SetPluginUserLinksActiveChatByUser(sys(ctx), forkdb.SetPluginUserLinksActiveChatByUserParams{
 				PluginID:     r.plugin.ID,
 				UserID:       b.ChatOwnerID,
 				ActiveChatID: uuidNull(b.ChatID),
@@ -124,7 +126,7 @@ func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindin
 	if len(msgs) < messagesPerEvent {
 		sentStatus = database.NullChatStatus{ChatStatus: status, Valid: true}
 	}
-	err = r.m.db.UpdatePluginChatBindingDelivered(sys(ctx), database.UpdatePluginChatBindingDeliveredParams{
+	err = r.m.fdb.UpdatePluginChatBindingDelivered(sys(ctx), forkdb.UpdatePluginChatBindingDeliveredParams{
 		PluginID:      r.plugin.ID,
 		ChatID:        b.ChatID,
 		SentMessageID: cursor,
@@ -135,7 +137,7 @@ func (r *runner) deliverChat(ctx context.Context, b database.GetPluginChatBindin
 	}
 }
 
-func (r *runner) deliveryFailed(ctx context.Context, b database.GetPluginChatBindingsDueRow, cause error) {
+func (r *runner) deliveryFailed(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow, cause error) {
 	r.logger.Warn(ctx, "deliver chat event", slog.F("chat_id", b.ChatID), slog.F("attempts", b.Attempts+1), slog.Error(cause))
 	if ctx.Err() != nil {
 		return
@@ -143,16 +145,14 @@ func (r *runner) deliveryFailed(ctx context.Context, b database.GetPluginChatBin
 	if b.Attempts+1 >= maxDeliveryAttempts {
 		// Drop the page so one bad chat cannot stop the plugin.
 		r.setLastError("dropped chat event after " + cause.Error())
-		msgs, err := r.m.db.GetPluginChatMessagesAfter(sys(ctx), database.GetPluginChatMessagesAfterParams{
-			ChatID: b.ChatID, AfterID: b.SentMessageID, LimitCount: messagesPerEvent,
-		})
+		msgs, err := r.chatMessagesAfter(ctx, b)
 		cursor := b.SentMessageID
 		if err == nil {
 			for _, m := range msgs {
 				cursor = max(cursor, m.ID)
 			}
 		}
-		err = r.m.db.UpdatePluginChatBindingDelivered(sys(ctx), database.UpdatePluginChatBindingDeliveredParams{
+		err = r.m.fdb.UpdatePluginChatBindingDelivered(sys(ctx), forkdb.UpdatePluginChatBindingDeliveredParams{
 			PluginID:      r.plugin.ID,
 			ChatID:        b.ChatID,
 			SentMessageID: cursor,
@@ -164,7 +164,7 @@ func (r *runner) deliveryFailed(ctx context.Context, b database.GetPluginChatBin
 		return
 	}
 	backoff := min(time.Second<<b.Attempts, maxDeliveryBackoff)
-	err := r.m.db.UpdatePluginChatBindingFailed(sys(ctx), database.UpdatePluginChatBindingFailedParams{
+	err := r.m.fdb.UpdatePluginChatBindingFailed(sys(ctx), forkdb.UpdatePluginChatBindingFailedParams{
 		PluginID:      r.plugin.ID,
 		ChatID:        b.ChatID,
 		NextAttemptAt: r.m.clock.Now().Add(backoff),
@@ -172,6 +172,16 @@ func (r *runner) deliveryFailed(ctx context.Context, b database.GetPluginChatBin
 	if err != nil {
 		r.logger.Warn(ctx, "store delivery failure", slog.Error(err))
 	}
+}
+
+// chatMessagesAfter returns the next page of messages after the delivery
+// cursor of a binding.
+func (r *runner) chatMessagesAfter(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow) ([]database.ChatMessage, error) {
+	return r.m.db.GetChatMessagesByChatIDAscPaginated(sys(ctx), database.GetChatMessagesByChatIDAscPaginatedParams{
+		ChatID:   b.ChatID,
+		AfterID:  b.SentMessageID,
+		LimitVal: messagesPerEvent,
+	})
 }
 
 // messageText joins the text parts of a message that the user can see.

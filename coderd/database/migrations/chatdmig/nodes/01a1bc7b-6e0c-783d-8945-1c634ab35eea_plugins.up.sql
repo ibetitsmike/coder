@@ -1,11 +1,15 @@
+-- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema
+-- requires: upstream:mcp_server_oauth2_client_registration
+
 -- API key scopes for the plugin RBAC resource and the composite scope that
--- plugin chat bridges mint for linked users.
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'plugin:*';
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'plugin:create';
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'plugin:read';
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'plugin:update';
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'plugin:delete';
-ALTER TYPE api_key_scope ADD VALUE IF NOT EXISTS 'coder:chats.converse';
+-- plugin chat bridges mint for linked users. The enum stays in public, and
+-- forkdb.APIKeyScopeValues lists these values for Go.
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'plugin:*';
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'plugin:create';
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'plugin:read';
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'plugin:update';
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'plugin:delete';
+ALTER TYPE public.api_key_scope ADD VALUE IF NOT EXISTS 'coder:chats.converse';
 
 CREATE TABLE plugins (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

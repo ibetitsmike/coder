@@ -205,17 +205,6 @@ WHERE b.plugin_id = @plugin_id
 ORDER BY b.next_attempt_at
 LIMIT sqlc.arg('limit_count')::int;
 
--- name: GetPluginChatMessagesAfter :many
-SELECT *
-FROM chat_messages
-WHERE chat_id = @chat_id
-    AND id > @after_id::bigint
-    AND role = 'assistant'
-    AND visibility IN ('user', 'both')
-    AND NOT deleted
-ORDER BY id ASC
-LIMIT sqlc.arg('limit_count')::int;
-
 -- name: UpdatePluginChatBindingDelivered :exec
 UPDATE plugin_chat_bindings
 SET

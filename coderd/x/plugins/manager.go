@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/coderd/x/plugins/sandbox"
@@ -39,10 +40,12 @@ type StartHostFunc func(ctx context.Context) (*pluginhost.Client, error)
 
 // Options configures a Manager.
 type Options struct {
-	Logger    slog.Logger
-	Database  database.Store
-	Pubsub    pubsub.Pubsub
-	ReplicaID uuid.UUID
+	Logger   slog.Logger
+	Database database.Store
+	// ForkDatabase runs the plugin queries. It is forkdb.From(Database).
+	ForkDatabase forkdb.Store
+	Pubsub       pubsub.Pubsub
+	ReplicaID    uuid.UUID
 	// AccessURL is the base URL for host calls into the chat API. The
 	// requests never leave the process: Handler serves them.
 	AccessURL *url.URL
@@ -73,6 +76,7 @@ type Manager struct {
 	opts   Options
 	logger slog.Logger
 	db     database.Store
+	fdb    forkdb.Store
 	clock  quartz.Clock
 
 	ctx    context.Context
@@ -119,6 +123,7 @@ func New(opts Options) *Manager {
 		opts:    opts,
 		logger:  opts.Logger,
 		db:      opts.Database,
+		fdb:     opts.ForkDatabase,
 		clock:   opts.Clock,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -178,7 +183,7 @@ func (m *Manager) loop() {
 			// Use a fresh context: the Manager context is done.
 			//nolint:gocritic // Releasing this replica's leases needs the same system access.
 			releaseCtx, cancel := context.WithTimeout(dbauthz.AsSystemRestricted(context.Background()), 5*time.Second)
-			if err := m.db.ReleasePluginLeases(releaseCtx, m.opts.ReplicaID); err != nil {
+			if err := m.fdb.ReleasePluginLeases(releaseCtx, m.opts.ReplicaID); err != nil {
 				m.logger.Warn(releaseCtx, "release plugin leases", slog.Error(err))
 			} else if err := m.opts.Pubsub.Publish(ChangedChannel, nil); err != nil {
 				// Other replicas still take over on their next lease check.
@@ -195,7 +200,7 @@ func (m *Manager) loop() {
 // reconcile renews the leases of this replica, takes free leases, and makes
 // the set of runners match the leases.
 func (m *Manager) reconcile(ctx context.Context) {
-	held, err := m.db.AcquirePluginLeases(ctx, database.AcquirePluginLeasesParams{
+	held, err := m.fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
 		RunnerID:     m.opts.ReplicaID,
 		LeaseSeconds: int32(m.opts.LeaseDuration.Seconds()),
 		MaxPlugins:   m.opts.MaxPlugins,
@@ -279,7 +284,7 @@ var ErrNotRunningHere = xerrors.New("the plugin does not run on this replica")
 // Webhook sends an HTTP request to the on_http export of a plugin. If
 // another replica runs the plugin, Webhook forwards the request to it. It
 // returns ErrNotRunningHere if no reachable replica runs the plugin.
-func (m *Manager) Webhook(ctx context.Context, p database.Plugin, req *http.Request) (*WebhookResponse, error) {
+func (m *Manager) Webhook(ctx context.Context, p forkdb.Plugin, req *http.Request) (*WebhookResponse, error) {
 	relayed := req.Header.Get(RelaySourceHeader) != ""
 	// The plugin sees the request as the sender sent it.
 	req.Header.Del(RelaySourceHeader)
