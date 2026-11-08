@@ -1,0 +1,51 @@
+# Keeps upstream coder/coder workflows off in the fork. GitHub registers a
+# workflow, active, on the first event that matches it, so this runs on the
+# events upstream's workflows use and hourly. Cancelling their unfinished runs
+# also stops most first runs. See coderd/database/migrations/chatdmig/README.md.
+name: fork-quiet
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  push: {}
+  create: {}
+  pull_request:
+    types: [opened, synchronize, reopened, edited, closed, labeled, unlabeled, ready_for_review]
+  issues: {}
+  issue_comment: {}
+  release: {}
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions: {}
+
+jobs:
+  quiet:
+    # A PR from another repository gets a read-only token.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: (.path | startswith(".github/workflows/")) and (.path | test("/fork-[^/]*$") | not)
+    steps:
+      - name: Disable upstream workflows
+        run: |
+          set -euo pipefail
+          gh workflow list -R "$GITHUB_REPOSITORY" --all --limit 500 --json id,path,state \
+            --jq ".[] | select(.state == \"active\" and $UPSTREAM) | .id" |
+            while read -r id; do
+              gh workflow disable -R "$GITHUB_REPOSITORY" "$id"
+            done
+      - name: Cancel unfinished upstream runs
+        run: |
+          set -euo pipefail
+          for status in requested queued pending waiting in_progress; do
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?status=$status&per_page=100" \
+              --jq ".workflow_runs[] | select($UPSTREAM) | .id"
+          done | sort -u | while read -r id; do
+            # A run can finish between the list and the cancel.
+            gh run cancel -R "$GITHUB_REPOSITORY" "$id" || echo "::warning::Could not cancel run $id."
+          done
