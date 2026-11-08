@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -321,12 +320,9 @@ func (r *runner) webhook(ctx context.Context, req *http.Request) (*WebhookRespon
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	body, err := io.ReadAll(io.LimitReader(req.Body, maxWebhookBodyBytes+1))
+	body, err := readWebhookBody(req)
 	if err != nil {
-		return nil, xerrors.Errorf("read webhook body: %w", err)
-	}
-	if len(body) > maxWebhookBodyBytes {
-		return nil, xerrors.New("webhook body is too large")
+		return nil, err
 	}
 	in := &pluginproto.HTTPRequest{
 		Method:  req.Method,

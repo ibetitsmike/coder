@@ -283,6 +283,11 @@ type Options struct {
 	// PluginStartHost starts one plugin-host process. Nil runs
 	// `coder plugin-host` from the current executable.
 	PluginStartHost plugins.StartHostFunc
+	// PluginReplicaAddress and PluginReplicaHTTPClient let a replica
+	// forward a plugin's webhooks to the replica that runs the plugin.
+	// Set by enterprise for HA deployments.
+	PluginReplicaAddress    func(ctx context.Context, replicaID uuid.UUID) (string, bool)
+	PluginReplicaHTTPClient *http.Client
 
 	UpdateAgentMetrics func(ctx context.Context, labels prometheusmetrics.AgentMetricLabels, metrics []*agentproto.Stats_Metric)
 	StatsBatcher       workspacestats.Batcher
@@ -2271,6 +2276,9 @@ func New(options *Options) *API {
 			Handler:    func() http.Handler { return api.RootHandler },
 			HTTPClient: options.HTTPClient,
 			StartHost:  options.PluginStartHost,
+
+			ReplicaAddress:    options.PluginReplicaAddress,
+			ReplicaHTTPClient: options.PluginReplicaHTTPClient,
 		})
 		api.pluginManager.Start()
 	}

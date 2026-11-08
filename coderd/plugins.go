@@ -674,7 +674,7 @@ func (api *API) postPluginWebhook(rw http.ResponseWriter, r *http.Request) {
 		httpapi.ResourceNotFound(rw)
 		return
 	}
-	resp, err := api.pluginManager.Webhook(ctx, p.ID, r)
+	resp, err := api.pluginManager.Webhook(ctx, p, r)
 	if errors.Is(err, plugins.ErrNotRunningHere) {
 		// Senders such as Telegram retry a failed webhook.
 		rw.Header().Set("Retry-After", "5")
@@ -690,8 +690,11 @@ func (api *API) postPluginWebhook(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		rw.Header().Set("Content-Type", ct)
+	// Other headers could set cookies on the Coder origin.
+	for _, name := range []string{"Content-Type", "Retry-After"} {
+		if v := resp.Header.Get(name); v != "" {
+			rw.Header().Set(name, v)
+		}
 	}
 	rw.WriteHeader(resp.StatusCode)
 	if _, err := rw.Write(resp.Body); err != nil {

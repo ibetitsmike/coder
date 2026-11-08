@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk/x/pluginsdk"
 )
@@ -86,6 +87,8 @@ func onHTTP(h pluginsdk.Host, req pluginsdk.HTTPRequest) pluginsdk.HTTPResponse 
 		out.Events = events
 	case "ticks":
 		out.Ticks = ticks
+	case "request":
+		out.Value, out.Body = req.URL, strings.Join(req.Header.Values(in.Key), ",")
 	default:
 		return reply(http.StatusBadRequest, response{Error: "unknown op " + in.Op})
 	}

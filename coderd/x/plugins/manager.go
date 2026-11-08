@@ -16,6 +16,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/coderd/x/plugins/sandbox"
@@ -55,6 +56,12 @@ type Options struct {
 	StartHost StartHostFunc
 	Limits    sandbox.Limits
 	Clock     quartz.Clock
+	// ReplicaAddress returns the internal address of another replica. A
+	// replica that does not run a plugin forwards the plugin's webhooks to
+	// the replica that does. Nil means one replica runs every plugin.
+	ReplicaAddress func(ctx context.Context, replicaID uuid.UUID) (string, bool)
+	// ReplicaHTTPClient forwards webhooks to other replicas.
+	ReplicaHTTPClient *http.Client
 
 	LeaseInterval time.Duration
 	LeaseDuration time.Duration
@@ -97,6 +104,9 @@ func New(opts Options) *Manager {
 	}
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = &http.Client{}
+	}
+	if opts.ReplicaHTTPClient == nil {
+		opts.ReplicaHTTPClient = http.DefaultClient
 	}
 	if opts.StartHost == nil {
 		logger := opts.Logger.Named("host")
@@ -170,6 +180,9 @@ func (m *Manager) loop() {
 			releaseCtx, cancel := context.WithTimeout(dbauthz.AsSystemRestricted(context.Background()), 5*time.Second)
 			if err := m.db.ReleasePluginLeases(releaseCtx, m.opts.ReplicaID); err != nil {
 				m.logger.Warn(releaseCtx, "release plugin leases", slog.Error(err))
+			} else if err := m.opts.Pubsub.Publish(ChangedChannel, nil); err != nil {
+				// Other replicas still take over on their next lease check.
+				m.logger.Warn(releaseCtx, "publish released plugin leases", slog.Error(err))
 			}
 			cancel()
 			return
@@ -259,16 +272,25 @@ func (m *Manager) Inspect(ctx context.Context, wasm []byte) (codersdk.PluginMani
 	return ManifestFromProto(manifest), nil
 }
 
-// ErrNotRunningHere means another replica holds the lease of the plugin, or
-// no replica runs it.
+// ErrNotRunningHere means no replica that this replica can reach runs the
+// plugin.
 var ErrNotRunningHere = xerrors.New("the plugin does not run on this replica")
 
-// Webhook sends an HTTP request to the on_http export of a plugin. It
-// returns ErrNotRunningHere if this replica does not run the plugin.
-func (m *Manager) Webhook(ctx context.Context, pluginID uuid.UUID, req *http.Request) (*WebhookResponse, error) {
-	r, ok := m.runnerFor(pluginID)
-	if !ok {
+// Webhook sends an HTTP request to the on_http export of a plugin. If
+// another replica runs the plugin, Webhook forwards the request to it. It
+// returns ErrNotRunningHere if no reachable replica runs the plugin.
+func (m *Manager) Webhook(ctx context.Context, p database.Plugin, req *http.Request) (*WebhookResponse, error) {
+	relayed := req.Header.Get(RelaySourceHeader) != ""
+	// The plugin sees the request as the sender sent it.
+	req.Header.Del(RelaySourceHeader)
+	if r, ok := m.runnerFor(p.ID); ok {
+		return r.webhook(ctx, req)
+	}
+	// A relayed request is not forwarded again, so a lease that moves
+	// while a request is in flight can't make a loop.
+	leased := p.RunnerID.Valid && p.LeaseExpiresAt.Valid && p.LeaseExpiresAt.Time.After(dbtime.Now())
+	if relayed || !leased || p.RunnerID.UUID == m.opts.ReplicaID || m.opts.ReplicaAddress == nil {
 		return nil, ErrNotRunningHere
 	}
-	return r.webhook(ctx, req)
+	return m.forwardWebhook(ctx, p, req)
 }
