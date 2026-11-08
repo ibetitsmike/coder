@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // RelaySourceHeader carries the ID of the replica that forwarded a webhook.
@@ -28,10 +30,10 @@ var hopHeaders = []string{
 	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
-// forwardWebhook sends a webhook to the replica that holds the lease of the
-// plugin and returns that replica's response. A replica it can't reach
-// gives ErrNotRunningHere, so the sender retries.
-func (m *Manager) forwardWebhook(ctx context.Context, p forkdb.Plugin, req *http.Request) (*WebhookResponse, error) {
+// forward sends a webhook or connect request to the replica that holds the
+// lease of the plugin and returns that replica's response. A replica it
+// can't reach gives ErrNotRunningHere, so the sender retries.
+func (m *Manager) forward(ctx context.Context, p forkdb.Plugin, req *http.Request) (*WebhookResponse, error) {
 	body, err := readWebhookBody(req)
 	if err != nil {
 		return nil, err
@@ -82,6 +84,30 @@ func (m *Manager) forwardWebhook(ctx context.Context, p forkdb.Plugin, req *http
 		return nil, xerrors.New("forwarded webhook response is too large")
 	}
 	return &WebhookResponse{StatusCode: res.StatusCode, Header: res.Header, Body: resBody}, nil
+}
+
+// decodeForwardedPrompt reads the response of the connect route of the
+// replica that runs the plugin.
+func decodeForwardedPrompt(res *WebhookResponse) (codersdk.PluginConnectPrompt, error) {
+	switch res.StatusCode {
+	case http.StatusOK:
+		var prompt codersdk.PluginConnectPrompt
+		if err := json.Unmarshal(res.Body, &prompt); err != nil {
+			return codersdk.PluginConnectPrompt{}, xerrors.Errorf("decode forwarded connect prompt: %w", err)
+		}
+		return prompt, nil
+	case http.StatusServiceUnavailable:
+		return codersdk.PluginConnectPrompt{}, ErrNotRunningHere
+	default:
+		var msg codersdk.Response
+		if err := json.Unmarshal(res.Body, &msg); err != nil || msg.Message == "" {
+			msg.Message = string(bytes.TrimSpace(res.Body))
+		}
+		if msg.Detail != "" {
+			msg.Message += ": " + msg.Detail
+		}
+		return codersdk.PluginConnectPrompt{}, xerrors.Errorf("the replica that runs the plugin answered %d: %s", res.StatusCode, msg.Message)
+	}
 }
 
 // readWebhookBody reads the body of a webhook, up to maxWebhookBodyBytes.

@@ -59,12 +59,13 @@ func TestHandleManifest(t *testing.T) {
 		ConfigKeys:  []string{"k"},
 		TickSeconds: 5,
 		Webhook:     true,
+		Connect:     true,
 	}})
 	var m pluginproto.Manifest
 	require.NoError(t, proto.Unmarshal(out, &m))
 	assert.True(t, proto.Equal(&pluginproto.Manifest{
 		Name: "p", Version: "1", Events: []string{"e"}, Chats: []string{"c"},
-		HttpOrigins: []string{"https://o"}, ConfigKeys: []string{"k"}, TickSeconds: 5, Webhook: true,
+		HttpOrigins: []string{"https://o"}, ConfigKeys: []string{"k"}, TickSeconds: 5, Webhook: true, Connect: true,
 	}, &m))
 
 	require.NoError(t, proto.Unmarshal(handleManifest(nil), &m))
@@ -129,6 +130,27 @@ func TestHandlePanics(t *testing.T) {
 
 	require.NoError(t, proto.Unmarshal(handleHTTP(&Plugin{}, fake.send, nil), &res))
 	assert.EqualValues(t, http.StatusNotFound, res.GetStatus())
+}
+
+func TestHandleConnect(t *testing.T) {
+	t.Parallel()
+	decode := func(out []byte) *pluginproto.ConnectPrompt {
+		var res pluginproto.ConnectPrompt
+		require.NoError(t, proto.Unmarshal(out, &res))
+		return &res
+	}
+	fake := &fakeHost{}
+	p := &Plugin{OnConnect: func(h Host) (ConnectPrompt, error) {
+		return ConnectPrompt{QRCodePNG: []byte("png"), Instructions: "scan " + h.Config("k")}, nil
+	}}
+	assert.True(t, proto.Equal(&pluginproto.ConnectPrompt{QrCodePng: []byte("png"), Instructions: "scan v-k"},
+		decode(handleConnect(p, fake.send))))
+
+	p.OnConnect = func(Host) (ConnectPrompt, error) { return ConnectPrompt{}, xerrors.New("server is down") }
+	assert.Equal(t, "server is down", decode(handleConnect(p, fake.send)).GetError())
+	p.OnConnect = func(Host) (ConnectPrompt, error) { panic("connect boom") }
+	assert.Contains(t, decode(handleConnect(p, fake.send)).GetError(), "plugin panic: connect boom")
+	assert.Equal(t, "the plugin has no connect handler", decode(handleConnect(&Plugin{}, fake.send)).GetError())
 }
 
 func TestHandleHTTP(t *testing.T) {

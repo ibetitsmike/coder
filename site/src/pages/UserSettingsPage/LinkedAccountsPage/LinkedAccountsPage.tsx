@@ -2,16 +2,12 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
-	createPluginLinkCode,
 	deletePluginLink,
 	linkablePlugins,
 	linkablePluginsKey,
+	startPluginLink,
 } from "#/api/queries/plugins";
-import type {
-	LinkablePlugin,
-	PluginLinkCode,
-	PluginUserLink,
-} from "#/api/typesGenerated";
+import type { LinkablePlugin, PluginUserLink } from "#/api/typesGenerated";
 import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
 import {
 	SettingsHeader,
@@ -20,10 +16,12 @@ import {
 } from "#/components/SettingsHeader/SettingsHeader";
 import { toast } from "#/components/Toaster/toast";
 import { pageTitle } from "#/utils/page";
-import { LinkedAccountsPageView } from "./LinkedAccountsPageView";
+import {
+	type IssuedLinkCode,
+	LinkedAccountsPageView,
+} from "./LinkedAccountsPageView";
 
-type IssuedLinkCode = {
-	linkCode: PluginLinkCode;
+type TrackedLinkCode = IssuedLinkCode & {
 	knownExternalIds: readonly string[];
 };
 
@@ -38,9 +36,9 @@ const linkCodePollIntervalMs = 3_000;
 // made shows up.
 const getUnusedLinkCodes = (
 	plugins: readonly LinkablePlugin[] | undefined,
-	issuedCodes: Readonly<Partial<Record<string, IssuedLinkCode>>>,
-): Partial<Record<string, PluginLinkCode>> => {
-	const unused: Partial<Record<string, PluginLinkCode>> = {};
+	issuedCodes: Readonly<Partial<Record<string, TrackedLinkCode>>>,
+): Partial<Record<string, TrackedLinkCode>> => {
+	const unused: Partial<Record<string, TrackedLinkCode>> = {};
 	for (const plugin of plugins ?? []) {
 		const issued = issuedCodes[plugin.id];
 		if (
@@ -49,7 +47,7 @@ const getUnusedLinkCodes = (
 				issued.knownExternalIds.includes(link.external_id),
 			)
 		) {
-			unused[plugin.id] = issued.linkCode;
+			unused[plugin.id] = issued;
 		}
 	}
 	return unused;
@@ -58,7 +56,7 @@ const getUnusedLinkCodes = (
 const LinkedAccountsPage: React.FC = () => {
 	const queryClient = useQueryClient();
 	const [issuedCodes, setIssuedCodes] = useState<
-		Partial<Record<string, IssuedLinkCode>>
+		Partial<Record<string, TrackedLinkCode>>
 	>({});
 	const pluginsQuery = useQuery({
 		...linkablePlugins(),
@@ -67,14 +65,14 @@ const LinkedAccountsPage: React.FC = () => {
 		refetchInterval: ({ state }) =>
 			!state.error &&
 			Object.values(getUnusedLinkCodes(state.data, issuedCodes)).some(
-				(linkCode) =>
-					linkCode !== undefined &&
-					new Date(linkCode.expires_at).getTime() > Date.now(),
+				(issued) =>
+					issued !== undefined &&
+					new Date(issued.linkCode.expires_at).getTime() > Date.now(),
 			)
 				? linkCodePollIntervalMs
 				: false,
 	});
-	const createLinkCodeMutation = useMutation(createPluginLinkCode(queryClient));
+	const startLinkMutation = useMutation(startPluginLink(queryClient));
 	const deleteLinkMutation = useMutation(deletePluginLink(queryClient));
 	const [linkToUnlink, setLinkToUnlink] = useState<LinkToUnlink>();
 	const focusReturnTargetsRef = useRef<readonly (HTMLButtonElement | null)[]>(
@@ -101,13 +99,13 @@ const LinkedAccountsPage: React.FC = () => {
 				// it and an expired code renders as expired without a timer.
 				now={new Date(pluginsQuery.dataUpdatedAt)}
 				creatingLinkCodePluginId={
-					createLinkCodeMutation.isPending
-						? createLinkCodeMutation.variables
+					startLinkMutation.isPending
+						? startLinkMutation.variables?.id
 						: undefined
 				}
 				onCreateLinkCode={(plugin) => {
-					createLinkCodeMutation.mutate(plugin.id, {
-						onSuccess: (linkCode) => {
+					startLinkMutation.mutate(plugin, {
+						onSuccess: ({ linkCode, connectPrompt }) => {
 							// The mutation refetched the list, so read it instead of the
 							// plugin from the click.
 							const current =
@@ -118,6 +116,7 @@ const LinkedAccountsPage: React.FC = () => {
 								...codes,
 								[plugin.id]: {
 									linkCode,
+									connectPrompt,
 									knownExternalIds: current.links.map(
 										(link) => link.external_id,
 									),
@@ -126,7 +125,12 @@ const LinkedAccountsPage: React.FC = () => {
 						},
 						onError: (error) => {
 							toast.error(
-								getErrorMessage(error, "Failed to create a link code."),
+								getErrorMessage(
+									error,
+									plugin.connect
+										? "Failed to connect an account."
+										: "Failed to create a link code.",
+								),
 								{ description: getErrorDetail(error) },
 							);
 						},

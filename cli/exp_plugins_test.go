@@ -45,6 +45,7 @@ func TestExpPlugins(t *testing.T) {
 
 	out := run(t, "install", wasmPath, "--yes", "--config", "token=secret", "--allow-private-cidr", "10.0.0.0/8")
 	require.Contains(t, out, "(as linked users)")
+	require.Contains(t, out, "such as a QR code")
 	require.Contains(t, out, "Installed bridge")
 
 	plugins := list(t)

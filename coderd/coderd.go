@@ -1438,6 +1438,7 @@ func New(options *Options) *API {
 				r.Get("/links", api.getPluginLinks)
 				r.Delete("/links/{externalID}", api.deletePluginLink)
 				r.Post("/link-codes", api.postPluginLinkCode)
+				r.Post("/connect", api.postPluginConnect)
 			})
 		})
 		r.With(

@@ -2144,6 +2144,44 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/experimental/plugins/{plugin}/connect": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the connect prompt of a plugin",
+                "operationId": "connect-plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Plugin ID",
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.PluginConnectPrompt"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/experimental/plugins/{plugin}/link-codes": {
             "post": {
                 "produces": [
@@ -27919,6 +27957,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "connect": {
+                    "description": "Connect means ConnectPlugin returns a prompt to show next to the link\ncode.",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string",
                     "format": "uuid"
@@ -30281,6 +30323,19 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.PluginConnectPrompt": {
+            "type": "object",
+            "properties": {
+                "instructions": {
+                    "type": "string"
+                },
+                "qr_code_png": {
+                    "description": "QRCodePNG is a PNG image of a QR code, omitted when the plugin shows\nonly instructions. JSON encodes it as base64.",
+                    "type": "string",
+                    "format": "byte"
+                }
+            }
+        },
         "codersdk.PluginGrants": {
             "type": "object",
             "properties": {
@@ -30295,6 +30350,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "connect": {
+                    "type": "boolean"
                 },
                 "events": {
                     "type": "array",
@@ -30349,6 +30407,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "connect": {
+                    "description": "Connect means the plugin shows a prompt, such as a QR code, to users\nwho link an account in Settings \u003e Linked accounts.",
+                    "type": "boolean"
                 },
                 "events": {
                     "type": "array",

@@ -23,11 +23,12 @@ import (
 
 // Export names of the plugin ABI.
 const (
-	ExportAlloc    = "coder_alloc"
-	ExportManifest = "coder_manifest"
-	ExportOnEvent  = "coder_on_event"
-	ExportOnTick   = "coder_on_tick"
-	ExportOnHTTP   = "coder_on_http"
+	ExportAlloc     = "coder_alloc"
+	ExportManifest  = "coder_manifest"
+	ExportOnEvent   = "coder_on_event"
+	ExportOnTick    = "coder_on_tick"
+	ExportOnHTTP    = "coder_on_http"
+	ExportOnConnect = "coder_on_connect"
 
 	exportInitialize = "_initialize"
 	hostModuleName   = "coder"
@@ -124,6 +125,7 @@ var requiredExports = map[string]struct {
 	ExportOnTick:     {results: []api.ValueType{api.ValueTypeI64}},
 	ExportOnEvent:    {params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, results: []api.ValueType{api.ValueTypeI64}},
 	ExportOnHTTP:     {params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, results: []api.ValueType{api.ValueTypeI64}},
+	ExportOnConnect:  {results: []api.ValueType{api.ValueTypeI64}},
 }
 
 // New compiles wasm and instantiates it. Module stdout and stderr are written

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -72,6 +73,25 @@ func postWebhook(t *testing.T, client *codersdk.Client, pluginID uuid.UUID, req 
 		return true
 	}, testutil.IntervalFast)
 	return out
+}
+
+// connectPlugin gets the connect prompt of a plugin. It retries while the
+// plugin is not yet running on the replica.
+func connectPlugin(t *testing.T, client *codersdk.ExperimentalClient, pluginID uuid.UUID) codersdk.PluginConnectPrompt {
+	t.Helper()
+	var prompt codersdk.PluginConnectPrompt
+	ctx := testutil.Context(t, testutil.WaitLong)
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		var err error
+		prompt, err = client.ConnectPlugin(ctx, pluginID)
+		var sdkErr *codersdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusServiceUnavailable {
+			return false
+		}
+		require.NoError(t, err)
+		return true
+	}, testutil.IntervalFast)
+	return prompt
 }
 
 func TestPlugins(t *testing.T) {
@@ -169,8 +189,12 @@ func TestPlugins(t *testing.T) {
 	t.Run("ConverseScopeOnlyReachesChats", func(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitLong)
+		// Not the member that LinkSendAndDeliver links: the plugin bridges
+		// every chat of a linked user, so this chat could become the chat
+		// that replied last.
+		_, other := coderdtest.CreateAnotherUser(t, ownerClient, owner.OrganizationID)
 		_, token := dbgen.APIKey(t, api.Database, database.APIKey{
-			UserID: member.ID,
+			UserID: other.ID,
 			Scopes: database.APIKeyScopes{forkdb.APIKeyScopeCoderChatsConverse},
 		})
 		scoped := codersdk.NewExperimentalClient(codersdk.New(ownerClient.URL, codersdk.WithSessionToken(token)))
@@ -183,6 +207,19 @@ func TestPlugins(t *testing.T) {
 		_, err = scoped.CreateToken(ctx, codersdk.Me, codersdk.CreateTokenRequest{})
 		require.ErrorAs(t, err, &sdkErr)
 		require.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, sdkErr.StatusCode())
+	})
+
+	t.Run("Connect", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		linkable, err := memberClient.LinkablePlugins(ctx)
+		require.NoError(t, err)
+		require.Len(t, linkable, 1)
+		require.True(t, linkable[0].Connect)
+
+		prompt := connectPlugin(t, memberClient, plugin.ID)
+		require.Equal(t, "\x89PNG\r\n\x1a\nbridge", string(prompt.QRCodePNG))
+		require.Equal(t, "Scan the code, then send the link code to the bridge.", prompt.Instructions)
 	})
 
 	t.Run("LinkSendAndDeliver", func(t *testing.T) {

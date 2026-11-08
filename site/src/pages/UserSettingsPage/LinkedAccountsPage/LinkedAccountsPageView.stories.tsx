@@ -4,6 +4,7 @@ import type { LinkablePlugin } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockLinkablePlugin,
+	MockPluginConnectPrompt,
 	MockPluginLinkCode,
 	MockPluginUserLink,
 } from "#/testHelpers/plugins";
@@ -27,6 +28,12 @@ const mockPluginWithTwoLinks: LinkablePlugin = {
 			created_at: "2024-01-02T09:30:00Z",
 		},
 	],
+};
+
+const mockConnectPlugin: LinkablePlugin = {
+	...MockLinkablePlugin,
+	connect: true,
+	links: [],
 };
 
 const meta: Meta<typeof LinkedAccountsPageView> = {
@@ -54,13 +61,62 @@ export const WithoutLinks: Story = {
 
 export const LinkCodeShown: Story = {
 	args: {
-		linkCodes: { [MockLinkablePlugin.id]: MockPluginLinkCode },
+		linkCodes: { [MockLinkablePlugin.id]: { linkCode: MockPluginLinkCode } },
 	},
 };
 
 export const LinkCodeExpired: Story = {
 	args: {
-		linkCodes: { [MockLinkablePlugin.id]: MockPluginLinkCode },
+		linkCodes: { [MockLinkablePlugin.id]: { linkCode: MockPluginLinkCode } },
+		now: new Date(MockPluginLinkCode.expires_at),
+	},
+};
+
+export const ConnectWithoutLinks: Story = {
+	args: {
+		plugins: [mockConnectPlugin],
+	},
+};
+
+export const ConnectPromptShown: Story = {
+	args: {
+		plugins: [mockConnectPlugin],
+		linkCodes: {
+			[mockConnectPlugin.id]: {
+				linkCode: MockPluginLinkCode,
+				connectPrompt: MockPluginConnectPrompt,
+			},
+		},
+	},
+};
+
+export const ConnectPromptWithoutQRCode: Story = {
+	args: {
+		plugins: [mockConnectPlugin],
+		linkCodes: {
+			[mockConnectPlugin.id]: {
+				linkCode: MockPluginLinkCode,
+				connectPrompt: { ...MockPluginConnectPrompt, qr_code_png: undefined },
+			},
+		},
+	},
+};
+
+export const ConnectPromptWithoutInstructions: Story = {
+	args: {
+		plugins: [mockConnectPlugin],
+		linkCodes: {
+			[mockConnectPlugin.id]: {
+				linkCode: MockPluginLinkCode,
+				connectPrompt: { ...MockPluginConnectPrompt, instructions: "" },
+			},
+		},
+	},
+};
+
+export const ConnectPromptExpired: Story = {
+	args: {
+		...ConnectPromptShown.args,
 		now: new Date(MockPluginLinkCode.expires_at),
 	},
 };

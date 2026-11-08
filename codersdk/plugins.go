@@ -35,6 +35,9 @@ type PluginManifest struct {
 	TickSeconds uint32   `json:"tick_seconds"`
 	Webhook     bool     `json:"webhook"`
 	ConfigKeys  []string `json:"config_keys"`
+	// Connect means the plugin shows a prompt, such as a QR code, to users
+	// who link an account in Settings > Linked accounts.
+	Connect bool `json:"connect"`
 }
 
 // PluginGrants is what an owner granted a plugin. The capabilities must equal
@@ -46,6 +49,7 @@ type PluginGrants struct {
 	TickSeconds uint32   `json:"tick_seconds"`
 	Webhook     bool     `json:"webhook"`
 	ConfigKeys  []string `json:"config_keys"`
+	Connect     bool     `json:"connect"`
 	// PrivateCIDRs lets HTTP requests of the plugin reach these private
 	// address ranges, for example a signal-cli-rest-api in the cluster.
 	PrivateCIDRs []string `json:"private_cidrs"`
@@ -60,6 +64,7 @@ func GrantsForManifest(m PluginManifest, privateCIDRs []string) PluginGrants {
 		TickSeconds:  m.TickSeconds,
 		Webhook:      m.Webhook,
 		ConfigKeys:   m.ConfigKeys,
+		Connect:      m.Connect,
 		PrivateCIDRs: privateCIDRs,
 	}
 }
@@ -122,13 +127,26 @@ type PluginUserLink struct {
 
 // LinkablePlugin is a plugin the user can link an external account to.
 type LinkablePlugin struct {
-	ID               uuid.UUID        `json:"id" format:"uuid"`
-	OrganizationID   uuid.UUID        `json:"organization_id" format:"uuid"`
-	OrganizationName string           `json:"organization_name"`
-	Name             string           `json:"name"`
-	Version          string           `json:"version"`
-	Chats            []string         `json:"chats"`
-	Links            []PluginUserLink `json:"links"`
+	ID               uuid.UUID `json:"id" format:"uuid"`
+	OrganizationID   uuid.UUID `json:"organization_id" format:"uuid"`
+	OrganizationName string    `json:"organization_name"`
+	Name             string    `json:"name"`
+	Version          string    `json:"version"`
+	Chats            []string  `json:"chats"`
+	// Connect means ConnectPlugin returns a prompt to show next to the link
+	// code.
+	Connect bool             `json:"connect"`
+	Links   []PluginUserLink `json:"links"`
+}
+
+// PluginConnectPrompt is what a plugin shows a user who links an account,
+// for example a QR code that adds Coder as a linked device of the user's
+// Signal account.
+type PluginConnectPrompt struct {
+	// QRCodePNG is a PNG image of a QR code, omitted when the plugin shows
+	// only instructions. JSON encodes it as base64.
+	QRCodePNG    []byte `json:"qr_code_png,omitempty" swaggertype:"string" format:"byte"`
+	Instructions string `json:"instructions"`
 }
 
 // InspectPlugin reads the manifest of a module without installing it.
@@ -187,6 +205,12 @@ func (c *ExperimentalClient) LinkablePlugins(ctx context.Context) ([]LinkablePlu
 // user. A new code replaces the older codes of the user for the plugin.
 func (c *ExperimentalClient) CreatePluginLinkCode(ctx context.Context, pluginID uuid.UUID) (PluginLinkCode, error) {
 	return requestJSON[PluginLinkCode](ctx, c.Client, http.MethodPost, fmt.Sprintf("/api/experimental/plugins/%s/link-codes", pluginID), http.StatusCreated, nil)
+}
+
+// ConnectPlugin asks a plugin for the prompt that the authenticated user
+// follows to connect an account. Each call can return a new prompt.
+func (c *ExperimentalClient) ConnectPlugin(ctx context.Context, pluginID uuid.UUID) (PluginConnectPrompt, error) {
+	return requestJSON[PluginConnectPrompt](ctx, c.Client, http.MethodPost, fmt.Sprintf("/api/experimental/plugins/%s/connect", pluginID), http.StatusOK, nil)
 }
 
 // DeletePluginLink removes a link. Users can remove their own links. Owners

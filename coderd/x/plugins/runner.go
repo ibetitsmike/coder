@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -27,7 +28,13 @@ const (
 	scanInterval = 15 * time.Second
 	// maxWebhookBodyBytes caps the body of one webhook request.
 	maxWebhookBodyBytes = 1 << 20
+	// maxQRCodeBytes and maxInstructionsBytes cap a connect prompt, which
+	// coderd shows on its own origin.
+	maxQRCodeBytes       = 256 << 10
+	maxInstructionsBytes = 2 << 10
 )
+
+var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 
 // WebhookResponse is what on_http returned.
 type WebhookResponse struct {
@@ -309,16 +316,24 @@ func (r *runner) unsubscribeAll() {
 	}
 }
 
+// waitReady waits until the plugin process has loaded the module.
+func (r *runner) waitReady(ctx context.Context) error {
+	select {
+	case <-r.ready:
+		return nil
+	case <-r.done:
+		return ErrNotRunningHere
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (r *runner) webhook(ctx context.Context, req *http.Request) (*WebhookResponse, error) {
 	if !r.grants.Webhook {
 		return nil, xerrors.New("the plugin has no webhook grant")
 	}
-	select {
-	case <-r.ready:
-	case <-r.done:
-		return nil, ErrNotRunningHere
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if err := r.waitReady(ctx); err != nil {
+		return nil, err
 	}
 	body, err := readWebhookBody(req)
 	if err != nil {
@@ -339,6 +354,39 @@ func (r *runner) webhook(ctx context.Context, req *http.Request) (*WebhookRespon
 		status = http.StatusOK
 	}
 	return &WebhookResponse{StatusCode: status, Header: headersFromProto(out.GetHeaders()), Body: out.GetBody()}, nil
+}
+
+func (r *runner) connect(ctx context.Context) (codersdk.PluginConnectPrompt, error) {
+	if !r.grants.Connect {
+		return codersdk.PluginConnectPrompt{}, xerrors.New("the plugin has no connect grant")
+	}
+	if err := r.waitReady(ctx); err != nil {
+		return codersdk.PluginConnectPrompt{}, err
+	}
+	var out pluginproto.ConnectPrompt
+	if err := r.invoke(ctx, "coder_on_connect", nil, &out); err != nil {
+		return codersdk.PluginConnectPrompt{}, err
+	}
+	return connectPromptFromProto(&out)
+}
+
+// connectPromptFromProto checks the output of coder_on_connect before coderd
+// shows it to a user.
+func connectPromptFromProto(out *pluginproto.ConnectPrompt) (codersdk.PluginConnectPrompt, error) {
+	if out.GetError() != "" {
+		return codersdk.PluginConnectPrompt{}, xerrors.Errorf("coder_on_connect: %s", out.GetError())
+	}
+	png, instructions := out.GetQrCodePng(), out.GetInstructions()
+	if len(png) == 0 && instructions == "" {
+		return codersdk.PluginConnectPrompt{}, xerrors.New("the plugin returned an empty connect prompt")
+	}
+	if len(png) > 0 && (!bytes.HasPrefix(png, pngSignature) || len(png) > maxQRCodeBytes) {
+		return codersdk.PluginConnectPrompt{}, xerrors.Errorf("the QR code of the plugin must be a PNG image of at most %d bytes", maxQRCodeBytes)
+	}
+	if len(instructions) > maxInstructionsBytes {
+		return codersdk.PluginConnectPrompt{}, xerrors.Errorf("the connect instructions of the plugin must be at most %d bytes", maxInstructionsBytes)
+	}
+	return codersdk.PluginConnectPrompt{QRCodePNG: png, Instructions: instructions}, nil
 }
 
 func headersToProto(h http.Header) []*pluginproto.Header {

@@ -14,6 +14,7 @@ message Manifest {
   uint32 tick_seconds = 6;
   bool webhook = 7;
   repeated string config_keys = 8;
+  bool connect = 9;
 }
 
 message Header {
@@ -104,4 +105,14 @@ message ChatEvent {
 // Result is the output of the coder_on_event and coder_on_tick exports.
 message Result {
   string error = 1;
+}
+
+// ConnectPrompt is the output of the coder_on_connect export. Coder shows it
+// to a user who connects an account in the external service.
+message ConnectPrompt {
+  string error = 1;
+  // qr_code_png is a PNG image of a QR code that the user scans in the
+  // external service.
+  bytes qr_code_png = 2;
+  string instructions = 3;
 }

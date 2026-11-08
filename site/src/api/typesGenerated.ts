@@ -6761,6 +6761,11 @@ export interface LinkablePlugin {
 	readonly name: string;
 	readonly version: string;
 	readonly chats: readonly string[];
+	/**
+	 * Connect means ConnectPlugin returns a prompt to show next to the link
+	 * code.
+	 */
+	readonly connect: boolean;
 	readonly links: readonly PluginUserLink[];
 }
 
@@ -8586,6 +8591,21 @@ export const PluginChatSend = "send";
 
 // From codersdk/plugins.go
 /**
+ * PluginConnectPrompt is what a plugin shows a user who links an account,
+ * for example a QR code that adds Coder as a linked device of the user's
+ * Signal account.
+ */
+export interface PluginConnectPrompt {
+	/**
+	 * QRCodePNG is a PNG image of a QR code, omitted when the plugin shows
+	 * only instructions. JSON encodes it as base64.
+	 */
+	readonly qr_code_png?: string;
+	readonly instructions: string;
+}
+
+// From codersdk/plugins.go
+/**
  * Plugin event names a plugin can request in its manifest.
  */
 export const PluginEventChatMessagesAdded = "chat.messages_added";
@@ -8608,6 +8628,7 @@ export interface PluginGrants {
 	readonly tick_seconds: number;
 	readonly webhook: boolean;
 	readonly config_keys: readonly string[];
+	readonly connect: boolean;
 	/**
 	 * PrivateCIDRs lets HTTP requests of the plugin reach these private
 	 * address ranges, for example a signal-cli-rest-api in the cluster.
@@ -8639,6 +8660,11 @@ export interface PluginManifest {
 	readonly tick_seconds: number;
 	readonly webhook: boolean;
 	readonly config_keys: readonly string[];
+	/**
+	 * Connect means the plugin shows a prompt, such as a QR code, to users
+	 * who link an account in Settings > Linked accounts.
+	 */
+	readonly connect: boolean;
 }
 
 // From codersdk/plugins.go

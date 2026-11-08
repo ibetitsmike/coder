@@ -141,6 +141,9 @@ func describePluginRequest(inspected codersdk.InspectPluginResponse, privateCIDR
 	if m.Webhook {
 		_, _ = fmt.Fprintf(&b, "  %-8s POST /api/experimental/plugins/{id}/webhook, no authentication\n", "webhook")
 	}
+	if m.Connect {
+		_, _ = fmt.Fprintf(&b, "  %-8s show users who link an account a prompt, such as a QR code\n", "connect")
+	}
 	line("config", m.ConfigKeys, "")
 	line("private", privateCIDRs, " (from --allow-private-cidr)")
 	return b.String()

@@ -4054,6 +4054,15 @@ class ExperimentalApiMethods {
 		return response.data;
 	};
 
+	connectPlugin = async (
+		pluginId: string,
+	): Promise<TypesGen.PluginConnectPrompt> => {
+		const response = await this.axios.post<TypesGen.PluginConnectPrompt>(
+			`${pluginPath(pluginId)}/connect`,
+		);
+		return response.data;
+	};
+
 	deletePluginLink = async (
 		pluginId: string,
 		externalId: string,

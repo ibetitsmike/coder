@@ -39,6 +39,7 @@ func TestValidateGrants(t *testing.T) {
 		"ExtraKey":    func(g *codersdk.PluginGrants) { g.ConfigKeys = append(g.ConfigKeys, "other") },
 		"Tick":        func(g *codersdk.PluginGrants) { g.TickSeconds = 2 },
 		"Webhook":     func(g *codersdk.PluginGrants) { g.Webhook = true },
+		"Connect":     func(g *codersdk.PluginGrants) { g.Connect = true },
 		"InvalidCIDR": func(g *codersdk.PluginGrants) { g.PrivateCIDRs = []string{"not-a-cidr"} },
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -29,6 +29,9 @@ type Manifest struct {
 	ConfigKeys  []string
 	TickSeconds uint32
 	Webhook     bool
+	// Connect shows the prompt of Plugin.OnConnect to users who link an
+	// account in Coder.
+	Connect bool
 }
 
 // ChatEvent is delivered to Plugin.OnEvent.
@@ -44,6 +47,18 @@ type ChatEvent struct {
 type ChatText struct {
 	ID   int64
 	Text string
+}
+
+// ConnectPrompt is what Plugin.OnConnect returns. Coder shows it to a user
+// who links an account, for example to add Coder as a linked device of the
+// user's own account.
+type ConnectPrompt struct {
+	// QRCodePNG is a PNG image of a QR code that the user scans in the
+	// external service.
+	QRCodePNG []byte
+	// Instructions tell the user how to use the QR code and how to finish
+	// linking with the link code that Coder shows next to it.
+	Instructions string
 }
 
 // HTTPRequest is an outbound request for Host.Fetch or an inbound webhook
@@ -87,12 +102,13 @@ type Host interface {
 }
 
 // Plugin is the set of handlers a plugin implements. Nil handlers are
-// no-ops, and a nil OnHTTP responds with 404.
+// no-ops, a nil OnHTTP responds with 404, and a nil OnConnect fails.
 type Plugin struct {
-	Manifest Manifest
-	OnTick   func(Host) error
-	OnEvent  func(Host, ChatEvent) error
-	OnHTTP   func(Host, HTTPRequest) HTTPResponse
+	Manifest  Manifest
+	OnTick    func(Host) error
+	OnEvent   func(Host, ChatEvent) error
+	OnHTTP    func(Host, HTTPRequest) HTTPResponse
+	OnConnect func(Host) (ConnectPrompt, error)
 }
 
 // registered is read by the wasip1 exports.
@@ -236,6 +252,7 @@ func handleManifest(p *Plugin) []byte {
 		TickSeconds: m.TickSeconds,
 		Webhook:     m.Webhook,
 		ConfigKeys:  m.ConfigKeys,
+		Connect:     m.Connect,
 	})
 }
 
@@ -301,6 +318,29 @@ func handleHTTP(p *Plugin, send hostTransport, input []byte) (out []byte) {
 		})
 	}
 	return out
+}
+
+func handleConnect(p *Plugin, send hostTransport) (out []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = mustMarshal(&pluginproto.ConnectPrompt{Error: validUTF8(fmt.Sprintf("plugin panic: %v\n%s", r, debug.Stack()))})
+		}
+	}()
+	if p == nil || p.OnConnect == nil {
+		return mustMarshal(&pluginproto.ConnectPrompt{Error: "the plugin has no connect handler"})
+	}
+	prompt, err := p.OnConnect(host{send: send})
+	if err != nil {
+		msg := validUTF8(err.Error())
+		if msg == "" {
+			msg = "plugin returned an error with an empty message"
+		}
+		return mustMarshal(&pluginproto.ConnectPrompt{Error: msg})
+	}
+	return mustMarshal(&pluginproto.ConnectPrompt{
+		QrCodePng:    prompt.QRCodePNG,
+		Instructions: validUTF8(prompt.Instructions),
+	})
 }
 
 // validUTF8 makes s safe for a proto3 string field, which must be UTF-8.

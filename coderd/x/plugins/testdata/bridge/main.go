@@ -46,6 +46,7 @@ func init() {
 			ConfigKeys:  []string{"token"},
 			TickSeconds: 2,
 			Webhook:     true,
+			Connect:     true,
 		},
 		OnTick: func(pluginsdk.Host) error {
 			ticks++
@@ -55,7 +56,8 @@ func init() {
 			events = append(events, ev)
 			return nil
 		},
-		OnHTTP: onHTTP,
+		OnHTTP:    onHTTP,
+		OnConnect: onConnect,
 	})
 }
 
@@ -96,6 +98,15 @@ func onHTTP(h pluginsdk.Host, req pluginsdk.HTTPRequest) pluginsdk.HTTPResponse 
 		out.Error = err.Error()
 	}
 	return reply(http.StatusOK, out)
+}
+
+func onConnect(pluginsdk.Host) (pluginsdk.ConnectPrompt, error) {
+	return pluginsdk.ConnectPrompt{
+		// Not a valid image, but it starts with the PNG signature that
+		// Coder checks.
+		QRCodePNG:    []byte("\x89PNG\r\n\x1a\nbridge"),
+		Instructions: "Scan the code, then send the link code to the bridge.",
+	}, nil
 }
 
 func reply(status int, out response) pluginsdk.HTTPResponse {

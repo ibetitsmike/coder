@@ -103,3 +103,8 @@ func coderOnHTTP(ptr, size uint32) uint64 {
 	}
 	return ret(handleHTTP(registered, sendHostCall, in))
 }
+
+//go:wasmexport coder_on_connect
+func coderOnConnect() uint64 {
+	return ret(handleConnect(registered, sendHostCall))
+}

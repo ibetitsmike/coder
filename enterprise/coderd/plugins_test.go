@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -22,7 +23,8 @@ import (
 )
 
 // TestPluginWebhookRelay checks that a replica that does not run a plugin
-// forwards the plugin's webhooks to the replica that does.
+// forwards the plugin's webhooks and connect requests to the replica that
+// does.
 func TestPluginWebhookRelay(t *testing.T) {
 	t.Parallel()
 	wasm := plugintest.BuildWasm(t, "github.com/coder/coder/v2/coderd/x/plugins/testdata/bridge")
@@ -121,6 +123,25 @@ func TestPluginWebhookRelay(t *testing.T) {
 		status, _, res := post(t, plugins.RelaySourceHeader, nil)
 		require.Equal(t, http.StatusOK, status)
 		require.Empty(t, res.Body)
+	})
+
+	t.Run("ConnectForwarded", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		otherClient := codersdk.NewExperimentalClient(codersdk.New(other, codersdk.WithSessionToken(firstClient.SessionToken())))
+		var prompt codersdk.PluginConnectPrompt
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			var err error
+			prompt, err = otherClient.ConnectPlugin(ctx, plugin.ID)
+			var sdkErr *codersdk.Error
+			if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusServiceUnavailable {
+				return false
+			}
+			require.NoError(t, err)
+			return true
+		}, testutil.IntervalFast)
+		require.Equal(t, "\x89PNG\r\n\x1a\nbridge", string(prompt.QRCodePNG))
+		require.NotEmpty(t, prompt.Instructions)
 	})
 
 	t.Run("RelayedRequestIsNotForwardedAgain", func(t *testing.T) {

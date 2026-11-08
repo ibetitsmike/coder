@@ -7374,6 +7374,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "config_keys": [
       "string"
     ],
+    "connect": true,
     "events": [
       "string"
     ],
@@ -10985,6 +10986,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
     "config_keys": [
       "string"
     ],
+    "connect": true,
     "events": [
       "string"
     ],
@@ -11145,6 +11147,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   "chats": [
     "string"
   ],
+  "connect": true,
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "links": [
     {
@@ -11163,15 +11166,16 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name                | Type                                                        | Required | Restrictions | Description |
-|---------------------|-------------------------------------------------------------|----------|--------------|-------------|
-| `chats`             | array of string                                             | false    |              |             |
-| `id`                | string                                                      | false    |              |             |
-| `links`             | array of [codersdk.PluginUserLink](#codersdkpluginuserlink) | false    |              |             |
-| `name`              | string                                                      | false    |              |             |
-| `organization_id`   | string                                                      | false    |              |             |
-| `organization_name` | string                                                      | false    |              |             |
-| `version`           | string                                                      | false    |              |             |
+| Name                | Type                                                        | Required | Restrictions | Description                                                                 |
+|---------------------|-------------------------------------------------------------|----------|--------------|-----------------------------------------------------------------------------|
+| `chats`             | array of string                                             | false    |              |                                                                             |
+| `connect`           | boolean                                                     | false    |              | Connect means ConnectPlugin returns a prompt to show next to the link code. |
+| `id`                | string                                                      | false    |              |                                                                             |
+| `links`             | array of [codersdk.PluginUserLink](#codersdkpluginuserlink) | false    |              |                                                                             |
+| `name`              | string                                                      | false    |              |                                                                             |
+| `organization_id`   | string                                                      | false    |              |                                                                             |
+| `organization_name` | string                                                      | false    |              |                                                                             |
+| `version`           | string                                                      | false    |              |                                                                             |
 
 ## codersdk.ListInboxNotificationsResponse
 
@@ -13722,6 +13726,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
     "config_keys": [
       "string"
     ],
+    "connect": true,
     "events": [
       "string"
     ],
@@ -13743,6 +13748,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
     "config_keys": [
       "string"
     ],
+    "connect": true,
     "events": [
       "string"
     ],
@@ -13781,6 +13787,22 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `updated_at`      | string                                             | false    |              |                                                          |
 | `version`         | string                                             | false    |              |                                                          |
 
+## codersdk.PluginConnectPrompt
+
+```json
+{
+  "instructions": "string",
+  "qr_code_png": "string"
+}
+```
+
+### Properties
+
+| Name           | Type   | Required | Restrictions | Description                                                                                                          |
+|----------------|--------|----------|--------------|----------------------------------------------------------------------------------------------------------------------|
+| `instructions` | string | false    |              |                                                                                                                      |
+| `qr_code_png`  | string | false    |              | Qr code png is a PNG image of a QR code, omitted when the plugin shows only instructions. JSON encodes it as base64. |
+
 ## codersdk.PluginGrants
 
 ```json
@@ -13791,6 +13813,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   "config_keys": [
     "string"
   ],
+  "connect": true,
   "events": [
     "string"
   ],
@@ -13811,6 +13834,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 |-----------------|-----------------|----------|--------------|--------------------------------------------------------------------------------------------------------------------------------------|
 | `chats`         | array of string | false    |              |                                                                                                                                      |
 | `config_keys`   | array of string | false    |              |                                                                                                                                      |
+| `connect`       | boolean         | false    |              |                                                                                                                                      |
 | `events`        | array of string | false    |              |                                                                                                                                      |
 | `http_origins`  | array of string | false    |              |                                                                                                                                      |
 | `private_cidrs` | array of string | false    |              | Private cidrs lets HTTP requests of the plugin reach these private address ranges, for example a signal-cli-rest-api in the cluster. |
@@ -13843,6 +13867,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   "config_keys": [
     "string"
   ],
+  "connect": true,
   "events": [
     "string"
   ],
@@ -13858,16 +13883,17 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name           | Type            | Required | Restrictions | Description |
-|----------------|-----------------|----------|--------------|-------------|
-| `chats`        | array of string | false    |              |             |
-| `config_keys`  | array of string | false    |              |             |
-| `events`       | array of string | false    |              |             |
-| `http_origins` | array of string | false    |              |             |
-| `name`         | string          | false    |              |             |
-| `tick_seconds` | integer         | false    |              |             |
-| `version`      | string          | false    |              |             |
-| `webhook`      | boolean         | false    |              |             |
+| Name           | Type            | Required | Restrictions | Description                                                                                                             |
+|----------------|-----------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------|
+| `chats`        | array of string | false    |              |                                                                                                                         |
+| `config_keys`  | array of string | false    |              |                                                                                                                         |
+| `connect`      | boolean         | false    |              | Connect means the plugin shows a prompt, such as a QR code, to users who link an account in Settings > Linked accounts. |
+| `events`       | array of string | false    |              |                                                                                                                         |
+| `http_origins` | array of string | false    |              |                                                                                                                         |
+| `name`         | string          | false    |              |                                                                                                                         |
+| `tick_seconds` | integer         | false    |              |                                                                                                                         |
+| `version`      | string          | false    |              |                                                                                                                         |
+| `webhook`      | boolean         | false    |              |                                                                                                                         |
 
 ## codersdk.PluginUserLink
 

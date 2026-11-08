@@ -285,17 +285,46 @@ var ErrNotRunningHere = xerrors.New("the plugin does not run on this replica")
 // another replica runs the plugin, Webhook forwards the request to it. It
 // returns ErrNotRunningHere if no reachable replica runs the plugin.
 func (m *Manager) Webhook(ctx context.Context, p forkdb.Plugin, req *http.Request) (*WebhookResponse, error) {
+	r, forward := m.route(p, req)
+	if r != nil {
+		return r.webhook(ctx, req)
+	}
+	if !forward {
+		return nil, ErrNotRunningHere
+	}
+	return m.forward(ctx, p, req)
+}
+
+// Connect returns the prompt that a plugin shows a user who links an
+// account. If another replica runs the plugin, Connect forwards the request
+// to it. It returns ErrNotRunningHere if no reachable replica runs the
+// plugin.
+func (m *Manager) Connect(ctx context.Context, p forkdb.Plugin, req *http.Request) (codersdk.PluginConnectPrompt, error) {
+	r, forward := m.route(p, req)
+	if r != nil {
+		return r.connect(ctx)
+	}
+	if !forward {
+		return codersdk.PluginConnectPrompt{}, ErrNotRunningHere
+	}
+	res, err := m.forward(ctx, p, req)
+	if err != nil {
+		return codersdk.PluginConnectPrompt{}, err
+	}
+	return decodeForwardedPrompt(res)
+}
+
+// route returns the runner of a plugin that this replica runs. Otherwise it
+// reports whether the request can go to the replica that holds the lease.
+func (m *Manager) route(p forkdb.Plugin, req *http.Request) (*runner, bool) {
 	relayed := req.Header.Get(RelaySourceHeader) != ""
 	// The plugin sees the request as the sender sent it.
 	req.Header.Del(RelaySourceHeader)
 	if r, ok := m.runnerFor(p.ID); ok {
-		return r.webhook(ctx, req)
+		return r, false
 	}
 	// A relayed request is not forwarded again, so a lease that moves
 	// while a request is in flight can't make a loop.
 	leased := p.RunnerID.Valid && p.LeaseExpiresAt.Valid && p.LeaseExpiresAt.Time.After(dbtime.Now())
-	if relayed || !leased || p.RunnerID.UUID == m.opts.ReplicaID || m.opts.ReplicaAddress == nil {
-		return nil, ErrNotRunningHere
-	}
-	return m.forwardWebhook(ctx, p, req)
+	return nil, !relayed && leased && p.RunnerID.UUID != m.opts.ReplicaID && m.opts.ReplicaAddress != nil
 }

@@ -36,6 +36,7 @@ func ManifestFromProto(m *pluginproto.Manifest) codersdk.PluginManifest {
 		TickSeconds: m.GetTickSeconds(),
 		Webhook:     m.GetWebhook(),
 		ConfigKeys:  nonNil(m.GetConfigKeys()),
+		Connect:     m.GetConnect(),
 	}
 }
 
@@ -102,6 +103,9 @@ func ValidateGrants(m codersdk.PluginManifest, g codersdk.PluginGrants) error {
 	}
 	if m.Webhook != g.Webhook {
 		return xerrors.Errorf("grant for webhook must equal the manifest: requested %t, granted %t", m.Webhook, g.Webhook)
+	}
+	if m.Connect != g.Connect {
+		return xerrors.Errorf("grant for connect must equal the manifest: requested %t, granted %t", m.Connect, g.Connect)
 	}
 	if _, err := ParsePrivateCIDRs(g.PrivateCIDRs); err != nil {
 		return err

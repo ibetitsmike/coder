@@ -1,6 +1,7 @@
 import { useId, useRef } from "react";
 import type {
 	LinkablePlugin,
+	PluginConnectPrompt,
 	PluginLinkCode,
 	PluginUserLink,
 } from "#/api/typesGenerated";
@@ -21,10 +22,19 @@ import {
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { DATE_FORMAT, formatDateTime } from "#/utils/time";
 
+/**
+ * IssuedLinkCode is a link code the user asked for. It carries a connect
+ * prompt only for a plugin that connects accounts.
+ */
+export type IssuedLinkCode = {
+	linkCode: PluginLinkCode;
+	connectPrompt?: PluginConnectPrompt;
+};
+
 type LinkedAccountsPageViewProps = {
 	plugins?: readonly LinkablePlugin[];
 	getPluginsError?: unknown;
-	linkCodes: Readonly<Partial<Record<string, PluginLinkCode>>>;
+	linkCodes: Readonly<Partial<Record<string, IssuedLinkCode>>>;
 	now: Date;
 	creatingLinkCodePluginId?: string;
 	onCreateLinkCode: (plugin: LinkablePlugin) => void;
@@ -69,7 +79,7 @@ export const LinkedAccountsPageView: React.FC<LinkedAccountsPageViewProps> = ({
 					<PluginSection
 						key={plugin.id}
 						plugin={plugin}
-						linkCode={linkCodes[plugin.id]}
+						issued={linkCodes[plugin.id]}
 						now={now}
 						isCreatingLinkCode={creatingLinkCodePluginId === plugin.id}
 						onCreateLinkCode={() => onCreateLinkCode(plugin)}
@@ -85,7 +95,7 @@ export const LinkedAccountsPageView: React.FC<LinkedAccountsPageViewProps> = ({
 
 type PluginSectionProps = {
 	plugin: LinkablePlugin;
-	linkCode?: PluginLinkCode;
+	issued?: IssuedLinkCode;
 	now: Date;
 	isCreatingLinkCode: boolean;
 	onCreateLinkCode: () => void;
@@ -97,7 +107,7 @@ type PluginSectionProps = {
 
 const PluginSection: React.FC<PluginSectionProps> = ({
 	plugin,
-	linkCode,
+	issued,
 	now,
 	isCreatingLinkCode,
 	onCreateLinkCode,
@@ -127,11 +137,18 @@ const PluginSection: React.FC<PluginSectionProps> = ({
 					onClick={onCreateLinkCode}
 				>
 					<Spinner loading={isCreatingLinkCode} />
-					Get link code
+					{plugin.connect ? "Connect account" : "Get link code"}
 				</Button>
 			</div>
 
-			{linkCode && <LinkCode linkCode={linkCode} now={now} />}
+			{issued && (
+				<LinkCode
+					pluginName={plugin.name}
+					linkCode={issued.linkCode}
+					connectPrompt={issued.connectPrompt}
+					now={now}
+				/>
+			)}
 
 			<Table aria-label={`${plugin.name} linked accounts`}>
 				<TableHeader>
@@ -148,7 +165,11 @@ const PluginSection: React.FC<PluginSectionProps> = ({
 						<TableEmpty
 							isCompact
 							message="No linked accounts"
-							description="Get a link code and send it to the bot to link an account."
+							description={
+								plugin.connect
+									? "Connect an account, then use it to send the link code."
+									: "Get a link code and send it to the bot to link an account."
+							}
 						/>
 					) : (
 						plugin.links.map((link) => (
@@ -182,11 +203,18 @@ const PluginSection: React.FC<PluginSectionProps> = ({
 };
 
 type LinkCodeProps = {
+	pluginName: string;
 	linkCode: PluginLinkCode;
+	connectPrompt?: PluginConnectPrompt;
 	now: Date;
 };
 
-const LinkCode: React.FC<LinkCodeProps> = ({ linkCode, now }) => {
+const LinkCode: React.FC<LinkCodeProps> = ({
+	pluginName,
+	linkCode,
+	connectPrompt,
+	now,
+}) => {
 	const command = `/link ${linkCode.code}`;
 	const expiresAt = new Date(linkCode.expires_at);
 
@@ -196,7 +224,10 @@ const LinkCode: React.FC<LinkCodeProps> = ({ linkCode, now }) => {
 				<p className="m-0 text-sm text-content-secondary">
 					The link code{" "}
 					<code className="font-mono font-semibold">{linkCode.code}</code>{" "}
-					expired. Get a new link code to link an account.
+					expired.{" "}
+					{connectPrompt
+						? "Connect again to link an account."
+						: "Get a new link code to link an account."}
 				</p>
 			</div>
 		);
@@ -204,6 +235,9 @@ const LinkCode: React.FC<LinkCodeProps> = ({ linkCode, now }) => {
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg border border-solid border-border bg-surface-secondary p-4">
+			{connectPrompt && (
+				<ConnectPrompt pluginName={pluginName} prompt={connectPrompt} />
+			)}
 			<div className="flex items-center gap-2">
 				<span className="font-mono text-3xl font-semibold tracking-wider text-content-primary">
 					{linkCode.code}
@@ -211,13 +245,40 @@ const LinkCode: React.FC<LinkCodeProps> = ({ linkCode, now }) => {
 				<CopyButton text={command} label="Copy link command" />
 			</div>
 			<p className="m-0 text-sm text-content-primary">
-				Send <code className="font-mono font-semibold">{command}</code> to the
-				bot.
+				Send <code className="font-mono font-semibold">{command}</code>{" "}
+				{connectPrompt ? "to finish linking." : "to the bot."}
 			</p>
 			<p className="m-0 text-xs text-content-secondary">
 				The code works once and expires at{" "}
 				{formatDateTime(expiresAt, DATE_FORMAT.FULL_DATETIME)}.
 			</p>
+		</div>
+	);
+};
+
+type ConnectPromptProps = {
+	pluginName: string;
+	prompt: PluginConnectPrompt;
+};
+
+const ConnectPrompt: React.FC<ConnectPromptProps> = ({
+	pluginName,
+	prompt,
+}) => {
+	return (
+		<div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+			{prompt.qr_code_png && (
+				<img
+					src={`data:image/png;base64,${prompt.qr_code_png}`}
+					alt={`QR code to connect a ${pluginName} account`}
+					className="size-48 shrink-0 rounded-md [image-rendering:pixelated]"
+				/>
+			)}
+			{prompt.instructions && (
+				<p className="m-0 whitespace-pre-line text-sm text-content-primary">
+					{prompt.instructions}
+				</p>
+			)}
 		</div>
 	);
 };

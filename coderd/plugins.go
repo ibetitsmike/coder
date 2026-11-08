@@ -551,6 +551,47 @@ func newPluginLinkCode() (string, error) {
 	return string(out), nil
 }
 
+// @Summary Get the connect prompt of a plugin
+// @ID connect-plugin
+// @Security CoderSessionToken
+// @Produce json
+// @Tags Chats
+// @Param plugin path string true "Plugin ID" format(uuid)
+// @Success 200 {object} codersdk.PluginConnectPrompt
+// @Router /api/experimental/plugins/{plugin}/connect [post]
+// @x-apidocgen {"skip": true}
+func (api *API) postPluginConnect(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if api.pluginsUnavailable(rw) {
+		return
+	}
+	p, ok := api.pluginParam(rw, r)
+	if !ok {
+		return
+	}
+	var grants codersdk.PluginGrants
+	if !api.linkablePlugin(r, p) || json.Unmarshal(p.Grants, &grants) != nil || !grants.Connect {
+		httpapi.ResourceNotFound(rw)
+		return
+	}
+	prompt, err := api.pluginManager.Connect(ctx, p, r)
+	if errors.Is(err, plugins.ErrNotRunningHere) {
+		rw.Header().Set("Retry-After", "5")
+		httpapi.Write(ctx, rw, http.StatusServiceUnavailable, codersdk.Response{
+			Message: "The plugin is not running. Try again in a few seconds.",
+		})
+		return
+	}
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusBadGateway, codersdk.Response{
+			Message: "The plugin failed to make a connect prompt.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+	httpapi.Write(ctx, rw, http.StatusOK, prompt)
+}
+
 // @Summary Delete a plugin link
 // @ID delete-plugin-link
 // @Security CoderSessionToken
@@ -647,6 +688,7 @@ func (api *API) getLinkablePlugins(rw http.ResponseWriter, r *http.Request) {
 				Name:             p.Name,
 				Version:          p.Version,
 				Chats:            grants.Chats,
+				Connect:          grants.Connect,
 				Links:            convertPluginLinks(linksByPlugin[p.ID]),
 			})
 		}
