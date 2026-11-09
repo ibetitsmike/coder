@@ -47,10 +47,6 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	modelOnly := func(role database.ChatMessageRole, parts ...codersdk.ChatMessagePart) row {
 		return row{role: role, visibility: database.ChatMessageVisibilityModel, parts: parts}
 	}
-	// compacted stands in for a message compaction replaced.
-	compacted := func(role database.ChatMessageRole, visibility database.ChatMessageVisibility, parts ...codersdk.ChatMessagePart) row {
-		return row{role: role, visibility: visibility, compressed: true, parts: parts}
-	}
 	toolCall := func(id, name string) codersdk.ChatMessagePart {
 		return codersdk.ChatMessageToolCall(id, name, json.RawMessage(`{}`))
 	}
@@ -58,8 +54,10 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		return codersdk.ChatMessageToolResult(id, name, json.RawMessage(`{}`), false, false)
 	}
 	text := func(s string) codersdk.ChatMessagePart { return codersdk.ChatMessageText(s) }
+	// summary is the row compaction writes: the prompt starts at the newest
+	// compressed model-only row and drops every row before it.
 	summary := func() row {
-		return modelOnly(database.ChatMessageRoleUser, text("Compacted summary."))
+		return row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityModel, compressed: true, parts: []codersdk.ChatMessagePart{text("Compacted summary.")}}
 	}
 
 	newChat := func(t *testing.T, parent uuid.NullUUID) database.Chat {
@@ -140,12 +138,13 @@ func TestTodoSnapshotMessage(t *testing.T) {
 
 	t.Run("RestoredAfterCompaction", func(t *testing.T) {
 		t.Parallel()
-		// The todo_write call compaction replaced, the summary that replaced
-		// it, and the user prompt that follows.
+		// A todo_write call and its result, then the summary compaction wrote
+		// after them.
 		chat := rootChat(t)
 		writeTodos(t, chat.ID)
 		insert(t, chat.ID,
-			compacted(database.ChatMessageRoleAssistant, database.ChatMessageVisibilityBoth, toolCall("call-1", todoWriteToolName)),
+			visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoWriteToolName)),
+			visible(database.ChatMessageRoleTool, toolResult("call-1", todoWriteToolName)),
 			summary(),
 		)
 		got, ok := snapshotText(t, server, chat)
