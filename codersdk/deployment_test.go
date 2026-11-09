@@ -56,8 +56,10 @@ func TestExperimentDisplayNames(t *testing.T) {
 		codersdk.ExperimentPlugins:                   "Plugins",
 	}
 
-	require.Len(t, expected, len(codersdk.ExperimentsKnown))
-	for _, experiment := range codersdk.ExperimentsKnown {
+	// Fork experiments come last in ExperimentsKnown; TestForkExperiments covers them.
+	upstream := codersdk.ExperimentsKnown[:len(codersdk.ExperimentsKnown)-len(codersdk.ForkExperiments)]
+	require.Len(t, expected, len(upstream))
+	for _, experiment := range upstream {
 		displayName, ok := expected[experiment]
 		require.Truef(t, ok, "experiment %q has no expected display name", experiment)
 		require.Equal(t, displayName, experiment.DisplayName())

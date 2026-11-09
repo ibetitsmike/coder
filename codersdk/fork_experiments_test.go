@@ -21,8 +21,9 @@ func TestForkExperiments(t *testing.T) {
 			"fork experiment %q must be named fork-<feature>",
 			experiment,
 		)
-		require.Containsf(t, codersdk.ExperimentsKnown, experiment, "fork experiment %q must be in ExperimentsKnown", experiment)
 	}
+	// TestExperimentDisplayNames relies on the fork experiments coming last.
+	require.Equal(t, codersdk.ForkExperiments, codersdk.ExperimentsKnown[len(codersdk.ExperimentsKnown)-len(codersdk.ForkExperiments):])
 
 	// The append in init must add to the upstream list rather than replace it,
 	// which is what happens if it runs before ExperimentsKnown initializes.
