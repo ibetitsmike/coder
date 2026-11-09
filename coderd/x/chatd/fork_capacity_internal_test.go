@@ -6,6 +6,7 @@ package chatd
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -294,6 +295,11 @@ func TestForkListAgentsWaitingForCapacity(t *testing.T) {
 		"Upstream":        {experiments: upstreamExperimentsKnown()},
 	} {
 		server := newInternalTestServer(t, f.db, f.ps, chatprovider.ProviderAPIKeys{}, withInternalTestServerExperiments(tc.experiments))
+		tools, err := server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
+		require.NoError(t, err)
+		listTool := findToolByName(tools, "list_agents")
+		require.NotNil(t, listTool)
+		require.Equal(t, tc.reported, strings.Contains(listTool.Info().Description, "waiting_for_capacity"), name)
 		resp := runSubagentTool(ctx, t, server, f.root, f.root.LastModelConfigID, "list_agents", listAgentsArgs{})
 		require.False(t, resp.IsError, resp.Content)
 		var got struct {

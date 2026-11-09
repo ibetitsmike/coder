@@ -568,7 +568,7 @@ func (p *Server) subagentTools(
 		),
 		fantasy.NewAgentTool(
 			"list_agents",
-			"List the child agents spawned by this chat, most recently "+
+			p.forkListAgentsDescription("List the child agents spawned by this chat, most recently "+
 				"active first. Returns up to `limit` agents (default 10) "+
 				"with `total` and `has_more`; use `offset` to page. The "+
 				"sort order is best-effort: an agent's position may shift "+
@@ -577,7 +577,7 @@ func (p *Server) subagentTools(
 				"updated_at. Status: running = working, "+
 				"interrupting = transient, waiting = idle, "+
 				"error = stopped on error, paused = waiting for its owner "+
-				"to finish editing a queued message.",
+				"to finish editing a queued message."),
 			func(ctx context.Context, args listAgentsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				if currentChat == nil {
 					return fantasy.NewTextErrorResponse("subagent callbacks are not configured"), nil

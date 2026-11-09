@@ -1,7 +1,8 @@
 package chatd
 
 // This file is fork code: it adds the fork fields to the list_agents output.
-// Upstream's subagent.go passes its result through forkListAgents once, so
+// Upstream's subagent.go passes its description through
+// forkListAgentsDescription and its result through forkListAgents once, so
 // fork features never edit the list_agents tool itself.
 
 import (
@@ -26,6 +27,16 @@ type forkListAgentsEntry struct {
 	subagentListEntry
 	Todos              []codersdk.ChatTodo `json:"todos,omitempty"`
 	WaitingForCapacity bool                `json:"waiting_for_capacity,omitempty"`
+}
+
+// forkListAgentsDescription documents the waiting_for_capacity field in
+// upstream's list_agents description when nested subagents are enabled.
+func (p *Server) forkListAgentsDescription(description string) string {
+	if !p.nestedSubagentsEnabled() {
+		return description
+	}
+	return description + " A running agent that waits for a free subagent concurrency slot " +
+		"also has waiting_for_capacity: true; the field is absent otherwise."
 }
 
 // forkListAgents returns the list_agents result of parent with the fields of
