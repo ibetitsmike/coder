@@ -208,6 +208,7 @@ func TestNestedSubagentOrganizationMaxDepth(t *testing.T) {
 		require.Empty(t, f.toolNames(t, child))
 		_, err = f.spawn(t, child, childSubagentChatOptions{})
 		require.ErrorContains(t, err, "maximum subagent depth is 1")
+		require.ErrorContains(t, f.server.forkValidateSpawnParent(ctx, child), "maximum subagent depth is 1")
 		f.requireNoChildren(t, child)
 	})
 

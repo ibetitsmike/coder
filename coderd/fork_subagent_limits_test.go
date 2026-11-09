@@ -29,6 +29,7 @@ func TestForkOrganizationSubagentLimits(t *testing.T) {
 		orgID := owner.OrganizationID
 		orgAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(orgID))
 		member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+		auditor, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAuditor(orgID))
 
 		got, err := orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
@@ -51,6 +52,8 @@ func TestForkOrganizationSubagentLimits(t *testing.T) {
 			{MaxDepth: ptr.Ref[int32](0)},
 			{MaxDepth: ptr.Ref[int32](17)},
 			{MaxConcurrent: ptr.Ref[int32](0)},
+			{MaxConcurrentPerFamily: ptr.Ref[int32](0)},
+			{MaxLivePerFamily: ptr.Ref[int32](0)},
 		} {
 			_, err = orgAdmin.UpdateForkOrganizationSubagentLimits(ctx, orgID, invalid)
 			require.Len(t, requireSDKError(t, err, http.StatusBadRequest).Validations, 1)
@@ -60,6 +63,12 @@ func TestForkOrganizationSubagentLimits(t *testing.T) {
 		_ = requireSDKError(t, err, http.StatusNotFound)
 		_, err = member.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{})
 		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		got, err = auditor.ForkOrganizationSubagentLimits(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		_, err = auditor.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{})
+		_ = requireSDKError(t, err, http.StatusForbidden)
 
 		got, err = orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
