@@ -73,9 +73,7 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 
 // createSubagentChatWithID creates the child chat of parent. With nested
 // subagents enabled it also records the child's chat_subagents row in the
-// same transaction, rechecking the depth limit there. W1 (custom agent types)
-// and W4 (isolation) extend this function for the other chat_subagents
-// columns.
+// same transaction, rechecking the depth limit there.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -116,8 +114,5 @@ func (p *Server) createSubagentChatWithID(
 	if err != nil {
 		return chatstate.CreateChatResult{}, err
 	}
-	if err := buffer.Flush(); err != nil {
-		return result, err
-	}
-	return result, nil
+	return result, buffer.Flush()
 }
