@@ -168,8 +168,9 @@ func (w *chatWorker) acquisitionLoop(
 func (w *chatWorker) acquireOnce(ctx context.Context, workerID uuid.UUID, manager *runnerManager) {
 	// Fetch twice the budget so one full pool cannot hide candidates in the other.
 	rows, err := w.opts.Store.GetChatWorkerAcquisitionCandidates(ctx, database.GetChatWorkerAcquisitionCandidatesParams{
-		StaleSeconds: w.opts.HeartbeatStaleSeconds,
-		LimitCount:   w.opts.AcquisitionBatchSize * 2,
+		StaleSeconds:        w.opts.HeartbeatStaleSeconds,
+		LimitCount:          w.opts.AcquisitionBatchSize * 2,
+		InterleaveSubagents: w.server.nestedSubagentsEnabled(),
 	})
 	if err != nil {
 		if ctx.Err() == nil {

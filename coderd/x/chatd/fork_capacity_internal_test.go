@@ -4,6 +4,7 @@ package chatd
 // fork-nested-subagents experiment.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -89,6 +90,24 @@ func makeNewestCandidate(t *testing.T, f *workerTestFixture, chatID uuid.UUID) {
 	require.NoError(t, err)
 }
 
+// startNestedSubagentsWorker starts a worker whose server has the
+// fork-nested-subagents experiment on, so it interleaves subagent candidates.
+func startNestedSubagentsWorker(t *testing.T, f *workerTestFixture, opts chatWorkerOptions) {
+	t.Helper()
+	server, err := New(f.pubsub, Config{
+		Logger:      testutil.Logger(t),
+		Database:    f.db,
+		ReplicaID:   uuid.New(),
+		Experiments: codersdk.Experiments{codersdk.ExperimentForkNestedSubagents},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = server.Close() })
+	worker, err := newChatWorker(server, opts)
+	require.NoError(t, err)
+	require.NoError(t, worker.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, worker.Close()) })
+}
+
 func requireUnowned(t *testing.T, f *workerTestFixture, chats []database.Chat) {
 	t.Helper()
 	ctx := testutil.Context(t, testutil.WaitShort)
@@ -114,7 +133,7 @@ func TestForkCapacityFullFamilyDoesNotBlockOtherFamilies(t *testing.T) {
 	acquireChat(t, f, familyA[0].ID, uuid.New(), uuid.New())
 	_, familyB := createForkFamily(t, f, f.org.ID, 1)
 	makeNewestCandidate(t, f, familyB[0].ID)
-	startWorker(t, opts)
+	startNestedSubagentsWorker(t, f, opts)
 
 	starter.waitCall(t, taskKindGeneration, familyB[0].ID)
 	requireUnowned(t, f, familyA[1:])
@@ -143,10 +162,46 @@ func TestForkCapacityFullOrganizationDoesNotBlockOtherOrganizations(t *testing.T
 	otherOrg := dbgen.Organization(t, f.db, database.Organization{})
 	_, other := createForkFamily(t, f, otherOrg.ID, 1)
 	makeNewestCandidate(t, f, other[0].ID)
-	startWorker(t, opts)
+	startNestedSubagentsWorker(t, f, opts)
 
 	starter.waitCall(t, taskKindGeneration, other[0].ID)
 	requireUnowned(t, f, waiting)
+}
+
+// Unowned interrupting subagents of a capped family rank first by status, so
+// they must not fill the candidates of a status-major order either. Without
+// the experiment, candidates keep upstream's status and age order.
+func TestForkAcquisitionCandidatesInterleaveBeforeStatus(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+
+	_, familyA := createForkFamily(t, f, f.org.ID, 3)
+	for _, chat := range familyA {
+		forceExecutionState(t, f, chat.ID, database.ChatStatusInterrupting, false)
+	}
+	_, familyB := createForkFamily(t, f, f.org.ID, 1)
+	makeNewestCandidate(t, f, familyB[0].ID)
+
+	candidates := func(interleave bool) []uuid.UUID {
+		rows, err := f.db.GetChatWorkerAcquisitionCandidates(ctx, database.GetChatWorkerAcquisitionCandidatesParams{
+			StaleSeconds:        30,
+			LimitCount:          2,
+			InterleaveSubagents: interleave,
+		})
+		require.NoError(t, err)
+		ids := make([]uuid.UUID, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		return ids
+	}
+	interleaved := candidates(true)
+	require.Len(t, interleaved, 2)
+	require.Contains(t, interleaved, familyB[0].ID)
+	upstreamOrder := candidates(false)
+	require.Len(t, upstreamOrder, 2)
+	require.NotContains(t, upstreamOrder, familyB[0].ID)
 }
 
 func TestForkCapacityAdmission(t *testing.T) {

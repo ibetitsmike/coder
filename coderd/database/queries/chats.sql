@@ -2557,9 +2557,13 @@ WHERE chat_id = @chat_id::uuid
 -- requires-action chats follow so their runner can enforce the action deadline
 -- before new generations start. Pools are interleaved by that per-pool rank, so
 -- a saturated pool's refused high-priority rows cannot crowd the other pool's
--- candidates out of the limit. Subagents interleave organizations, then the
--- families within each, then age, so the refused rows of a capped organization
--- or family cannot crowd the others out either. Roots keep age order.
+-- candidates out of the limit.
+--
+-- With interleave_subagents set, subagents interleave organizations, then the
+-- families within each, then status and age, so the refused rows of a capped
+-- organization or family cannot crowd the others out either. That ranks every
+-- unowned subagent of a status, so roots, and subagents without it, keep the
+-- indexed age order.
 WITH candidate_partitions AS (
     SELECT true AS is_root, 'interrupting'::chat_status AS status, 0 AS status_priority, 0 AS pool_priority
     UNION ALL
@@ -2573,50 +2577,68 @@ WITH candidate_partitions AS (
     UNION ALL
     SELECT false, 'running'::chat_status, 2, 1
 ),
+unowned_chats AS NOT MATERIALIZED (
+    SELECT chats.id, chats.status, chats.parent_chat_id, chats.root_chat_id, chats.organization_id, chats.updated_at
+    FROM chats
+    WHERE chats.archived = false
+      AND (
+          chats.worker_id IS NULL
+          OR chats.runner_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM chat_heartbeats current_lease
+              WHERE current_lease.chat_id = chats.id
+                AND current_lease.runner_id = chats.runner_id
+                AND current_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+          )
+      )
+),
 candidates AS (
     SELECT
         candidate.id,
         candidate_partitions.pool_priority,
         ROW_NUMBER() OVER (
             PARTITION BY candidate_partitions.is_root
-            ORDER BY candidate_partitions.status_priority ASC, candidate.fair_position ASC, candidate.updated_at ASC, candidate.id ASC
+            ORDER BY candidate.fair_position ASC, candidate_partitions.status_priority ASC, candidate.updated_at ASC, candidate.id ASC
         ) AS pool_position
     FROM candidate_partitions
     CROSS JOIN LATERAL (
-        SELECT
-            family_ranked.id,
-            family_ranked.updated_at,
-            CASE WHEN candidate_partitions.is_root THEN 1 ELSE ROW_NUMBER() OVER (
-                PARTITION BY family_ranked.organization_id
-                ORDER BY family_ranked.family_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
-            ) END AS fair_position
-        FROM (
-        SELECT
-            chats.id,
-            chats.updated_at,
-            chats.organization_id,
-            ROW_NUMBER() OVER (
-                PARTITION BY COALESCE(chats.root_chat_id, chats.parent_chat_id)
-                ORDER BY chats.updated_at ASC, chats.id ASC
-            ) AS family_position
-        FROM chats
-        WHERE (chats.parent_chat_id IS NULL) = candidate_partitions.is_root
-          AND chats.status = candidate_partitions.status
-          AND chats.archived = false
-          AND (
-              chats.worker_id IS NULL
-              OR chats.runner_id IS NULL
-              OR NOT EXISTS (
-                  SELECT 1
-                  FROM chat_heartbeats current_lease
-                  WHERE current_lease.chat_id = chats.id
-                    AND current_lease.runner_id = chats.runner_id
-                    AND current_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
-              )
-          )
-        ) family_ranked
-        ORDER BY fair_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
-        LIMIT @limit_count::int
+        (
+            SELECT unowned_chats.id, unowned_chats.updated_at, 1::bigint AS fair_position
+            FROM unowned_chats
+            WHERE (unowned_chats.parent_chat_id IS NULL) = candidate_partitions.is_root
+              AND unowned_chats.status = candidate_partitions.status
+              AND (candidate_partitions.is_root OR NOT @interleave_subagents::boolean)
+            ORDER BY unowned_chats.updated_at ASC, unowned_chats.id ASC
+            LIMIT @limit_count::int
+        )
+        UNION ALL
+        (
+            SELECT
+                family_ranked.id,
+                family_ranked.updated_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY family_ranked.organization_id
+                    ORDER BY family_ranked.family_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
+                ) AS fair_position
+            FROM (
+                SELECT
+                    unowned_chats.id,
+                    unowned_chats.updated_at,
+                    unowned_chats.organization_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(unowned_chats.root_chat_id, unowned_chats.parent_chat_id)
+                        ORDER BY unowned_chats.updated_at ASC, unowned_chats.id ASC
+                    ) AS family_position
+                FROM unowned_chats
+                WHERE unowned_chats.parent_chat_id IS NOT NULL
+                  AND unowned_chats.status = candidate_partitions.status
+                  AND NOT candidate_partitions.is_root
+                  AND @interleave_subagents::boolean
+            ) family_ranked
+            ORDER BY fair_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
+            LIMIT @limit_count::int
+        )
     ) candidate
 )
 SELECT
