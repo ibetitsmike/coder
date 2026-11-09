@@ -136,6 +136,7 @@ Without the experiment, a custom type fails with `type must be one of:` and the 
 
 When the deployment enables the `fork-nested-subagents` experiment, a `general` child gets `spawn_agent` and the other subagent tools while its own children stay within `--chat-max-subagent-depth`.
 The default depth of 2 allows a root, a coordinator, and its workers.
+An organization's `max_depth` subagent limit can lower that depth, but not raise it.
 An `explore` or `computer_use` child never gets them.
 With the experiment, each chat can wait on, message, interrupt, and list only its direct children, so the root waits on the coordinator, not on its workers.
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
@@ -185,7 +186,7 @@ Pass a child's `chat_id` from `spawn_agent` or `list_agents` to read that child,
 With the same experiment, `search_chats` finds the top-level chats your user can read with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
 It returns no subagent chats, so get a child's ID from `list_agents` in its parent.
 Plan-mode turns and `explore` children don't get either tool.
-`wait_agent` still returns only a child's final reply.
+With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds that many of the child's latest tool calls, oldest first, to its reply.
 Without the experiment, there is no transcript or chat search tool.
 Root chats in a project have `read_memory` and `save_memory`, but Setup creates no project.
 
@@ -212,13 +213,13 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `ab33ec5f07`:
+Checked against fork `main` at `106a9355f6`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:142-155`, `:169-197`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:202-214`.
-  Depth flag, `codersdk/fork_chat_config.go:33-40`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:170-187`, `:201-229`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:234-246`.
+  Depth flag, `codersdk/fork_chat_config.go:33-40`, lowered by the organization's `max_depth`, `fork_subagents.go:55-69`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
@@ -244,8 +245,9 @@ Checked against fork `main` at `ab33ec5f07`:
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
-- Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-32`.
+- Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-33`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
+  `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:32`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:31`, and run as the chat owner, `fork_search_chats.go:97-103`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
 - No wake-up, notification, or PR tool: no matches in `coderd/x/chatd` for `schedule_wakeup`, `notify_user`, or `pull_request`.
