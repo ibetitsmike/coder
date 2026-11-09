@@ -4649,7 +4649,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "post": {
                 "consumes": [
@@ -4693,7 +4696,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             }
         },
         "/api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}": {
@@ -4734,7 +4740,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "delete": {
                 "tags": [
@@ -4767,7 +4776,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "patch": {
                 "consumes": [
@@ -4818,7 +4830,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             }
         },
         "/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions": {
@@ -4862,7 +4877,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "post": {
                 "consumes": [
@@ -4913,7 +4931,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             }
         },
         "/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition}": {
@@ -4961,7 +4982,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "delete": {
                 "tags": [
@@ -5001,7 +5025,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             },
             "patch": {
                 "consumes": [
@@ -5059,7 +5086,10 @@ const docTemplate = `{
                     {
                         "CoderSessionToken": []
                     }
-                ]
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
             }
         },
         "/api/v2/chats/fork/organizations/{organization}/subagent-limits": {

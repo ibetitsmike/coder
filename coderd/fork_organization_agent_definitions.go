@@ -24,6 +24,7 @@ import (
 // @Param organization path string true "Organization ID or name"
 // @Success 200 {array} codersdk.ForkAgentDefinitionMetadata
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions [get]
+// @x-apidocgen {"skip": true}
 func (api *API) forkOrganizationAgentDefinitions(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
@@ -55,6 +56,7 @@ func (api *API) forkOrganizationAgentDefinitions(rw http.ResponseWriter, r *http
 // @Param request body codersdk.CreateForkAgentDefinitionRequest true "Request body"
 // @Success 201 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions [post]
+// @x-apidocgen {"skip": true}
 func (api *API) postForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	organization := httpmw.OrganizationParam(r)
@@ -94,6 +96,7 @@ func (api *API) postForkOrganizationAgentDefinition(rw http.ResponseWriter, r *h
 // @Param agentDefinition path string true "Agent definition name"
 // @Success 200 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition} [get]
+// @x-apidocgen {"skip": true}
 func (api *API) forkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	row, ok := api.readForkOrganizationAgentDefinition(rw, r)
@@ -114,6 +117,7 @@ func (api *API) forkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.
 // @Param request body codersdk.UpdateForkAgentDefinitionRequest true "Request body"
 // @Success 200 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition} [patch]
+// @x-apidocgen {"skip": true}
 func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	current, ok := api.readForkOrganizationAgentDefinition(rw, r)
@@ -150,6 +154,7 @@ func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *
 // @Param agentDefinition path string true "Agent definition name"
 // @Success 204
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition} [delete]
+// @x-apidocgen {"skip": true}
 func (api *API) deleteForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	current, ok := api.readForkOrganizationAgentDefinition(rw, r)

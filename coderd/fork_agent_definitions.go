@@ -30,6 +30,7 @@ const maxForkAgentDefinitionRequestBytes = 65536*skillJSONEscapeExpansion + skil
 // @Param user path string true "User ID, username, or me"
 // @Success 200 {array} codersdk.ForkAgentDefinitionMetadata
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions [get]
+// @x-apidocgen {"skip": true}
 func (api *API) forkUserAgentDefinitions(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
@@ -66,6 +67,7 @@ func (api *API) forkUserAgentDefinitions(rw http.ResponseWriter, r *http.Request
 // @Param request body codersdk.CreateForkAgentDefinitionRequest true "Request body"
 // @Success 201 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions [post]
+// @x-apidocgen {"skip": true}
 func (api *API) postForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
@@ -101,6 +103,7 @@ func (api *API) postForkUserAgentDefinition(rw http.ResponseWriter, r *http.Requ
 // @Param agentDefinition path string true "Agent definition name"
 // @Success 200 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} [get]
+// @x-apidocgen {"skip": true}
 func (api *API) forkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
@@ -132,6 +135,7 @@ func (api *API) forkUserAgentDefinition(rw http.ResponseWriter, r *http.Request)
 // @Param request body codersdk.UpdateForkAgentDefinitionRequest true "Request body"
 // @Success 200 {object} codersdk.ForkAgentDefinition
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} [patch]
+// @x-apidocgen {"skip": true}
 func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
@@ -162,6 +166,7 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 // @Param agentDefinition path string true "Agent definition name"
 // @Success 204
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} [delete]
+// @x-apidocgen {"skip": true}
 func (api *API) deleteForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
