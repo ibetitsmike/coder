@@ -23,6 +23,7 @@ import (
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
@@ -48,6 +49,25 @@ func subagentDepth(ctx context.Context, fdb forkdb.Store, chat database.Chat) (i
 		return 0, xerrors.Errorf("get subagent depth of chat %s: %w", chat.ID, err)
 	}
 	return row.Depth, nil
+}
+
+// maxSubagentDepth returns the maximum subagent depth of chats in the
+// organization: the deployment value, lowered by the organization's max_depth
+// when it sets one.
+func (p *Server) maxSubagentDepth(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID) (int, error) {
+	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
+	//nolint:gocritic // Chat creators cannot read organization config, so chatd reads it.
+	limits, err := fdb.GetChatOrganizationSubagentLimits(dbauthz.AsChatd(ctx), organizationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return maxDepth, nil
+	}
+	if err != nil {
+		return 0, xerrors.Errorf("get subagent limits of organization %s: %w", organizationID, err)
+	}
+	if limits.MaxDepth.Valid {
+		maxDepth = min(maxDepth, int(limits.MaxDepth.Int32))
+	}
+	return maxDepth, nil
 }
 
 // validateNestedSpawnParent returns the depth of parent, or an error when
@@ -77,7 +97,11 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if err != nil {
 		return xerrors.Errorf("fork queries: %w", err)
 	}
-	_, err = validateNestedSpawnParent(ctx, fdb, parent, p.chatLimits.Fork.MaxSubagentDepth)
+	maxDepth, err := p.maxSubagentDepth(ctx, fdb, parent.OrganizationID)
+	if err != nil {
+		return err
+	}
+	_, err = validateNestedSpawnParent(ctx, fdb, parent, maxDepth)
 	return err
 }
 
@@ -110,7 +134,6 @@ func (p *Server) createSubagentChatWithID(
 	// transaction commits.
 	buffer := chatstate.NewPublishBuffer(publisher)
 	defer buffer.Discard()
-	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
 	var result chatstate.CreateChatResult
 	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
 		// Without nested subagents the parent is a root chat that was
@@ -118,6 +141,11 @@ func (p *Server) createSubagentChatWithID(
 		var depth int32
 		var err error
 		if nested {
+			var maxDepth int
+			maxDepth, err = p.maxSubagentDepth(ctx, ftx, parent.OrganizationID)
+			if err != nil {
+				return err
+			}
 			depth, err = validateNestedSpawnParent(ctx, ftx, parent, maxDepth)
 		} else {
 			depth, err = subagentDepth(ctx, ftx, parent)
@@ -166,7 +194,11 @@ func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool
 	if err != nil {
 		return false, err
 	}
-	return int(depth)+1 <= p.chatLimits.Fork.MaxSubagentDepth, nil
+	maxDepth, err := p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	return int(depth)+1 <= maxDepth, nil
 }
 
 func subagentModeCanSpawn(mode database.NullChatMode) bool {
@@ -255,20 +287,38 @@ func (p *Server) childGetsOrchestrationPrompt(
 			slog.F("chat_id", parent.ID), slog.Error(err))
 		return false
 	}
-	return int(depth)+2 <= p.chatLimits.Fork.MaxSubagentDepth
+	maxDepth, err := p.maxSubagentDepth(ctx, fdb, parent.OrganizationID)
+	if err != nil {
+		p.logger.Warn(ctx, "get maximum subagent depth for orchestration prompt",
+			slog.F("chat_id", parent.ID), slog.Error(err))
+		return false
+	}
+	return int(depth)+2 <= maxDepth
 }
 
 const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own subagents; its tools depend on its type and mode. "
 
 // forkSpawnAgentDescription rewrites upstream's spawn_agent description,
-// which says children cannot spawn, when nested subagents are enabled.
-func (p *Server) forkSpawnAgentDescription(description string) string {
+// which says children cannot spawn, when nested subagents are enabled. The
+// depth it states is advisory, since spawning enforces it, so a failed
+// organization lookup states the deployment value instead of failing the turn.
+func (p *Server) forkSpawnAgentDescription(ctx context.Context, chat database.Chat, description string) string {
 	if !p.nestedSubagentsEnabled() {
 		return description
+	}
+	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
+	fdb, err := forkdb.From(p.db)
+	if err == nil {
+		maxDepth, err = p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
+	}
+	if err != nil {
+		p.logger.Warn(ctx, "get maximum subagent depth for spawn_agent description",
+			slog.F("chat_id", chat.ID), slog.Error(err))
+		maxDepth = p.chatLimits.Fork.MaxSubagentDepth
 	}
 	return strings.Replace(description, upstreamSpawnAgentChildToolsSentence, fmt.Sprintf(
 		"A general child can spawn its own subagents while it is below the maximum subagent depth of %d; "+
 			"explore and computer use children cannot. Its tools depend on its type and mode. ",
-		p.chatLimits.Fork.MaxSubagentDepth,
+		maxDepth,
 	), 1)
 }

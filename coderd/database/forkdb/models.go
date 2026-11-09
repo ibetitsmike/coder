@@ -13,6 +13,16 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+// Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
+type ChatOrganizationSubagentLimit struct {
+	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`
+	MaxDepth               sql.NullInt32 `db:"max_depth" json:"max_depth"`
+	MaxConcurrent          sql.NullInt32 `db:"max_concurrent" json:"max_concurrent"`
+	MaxConcurrentPerFamily sql.NullInt32 `db:"max_concurrent_per_family" json:"max_concurrent_per_family"`
+	MaxLivePerFamily       sql.NullInt32 `db:"max_live_per_family" json:"max_live_per_family"`
+	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
+}
+
 type ChatSubagent struct {
 	ChatID       uuid.UUID             `db:"chat_id" json:"chat_id"`
 	AgentType    string                `db:"agent_type" json:"agent_type"`

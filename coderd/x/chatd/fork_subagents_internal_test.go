@@ -175,6 +175,59 @@ func TestNestedSubagentDepthLegacyChild(t *testing.T) {
 	f.requireNoChildren(t, legacy)
 }
 
+// An organization max_depth lowers the deployment maximum subagent depth but
+// cannot raise it.
+func TestNestedSubagentOrganizationMaxDepth(t *testing.T) {
+	t.Parallel()
+
+	nested := codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}
+	setOrgMaxDepth := func(t *testing.T, f nestedSubagentsFixture, maxDepth int32) {
+		t.Helper()
+		_, err := f.fdb.UpsertChatOrganizationSubagentLimits(chatdTestContext(t), forkdb.UpsertChatOrganizationSubagentLimitsParams{
+			OrganizationID: f.root.OrganizationID,
+			MaxDepth:       sql.NullInt32{Int32: maxDepth, Valid: true},
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("Lower", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, nested, Limits{Fork: ForkLimits{MaxSubagentDepth: 2}})
+		setOrgMaxDepth(t, f, 1)
+		ctx := chatdTestContext(t)
+
+		require.False(t, f.server.childGetsOrchestrationPrompt(ctx, f.root, database.NullChatMode{}, nil))
+		tools, err := f.server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
+		require.NoError(t, err)
+		spawnTool := findToolByName(tools, spawnAgentToolName)
+		require.NotNil(t, spawnTool)
+		require.Contains(t, spawnTool.Info().Description, "below the maximum subagent depth of 1;")
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		require.Empty(t, f.toolNames(t, child))
+		_, err = f.spawn(t, child, childSubagentChatOptions{})
+		require.ErrorContains(t, err, "maximum subagent depth is 1")
+		require.ErrorContains(t, f.server.forkValidateSpawnParent(ctx, child), "maximum subagent depth is 1")
+		f.requireNoChildren(t, child)
+	})
+
+	t.Run("Higher", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, nested, Limits{Fork: ForkLimits{MaxSubagentDepth: 2}})
+		setOrgMaxDepth(t, f, 3)
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		require.Empty(t, f.toolNames(t, grandchild))
+		_, err = f.spawn(t, grandchild, childSubagentChatOptions{})
+		require.ErrorContains(t, err, "maximum subagent depth is 2")
+		f.requireNoChildren(t, grandchild)
+	})
+}
+
 func TestForkLimitsFromConfig(t *testing.T) {
 	t.Parallel()
 

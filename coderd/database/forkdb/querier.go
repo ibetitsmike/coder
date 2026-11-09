@@ -25,6 +25,7 @@ type Querier interface {
 	// history is delivered. Older chats start at their newest message so linking
 	// does not replay history.
 	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
+	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
@@ -50,6 +51,7 @@ type Querier interface {
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
 	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
+	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	// Relinking an external identity to another user clears the active chat so
 	// replies never reach a chat the new user does not own.
