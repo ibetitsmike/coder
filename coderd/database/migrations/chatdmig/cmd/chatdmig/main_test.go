@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,8 +17,15 @@ const (
 # <version> <name> <ledger: core, chatd or mixed>
 split mcp_server_oauth2_client_registration
 `
-	earlyQueued = "# <version> <name> <source>\n000640 chat_queued_message_busy_behavior coder/coder#30073\n"
+	queuedSQL = "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text;\n"
 )
+
+var earlyQueued = "# <version> <name> <source> <sha256>\n000640 chat_queued_message_busy_behavior coder/coder#30073 " + sha(queuedSQL) + "\n"
+
+func sha(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
 
 // writeMigrations lays out dir/migrations like the real tree and returns its
 // path, the dir that route reads.
@@ -55,7 +64,7 @@ func TestRouteEarly(t *testing.T) {
 		routes := routesHeader + "000640 chat_queued_message_busy_behavior chatd\n"
 		dir := writeMigrations(t, routes, map[string]string{
 			"000640_other_core.up.sql":                        "ALTER TABLE users ADD COLUMN x int;\n",
-			"000641_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text;\n",
+			"000641_chat_queued_message_busy_behavior.up.sql": queuedSQL,
 		})
 
 		err := route(dir)
@@ -70,7 +79,7 @@ func TestRouteEarly(t *testing.T) {
 		routes := routesHeader + "000641 after core\n000642 chat_queued_message_busy_behavior chatd\n"
 		dir := writeMigrations(t, routes, map[string]string{
 			"000640_after.up.sql":                             "ALTER TABLE users ADD COLUMN y int;\n",
-			"000642_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text;\n",
+			"000642_chat_queued_message_busy_behavior.up.sql": queuedSQL,
 		})
 
 		require.ErrorContains(t, route(dir), "000640_after")
@@ -84,10 +93,11 @@ func TestRouteEarly(t *testing.T) {
 		// A hand-edited ledger may leave a version unpadded.
 		routes := routesHeader + "640 a core\n000641 b core\n"
 		dir := writeMigrations(t, routes, map[string]string{
-			"000640_a.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
-			"000641_b.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
+			"000640_a.up.sql":      "ALTER TABLE users ADD COLUMN a int;\n",
+			"000641_b.up.sql":      "ALTER TABLE users ADD COLUMN b int;\n",
+			"000642_chat_x.up.sql": "ALTER TABLE chats ADD COLUMN x int;\n",
 		})
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000642 chat_x coder/coder#1\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000642 chat_x coder/coder#1 "+sha("ALTER TABLE chats ADD COLUMN x int;\n")+"\n"), 0o600))
 
 		require.NoError(t, route(dir))
 	})
@@ -98,7 +108,7 @@ func TestRouteEarly(t *testing.T) {
 			"000640_a_q.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
 			"000641_b_q.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
 		})
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000640 a_q coder/coder#1\n000641 b_q coder/coder#1\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000640 a_q coder/coder#1 "+sha("ALTER TABLE users ADD COLUMN a int;\n")+"\n000641 b_q coder/coder#1 "+sha("ALTER TABLE users ADD COLUMN b int;\n")+"\n"), 0o600))
 
 		require.NoError(t, route(dir))
 		got, err := os.ReadFile(filepath.Join(dir, "chatdmig", "routes.txt"))
@@ -109,7 +119,7 @@ func TestRouteEarly(t *testing.T) {
 	t.Run("EarlyAtOrBelowSplitFails", func(t *testing.T) {
 		t.Parallel()
 		dir := writeMigrations(t, routesHeader, nil)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000639 chat_x coder/coder#1\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000639 chat_x coder/coder#1 "+sha("SELECT 1;\n")+"\n"), 0o600))
 
 		require.ErrorContains(t, route(dir), "000639_chat_x is at or below the split")
 		require.ErrorContains(t, check(dir), "000639_chat_x is at or below the split")
@@ -118,7 +128,7 @@ func TestRouteEarly(t *testing.T) {
 	t.Run("EarlyMigrationRoutes", func(t *testing.T) {
 		t.Parallel()
 		dir := writeMigrations(t, routesHeader, map[string]string{
-			"000640_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text;\n",
+			"000640_chat_queued_message_busy_behavior.up.sql": queuedSQL,
 			"000641_after.up.sql":                             "ALTER TABLE users ADD COLUMN y int;\n",
 		})
 
@@ -128,7 +138,38 @@ func TestRouteEarly(t *testing.T) {
 		require.Equal(t, routesHeader+"000640 chat_queued_message_busy_behavior chatd\n000641 after core\n", string(got))
 	})
 
-	for _, line := range []string{"640 short", "00064x chat_x coder/coder#1", "640 chat_x coder/coder#1"} {
+	t.Run("EarlyMigrationChangedFails", func(t *testing.T) {
+		t.Parallel()
+		routes := routesHeader + "000640 chat_queued_message_busy_behavior chatd\n"
+		dir := writeMigrations(t, routes, map[string]string{
+			"000640_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text NOT NULL DEFAULT 'queue';\n",
+		})
+
+		err := route(dir)
+		require.ErrorContains(t, err, "upstream changed 000640_chat_queued_message_busy_behavior.up.sql")
+		require.ErrorContains(t, err, "coder/coder#30073")
+		got, err := os.ReadFile(filepath.Join(dir, "chatdmig", "routes.txt"))
+		require.NoError(t, err)
+		require.Equal(t, routes, string(got))
+		require.ErrorContains(t, check(dir), "upstream changed 000640_chat_queued_message_busy_behavior.up.sql")
+	})
+
+	t.Run("EarlyMigrationMissingFails", func(t *testing.T) {
+		t.Parallel()
+		dir := writeMigrations(t, routesHeader, nil)
+
+		require.ErrorContains(t, route(dir), "no upstream migration named chat_queued_message_busy_behavior")
+		require.ErrorContains(t, check(dir), "no upstream migration named chat_queued_message_busy_behavior")
+	})
+
+	for _, line := range []string{
+		"640 short",
+		"000640 chat_x coder/coder#1",
+		"00064x chat_x coder/coder#1 " + sha("x"),
+		"640 chat_x coder/coder#1 " + sha("x"),
+		"000640 chat_x coder/coder#1 " + sha("x")[:63],
+		"000640 chat_x coder/coder#1 " + sha("x")[:63] + "g",
+	} {
 		t.Run("BadEarlyLineFails/"+line, func(t *testing.T) {
 			t.Parallel()
 			dir := writeMigrations(t, routesHeader, nil)

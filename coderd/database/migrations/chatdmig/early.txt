@@ -3,6 +3,7 @@
 # database, so a database that ran one of them skips every later upstream
 # migration at or below its version. chatdmig route fails when upstream
 # brings a new or renumbered migration at or below an early version. Each
-# version must be above the split. See README.md.
+# version must be above the split. <sha256> is `shasum -a 256` of the taken
+# .up.sql. chatdmig route fails when upstream changes that file. See README.md.
 #
-# <version> <name> <source>
+# <version> <name> <source> <sha256>

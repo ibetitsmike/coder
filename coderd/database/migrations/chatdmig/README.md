@@ -118,7 +118,9 @@ migrations, so sqlc and the generated queries do not change.
 
 `early.txt` lists the upstream migrations that the fork took from an open
 coder/coder branch before upstream main merged them, one
-`<version> <name> <source>` per line. golang-migrate keeps one version per
+`<version> <name> <source> <sha256>` per line. `<sha256>` is the sha256 of
+the `.up.sql` file that the fork took, as `shasum -a 256 <file>` prints it.
+golang-migrate keeps one version per
 database, so a database that ran one of them skips every later upstream
 migration at or below its version. `chatdmig route` fails when upstream brings
 a new or renumbered migration at or below an early version, and the sync stops.
@@ -127,6 +129,15 @@ Migrations that were routed before the early entry was added are not checked.
 An early version must be above the split, because route ignores the
 migrations at or below it. `chatdmig check` validates `early.txt` too, so
 fork-ci rejects a bad entry in the PR that adds it.
+
+Upstream can change the SQL of a migration before it merges. A database that
+ran the early copy does not run the new SQL, because golang-migrate does not
+run a version again. `chatdmig route` and `chatdmig check` fail when an
+upstream file with an early name has a different sha256, or when no upstream
+file has that name. A person then writes a fork node with `chatdmig new` that
+brings the databases that ran the early copy to the new schema. The node must
+do nothing on a database that ran the final file. Then put the new sha256 in
+`early.txt`.
 
 ## Add a fork migration
 
@@ -221,7 +232,7 @@ The package does not exist yet. Create it with the first fork query.
 5. It opens a PR labeled `sync` from `sync/<date>-<sha>`. A clean PR merges
    itself with a merge commit when fork-ci passes.
 
-A person takes over in three cases:
+A person takes over in four cases:
 
 - **Conflict.** The job opens or updates an issue labeled `sync-blocked`.
   Merge upstream by hand on a branch and open a PR.
@@ -231,6 +242,11 @@ A person takes over in three cases:
 - **Migration below an early one.** The job fails with the route output,
   which names the upstream migration and the `early.txt` entry. Renumber or
   move the migration on a branch, update `early.txt`, and open a PR (see
+  [Migrations taken early](#migrations-taken-early)).
+- **Early migration that upstream changed.** The job fails with the route
+  output, which names the file and the old and new sha256. Add a fork node
+  that brings the databases that ran the early copy to the new schema, put
+  the new sha256 in `early.txt`, and open a PR (see
   [Migrations taken early](#migrations-taken-early)).
 
 The job pushes with the `FORK_SYNC_TOKEN` secret, a fine-grained token for

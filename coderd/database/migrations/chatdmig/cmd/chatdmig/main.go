@@ -1,12 +1,15 @@
 // Command chatdmig manages the fork's chatd migrations.
 //
 //	chatdmig route        route new upstream migrations; exit 3 if one is mixed,
-//	                     1 if one is at or below a migration in early.txt
+//	                     1 if one is at or below a migration in early.txt or
+//	                     upstream changed a migration in early.txt
 //	chatdmig new <name>   create a fork node; -requires adds a parent
 //	chatdmig check        validate the graph and early.txt, print the order
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -212,11 +215,16 @@ type earlyMigration struct {
 	version uint64
 	name    string
 	source  string
+	sha256  string
 }
+
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // loadEarly parses early.txt, the upstream migrations that the fork took
 // before upstream main merged them. Each must be above the split, because
-// route ignores the migrations at or below it.
+// route ignores the migrations at or below it. Each upstream file with an
+// early name must still match the recorded sha256, because golang-migrate
+// does not rerun a version that a database already ran.
 func loadEarly(dir string, splitVersion uint64) ([]earlyMigration, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "chatdmig", "early.txt"))
 	if err != nil {
@@ -229,13 +237,38 @@ func loadEarly(dir string, splitVersion uint64) ([]earlyMigration, error) {
 			continue
 		}
 		v, err := strconv.ParseUint(f[0], 10, 32)
-		if len(f) != 3 || len(f[0]) != 6 || err != nil {
+		if len(f) != 4 || len(f[0]) != 6 || err != nil || !sha256Hex.MatchString(f[3]) {
 			return nil, xerrors.Errorf("early.txt: bad line %q", line)
 		}
 		if v <= splitVersion {
 			return nil, xerrors.Errorf("early.txt: %06d_%s is at or below the split, which route does not check", v, f[1])
 		}
-		early = append(early, earlyMigration{v, f[1], f[2]})
+		early = append(early, earlyMigration{v, f[1], f[2], f[3]})
+	}
+
+	var changed []string
+	for _, x := range early {
+		files, err := filepath.Glob(filepath.Join(dir, "[0-9][0-9][0-9][0-9][0-9][0-9]_"+x.name+".up.sql"))
+		if err != nil {
+			return nil, xerrors.Errorf("find upstream migration %s: %w", x.name, err)
+		}
+		if len(files) == 0 {
+			return nil, xerrors.Errorf("early.txt: no upstream migration named %s", x.name)
+		}
+		for _, file := range files {
+			sql, err := os.ReadFile(file)
+			if err != nil {
+				return nil, xerrors.Errorf("read early migration: %w", err)
+			}
+			sum := sha256.Sum256(sql)
+			if actual := hex.EncodeToString(sum[:]); actual != x.sha256 {
+				changed = append(changed, fmt.Sprintf("upstream changed %s after the fork took it early from %s: early.txt has sha256 %s, the file has %s. Databases that ran the early copy will not run the new SQL: add a fork node that brings them to the new schema, then put the new sha256 in early.txt",
+					filepath.Base(file), x.source, x.sha256, actual))
+			}
+		}
+	}
+	if len(changed) > 0 {
+		return nil, xerrors.New(strings.Join(changed, "\n"))
 	}
 	return early, nil
 }
