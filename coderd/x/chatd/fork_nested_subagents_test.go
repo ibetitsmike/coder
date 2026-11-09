@@ -4,6 +4,7 @@ package chatd_test
 // fork-nested-subagents experiment end to end.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -148,6 +149,8 @@ func TestDescendantQuestionEndsTurn(t *testing.T) {
 	)
 	db, ps := dbtestutil.NewDB(t)
 	ctx := testutil.Context(t, testutil.WaitLong)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
 
 	openAIURL := chattest.NewOpenAI(t, func(req *chattest.OpenAIRequest) chattest.OpenAIResponse {
 		if !req.Stream {
@@ -176,11 +179,19 @@ func TestDescendantQuestionEndsTurn(t *testing.T) {
 				fmt.Sprintf(`{"type":"general","prompt":%q,"title":"asker"}`, askPrompt)))
 		case len(toolResults) == 1:
 			var spawned struct {
-				ChatID string `json:"chat_id"`
+				ChatID uuid.UUID `json:"chat_id"`
 			}
-			_ = json.Unmarshal([]byte(toolResults[0]), &spawned)
+			if err := json.Unmarshal([]byte(toolResults[0]), &spawned); err != nil {
+				return chattest.OpenAIStreamingResponse(chattest.OpenAITextChunks("spawn failed: " + toolResults[0])...)
+			}
+			// The child's turn races the root's, so wait_agent starts only
+			// once the question is pending to make its result deterministic.
+			testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+				_, err := fdb.GetPendingChatDescendantQuestion(ctx, spawned.ChatID)
+				return err == nil
+			}, testutil.IntervalFast)
 			return chattest.OpenAIStreamingResponse(chattest.OpenAIToolCallChunk("wait_agent",
-				fmt.Sprintf(`{"chat_id":%q}`, spawned.ChatID)))
+				fmt.Sprintf(`{"chat_id":%q,"timeout_seconds":1}`, spawned.ChatID)))
 		default:
 			return chattest.OpenAIStreamingResponse(chattest.OpenAITextChunks("root done")...)
 		}
@@ -210,8 +221,6 @@ func TestDescendantQuestionEndsTurn(t *testing.T) {
 	for _, message := range chatMessages(ctx, t, db, child.ID) {
 		require.NotContains(t, string(message.Content.RawMessage), afterQuestion, "the question ends the child's turn")
 	}
-	fdb, err := forkdb.From(db)
-	require.NoError(t, err)
 	question, err := fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
 	require.NoError(t, err)
 	require.Contains(t, string(question.Questions), "Which database?")

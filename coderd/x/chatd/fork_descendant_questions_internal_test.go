@@ -207,4 +207,27 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, "answered", result["report"])
 	require.NotContains(t, result, "needs_input")
+
+	// A question the child asks while the call waits on it is reported
+	// with the child's result.
+	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusRunning, "")
+	done = waitAsync(child.ID, 10)
+	subagentAwaitTrap.MustWait(ctx).MustRelease(ctx)
+	subagentPollTrap.MustWait(ctx).MustRelease(ctx)
+	resp, err = f.server.newDescendantQuestionTool(child).Run(ctx,
+		fantasy.ToolCall{ID: uuid.NewString(), Name: askUserQuestionToolName, Input: descendantQuestionInput})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusWaiting, "")
+	insertAssistantMessage(t, f.db, child.ID, child.LastModelConfigID, "asked again")
+	// Server tickers can fire before the poll, and Advance cannot pass them.
+	for elapsed := time.Duration(0); elapsed < subagentAwaitFallbackPoll; {
+		d, w := mClock.AdvanceNext()
+		w.MustWait(ctx)
+		elapsed += d
+	}
+	result = decode(testutil.RequireReceive(ctx, t, done))
+	require.Equal(t, "asked again", result["report"])
+	require.Equal(t, true, result["needs_input"])
+	require.NotEmpty(t, result["questions"])
 }
