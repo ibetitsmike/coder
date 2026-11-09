@@ -69,6 +69,11 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		testAgentTool: &testAgentTool{info: fantasy.ToolInfo{Name: "Workspace__echo"}},
 		server:        "Workspace",
 	}
+	// Workspace config can hold a padded server name next to the plain one.
+	padded := &testWorkspaceMCPAgentTool{
+		testAgentTool: &testAgentTool{info: fantasy.ToolInfo{Name: "_Workspace__ping"}},
+		server:        " Workspace ",
+	}
 	tools := []fantasy.AgentTool{
 		newTestAgentTool("read_file"),
 		newTestAgentTool("write_file"),
@@ -81,15 +86,19 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		// An MCP tool whose server is unknown has no server name.
 		newTestMCPAgentTool("ghost__lookup", uuid.New()),
 		workspace,
+		padded,
 	}
-	candidates := []deferredMCPTool{{tool: docs, server: "docs"}, {tool: other, server: "other"}, {tool: workspace, server: "Workspace"}}
+	candidates := []deferredMCPTool{
+		{tool: docs, server: "docs"}, {tool: other, server: "other"},
+		{tool: workspace, server: "Workspace"}, {tool: padded, server: " Workspace "},
+	}
 	providerTools := []chatloop.ProviderTool{
 		{Definition: fantasy.ProviderDefinedTool{Name: "web_search"}},
 		{Definition: fantasy.ProviderDefinedTool{Name: "code_execution"}},
 	}
 	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent"}
-	allMCP := []string{"docs__search", "other__lookup", "ghost__lookup", "Workspace__echo"}
-	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo"}
+	allMCP := []string{"docs__search", "other__lookup", "ghost__lookup", "Workspace__echo", "_Workspace__ping"}
+	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo", "_Workspace__ping"}
 	allProvider := []string{"web_search", "code_execution"}
 
 	tests := []struct {
@@ -129,9 +138,9 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		},
 		{
 			name:         "Disallowed",
-			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "other__lookup", "web_search"}, MCPMode: "inherit"},
-			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "ghost__lookup", "Workspace__echo"},
-			wantDeferred: []string{"docs__search", "Workspace__echo"},
+			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "mcp__other__lookup", "ghost__lookup", "web_search"}, MCPMode: "inherit"},
+			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "Workspace__echo", "_Workspace__ping"},
+			wantDeferred: []string{"docs__search", "Workspace__echo", "_Workspace__ping"},
 			wantProvider: []string{"code_execution"},
 		},
 		{

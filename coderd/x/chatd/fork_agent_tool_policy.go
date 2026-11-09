@@ -62,10 +62,16 @@ func customAgentToolPolicyFromDefinition(def workspacesdk.AgentDefinition) custo
 	}
 }
 
+// customAgentToolNames expands names with their aliases. A Claude Code MCP
+// tool ID, mcp__<server>__<tool>, also matches the chatd tool name
+// <server>__<tool>.
 func customAgentToolNames(names []string) map[string]bool {
 	out := make(map[string]bool, len(names))
 	for _, name := range names {
 		out[name] = true
+		if tool, ok := strings.CutPrefix(name, "mcp__"); ok {
+			out[tool] = true
+		}
 		for _, alias := range customAgentToolAliases[name] {
 			out[alias] = true
 		}
@@ -75,10 +81,11 @@ func customAgentToolNames(names []string) map[string]bool {
 
 // customAgentMCPServer reports whether tool is an MCP tool and, if so, the
 // name of its server. An MCP tool whose server ID is not in mcpServerSlugs
-// has no name.
+// has no name. Workspace server names stay untrimmed, because workspace
+// config can hold both "x" and " x " as distinct servers.
 func customAgentMCPServer(tool fantasy.AgentTool, mcpServerSlugs map[uuid.UUID]string) (string, bool) {
 	if namer, ok := tool.(interface{ ServerName() string }); ok {
-		return strings.TrimSpace(namer.ServerName()), true
+		return namer.ServerName(), true
 	}
 	if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok {
 		return mcpServerSlugs[identified.MCPServerConfigID()], true
@@ -92,7 +99,7 @@ func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
 		return false
 	case workspacesdk.AgentDefinitionMCPNamed:
 		return server != "" && slices.ContainsFunc(policy.MCPServers, func(name string) bool {
-			return strings.EqualFold(strings.TrimSpace(name), server)
+			return strings.EqualFold(name, server)
 		})
 	default:
 		return true
