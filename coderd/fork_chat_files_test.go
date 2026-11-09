@@ -36,33 +36,25 @@ func TestGetChatFileByteRange(t *testing.T) {
 	require.NoError(t, err)
 	path := fmt.Sprintf("/api/v2/chats/files/%s", row.ID)
 
-	t.Run("RangeRequest", func(t *testing.T) {
-		t.Parallel()
-
-		res, err := client.Request(ctx, http.MethodGet, path, nil, func(r *http.Request) {
-			r.Header.Set("Range", "bytes=10-19")
-		})
-		require.NoError(t, err)
-		defer res.Body.Close()
-		require.Equal(t, http.StatusPartialContent, res.StatusCode)
-		require.Equal(t, "bytes 10-19/100", res.Header.Get("Content-Range"))
-		require.Equal(t, "video/mp4", res.Header.Get("Content-Type"))
-		got, err := io.ReadAll(res.Body)
-		require.NoError(t, err)
-		require.Equal(t, data[10:20], got)
+	res, err := client.Request(ctx, http.MethodGet, path, nil, func(r *http.Request) {
+		r.Header.Set("Range", "bytes=10-19")
 	})
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusPartialContent, res.StatusCode)
+	require.Equal(t, "bytes 10-19/100", res.Header.Get("Content-Range"))
+	require.Equal(t, "video/mp4", res.Header.Get("Content-Type"))
+	got, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, data[10:20], got)
 
-	t.Run("FullRequest", func(t *testing.T) {
-		t.Parallel()
-
-		res, err := client.Request(ctx, http.MethodGet, path, nil)
-		require.NoError(t, err)
-		defer res.Body.Close()
-		require.Equal(t, http.StatusOK, res.StatusCode)
-		require.Equal(t, "bytes", res.Header.Get("Accept-Ranges"))
-		require.Equal(t, "video/mp4", res.Header.Get("Content-Type"))
-		got, err := io.ReadAll(res.Body)
-		require.NoError(t, err)
-		require.Equal(t, data, got)
-	})
+	res, err = client.Request(ctx, http.MethodGet, path, nil)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "bytes", res.Header.Get("Accept-Ranges"))
+	require.Equal(t, "video/mp4", res.Header.Get("Content-Type"))
+	got, err = io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
 }

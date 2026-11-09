@@ -18,7 +18,11 @@ type ForkAttachmentPreviewProps = {
 	children: React.ReactNode;
 };
 
-/** Previews a stored MP4 with the recording player while fork-chat-todos is on. */
+/**
+ * Agent-attached MP4s, such as review videos, reuse the computer-use
+ * recording player. Only stored files qualify, because the player loads the
+ * video from its chat file URL.
+ */
 export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	block,
 	children,
