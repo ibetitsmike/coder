@@ -286,3 +286,110 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		_ = requireSDKError(t, err, http.StatusForbidden)
 	})
 }
+
+func TestForkProjectAgentDefinitions(t *testing.T) {
+	t.Parallel()
+
+	const reviewer = "---\nname: reviewer\ndescription: Reviews diffs\n---\nReview the diff.\n"
+
+	t.Run("Enabled", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := newChatProjectClient(t, func(o *coderdtest.Options) {
+			o.DeploymentValues.Experiments = append(o.DeploymentValues.Experiments, string(codersdk.ExperimentForkAgentDefinitions))
+		})
+		orgID := coderdtest.CreateFirstUser(t, client.Client).OrganizationID
+		project := createChatProject(t, client, orgID, "Agent Definitions Project")
+
+		created, err := client.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		require.NoError(t, err)
+		require.Equal(t, "reviewer", created.Name)
+		require.Equal(t, "Reviews diffs", created.Description)
+		require.Equal(t, orgID, created.OrganizationID)
+		require.True(t, created.Enabled)
+		_, err = client.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		_ = requireSDKError(t, err, http.StatusConflict)
+
+		list, err := client.ForkProjectAgentDefinitions(ctx, orgID, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, []codersdk.ForkAgentDefinitionMetadata{created.ForkAgentDefinitionMetadata}, list)
+
+		updated, err := client.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{
+			Content: ptr.Ref("---\nname: reviewer\ndescription: Reviews code\n---\nReview the code.\n"),
+			Enabled: ptr.Ref(false),
+		})
+		require.NoError(t, err)
+		require.Equal(t, "Reviews code", updated.Description)
+		require.False(t, updated.Enabled)
+		_, err = client.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{
+			Content: ptr.Ref("---\nname: renamed\n---\nReview the code.\n"),
+		})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+
+		// The project is not visible through another organization's path.
+		otherOrg := dbgen.Organization(t, db, database.Organization{})
+		_, err = client.ForkProjectAgentDefinitions(ctx, otherOrg.ID, project.ID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		memberRaw, memberUser := coderdtest.CreateAnotherUser(t, client.Client, orgID)
+		member := codersdk.NewExperimentalClient(memberRaw)
+		memberCalls := []func() error{
+			func() error { _, err := member.ForkProjectAgentDefinitions(ctx, orgID, project.ID); return err },
+			func() error {
+				_, err := member.ForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer")
+				return err
+			},
+			func() error {
+				_, err := member.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+				return err
+			},
+			func() error {
+				_, err := member.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+				return err
+			},
+			func() error { return member.DeleteForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer") },
+		}
+		// A member who cannot read the project gets 404 on every route.
+		for i, call := range memberCalls {
+			_ = requireSDKErrorStatus(t, call(), http.StatusNotFound, "member call %d", i)
+		}
+
+		// The use role reads the definitions but cannot change them.
+		require.NoError(t, client.UpdateChatProjectACL(ctx, orgID, project.ID, codersdk.UpdateChatProjectACL{
+			UserRoles: map[string]codersdk.ChatProjectRole{memberUser.ID.String(): codersdk.ChatProjectRoleUse},
+		}))
+		require.NoError(t, memberCalls[0]())
+		got, err := member.ForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer")
+		require.NoError(t, err)
+		require.Equal(t, updated, got)
+		for i, call := range memberCalls[2:] {
+			_ = requireSDKErrorStatus(t, call(), http.StatusNotFound, "use call %d", i)
+		}
+		got, err = client.ForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer")
+		require.NoError(t, err)
+		require.Equal(t, updated, got)
+
+		// The admin role can change them.
+		require.NoError(t, client.UpdateChatProjectACL(ctx, orgID, project.ID, codersdk.UpdateChatProjectACL{
+			UserRoles: map[string]codersdk.ChatProjectRole{memberUser.ID.String(): codersdk.ChatProjectRoleAdmin},
+		}))
+		_, err = member.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+		require.NoError(t, err)
+		require.NoError(t, member.DeleteForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer"))
+		_, err = client.ForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("ExperimentOff", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, _ := newChatProjectClient(t)
+		orgID := coderdtest.CreateFirstUser(t, client.Client).OrganizationID
+		project := createChatProject(t, client, orgID, "Agent Definitions Project")
+
+		_, err := client.ForkProjectAgentDefinitions(ctx, orgID, project.ID)
+		_ = requireSDKError(t, err, http.StatusForbidden)
+	})
+}
