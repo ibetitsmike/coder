@@ -31,8 +31,7 @@ type forkListAgentsEntry struct {
 // the enabled fork features. With fork-chat-todos off it returns result as it
 // is, so the output matches upstream. With it on, each listed child carries
 // its todo list, read as the owner of parent so the child chats are read with
-// the owner's permissions instead of chatd's. W1 (agent type badge) and W2
-// (waiting for capacity) extend this function.
+// the owner's permissions instead of chatd's.
 func (p *Server) forkListAgents(ctx context.Context, parent database.Chat, result subagentListResult) any {
 	if !p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		return result
