@@ -519,6 +519,11 @@ func (p *Server) setChatFamilyArchived(ctx context.Context, chat database.Chat, 
 	if chat.ParentChatID.Valid {
 		return ErrArchiveRequiresRootChat
 	}
+	if archived {
+		if err := p.forkArchiveActiveFamily(ctx, chat); err != nil {
+			return err
+		}
+	}
 
 	familyChats, err := chatstate.SetFamilyArchived(ctx, p.db, p.pubsub, chatstate.SetFamilyArchivedInput{
 		RootID:   chat.ID,
@@ -872,6 +877,7 @@ func (p *Server) InterruptChat(
 	if chat.ID == uuid.Nil {
 		return chat, xerrors.New("chat_id is required")
 	}
+	descendantsInterrupted := p.forkInterruptDescendants(ctx, chat)
 
 	var result chatstate.InterruptResult
 	refreshed, err := p.updateChat(ctx, chat.ID, "interrupt", func(tx *chatstate.Tx, _ database.Store, _ *database.Chat) error {
@@ -882,7 +888,7 @@ func (p *Server) InterruptChat(
 		return err
 	})
 	if err != nil {
-		return chat, err
+		return p.forkInterruptResult(ctx, chat, descendantsInterrupted, err)
 	}
 
 	p.recordQueueWait(ctx, refreshed, result.PromotedQueuedAt)
