@@ -61,6 +61,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountActiveSubagentsForCapacity(gomock.Any(), arg).Return(row, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(row)
 		},
+		"CountLiveSubagentsInFamily": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
+		},
 		"GetChatOrganizationSubagentLimits": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			limits := testutil.Fake(t, faker, forkdb.ChatOrganizationSubagentLimit{})
 			fdb.EXPECT().GetChatOrganizationSubagentLimits(gomock.Any(), limits.OrganizationID).Return(limits, nil).AnyTimes()

@@ -21,6 +21,9 @@ type ForkLimits struct {
 	// MaxConcurrentSubagentsPerFamily is the maximum number of running
 	// subagent chats under one root chat.
 	MaxConcurrentSubagentsPerFamily int
+	// MaxLiveSubagentsPerFamily is the maximum number of live subagent
+	// chats under one root chat.
+	MaxLiveSubagentsPerFamily int
 }
 
 func forkLimitsFromConfig(cfg codersdk.ForkChatConfig) ForkLimits {
@@ -28,6 +31,7 @@ func forkLimitsFromConfig(cfg codersdk.ForkChatConfig) ForkLimits {
 		MaxSubagentDepth:                int(cfg.MaxSubagentDepth.Value()),
 		MaxConcurrentSubagents:          int(cfg.MaxConcurrentSubagents.Value()),
 		MaxConcurrentSubagentsPerFamily: int(cfg.MaxConcurrentSubagentsPerFamily.Value()),
+		MaxLiveSubagentsPerFamily:       int(cfg.MaxLiveSubagentsPerFamily.Value()),
 	}
 }
 

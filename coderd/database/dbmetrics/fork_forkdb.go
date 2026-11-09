@@ -67,6 +67,11 @@ func (f forkQueryMetricsStore) CountActiveSubagentsForCapacity(ctx context.Conte
 	return f.s.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
+	defer f.observe(ctx, "CountLiveSubagentsInFamily", time.Now())
+	return f.s.CountLiveSubagentsInFamily(ctx, rootChatID)
+}
+
 func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
 	return f.s.DeleteExpiredPluginLinkCodes(ctx)

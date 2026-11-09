@@ -3,9 +3,9 @@ package chatd
 // This file is fork code: it implements nested subagents behind the
 // fork-nested-subagents experiment. Upstream's chatd files call the hooks in
 // this file (forkValidateSpawnParent, createSubagentChatWithID,
-// isSubagentTarget, childGetsOrchestrationPrompt and
-// forkSpawnAgentDescription), which keep upstream's behavior when the
-// experiment is off.
+// forkValidateSubagentResume, withSubagentResume, isSubagentTarget,
+// childGetsOrchestrationPrompt and forkSpawnAgentDescription), which keep
+// upstream's behavior when the experiment is off.
 
 import (
 	"context"
@@ -81,14 +81,91 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if err != nil {
 		return err
 	}
-	_, err = validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth)
+	if _, err := validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth); err != nil {
+		return err
+	}
+	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily, "create a child agent")
+}
+
+type subagentResumeKey struct{}
+
+// withSubagentResume marks ctx as a message_agent send, so SendMessage
+// applies the family live subagent limit when the message resumes a finished
+// child. Messages that the owner sends through the chat API do not carry it.
+func withSubagentResume(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subagentResumeKey{}, true)
+}
+
+// forkValidateSubagentResume returns an error when a message_agent send would
+// resume the finished subagent target while its family already has the
+// maximum number of live subagents. sendSubagentMessage calls it before
+// SendMessage runs the prompt hooks, and SendMessage calls it again with inTx
+// in the transaction that resumes target. That call takes the lock that
+// serializes the family's spawns, so a concurrent spawn cannot pass the same
+// count.
+func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
+	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
+		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
+		return nil
+	}
+	fdb, err := forkdb.From(store)
+	if err != nil {
+		return xerrors.Errorf("fork queries: %w", err)
+	}
+	limits, err := p.subagentLimits(ctx, fdb, target.OrganizationID)
+	if err != nil {
+		return err
+	}
+	if limits.maxLivePerFamily == 0 {
+		return nil
+	}
+	rootChatID := subagentRootChatID(target)
+	if inTx {
+		if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
+			return xerrors.Errorf("acquire chat family admission lock: %w", err)
+		}
+	}
+	err = validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
+	if err != nil && !inTx {
+		// A concurrent message_agent may have resumed target after the
+		// caller loaded it. The send then only queues on a live child, and
+		// the transactional check reloads target and skips the limit.
+		current, getErr := store.GetChatByID(ctx, target.ID)
+		if getErr == nil && current.Status != database.ChatStatusWaiting && current.Status != database.ChatStatusError {
+			return nil
+		}
+	}
 	return err
+}
+
+// chatFamilyAdmissionLockID is the transaction lock that serializes the
+// spawns and resumes of one chat family, so two of them cannot both pass the
+// live subagent count.
+func chatFamilyAdmissionLockID(rootChatID uuid.UUID) int64 {
+	return database.GenLockID("fork_chat_family_admission:" + rootChatID.String())
+}
+
+// validateFamilyLiveSubagents returns an error when the family of rootChatID
+// already has maxLive live subagents. 0 means no limit.
+func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int, action string) error {
+	if maxLive == 0 {
+		return nil
+	}
+	live, err := fdb.CountLiveSubagentsInFamily(ctx, rootChatID)
+	if err != nil {
+		return xerrors.Errorf("count live subagents of chat family %s: %w", rootChatID, err)
+	}
+	if live >= int64(maxLive) {
+		return xerrors.Errorf("cannot %s: this chat family has %d live subagents and the maximum is %d", action, live, maxLive)
+	}
+	return nil
 }
 
 // createSubagentChatWithID creates the child chat of parent. With nested
 // subagents enabled, or for a customAgent, it also records the child's
 // chat_subagents row in the same transaction, with the custom agent's tool
-// policy. Nested subagents also recheck the depth limit there.
+// policy. Nested subagents also recheck the depth and live subagent limits
+// there.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -119,9 +196,9 @@ func (p *Server) createSubagentChatWithID(
 		// Without nested subagents the parent is a root chat that was
 		// already validated, so only its depth is needed.
 		var depth int32
+		var limits forkSubagentLimits
 		var err error
 		if nested {
-			var limits forkSubagentLimits
 			limits, err = p.subagentLimits(ctx, ftx, parent.OrganizationID)
 			if err != nil {
 				return err
@@ -132,6 +209,22 @@ func (p *Server) createSubagentChatWithID(
 		}
 		if err != nil {
 			return err
+		}
+		if limits.maxLivePerFamily > 0 {
+			rootChatID := subagentRootChatID(parent)
+			// Family operations lock the root first, and CreateChatWithID
+			// locks it too. Taking it before the admission lock keeps that
+			// order, so this spawn never holds the admission lock while it
+			// waits for the root.
+			if _, err := tx.GetChatByIDForShare(ctx, rootChatID); err != nil {
+				return xerrors.Errorf("lock root chat: %w", err)
+			}
+			if err := tx.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
+				return xerrors.Errorf("acquire chat family admission lock: %w", err)
+			}
+			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily, "create a child agent"); err != nil {
+				return err
+			}
 		}
 		result, err = chatstate.CreateChatWithID(ctx, tx, buffer, chatID, input)
 		if err != nil {

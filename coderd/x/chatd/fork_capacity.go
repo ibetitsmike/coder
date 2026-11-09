@@ -24,6 +24,7 @@ type forkSubagentLimits struct {
 	maxDepth               int
 	maxConcurrent          int
 	maxConcurrentPerFamily int
+	maxLivePerFamily       int
 }
 
 // subagentLimits returns the subagent limits of chats in the organization:
@@ -39,6 +40,7 @@ func (p *Server) subagentLimits(ctx context.Context, fdb forkdb.Store, organizat
 		maxDepth:               deployment.MaxSubagentDepth,
 		maxConcurrent:          effectiveCapacityLimit(deployment.MaxConcurrentSubagents, org.MaxConcurrent),
 		maxConcurrentPerFamily: effectiveCapacityLimit(deployment.MaxConcurrentSubagentsPerFamily, org.MaxConcurrentPerFamily),
+		maxLivePerFamily:       effectiveCapacityLimit(deployment.MaxLiveSubagentsPerFamily, org.MaxLivePerFamily),
 	}
 	if org.MaxDepth.Valid {
 		limits.maxDepth = min(limits.maxDepth, int(org.MaxDepth.Int32))

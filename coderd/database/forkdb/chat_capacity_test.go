@@ -80,3 +80,44 @@ func TestCountActiveSubagentsForCapacity(t *testing.T) {
 		ActiveFamilyCount:       2,
 	}, count(sibling))
 }
+
+func TestCountLiveSubagentsInFamily(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	orgID := dbgen.Organization(t, db, database.Organization{}).ID
+	ownerID := dbgen.User(t, db, database.User{}).ID
+	modelID := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}).ID
+	chat := func(root *database.Chat, status database.ChatStatus, archived bool) database.Chat {
+		seed := database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: modelID, Status: status}
+		if root != nil {
+			seed.ParentChatID = uuid.NullUUID{UUID: root.ID, Valid: true}
+			seed.RootChatID = seed.ParentChatID
+		}
+		c := dbgen.Chat(t, db, seed)
+		_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET archived = $2 WHERE id = $1", c.ID, archived)
+		require.NoError(t, err)
+		return c
+	}
+	root := chat(nil, database.ChatStatusRunning, false)
+	for _, status := range []database.ChatStatus{
+		database.ChatStatusRunning,
+		database.ChatStatusInterrupting,
+		database.ChatStatusRequiresAction,
+		database.ChatStatusPaused,
+	} {
+		_ = chat(&root, status, false)
+	}
+	_ = chat(&root, database.ChatStatusWaiting, false)
+	_ = chat(&root, database.ChatStatusError, false)
+	_ = chat(&root, database.ChatStatusRunning, true)
+	otherRoot := chat(nil, database.ChatStatusRunning, false)
+	_ = chat(&otherRoot, database.ChatStatusRunning, false)
+
+	live, err := fdb.CountLiveSubagentsInFamily(ctx, root.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, live)
+}
