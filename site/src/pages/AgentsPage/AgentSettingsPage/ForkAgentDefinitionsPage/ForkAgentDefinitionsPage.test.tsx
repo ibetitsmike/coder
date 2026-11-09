@@ -4,12 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import type { Experiment } from "#/api/typesGenerated";
-import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
 	MockUserMember,
-	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
@@ -72,84 +70,5 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(getDefinitions).toHaveBeenLastCalledWith(MockOrganization2.id),
 		);
-	});
-
-	it("disables a definition in the selected organization", async () => {
-		const user = userEvent.setup();
-		renderPage();
-		const update = vi
-			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
-			.mockResolvedValue({
-				...MockForkAgentDefinitionMetadata,
-				enabled: false,
-				content: "",
-			});
-
-		await user.click(
-			await screen.findByRole("switch", {
-				name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-
-		await waitFor(() =>
-			expect(update).toHaveBeenCalledWith(
-				MockDefaultOrganization.id,
-				MockForkAgentDefinitionMetadata.name,
-				{ enabled: false },
-			),
-		);
-	});
-
-	it("reports a failed toggle with the server message", async () => {
-		const user = userEvent.setup();
-		renderPage();
-		const toastError = vi.spyOn(toast, "error");
-		vi.spyOn(
-			forkAgentDefinitionsApi,
-			"updateUserAgentDefinition",
-		).mockRejectedValue(
-			mockApiError({ message: "Permission denied.", detail: "read-only" }),
-		);
-
-		await user.click(
-			await screen.findByRole("switch", {
-				name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-
-		await waitFor(() =>
-			expect(toastError).toHaveBeenCalledWith("Permission denied.", {
-				description: "read-only",
-			}),
-		);
-	});
-
-	it("deletes a definition only after confirmation", async () => {
-		const user = userEvent.setup();
-		renderPage();
-		const toastSuccess = vi.spyOn(toast, "success");
-		const remove = vi
-			.spyOn(forkAgentDefinitionsApi, "deleteUserAgentDefinition")
-			.mockResolvedValue();
-
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
-		expect(remove).not.toHaveBeenCalled();
-		await user.click(await screen.findByRole("button", { name: "Delete" }));
-
-		await waitFor(() =>
-			expect(remove).toHaveBeenCalledWith(
-				MockDefaultOrganization.id,
-				MockForkAgentDefinitionMetadata.name,
-			),
-		);
-		await waitFor(() =>
-			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
-		);
-		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 });

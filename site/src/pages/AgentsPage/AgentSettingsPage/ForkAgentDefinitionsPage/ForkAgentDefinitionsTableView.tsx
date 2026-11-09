@@ -1,19 +1,7 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
-import { EllipsisVerticalIcon } from "lucide-react";
-import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
-import { Alert, AlertDescription } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
-import { Button } from "#/components/Button/Button";
-import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "#/components/DropdownMenu/DropdownMenu";
-import { Switch } from "#/components/Switch/Switch";
 import {
 	Table,
 	TableBody,
@@ -27,17 +15,8 @@ import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { formatDate } from "#/utils/time";
 import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
-import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
 
 const title = "Agent definitions";
-
-export type ForkAgentDefinitionDeleteState = {
-	definition: ForkAgentDefinitionMetadata;
-	error?: unknown;
-	isDeleting: boolean;
-	onConfirm: () => void;
-	onClose: () => void;
-};
 
 type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
@@ -47,11 +26,6 @@ type ForkAgentDefinitionsTableViewProps = {
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
-	/** The toggle in flight, shown optimistically on its row. */
-	pendingToggle?: { name: string; enabled: boolean };
-	onToggleEnabled: (name: string, enabled: boolean) => void;
-	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
-	deleteState?: ForkAgentDefinitionDeleteState;
 };
 
 const formatUpdatedAt = (value: string) => {
@@ -72,23 +46,7 @@ const formatUpdatedAt = (value: string) => {
 
 export const ForkAgentDefinitionsTableView: React.FC<
 	ForkAgentDefinitionsTableViewProps
-> = ({
-	definitions,
-	action,
-	error,
-	isLoading,
-	isRetrying,
-	onRetry,
-	pendingToggle,
-	onToggleEnabled,
-	onDelete,
-	deleteState,
-}) => {
-	const { rememberTrigger, restoreFocus } = useDialogFocusReturn();
-	const deleteErrorDetail = deleteState?.error
-		? getErrorDetail(deleteState.error)
-		: undefined;
-
+> = ({ definitions, action, error, isLoading, isRetrying, onRetry }) => {
 	let tableBody: React.ReactNode;
 	if (isLoading) {
 		tableBody = <TableLoader />;
@@ -110,60 +68,24 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			<TableEmpty message="No personal agent definitions in this organization yet." />
 		);
 	} else {
-		tableBody = definitions.map((definition) => {
-			const isToggling = pendingToggle?.name === definition.name;
-			return (
-				<TableRow key={definition.id}>
-					<TableCell className="max-w-48 truncate" title={definition.name}>
-						{definition.name}
-					</TableCell>
-					<TableCell
-						className="w-full max-w-0 truncate"
-						title={definition.description || undefined}
-					>
-						{definition.description || (
-							<span className="text-content-disabled">No description</span>
-						)}
-					</TableCell>
-					<TableCell>
-						<Switch
-							aria-label={`Enable ${definition.name}`}
-							checked={isToggling ? pendingToggle.enabled : definition.enabled}
-							disabled={isToggling}
-							onCheckedChange={(enabled) =>
-								onToggleEnabled(definition.name, enabled)
-							}
-						/>
-					</TableCell>
-					<TableCell className="hidden whitespace-nowrap sm:table-cell">
-						{formatUpdatedAt(definition.updated_at)}
-					</TableCell>
-					<TableCell className="text-right">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									size="icon"
-									variant="subtle"
-									aria-label={`More actions for ${definition.name}`}
-									onPointerDown={rememberTrigger}
-									onKeyDown={rememberTrigger}
-								>
-									<EllipsisVerticalIcon aria-hidden="true" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								<DropdownMenuItem
-									className="text-content-destructive focus:text-content-destructive"
-									onClick={() => onDelete(definition)}
-								>
-									Delete&hellip;
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					</TableCell>
-				</TableRow>
-			);
-		});
+		tableBody = definitions.map((definition) => (
+			<TableRow key={definition.id}>
+				<TableCell className="max-w-48 truncate" title={definition.name}>
+					{definition.name}
+				</TableCell>
+				<TableCell
+					className="w-full max-w-0 truncate"
+					title={definition.description || undefined}
+				>
+					{definition.description || (
+						<span className="text-content-disabled">No description</span>
+					)}
+				</TableCell>
+				<TableCell className="hidden whitespace-nowrap sm:table-cell">
+					{formatUpdatedAt(definition.updated_at)}
+				</TableCell>
+			</TableRow>
+		));
 	}
 
 	return (
@@ -181,49 +103,13 @@ export const ForkAgentDefinitionsTableView: React.FC<
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>
 						<TableHead className="w-full">Description</TableHead>
-						<TableHead className="whitespace-nowrap">Enabled</TableHead>
 						<TableHead className="hidden whitespace-nowrap sm:table-cell">
 							Updated
-						</TableHead>
-						<TableHead className="w-14">
-							<span className="sr-only">Actions</span>
 						</TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody size="lg">{tableBody}</TableBody>
 			</Table>
-
-			{deleteState && (
-				<ConfirmDialog
-					type="delete"
-					open
-					onClose={deleteState.onClose}
-					onCloseAutoFocus={restoreFocus}
-					title={`Delete ${deleteState.definition.name}?`}
-					confirmText="Delete"
-					description={
-						<>
-							<p className="m-0">
-								Chats can no longer spawn {deleteState.definition.name}. This
-								action cannot be undone.
-							</p>
-							{Boolean(deleteState.error) && (
-								<Alert severity="error" className="mt-3">
-									<AlertDescription>
-										{getErrorMessage(
-											deleteState.error,
-											"Failed to delete agent definition.",
-										)}
-										{deleteErrorDetail ? ` ${deleteErrorDetail}` : ""}
-									</AlertDescription>
-								</Alert>
-							)}
-						</>
-					}
-					onConfirm={deleteState.onConfirm}
-					confirmLoading={deleteState.isDeleting}
-				/>
-			)}
 		</div>
 	);
 };
