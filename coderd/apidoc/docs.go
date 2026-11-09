@@ -4695,6 +4695,84 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/todos": {
+            "get": {
+                "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the chat todo list",
+                "operationId": "get-the-chat-todo-list",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatTodoList"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/todos/watch": {
+            "get": {
+                "description": "Streams the todo list of the chat over a websocket: the current\nlist first, then the latest list after writes to it. Writes close\ntogether can arrive as one list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Watch the chat todo list",
+                "operationId": "watch-the-chat-todo-list",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatTodoList"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/watch": {
             "get": {
                 "produces": [
@@ -24635,6 +24713,50 @@ const docTemplate = `{
                 "ChatTitleSourceUser"
             ]
         },
+        "codersdk.ChatTodo": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/codersdk.ChatTodoStatus"
+                }
+            }
+        },
+        "codersdk.ChatTodoList": {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatTodo"
+                    }
+                },
+                "version": {
+                    "description": "Version is the revision of Todos. It lets a watcher drop an event for\na version it has already sent.",
+                    "type": "integer"
+                }
+            }
+        },
+        "codersdk.ChatTodoStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "in_progress",
+                "done",
+                "cancelled"
+            ],
+            "x-enum-varnames": [
+                "ChatTodoStatusPending",
+                "ChatTodoStatusInProgress",
+                "ChatTodoStatusDone",
+                "ChatTodoStatusCancelled"
+            ]
+        },
         "codersdk.ChatUnsupportedProvider": {
             "type": "object",
             "properties": {
@@ -26947,6 +27069,9 @@ const docTemplate = `{
         "codersdk.Experiment": {
             "type": "string",
             "enum": [
+                "fork-chat-todos",
+                "fork-nested-subagents",
+                "fork-agent-definitions",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -26963,10 +27088,7 @@ const docTemplate = `{
                 "chat-inline-mcp-servers",
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
-                "chat-acp-subagents",
-                "fork-chat-todos",
-                "fork-nested-subagents",
-                "fork-agent-definitions"
+                "chat-acp-subagents"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -26988,6 +27110,9 @@ const docTemplate = `{
                 "ExperimentWorkspaceUsage": "Enables the new workspace usage tracking."
             },
             "x-enum-descriptions": [
+                "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -27004,11 +27129,12 @@ const docTemplate = `{
                 "Enables inline MCP servers declared on POST /chats.",
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
-                "Enables workspace-local ACP subagent tools in root chats.",
-                "",
-                ""
+                "Enables workspace-local ACP subagent tools in root chats."
             ],
             "x-enum-varnames": [
+                "ExperimentForkChatTodos",
+                "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -27025,10 +27151,7 @@ const docTemplate = `{
                 "ExperimentChatInlineMCPServers",
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
-                "ExperimentChatACPSubagents",
-                "ExperimentForkChatTodos",
-                "ExperimentForkNestedSubagents",
-                "ExperimentForkAgentDefinitions"
+                "ExperimentChatACPSubagents"
             ]
         },
         "codersdk.ExperimentRule": {
