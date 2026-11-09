@@ -214,7 +214,11 @@ func TestNestedArchiveActiveFamily(t *testing.T) {
 		go func() {
 			transitionErr <- chatstate.NewChatMachine(f.db, f.server.pubsub, grandchild.ID).Update(ctx, func(_ *chatstate.Tx, store database.Store) error {
 				locked <- struct{}{}
-				<-release
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				current, err := store.GetChatByID(ctx, grandchild.ID)
 				if err != nil {
 					return err
