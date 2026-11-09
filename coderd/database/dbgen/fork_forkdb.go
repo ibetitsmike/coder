@@ -56,6 +56,7 @@ func ChatSubagent(t testing.TB, db database.Store, seed forkdb.ChatSubagent) for
 		WorktreePath: seed.WorktreePath,
 		Branch:       seed.Branch,
 		WorkspaceID:  seed.WorkspaceID,
+		ToolPolicy:   seed.ToolPolicy,
 	})
 	require.NoError(t, err, "insert chat subagent")
 	return sub

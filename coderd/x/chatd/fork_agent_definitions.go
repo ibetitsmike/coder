@@ -175,7 +175,7 @@ func customSubagentDefinition(def workspacesdk.AgentDefinition, description stri
 				options.reasoningEffortOverride = &effort
 			}
 			options.systemPrompt = def.Prompt
-			options.agentType = def.Name
+			options.customAgent = &def
 			return options, nil
 		},
 	}
