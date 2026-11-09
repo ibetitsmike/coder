@@ -13,7 +13,6 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "#/components/DropdownMenu/DropdownMenu";
-import { Skeleton } from "#/components/Skeleton/Skeleton";
 import { Switch } from "#/components/Switch/Switch";
 import {
 	Table,
@@ -24,10 +23,7 @@ import {
 	TableRow,
 } from "#/components/Table/Table";
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
-import {
-	TableLoaderSkeleton,
-	TableRowSkeleton,
-} from "#/components/TableLoader/TableLoader";
+import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { formatDate } from "#/utils/time";
 import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
@@ -95,27 +91,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
-		tableBody = (
-			<TableLoaderSkeleton>
-				<TableRowSkeleton aria-label="Loading agent definitions">
-					<TableCell>
-						<Skeleton variant="text" className="w-32" />
-					</TableCell>
-					<TableCell className="w-full max-w-0">
-						<Skeleton variant="text" />
-					</TableCell>
-					<TableCell>
-						<Skeleton className="h-5 w-9" />
-					</TableCell>
-					<TableCell className="hidden sm:table-cell">
-						<Skeleton variant="text" className="w-44" />
-					</TableCell>
-					<TableCell>
-						<Skeleton className="size-8" />
-					</TableCell>
-				</TableRowSkeleton>
-			</TableLoaderSkeleton>
-		);
+		tableBody = <TableLoader />;
 	} else if (definitions.length === 0 && error) {
 		tableBody = (
 			<TableEmpty
