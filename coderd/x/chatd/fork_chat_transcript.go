@@ -209,7 +209,10 @@ func transcriptFilters(args readChatTranscriptArgs) (roles []codersdk.ChatMessag
 // StripInternal. It reports false when the filters leave nothing of row.
 // User-only rows are skipped: they are projections kept from the model,
 // such as a tool result whose user view holds a subagent's private
-// reasoning while the model gets a separate model-only row.
+// reasoning while the model gets a separate model-only row. Hook notices
+// are skipped because they never reach the model. The calls and results
+// of this tool are skipped too, so paging through the calling chat does
+// not return earlier pages again or grow the tail faster than the cursor.
 func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int) (chatTranscriptMessage, bool) {
 	if row.Visibility != database.ChatMessageVisibilityBoth {
 		return chatTranscriptMessage{}, false
@@ -221,6 +224,9 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 	parts := make([]codersdk.ChatMessagePart, 0, len(message.Content))
 	for _, part := range message.Content {
 		if len(partTypes) > 0 && !slices.Contains(partTypes, part.Type) {
+			continue
+		}
+		if part.Type == codersdk.ChatMessagePartTypeHookNotice || part.ToolName == readChatTranscriptToolName {
 			continue
 		}
 		parts = append(parts, truncateTranscriptPart(part, maxPartBytes))

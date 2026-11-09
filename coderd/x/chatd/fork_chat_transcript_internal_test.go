@@ -114,7 +114,16 @@ func TestReadChatTranscript(t *testing.T) {
 			row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{reasoning, codersdk.ChatMessageText("answer")}},
 			row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityModel, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("model-only context")}},
 			row{role: database.ChatMessageRoleTool, visibility: database.ChatMessageVisibilityUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("secret-user-projection")}},
-			userText("second question"),
+			row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageText("second question"),
+				{Type: codersdk.ChatMessagePartTypeHookNotice, Text: "secret-hook-notice"},
+			}},
+			row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageToolCall("call-1", readChatTranscriptToolName, json.RawMessage(`{"after_id":1}`)),
+			}},
+			row{role: database.ChatMessageRoleTool, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageToolResult("call-1", readChatTranscriptToolName, json.RawMessage(`{"messages":"secret-earlier-page"}`), false, false),
+			}},
 		)
 
 		raw := read(t, chat, readChatTranscriptArgs{Limit: 2}, false)
@@ -127,7 +136,11 @@ func TestReadChatTranscript(t *testing.T) {
 		require.Equal(t, []string{"user:text:first question", "assistant:reasoning:thinking", "assistant:text:answer"}, texts(first))
 		require.True(t, first.HasMore)
 
-		second := readPage(t, chat, readChatTranscriptArgs{AfterID: first.NextAfterID})
+		secondRaw := read(t, chat, readChatTranscriptArgs{AfterID: first.NextAfterID}, false)
+		require.NotContains(t, secondRaw, "secret-hook-notice")
+		require.NotContains(t, secondRaw, "secret-earlier-page")
+		var second chatTranscriptResult
+		require.NoError(t, json.Unmarshal([]byte(secondRaw), &second))
 		require.Equal(t, []string{"user:text:second question"}, texts(second))
 		require.False(t, second.HasMore)
 
