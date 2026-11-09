@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // registerForkChatRoutes mounts the fork-only chat routes on /chats/fork of r,
@@ -24,8 +26,19 @@ import (
 // The API key middleware wraps the mount instead of being Use'd inside the
 // subrouter: chi builds a subrouter's middleware chain only when its first
 // route is registered, so with no fork route the 404 would skip authentication.
-func (*API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
+func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
 	r.With(apiKeyMiddleware).Route("/chats/fork", func(r chi.Router) {
+		// The fork routes take their middleware inline rather than from a
+		// {chat} subrouter: a subrouter is mounted as a prefix, so it would
+		// also run for fork paths that match no route, and the reserved 404
+		// below would become an experiment or chat parameter error.
+		chatTodos := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatTodos),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatTodos.Get("/{chat}/todos", api.getChatTodos)
+		chatTodos.Get("/{chat}/todos/watch", api.watchChatTodos)
+
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})

@@ -4005,6 +4005,20 @@ export interface ChatTodo {
 }
 
 // From codersdk/fork_chat_todos.go
+/**
+ * ChatTodoList is the whole todo list of a chat. Version is 0 while the chat
+ * has no stored list, and increases by one with every write.
+ */
+export interface ChatTodoList {
+	readonly todos: readonly ChatTodo[];
+	/**
+	 * Version is the revision of Todos. It lets a watcher drop an event for
+	 * a version it has already sent.
+	 */
+	readonly version: number;
+}
+
+// From codersdk/fork_chat_todos.go
 export type ChatTodoStatus = "cancelled" | "done" | "in_progress" | "pending";
 
 export const ChatTodoStatuses: ChatTodoStatus[] = [

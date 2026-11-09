@@ -171,9 +171,9 @@ func (p *Server) readChatTodos(ctx context.Context, chatID uuid.UUID) ([]codersd
 	if err != nil {
 		return nil, 0, xerrors.Errorf("read todo list: %w", err)
 	}
-	todos := []codersdk.ChatTodo{}
-	if err := json.Unmarshal(row.Items, &todos); err != nil {
-		return nil, 0, xerrors.Errorf("decode todo list: %w", err)
+	todos, err := codersdk.DecodeChatTodoItems(row.Items)
+	if err != nil {
+		return nil, 0, err
 	}
 	return todos, row.Version, nil
 }
