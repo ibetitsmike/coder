@@ -92,6 +92,7 @@ import {
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import type { AgentContextUsage } from "./ContextUsageIndicator";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
+import { ForkComposerSlot } from "./ForkComposerSlot";
 import { ImageLightbox } from "./ImageLightbox";
 import { MCPServerIconStack } from "./MCPServerIconStack";
 import { MCPServersMenuContent } from "./MCPServersMenuContent";
@@ -1952,6 +1953,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
+						<ForkComposerSlot chatId={chatId} isDisabled={isDisabled} />
 						{contextUsage !== undefined && (
 							<div
 								className={cn(
