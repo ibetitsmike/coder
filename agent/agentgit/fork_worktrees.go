@@ -236,7 +236,7 @@ func insideRoot(root, path string) bool {
 		return false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	return len(parts) == 2 && parts[0] != ".." && parts[0] != "."
+	return len(parts) == 2 && parts[0] != ".."
 }
 
 func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
