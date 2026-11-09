@@ -252,6 +252,30 @@ that fork nodes add. `forkdb.APIKeyScopeValues` lists them, and
 `scripts/check-scopes` reads the `ALTER TYPE api_key_scope ADD VALUE` lines
 of the fork nodes next to `dump.sql`.
 
+### Add a fork table and query
+
+The `chat_subagents` node and its queries are a complete example.
+
+1. Write the node as in [Add a fork migration](#add-a-fork-migration), then
+   the `CREATE TABLE` in the new file. Run
+   `go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check`.
+2. Add the node file to the `schema` list of `forkdb/sqlc.yaml`, in graph
+   order.
+3. Write the queries in `forkdb/queries/<table>.sql`, each with a sqlc
+   `-- name: <Query> :one`, `:many` or `:exec` header.
+4. Run `./coderd/database/forkdb/generate.sh`.
+5. Fix what no longer compiles: authorize the query in
+   `dbauthz/fork_forkdb.go`, add its case to `TestForkQuerier`, and time it
+   in `dbmetrics/fork_forkdb.go`. A chat table authorizes through the owning
+   chat: a read calls `f.q.GetChatByID`, which authorizes the read, and a write
+   loads the chat with `f.q.db.GetChatByID` and then calls
+   `f.q.authorizeContext(ctx, policy.ActionUpdate, chat)`. Override the query
+   in `enterprise/dbcrypt/fork_forkdb.go` only if it reads or writes a secret.
+6. Add a seed helper to `dbgen/fork_forkdb.go` if tests insert rows.
+7. Test the query against Postgres in `forkdb` and call it through
+   `forkdb.From(db)`, or `forkdb.InTx` when it must commit with upstream
+   writes.
+
 ## Upstream sync
 
 `.github/workflows/fork-sync.yaml` runs at 05:00 UTC and on demand:
@@ -305,6 +329,8 @@ schedule registers stays active until the next hourly pass.
 | `graph`      | `chatdmig check`, the unit tests of this package and `scripts/check-scopes`.                             |
 | `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version), from the split, or from a database without one fork node equals a fresh database. Fork nodes only add chatd objects and enum values. Lock timeouts, retries and the node options work on a real database. |
 | `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP and plugin tests of `./coderd` and `./enterprise/coderd`, and `TestExpPlugins` of `./cli`. |
+| `agent-sdk`  | `./agent/agentcontext/...`, `./agent/agentgit/...` and `./codersdk/`.                                    |
+| `site`       | `tsc` of `site` and the unit tests of `site/src/pages/AgentsPage`.                                       |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
 | `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
 

@@ -9,8 +9,7 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: fork-ci-${{ github.event.pull_request.number || github.sha }}
@@ -19,6 +18,8 @@ concurrency:
 jobs:
   graph:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,6 +37,8 @@ jobs:
 
   schema:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 20
     env:
       CHATDMIG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
@@ -58,6 +61,8 @@ jobs:
 
   chat-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,8 +81,47 @@ jobs:
       - name: Plugin CLI tests
         run: go test -count=1 -run TestExpPlugins ./cli
 
+  agent-sdk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Agent context, agent git and SDK packages
+        run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./codersdk/
+
+  site:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up mise tools
+        uses: ./.github/actions/setup-mise
+        with:
+          install-args: "node pnpm"
+      - name: Install pnpm dependencies
+        uses: ./.github/actions/pnpm-install
+      - name: Type check
+        run: pnpm run lint:types
+        working-directory: site
+      - name: Agents page unit tests
+        run: pnpm test:ci src/pages/AgentsPage
+        working-directory: site
+
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,6 +135,8 @@ jobs:
 
   forkdb:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
