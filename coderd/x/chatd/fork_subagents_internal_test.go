@@ -379,3 +379,32 @@ func TestNestedSubagentOrchestrationPrompt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, stripped, deploymentPrompt(t, off, offChild))
 }
+
+func TestAncestorChatIDs(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+	require.NoError(t, err)
+
+	ids := func(nested bool, chat database.Chat) []string {
+		t.Helper()
+		return AncestorChatIDs(ctx, f.db, f.server.logger, nested, chat)
+	}
+
+	// A root attributes its own work, so it has no ancestors to send.
+	require.Nil(t, ids(true, f.root))
+	require.Equal(t, []string{f.root.ID.String()}, ids(true, child))
+	// Nearest ancestor first ending at the family root, so a grandchild's
+	// touched paths reach the root's path store.
+	require.Equal(t, []string{child.ID.String(), f.root.ID.String()}, ids(true, grandchild))
+
+	// Without nested subagents the header is exactly upstream's: the immediate
+	// parent and nothing above it.
+	require.Nil(t, ids(false, f.root))
+	require.Equal(t, []string{f.root.ID.String()}, ids(false, child))
+	require.Equal(t, []string{child.ID.String()}, ids(false, grandchild))
+}
