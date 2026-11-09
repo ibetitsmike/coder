@@ -29,6 +29,9 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 5. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    `ls ~/.coder/skills/*/SKILL.md | wc -l` then prints at least 61.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
+   Then copy pstack's agents: `mkdir -p ~/.coder/agents && cp ~/pstack-src/pstack/agents/*.md ~/.coder/agents/`.
+   `ls ~/.coder/agents/*.md | wc -l` then prints at least 2.
+   Chats use them only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types).
 6. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`.
 7. If the downloaded page pins a different pstack commit than step 3, start again at step 1 with the downloaded page.
@@ -43,6 +46,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
    read_file needs an absolute path, so replace ~ with your home directory.
    - Task: spawn_agent, then wait_agent.
      readonly: true is type "explore" only for narrow code lookup.
+     A custom subagent_type such as poteto-agent: that type if spawn_agent lists it, else type "general" with the body of ~/.coder/agents/<name>.md at the top of prompt.
    - AskQuestion: ask_user_question if you have it, else ask in plain text and end the turn.
    - Todo list: todo_write with the whole list, if you have it; otherwise keep it in your reply.
    - Another pstack skill: read_file ~/.coder/skills/<name>/SKILL.md.
@@ -98,8 +102,8 @@ The web UI shows a non-empty list in a pill in the composer.
 
 | Cursor                                        | Coder Agents today                                                                                                                                                  | Do this                                                                                                                                                                                                                                              | Removed by |
 |-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `subagent_type: generalPurpose`               | Types `general`, `explore`, `computer_use`                                                                                                                          | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
-| `poteto-agent`, `comment-sicko`               | No custom types                                                                                                                                                     | `type: "general"`. Paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                                                                                                                                   | W1         |
+| `subagent_type: generalPurpose`               | Types `general`, `explore`, `computer_use`, and custom types with the `fork-agent-definitions` experiment                                                           | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
+| `poteto-agent`, `comment-sicko`               | Custom types only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)                                                  | If the `spawn_agent` description lists `<name>`, pass `type: "<name>"`. Otherwise `type: "general"`, and paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                                             | W1         |
 | `readonly: true`                              | `explore` has `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file` and the deployment MCP tools allowed in subagents, and no file-writing tool | `type: "explore"` for narrow code discovery, else `type: "general"`. Neither type enforces read-only, because `execute` can change files. Say "do not edit files or run commands that change state" in the prompt, and check `git status` afterward. | Stays      |
 | `readonly: false`                             | `general`                                                                                                                                                           | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
 | A subagent that spawns its own workers        | Only with the `fork-nested-subagents` experiment, up to a depth limit. Refer to [Nested subagents](#nested-subagents)                                               | If the child has `spawn_agent`, it spawns and collects its own workers. Otherwise the root spawns every worker itself and does the sub-coordinator's job.                                                                                            | W2         |
@@ -111,12 +115,29 @@ The web UI shows a non-empty list in a pill in the composer.
 | `resume`                                      | `message_agent` wakes an idle child with a follow-up                                                                                                                | `message_agent`, then `wait_agent`.                                                                                                                                                                                                                  | Stays      |
 | `file_attachments`                            | No field                                                                                                                                                            | List the paths in the prompt.                                                                                                                                                                                                                        | Stays      |
 
+### Custom agent types
+
+When the deployment enables the `fork-agent-definitions` experiment, `spawn_agent` accepts a custom type for each agent definition that the workspace agent finds.
+It reads the `*.md` files in `agents/`, `.agents/agents/`, `.claude/agents/`, and `.cursor/agents/` of each scan root, including `~/.coder/agents/`.
+A chat pins the definitions when it starts, like `AGENTS.md` and the skills, so start a new chat or select **Refresh context** after you add one.
+The `spawn_agent` description lists the custom types after the built-in ones.
+The child gets the definition's body as a system message, so don't paste the body into `prompt`.
+A definition without `model` runs on your model, and pstack's agents set none.
+A `model` that matches no config in `list_subagent_models` fails the spawn.
+An explicit `model_config_id` or `reasoning_effort` overrides the definition.
+`tools`, `readonly`, `mcp`, and `disallowedTools` aren't enforced yet.
+A custom type gets the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
+A definition named `general`, `explore`, or `computer_use` is ignored.
+Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
+
 ### Nested subagents
 
 When the deployment enables the `fork-nested-subagents` experiment, a `general` child gets `spawn_agent` and the other subagent tools while its own children stay within `--chat-max-subagent-depth`.
 The default depth of 2 allows a root, a coordinator, and its workers.
 An `explore` or `computer_use` child never gets them.
 With the experiment, each chat can wait on, message, interrupt, and list only its direct children, so the root waits on the coordinator, not on its workers.
+The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
+Archiving a root whose family is still working interrupts the family, waits up to 30 seconds for it to stop, then archives every member.
 Without the experiment, or at the maximum depth, a child has no `spawn_agent`, and a call fails with `Tool not active in this turn: spawn_agent`.
 
 ## Models
@@ -146,7 +167,7 @@ Follow its steps with these changes:
 | Cursor                                                        | Coder Agents today                                                                                                                                                                                                              | Do this                                                                                                                                                                              | Removed by |
 |---------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
 | `.cursor/skills/`, `~/.cursor/skills/`                        | Skills under `skills/`, `.agents/skills/`, `.claude/skills/` and `.codex/skills/` of each scan root, including `~/.coder/skills/`, but not `.cursor/skills/`. A skill must sit one level deep, at `<container>/<name>/SKILL.md` | Use `~/.coder/skills/` or the repository's `.agents/skills/`. Flatten a nested path such as `<category>/<name>/` to `<name>/`.                                                       | Stays      |
-| `.cursor/agents/`, `<pstack>/agents/`                         | Not read                                                                                                                                                                                                                        | Refer to `poteto-agent` under Subagent fields.                                                                                                                                       | W1         |
+| `.cursor/agents/`, `<pstack>/agents/`                         | Read from `agents/`, `.agents/agents/`, `.claude/agents/`, and `.cursor/agents/` of each scan root, and used only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)              | Follow Setup, which copies `<pstack>/agents/` to `~/.coder/agents/`.                                                                                                                 | W1         |
 | `~/.cursor/plugins/`, `.cursor-plugin/plugin.json`            | `~/.claude/plugins/cache` is watched, but plugin manifests are ignored                                                                                                                                                          | Follow Setup.                                                                                                                                                                        | W6         |
 | `.cursor/rules/*.mdc`, always-applied rules                   | `AGENTS.md`, `CLAUDE.md` and `.cursorrules` at the top of each scan root, and no `.mdc` files                                                                                                                                   | Put an always-applied rule's text in `AGENTS.md` or `~/.coder/AGENTS.md`.                                                                                                            | W6         |
 | `https://github.com/cursor/plugins/blob/main/pstack/<path>`   | Not needed                                                                                                                                                                                                                      | Read `<pstack>/<path>` and never fetch it. Give the user the URL when they need a link.                                                                                              | Stays      |
@@ -196,6 +217,9 @@ Checked against fork `main` at `f015332553`:
   Depth flag, `codersdk/fork_chat_config.go:33-40`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
+- Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
+- Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
+  Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:469-474`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:638-670`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, `coderd/x/chatd/worker.go:273-281`.
