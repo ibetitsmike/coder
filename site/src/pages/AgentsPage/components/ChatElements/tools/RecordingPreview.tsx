@@ -41,6 +41,8 @@ type RecordingPreviewProps = {
 	/** Optional thumbnail URL override. When provided, this is used
 	 * directly instead of deriving the URL from thumbnailFileId. */
 	thumbnailSrc?: string;
+	/** Accessible name of the play control. */
+	playLabel?: string;
 };
 
 /**
@@ -55,6 +57,7 @@ export const RecordingPreview: React.FC<RecordingPreviewProps> = ({
 	thumbnailFileId,
 	src: srcOverride,
 	thumbnailSrc: thumbnailSrcOverride,
+	playLabel = "View recording",
 }) => {
 	const { hasExpired } = useFileProbes();
 	const { openLightbox, lightbox } = useLightbox();
@@ -89,7 +92,7 @@ export const RecordingPreview: React.FC<RecordingPreviewProps> = ({
 			)}
 			<button
 				type="button"
-				aria-label="View recording"
+				aria-label={playLabel}
 				onClick={() =>
 					openLightbox((close) => (
 						<VideoLightbox src={videoSrc} onClose={close} />

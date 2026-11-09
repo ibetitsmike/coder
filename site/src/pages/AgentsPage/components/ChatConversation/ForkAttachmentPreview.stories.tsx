@@ -30,16 +30,14 @@ export const AttachedVideo: Story = {
 	parameters: { experiments: ["fork-chat-todos"] },
 };
 
-export const ExperimentOff: Story = {
-	parameters: { experiments: [] },
-};
+export const ExperimentOff: Story = {};
 
 export const ExpiredVideo: Story = {
 	parameters: { experiments: ["fork-chat-todos"] },
 	decorators: [
 		(Story) => (
 			<FileProbeProvider
-				evictedFileIds={new Set([MockChatVideoFilePart.file_id ?? ""])}
+				evictedFileIds={new Set([MockChatVideoFilePart.file_id])}
 			>
 				<Story />
 			</FileProbeProvider>

@@ -44,7 +44,7 @@ describe("ForkAttachmentPreview", () => {
 		const preview = screen.getByRole("figure", { name: "review.mp4" });
 
 		await userEvent.click(
-			within(preview).getByRole("button", { name: "View recording" }),
+			within(preview).getByRole("button", { name: "Play review.mp4" }),
 		);
 
 		await screen.findByRole("dialog", { name: "Recording playback" });
@@ -53,7 +53,9 @@ describe("ForkAttachmentPreview", () => {
 	it("offers the upstream download when fork-chat-todos is off", () => {
 		renderPreview([]);
 
-		expect(screen.queryByRole("button", { name: "View recording" })).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: "Play review.mp4" }),
+		).toBeNull();
 		expect(
 			screen
 				.getByRole("link", { name: "Download review.mp4" })

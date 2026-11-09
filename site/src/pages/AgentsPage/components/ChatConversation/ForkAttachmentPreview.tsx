@@ -47,10 +47,13 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	return (
 		<figure
 			aria-labelledby={nameId}
-			className="m-0 flex w-fit max-w-full flex-col gap-1"
+			className="flex w-fit max-w-full flex-col gap-1"
 		>
 			<div className="w-fit">
-				<RecordingPreview recordingFileId={block.file_id} />
+				<RecordingPreview
+					recordingFileId={block.file_id}
+					playLabel={`Play ${download.displayName}`}
+				/>
 			</div>
 			<figcaption className="flex min-w-0 items-center gap-1 text-xs text-content-secondary">
 				<span id={nameId} className="truncate">
@@ -58,7 +61,7 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 				</span>
 				<AttachmentDownloadLink
 					{...download}
-					className="flex size-6 shrink-0 items-center justify-center rounded text-content-secondary hover:text-content-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
+					className="flex size-6 shrink-0 items-center justify-center rounded-md text-content-secondary transition-colors hover:bg-surface-secondary hover:text-content-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
 				>
 					<DownloadIcon aria-hidden="true" className="size-3.5" />
 				</AttachmentDownloadLink>
