@@ -81,64 +81,29 @@ func (api *API) getChatTodos(rw http.ResponseWriter, r *http.Request) {
 // @Router /api/v2/chats/fork/{chat}/todos/watch [get]
 // @x-apidocgen {"skip": true}
 // @Description Streams the todo list of the chat over a websocket: the current
-// @Description list first, then the new list after every write to it.
+// @Description list first, then the latest list after writes to it. Writes close
+// @Description together can arrive as one list.
 func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
 	logger := api.Logger.Named("chat_todos_watcher")
 
-	// Subscribe before accepting the websocket so the subscription is active
-	// when the client's Dial returns.
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	var (
-		encoder      *json.Encoder
-		encoderReady = make(chan struct{})
-		// Captured before WebsocketNetConn and wsWatcher reassign ctx. The
-		// callback reads both only after encoderReady closes, which the
-		// handler closes after every value the callback needs is set.
-		ctxDone  = ctx.Done()
-		readCtx  = ctx
-		lastSent int64
-	)
-
-	cancelSubscribe, err := api.Pubsub.SubscribeWithErr(pubsub.ChatTodosEventChannel(chat.ID),
-		pubsub.HandleChatTodosEvent(func(cbCtx context.Context, payload pubsub.ChatTodosEvent, err error) {
-			if err != nil {
-				logger.Error(cbCtx, "chat todo list event", slog.F("chat_id", chat.ID), slog.Error(err))
-				return
-			}
-			select {
-			case <-encoderReady:
-			case <-ctxDone:
-				return
-			case <-cbCtx.Done():
-				return
-			}
-			// encoderReady may close with encoder still nil on error paths.
-			if encoder == nil {
-				return
-			}
-			// The event carries no list, and an older write can be delivered
-			// after a newer one, so only a newer version is worth reading.
-			if payload.Version <= lastSent {
-				return
-			}
-			list, err := readForkChatTodos(readCtx, api.Database, chat.ID)
-			if err != nil {
-				logger.Error(cbCtx, "read chat todo list", slog.F("chat_id", chat.ID), slog.Error(err))
-				return
-			}
-			if err := encoder.Encode(list); err != nil {
-				logger.Debug(cbCtx, "send chat todo list", slog.Error(err))
-				cancel()
-				return
-			}
-			lastSent = list.Version
-		}))
+	// The callback only wakes the send loop, so reads and sends stay on this
+	// goroutine even when a pubsub delivers callbacks concurrently, and writes
+	// that land close together coalesce into one send of the latest list. A
+	// dropped-messages error wakes it too, because the missed event may be the
+	// last write.
+	changed := make(chan struct{}, 1)
+	cancelSubscribe, err := api.Pubsub.SubscribeWithErr(pubsub.ChatTodosEventChannel(chat.ID), func(cbCtx context.Context, _ []byte, err error) {
+		if err != nil {
+			logger.Warn(cbCtx, "chat todo list events", slog.F("chat_id", chat.ID), slog.Error(err))
+		}
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
 	if err != nil {
-		close(encoderReady)
-		logger.Error(ctx, "subscribe to chat todo list events", slog.F("chat_id", chat.ID), slog.Error(err))
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to subscribe to chat todo list events.",
 			Detail:  err.Error(),
@@ -147,11 +112,10 @@ func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 	}
 	defer cancelSubscribe()
 
-	// Read before accepting, so a failed read answers as an HTTP error.
-	initial, err := readForkChatTodos(ctx, api.Database, chat.ID)
+	// Read before accepting, so a failed read answers as an HTTP error. The
+	// subscription is already active, so no write after this read is missed.
+	list, err := readForkChatTodos(ctx, api.Database, chat.ID)
 	if err != nil {
-		close(encoderReady)
-		logger.Error(ctx, "read chat todo list", slog.F("chat_id", chat.ID), slog.Error(err))
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to read the chat todo list.",
 			Detail:  err.Error(),
@@ -161,32 +125,44 @@ func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 
 	conn, err := websocket.Accept(rw, r, nil)
 	if err != nil {
-		close(encoderReady)
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to open chat todo list stream.",
 			Detail:  err.Error(),
 		})
 		return
 	}
-
 	_ = conn.CloseRead(context.Background())
 
 	ctx, wsNetConn := codersdk.WebsocketNetConn(ctx, conn, websocket.MessageText)
 	defer wsNetConn.Close()
-
 	ctx = api.wsWatcher.Watch(ctx, logger, conn)
 
-	// The handler writes the encoder until encoderReady closes, and from then
-	// on only the serially delivered pubsub callback writes it.
-	encoder = json.NewEncoder(wsNetConn)
-	if err := encoder.Encode(initial); err != nil {
+	encoder := json.NewEncoder(wsNetConn)
+	if err := encoder.Encode(list); err != nil {
 		logger.Debug(ctx, "send chat todo list", slog.Error(err))
-		close(encoderReady)
-		cancel()
 		return
 	}
-	lastSent = initial.Version
-	close(encoderReady)
-
-	<-ctx.Done()
+	lastSent := list.Version
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-api.ctx.Done():
+			return
+		case <-changed:
+		}
+		list, err := readForkChatTodos(ctx, api.Database, chat.ID)
+		if err != nil {
+			logger.Error(ctx, "read chat todo list", slog.F("chat_id", chat.ID), slog.Error(err))
+			continue
+		}
+		if list.Version <= lastSent {
+			continue
+		}
+		if err := encoder.Encode(list); err != nil {
+			logger.Debug(ctx, "send chat todo list", slog.Error(err))
+			return
+		}
+		lastSent = list.Version
+	}
 }

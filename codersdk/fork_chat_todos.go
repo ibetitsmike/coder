@@ -75,8 +75,9 @@ func (c *Client) ChatTodos(ctx context.Context, chatID uuid.UUID) (ChatTodoList,
 }
 
 // WatchChatTodos streams the todo list of a chat. The returned channel
-// receives the current list first, and then the new list after every write
-// to it. Callers must close the returned io.Closer to release the websocket
+// receives the current list first, and then the latest list after writes to
+// it. Writes close together can arrive as one list, so a version can be
+// skipped. Callers must close the returned io.Closer to release the websocket
 // connection when done.
 func (c *Client) WatchChatTodos(ctx context.Context, chatID uuid.UUID) (<-chan ChatTodoList, io.Closer, error) {
 	conn, err := c.Dial(
