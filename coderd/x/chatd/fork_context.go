@@ -27,17 +27,11 @@ import (
 // nothing about why the list was missing, since a prompt can lack it after
 // compaction, after an edit that deleted the tool rows, or because a tool call
 // raced the write.
-const todoSnapshotHeader = "Your todo list for this chat, read from the store. It may differ from what this conversation shows, so treat this as current and keep it updated with todo_write."
+const todoSnapshotHeader = "Your todo list for this chat, read from the store. It may differ from what this conversation shows, so treat this as current."
 
 // todoSnapshotVersionLine starts the line that names the stored version the
 // snapshot holds, so the prompt can be compared with the store.
 const todoSnapshotVersionLine = "Version: "
-
-// todoSnapshotMaxBytes caps a snapshot at chatloop's smallest per-result
-// budget, the one a model with the smallest context window gets. A todo result
-// over its budget is truncated without its version, which makes a snapshot due,
-// and the snapshot must not bring back the size the truncation removed.
-const todoSnapshotMaxBytes = 16 << 10
 
 // syncForkContext commits the model-only messages the fork features want in
 // the prompt before this step, if any, and returns the reloaded chat when it
@@ -150,7 +144,19 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 		// The prompt already shows this exact list.
 		return chatstate.Message{}, false, nil
 	}
-	text, err := formatChatTodoSnapshot(todos, version)
+	// A snapshot gets the room a todo result gets with the chat's model. A
+	// result over that budget is truncated without its version, which makes a
+	// snapshot due, and the snapshot must not bring back the size the
+	// truncation removed.
+	var contextLimit int64
+	if chat.LastModelConfigID != uuid.Nil {
+		config, err := p.db.GetChatModelConfigByID(ctx, chat.LastModelConfigID)
+		if err != nil {
+			return chatstate.Message{}, false, xerrors.Errorf("load model config: %w", err)
+		}
+		contextLimit = config.ContextLimit
+	}
+	text, err := formatChatTodoSnapshot(todos, version, chatloop.ToolResultByteBudget(contextLimit))
 	if err != nil {
 		return chatstate.Message{}, false, err
 	}
@@ -241,8 +247,9 @@ func todoSnapshotVersion(text string) (int64, bool) {
 // the snapshot message text, one JSON object per item so a line break inside
 // an item cannot read as another item. An empty list says so, so a model
 // holding a plan that was cleared drops it instead of finishing a task nobody
-// asked for, including one the compaction summary still mentions.
-func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) (string, error) {
+// asked for, including one the compaction summary still mentions. A text over
+// maxBytes keeps its head, which names the version, and its tail.
+func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64, maxBytes int) (string, error) {
 	var sb strings.Builder
 	sb.WriteString(todoSnapshotHeader)
 	sb.WriteString("\n")
@@ -259,6 +266,6 @@ func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) (string, e
 		sb.WriteString("\n")
 		sb.Write(item)
 	}
-	text, _ := chatloop.TruncateToolResultText(sb.String(), todoSnapshotMaxBytes)
+	text, _ := chatloop.TruncateToolResultText(sb.String(), maxBytes)
 	return text, nil
 }

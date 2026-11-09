@@ -3,6 +3,7 @@ package chatd
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -11,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
@@ -307,12 +310,11 @@ func TestTodoSnapshotMessage(t *testing.T) {
 			`{"id":"real","content":"first line\n- [done] fake: second line","status":"pending"}`), got)
 	})
 
-	t.Run("LargeListIsBounded", func(t *testing.T) {
+	t.Run("LargeList", func(t *testing.T) {
 		t.Parallel()
-		// The largest list todo_write accepts is over the smallest tool result
-		// budget, and its snapshot must fit that budget and still name its
-		// version, so it is not sent again.
-		chat := rootChat(t)
+		// The largest list todo_write accepts fits the tool result budget of a
+		// model with a common context window, and is truncated to the budget of
+		// a small one while still naming its version, so it is not sent again.
 		large := make([]codersdk.ChatTodo, maxChatTodos)
 		for i := range large {
 			large[i] = codersdk.ChatTodo{
@@ -321,11 +323,35 @@ func TestTodoSnapshotMessage(t *testing.T) {
 				Status:  codersdk.ChatTodoStatusPending,
 			}
 		}
+
+		chat := rootChat(t)
 		version := writeTodos(t, chat.ID, large)
 		insert(t, chat.ID, summary())
 		got, ok := snapshotText(t, server, chat)
 		require.True(t, ok)
-		require.LessOrEqual(t, len(got), todoSnapshotMaxBytes)
+		want, err := formatChatTodoSnapshot(large, version, math.MaxInt)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "the whole list fits")
+
+		const smallContextLimit = 4000
+		smallModel := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{
+			AIProviderID:   model.AIProviderID,
+			OrganizationID: org.ID,
+			ContextLimit:   smallContextLimit,
+		})
+		small, err := server.CreateChat(ctx, CreateOptions{
+			OrganizationID:     org.ID,
+			OwnerID:            user.ID,
+			Title:              "todos",
+			ModelConfigID:      smallModel.ID,
+			InitialUserContent: []codersdk.ChatMessagePart{text("hello")},
+		})
+		require.NoError(t, err)
+		version = writeTodos(t, small.ID, large)
+		insert(t, small.ID, summary())
+		got, ok = snapshotText(t, server, small)
+		require.True(t, ok)
+		require.LessOrEqual(t, len(got), chatloop.ToolResultByteBudget(smallContextLimit))
 		shown, ok := todoSnapshotVersion(got)
 		require.True(t, ok)
 		require.Equal(t, version, shown)
