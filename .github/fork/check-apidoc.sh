@@ -1,29 +1,24 @@
 #!/usr/bin/env bash
 # Fails when coderd/apidoc is out of date with the API annotations. swag
-# collects enum constants from a package's files in map order, so an enum
-# declared across files (codersdk.Experiment and fork_experiments.go) comes
-# out in a different order from run to run. The comparison sorts object keys
-# and each enum's values, sorting the x-enum-varnames and x-enum-descriptions
-# entries with their values so a stale value-to-name mapping still fails.
+# collects enum constants from a package's files in map order, so
+# codersdk.Experiment, the one enum declared across files (deployment.go and
+# fork_experiments.go), comes out in a different order from run to run. The
+# comparison sorts that enum's values, moving each value's x-enum-varnames and
+# x-enum-descriptions entries with it, so a stale value-to-name mapping still
+# fails. Every other enum keeps its order.
 set -euo pipefail
 
 # shellcheck disable=SC2016 # $o and $t are jq variables.
 canon='
-def canon_enum:
-	if type == "object" and (.enum | type) == "array" then
-		if (."x-enum-varnames" | type) == "array" then
-			. as $o
-			| [range(0; $o.enum | length) | [$o.enum[.], $o."x-enum-varnames"[.], ($o."x-enum-descriptions" // [])[.]]]
-			| sort as $t
-			| $o
-			| .enum = [$t[][0]]
-			| ."x-enum-varnames" = [$t[][1]]
-			| if has("x-enum-descriptions") then ."x-enum-descriptions" = [$t[][2]] else . end
-		else
-			.enum |= sort
-		end
-	else . end;
-walk(canon_enum)
+.definitions["codersdk.Experiment"] |= (
+	. as $o
+	| [range(0; $o.enum | length) | [$o.enum[.], $o."x-enum-varnames"[.], $o."x-enum-descriptions"[.]]]
+	| sort as $t
+	| $o
+	| .enum = [$t[][0]]
+	| ."x-enum-varnames" = [$t[][1]]
+	| ."x-enum-descriptions" = [$t[][2]]
+)
 '
 
 # docs.go embeds the spec in a Go raw string, which spells a backtick as
