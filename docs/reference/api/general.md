@@ -876,7 +876,7 @@ curl -X GET http://coder-server:8080/api/v2/experiments \
 
 ```json
 [
-  "example"
+  "fork-chat-todos"
 ]
 ```
 
@@ -915,7 +915,7 @@ curl -X GET http://coder-server:8080/api/v2/experiments/available \
 
 ```json
 [
-  "example"
+  "fork-chat-todos"
 ]
 ```
 

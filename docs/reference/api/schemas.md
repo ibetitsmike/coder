@@ -5921,6 +5921,60 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |---------------------------------|
 | `fallback`, `generated`, `user` |
 
+## codersdk.ChatTodo
+
+```json
+{
+  "content": "string",
+  "id": "string",
+  "status": "pending"
+}
+```
+
+### Properties
+
+| Name      | Type                                               | Required | Restrictions | Description |
+|-----------|----------------------------------------------------|----------|--------------|-------------|
+| `content` | string                                             | false    |              |             |
+| `id`      | string                                             | false    |              |             |
+| `status`  | [codersdk.ChatTodoStatus](#codersdkchattodostatus) | false    |              |             |
+
+## codersdk.ChatTodoList
+
+```json
+{
+  "todos": [
+    {
+      "content": "string",
+      "id": "string",
+      "status": "pending"
+    }
+  ],
+  "version": 0
+}
+```
+
+### Properties
+
+| Name      | Type                                            | Required | Restrictions | Description                                                                                          |
+|-----------|-------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------|
+| `todos`   | array of [codersdk.ChatTodo](#codersdkchattodo) | false    |              |                                                                                                      |
+| `version` | integer                                         | false    |              | Version is the revision of Todos. It lets a watcher drop an event for a version it has already sent. |
+
+## codersdk.ChatTodoStatus
+
+```json
+"pending"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                                      |
+|-----------------------------------------------|
+| `cancelled`, `done`, `in_progress`, `pending` |
+
 ## codersdk.ChatUnsupportedProvider
 
 ```json
@@ -10034,15 +10088,15 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"example"
+"fork-chat-todos"
 ```
 
 ### Properties
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
