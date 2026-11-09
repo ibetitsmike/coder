@@ -117,8 +117,10 @@ func TestReadChatTranscript(t *testing.T) {
 			row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
 				codersdk.ChatMessageText("second question"),
 				{Type: codersdk.ChatMessagePartTypeHookNotice, Text: "secret-hook-notice"},
+				{Type: codersdk.ChatMessagePartTypeSource, URL: "https://example.com/secret-source"},
 			}},
 			row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageText("secret-sibling-text"),
 				codersdk.ChatMessageToolCall("call-1", readChatTranscriptToolName, json.RawMessage(`{"after_id":1}`)),
 			}},
 			row{role: database.ChatMessageRoleTool, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
@@ -139,6 +141,8 @@ func TestReadChatTranscript(t *testing.T) {
 		secondRaw := read(t, chat, readChatTranscriptArgs{AfterID: first.NextAfterID}, false)
 		require.NotContains(t, secondRaw, "secret-hook-notice")
 		require.NotContains(t, secondRaw, "secret-earlier-page")
+		require.NotContains(t, secondRaw, "secret-source")
+		require.NotContains(t, secondRaw, "secret-sibling-text")
 		var second chatTranscriptResult
 		require.NoError(t, json.Unmarshal([]byte(secondRaw), &second))
 		require.Equal(t, []string{"user:text:second question"}, texts(second))
@@ -152,10 +156,10 @@ func TestReadChatTranscript(t *testing.T) {
 		t.Parallel()
 		chat := newChat(t, user.ID, uuid.NullUUID{}, uuid.NullUUID{})
 		execute := codersdk.ChatMessageToolCall("call-1", "execute", json.RawMessage(`{"command":"ls"}`))
-		execute.ParsedCommands = [][]string{{strings.Repeat("d", 10000)}}
+		execute.ParsedCommands = [][]string{{strings.Repeat("d", 20000)}}
 		pasted := row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
-			codersdk.ChatMessageText(strings.Repeat("b", 10000)),
-			codersdk.ChatMessageFileReference("main.go", 1, 500, strings.Repeat("c", 10000)),
+			codersdk.ChatMessageText(strings.Repeat("b", 20000)),
+			codersdk.ChatMessageFileReference("main.go", 1, 500, strings.Repeat("c", 20000)),
 			execute,
 		}}
 		insert(t, chat.ID, userText(strings.Repeat("a", 3000)), pasted, userText("last"))
@@ -164,13 +168,14 @@ func TestReadChatTranscript(t *testing.T) {
 		require.Len(t, first.Messages, 1)
 		require.True(t, first.HasMore)
 
-		second := readPage(t, chat, readChatTranscriptArgs{AfterID: first.NextAfterID, MaxBytes: minTranscriptBytes})
+		second := readPage(t, chat, readChatTranscriptArgs{AfterID: first.NextAfterID, Limit: 1, MaxBytes: maxTranscriptBytes})
 		require.Len(t, second.Messages, 1)
+		require.Len(t, second.Messages[0].Parts, 3)
 		text := second.Messages[0].Parts[0].Text
-		require.LessOrEqual(t, len(text), minTranscriptBytes)
+		require.LessOrEqual(t, len(text), maxTranscriptPartBytes)
 		require.Contains(t, text, "Coder truncated")
 		pastedContent := second.Messages[0].Parts[1].Content
-		require.LessOrEqual(t, len(pastedContent), minTranscriptBytes)
+		require.LessOrEqual(t, len(pastedContent), maxTranscriptPartBytes)
 		require.Contains(t, pastedContent, "Coder truncated")
 		require.Nil(t, second.Messages[0].Parts[2].ParsedCommands)
 		require.True(t, second.HasMore)
@@ -178,6 +183,20 @@ func TestReadChatTranscript(t *testing.T) {
 		last := readPage(t, chat, readChatTranscriptArgs{AfterID: second.NextAfterID, MaxBytes: minTranscriptBytes})
 		require.Equal(t, []string{"user:text:last"}, texts(last))
 		require.False(t, last.HasMore)
+
+		wide := newChat(t, user.ID, uuid.NullUUID{}, uuid.NullUUID{})
+		var parts []codersdk.ChatMessagePart
+		for range 5 {
+			parts = append(parts, codersdk.ChatMessageText(strings.Repeat("e", 3000)))
+		}
+		insert(t, wide.ID, row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: parts})
+		raw := read(t, wide, readChatTranscriptArgs{MaxBytes: minTranscriptBytes}, false)
+		require.LessOrEqual(t, len(raw), minTranscriptBytes)
+		var page chatTranscriptResult
+		require.NoError(t, json.Unmarshal([]byte(raw), &page))
+		require.Len(t, page.Messages, 1)
+		require.Len(t, page.Messages[0].Parts, 1)
+		require.Equal(t, 4, page.Messages[0].OmittedParts)
 	})
 
 	t.Run("ReadsAsTheChatOwner", func(t *testing.T) {

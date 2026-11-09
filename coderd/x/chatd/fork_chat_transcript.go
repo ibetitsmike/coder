@@ -58,6 +58,9 @@ type chatTranscriptMessage struct {
 	Role      codersdk.ChatMessageRole   `json:"role"`
 	CreatedAt time.Time                  `json:"created_at"`
 	Parts     []codersdk.ChatMessagePart `json:"parts"`
+	// OmittedParts counts the trailing parts left out because the message
+	// alone passes the page's byte budget.
+	OmittedParts int `json:"omitted_parts,omitempty"`
 }
 
 // chatTranscriptTool returns the read_chat_transcript tool, which reads the
@@ -68,7 +71,8 @@ func (p *Server) chatTranscriptTool(chat database.Chat) fantasy.AgentTool {
 		"Read the messages of this chat, of a subagent chat, or of another "+
 			"chat your user can read, in pages. Messages compacted out of "+
 			"your context are still returned verbatim. Long parts are "+
-			"truncated. Continue with after_id set to next_after_id while "+
+			"truncated, and omitted_parts counts the parts of a message "+
+			"that did not fit. Continue with after_id set to next_after_id while "+
 			"has_more is true.",
 		func(ctx context.Context, args readChatTranscriptArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			result, err := p.readChatTranscript(ctx, chat, args)
@@ -135,12 +139,18 @@ func (p *Server) readChatTranscript(ctx context.Context, chat database.Chat, arg
 			scanned++
 			message, ok := transcriptMessage(row, roles, partTypes, min(maxTranscriptPartBytes, maxBytes))
 			if ok {
-				size, err := jsonSize(message)
+				var size int
+				if len(result.Messages) == 0 {
+					// The first message always goes on the page so that
+					// every page moves the cursor forward, with only the
+					// parts that fit.
+					message, size, err = fitTranscriptMessage(message, maxBytes)
+				} else {
+					size, err = jsonSize(message)
+				}
 				if err != nil {
 					return chatTranscriptResult{}, xerrors.Errorf("encode chat message %d: %w", row.ID, err)
 				}
-				// The first message always fits so that every page moves
-				// the cursor forward.
 				if len(result.Messages) > 0 && usedBytes+size > maxBytes {
 					result.HasMore = true
 					return result, nil
@@ -210,9 +220,10 @@ func transcriptFilters(args readChatTranscriptArgs) (roles []codersdk.ChatMessag
 // User-only rows are skipped: they are projections kept from the model,
 // such as a tool result whose user view holds a subagent's private
 // reasoning while the model gets a separate model-only row. Hook notices
-// are skipped because they never reach the model. The calls and results
-// of this tool are skipped too, so paging through the calling chat does
-// not return earlier pages again or grow the tail faster than the cursor.
+// and sources are skipped because they never reach the model. Rows with a
+// call or result of this tool are skipped too, so paging through the
+// calling chat does not return earlier pages again or grow the tail faster
+// than the cursor.
 func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int) (chatTranscriptMessage, bool) {
 	if row.Visibility != database.ChatMessageVisibilityBoth {
 		return chatTranscriptMessage{}, false
@@ -221,12 +232,17 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 	if len(roles) > 0 && !slices.Contains(roles, message.Role) {
 		return chatTranscriptMessage{}, false
 	}
+	if slices.ContainsFunc(message.Content, func(part codersdk.ChatMessagePart) bool {
+		return part.ToolName == readChatTranscriptToolName
+	}) {
+		return chatTranscriptMessage{}, false
+	}
 	parts := make([]codersdk.ChatMessagePart, 0, len(message.Content))
 	for _, part := range message.Content {
 		if len(partTypes) > 0 && !slices.Contains(partTypes, part.Type) {
 			continue
 		}
-		if part.Type == codersdk.ChatMessagePartTypeHookNotice || part.ToolName == readChatTranscriptToolName {
+		if part.Type == codersdk.ChatMessagePartTypeHookNotice || part.Type == codersdk.ChatMessagePartTypeSource {
 			continue
 		}
 		parts = append(parts, truncateTranscriptPart(part, maxPartBytes))
@@ -240,6 +256,19 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 		CreatedAt: message.CreatedAt,
 		Parts:     parts,
 	}, true
+}
+
+// fitTranscriptMessage drops the trailing parts of message until it fits
+// maxBytes, keeping at least one part, and returns its encoded size.
+func fitTranscriptMessage(message chatTranscriptMessage, maxBytes int) (chatTranscriptMessage, int, error) {
+	for {
+		size, err := jsonSize(message)
+		if err != nil || size <= maxBytes || len(message.Parts) == 1 {
+			return message, size, err
+		}
+		message.Parts = message.Parts[:len(message.Parts)-1]
+		message.OmittedParts++
+	}
 }
 
 // truncateTranscriptPart bounds the large fields of part with the tool
