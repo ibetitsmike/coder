@@ -445,9 +445,12 @@ type SendMessageBusyBehavior string
 const (
 	// SendMessageBusyBehaviorQueue queues user messages while the chat is busy.
 	SendMessageBusyBehaviorQueue SendMessageBusyBehavior = "queue"
+	// SendMessageBusyBehaviorSteer delivers the message before the next
+	// assistant model call.
+	SendMessageBusyBehaviorSteer SendMessageBusyBehavior = "steer"
 	// SendMessageBusyBehaviorInterrupt interrupts the active run. It persists
-	// the partial response before this message runs ahead of queued messages.
-	// Further messages join the queue tail while the interruption is pending.
+	// the partial response, then delivers this message and the other steer
+	// messages ahead of queued messages.
 	SendMessageBusyBehaviorInterrupt SendMessageBusyBehavior = "interrupt"
 )
 
@@ -516,14 +519,6 @@ type EditMessageResult struct {
 type PromoteQueuedOptions struct {
 	ChatID          uuid.UUID
 	QueuedMessageID int64
-}
-
-// PromoteQueuedResult contains post-promotion message metadata.
-type PromoteQueuedResult struct {
-	// PromotedMessage is the inserted user message. For a chat that
-	// was running at promote time, the insertion is deferred to the
-	// worker's auto-promote and PromotedMessage is the zero value.
-	PromotedMessage database.ChatMessage
 }
 
 // forcedMCPServerConfigsForOwner filters enabled Force On configs
