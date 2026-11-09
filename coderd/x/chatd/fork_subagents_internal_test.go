@@ -260,6 +260,13 @@ func TestNestedSubagentLiveLimit(t *testing.T) {
 	// Resuming the finished child would make two live subagents.
 	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "continue", SendMessageBusyBehaviorQueue)
 	require.ErrorContains(t, err, "cannot resume the child agent: this chat family has 1 live subagents and the maximum is 1")
+
+	// A concurrent message_agent resumed the child after this one loaded
+	// it, so the send only queues on a live child.
+	stale := child
+	stale.Status = database.ChatStatusWaiting
+	f.setStatus(t, child, database.ChatStatusRunning, uuid.NullUUID{})
+	require.NoError(t, f.server.forkValidateSubagentResume(withSubagentResume(ctx), f.db, stale, false))
 }
 
 // A resume that races a spawn of the same family waits for the spawn to
