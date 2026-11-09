@@ -134,6 +134,19 @@ func (f *forkQuerier) GetPluginsByOrganizationID(ctx context.Context, organizati
 	return f.db.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
+// InsertChatSubagent authorizes as an update of the owning chat, like
+// InsertChatDebugRun.
+func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
+	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return forkdb.ChatSubagent{}, err
+	}
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+		return forkdb.ChatSubagent{}, err
+	}
+	return f.db.InsertChatSubagent(ctx, arg)
+}
+
 func (f *forkQuerier) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourcePlugin.InOrg(arg.OrganizationID)); err != nil {
 		return forkdb.Plugin{}, err

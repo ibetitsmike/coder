@@ -35,6 +35,7 @@ type Querier interface {
 	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
+	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
