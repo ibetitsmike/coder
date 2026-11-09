@@ -8,7 +8,9 @@ import (
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -210,7 +212,7 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		t.Parallel()
 
 		ctx := testutil.Context(t, testutil.WaitLong)
-		client := coderdtest.New(t, &coderdtest.Options{
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
 			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
 				dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
 			}),
@@ -253,7 +255,22 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		})
 		_ = requireSDKError(t, err, http.StatusBadRequest)
 
+		// Leaving the organization drops the direct grant, so rejoining does
+		// not restore it.
 		require.NoError(t, client.DeleteOrganizationMember(ctx, orgID, granteeUser.ID.String()))
+		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		//nolint:gocritic // The test reads the stored ACL directly.
+		row, err := fdb.GetOrganizationAgentDefinitionByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationAgentDefinitionByNameParams{
+			OrganizationID: orgID,
+			Name:           "reviewer",
+		})
+		require.NoError(t, err)
+		require.NotContains(t, row.UserAcl, granteeUser.ID.String())
+		_, err = client.PostOrganizationMember(ctx, orgID, granteeUser.ID.String())
+		require.NoError(t, err)
 		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
