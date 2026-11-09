@@ -750,6 +750,13 @@ func (p *Server) buildTurnEnvironment(
 		_, ok := tool.(acpSpawnTool)
 		return ok
 	})
+	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
+	if err != nil {
+		return turnEnvironment{}, err
+	}
+	if customAgentPolicy != nil && !customAgentPolicy.keepsSkillTools() {
+		initialResolvedSkills = nil
+	}
 	prompt = buildSystemPrompt(
 		prompt,
 		subagentInstruction,
@@ -933,6 +940,10 @@ func (p *Server) buildTurnEnvironment(
 		if err != nil {
 			return turnEnvironment{}, err
 		}
+	}
+
+	if tools, deferredCandidates, providerTools, err = p.applyCustomAgentToolPolicy(ctx, chat, customAgentPolicy, tools, deferredCandidates, providerTools); err != nil {
+		return turnEnvironment{}, err
 	}
 
 	activeToolNames := activeToolNamesForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)
