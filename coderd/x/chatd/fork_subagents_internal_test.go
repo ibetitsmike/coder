@@ -5,6 +5,7 @@ package chatd
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -203,6 +204,31 @@ func TestNestedSubagentTools(t *testing.T) {
 	require.Empty(t, off.toolNames(t, offChild))
 }
 
+func TestNestedSubagentSpawnDescription(t *testing.T) {
+	t.Parallel()
+
+	spawnDescription := func(t *testing.T, f nestedSubagentsFixture, chat database.Chat) string {
+		t.Helper()
+		tools, err := f.server.subagentTools(chatdTestContext(t), func() database.Chat { return chat }, chat.LastModelConfigID)
+		require.NoError(t, err)
+		tool := findToolByName(tools, spawnAgentToolName)
+		require.NotNil(t, tool)
+		return tool.Info().Description
+	}
+
+	// The fork rewrites this upstream sentence, so it must stay in
+	// upstream's description for the rewrite to apply.
+	off := newNestedSubagentsFixture(t, upstreamExperimentsKnown(), Limits{})
+	require.Contains(t, spawnDescription(t, off, off.root), upstreamSpawnAgentChildToolsSentence)
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents},
+		Limits{Fork: ForkLimits{MaxSubagentDepth: 3}})
+	description := spawnDescription(t, f, f.root)
+	require.NotContains(t, description, upstreamSpawnAgentChildToolsSentence)
+	require.Contains(t, description, "A general child can spawn its own subagents while it is below the maximum subagent depth of 3; "+
+		"explore and computer use children cannot. Its tools depend on its type and mode. ")
+}
+
 func TestNestedSubagentTargets(t *testing.T) {
 	t.Parallel()
 
@@ -229,6 +255,27 @@ func TestNestedSubagentTargets(t *testing.T) {
 	}
 	_, _, err = f.server.awaitSubagentCompletion(ctx, f.root.ID, grandchild.ID, 0)
 	require.ErrorIs(t, err, ErrSubagentNotDescendant)
+	_, err = f.server.awaitSubagent(ctx, f.root, grandchild.ID, 0)
+	require.ErrorIs(t, err, ErrSubagentNotDescendant)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, grandchild.ID, "hi", SendMessageBusyBehaviorQueue)
+	require.ErrorIs(t, err, ErrSubagentNotDescendant)
+	_, _, err = f.server.interruptSubagent(ctx, f.root.ID, grandchild.ID)
+	require.ErrorIs(t, err, ErrSubagentNotDescendant)
+
+	listed := func(chat database.Chat) []string {
+		t.Helper()
+		resp := runSubagentTool(ctx, t, f.server, chat, chat.LastModelConfigID, "list_agents", listAgentsArgs{})
+		require.False(t, resp.IsError, resp.Content)
+		var result subagentListResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+		ids := make([]string, 0, len(result.Agents))
+		for _, agent := range result.Agents {
+			ids = append(ids, agent.ChatID)
+		}
+		return ids
+	}
+	require.Equal(t, []string{child.ID.String()}, listed(f.root))
+	require.Equal(t, []string{grandchild.ID.String()}, listed(child))
 
 	// Upstream lets a chat target any descendant. Only nested subagents can
 	// build a grandchild, so check upstream's rule on the same family.
