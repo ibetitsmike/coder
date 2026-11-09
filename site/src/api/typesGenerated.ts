@@ -5848,6 +5848,7 @@ export type Experiment =
 	| "example"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
+	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
@@ -5931,6 +5932,7 @@ export const Experiments: Experiment[] = [
 	"example",
 	"fork-agent-definitions",
 	"fork-chat-todos",
+	"fork-chat-wakeups",
 	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",

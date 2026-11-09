@@ -14,6 +14,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1bfc4-13ba-78b6-8668-4cc368ed96cc_chat_organization_subagent_limits.up.sql"
       - "../migrations/chatdmig/nodes/01a1c08d-32ae-7003-94bf-3e43983154d7_chat_subagent_tool_policy.up.sql"
       - "../migrations/chatdmig/nodes/01a1c18d-027a-7d4a-a2ad-e823d1e3ca6c_agent_definitions.up.sql"
+      - "../migrations/chatdmig/nodes/01a1c28c-8c16-78c2-af7b-26d1d9f7986e_chat_wakeups.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
