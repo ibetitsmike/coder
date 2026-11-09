@@ -208,20 +208,23 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `f015332553`:
+Checked against fork `main` at `1a00411b6b`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:130-143`, `:157-185`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:190-202`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:142-155`, `:169-197`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:202-214`.
   Depth flag, `codersdk/fork_chat_config.go:33-40`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
   Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
-- Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:469-474`.
-- `wait_agent` returns the last assistant message: `subagent_operations.go:638-670`.
+  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:40-42`, `:61-64`, `:86-88`, called from `subagent_catalog.go:185` and `:233`.
+  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:177`.
+  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:147-159`, and the model match, `:187-210`.
+- Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:471-476`.
+- `wait_agent` returns the last assistant message: `subagent_operations.go:640-672`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, `coderd/x/chatd/worker.go:273-281`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
@@ -232,7 +235,7 @@ Checked against fork `main` at `f015332553`:
 - `explore` tools: `turn_environment.go:2113-2122`.
 - Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2174-2190`.
 - `find_tools`: `coderd/x/chatd/chattool/findtools.go:19`, only with MCP tools, `coderd/x/chatd/mcp_tool_search.go:121-136`, which also omits it on a name collision.
-- Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:335-338`.
+- Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:337-340`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
