@@ -17,20 +17,21 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 
 ## Setup
 
-1. Clone pstack in the workspace: `git clone https://github.com/cursor/plugins ~/pstack-src`.
+1. If `~/pstack-src` exists from an earlier setup, update it: `git -C ~/pstack-src fetch origin`.
+2. Otherwise, clone pstack in the workspace: `git clone https://github.com/cursor/plugins ~/pstack-src`.
    The clone creates `~/pstack-src/pstack/`.
-2. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
+3. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
    `git -C ~/pstack-src rev-parse HEAD` then prints that commit.
    `<pstack>` is `~/pstack-src/pstack`.
-3. If a skill in `~/.coder/skills/` shares a name with one you copy next, move it out.
+4. If a skill in `~/.coder/skills/` shares a name with one you copy next, move it out.
    The next step replaces a skill that has the same name.
-4. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
+5. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    `ls ~/.coder/skills/*/SKILL.md | wc -l` then prints at least 61.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
-5. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
+6. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`.
-6. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
-7. Append the block below to `~/.coder/AGENTS.md`.
+7. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
+8. Append the block below to `~/.coder/AGENTS.md`.
    Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it doesn't load this page, so the block carries the mappings that most skills need:
 
    ```markdown
@@ -51,18 +52,18 @@ This page is fork-only: it isn't in `docs/manifest.json`.
    <!-- /pstack-adapter -->
    ```
 
-8. Start a new chat.
+9. Start a new chat.
    A chat pins `AGENTS.md` and the skills when it starts.
    A chat that was already open keeps its old copy until you select **Refresh context** in it.
-9. Ask the chat to quote the `pstack-adapter` block without any tool call.
-   The chat replies with the block's lines.
-   This message is also the plain first message the chat needs, because a chat's first message can't run a skill.
-10. If the chat can't quote the block, switch to a model server that keeps every system message.
-    Then start again at step 8.
+10. Ask the chat to quote the `pstack-adapter` block without any tool call.
+    The chat replies with the block's lines.
+    This message is also the plain first message the chat needs, because a chat's first message can't run a skill.
+11. If the chat can't quote the block, switch to a model server that keeps every system message.
     Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
     A model server that keeps only the first system message drops the block without an error.
     Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
-11. Pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
+12. If you switched model servers, start again at step 9.
+13. Select the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
 
 ## Tools
@@ -72,7 +73,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 | `Task`                                                     | `spawn_agent` starts a child and returns at once, and `wait_agent` returns its final reply                                                                                                                               | Spawn with `spawn_agent`, then collect with `wait_agent`.                                                                                                                                                                                                                     | Stays                                                               |
 | `AskQuestion`                                              | `ask_user_question` exists only in plan-mode turns of a root chat                                                                                                                                                        | Outside plan mode, ask in plain text and end the turn.                                                                                                                                                                                                                        | W0b (async questions in web UI chats), W2 (questions from children) |
 | Open a todolist                                            | No todo tool                                                                                                                                                                                                             | Keep the list in your reply and update it at each phase. Restate it after a compaction.                                                                                                                                                                                       | W4                                                                  |
-| Run another pstack skill (`/name` or "the **name** skill") | 57 of pstack's 58 skills set `disable-model-invocation: true`, so `read_skill` and the skill index hide them from the model. A person can still run one from the composer's `/` menu, but not in a chat's first message. | `read_file` `~/.coder/skills/<name>/SKILL.md`, with `~` replaced by your home directory, and follow it. Read its sibling files with `read_file` too. When you tell the user to type it, write `/workspace/<name>`, and in a new chat tell them to send a plain message first. | Stays                                                               |
+| Run another pstack skill (`/name` or "the **name** skill") | 57 of pstack's 58 skills set `disable-model-invocation: true`, so `read_skill` and the skill index hide them from the model. You can still run one from the composer's `/` menu, but not in a chat's first message. | `read_file` `~/.coder/skills/<name>/SKILL.md`, with `~` replaced by your home directory, and follow it. Read its sibling files with `read_file` too. When you tell the user to type it, write `/workspace/<name>`, and in a new chat tell them to send a plain message first. | Stays                                                               |
 | `Grep`, `Glob`                                             | `execute`, `read_file`                                                                                                                                                                                                   | `execute` with `rg` or `find`.                                                                                                                                                                                                                                                | Stays                                                               |
 | Available-tools map, `mcps/`                               | When MCP servers are configured, their tools sit behind `find_tools`. It is absent when there are none, or when an MCP or client tool is itself named `find_tools`                                                       | If you have `find_tools`, call it to find a tool by name or purpose. If not, look for MCP tools in your tool list.                                                                                                                                                            | Stays                                                               |
 
