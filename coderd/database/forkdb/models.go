@@ -35,6 +35,14 @@ type AgentDefinition struct {
 	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
 }
 
+// The latest question each descendant chat asked the user with ask_user_question. The question is pending until a user message reaches that chat after created_at.
+type ChatDescendantQuestion struct {
+	ChatID     uuid.UUID       `db:"chat_id" json:"chat_id"`
+	ToolCallID string          `db:"tool_call_id" json:"tool_call_id"`
+	Questions  json.RawMessage `db:"questions" json:"questions"`
+	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
+}
+
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
 	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`

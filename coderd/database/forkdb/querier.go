@@ -43,6 +43,7 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
@@ -70,6 +71,7 @@ type Querier interface {
 	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	// Relinking an external identity to another user clears the active chat so
