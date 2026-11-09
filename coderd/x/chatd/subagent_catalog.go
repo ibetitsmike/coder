@@ -344,7 +344,7 @@ func buildSpawnAgentDescription(
 			"\" should be used for cloning repositories or non-local investigation. " +
 			"They must not implement changes or intentionally modify workspace files."
 	}
-	return p.forkSpawnAgentDescription(ctx, currentChat, description), nil
+	return p.forkSpawnAgentDescription(description), nil
 }
 
 func formatSubagentDefinitionsWithDescriptionOverrides(

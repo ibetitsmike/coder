@@ -203,7 +203,7 @@ const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own sub
 
 // forkSpawnAgentDescription rewrites upstream's spawn_agent description,
 // which says children cannot spawn, when nested subagents are enabled.
-func (p *Server) forkSpawnAgentDescription(_ context.Context, _ database.Chat, description string) string {
+func (p *Server) forkSpawnAgentDescription(description string) string {
 	if !p.nestedSubagentsEnabled() {
 		return description
 	}
