@@ -8,9 +8,9 @@ package chatd
 // experiment is off.
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -18,6 +18,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
@@ -25,6 +26,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 func (p *Server) nestedSubagentsEnabled() bool {
@@ -80,20 +82,28 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 }
 
 // createSubagentChatWithID creates the child chat of parent. With nested
-// subagents enabled, or for a custom agentType, it also records the child's
-// chat_subagents row in the same transaction. Nested subagents also recheck
-// the depth limit there.
+// subagents enabled, or for a customAgent, it also records the child's
+// chat_subagents row in the same transaction, with the custom agent's tool
+// policy. Nested subagents also recheck the depth limit there.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
 	chatID uuid.UUID,
 	parent database.Chat,
-	agentType string,
+	customAgent *workspacesdk.AgentDefinition,
 	input chatstate.CreateChatInput,
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
-	if !nested && agentType == "" {
+	if !nested && customAgent == nil {
 		return chatstate.CreateChatWithID(ctx, p.db, publisher, chatID, input)
+	}
+	var toolPolicy pqtype.NullRawMessage
+	if customAgent != nil {
+		raw, err := json.Marshal(customAgentToolPolicyFromDefinition(*customAgent))
+		if err != nil {
+			return chatstate.CreateChatResult{}, xerrors.Errorf("marshal tool policy of agent %q: %w", customAgent.Name, err)
+		}
+		toolPolicy = pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 	}
 	// CreateChatWithID publishes into this buffer when its nested
 	// transaction returns, so nothing reaches subscribers before the outer
@@ -119,11 +129,16 @@ func (p *Server) createSubagentChatWithID(
 		if err != nil {
 			return err
 		}
+		agentType := subagentTypeFromChat(result.Chat)
+		if customAgent != nil {
+			agentType = customAgent.Name
+		}
 		_, err = ftx.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
-			ChatID:    result.Chat.ID,
-			AgentType: cmp.Or(agentType, subagentTypeFromChat(result.Chat)),
-			Depth:     depth + 1,
-			Isolation: "shared",
+			ChatID:     result.Chat.ID,
+			AgentType:  agentType,
+			Depth:      depth + 1,
+			Isolation:  "shared",
+			ToolPolicy: toolPolicy,
 		})
 		if err != nil {
 			return xerrors.Errorf("insert chat subagent: %w", err)

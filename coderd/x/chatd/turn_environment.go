@@ -884,6 +884,9 @@ func (p *Server) buildTurnEnvironment(
 			return !exploreToolAllowed(tool)
 		})
 	}
+	if tools, deferredCandidates, err = p.applyCustomAgentToolPolicy(ctx, chat, tools, deferredCandidates); err != nil {
+		return turnEnvironment{}, err
+	}
 
 	var dynamicToolNames map[string]bool
 	if p.disableCallerSuppliedTools {

@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type ChatSubagent struct {
-	ChatID       uuid.UUID     `db:"chat_id" json:"chat_id"`
-	AgentType    string        `db:"agent_type" json:"agent_type"`
-	Depth        int32         `db:"depth" json:"depth"`
-	Isolation    string        `db:"isolation" json:"isolation"`
-	WorktreePath string        `db:"worktree_path" json:"worktree_path"`
-	Branch       string        `db:"branch" json:"branch"`
-	WorkspaceID  uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
+	ChatID       uuid.UUID             `db:"chat_id" json:"chat_id"`
+	AgentType    string                `db:"agent_type" json:"agent_type"`
+	Depth        int32                 `db:"depth" json:"depth"`
+	Isolation    string                `db:"isolation" json:"isolation"`
+	WorktreePath string                `db:"worktree_path" json:"worktree_path"`
+	Branch       string                `db:"branch" json:"branch"`
+	WorkspaceID  uuid.NullUUID         `db:"workspace_id" json:"workspace_id"`
+	ToolPolicy   pqtype.NullRawMessage `db:"tool_policy" json:"tool_policy"`
 }
 
 type ChatTodo struct {

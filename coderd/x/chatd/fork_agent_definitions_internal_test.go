@@ -4,15 +4,19 @@ package chatd
 // the fork-agent-definitions experiment.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -36,12 +40,13 @@ func newAgentDefinitionsFixture(
 	t *testing.T,
 	experiments codersdk.Experiments,
 	definitions func(otherModel database.ChatModelConfig) map[string]string,
+	opts ...internalTestServerOpt,
 ) agentDefinitionsFixture {
 	t.Helper()
 
 	db, ps := dbtestutil.NewDB(t)
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
-		withInternalTestServerExperiments(experiments))
+		append(opts, withInternalTestServerExperiments(experiments))...)
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
 
@@ -269,4 +274,91 @@ func TestForkAgentDefinitionDescriptionBudget(t *testing.T) {
 		}
 		require.Equal(t, customAgentFallbackDescription, description, "entry %d", i)
 	}
+}
+
+func TestForkAgentDefinitionToolPolicy(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions, codersdk.ExperimentForkNestedSubagents},
+		func(database.ChatModelConfig) map[string]string {
+			return map[string]string{
+				"reader":    agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
+				"no-writes": agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file]", "No writes."),
+			}
+		},
+		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
+	toolNames := func(t *testing.T, child database.Chat) []string {
+		t.Helper()
+		ctx := chatdTestContext(t)
+		messages, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+		require.NoError(t, err)
+		env, err := f.server.buildTurnEnvironment(ctx, generationPrepareInput{Chat: child, Messages: messages})
+		require.NoError(t, err)
+		t.Cleanup(env.Close)
+		names := make([]string, 0, len(env.Tools))
+		for _, tool := range env.Tools {
+			names = append(names, tool.Info().Name)
+		}
+		return names
+	}
+
+	t.Run("ReadOnly", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "reader"})
+		require.NoError(t, err)
+		row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
+		require.NoError(t, err)
+		var policy customAgentToolPolicy
+		require.NoError(t, json.Unmarshal(row.ToolPolicy.RawMessage, &policy))
+		require.True(t, policy.ReadOnly)
+
+		names := toolNames(t, child)
+		require.Contains(t, names, "execute")
+		require.NotContains(t, names, "write_file")
+		require.NotContains(t, names, "edit_files")
+	})
+
+	t.Run("DisallowedTools", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "no-writes"})
+		require.NoError(t, err)
+		names := toolNames(t, child)
+		require.Contains(t, names, "edit_files")
+		require.NotContains(t, names, "write_file")
+	})
+
+	t.Run("BuiltinType", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: subagentTypeGeneral})
+		require.NoError(t, err)
+		row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
+		require.NoError(t, err)
+		require.False(t, row.ToolPolicy.Valid)
+		require.Contains(t, toolNames(t, child), "write_file")
+	})
+
+	t.Run("UndecodablePolicyFailsClosed", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		for _, policy := range []string{`{"tools": "Read"}`, `{"mcp_mode": "everything"}`} {
+			child := dbgen.Chat(t, f.db, database.Chat{
+				OrganizationID:    f.root.OrganizationID,
+				OwnerID:           f.root.OwnerID,
+				LastModelConfigID: f.root.LastModelConfigID,
+				ParentChatID:      uuid.NullUUID{UUID: f.root.ID, Valid: true},
+				RootChatID:        uuid.NullUUID{UUID: f.root.ID, Valid: true},
+			})
+			_, err := f.fdb.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
+				ChatID:     child.ID,
+				AgentType:  "reader",
+				Depth:      1,
+				Isolation:  "shared",
+				ToolPolicy: pqtype.NullRawMessage{RawMessage: json.RawMessage(policy), Valid: true},
+			})
+			require.NoError(t, err)
+			_, _, err = f.server.applyCustomAgentToolPolicy(ctx, child, []fantasy.AgentTool{newTestAgentTool("write_file")}, nil)
+			require.Error(t, err, policy)
+		}
+	})
 }
