@@ -151,9 +151,12 @@ func TestReadChatTranscript(t *testing.T) {
 	t.Run("BoundsThePageSize", func(t *testing.T) {
 		t.Parallel()
 		chat := newChat(t, user.ID, uuid.NullUUID{}, uuid.NullUUID{})
+		execute := codersdk.ChatMessageToolCall("call-1", "execute", json.RawMessage(`{"command":"ls"}`))
+		execute.ParsedCommands = [][]string{{strings.Repeat("d", 10000)}}
 		pasted := row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
 			codersdk.ChatMessageText(strings.Repeat("b", 10000)),
 			codersdk.ChatMessageFileReference("main.go", 1, 500, strings.Repeat("c", 10000)),
+			execute,
 		}}
 		insert(t, chat.ID, userText(strings.Repeat("a", 3000)), pasted, userText("last"))
 
@@ -169,6 +172,7 @@ func TestReadChatTranscript(t *testing.T) {
 		pastedContent := second.Messages[0].Parts[1].Content
 		require.LessOrEqual(t, len(pastedContent), minTranscriptBytes)
 		require.Contains(t, pastedContent, "Coder truncated")
+		require.Nil(t, second.Messages[0].Parts[2].ParsedCommands)
 		require.True(t, second.HasMore)
 
 		last := readPage(t, chat, readChatTranscriptArgs{AfterID: second.NextAfterID, MaxBytes: minTranscriptBytes})

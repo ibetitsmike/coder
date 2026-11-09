@@ -244,9 +244,11 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 
 // truncateTranscriptPart bounds the large fields of part with the tool
 // result truncation chatloop applies. Inline file bytes are dropped: the
-// media type and name stay, and a model cannot use the base64 data.
+// media type and name stay, and a model cannot use the base64 data. Parsed
+// commands are dropped too: they repeat the tool call's args.
 func truncateTranscriptPart(part codersdk.ChatMessagePart, maxBytes int) codersdk.ChatMessagePart {
 	part.Data = nil
+	part.ParsedCommands = nil
 	part.Text, _ = chatloop.TruncateToolResultText(part.Text, maxBytes)
 	part.Content, _ = chatloop.TruncateToolResultText(part.Content, maxBytes)
 	part.Args = truncateTranscriptJSON(part.Args, maxBytes)
