@@ -1,7 +1,8 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
+import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import type { ChatTodoList, Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { MockChat } from "#/testHelpers/chatEntities";
@@ -24,8 +25,9 @@ import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import { ForkComposerSlot } from "./ForkComposerSlot";
 
 const renderSlot = (experiments: Experiment[]) => {
+	const queryClient = createTestQueryClient();
 	renderComponent(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={queryClient}>
 			<DashboardContext.Provider
 				value={{
 					entitlements: MockEntitlements,
@@ -41,6 +43,7 @@ const renderSlot = (experiments: Experiment[]) => {
 			</DashboardContext.Provider>
 		</QueryClientProvider>,
 	);
+	return queryClient;
 };
 
 const mockTodoWatchSocket = () => {
@@ -93,18 +96,22 @@ describe("ForkComposerSlot todo list", () => {
 		);
 		const { watch, publish } = mockTodoWatchSocket();
 
-		renderSlot(["fork-chat-todos"]);
+		const queryClient = renderSlot(["fork-chat-todos"]);
 
-		await screen.findByRole("button", { name: "Todo list, 1/3 done" });
 		await waitFor(() => expect(watch).toHaveBeenCalledWith(MockChat.id));
-		publish({
+		const updated: ChatTodoList = {
 			version: MockChatTodoList.version + 1,
 			todos: MockChatTodoList.todos.map((todo) =>
 				todo.id === "build" ? { ...todo, status: "done" } : todo,
 			),
-		});
+		};
+		publish(updated);
 
-		await screen.findByRole("button", { name: "Todo list, 2/3 done" });
+		await waitFor(() =>
+			expect(queryClient.getQueryData(chatTodosKey(MockChat.id))).toEqual(
+				updated,
+			),
+		);
 	});
 
 	it("does not watch a list it failed to load", async () => {
@@ -113,9 +120,13 @@ describe("ForkComposerSlot todo list", () => {
 		);
 		const { watch } = mockTodoWatchSocket();
 
-		renderSlot(["fork-chat-todos"]);
+		const queryClient = renderSlot(["fork-chat-todos"]);
 
-		await screen.findByRole("button", { name: "Todo list failed to load" });
+		await waitFor(() =>
+			expect(queryClient.getQueryState(chatTodosKey(MockChat.id))?.status).toBe(
+				"error",
+			),
+		);
 		expect(watch).not.toHaveBeenCalled();
 	});
 });
