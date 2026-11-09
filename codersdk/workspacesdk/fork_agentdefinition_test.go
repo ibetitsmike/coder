@@ -49,22 +49,22 @@ func TestParseAgentDefinition(t *testing.T) {
 		{
 			name: "ClaudeCode",
 			content: "---\nname: code-reviewer\ndescription: Reviews code.\ntools: Read, Grep, , Glob\n" +
-				"disallowedTools: [Write]\nmodel: inherit\ncolor: blue\nmcpServers: [github]\n---\nReview it.",
+				"disallowedTools: [Write]\nmodel: inherit\neffort: high\ncolor: blue\nmcpServers: [github]\n---\nReview it.",
 			want: workspacesdk.AgentDefinition{
 				Name:            "code-reviewer",
 				Description:     "Reviews code.",
 				Prompt:          "Review it.",
+				ReasoningEffort: "high",
 				Tools:           []string{"Read", "Grep", "Glob"},
 				DisallowedTools: []string{"Write"},
-				MCPMode:         workspacesdk.AgentDefinitionMCPNamed,
-				MCPServers:      []string{"github"},
+				MCPMode:         workspacesdk.AgentDefinitionMCPInherit,
 				BaseType:        workspacesdk.AgentDefinitionBaseGeneral,
 			},
 		},
 		{
 			name: "CoderKeys",
 			content: "---\ndescription: Explores.\ntools:\n  - read_file\n  - execute\ndisallowed_tools: execute\n" +
-				"reasoning_effort: high\nmcp: none\nbase_type: explore\n---\nExplore.",
+				"reasoning_effort: high\neffort: low\nmcp: none\nbase_type: explore\n---\nExplore.",
 			fallback: "explorer",
 			want: workspacesdk.AgentDefinition{
 				Name:            "explorer",
@@ -102,8 +102,7 @@ func TestParseAgentDefinition(t *testing.T) {
 				Name:        "a",
 				Description: "d",
 				Prompt:      "Body.",
-				MCPMode:     workspacesdk.AgentDefinitionMCPNamed,
-				MCPServers:  []string{"github"},
+				MCPMode:     workspacesdk.AgentDefinitionMCPInherit,
 				BaseType:    workspacesdk.AgentDefinitionBaseGeneral,
 				Warnings:    []string{"inline MCP server definitions in mcpServers are not supported and were ignored"},
 			},
@@ -115,8 +114,7 @@ func TestParseAgentDefinition(t *testing.T) {
 				Name:        "a",
 				Description: "d",
 				Prompt:      "Body.",
-				MCPMode:     workspacesdk.AgentDefinitionMCPNamed,
-				MCPServers:  []string{},
+				MCPMode:     workspacesdk.AgentDefinitionMCPInherit,
 				BaseType:    workspacesdk.AgentDefinitionBaseGeneral,
 				Warnings:    []string{"inline MCP server definitions in mcpServers are not supported and were ignored"},
 			},
