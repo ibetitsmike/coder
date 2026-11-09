@@ -65,6 +65,7 @@ var agentDefinitionKnownKeys = map[string]struct{}{
 	"description":      {},
 	"model":            {},
 	"reasoning_effort": {},
+	"effort":           {},
 	"tools":            {},
 	"disallowed_tools": {},
 	"disallowedTools":  {},
@@ -135,8 +136,15 @@ func ParseAgentDefinition(content, fallbackName string) (AgentDefinition, error)
 	if def.Model == "inherit" {
 		def.Model = ""
 	}
-	if def.ReasoningEffort, err = agentStringField(fm, "reasoning_effort"); err != nil {
-		return AgentDefinition{}, err
+	// reasoning_effort wins over Claude Code's effort when both are set.
+	for _, key := range []string{"reasoning_effort", "effort"} {
+		effort, err := agentStringField(fm, key)
+		if err != nil {
+			return AgentDefinition{}, err
+		}
+		if def.ReasoningEffort == "" {
+			def.ReasoningEffort = effort
+		}
 	}
 	if def.Tools, err = agentToolListField(fm, "tools"); err != nil {
 		return AgentDefinition{}, err
@@ -177,8 +185,10 @@ func ParseAgentDefinition(content, fallbackName string) (AgentDefinition, error)
 	return def, nil
 }
 
-// parseAgentMCP sets def.MCPMode and def.MCPServers from the mcp key, or
-// from the Claude Code mcpServers key when mcp is absent.
+// parseAgentMCP sets def.MCPMode and def.MCPServers from the mcp key. The
+// Claude Code mcpServers key only adds servers to the inherited set, so it
+// keeps the inherit mode: named references are already inherited, and inline
+// server definitions cannot be honored.
 func parseAgentMCP(fm map[string]any, def *AgentDefinition) (warnings []string, err error) {
 	mcp, hasMCP := fm["mcp"]
 	servers, hasServers := fm["mcpServers"]
@@ -211,22 +221,12 @@ func parseAgentMCP(fm map[string]any, def *AgentDefinition) (warnings []string, 
 	if !hasServers || servers == nil {
 		return warnings, nil
 	}
-	// Inline server configs cannot be honored, but the author still asked
-	// for a restricted server set, so the mode stays named rather than
-	// widening to every server.
-	def.MCPMode = AgentDefinitionMCPNamed
-	def.MCPServers = []string{}
 	inline := false
 	switch v := servers.(type) {
 	case []any:
 		for _, entry := range v {
-			name, ok := entry.(string)
-			if !ok {
+			if _, ok := entry.(string); !ok {
 				inline = true
-				continue
-			}
-			if name = strings.TrimSpace(name); name != "" {
-				def.MCPServers = append(def.MCPServers, name)
 			}
 		}
 	case map[string]any:
