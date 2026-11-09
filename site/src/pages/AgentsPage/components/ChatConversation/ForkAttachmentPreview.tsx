@@ -38,6 +38,8 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 		!experiments.includes("fork-chat-todos") ||
 		block.media_type !== "video/mp4" ||
 		!block.file_id ||
+		// The upstream card shows the expired state; the caption here would
+		// still offer a dead download link.
 		hasExpired(block.file_id)
 	) {
 		return children;

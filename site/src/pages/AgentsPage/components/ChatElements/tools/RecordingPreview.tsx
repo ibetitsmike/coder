@@ -41,7 +41,7 @@ type RecordingPreviewProps = {
 	/** Optional thumbnail URL override. When provided, this is used
 	 * directly instead of deriving the URL from thumbnailFileId. */
 	thumbnailSrc?: string;
-	/** Accessible name of the play control. */
+	/** Accessible name of the play control. Defaults to "View recording". */
 	playLabel?: string;
 };
 
