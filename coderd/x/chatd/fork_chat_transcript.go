@@ -235,6 +235,7 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 func truncateTranscriptPart(part codersdk.ChatMessagePart, maxBytes int) codersdk.ChatMessagePart {
 	part.Data = nil
 	part.Text, _ = chatloop.TruncateToolResultText(part.Text, maxBytes)
+	part.Content, _ = chatloop.TruncateToolResultText(part.Content, maxBytes)
 	part.Args = truncateTranscriptJSON(part.Args, maxBytes)
 	part.Result = truncateTranscriptJSON(part.Result, maxBytes)
 	return part
