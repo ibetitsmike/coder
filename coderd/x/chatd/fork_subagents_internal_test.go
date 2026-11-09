@@ -18,6 +18,7 @@ import (
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/serpent"
 )
 
 type nestedSubagentsFixture struct {
@@ -122,6 +123,63 @@ func TestNestedSubagentDepth(t *testing.T) {
 	})
 }
 
+func TestNestedSubagentDepthAtSpawnToolBoundary(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkNestedSubagents},
+		Limits{Fork: ForkLimits{MaxSubagentDepth: 1}})
+	ctx := chatdTestContext(t)
+
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+
+	resp := runSpawnAgentTool(ctx, t, f.server, child, spawnAgentArgs{
+		Type:   subagentTypeGeneral,
+		Prompt: "delegate work",
+	})
+	require.True(t, resp.IsError, "expected a depth error but got: %s", resp.Content)
+	require.Contains(t, resp.Content, "maximum subagent depth is 1")
+	f.requireNoChildren(t, child)
+}
+
+// A child chat with no chat_subagents row predates depth recording and counts
+// as depth 1.
+func TestNestedSubagentDepthLegacyChild(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkNestedSubagents},
+		Limits{Fork: ForkLimits{MaxSubagentDepth: 1}})
+	ctx := chatdTestContext(t)
+
+	legacy, err := f.server.CreateChat(ctx, CreateOptions{
+		OrganizationID:     f.root.OrganizationID,
+		OwnerID:            f.root.OwnerID,
+		ParentChatID:       uuid.NullUUID{UUID: f.root.ID, Valid: true},
+		RootChatID:         uuid.NullUUID{UUID: f.root.ID, Valid: true},
+		Title:              "legacy-child",
+		ModelConfigID:      f.root.LastModelConfigID,
+		InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do work")},
+	})
+	require.NoError(t, err)
+	legacy, err = f.db.GetChatByID(ctx, legacy.ID)
+	require.NoError(t, err)
+	_, err = f.fdb.GetChatSubagentByChatID(ctx, legacy.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	_, err = f.spawn(t, legacy, childSubagentChatOptions{})
+	require.ErrorContains(t, err, "this chat is at subagent depth 1 and the maximum subagent depth is 1")
+	f.requireNoChildren(t, legacy)
+}
+
+func TestForkLimitsFromConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := codersdk.ChatConfig{Fork: codersdk.ForkChatConfig{MaxSubagentDepth: serpent.Int64(4)}}
+	require.Equal(t, ForkLimits{MaxSubagentDepth: 4}, LimitsFromConfig(cfg).Fork)
+}
+
 func TestNestedSubagentLeaves(t *testing.T) {
 	t.Parallel()
 
@@ -129,11 +187,12 @@ func TestNestedSubagentLeaves(t *testing.T) {
 	ctx := chatdTestContext(t)
 
 	for _, tc := range []struct {
-		mode    database.ChatMode
-		wantErr string
+		mode     database.ChatMode
+		wantType string
+		wantErr  string
 	}{
-		{database.ChatModeExplore, "explore chats cannot create child subagents"},
-		{database.ChatModeComputerUse, "computer use chats cannot create child subagents"},
+		{database.ChatModeExplore, subagentTypeExplore, "explore chats cannot create child subagents"},
+		{database.ChatModeComputerUse, subagentTypeComputerUse, "computer use chats cannot create child subagents"},
 	} {
 		child, err := f.spawn(t, f.root, childSubagentChatOptions{
 			chatMode: database.NullChatMode{ChatMode: tc.mode, Valid: true},
@@ -141,7 +200,7 @@ func TestNestedSubagentLeaves(t *testing.T) {
 		require.NoError(t, err)
 		row, err := f.fdb.GetChatSubagentByChatID(ctx, child.ID)
 		require.NoError(t, err)
-		require.Equal(t, subagentTypeFromChat(child), row.AgentType)
+		require.Equal(t, tc.wantType, row.AgentType)
 		require.ErrorContains(t, f.server.forkValidateSpawnParent(ctx, child), tc.wantErr)
 		_, err = f.spawn(t, child, childSubagentChatOptions{})
 		require.ErrorContains(t, err, tc.wantErr)

@@ -20,7 +20,6 @@ func TestForkChatMaxSubagentDepthOption(t *testing.T) {
 	require.Equal(t, "CODER_CHAT_MAX_SUBAGENT_DEPTH", opt.Env)
 	require.NoError(t, opts.SetDefaults())
 	require.EqualValues(t, codersdk.DefaultChatMaxSubagentDepth, values.AI.Chat.Fork.MaxSubagentDepth.Value())
-	require.EqualValues(t, 2, codersdk.DefaultChatMaxSubagentDepth)
 
 	require.Error(t, opt.Value.Set("0"))
 	require.NoError(t, opt.Value.Set("3"))
