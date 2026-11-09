@@ -113,20 +113,20 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 
 ## Subagent fields
 
-| Cursor                                        | Coder Agents today                                                                                                                                                  | Do this                                                                                                                                                                                                                                              | Removed by |
-|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `subagent_type: generalPurpose`               | Types `general`, `explore`, `computer_use`, and custom types with the `fork-agent-definitions` experiment                                                           | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
-| `poteto-agent`, `comment-sicko`               | Custom types only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)                                                  | If the `spawn_agent` description lists `<name>`, pass `type: "<name>"`. Otherwise `type: "general"`, and paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                                             | W1         |
-| `readonly: true`                              | `explore` has `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file` and the deployment MCP tools allowed in subagents, and no file-writing tool | `type: "explore"` for narrow code discovery, else `type: "general"`. Neither type enforces read-only, because `execute` can change files. Say "do not edit files or run commands that change state" in the prompt, and check `git status` afterward. | Stays      |
-| `readonly: false`                             | `general`                                                                                                                                                           | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
-| A subagent that spawns its own workers        | Only with the `fork-nested-subagents` experiment, up to a depth limit. Refer to [Nested subagents](#nested-subagents)                                               | If the child has `spawn_agent`, it spawns and collects its own workers. Otherwise the root spawns every worker itself and does the sub-coordinator's job.                                                                                            | W2         |
-| More than 10 running subagents                | By default, at most 10 subagent turns run at once across the deployment. Children over the cap wait for a free slot                                                 | Spawn them all. Expect `wait_agent` to take longer when other chats hold slots.                                                                                                                                                                      | W2         |
-| `environment: "cloud"`, a worktree per worker | A child shares its parent's workspace and working directory                                                                                                         | Run writers one at a time, or tell each writer to `git worktree add` its own checkout on its own branch and work only there.                                                                                                                         | W3         |
-| `environment: "local"`                        | Not needed                                                                                                                                                          | Omit.                                                                                                                                                                                                                                                | Stays      |
-| `cloud_base_branch: <b>`                      | No base branch argument                                                                                                                                             | Tell the worker to create its worktree from `<b>`.                                                                                                                                                                                                   | W3         |
-| `run_in_background: true`                     | `spawn_agent` never blocks                                                                                                                                          | Omit. Call `wait_agent` when you need the result.                                                                                                                                                                                                    | Stays      |
-| `resume`                                      | `message_agent` wakes an idle child with a follow-up                                                                                                                | `message_agent`, then `wait_agent`.                                                                                                                                                                                                                  | Stays      |
-| `file_attachments`                            | No field                                                                                                                                                            | List the paths in the prompt.                                                                                                                                                                                                                        | Stays      |
+| Cursor                                        | Coder Agents today                                                                                                                                                                                                                                            | Do this                                                                                                                                                                                                                                              | Removed by |
+|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| `subagent_type: generalPurpose`               | Types `general`, `explore`, `computer_use`, and custom types with the `fork-agent-definitions` experiment                                                                                                                                                     | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
+| `poteto-agent`, `comment-sicko`               | Custom types only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)                                                                                                                                            | If the `spawn_agent` description lists `<name>`, pass `type: "<name>"`. Otherwise `type: "general"`, and paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                                             | W1         |
+| `readonly: true`                              | `explore` has `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file` and the deployment MCP tools allowed in subagents, and no file-writing tool                                                                                           | `type: "explore"` for narrow code discovery, else `type: "general"`. Neither type enforces read-only, because `execute` can change files. Say "do not edit files or run commands that change state" in the prompt, and check `git status` afterward. | Stays      |
+| `readonly: false`                             | `general`                                                                                                                                                                                                                                                     | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
+| A subagent that spawns its own workers        | Only with the `fork-nested-subagents` experiment, up to a depth limit. Refer to [Nested subagents](#nested-subagents)                                                                                                                                         | If the child has `spawn_agent`, it spawns and collects its own workers. Otherwise the root spawns every worker itself and does the sub-coordinator's job.                                                                                            | W2         |
+| More than 10 running subagents                | By default, at most 10 subagent turns run at once across the deployment, and more with an Agent Runtime Hours entitlement or the `fork-nested-subagents` experiment. Children over the cap wait for a free slot. Refer to [Subagent limits](#subagent-limits) | Spawn them all. Expect `wait_agent` to take longer when other chats hold slots.                                                                                                                                                                      | W2         |
+| `environment: "cloud"`, a worktree per worker | A child shares its parent's workspace and working directory                                                                                                                                                                                                   | Run writers one at a time, or tell each writer to `git worktree add` its own checkout on its own branch and work only there.                                                                                                                         | W3         |
+| `environment: "local"`                        | Not needed                                                                                                                                                                                                                                                    | Omit.                                                                                                                                                                                                                                                | Stays      |
+| `cloud_base_branch: <b>`                      | No base branch argument                                                                                                                                                                                                                                       | Tell the worker to create its worktree from `<b>`.                                                                                                                                                                                                   | W3         |
+| `run_in_background: true`                     | `spawn_agent` never blocks                                                                                                                                                                                                                                    | Omit. Call `wait_agent` when you need the result.                                                                                                                                                                                                    | Stays      |
+| `resume`                                      | `message_agent` wakes an idle child with a follow-up                                                                                                                                                                                                          | `message_agent`, then `wait_agent`.                                                                                                                                                                                                                  | Stays      |
+| `file_attachments`                            | No field                                                                                                                                                                                                                                                      | List the paths in the prompt.                                                                                                                                                                                                                        | Stays      |
 
 ### Custom agent types
 
@@ -142,6 +142,7 @@ A definition whose effort isn't a valid reasoning effort fails every spawn.
 A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
+With the experiment, the API also stores a user's definitions in an organization, but `spawn_agent` doesn't offer stored definitions yet.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
 ### Custom agent tool policy
@@ -177,6 +178,35 @@ The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's acti
 Archiving a root whose family is still working interrupts the family, waits up to 30&nbsp;seconds for it to stop, then archives every member.
 If a member is still working after 30&nbsp;seconds, the archive fails and archives nothing.
 Without the experiment, or at the maximum depth, a child has no `spawn_agent`, and a call fails with `Tool not active in this turn: spawn_agent`.
+
+### Subagent limits
+
+By default, at most 10 subagent turns run at once across the deployment, and a child over that cap waits for a free slot.
+An Enterprise deployment doesn't have that cap while its Agent Runtime Hours entitlement is enabled and below its hard limit.
+A family is a root chat and all of its descendants.
+With the `fork-nested-subagents` experiment, an administrator can also limit running subagents with `--chat-max-concurrent-subagents` across the deployment and `--chat-max-concurrent-subagents-per-family` in one family.
+A child over one of these limits waits for a free slot, like a child over the default cap.
+With the experiment, a child's own ancestors don't count against the default cap or these limits, so a coordinator that waits in `wait_agent` doesn't block its workers.
+Because of that, more than 10 subagent turns can run at once.
+
+With the experiment, `--chat-max-live-subagents-per-family` limits how many subagents in one family are live at once.
+A subagent is live while it isn't archived and its status is `running`, `interrupting`, `requires_action`, or `paused`.
+A child that finished doesn't count.
+At the limit, `spawn_agent` fails with `cannot create a child agent: this chat family has` and the count, instead of queueing the child.
+`message_agent` to a finished child fails the same way with `cannot resume the child agent:`.
+After either error, call `list_agents`, and follow `has_more` with `offset` until you have every direct child.
+If a child is `running`, `interrupting`, or `paused`, call `wait_agent` on it, and retry when it finishes.
+A `paused` child waits for its owner to finish editing a queued message, so keep waiting on it unless the user says otherwise.
+Otherwise, `requires_action` children or your children's own workers hold the limit.
+`wait_agent` returns at once for a `requires_action` child, and `list_agents` doesn't show your children's workers.
+In that case, call `interrupt_agent` on each child whose remaining work you don't need.
+Whatever the child's status, `interrupt_agent` interrupts its `running`, `interrupting`, and `requires_action` descendants, and the child itself when it has a turn.
+An interrupted `requires_action` child runs again before it stops, so call `wait_agent` on it before you retry.
+Interrupted descendants count until they stop, and you can't wait on them, so if the retry fails, run `sleep 30` with `execute` and retry.
+Tell the user that the family is at its live limit only after several retries fail.
+
+These three flags default to 0, which means no limit.
+An organization's `max_concurrent`, `max_concurrent_per_family`, and `max_live_per_family` subagent limits apply too, and the lower of the deployment and organization values wins.
 
 ## Models
 
@@ -248,13 +278,13 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `68fbdea615`:
+Checked against fork `main` at `e155b422a2`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:185-202`, `:216-244`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:249-261`.
-  Depth flag, `codersdk/fork_chat_config.go:33-40`, lowered by the organization's `max_depth`, `fork_subagents.go:57-71`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:258-275`, `:289-317`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:322-334`.
+  Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_capacity.go:45-47`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
@@ -263,16 +293,23 @@ Checked against fork `main` at `68fbdea615`:
   Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:40-42`, `:61-64`, `:86-88`, called from `subagent_catalog.go:185` and `:233`.
   The definition's body becomes the child's system prompt, `fork_agent_definitions.go:177`.
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:147-159`, and the model match, `:187-210`.
-- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:124-131`, `:169`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
-  Orchestration guidance dropped, `fork_subagents.go:276-278`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
+  Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:709-712`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`.
-- Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:471-476`.
-- `wait_agent` returns the last assistant message: `subagent_operations.go:640-672`.
-- Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, `coderd/x/chatd/worker.go:273-281`.
+- Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:474-479`.
+- `wait_agent` returns the last assistant message: `subagent_operations.go:643-675`.
+- Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:274-282`.
+  Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-61`.
+  Concurrency limits without the ancestors, `fork_capacity.go:91-142`.
+  `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:570-589`, and `wait_agent` on a `paused` child, `:479-487`.
+  `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
+  `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:883`, `:893-895`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
+  Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
+  Stored definitions: user routes only, `coderd/fork_agent_definitions.go:32-170`, and custom types still read only from the chat's pinned context, `coderd/x/chatd/fork_agent_definitions.go:61-66`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
@@ -282,7 +319,7 @@ Checked against fork `main` at `68fbdea615`:
 - `explore` tools: `turn_environment.go:2124-2133`.
 - Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2185-2201`.
 - `find_tools`: `coderd/x/chatd/chattool/findtools.go:19`, only with MCP tools, `coderd/x/chatd/mcp_tool_search.go:121-136`, which also omits it on a name collision.
-- Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:337-340`.
+- Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:340-343`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
