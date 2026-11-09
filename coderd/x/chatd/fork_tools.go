@@ -31,5 +31,5 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = append(tools, p.searchChatsTool(chat))
 		tools = p.withForkWaitAgent(tools, chat)
 	}
-	return tools, nil
+	return p.withStoredSubagentTypes(tools), nil
 }
