@@ -2238,3 +2238,14 @@ Disable the template builder feature for guided template creation. When disabled
 | Default     | <code>registry.coder.com</code>                   |
 
 The module registry host the template builder uses for module source paths (for example, "registry.coder.com" or "mirror.internal:8443"). An http(s):// scheme and trailing slash are stripped; a path, query, fragment, or credentials is rejected.
+
+### --chat-max-subagent-depth
+
+| Property    | Value                                       |
+|-------------|---------------------------------------------|
+| Type        | <code>int</code>                            |
+| Environment | <code>$CODER_CHAT_MAX_SUBAGENT_DEPTH</code> |
+| YAML        | <code>chat.maxSubagentDepth</code>          |
+| Default     | <code>2</code>                              |
+
+Maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0 and its subagents at depth 1. Explore and computer use subagents never spawn subagents. Must be between 1 and 16.

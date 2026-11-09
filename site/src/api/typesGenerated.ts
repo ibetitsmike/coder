@@ -2389,6 +2389,10 @@ export interface ChatConfig {
 	 * value has no effect. This option will be removed in a future release.
 	 */
 	readonly ai_gateway_routing_enabled: boolean;
+	/**
+	 * Fork holds the fork-only chat options.
+	 */
+	readonly fork: ForkChatConfig;
 }
 
 // From codersdk/chats.go
@@ -5409,6 +5413,13 @@ export const DefaultChatMaxQueuedMessagesPerChat = 20;
  */
 export const DefaultChatMaxStepsPerTurn = 1200;
 
+// From codersdk/fork_chat_config.go
+/**
+ * DefaultChatMaxSubagentDepth is the default maximum depth of nested subagent
+ * chats.
+ */
+export const DefaultChatMaxSubagentDepth = 2;
+
 // From codersdk/chats.go
 /**
  * DefaultChatWorkspaceTTL is the default TTL for chat workspaces.
@@ -5824,6 +5835,7 @@ export type Experiment =
 	| "enable-ai-workspace-debug"
 	| "example"
 	| "fork-chat-todos"
+	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
@@ -5905,6 +5917,7 @@ export const Experiments: Experiment[] = [
 	"enable-ai-workspace-debug",
 	"example",
 	"fork-chat-todos",
+	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",
@@ -6204,6 +6217,19 @@ export const FeatureNames: FeatureName[] = [
 export type FeatureSet = "enterprise" | "" | "premium";
 
 export const FeatureSets: FeatureSet[] = ["enterprise", "", "premium"];
+
+// From codersdk/fork_chat_config.go
+/**
+ * ForkChatConfig is the fork-only chat deployment configuration.
+ */
+export interface ForkChatConfig {
+	/**
+	 * MaxSubagentDepth is the maximum depth of nested subagent chats when
+	 * the fork-nested-subagents experiment is enabled. A root chat is at
+	 * depth 0.
+	 */
+	readonly max_subagent_depth: number;
+}
 
 // From codersdk/files.go
 export const FormatZip = "zip";
@@ -7067,6 +7093,13 @@ export const MaxAISpendPeriodDays = 31;
  * attachments.
  */
 export const MaxChatFileSizeBytes = 10485760;
+
+// From codersdk/fork_chat_config.go
+/**
+ * MaxChatMaxSubagentDepth caps --chat-max-subagent-depth so walks over a
+ * subagent family stay small and bounded.
+ */
+export const MaxChatMaxSubagentDepth = 16;
 
 // From codersdk/chats.go
 /**

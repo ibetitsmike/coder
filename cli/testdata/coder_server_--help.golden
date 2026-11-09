@@ -305,6 +305,12 @@ Configure the background chat processing daemon.
           count. A turn that reaches the limit runs the tools from the last
           response, then ends without an error. Must be at least 1.
 
+      --chat-max-subagent-depth int, $CODER_CHAT_MAX_SUBAGENT_DEPTH (default: 2)
+          Maximum depth of nested subagent chats when the fork-nested-subagents
+          experiment is enabled. A root chat is at depth 0 and its subagents at
+          depth 1. Explore and computer use subagents never spawn subagents.
+          Must be between 1 and 16.
+
       --chat-stream-silence-timeout duration, $CODER_CHAT_STREAM_SILENCE_TIMEOUT (default: 10m0s)
           Maximum time to wait for the next streamed part from the chat model
           before the attempt is canceled and retried. This also bounds the time

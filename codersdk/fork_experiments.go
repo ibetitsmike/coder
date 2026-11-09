@@ -11,11 +11,16 @@ package codersdk
 // enabled behaves exactly like upstream.
 var ForkExperiments = Experiments{
 	ExperimentForkChatTodos,
+	ExperimentForkNestedSubagents,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
 // the chat todo list.
 const ExperimentForkChatTodos Experiment = "fork-chat-todos"
+
+// ExperimentForkNestedSubagents lets general subagents spawn their own
+// subagents up to the maximum subagent depth.
+const ExperimentForkNestedSubagents Experiment = "fork-nested-subagents"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they
