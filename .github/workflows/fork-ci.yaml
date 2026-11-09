@@ -82,6 +82,8 @@ jobs:
         run: go test -count=1 -run TestExpPlugins ./cli
       - name: Swagger annotation tests
         run: go test -count=1 -run 'EndpointsDocumented|TestSwagger' ./coderd/coderdtest ./enterprise/coderd/coderdenttest
+      - name: Check API docs for drift
+        run: ./.github/fork/check-apidoc.sh
 
   agent-sdk:
     runs-on: ubuntu-latest
