@@ -36,6 +36,9 @@ type Querier interface {
 	// history is delivered. Older chats start at their newest message so linking
 	// does not replay history.
 	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
+	// Reports whether no worker with a fresh heartbeat owns the chat, with the
+	// heartbeat predicate of GetChatQueuedForCapacity.
+	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.

@@ -103,14 +103,7 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	if err != nil {
 		return false, err
 	}
-	// Upstream's pool count includes the candidate's ancestors, so
-	// coordinators blocked in wait_agent could fill the pool and starve
-	// their own children forever. The pool cap is applied here instead,
-	// with the ancestors excluded.
-	maxConcurrent := l.server.chatLimits.Fork.MaxConcurrentSubagents
-	if pool, capped := l.AgentCapacityLimiter.Limits(); capped && (maxConcurrent == 0 || int(pool.Subagent) < maxConcurrent) {
-		maxConcurrent = int(pool.Subagent)
-	}
+	maxConcurrent := l.server.subagentPoolLimit(l.AgentCapacityLimiter)
 	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
 		return true, nil
 	}
@@ -129,9 +122,7 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	if err != nil {
 		return false, xerrors.Errorf("count active subagents: %w", err)
 	}
-	if overCapacityLimit(counts.ActiveCount, maxConcurrent) ||
-		overCapacityLimit(counts.ActiveOrganizationCount, limits.maxConcurrent) ||
-		overCapacityLimit(counts.ActiveFamilyCount, limits.maxConcurrentPerFamily) {
+	if subagentCapacityFull(counts, maxConcurrent, limits) {
 		// A plain refusal makes the worker skip every other subagent in its
 		// batch as if the whole subagent pool were full, but each count
 		// excludes the candidate's own ancestors, so another subagent may
@@ -141,6 +132,77 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	return true, nil
 }
 
+// subagentPoolLimit returns the deployment limit of running subagents: the
+// fork limit, lowered to upstream's subagent pool when pool caps it.
+// Upstream's pool count includes the candidate's ancestors, so coordinators
+// blocked in wait_agent could fill the pool and starve their own children
+// forever. The fork applies the pool cap instead, with the ancestors
+// excluded.
+func (p *Server) subagentPoolLimit(pool AgentCapacityLimiter) int {
+	maxConcurrent := p.chatLimits.Fork.MaxConcurrentSubagents
+	if limits, capped := pool.Limits(); capped && (maxConcurrent == 0 || int(limits.Subagent) < maxConcurrent) {
+		maxConcurrent = int(limits.Subagent)
+	}
+	return maxConcurrent
+}
+
+// subagentCapacityFull reports whether the active subagents leave no slot
+// under the deployment limit maxConcurrent or the organization or family
+// concurrency limit.
+func subagentCapacityFull(counts forkdb.CountActiveSubagentsForCapacityRow, maxConcurrent int, limits forkSubagentLimits) bool {
+	return overCapacityLimit(counts.ActiveCount, maxConcurrent) ||
+		overCapacityLimit(counts.ActiveOrganizationCount, limits.maxConcurrent) ||
+		overCapacityLimit(counts.ActiveFamilyCount, limits.maxConcurrentPerFamily)
+}
+
 func overCapacityLimit(count int64, limit int) bool {
 	return limit > 0 && count >= int64(limit)
+}
+
+// forkChatQueuedForCapacity reports whether chat is a running subagent that
+// no worker owns while a concurrency limit is full. handled is true when the
+// fork limiter admits chat, so the answer replaces upstream's. It takes no
+// lock: the answer is for display and may be stale by the time it is read.
+func (p *Server) forkChatQueuedForCapacity(ctx context.Context, chat database.Chat) (queued bool, handled bool, err error) {
+	if !p.nestedSubagentsEnabled() || !chat.ParentChatID.Valid {
+		return false, false, nil
+	}
+	if chat.Archived || chat.Status != database.ChatStatusRunning {
+		return false, true, nil
+	}
+	//nolint:gocritic // Capacity accounting is chatd-internal state.
+	ctx = dbauthz.AsChatd(ctx)
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return false, true, xerrors.Errorf("fork queries: %w", err)
+	}
+	limits, err := p.subagentLimits(ctx, fdb, chat.OrganizationID)
+	if err != nil {
+		return false, true, err
+	}
+	maxConcurrent := p.subagentPoolLimit(p.agentCapacityLimiter)
+	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
+		return false, true, nil
+	}
+	staleSeconds := int32(p.inFlightChatStaleAfter.Seconds())
+	awaiting, err := fdb.GetChatAwaitingWorker(ctx, forkdb.GetChatAwaitingWorkerParams{
+		ChatID:       chat.ID,
+		StaleSeconds: staleSeconds,
+	})
+	if err != nil {
+		return false, true, xerrors.Errorf("check chat owner: %w", err)
+	}
+	if !awaiting {
+		return false, true, nil
+	}
+	counts, err := fdb.CountActiveSubagentsForCapacity(ctx, forkdb.CountActiveSubagentsForCapacityParams{
+		ChatID:         chat.ID,
+		OrganizationID: chat.OrganizationID,
+		RootChatID:     subagentRootChatID(chat),
+		StaleSeconds:   staleSeconds,
+	})
+	if err != nil {
+		return false, true, xerrors.Errorf("count active subagents: %w", err)
+	}
+	return subagentCapacityFull(counts, maxConcurrent, limits), true, nil
 }
