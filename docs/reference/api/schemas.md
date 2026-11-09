@@ -7305,6 +7305,20 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `last_name`    | string | false    |              |             |
 | `phone_number` | string | false    |              |             |
 
+## codersdk.CreateForkAgentDefinitionRequest
+
+```json
+{
+  "content": "string"
+}
+```
+
+### Properties
+
+| Name      | Type   | Required | Restrictions | Description                                                                                                                       |
+|-----------|--------|----------|--------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `content` | string | false    |              | Content is a Claude Code or Cursor agent markdown file. Its front-matter must include name and must be followed by a prompt body. |
+
 ## codersdk.CreateGroupRequest
 
 ```json
@@ -10437,6 +10451,60 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `limit`        | integer                                      | false    |              | Limit is the maximum value the license grants for the feature, in the feature's own unit. For FeatureAgentRuntimeHours, an enabled feature with Limit omitted means the license grants unlimited runtime hours.                                                                                                                                                                                                                                                             |
 | `soft_limit`   | integer                                      | false    |              | Soft limit is the advisory warning threshold that accompanies Limit for features whose license carries it. For these features, Limit carries the purchased allocation; an unlimited allocation has no thresholds, so SoftLimit is omitted alongside the omitted Limit. Only FeatureAgentRuntimeHours sets this field.                                                                                                                                                       |
 | `usage_period` | [codersdk.UsagePeriod](#codersdkusageperiod) | false    |              | Usage period denotes that the usage is a counter that accumulates over this period (and most likely resets with the issuance of the next license). These dates are determined from the license that this entitlement comes from, see enterprise/coderd/license/license.go. Only FeatureManagedAgentLimit and FeatureAgentRuntimeHours set this field.                                                                                                                       |
+
+## codersdk.ForkAgentDefinition
+
+```json
+{
+  "content": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "description": "string",
+  "enabled": true,
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name              | Type    | Required | Restrictions | Description                                                               |
+|-------------------|---------|----------|--------------|---------------------------------------------------------------------------|
+| `content`         | string  | false    |              |                                                                           |
+| `created_at`      | string  | false    |              |                                                                           |
+| `description`     | string  | false    |              |                                                                           |
+| `enabled`         | boolean | false    |              | Enabled reports whether chats are offered the definition.                 |
+| `id`              | string  | false    |              |                                                                           |
+| `name`            | string  | false    |              | Name is the spawn_agent type, taken from the front-matter of the content. |
+| `organization_id` | string  | false    |              |                                                                           |
+| `updated_at`      | string  | false    |              |                                                                           |
+
+## codersdk.ForkAgentDefinitionMetadata
+
+```json
+{
+  "created_at": "2019-08-24T14:15:22Z",
+  "description": "string",
+  "enabled": true,
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name              | Type    | Required | Restrictions | Description                                                               |
+|-------------------|---------|----------|--------------|---------------------------------------------------------------------------|
+| `created_at`      | string  | false    |              |                                                                           |
+| `description`     | string  | false    |              |                                                                           |
+| `enabled`         | boolean | false    |              | Enabled reports whether chats are offered the definition.                 |
+| `id`              | string  | false    |              |                                                                           |
+| `name`            | string  | false    |              | Name is the spawn_agent type, taken from the front-matter of the content. |
+| `organization_id` | string  | false    |              |                                                                           |
+| `updated_at`      | string  | false    |              |                                                                           |
 
 ## codersdk.ForkChatConfig
 
@@ -17791,6 +17859,22 @@ The cursor is owner-scoped, so only the chat owner may set this. Opening a chat'
 | `current` | boolean | false    |              | Current indicates whether the server version is the same as the latest. |
 | `url`     | string  | false    |              | URL to download the latest release of Coder.                            |
 | `version` | string  | false    |              | Version is the semantic version for the latest release of Coder.        |
+
+## codersdk.UpdateForkAgentDefinitionRequest
+
+```json
+{
+  "content": "string",
+  "enabled": true
+}
+```
+
+### Properties
+
+| Name      | Type    | Required | Restrictions | Description |
+|-----------|---------|----------|--------------|-------------|
+| `content` | string  | false    |              |             |
+| `enabled` | boolean | false    |              |             |
 
 ## codersdk.UpdateMCPServerConfigACLRequest
 
