@@ -43,7 +43,7 @@ export type ForkAgentDefinitionDeleteState = {
 	onClose: () => void;
 };
 
-export type ForkAgentDefinitionsTableViewProps = {
+type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
 	/** Rendered in the section header, for example an organization picker. */
 	action?: React.ReactNode;
