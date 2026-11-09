@@ -598,7 +598,7 @@ func (p *Server) subagentTools(
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
-				return toolJSONResponse(p.forkListAgents(ctx, parent, listAgentsResult(children, offset, limit))), nil
+				return toolJSONResponse(p.forkListAgents(ctx, parent, children, listAgentsResult(children, offset, limit))), nil
 			},
 		),
 	}, nil

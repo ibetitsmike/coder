@@ -97,6 +97,11 @@ func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, plu
 	return f.s.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f forkQueryMetricsStore) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
+	defer f.observe(ctx, "GetChatAwaitingWorker", time.Now())
+	return f.s.GetChatAwaitingWorker(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	defer f.observe(ctx, "GetChatOrganizationSubagentLimits", time.Now())
 	return f.s.GetChatOrganizationSubagentLimits(ctx, organizationID)

@@ -35,3 +35,20 @@ FROM chats
 WHERE chats.root_chat_id = @root_chat_id::uuid
 	AND chats.archived = false
 	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status);
+
+-- name: GetChatAwaitingWorker :one
+-- Reports whether no worker with a fresh heartbeat owns the chat, with the
+-- heartbeat predicate of GetChatQueuedForCapacity.
+SELECT (
+	c.worker_id IS NULL
+	OR c.runner_id IS NULL
+	OR NOT EXISTS (
+		SELECT 1
+		FROM chat_heartbeats hb
+		WHERE hb.chat_id = c.id
+			AND hb.runner_id = c.runner_id
+			AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+	)
+)::boolean AS awaiting_worker
+FROM chats c
+WHERE c.id = @chat_id::uuid;

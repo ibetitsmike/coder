@@ -82,3 +82,33 @@ func (q *Queries) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uui
 	err := row.Scan(&live_count)
 	return live_count, err
 }
+
+const getChatAwaitingWorker = `-- name: GetChatAwaitingWorker :one
+SELECT (
+	c.worker_id IS NULL
+	OR c.runner_id IS NULL
+	OR NOT EXISTS (
+		SELECT 1
+		FROM chat_heartbeats hb
+		WHERE hb.chat_id = c.id
+			AND hb.runner_id = c.runner_id
+			AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $1::int)
+	)
+)::boolean AS awaiting_worker
+FROM chats c
+WHERE c.id = $2::uuid
+`
+
+type GetChatAwaitingWorkerParams struct {
+	StaleSeconds int32     `db:"stale_seconds" json:"stale_seconds"`
+	ChatID       uuid.UUID `db:"chat_id" json:"chat_id"`
+}
+
+// Reports whether no worker with a fresh heartbeat owns the chat, with the
+// heartbeat predicate of GetChatQueuedForCapacity.
+func (q *Queries) GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, getChatAwaitingWorker, arg.StaleSeconds, arg.ChatID)
+	var awaiting_worker bool
+	err := row.Scan(&awaiting_worker)
+	return awaiting_worker, err
+}
