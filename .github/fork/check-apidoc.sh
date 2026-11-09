@@ -3,10 +3,28 @@
 # collects enum constants from a package's files in map order, so an enum
 # declared across files (codersdk.Experiment and fork_experiments.go) comes
 # out in a different order from run to run. The comparison sorts object keys
-# and enum arrays so only real drift fails.
+# and each enum's values, sorting the x-enum-varnames and x-enum-descriptions
+# entries with their values so a stale value-to-name mapping still fails.
 set -euo pipefail
 
-canon='walk(if type == "object" then with_entries(if (.key == "enum" or (.key | startswith("x-enum-"))) and (.value | type) == "array" then .value |= sort else . end) else . end)'
+# shellcheck disable=SC2016 # $o and $t are jq variables.
+canon='
+def canon_enum:
+	if type == "object" and (.enum | type) == "array" then
+		if (."x-enum-varnames" | type) == "array" then
+			. as $o
+			| [range(0; $o.enum | length) | [$o.enum[.], $o."x-enum-varnames"[.], ($o."x-enum-descriptions" // [])[.]]]
+			| sort as $t
+			| $o
+			| .enum = [$t[][0]]
+			| ."x-enum-varnames" = [$t[][1]]
+			| if has("x-enum-descriptions") then ."x-enum-descriptions" = [$t[][2]] else . end
+		else
+			.enum |= sort
+		end
+	else . end;
+walk(canon_enum)
+'
 
 # docs.go embeds the spec in a Go raw string, which spells a backtick as
 # ` + "`" + `. The only template placeholder outside a JSON string is the
