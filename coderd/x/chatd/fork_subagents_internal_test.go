@@ -28,13 +28,15 @@ type nestedSubagentsFixture struct {
 	root   database.Chat
 }
 
-func newNestedSubagentsFixture(t *testing.T, experiments codersdk.Experiments, limits Limits) nestedSubagentsFixture {
+func newNestedSubagentsFixture(t *testing.T, experiments codersdk.Experiments, limits Limits, opts ...internalTestServerOpt) nestedSubagentsFixture {
 	t.Helper()
 
 	db, ps := dbtestutil.NewDB(t)
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
-		withInternalTestServerExperiments(experiments),
-		withInternalTestServerLimits(limits),
+		append([]internalTestServerOpt{
+			withInternalTestServerExperiments(experiments),
+			withInternalTestServerLimits(limits),
+		}, opts...)...,
 	)
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)

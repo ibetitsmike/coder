@@ -776,6 +776,8 @@ The endpoint also accepts an unowned chat that is already in `I0`, `I1`, or `I1P
 
 No other input states are supported.
 
+<!-- TODO(ibetitsmike): describe fork-nested-subagents interrupt cascade and archive of an active family. -->
+
 ### `POST /api/v2/chats/{chat}/tool-results`
 
 This endpoint uses `CompleteRequiresAction(results)`:
