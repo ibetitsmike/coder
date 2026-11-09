@@ -2,7 +2,6 @@ package chatd
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	"charm.land/fantasy"
@@ -29,11 +28,7 @@ func TestAppendForkTools(t *testing.T) {
 	// The Server has no database, so a fork hook that reaches the store
 	// for a delegated chat with its experiment off fails the test.
 	chats := []database.Chat{{}, {ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}}
-	upstream := slices.DeleteFunc(slices.Clone(codersdk.ExperimentsKnown), func(e codersdk.Experiment) bool {
-		return slices.Contains(codersdk.ForkExperiments, e)
-	})
-
-	for _, experiments := range []codersdk.Experiments{{}, upstream} {
+	for _, experiments := range []codersdk.Experiments{{}, upstreamExperimentsKnown()} {
 		for _, chat := range chats {
 			p := &Server{experiments: experiments}
 			got, err := p.appendForkTools(ctx, tools, chat, uuid.Nil)
