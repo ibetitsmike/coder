@@ -11,12 +11,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const agentDefinitionExt = ".md"
+
+// maxAgentErrorBytes bounds a definition's error text, which can quote file
+// content and grow with the number of warnings. coderd rejects a whole push
+// when any resource error exceeds its 4096-byte cap, so one oversized error
+// would stop every context resource from syncing.
+const maxAgentErrorBytes = 1024
 
 // agentContainerRelPaths are the directories, relative to a scan root, that
 // hold agent definition markdown files. They cover the Claude Code and Cursor
@@ -68,6 +75,7 @@ func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]
 			if !ok || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
 				continue
 			}
+			res.Error = truncateAgentError(res.Error)
 			appendResource(out, seenID, res)
 		}
 	}
@@ -123,6 +131,20 @@ func (r *Resolver) readAgentDefinition(root ScanRoot, path string, info fs.FileI
 	res.Payload = data
 	res.Error = strings.Join(def.Warnings, "; ")
 	return res, true
+}
+
+// truncateAgentError cuts s to at most maxAgentErrorBytes on a UTF-8 rune
+// boundary.
+func truncateAgentError(s string) string {
+	if len(s) <= maxAgentErrorBytes {
+		return s
+	}
+	const suffix = " (truncated)"
+	cut := maxAgentErrorBytes - len(suffix)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + suffix
 }
 
 func hasOKSubagent(resources []Resource, name string) bool {
