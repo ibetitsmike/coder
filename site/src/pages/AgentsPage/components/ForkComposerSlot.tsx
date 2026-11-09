@@ -3,6 +3,8 @@
 // fork features never edit that file and an upstream sync of it stays clean.
 
 import type React from "react";
+import { useDashboard } from "#/modules/dashboard/useDashboard";
+import { ChatTodoPill } from "./ChatTodoPill";
 
 type ForkComposerSlotProps = {
 	chatId?: string;
@@ -11,6 +13,14 @@ type ForkComposerSlotProps = {
 
 /**
  * Renders fork composer controls at the start of the AgentChatInput controls
- * row. It renders nothing until a fork feature adds a control.
+ * row. Each control renders only while its fork experiment is enabled.
  */
-export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = () => null;
+export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = ({
+	chatId,
+}) => {
+	const { experiments } = useDashboard();
+	if (!chatId || !experiments.includes("fork-chat-todos")) {
+		return null;
+	}
+	return <ChatTodoPill chatId={chatId} />;
+};
