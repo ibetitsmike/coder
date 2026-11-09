@@ -52,8 +52,9 @@ it is not in `docs/manifest.json`.
    Coder Agents sends `AGENTS.md` as its own system message, after the base
    system prompt. A model server that keeps only the first system message
    drops the block without an error. Ollama's `qwen3-coder` renderer (Ollama
-   0.34.4) does this. To check a model, ask a new chat to quote the
-   `pstack-adapter` block without any tool call.
+   0.34.4) does this; the oMLX Qwen3.8 chat template keeps every system
+   message. To check a model, ask a new chat to quote the `pstack-adapter`
+   block without any tool call.
 
 ## Tools
 
