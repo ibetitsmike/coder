@@ -83,6 +83,25 @@ func TestNestedInterruptCascade(t *testing.T) {
 		require.ErrorIs(t, err, chatstate.ErrTransitionNotAllowed)
 	})
 
+	// interrupt_agent on an idle child still stops the child's running
+	// descendants.
+	t.Run("IdleSubagentTarget", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+		ctx := chatdTestContext(t)
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
+
+		_, interrupted, err := f.server.interruptSubagent(ctx, f.root.ID, child.ID)
+		require.NoError(t, err)
+		require.True(t, interrupted)
+		f.requireStatus(t, database.ChatStatusWaiting, child, grandchild)
+	})
+
 	t.Run("ExperimentOff", func(t *testing.T) {
 		t.Parallel()
 		f := newNestedSubagentsFixture(t, upstreamExperimentsKnown(), Limits{})
