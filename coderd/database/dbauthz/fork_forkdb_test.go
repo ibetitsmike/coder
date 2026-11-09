@@ -300,7 +300,7 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"InsertOrganizationAgentDefinition": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			def := organizationAgentDefinition(uuid.New(), "reviewer")
-			arg := forkdb.InsertOrganizationAgentDefinitionParams{OrganizationID: def.OrganizationID, Name: def.Name, Content: def.Content}
+			arg := forkdb.InsertOrganizationAgentDefinitionParams{OrganizationID: def.OrganizationID, Name: def.Name, Content: def.Content, GroupAcl: def.GroupAcl, UserAcl: def.UserAcl}
 			fdb.EXPECT().InsertOrganizationAgentDefinition(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceOrganizationSkill.InOrg(def.OrganizationID), policy.ActionCreate).Returns(def)
 		},

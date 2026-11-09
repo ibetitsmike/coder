@@ -141,16 +141,18 @@ func (q *Queries) GetUserAgentDefinitionByName(ctx context.Context, arg GetUserA
 }
 
 const insertOrganizationAgentDefinition = `-- name: InsertOrganizationAgentDefinition :one
-INSERT INTO agent_definitions (organization_id, name, description, content)
-VALUES ($1::uuid, $2::text, $3::text, $4::text)
+INSERT INTO agent_definitions (organization_id, name, description, content, group_acl, user_acl)
+VALUES ($1::uuid, $2::text, $3::text, $4::text, $5, $6)
 RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
 `
 
 type InsertOrganizationAgentDefinitionParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	Name           string    `db:"name" json:"name"`
-	Description    string    `db:"description" json:"description"`
-	Content        string    `db:"content" json:"content"`
+	OrganizationID uuid.UUID        `db:"organization_id" json:"organization_id"`
+	Name           string           `db:"name" json:"name"`
+	Description    string           `db:"description" json:"description"`
+	Content        string           `db:"content" json:"content"`
+	GroupAcl       database.ChatACL `db:"group_acl" json:"group_acl"`
+	UserAcl        database.ChatACL `db:"user_acl" json:"user_acl"`
 }
 
 func (q *Queries) InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error) {
@@ -159,6 +161,8 @@ func (q *Queries) InsertOrganizationAgentDefinition(ctx context.Context, arg Ins
 		arg.Name,
 		arg.Description,
 		arg.Content,
+		arg.GroupAcl,
+		arg.UserAcl,
 	)
 	var i AgentDefinition
 	err := row.Scan(

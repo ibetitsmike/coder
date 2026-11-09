@@ -31,8 +31,8 @@ WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid AND 
 RETURNING *;
 
 -- name: InsertOrganizationAgentDefinition :one
-INSERT INTO agent_definitions (organization_id, name, description, content)
-VALUES (@organization_id::uuid, @name::text, @description::text, @content::text)
+INSERT INTO agent_definitions (organization_id, name, description, content, group_acl, user_acl)
+VALUES (@organization_id::uuid, @name::text, @description::text, @content::text, @group_acl, @user_acl)
 RETURNING *;
 
 -- name: GetOrganizationAgentDefinitionByName :one

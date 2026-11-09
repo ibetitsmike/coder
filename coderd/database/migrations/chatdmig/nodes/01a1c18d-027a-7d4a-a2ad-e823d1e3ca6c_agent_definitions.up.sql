@@ -23,9 +23,10 @@ CREATE TABLE agent_definitions (
     CONSTRAINT agent_definitions_acl_only_on_organization_tier CHECK ((user_id IS NULL AND project_id IS NULL) OR (group_acl = '{}'::jsonb AND user_acl = '{}'::jsonb))
 );
 
-CREATE UNIQUE INDEX agent_definitions_user_name_idx ON agent_definitions (organization_id, user_id, name) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX agent_definitions_user_name_idx ON agent_definitions (user_id, organization_id, name) WHERE user_id IS NOT NULL;
 CREATE UNIQUE INDEX agent_definitions_organization_name_idx ON agent_definitions (organization_id, name) WHERE user_id IS NULL AND project_id IS NULL;
 CREATE UNIQUE INDEX agent_definitions_project_name_idx ON agent_definitions (project_id, name) WHERE project_id IS NOT NULL;
+CREATE INDEX agent_definitions_organization_id_idx ON agent_definitions (organization_id);
 
 CREATE FUNCTION enforce_agent_definitions_per_owner_limit() RETURNS trigger
     LANGUAGE plpgsql
