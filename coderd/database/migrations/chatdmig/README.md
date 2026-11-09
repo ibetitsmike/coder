@@ -264,10 +264,12 @@ The `chat_subagents` node and its queries are a complete example.
    `-- name: <Query> :one` headers.
 4. Run `./coderd/database/forkdb/generate.sh`.
 5. Fix what no longer compiles: authorize the query in
-   `dbauthz/fork_forkdb.go` (a chat table authorizes through the owning chat,
-   which it loads with `f.q.db.GetChatByID`), add its case to
-   `TestForkQuerier`, and time it in `dbmetrics/fork_forkdb.go`. Override it in
-   `enterprise/dbcrypt/fork_forkdb.go` only if it reads or writes a secret.
+   `dbauthz/fork_forkdb.go`, add its case to `TestForkQuerier`, and time it
+   in `dbmetrics/fork_forkdb.go`. A chat table authorizes through the owning
+   chat: a read calls `f.q.GetChatByID`, which authorizes the read, and a write
+   loads the chat with `f.q.db.GetChatByID` and then calls
+   `f.q.authorizeContext(ctx, policy.ActionUpdate, chat)`. Override the query
+   in `enterprise/dbcrypt/fork_forkdb.go` only if it reads or writes a secret.
 6. Add a seed helper to `dbgen/fork_forkdb.go` if tests insert rows.
 7. Test the query against Postgres in `forkdb` and call it through
    `forkdb.From(db)`, or `forkdb.InTx` when it must commit with upstream

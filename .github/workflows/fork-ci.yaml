@@ -9,8 +9,7 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: fork-ci-${{ github.event.pull_request.number || github.sha }}
@@ -19,6 +18,8 @@ concurrency:
 jobs:
   graph:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,6 +37,8 @@ jobs:
 
   schema:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 20
     env:
       CHATDMIG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
@@ -58,6 +61,8 @@ jobs:
 
   chat-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +83,8 @@ jobs:
 
   agent-sdk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,6 +98,8 @@ jobs:
 
   site:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -111,6 +120,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +135,8 @@ jobs:
 
   forkdb:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
