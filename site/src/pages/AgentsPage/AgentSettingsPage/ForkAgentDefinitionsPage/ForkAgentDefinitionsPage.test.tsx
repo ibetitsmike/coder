@@ -3,17 +3,20 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import type { Experiment } from "#/api/typesGenerated";
+import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
 	MockUserMember,
+	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
 
-const renderPage = () => {
-	vi.spyOn(API, "getExperiments").mockResolvedValue(["fork-agent-definitions"]);
+const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
+	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
 	vi.spyOn(API, "getAuthenticatedUser").mockResolvedValue({
 		...MockUserMember,
 		organization_ids: [MockOrganization2.id, MockDefaultOrganization.id],
@@ -25,8 +28,12 @@ const renderPage = () => {
 	const getDefinitions = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
 		.mockResolvedValue([MockForkAgentDefinitionMetadata]);
-	renderWithAuth(<ForkAgentDefinitionsPage />);
-	return { getDefinitions };
+	const { router } = renderWithAuth(<ForkAgentDefinitionsPage />, {
+		path: "/agents/settings/agent-definitions",
+		route: "/agents/settings/agent-definitions",
+		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
+	});
+	return { getDefinitions, router };
 };
 
 afterEach(() => {
@@ -34,6 +41,15 @@ afterEach(() => {
 });
 
 describe("ForkAgentDefinitionsPage", () => {
+	it("redirects to the settings index without listing when the experiment is off", async () => {
+		const { getDefinitions, router } = renderPage([]);
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/agents/settings"),
+		);
+		expect(getDefinitions).not.toHaveBeenCalled();
+	});
+
 	it("lists the default organization first and follows the picker", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();
@@ -84,9 +100,34 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 	});
 
+	it("reports a failed toggle with the server message", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastError = vi.spyOn(toast, "error");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockRejectedValue(
+			mockApiError({ message: "Permission denied.", detail: "read-only" }),
+		);
+
+		await user.click(
+			await screen.findByRole("switch", {
+				name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(toastError).toHaveBeenCalledWith("Permission denied.", {
+				description: "read-only",
+			}),
+		);
+	});
+
 	it("deletes a definition only after confirmation", async () => {
 		const user = userEvent.setup();
 		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
 		const remove = vi
 			.spyOn(forkAgentDefinitionsApi, "deleteUserAgentDefinition")
 			.mockResolvedValue();
@@ -106,5 +147,9 @@ describe("ForkAgentDefinitionsPage", () => {
 				MockForkAgentDefinitionMetadata.name,
 			),
 		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
+		);
+		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 });
