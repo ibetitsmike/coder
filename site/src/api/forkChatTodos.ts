@@ -17,8 +17,8 @@ export const getChatTodos = async (
 };
 
 /**
- * Streams the chat's todo list: the server sends the current list on connect
- * and the whole list again after every write.
+ * Streams the chat's todo list. Each message is the whole list: the current
+ * one on connect, then one after every write.
  */
 export const watchChatTodos = (
 	chatId: string,

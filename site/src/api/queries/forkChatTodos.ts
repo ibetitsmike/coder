@@ -8,7 +8,6 @@ export const chatTodos = (chatId: string) =>
 	queryOptions({
 		queryKey: chatTodosKey(chatId),
 		queryFn: ({ signal }) => getChatTodos(chatId, signal),
-		// The todo watch socket writes every change into this cache and resends
-		// the current list when it reconnects, so a refetch never adds anything.
+		// The todo watch socket keeps this cache current, so refetches add nothing.
 		staleTime: Number.POSITIVE_INFINITY,
 	});

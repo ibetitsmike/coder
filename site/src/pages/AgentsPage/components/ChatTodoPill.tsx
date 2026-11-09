@@ -1,6 +1,3 @@
-// This file is fork code for the fork-chat-todos experiment. ForkComposerSlot
-// renders it in the composer controls row.
-
 import { cn } from "cn";
 import {
 	CircleCheckIcon,
@@ -24,12 +21,6 @@ import {
 	PopoverTrigger,
 } from "#/components/Popover/Popover";
 import { createReconnectingWebSocket } from "#/utils/reconnectingWebSocket";
-
-const triggerClassName =
-	"inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border-none bg-transparent px-1 text-xs outline-hidden transition-colors hover:bg-surface-secondary/60 focus-visible:ring-2 focus-visible:ring-content-link";
-
-const popoverClassName =
-	"mobile-full-width-dropdown w-76 p-3 text-xs font-normal text-content-primary";
 
 const statusDisplay: Record<
 	ChatTodoStatus,
@@ -57,12 +48,15 @@ const statusDisplay: Record<
 	},
 };
 
+type ChatTodoPillProps = {
+	chatId: string;
+};
+
 /**
- * Shows the chat's todo list as a pill with a popover and keeps it live
- * through the todo watch socket. It renders nothing while the chat has no
- * todos.
+ * Shows the chat's live todo list as a pill with a popover. It renders
+ * nothing while the chat has no todos.
  */
-export const ChatTodoPill: React.FC<{ chatId: string }> = ({ chatId }) => {
+export const ChatTodoPill: React.FC<ChatTodoPillProps> = ({ chatId }) => {
 	const queryClient = useQueryClient();
 	const todosQuery = useQuery(chatTodos(chatId));
 	const isLoaded = todosQuery.isSuccess;
@@ -105,27 +99,57 @@ export const ChatTodoPillView: React.FC<ChatTodoPillViewProps> = ({
 	if (todos) {
 		return todos.length > 0 ? <ChatTodoListPill todos={todos} /> : null;
 	}
-	if (error) {
-		return <ChatTodoErrorPill error={error} />;
-	}
-	return null;
+	return error ? <ChatTodoErrorPill error={error} /> : null;
 };
 
-const ChatTodoListPill: React.FC<{ todos: readonly ChatTodo[] }> = ({
-	todos,
-}) => {
-	const counted = todos.filter((todo) => todo.status !== "cancelled");
-	const done = counted.filter((todo) => todo.status === "done").length;
-	const progress = `${done}/${counted.length}`;
+type ChatTodoPopoverProps = {
+	label: string;
+	trigger: React.ReactNode;
+	children: React.ReactNode;
+};
 
+const ChatTodoPopover: React.FC<ChatTodoPopoverProps> = ({
+	label,
+	trigger,
+	children,
+}) => {
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
 				<button
 					type="button"
-					aria-label={`Todo list, ${progress} done`}
-					className={triggerClassName}
+					aria-label={label}
+					className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border-none bg-transparent px-1 text-xs outline-hidden transition-colors hover:bg-surface-secondary/60 focus-visible:ring-2 focus-visible:ring-content-link"
 				>
+					{trigger}
+				</button>
+			</PopoverTrigger>
+			<PopoverContent
+				side="top"
+				align="end"
+				className="mobile-full-width-dropdown w-76 p-3 text-xs font-normal text-content-primary"
+			>
+				<h3 className="m-0 text-sm font-semibold">Todos</h3>
+				{children}
+			</PopoverContent>
+		</Popover>
+	);
+};
+
+type ChatTodoListPillProps = {
+	todos: readonly ChatTodo[];
+};
+
+const ChatTodoListPill: React.FC<ChatTodoListPillProps> = ({ todos }) => {
+	const counted = todos.filter((todo) => todo.status !== "cancelled");
+	const done = counted.filter((todo) => todo.status === "done").length;
+	const progress = `${done}/${counted.length}`;
+
+	return (
+		<ChatTodoPopover
+			label={`Todo list, ${progress} done`}
+			trigger={
+				<>
 					<ListTodoIcon
 						aria-hidden="true"
 						className="size-3.5 shrink-0 text-content-secondary"
@@ -133,21 +157,23 @@ const ChatTodoListPill: React.FC<{ todos: readonly ChatTodo[] }> = ({
 					<span className="text-content-secondary tabular-nums">
 						{progress}
 					</span>
-				</button>
-			</PopoverTrigger>
-			<PopoverContent side="top" align="end" className={popoverClassName}>
-				<h3 className="m-0 text-sm font-semibold">Todos</h3>
-				<ul className="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
-					{todos.map((todo) => (
-						<ChatTodoItem key={todo.id} todo={todo} />
-					))}
-				</ul>
-			</PopoverContent>
-		</Popover>
+				</>
+			}
+		>
+			<ul className="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
+				{todos.map((todo) => (
+					<ChatTodoItem key={todo.id} todo={todo} />
+				))}
+			</ul>
+		</ChatTodoPopover>
 	);
 };
 
-const ChatTodoItem: React.FC<{ todo: ChatTodo }> = ({ todo }) => {
+type ChatTodoItemProps = {
+	todo: ChatTodo;
+};
+
+const ChatTodoItem: React.FC<ChatTodoItemProps> = ({ todo }) => {
 	const { icon: Icon, label, iconClassName } = statusDisplay[todo.status];
 	return (
 		<li className="flex items-start gap-2">
@@ -158,7 +184,7 @@ const ChatTodoItem: React.FC<{ todo: ChatTodo }> = ({ todo }) => {
 			<span className="sr-only">{label}: </span>
 			<span
 				className={cn(
-					"min-w-0 break-words leading-5",
+					"min-w-0 wrap-break-word leading-5",
 					todo.status === "done" && "text-content-secondary",
 					todo.status === "cancelled" && "text-content-secondary line-through",
 				)}
@@ -169,27 +195,24 @@ const ChatTodoItem: React.FC<{ todo: ChatTodo }> = ({ todo }) => {
 	);
 };
 
-const ChatTodoErrorPill: React.FC<{ error: unknown }> = ({ error }) => {
+type ChatTodoErrorPillProps = {
+	error: unknown;
+};
+
+const ChatTodoErrorPill: React.FC<ChatTodoErrorPillProps> = ({ error }) => {
 	return (
-		<Popover>
-			<PopoverTrigger asChild>
-				<button
-					type="button"
-					aria-label="Todo list failed to load"
-					className={triggerClassName}
-				>
-					<TriangleAlertIcon
-						aria-hidden="true"
-						className="size-3.5 shrink-0 text-content-warning"
-					/>
-				</button>
-			</PopoverTrigger>
-			<PopoverContent side="top" align="end" className={popoverClassName}>
-				<h3 className="m-0 text-sm font-semibold">Todos</h3>
-				<p className="mb-0 mt-2 text-content-secondary">
-					{getErrorMessage(error, "Failed to load the todo list.")}
-				</p>
-			</PopoverContent>
-		</Popover>
+		<ChatTodoPopover
+			label="Todo list failed to load"
+			trigger={
+				<TriangleAlertIcon
+					aria-hidden="true"
+					className="size-3.5 shrink-0 text-content-warning"
+				/>
+			}
+		>
+			<p className="mb-0 mt-2 text-content-secondary">
+				{getErrorMessage(error, "Failed to load the todo list.")}
+			</p>
+		</ChatTodoPopover>
 	);
 };
