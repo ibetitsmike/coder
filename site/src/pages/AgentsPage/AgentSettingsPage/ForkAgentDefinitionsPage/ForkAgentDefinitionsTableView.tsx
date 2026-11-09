@@ -1,0 +1,253 @@
+// This file is fork code: the fork-agent-definitions experiment's table.
+
+import { EllipsisVerticalIcon } from "lucide-react";
+import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
+import { Alert, AlertDescription } from "#/components/Alert/Alert";
+import { ErrorAlert } from "#/components/Alert/ErrorAlert";
+import { Button } from "#/components/Button/Button";
+import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "#/components/DropdownMenu/DropdownMenu";
+import { Skeleton } from "#/components/Skeleton/Skeleton";
+import { Switch } from "#/components/Switch/Switch";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "#/components/Table/Table";
+import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
+import {
+	TableLoaderSkeleton,
+	TableRowSkeleton,
+} from "#/components/TableLoader/TableLoader";
+import { formatDate } from "#/utils/time";
+import { RetryButton } from "../../components/RetryButton";
+import { SectionHeader } from "../../components/SectionHeader";
+import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
+
+const title = "Agent definitions";
+
+export type ForkAgentDefinitionDeleteState = {
+	definition: ForkAgentDefinitionMetadata;
+	error?: unknown;
+	isDeleting: boolean;
+	onConfirm: () => void;
+	onClose: () => void;
+};
+
+export type ForkAgentDefinitionsTableViewProps = {
+	definitions: readonly ForkAgentDefinitionMetadata[];
+	/** Rendered in the section header, for example an organization picker. */
+	action?: React.ReactNode;
+	error: unknown;
+	isLoading: boolean;
+	isRetrying: boolean;
+	onRetry: () => void;
+	/** The toggle in flight, shown optimistically on its row. */
+	pendingToggle?: { name: string; enabled: boolean };
+	onToggleEnabled: (name: string, enabled: boolean) => void;
+	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	deleteState?: ForkAgentDefinitionDeleteState;
+};
+
+const formatUpdatedAt = (value: string) => {
+	const date = new Date(value);
+	if (!Number.isFinite(date.getTime())) {
+		return "Unknown";
+	}
+	return formatDate(date, {
+		locale: "en-US",
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+		hour: "numeric",
+		second: undefined,
+		minute: "2-digit",
+	});
+};
+
+export const ForkAgentDefinitionsTableView: React.FC<
+	ForkAgentDefinitionsTableViewProps
+> = ({
+	definitions,
+	action,
+	error,
+	isLoading,
+	isRetrying,
+	onRetry,
+	pendingToggle,
+	onToggleEnabled,
+	onDelete,
+	deleteState,
+}) => {
+	const { rememberTrigger, restoreFocus } = useDialogFocusReturn();
+	const deleteErrorDetail = deleteState?.error
+		? getErrorDetail(deleteState.error)
+		: undefined;
+
+	let tableBody: React.ReactNode;
+	if (isLoading) {
+		tableBody = (
+			<TableLoaderSkeleton>
+				<TableRowSkeleton aria-label="Loading agent definitions">
+					<TableCell>
+						<Skeleton variant="text" className="w-32" />
+					</TableCell>
+					<TableCell className="w-full max-w-0">
+						<Skeleton variant="text" />
+					</TableCell>
+					<TableCell>
+						<Skeleton className="h-5 w-9" />
+					</TableCell>
+					<TableCell className="hidden sm:table-cell">
+						<Skeleton variant="text" className="w-44" />
+					</TableCell>
+					<TableCell>
+						<Skeleton className="size-8" />
+					</TableCell>
+				</TableRowSkeleton>
+			</TableLoaderSkeleton>
+		);
+	} else if (definitions.length === 0 && error) {
+		tableBody = (
+			<TableEmpty
+				message="Failed to load agent definitions"
+				cta={
+					<RetryButton
+						variant="outline"
+						isRetrying={isRetrying}
+						onRetry={onRetry}
+					/>
+				}
+			/>
+		);
+	} else if (definitions.length === 0) {
+		tableBody = (
+			<TableEmpty message="No personal agent definitions in this organization yet." />
+		);
+	} else {
+		tableBody = definitions.map((definition) => {
+			const isToggling = pendingToggle?.name === definition.name;
+			return (
+				<TableRow key={definition.id}>
+					<TableCell className="max-w-48 truncate" title={definition.name}>
+						{definition.name}
+					</TableCell>
+					<TableCell
+						className="w-full max-w-0 truncate"
+						title={definition.description || undefined}
+					>
+						{definition.description || (
+							<span className="text-content-disabled">No description</span>
+						)}
+					</TableCell>
+					<TableCell>
+						<Switch
+							aria-label={`Enable ${definition.name}`}
+							checked={isToggling ? pendingToggle.enabled : definition.enabled}
+							disabled={isToggling}
+							onCheckedChange={(enabled) =>
+								onToggleEnabled(definition.name, enabled)
+							}
+						/>
+					</TableCell>
+					<TableCell className="hidden whitespace-nowrap sm:table-cell">
+						{formatUpdatedAt(definition.updated_at)}
+					</TableCell>
+					<TableCell className="text-right">
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									size="icon"
+									variant="subtle"
+									aria-label={`More actions for ${definition.name}`}
+									onPointerDown={rememberTrigger}
+									onKeyDown={rememberTrigger}
+								>
+									<EllipsisVerticalIcon aria-hidden="true" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem
+									className="text-content-destructive focus:text-content-destructive"
+									onClick={() => onDelete(definition)}
+								>
+									Delete&hellip;
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</TableCell>
+				</TableRow>
+			);
+		});
+	}
+
+	return (
+		<div className="flex flex-col gap-8">
+			<SectionHeader
+				label={title}
+				description="Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file."
+				action={action}
+			/>
+
+			{Boolean(error) && <ErrorAlert error={error} />}
+
+			<Table aria-label={title}>
+				<TableHeader>
+					<TableRow>
+						<TableHead className="whitespace-nowrap">Name</TableHead>
+						<TableHead className="w-full">Description</TableHead>
+						<TableHead className="whitespace-nowrap">Enabled</TableHead>
+						<TableHead className="hidden whitespace-nowrap sm:table-cell">
+							Updated
+						</TableHead>
+						<TableHead className="w-14">
+							<span className="sr-only">Actions</span>
+						</TableHead>
+					</TableRow>
+				</TableHeader>
+				<TableBody size="lg">{tableBody}</TableBody>
+			</Table>
+
+			{deleteState && (
+				<ConfirmDialog
+					type="delete"
+					open
+					onClose={deleteState.onClose}
+					onCloseAutoFocus={restoreFocus}
+					title={`Delete ${deleteState.definition.name}?`}
+					confirmText="Delete"
+					description={
+						<>
+							<p className="m-0">
+								Chats can no longer spawn {deleteState.definition.name}. This
+								action cannot be undone.
+							</p>
+							{Boolean(deleteState.error) && (
+								<Alert severity="error" className="mt-3">
+									<AlertDescription>
+										{getErrorMessage(
+											deleteState.error,
+											"Failed to delete agent definition.",
+										)}
+										{deleteErrorDetail ? ` ${deleteErrorDetail}` : ""}
+									</AlertDescription>
+								</Alert>
+							)}
+						</>
+					}
+					onConfirm={deleteState.onConfirm}
+					confirmLoading={deleteState.isDeleting}
+				/>
+			)}
+		</div>
+	);
+};
