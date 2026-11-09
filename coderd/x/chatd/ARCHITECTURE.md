@@ -142,6 +142,7 @@ Queued messages wait in two lanes. These rules apply to every transition that qu
 - `Create(initialMessages, initialStatus)` creates a new chat, initializes `snapshot_version` to 1, inserts its initial history, and lands in `initialStatus`. The initial status defaults to `running`; a caller can request `waiting` instead to create an idle chat, which starts running with its first `SendMessage`. The inserted initial history sets `history_version` to 1. Since the queue has not changed, `queue_version` remains 0. This transition is a special case: since the chat does not exist at the time it's run, the chat row cannot be locked before the transition is applied.
 - When `Create(initialMessages, initialStatus)` creates a child chat, it first locks the family's root chat row with `FOR SHARE` and fails if the root is archived, so a new child never joins an archived family.
   <!-- TODO(ibetitsmike): describe fork-nested-subagents depth tracking: with the experiment on, spawning a child records its `chat_subagents` row (depth = parent depth + 1) in the same transaction as the chat insert and rechecks the maximum subagent depth there. -->
+  <!-- TODO(ibetitsmike): describe chat_organization_subagent_limits and how the organization max_depth lowers the deployment maximum subagent depth. -->
   <!-- TODO(ibetitsmike): describe fork-agent-definitions: spawn_agent resolves custom agent types from the chat's pinned subagent context resources after the built-in types, and records the custom type in the child's chat_subagents row. -->
 - `SetArchived(archived)` sets or clears the archived marker for one chat.
 - `SetProject(project)` sets or clears the project of one chat without changing its execution state. A move of a root chat applies it to the root and each descendant in one transaction, and fails without changing any chat if one of them isn't in `W`, `E0`, `E1`, `E1P` or `P`. Only the root's `project_id` changes; subagents go through `SetProject` only so that their execution state is checked too. As in a family archive, the root row is locked first, so a concurrent child creation either joins the move or waits for it. A move to the root's current project applies no transition.
@@ -1189,7 +1190,7 @@ The generation goroutine supports:
 - memory tools (`read_memory`, `save_memory`, `delete_memory`) for root chats in a project, see [Project memory](#project-memory)
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
-  <!-- TODO(fork-chat-todos): document search_chats. -->
+  <!-- TODO(fork-chat-todos): document search_chats and the include_tool_calls option that fork-chat-todos adds to wait_agent. -->
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
   <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->

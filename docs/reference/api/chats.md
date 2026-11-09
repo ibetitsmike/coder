@@ -1563,6 +1563,99 @@ curl -X GET http://coder-server:8080/api/v2/chats/files/{file} \
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
+## Get organization subagent limits
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/subagent-limits \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`GET /api/v2/chats/fork/organizations/{organization}/subagent-limits`
+
+### Parameters
+
+| Name           | In   | Type         | Required | Description     |
+|----------------|------|--------------|----------|-----------------|
+| `organization` | path | string(uuid) | true     | Organization ID |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                       |
+|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimits](schemas.md#codersdkforkorganizationsubagentlimits) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Update organization subagent limits
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/subagent-limits \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`PUT /api/v2/chats/fork/organizations/{organization}/subagent-limits`
+
+> Body parameter
+
+```json
+{
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
+}
+```
+
+### Parameters
+
+| Name           | In   | Type                                                                                         | Required | Description     |
+|----------------|------|----------------------------------------------------------------------------------------------|----------|-----------------|
+| `organization` | path | string(uuid)                                                                                 | true     | Organization ID |
+| `body`         | body | [codersdk.ForkOrganizationSubagentLimits](schemas.md#codersdkforkorganizationsubagentlimits) | true     | Request body    |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                       |
+|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimits](schemas.md#codersdkforkorganizationsubagentlimits) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
 ## Watch chat events for a user via WebSockets
 
 ### Code samples

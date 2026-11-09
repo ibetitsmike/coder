@@ -142,6 +142,21 @@ func (mr *MockStoreMockRecorder) EnsurePluginChatBindings(ctx, pluginID any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsurePluginChatBindings", reflect.TypeOf((*MockStore)(nil).EnsurePluginChatBindings), ctx, pluginID)
 }
 
+// GetChatOrganizationSubagentLimits mocks base method.
+func (m *MockStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatOrganizationSubagentLimits", ctx, organizationID)
+	ret0, _ := ret[0].(forkdb.ChatOrganizationSubagentLimit)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatOrganizationSubagentLimits indicates an expected call of GetChatOrganizationSubagentLimits.
+func (mr *MockStoreMockRecorder) GetChatOrganizationSubagentLimits(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatOrganizationSubagentLimits", reflect.TypeOf((*MockStore)(nil).GetChatOrganizationSubagentLimits), ctx, organizationID)
+}
+
 // GetChatSubagentByChatID mocks base method.
 func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	m.ctrl.T.Helper()
@@ -448,6 +463,21 @@ func (m *MockStore) UpdatePluginLastError(ctx context.Context, arg forkdb.Update
 func (mr *MockStoreMockRecorder) UpdatePluginLastError(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginLastError", reflect.TypeOf((*MockStore)(nil).UpdatePluginLastError), ctx, arg)
+}
+
+// UpsertChatOrganizationSubagentLimits mocks base method.
+func (m *MockStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChatOrganizationSubagentLimits", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatOrganizationSubagentLimit)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChatOrganizationSubagentLimits indicates an expected call of UpsertChatOrganizationSubagentLimits.
+func (mr *MockStoreMockRecorder) UpsertChatOrganizationSubagentLimits(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatOrganizationSubagentLimits", reflect.TypeOf((*MockStore)(nil).UpsertChatOrganizationSubagentLimits), ctx, arg)
 }
 
 // UpsertChatTodos mocks base method.
