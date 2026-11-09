@@ -36,7 +36,7 @@ func TestChatTodoTools(t *testing.T) {
 	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
 	tools := server.appendForkTools(ctx, nil, chat)
-	require.Equal(t, []string{"todo_write", "todo_read"}, toolNames(tools))
+	require.Equal(t, []string{"todo_write", "todo_read", "read_chat_transcript"}, toolNames(tools))
 
 	events := make(chan coderdpubsub.ChatTodosEvent, 4)
 	cancel, err := ps.Subscribe(coderdpubsub.ChatTodosEventChannel(chat.ID), func(_ context.Context, message []byte) {

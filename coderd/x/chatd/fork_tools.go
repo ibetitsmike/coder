@@ -21,6 +21,7 @@ import (
 func (p *Server) appendForkTools(_ context.Context, tools []fantasy.AgentTool, chat database.Chat) []fantasy.AgentTool {
 	if p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		tools = append(tools, p.chatTodoTools(chat)...)
+		tools = append(tools, p.chatTranscriptTool(chat))
 	}
 	return tools
 }
