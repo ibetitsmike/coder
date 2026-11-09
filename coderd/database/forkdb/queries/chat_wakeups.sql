@@ -108,7 +108,9 @@ WHERE id = @id
     AND lease_expires_at = @lease_expires_at::timestamptz
 RETURNING *;
 
--- Returns no row when the run of this occurrence already exists.
+-- Returns no row when the run of this occurrence already exists. The chat and
+-- organization come from the wake-up, so a run always counts against the
+-- chat that owns it.
 -- name: InsertChatWakeupRun :one
 INSERT INTO chat_wakeup_runs (
     id,
@@ -120,17 +122,20 @@ INSERT INTO chat_wakeup_runs (
     error,
     created_at,
     updated_at
-) VALUES (
+)
+SELECT
     @id,
-    @wakeup_id::uuid,
-    @chat_id,
-    @organization_id,
+    w.id,
+    w.chat_id,
+    c.organization_id,
     @run_key,
     @status,
     @error,
     @created_at,
     @updated_at
-)
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 

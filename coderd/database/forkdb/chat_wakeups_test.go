@@ -144,18 +144,18 @@ func TestChatWakeupRuns(t *testing.T) {
 
 	insertRun := func(runKey string, status forkdb.ChatWakeupRunStatus) (forkdb.ChatWakeupRun, error) {
 		return fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
-			ID:             uuid.New(),
-			WakeupID:       wakeup.ID,
-			ChatID:         chat.ID,
-			OrganizationID: chat.OrganizationID,
-			RunKey:         runKey,
-			Status:         status,
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			ID:        uuid.New(),
+			WakeupID:  wakeup.ID,
+			RunKey:    runKey,
+			Status:    status,
+			CreatedAt: now,
+			UpdatedAt: now,
 		})
 	}
 	first, err := insertRun("2026-01-01T00:00:00Z", forkdb.ChatWakeupRunStatusPending)
 	require.NoError(t, err)
+	require.Equal(t, chat.ID, first.ChatID, "the run belongs to the wake-up's chat")
+	require.Equal(t, chat.OrganizationID, first.OrganizationID)
 	_, err = insertRun("2026-01-01T00:00:00Z", forkdb.ChatWakeupRunStatusPending)
 	require.ErrorIs(t, err, sql.ErrNoRows, "an occurrence runs once")
 

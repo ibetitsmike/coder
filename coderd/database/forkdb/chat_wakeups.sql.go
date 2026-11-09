@@ -412,45 +412,46 @@ INSERT INTO chat_wakeup_runs (
     error,
     created_at,
     updated_at
-) VALUES (
+)
+SELECT
     $1,
-    $2::uuid,
+    w.id,
+    w.chat_id,
+    c.organization_id,
+    $2,
     $3,
     $4,
     $5,
-    $6,
-    $7,
-    $8,
-    $9
-)
+    $6
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE w.id = $7::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING id, wakeup_id, chat_id, organization_id, run_key, status, error, created_at, updated_at
 `
 
 type InsertChatWakeupRunParams struct {
-	ID             uuid.UUID           `db:"id" json:"id"`
-	WakeupID       uuid.UUID           `db:"wakeup_id" json:"wakeup_id"`
-	ChatID         uuid.UUID           `db:"chat_id" json:"chat_id"`
-	OrganizationID uuid.UUID           `db:"organization_id" json:"organization_id"`
-	RunKey         string              `db:"run_key" json:"run_key"`
-	Status         ChatWakeupRunStatus `db:"status" json:"status"`
-	Error          sql.NullString      `db:"error" json:"error"`
-	CreatedAt      time.Time           `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time           `db:"updated_at" json:"updated_at"`
+	ID        uuid.UUID           `db:"id" json:"id"`
+	RunKey    string              `db:"run_key" json:"run_key"`
+	Status    ChatWakeupRunStatus `db:"status" json:"status"`
+	Error     sql.NullString      `db:"error" json:"error"`
+	CreatedAt time.Time           `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time           `db:"updated_at" json:"updated_at"`
+	WakeupID  uuid.UUID           `db:"wakeup_id" json:"wakeup_id"`
 }
 
-// Returns no row when the run of this occurrence already exists.
+// Returns no row when the run of this occurrence already exists. The chat and
+// organization come from the wake-up, so a run always counts against the
+// chat that owns it.
 func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupRunParams) (ChatWakeupRun, error) {
 	row := q.db.QueryRowContext(ctx, insertChatWakeupRun,
 		arg.ID,
-		arg.WakeupID,
-		arg.ChatID,
-		arg.OrganizationID,
 		arg.RunKey,
 		arg.Status,
 		arg.Error,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.WakeupID,
 	)
 	var i ChatWakeupRun
 	err := row.Scan(

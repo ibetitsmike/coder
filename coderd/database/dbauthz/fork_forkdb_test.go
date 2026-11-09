@@ -188,9 +188,11 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"InsertChatWakeupRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := testutil.Fake(t, faker, forkdb.InsertChatWakeupRunParams{ChatID: chat.ID})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.InsertChatWakeupRunParams{WakeupID: wakeup.ID})
 			run := testutil.Fake(t, faker, forkdb.ChatWakeupRun{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
 		},

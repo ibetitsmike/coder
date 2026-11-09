@@ -70,7 +70,9 @@ type Querier interface {
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)
-	// Returns no row when the run of this occurrence already exists.
+	// Returns no row when the run of this occurrence already exists. The chat and
+	// organization come from the wake-up, so a run always counts against the
+	// chat that owns it.
 	InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupRunParams) (ChatWakeupRun, error)
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
