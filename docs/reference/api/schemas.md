@@ -1142,6 +1142,8 @@ title: Schemas
     "acquire_batch_size": 0,
     "debug_logging_enabled": true,
     "fork": {
+      "max_concurrent_subagents": 0,
+      "max_concurrent_subagents_per_family": 0,
       "max_subagent_depth": 0
     },
     "hook_allow_insecure": true,
@@ -2934,6 +2936,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "acquire_batch_size": 0,
   "debug_logging_enabled": true,
   "fork": {
+    "max_concurrent_subagents": 0,
+    "max_concurrent_subagents_per_family": 0,
     "max_subagent_depth": 0
   },
   "hook_allow_insecure": true,
@@ -8343,6 +8347,8 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
         "acquire_batch_size": 0,
         "debug_logging_enabled": true,
         "fork": {
+          "max_concurrent_subagents": 0,
+          "max_concurrent_subagents_per_family": 0,
           "max_subagent_depth": 0
         },
         "hook_allow_insecure": true,
@@ -8984,6 +8990,8 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       "acquire_batch_size": 0,
       "debug_logging_enabled": true,
       "fork": {
+        "max_concurrent_subagents": 0,
+        "max_concurrent_subagents_per_family": 0,
         "max_subagent_depth": 0
       },
       "hook_allow_insecure": true,
@@ -10034,7 +10042,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"example"
+"fork-chat-todos"
 ```
 
 ### Properties
@@ -10376,15 +10384,19 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ```json
 {
+  "max_concurrent_subagents": 0,
+  "max_concurrent_subagents_per_family": 0,
   "max_subagent_depth": 0
 }
 ```
 
 ### Properties
 
-| Name                 | Type    | Required | Restrictions | Description                                                                                                                                       |
-|----------------------|---------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `max_subagent_depth` | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
+| Name                                  | Type    | Required | Restrictions | Description                                                                                                                                       |
+|---------------------------------------|---------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_concurrent_subagents`            | integer | false    |              | Max concurrent subagents is the maximum number of running subagent chats in the deployment. 0 means no limit.                                     |
+| `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat. 0 means no limit.                        |
+| `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
 
 ## codersdk.ForkOrganizationSubagentLimits
 
