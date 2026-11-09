@@ -2389,6 +2389,10 @@ export interface ChatConfig {
 	 * value has no effect. This option will be removed in a future release.
 	 */
 	readonly ai_gateway_routing_enabled: boolean;
+	/**
+	 * Fork holds the fork-only chat options.
+	 */
+	readonly fork: ForkChatConfig;
 }
 
 // From codersdk/chats.go
@@ -5789,6 +5793,7 @@ export type Experiment =
 	| "chat-virtual-desktop"
 	| "enable-ai-workspace-debug"
 	| "example"
+	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
@@ -5869,6 +5874,7 @@ export const Experiments: Experiment[] = [
 	"chat-virtual-desktop",
 	"enable-ai-workspace-debug",
 	"example",
+	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",
@@ -6168,6 +6174,19 @@ export const FeatureNames: FeatureName[] = [
 export type FeatureSet = "enterprise" | "" | "premium";
 
 export const FeatureSets: FeatureSet[] = ["enterprise", "", "premium"];
+
+// From codersdk/fork_chat_config.go
+/**
+ * ForkChatConfig is the fork-only chat deployment configuration.
+ */
+export interface ForkChatConfig {
+	/**
+	 * MaxSubagentDepth is the maximum depth of nested subagent chats when
+	 * the fork-nested-subagents experiment is enabled. A root chat is at
+	 * depth 0.
+	 */
+	readonly max_subagent_depth: number;
+}
 
 // From codersdk/files.go
 export const FormatZip = "zip";

@@ -902,6 +902,11 @@ chat:
   # to 0 to disable. Must be no more than 24h.
   # (default: 10m0s, type: duration)
   streamSilenceTimeout: 10m0s
+  # Maximum depth of nested subagent chats when the fork-nested-subagents experiment
+  # is enabled. A root chat is at depth 0 and its subagents at depth 1. Explore and
+  # computer use subagents never spawn subagents. Must be at least 1.
+  # (default: 2, type: int)
+  maxSubagentDepth: 2
 aibridge:
   # Deprecated: use --ai-gateway-enabled or CODER_AI_GATEWAY_ENABLED instead.
   # Whether to start an in-memory aibridged instance.
