@@ -21,6 +21,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
+	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/coderd/x/chatd/mcpclient"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -140,7 +141,9 @@ func (policy customAgentToolPolicy) filter(
 		return !keep(tool)
 	})
 	candidates = slices.DeleteFunc(slices.Clone(candidates), func(candidate deferredMCPTool) bool {
-		return !keep(candidate.tool)
+		// find_tools is built after this filter, and only when candidates
+		// remain, so denying it leaves the MCP tools undeferred instead.
+		return disallowed[chattool.FindToolsName] || !keep(candidate.tool)
 	})
 	providerTools = slices.DeleteFunc(slices.Clone(providerTools), func(tool chatloop.ProviderTool) bool {
 		name := tool.Definition.GetName()

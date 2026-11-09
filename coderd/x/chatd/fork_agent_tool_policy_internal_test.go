@@ -144,6 +144,13 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 			wantProvider: []string{"code_execution"},
 		},
 		{
+			name:         "DisallowedFindTools",
+			policy:       customAgentToolPolicy{DisallowedTools: []string{"find_tools"}, MCPMode: "inherit"},
+			want:         append(append([]string{}, builtins...), allMCP...),
+			wantDeferred: []string{},
+			wantProvider: allProvider,
+		},
+		{
 			name:         "MCPNone",
 			policy:       customAgentToolPolicy{MCPMode: "none"},
 			want:         builtins,
