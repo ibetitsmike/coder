@@ -51,32 +51,36 @@ func setOrgSubagentCapacity(t *testing.T, db database.Store, organizationID uuid
 	require.NoError(t, err)
 }
 
+// createForkChat creates a running chat in the organization under parent, a
+// root chat when parent is not valid.
+func createForkChat(t *testing.T, f *workerTestFixture, organizationID uuid.UUID, parent, root uuid.NullUUID) database.Chat {
+	t.Helper()
+	res, err := chatstate.CreateChat(testutil.Context(t, testutil.WaitShort), f.db, f.pubsub, chatstate.CreateChatInput{
+		OrganizationID:    organizationID,
+		OwnerID:           f.user.ID,
+		LastModelConfigID: f.model.ID,
+		Title:             "test",
+		ClientType:        database.ChatClientTypeApi,
+		ParentChatID:      parent,
+		RootChatID:        root,
+		InitialStatus:     database.ChatStatusRunning,
+		InitialMessages:   []chatstate.Message{userTextMessage(t, "hello", f.user.ID, f.model.ID)},
+	})
+	require.NoError(t, err)
+	return res.Chat
+}
+
 // createForkFamily creates a root chat in the organization, owned by another
 // replica so it is no acquisition candidate, and the given number of runnable
 // subagents under it.
 func createForkFamily(t *testing.T, f *workerTestFixture, organizationID uuid.UUID, children int) (database.Chat, []database.Chat) {
 	t.Helper()
-	ctx := testutil.Context(t, testutil.WaitShort)
-	create := func(parent uuid.NullUUID) database.Chat {
-		res, err := chatstate.CreateChat(ctx, f.db, f.pubsub, chatstate.CreateChatInput{
-			OrganizationID:    organizationID,
-			OwnerID:           f.user.ID,
-			LastModelConfigID: f.model.ID,
-			Title:             "test",
-			ClientType:        database.ChatClientTypeApi,
-			ParentChatID:      parent,
-			RootChatID:        parent,
-			InitialStatus:     database.ChatStatusRunning,
-			InitialMessages:   []chatstate.Message{userTextMessage(t, "hello", f.user.ID, f.model.ID)},
-		})
-		require.NoError(t, err)
-		return res.Chat
-	}
-	root := create(uuid.NullUUID{})
+	root := createForkChat(t, f, organizationID, uuid.NullUUID{}, uuid.NullUUID{})
 	acquireChat(t, f, root.ID, uuid.New(), uuid.New())
+	rootID := uuid.NullUUID{UUID: root.ID, Valid: true}
 	subagents := make([]database.Chat, 0, children)
 	for range children {
-		subagents = append(subagents, create(uuid.NullUUID{UUID: root.ID, Valid: true}))
+		subagents = append(subagents, createForkChat(t, f, organizationID, rootID, rootID))
 	}
 	return root, subagents
 }
@@ -166,6 +170,31 @@ func TestForkCapacityFullOrganizationDoesNotBlockOtherOrganizations(t *testing.T
 
 	starter.waitCall(t, taskKindGeneration, other[0].ID)
 	requireUnowned(t, f, waiting)
+}
+
+// A coordinator that holds its family's only slot while it waits for its own
+// child must get that child admitted, even when more older siblings queue than
+// the acquisition candidates hold: only the child excludes the coordinator.
+func TestForkCapacitySlotHolderChildPrecedesQueuedSiblings(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	setOrgSubagentCapacity(t, f.db, f.org.ID, 0, 1)
+	starter := newRecordingTaskStarter()
+	opts := testOptions(t, f, starter)
+	opts.AgentCapacityLimiter = testForkCapacityLimiter(codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, ForkLimits{})
+
+	root, children := createForkFamily(t, f, f.org.ID, 2*int(opts.AcquisitionBatchSize)+3)
+	coordinator, siblings := children[0], children[1:]
+	// Another replica runs the coordinator in the family's only slot.
+	acquireChat(t, f, coordinator.ID, uuid.New(), uuid.New())
+	grandchild := createForkChat(t, f, f.org.ID,
+		uuid.NullUUID{UUID: coordinator.ID, Valid: true},
+		uuid.NullUUID{UUID: root.ID, Valid: true})
+	makeNewestCandidate(t, f, grandchild.ID)
+	startNestedSubagentsWorker(t, f, opts)
+
+	starter.waitCall(t, taskKindGeneration, grandchild.ID)
+	requireUnowned(t, f, siblings)
 }
 
 // Unowned interrupting subagents of a capped family rank first by status, so

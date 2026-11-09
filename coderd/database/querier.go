@@ -616,7 +616,10 @@ type sqlcQuerier interface {
 	//
 	// With interleave_subagents set, subagents interleave organizations, then the
 	// families within each, then status and age, so the refused rows of a capped
-	// organization or family cannot crowd the others out either. That ranks every
+	// organization or family cannot crowd the others out either. Within a family,
+	// children of a subagent that holds a slot come first: they exclude that
+	// ancestor from their family count, so they may fit where their queued
+	// siblings cannot, and the ancestor may be waiting for them. That ranks every
 	// unowned subagent of a status, so roots, and subagents without it, keep the
 	// indexed age order.
 	GetChatWorkerAcquisitionCandidates(ctx context.Context, arg GetChatWorkerAcquisitionCandidatesParams) ([]GetChatWorkerAcquisitionCandidatesRow, error)
