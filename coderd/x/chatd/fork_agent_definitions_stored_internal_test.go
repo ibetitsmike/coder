@@ -49,7 +49,14 @@ func TestForkAgentDefinitionStoredTiers(t *testing.T) {
 	insertUser("planner", "PERSONAL-PLANNER-MARKER")
 	insertUser("general", "SHADOW-GENERAL-MARKER")
 	insertUser("retired", "RETIRED-MARKER")
-	_, err := f.fdb.UpdateUserAgentDefinitionByName(ctx, forkdb.UpdateUserAgentDefinitionByNameParams{
+	_, err := f.fdb.InsertUserAgentDefinition(ctx, forkdb.InsertUserAgentDefinitionParams{
+		OrganizationID: f.root.OrganizationID,
+		UserID:         f.root.OwnerID,
+		Name:           "renamed",
+		Content:        agentDefinitionMarkdown("name: general", "RENAMED-MARKER"),
+	})
+	require.NoError(t, err)
+	_, err = f.fdb.UpdateUserAgentDefinitionByName(ctx, forkdb.UpdateUserAgentDefinitionByNameParams{
 		OrganizationID: f.root.OrganizationID,
 		UserID:         f.root.OwnerID,
 		Name:           "retired",
@@ -84,6 +91,8 @@ func TestForkAgentDefinitionStoredTiers(t *testing.T) {
 	require.ErrorContains(t, err, "type must be one of")
 	_, err = f.spawn(t, spawnAgentArgs{Type: "retired"})
 	require.ErrorContains(t, err, "type must be one of")
+	_, err = f.spawn(t, spawnAgentArgs{Type: "renamed"})
+	require.ErrorContains(t, err, `agent "renamed" content names "general"`)
 
 	for agentType, marker := range map[string]string{
 		"personal/reviewer":  "PERSONAL-REVIEWER-MARKER",
@@ -159,4 +168,14 @@ func TestForkAgentDefinitionStoredTiersAuthz(t *testing.T) {
 	}
 	require.Equal(t, []string{"member-type", "shared"}, typeIDs(member))
 	require.Empty(t, typeIDs(outsider))
+}
+
+func TestParseStoredAgentDefinitionDisabled(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseStoredAgentDefinition(forkdb.AgentDefinition{
+		Name:    "reviewer",
+		Content: agentDefinitionMarkdown("name: reviewer", "Review."),
+	})
+	require.ErrorContains(t, err, `agent "reviewer" is disabled`)
 }

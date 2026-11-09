@@ -253,10 +253,20 @@ func (p *Server) storedAgentTypes(ctx context.Context, chat database.Chat) []tie
 	return out
 }
 
+// parseStoredAgentDefinition parses a stored agent definition read at spawn
+// time. The row may have been disabled since the catalog listed it, and its
+// content must keep the row's name, which the catalog checked against the
+// built-in types.
 func parseStoredAgentDefinition(row forkdb.AgentDefinition) (workspacesdk.AgentDefinition, error) {
+	if !row.Enabled {
+		return workspacesdk.AgentDefinition{}, xerrors.Errorf("agent %q is disabled", row.Name)
+	}
 	def, err := workspacesdk.ParseAgentDefinition(row.Content, row.Name)
 	if err != nil {
 		return workspacesdk.AgentDefinition{}, xerrors.Errorf("parse agent %q: %w", row.Name, err)
+	}
+	if def.Name != row.Name {
+		return workspacesdk.AgentDefinition{}, xerrors.Errorf("agent %q content names %q", row.Name, def.Name)
 	}
 	return def, nil
 }
