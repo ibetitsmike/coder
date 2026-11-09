@@ -154,6 +154,43 @@ func TestResolver_AgentDefinitionSymlinkOutsideScanRootRejected(t *testing.T) {
 	require.Contains(t, got.Error, "escapes scan root")
 }
 
+func TestResolver_AgentContainerSymlinkOutsideScanRootSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require admin privileges on Windows runners")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	outside := t.TempDir()
+	mustWriteFile(t, filepath.Join(outside, "secret.md"), "---\nname: secret\ndescription: d\n---\ntoken")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, ".claude", "agents")))
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: dir}})
+
+	require.Empty(t, subagentResources(snap.Resources), "files under an escaping container must not be shipped")
+}
+
+// An AGENTS.md with agent front-matter in an "agents" scan root is already an
+// instruction resource; a second resource with the same source would make
+// coderd reject the whole push.
+func TestResolver_AgentsScanRootInstructionFileNotDuplicated(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "agents")
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "---\nname: instructions\ndescription: d\n---\nBody.")
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	var sources int
+	for _, res := range snap.Resources {
+		if res.Source == filepath.Join(root, "AGENTS.md") {
+			sources++
+		}
+	}
+	require.Equal(t, 1, sources)
+}
+
 func TestDRPCPusher_SubagentBody(t *testing.T) {
 	t.Parallel()
 	client := &fakeDRPCClient{}
@@ -208,4 +245,27 @@ func TestWatcher_FiresOnAgentDefinitionEdit(t *testing.T) {
 		_ = os.WriteFile(path, []byte("---\ndescription: v2\n---\nv2"), 0o600)
 		return fires.Load() >= 1
 	}, testutil.WaitShort, testutil.IntervalFast, "expected fire after agent definition edit")
+}
+
+func TestWatcher_FiresOnAgentContainerCreatedUnderExistingParent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+
+	var fires atomic.Int32
+	w, err := agentcontext.NewWatcher(agentcontext.WatcherOptions{
+		Logger:   testutil.Logger(t).Named("watcher"),
+		Debounce: 10 * time.Millisecond,
+		OnChange: func() { fires.Add(1) },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	w.Sync(ctx, []agentcontext.ScanRoot{{Path: dir}})
+
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".claude", "agents"), 0o755))
+	require.Eventually(t, func() bool {
+		return fires.Load() >= 1
+	}, testutil.WaitShort, testutil.IntervalFast, "expected fire when .claude/agents is created")
 }

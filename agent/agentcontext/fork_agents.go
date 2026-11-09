@@ -37,14 +37,24 @@ var agentContainerRelPaths = []string{
 
 // agentContainersFor returns the existing agent-container directories under
 // rootPath, plus rootPath itself when it is already an "agents" directory.
+// A container that resolves outside rootPath is skipped: definitions are
+// shipped whole, so a symlinked container must not pull in outside files.
 func agentContainersFor(rootPath string) []string {
 	var out []string
 	if filepath.Base(rootPath) == "agents" {
 		out = append(out, rootPath)
 	}
+	rootResolved := filepath.Clean(rootPath)
+	if resolved, err := filepath.EvalSymlinks(rootResolved); err == nil {
+		rootResolved = resolved
+	}
 	for _, rel := range agentContainerRelPaths {
 		container := filepath.Join(rootPath, rel)
-		if info, err := os.Stat(container); err == nil && info.IsDir() {
+		resolved, err := filepath.EvalSymlinks(container)
+		if err != nil || !pathHasPrefix(resolved, rootResolved) {
+			continue
+		}
+		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
 			out = append(out, container)
 		}
 	}
@@ -72,7 +82,7 @@ func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]
 				continue
 			}
 			res, ok := r.readAgentDefinition(root, path, info)
-			if !ok || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
+			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
 				continue
 			}
 			res.Error = truncateAgentError(res.Error)
@@ -147,6 +157,18 @@ func truncateAgentError(s string) string {
 	return s[:cut] + suffix
 }
 
+// hasSource reports whether a resource already uses source. coderd rejects a
+// push with duplicate sources, which an AGENTS.md in an "agents" scan root or
+// a definition symlinked to an instruction file would otherwise produce.
+func hasSource(resources []Resource, source string) bool {
+	for _, existing := range resources {
+		if existing.Source == source {
+			return true
+		}
+	}
+	return false
+}
+
 func hasOKSubagent(resources []Resource, name string) bool {
 	for _, existing := range resources {
 		if existing.Kind == KindSubagent && existing.Status == StatusOK && existing.Name == name {
@@ -157,9 +179,20 @@ func hasOKSubagent(resources []Resource, name string) bool {
 }
 
 // addAgentWatchDirs adds every agent container under rootPath to out.
+// A missing container's existing parent (such as .claude) is watched too, so
+// creating the container later triggers a re-resolve.
 func addAgentWatchDirs(rootPath string, out map[string]struct{}) {
 	for _, container := range agentContainersFor(rootPath) {
 		out[container] = struct{}{}
+	}
+	for _, rel := range agentContainerRelPaths {
+		parent := filepath.Dir(filepath.Join(rootPath, rel))
+		if parent == rootPath {
+			continue
+		}
+		if info, err := os.Stat(parent); err == nil && info.IsDir() {
+			out[parent] = struct{}{}
+		}
 	}
 }
 
