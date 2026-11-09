@@ -72,6 +72,12 @@ func (api *API) getChatTodos(rw http.ResponseWriter, r *http.Request) {
 	httpapi.Write(ctx, rw, http.StatusOK, list)
 }
 
+// chatTodosWatchResync is how often a todo list watcher rereads the list
+// without a change event. Events can go missing, as when publishing one fails
+// after the write committed or the read after one fails, and the resync bounds
+// how long a client then shows an old list.
+const chatTodosWatchResync = 30 * time.Second
+
 // @Summary Watch the chat todo list
 // @ID watch-the-chat-todo-list
 // @Security CoderSessionToken
@@ -84,12 +90,6 @@ func (api *API) getChatTodos(rw http.ResponseWriter, r *http.Request) {
 // @Description Streams the todo list of the chat over a websocket: the current
 // @Description list first, then the latest list after writes to it. Writes close
 // @Description together can arrive as one list.
-// chatTodosWatchResync is how often a todo list watcher rereads the list
-// without a change event. Events can go missing, as when publishing one fails
-// after the write committed or the read after one fails, and the resync bounds
-// how long a client then shows an old list.
-const chatTodosWatchResync = 30 * time.Second
-
 func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
