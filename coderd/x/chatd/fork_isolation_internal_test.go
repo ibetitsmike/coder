@@ -363,7 +363,9 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 	t.Parallel()
 
 	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
-	ctx := context.WithValue(chatdTestContext(t), subagentIsolationKey{}, subagentIsolationRequest{isolation: subagentIsolationWorktree})
+	isolatedContext := func(t *testing.T) context.Context {
+		return context.WithValue(chatdTestContext(t), subagentIsolationKey{}, subagentIsolationRequest{isolation: subagentIsolationWorktree})
+	}
 
 	t.Run("RemovesWorktreeWhenTransactionFails", func(t *testing.T) {
 		t.Parallel()
@@ -371,7 +373,7 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 		root := f.rootChat(t, conn)
 		// No initial messages makes the chat insert fail inside the
 		// transaction, after the worktree exists.
-		_, err := f.server.createSubagentChatWithID(ctx, f.server.pubsub, uuid.New(), root, nil, chatstate.CreateChatInput{
+		_, err := f.server.createSubagentChatWithID(isolatedContext(t), f.server.pubsub, uuid.New(), root, nil, chatstate.CreateChatInput{
 			OrganizationID:    root.OrganizationID,
 			OwnerID:           root.OwnerID,
 			WorkspaceID:       root.WorkspaceID,
@@ -392,7 +394,7 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 		t.Parallel()
 		conn := &fakeWorktreeConn{}
 		root := f.rootChat(t, conn)
-		_, err := f.server.createSubagentChatWithID(ctx, f.server.pubsub, uuid.New(), root, nil, chatstate.CreateChatInput{
+		_, err := f.server.createSubagentChatWithID(isolatedContext(t), f.server.pubsub, uuid.New(), root, nil, chatstate.CreateChatInput{
 			OrganizationID: root.OrganizationID,
 			OwnerID:        root.OwnerID,
 			AgentID:        root.AgentID,
