@@ -62,6 +62,11 @@ func (f forkQueryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg fo
 	return f.s.ConsumePluginLinkCode(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
+	defer f.observe(ctx, "CountActiveSubagentsForCapacity", time.Now())
+	return f.s.CountActiveSubagentsForCapacity(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
 	return f.s.DeleteExpiredPluginLinkCodes(ctx)

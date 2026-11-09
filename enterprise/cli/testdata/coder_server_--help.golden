@@ -280,6 +280,19 @@ Configure the background chat processing daemon.
           free slot and are discarded if none frees up within 90 seconds. Must
           be at least 1.
 
+      --chat-max-concurrent-subagents int, $CODER_CHAT_MAX_CONCURRENT_SUBAGENTS (default: 0)
+          Maximum number of running subagent chats in the deployment when the
+          fork-nested-subagents experiment is enabled. A subagent's own
+          ancestors do not count against it, so nested subagents can exceed the
+          limit. 0 means no limit. An organization can set a lower value for its
+          own chats.
+
+      --chat-max-concurrent-subagents-per-family int, $CODER_CHAT_MAX_CONCURRENT_SUBAGENTS_PER_FAMILY (default: 0)
+          Maximum number of running subagent chats under one root chat when the
+          fork-nested-subagents experiment is enabled. A subagent's own
+          ancestors do not count against it, so nested subagents can exceed the
+          limit. 0 means no limit. An organization can set a lower value.
+
       --chat-max-generation-retries int, $CODER_CHAT_MAX_GENERATION_RETRIES (default: 25)
           Maximum number of consecutive retries after a model generation fails
           with a transient error, such as a rate limit, an overloaded provider,

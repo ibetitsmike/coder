@@ -14,17 +14,16 @@ import (
 // ForkOrganizationSubagentLimits are the subagent limits of an organization.
 // A nil limit, which is omitted from JSON, uses the deployment value, and a
 // set limit can only lower it.
-// chatd enforces MaxDepth; the capacity limits are stored but not enforced
-// yet.
+// MaxLivePerFamily is stored but not enforced yet.
 type ForkOrganizationSubagentLimits struct {
 	// MaxDepth is the maximum depth of nested subagent chats, between 1 and
 	// 16.
 	MaxDepth *int32 `json:"max_depth,omitempty" example:"2"`
 	// MaxConcurrent is the maximum number of running subagent chats in the
-	// organization.
+	// organization, not counting a subagent's own ancestors.
 	MaxConcurrent *int32 `json:"max_concurrent,omitempty" example:"8"`
 	// MaxConcurrentPerFamily is the maximum number of running subagent chats
-	// under one root chat.
+	// under one root chat, not counting a subagent's own ancestors.
 	MaxConcurrentPerFamily *int32 `json:"max_concurrent_per_family,omitempty" example:"4"`
 	// MaxLivePerFamily is the maximum number of unarchived subagent chats
 	// under one root chat.
