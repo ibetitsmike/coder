@@ -9,9 +9,11 @@ import {
 	MockDefaultOrganization,
 	MockEntitlements,
 } from "#/testHelpers/entities";
-import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
+import {
+	MockChatVideoAttachment,
+	MockChatVideoFilePart,
+} from "#/testHelpers/forkChatAttachments";
 import { renderComponent } from "#/testHelpers/renderHelpers";
-import { getChatFileURL } from "../../utils/chatAttachments";
 import { AttachmentBlock } from "./AttachmentBlocks";
 import { FileProbeProvider } from "./FileProbeContext";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
@@ -57,16 +59,7 @@ const openTurnAttachments = async (
 	renderWithExperiments(
 		experiments,
 		<FileProbeProvider evictedFileIds={evictedFileIds}>
-			<TurnAttachments
-				attachments={[
-					{
-						key: "video",
-						role: "assistant",
-						file: MockChatVideoFilePart,
-						href: getChatFileURL(MockChatVideoFilePart.file_id),
-					},
-				]}
-			/>
+			<TurnAttachments attachments={[MockChatVideoAttachment]} />
 		</FileProbeProvider>,
 	);
 	await userEvent.click(
@@ -118,11 +111,11 @@ describe("TurnAttachments with an attached MP4", () => {
 			new Set([MockChatVideoFilePart.file_id]),
 		);
 
-		within(menu).getByRole("button", {
-			name: "review.mp4 Attachment expired",
-		});
 		expect(
 			within(menu).queryByRole("button", { name: "Play review.mp4" }),
+		).toBeNull();
+		expect(
+			within(menu).queryByRole("link", { name: "Download review.mp4" }),
 		).toBeNull();
 	});
 
@@ -132,6 +125,10 @@ describe("TurnAttachments with an attached MP4", () => {
 		expect(
 			within(menu).queryByRole("button", { name: "Play review.mp4" }),
 		).toBeNull();
-		within(menu).getByRole("link", { name: /review\.mp4/ });
+		expect(
+			within(menu)
+				.getByRole("link", { name: "Download review.mp4" })
+				.getAttribute("href"),
+		).toBe("/api/v2/chats/files/chat-file-1");
 	});
 });

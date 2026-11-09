@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
-import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
+import { fn, userEvent, within } from "storybook/test";
+import {
+	MockChatVideoAttachment,
+	MockChatVideoFilePart,
+} from "#/testHelpers/forkChatAttachments";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { AttachmentBlock } from "./AttachmentBlocks";
 import { FileProbeProvider } from "./FileProbeContext";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
+import { TurnAttachments } from "./TurnAttachments";
 
 const meta: Meta<typeof ForkAttachmentPreview> = {
 	title: "pages/AgentsPage/ChatConversation/ForkAttachmentPreview",
@@ -43,4 +47,14 @@ export const ExpiredVideo: Story = {
 			</FileProbeProvider>
 		),
 	],
+};
+
+export const AttachmentsMenu: Story = {
+	parameters: { experiments: ["fork-chat-todos"] },
+	render: () => <TurnAttachments attachments={[MockChatVideoAttachment]} />,
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", { name: "Attachments (1)" }),
+		);
+	},
 };
