@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -73,13 +75,22 @@ func TestChatTodoTools(t *testing.T) {
 	))
 	requireEvent(2)
 
+	tooMany := make([]todoWriteItem, maxChatTodos+1)
+	for i := range tooMany {
+		tooMany[i] = todoWriteItem{ID: "todo-" + strconv.Itoa(i), Content: "one", Status: "pending"}
+	}
+
 	for name, args := range map[string]todoWriteArgs{
 		"DuplicateID": {Todos: []todoWriteItem{
 			{ID: "plan", Content: "one", Status: "pending"},
 			{ID: " plan", Content: "two", Status: "pending"},
 		}},
 		"BadStatus":    {Todos: []todoWriteItem{{ID: "plan", Content: "one", Status: "finished"}}},
+		"EmptyID":      {Todos: []todoWriteItem{{ID: " ", Content: "one", Status: "pending"}}},
 		"EmptyContent": {Todos: []todoWriteItem{{ID: "plan", Content: "  ", Status: "pending"}}},
+		"LongID":       {Todos: []todoWriteItem{{ID: strings.Repeat("i", maxChatTodoIDBytes+1), Content: "one", Status: "pending"}}},
+		"LongContent":  {Todos: []todoWriteItem{{ID: "plan", Content: strings.Repeat("c", maxChatTodoContentBytes+1), Status: "pending"}}},
+		"TooManyItems": {Todos: tooMany},
 	} {
 		runChatTodoTool(ctx, t, tools, "todo_write", args, true)
 		require.JSONEq(t, second, runChatTodoTool(ctx, t, tools, "todo_read", struct{}{}, false), "%s must not change the stored list", name)
