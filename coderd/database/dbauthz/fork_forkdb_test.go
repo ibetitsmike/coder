@@ -6,26 +6,34 @@ package dbauthz_test
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
+	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbmock"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/forkdb/forkdbmock"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
+	"github.com/coder/coder/v2/coderd/rbac/rolestore"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -242,6 +250,88 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().UpdatePluginChatBindingFailed(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
 		},
+		"InsertUserAgentDefinition": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := userAgentDefinition(uuid.New(), uuid.New(), "reviewer")
+			arg := forkdb.InsertUserAgentDefinitionParams{OrganizationID: def.OrganizationID, UserID: def.UserID.UUID, Name: def.Name, Content: def.Content}
+			fdb.EXPECT().InsertUserAgentDefinition(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(def.OrganizationID).InOrg(def.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(def.UserID.UUID.String()), policy.ActionCreate,
+			).Returns(def)
+		},
+		"GetUserAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := userAgentDefinition(uuid.New(), uuid.New(), "reviewer")
+			arg := forkdb.GetUserAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, UserID: def.UserID.UUID, Name: def.Name}
+			fdb.EXPECT().GetUserAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(def.OrganizationID).InOrg(def.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(def.UserID.UUID.String()), policy.ActionRead,
+			).Returns(def)
+		},
+		"ListUserAgentDefinitionMetadata": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := forkdb.ListUserAgentDefinitionMetadataParams{OrganizationID: uuid.New(), UserID: uuid.New()}
+			rows := []forkdb.ListUserAgentDefinitionMetadataRow{testutil.Fake(t, faker, forkdb.ListUserAgentDefinitionMetadataRow{
+				OrganizationID: arg.OrganizationID,
+				UserID:         uuid.NullUUID{UUID: arg.UserID, Valid: true},
+			})}
+			fdb.EXPECT().ListUserAgentDefinitionMetadata(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(arg.OrganizationID).InOrg(arg.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(arg.UserID.String()), policy.ActionRead,
+			).Returns(rows)
+		},
+		"UpdateUserAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := userAgentDefinition(uuid.New(), uuid.New(), "reviewer")
+			arg := forkdb.UpdateUserAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, UserID: def.UserID.UUID, Name: def.Name, Enabled: sql.NullBool{Bool: false, Valid: true}}
+			fdb.EXPECT().UpdateUserAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(def.OrganizationID).InOrg(def.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(def.UserID.UUID.String()), policy.ActionUpdate,
+			).Returns(def)
+		},
+		"DeleteUserAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := userAgentDefinition(uuid.New(), uuid.New(), "reviewer")
+			arg := forkdb.DeleteUserAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, UserID: def.UserID.UUID, Name: def.Name}
+			fdb.EXPECT().DeleteUserAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(def.OrganizationID).InOrg(def.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(def.UserID.UUID.String()), policy.ActionDelete,
+			).Returns(def)
+		},
+		"InsertOrganizationAgentDefinition": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.InsertOrganizationAgentDefinitionParams{OrganizationID: def.OrganizationID, Name: def.Name, Content: def.Content}
+			fdb.EXPECT().InsertOrganizationAgentDefinition(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceOrganizationSkill.InOrg(def.OrganizationID), policy.ActionCreate).Returns(def)
+		},
+		"GetOrganizationAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(def, policy.ActionRead).Returns(def)
+		},
+		// The NotAuthorized subtest gets no rows back: the post-filter drops
+		// every row that the actor cannot read.
+		"ListOrganizationAgentDefinitionMetadata": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			row := forkdb.ListOrganizationAgentDefinitionMetadataRow{ID: def.ID, OrganizationID: def.OrganizationID, Name: def.Name, GroupAcl: def.GroupAcl, UserAcl: def.UserAcl}
+			fdb.EXPECT().ListOrganizationAgentDefinitionMetadata(gomock.Any(), def.OrganizationID).Return([]forkdb.ListOrganizationAgentDefinitionMetadataRow{row}, nil).AnyTimes()
+			check.Args(def.OrganizationID).Asserts(row, policy.ActionRead).Returns([]forkdb.ListOrganizationAgentDefinitionMetadataRow{row})
+		},
+		"UpdateOrganizationAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.UpdateOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name, Enabled: sql.NullBool{Bool: false, Valid: true}}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}).Return(def, nil).AnyTimes()
+			fdb.EXPECT().UpdateOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(def, policy.ActionUpdate).Returns(def)
+		},
+		"DeleteOrganizationAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.DeleteOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams(arg)).Return(def, nil).AnyTimes()
+			fdb.EXPECT().DeleteOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(def, policy.ActionDelete).Returns(def)
+		},
 	}
 
 	// Every fork query needs a case, like MethodTestSuite's accounting of
@@ -325,4 +415,112 @@ func runForkMethodCase(t *testing.T, methodName string, testCaseF forkMethodCase
 		rec.AssertActor(t, actor, pairs...)
 		require.NoError(t, rec.AllAsserted(), "all rbac calls must be asserted")
 	})
+}
+
+func userAgentDefinition(organizationID, userID uuid.UUID, name string) forkdb.AgentDefinition {
+	def := organizationAgentDefinition(organizationID, name)
+	def.UserID = uuid.NullUUID{UUID: userID, Valid: true}
+	return def
+}
+
+func organizationAgentDefinition(organizationID uuid.UUID, name string) forkdb.AgentDefinition {
+	return forkdb.AgentDefinition{
+		ID:             uuid.New(),
+		OrganizationID: organizationID,
+		Name:           name,
+		Content:        "---\nname: " + name + "\n---\nReview the change.",
+		Enabled:        true,
+		GroupAcl:       database.ChatACL{},
+		UserAcl:        database.ChatACL{},
+	}
+}
+
+// TestUserAgentDefinitionOrganizationMembership runs the user-tier queries
+// against the real authorizer. Their RBAC object has no organization, so
+// only the organization check of dbauthz keeps out users who are not members.
+func TestUserAgentDefinitionOrganizationMembership(t *testing.T) {
+	t.Parallel()
+
+	setupCtx := testutil.Context(t, testutil.WaitLong)
+	store, _ := dbtestutil.NewDB(t)
+	db := dbauthz.New(store, rbac.NewAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, &slogtest.Options{
+		IgnoreErrors: true,
+	}), coderdtest.AccessControlStorePointer())
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+
+	org := dbgen.Organization(t, store, database.Organization{})
+	member := dbgen.User(t, store, database.User{})
+	outsider := dbgen.User(t, store, database.User{})
+	subject := func(userID uuid.UUID, roles ...rbac.RoleIdentifier) rbac.Subject {
+		return rbac.Subject{
+			ID:     userID.String(),
+			Roles:  must(rolestore.Expand(setupCtx, store, roles)),
+			Groups: []string{},
+			Scope:  rbac.ExpandableScope(rbac.ScopeAll),
+		}
+	}
+	memberSubject := subject(member.ID, rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID))
+
+	// The removed member created this row while they were a member.
+	_, err = fdb.InsertUserAgentDefinition(dbauthz.As(setupCtx, memberSubject), forkdb.InsertUserAgentDefinitionParams{
+		OrganizationID: org.ID,
+		UserID:         member.ID,
+		Name:           "removed-member",
+		Content:        "Review the change.",
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		subject rbac.Subject
+		allowed bool
+	}{
+		{name: "member", subject: memberSubject, allowed: true},
+		{name: "non-member", subject: subject(outsider.ID, rbac.RoleMember()), allowed: false},
+		{name: "removed-member", subject: subject(member.ID, rbac.RoleMember()), allowed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := dbauthz.As(testutil.Context(t, testutil.WaitLong), tc.subject)
+			userID := uuid.MustParse(tc.subject.ID)
+			ops := []struct {
+				name string
+				run  func() error
+			}{
+				{"create", func() error {
+					_, err := fdb.InsertUserAgentDefinition(ctx, forkdb.InsertUserAgentDefinitionParams{OrganizationID: org.ID, UserID: userID, Name: tc.name, Content: "Review the change."})
+					return err
+				}},
+				{"read", func() error {
+					_, err := fdb.GetUserAgentDefinitionByName(ctx, forkdb.GetUserAgentDefinitionByNameParams{OrganizationID: org.ID, UserID: userID, Name: tc.name})
+					return err
+				}},
+				{"list", func() error {
+					rows, err := fdb.ListUserAgentDefinitionMetadata(ctx, forkdb.ListUserAgentDefinitionMetadataParams{OrganizationID: org.ID, UserID: userID})
+					if err == nil && !slices.ContainsFunc(rows, func(r forkdb.ListUserAgentDefinitionMetadataRow) bool { return r.Name == tc.name }) {
+						return xerrors.Errorf("list misses %q", tc.name)
+					}
+					return err
+				}},
+				{"update", func() error {
+					_, err := fdb.UpdateUserAgentDefinitionByName(ctx, forkdb.UpdateUserAgentDefinitionByNameParams{OrganizationID: org.ID, UserID: userID, Name: tc.name, Content: sql.NullString{String: "Review it again.", Valid: true}})
+					return err
+				}},
+				{"delete", func() error {
+					_, err := fdb.DeleteUserAgentDefinitionByName(ctx, forkdb.DeleteUserAgentDefinitionByNameParams{OrganizationID: org.ID, UserID: userID, Name: tc.name})
+					return err
+				}},
+			}
+			for _, op := range ops {
+				err := op.run()
+				if tc.allowed {
+					require.NoError(t, err, op.name)
+				} else {
+					require.True(t, dbauthz.IsNotAuthorizedError(err), "%s: expected authorization failure, got: %v", op.name, err)
+				}
+			}
+		})
+	}
 }

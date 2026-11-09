@@ -55,6 +55,13 @@ func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	return f.db.DeleteExpiredPluginLinkCodes(ctx)
 }
 
+func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams(arg))
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationAgentDefinitionByName)(ctx, arg)
+}
+
 func (f *forkQuerier) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
 	return deleteQ(f.q.log, f.q.auth, f.db.GetPluginByID, f.db.DeletePluginByID)(ctx, id)
 }
@@ -71,6 +78,13 @@ func (f *forkQuerier) DeletePluginUserLink(ctx context.Context, arg forkdb.Delet
 		return err
 	}
 	return f.db.DeletePluginUserLink(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteUserAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionDelete, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.DeleteUserAgentDefinitionByName(ctx, arg)
 }
 
 func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
@@ -109,6 +123,10 @@ func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.GetChatTodosByChatID(ctx, chatID)
+}
+
+func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByName)(ctx, arg)
 }
 
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
@@ -159,6 +177,13 @@ func (f *forkQuerier) GetPluginsByOrganizationID(ctx context.Context, organizati
 
 // InsertChatSubagent authorizes as an update of the owning chat, like
 // InsertChatDebugRun.
+func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.GetUserAgentDefinitionByName(ctx, arg)
+}
+
 func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
 	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
 	if err != nil {
@@ -168,6 +193,13 @@ func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertC
 		return forkdb.ChatSubagent{}, err
 	}
 	return f.db.InsertChatSubagent(ctx, arg)
+}
+
+func (f *forkQuerier) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.InsertOrganizationAgentDefinition(ctx, arg)
 }
 
 func (f *forkQuerier) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
@@ -182,6 +214,24 @@ func (f *forkQuerier) InsertPluginLinkCode(ctx context.Context, arg forkdb.Inser
 		return err
 	}
 	return f.db.InsertPluginLinkCode(ctx, arg)
+}
+
+func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionCreate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.InsertUserAgentDefinition(ctx, arg)
+}
+
+func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
+	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
+}
+
+func (f *forkQuerier) ListUserAgentDefinitionMetadata(ctx context.Context, arg forkdb.ListUserAgentDefinitionMetadataParams) ([]forkdb.ListUserAgentDefinitionMetadataRow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return nil, err
+	}
+	return f.db.ListUserAgentDefinitionMetadata(ctx, arg)
 }
 
 func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
@@ -203,6 +253,16 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return updateWithReturn(f.q.log, f.q.auth, fetch, f.db.UpdateOrganizationAgentDefinitionByName)(ctx, arg)
 }
 
 func (f *forkQuerier) UpdatePluginChatBindingDelivered(ctx context.Context, arg forkdb.UpdatePluginChatBindingDeliveredParams) error {
@@ -240,6 +300,13 @@ func (f *forkQuerier) UpdatePluginLastError(ctx context.Context, arg forkdb.Upda
 	return f.db.UpdatePluginLastError(ctx, arg)
 }
 
+func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionUpdate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.UpdateUserAgentDefinitionByName(ctx, arg)
+}
+
 func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChatModelConfig.InOrg(arg.OrganizationID)); err != nil {
 		return forkdb.ChatOrganizationSubagentLimit{}, err
@@ -265,4 +332,15 @@ func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.Upser
 		return forkdb.PluginUserLink{}, err
 	}
 	return f.db.UpsertPluginUserLink(ctx, arg)
+}
+
+// authorizeUserAgentDefinition authorizes action on the user-tier agent
+// definitions of userID in organizationID. Their RBAC object is a personal
+// skill without an organization, so the organization check denies users who
+// are not members of organizationID.
+func (f *forkQuerier) authorizeUserAgentDefinition(ctx context.Context, action policy.Action, organizationID, userID uuid.UUID) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceOrganization.WithID(organizationID).InOrg(organizationID)); err != nil {
+		return err
+	}
+	return f.q.authorizeContext(ctx, action, rbac.ResourceUserSkill.WithOwner(userID.String()))
 }
