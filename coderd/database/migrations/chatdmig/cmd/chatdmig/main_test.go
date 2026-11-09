@@ -142,7 +142,9 @@ func TestRouteEarly(t *testing.T) {
 
 	t.Run("EarlyMigrationChangedFails", func(t *testing.T) {
 		t.Parallel()
-		routes := routesHeader + "000640 chat_queued_message_busy_behavior chatd\n"
+		// route would pad the version, so an unchanged routes.txt shows it
+		// stopped before writing.
+		routes := routesHeader + "640 chat_queued_message_busy_behavior chatd\n"
 		dir := writeMigrations(t, routes, map[string]string{
 			"000640_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text NOT NULL DEFAULT 'queue';\n",
 		})
@@ -154,6 +156,18 @@ func TestRouteEarly(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, routes, string(got))
 		require.ErrorContains(t, check(dir), "upstream changed 000640_chat_queued_message_busy_behavior.up.sql")
+	})
+
+	t.Run("RenumberedEarlyMigrationChangedFails", func(t *testing.T) {
+		t.Parallel()
+		// Upstream merged the early migration under a new version with new SQL,
+		// and the early copy is still in the tree.
+		dir := writeMigrations(t, routesHeader, map[string]string{
+			"000640_chat_queued_message_busy_behavior.up.sql": queuedSQL,
+			"000642_chat_queued_message_busy_behavior.up.sql": "ALTER TABLE chat_queued_messages ADD COLUMN busy_behavior text NOT NULL DEFAULT 'queue';\n",
+		})
+
+		require.ErrorContains(t, route(dir), "upstream changed 000642_chat_queued_message_busy_behavior.up.sql")
 	})
 
 	t.Run("EarlyMigrationMissingFails", func(t *testing.T) {
