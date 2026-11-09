@@ -92,6 +92,11 @@ func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chat
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
+	defer f.observe(ctx, "GetChatTodosByChatID", time.Now())
+	return f.s.GetChatTodosByChatID(ctx, chatID)
+}
+
 func (f forkQueryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	defer f.observe(ctx, "GetPluginByID", time.Now())
 	return f.s.GetPluginByID(ctx, id)
@@ -180,6 +185,11 @@ func (f forkQueryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg fork
 func (f forkQueryMetricsStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
 	defer f.observe(ctx, "UpdatePluginLastError", time.Now())
 	return f.s.UpdatePluginLastError(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
+	defer f.observe(ctx, "UpsertChatTodos", time.Now())
+	return f.s.UpsertChatTodos(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {

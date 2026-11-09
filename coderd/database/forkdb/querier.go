@@ -26,6 +26,7 @@ type Querier interface {
 	// does not replay history.
 	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
@@ -46,6 +47,7 @@ type Querier interface {
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
 	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
+	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	// Relinking an external identity to another user clears the active chat so
 	// replies never reach a chat the new user does not own.
 	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)
