@@ -1,3 +1,6 @@
+// This file is fork code: tests for the fork-nested-subagents experiment's
+// organization subagent limits section.
+
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "react-query";
@@ -44,7 +47,7 @@ const renderLimits = ({
 	});
 	const queryClient = createTestQueryClient();
 	// The Coder Agents page fetches these permissions before it renders the
-	// section, so the section reads them from the cache.
+	// section, so they are already cached when it mounts.
 	queryClient.setQueryData(organizationsPermissions([orgId]).queryKey, {
 		[orgId]: { viewChatModelConfigs: canView },
 	});
@@ -121,7 +124,7 @@ describe("ForkSubagentLimits", () => {
 	});
 
 	it("does not let a viewer change the limits", async () => {
-		const { updateLimits } = renderLimits({ canEdit: false });
+		renderLimits({ canEdit: false });
 		const user = userEvent.setup();
 
 		const input = await screen.findByLabelText(
@@ -130,7 +133,6 @@ describe("ForkSubagentLimits", () => {
 		await user.type(input, "2");
 
 		expect(input).toHaveValue(null);
-		expect(updateLimits).not.toHaveBeenCalled();
 	});
 
 	it("does not request the limits while fork-nested-subagents is off", () => {

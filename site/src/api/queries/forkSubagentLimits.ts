@@ -11,6 +11,7 @@ import type { ForkOrganizationSubagentLimits } from "#/api/typesGenerated";
 const organizationSubagentLimitsKey = (organizationId: string) =>
 	["chats", "fork-subagent-limits", organizationId] as const;
 
+/** Query options for an organization's subagent limits. */
 export const organizationSubagentLimits = (organizationId: string) =>
 	queryOptions({
 		queryKey: organizationSubagentLimitsKey(organizationId),
@@ -18,6 +19,7 @@ export const organizationSubagentLimits = (organizationId: string) =>
 			getOrganizationSubagentLimits(organizationId, signal),
 	});
 
+/** Mutation options that replace an organization's subagent limits. */
 export const updateOrganizationSubagentLimits = (
 	queryClient: QueryClient,
 	organizationId: string,

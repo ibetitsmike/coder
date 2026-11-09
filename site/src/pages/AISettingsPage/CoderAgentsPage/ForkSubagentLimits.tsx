@@ -17,6 +17,10 @@ type ForkSubagentLimitsProps = {
 	canEdit: boolean;
 };
 
+/**
+ * Renders the organization's subagent limits when fork-nested-subagents is on
+ * and the user can read the organization's chat model configs.
+ */
 export const ForkSubagentLimits: React.FC<ForkSubagentLimitsProps> = ({
 	organization,
 	canEdit,
@@ -24,9 +28,11 @@ export const ForkSubagentLimits: React.FC<ForkSubagentLimitsProps> = ({
 	// Upstream stories and tests mount OrganizationAgentSettings without a
 	// DashboardProvider, so a missing dashboard counts as the experiment off
 	// instead of throwing like useDashboard.
-	const experiments = useContext(DashboardContext)?.experiments ?? [];
+	const isExperimentEnabled =
+		useContext(DashboardContext)?.experiments.includes(
+			"fork-nested-subagents",
+		) ?? false;
 	const queryClient = useQueryClient();
-	const isExperimentEnabled = experiments.includes("fork-nested-subagents");
 	const permissionsQuery = useQuery({
 		...organizationsPermissions([organization.id]),
 		enabled: isExperimentEnabled,

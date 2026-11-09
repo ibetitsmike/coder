@@ -15,6 +15,7 @@ import { Loader } from "#/components/Loader/Loader";
 import { useTemporarySavedState } from "#/components/TemporarySavedState/TemporarySavedState";
 import { getFormHelpers } from "#/utils/formUtils";
 import { AgentSettingLayout } from "./AgentSettingLayout";
+import type { MutationCallbacks } from "./SubagentModelOverrideSettings";
 
 type LimitField = keyof ForkSubagentLimitValues;
 
@@ -61,7 +62,7 @@ const toFormValues = (limits: ForkOrganizationSubagentLimits): FormValues => ({
 });
 
 const toRequest = (values: FormValues): ForkOrganizationSubagentLimits => {
-	const request: { -readonly [K in LimitField]?: number } = {};
+	const request: Partial<Record<LimitField, number>> = {};
 	for (const { field } of limitConfigs) {
 		const value = values[field].trim();
 		if (value !== "") {
@@ -84,9 +85,10 @@ const validate = (values: FormValues) => {
 			parsed < 1 ||
 			(max !== undefined && parsed > max)
 		) {
-			errors[field] = max
-				? `Enter a whole number from 1 to ${max}.`
-				: "Enter a whole number of 1 or more.";
+			errors[field] =
+				max !== undefined
+					? `Enter a whole number from 1 to ${max}.`
+					: "Enter a whole number of 1 or more.";
 		}
 	}
 	return errors;
@@ -102,12 +104,16 @@ type ForkSubagentLimitsSettingsProps = {
 	canEdit: boolean;
 	onSave: (
 		req: ForkOrganizationSubagentLimits,
-		options: { onSuccess: () => void },
+		options: MutationCallbacks,
 	) => void;
 	isSaving: boolean;
 	saveError: unknown;
 };
 
+/**
+ * Shows an organization's subagent limits next to the deployment and effective
+ * values, and lets editors lower them.
+ */
 export const ForkSubagentLimitsSettings: React.FC<
 	ForkSubagentLimitsSettingsProps
 > = ({ limits, isLoading, loadError, ...formProps }) => {
@@ -117,7 +123,12 @@ export const ForkSubagentLimitsSettings: React.FC<
 	if (!limits) {
 		return <ErrorAlert error={loadError} />;
 	}
-	return <SubagentLimitsForm limits={limits} {...formProps} />;
+	return (
+		<div className="flex flex-col gap-4">
+			{loadError != null && <ErrorAlert error={loadError} />}
+			<SubagentLimitsForm limits={limits} {...formProps} />
+		</div>
+	);
 };
 
 type SubagentLimitsFormProps = Omit<
@@ -136,16 +147,12 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 }) => {
 	const { isSavedVisible, showSavedState } = useTemporarySavedState();
 	const form = useFormik<FormValues>({
-		// Reinitializes only when the server values change, so a refetch with
-		// the same values keeps in-progress edits.
-		enableReinitialize: true,
+		// No enableReinitialize: a refetch must not discard in-progress edits.
+		// Saving resets the form, and a new organization remounts it.
 		validateOnMount: true,
 		initialValues: toFormValues(limits.organization),
 		validate,
 		onSubmit: (values, { resetForm }) => {
-			if (!canEdit) {
-				return;
-			}
 			const request = toRequest(values);
 			onSave(request, {
 				onSuccess: () => {

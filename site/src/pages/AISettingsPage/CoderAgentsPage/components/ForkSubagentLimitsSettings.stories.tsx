@@ -1,3 +1,6 @@
+// This file is fork code: stories for the fork-nested-subagents experiment's
+// organization subagent limits form.
+
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
 import type { ForkOrganizationSubagentLimitsResponse } from "#/api/typesGenerated";
@@ -23,7 +26,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof ForkSubagentLimitsSettings>;
 
-const unsetLimits: ForkOrganizationSubagentLimitsResponse = {
+const mockUnsetLimits: ForkOrganizationSubagentLimitsResponse = {
 	...MockForkOrganizationSubagentLimits,
 	organization: {},
 	effective: MockForkOrganizationSubagentLimits.deployment,
@@ -31,8 +34,20 @@ const unsetLimits: ForkOrganizationSubagentLimitsResponse = {
 
 export const Editable: Story = {};
 
-export const Default: Story = {
-	args: { limits: unsetLimits },
+export const Unset: Story = {
+	args: { limits: mockUnsetLimits },
+};
+
+export const Edited: Story = {
+	play: async ({ canvasElement }) => {
+		const input = within(canvasElement).getByLabelText("Max depth");
+		await userEvent.clear(input);
+		await userEvent.type(input, "3");
+	},
+};
+
+export const Saving: Story = {
+	args: { isSaving: true },
 };
 
 export const ReadOnly: Story = {

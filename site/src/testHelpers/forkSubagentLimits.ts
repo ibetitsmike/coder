@@ -3,6 +3,7 @@
 
 import type { ForkOrganizationSubagentLimitsResponse } from "#/api/typesGenerated";
 
+/** An organization that lowers the depth and sets an organization-wide cap. */
 export const MockForkOrganizationSubagentLimits: ForkOrganizationSubagentLimitsResponse =
 	{
 		organization: { max_depth: 2, max_concurrent: 10 },
