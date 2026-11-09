@@ -1596,18 +1596,32 @@ curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 ```json
 {
-  "max_concurrent": 8,
-  "max_concurrent_per_family": 4,
-  "max_depth": 2,
-  "max_live_per_family": 6
+  "deployment": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "effective": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "organization": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  }
 }
 ```
 
 ### Responses
 
-| Status | Meaning                                                 | Description | Schema                                                                                       |
-|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------------|
-| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimits](schemas.md#codersdkforkorganizationsubagentlimits) |
+| Status | Meaning                                                 | Description | Schema                                                                                                       |
+|--------|---------------------------------------------------------|-------------|--------------------------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimitsResponse](schemas.md#codersdkforkorganizationsubagentlimitsresponse) |
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
@@ -1649,18 +1663,32 @@ curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 ```json
 {
-  "max_concurrent": 8,
-  "max_concurrent_per_family": 4,
-  "max_depth": 2,
-  "max_live_per_family": 6
+  "deployment": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "effective": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "organization": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  }
 }
 ```
 
 ### Responses
 
-| Status | Meaning                                                 | Description | Schema                                                                                       |
-|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------------|
-| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimits](schemas.md#codersdkforkorganizationsubagentlimits) |
+| Status | Meaning                                                 | Description | Schema                                                                                                       |
+|--------|---------------------------------------------------------|-------------|--------------------------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationSubagentLimitsResponse](schemas.md#codersdkforkorganizationsubagentlimitsresponse) |
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 

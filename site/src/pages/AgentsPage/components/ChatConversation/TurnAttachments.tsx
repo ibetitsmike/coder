@@ -13,6 +13,7 @@ import {
 	isTextPreviewAttachmentMediaType,
 } from "./AttachmentBlocks";
 import { useFileProbes } from "./FileProbeContext";
+import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 import { MessageAttachmentCard } from "./MessageAttachmentCard";
 import type { MessageAttachment } from "./messageHelpers";
 
@@ -112,7 +113,9 @@ export const TurnAttachments: React.FC<TurnAttachmentsProps> = ({
 				<ul className="flex flex-col gap-2">
 					{attachments.map((attachment) => (
 						<li key={attachment.key}>
-							<MessageAttachmentCard attachment={attachment} />
+							<ForkAttachmentPreview block={attachment.file}>
+								<MessageAttachmentCard attachment={attachment} />
+							</ForkAttachmentPreview>
 						</li>
 					))}
 				</ul>

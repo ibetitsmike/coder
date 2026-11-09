@@ -145,6 +145,7 @@ Queued messages wait in two lanes. These rules apply to every transition that qu
   <!-- TODO(ibetitsmike): describe chat_organization_subagent_limits and how the organization max_depth lowers the deployment maximum subagent depth. -->
   <!-- TODO(ibetitsmike): describe the fork subagent concurrency caps (deployment, organization, family) and why a chat's ancestors do not count against its admission. -->
   <!-- TODO(ibetitsmike): describe the fork live subagent cap per family, checked when a child spawns and when message_agent resumes a finished child, each in its own transaction under one per-family advisory lock. -->
+  <!-- TODO(ibetitsmike): describe how a subagent held by a fork concurrency cap reports queued_for_capacity and the list_agents waiting_for_capacity field. -->
   <!-- TODO(ibetitsmike): describe fork-agent-definitions: spawn_agent resolves custom agent types from the chat's pinned subagent context resources after the built-in types, and records the custom type in the child's chat_subagents row. -->
   <!-- TODO(ibetitsmike): describe fork-agent-definitions tool policy: spawn stores the custom agent's readonly, tools, disallowed_tools and mcp policy on its chat_subagents row, and every child turn filters its tools and deferred MCP tools by that policy. -->
 - `SetArchived(archived)` sets or clears the archived marker for one chat.

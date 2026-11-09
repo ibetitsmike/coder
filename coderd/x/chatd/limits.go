@@ -51,6 +51,6 @@ func (l Limits) withDefaults() Limits {
 		MaxAttachmentsPerChat:         cmp.Or(l.MaxAttachmentsPerChat, codersdk.DefaultChatMaxAttachmentsPerChat),
 		MaxPromptBytes:                cmp.Or(l.MaxPromptBytes, codersdk.DefaultChatMaxPromptBytes),
 		MaxConcurrentRecordingUploads: cmp.Or(l.MaxConcurrentRecordingUploads, codersdk.DefaultChatMaxConcurrentRecordingUploads),
-		Fork:                          l.Fork.withDefaults(),
+		Fork:                          l.Fork.WithDefaults(),
 	}
 }
