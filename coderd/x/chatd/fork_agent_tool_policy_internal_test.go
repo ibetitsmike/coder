@@ -10,6 +10,9 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 type testWorkspaceMCPAgentTool struct {
@@ -19,6 +22,39 @@ type testWorkspaceMCPAgentTool struct {
 
 func (t *testWorkspaceMCPAgentTool) ServerName() string {
 	return t.server
+}
+
+// TestCustomAgentToolPolicySkipsLookup checks that a chat without the
+// experiment, or a root chat, keeps its tools without reading the database:
+// the server has no store, so any read fails the call.
+func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
+	t.Parallel()
+
+	parent := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+	tests := []struct {
+		name        string
+		experiments codersdk.Experiments
+		chat        database.Chat
+	}{
+		{name: "ExperimentOff", chat: database.Chat{ID: uuid.New(), ParentChatID: parent}},
+		{
+			name:        "RootChat",
+			experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions},
+			chat:        database.Chat{ID: uuid.New()},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := &Server{experiments: tt.experiments}
+			tools := []fantasy.AgentTool{newTestAgentTool("write_file")}
+			candidates := []deferredMCPTool{{tool: newTestMCPAgentTool("docs__search", uuid.New()), server: "docs"}}
+			gotTools, gotCandidates, err := server.applyCustomAgentToolPolicy(chatdTestContext(t), tt.chat, tools, candidates)
+			require.NoError(t, err)
+			require.Equal(t, tools, gotTools)
+			require.Equal(t, candidates, gotCandidates)
+		})
+	}
 }
 
 func TestCustomAgentToolPolicyFilter(t *testing.T) {

@@ -283,8 +283,9 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions, codersdk.ExperimentForkNestedSubagents},
 		func(database.ChatModelConfig) map[string]string {
 			return map[string]string{
-				"reader":    agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
-				"no-writes": agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file]", "No writes."),
+				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
+				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file]", "No writes."),
+				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [Docs]", "Docs only."),
 			}
 		},
 		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
@@ -326,6 +327,29 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		names := toolNames(t, child)
 		require.Contains(t, names, "edit_files")
 		require.NotContains(t, names, "write_file")
+	})
+
+	t.Run("AllowlistAndNamedMCP", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		child, err := f.spawn(t, spawnAgentArgs{Type: "docs-reader"})
+		require.NoError(t, err)
+		docs := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs"})
+		other := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "other"})
+		docsTool := newTestMCPAgentTool("docs__search", docs.ID)
+		otherTool := newTestMCPAgentTool("other__lookup", other.ID)
+
+		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
+			[]fantasy.AgentTool{newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, otherTool},
+			[]deferredMCPTool{{tool: otherTool, server: "other"}, {tool: docsTool, server: "docs"}})
+		require.NoError(t, err)
+		names := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			names = append(names, tool.Info().Name)
+		}
+		require.Equal(t, []string{"read_file", "docs__search"}, names)
+		require.Len(t, candidates, 1)
+		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
 	})
 
 	t.Run("BuiltinType", func(t *testing.T) {
