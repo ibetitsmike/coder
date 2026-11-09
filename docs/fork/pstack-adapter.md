@@ -70,7 +70,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 13. If the chat can't quote the block, switch to a model server that keeps every system message.
     Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
     A model server that keeps only the first system message drops the block without an error.
-    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
+    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX GLM-5.3-Flash chat template keeps every system message.
 14. If you switched model servers, start again at step 11.
 15. Select the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
