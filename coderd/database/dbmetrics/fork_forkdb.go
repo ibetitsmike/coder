@@ -87,6 +87,11 @@ func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, plu
 	return f.s.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f forkQueryMetricsStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
+	defer f.observe(ctx, "GetChatOrganizationSubagentLimits", time.Now())
+	return f.s.GetChatOrganizationSubagentLimits(ctx, organizationID)
+}
+
 func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "GetChatSubagentByChatID", time.Now())
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
@@ -190,6 +195,11 @@ func (f forkQueryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg fork
 func (f forkQueryMetricsStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
 	defer f.observe(ctx, "UpdatePluginLastError", time.Now())
 	return f.s.UpdatePluginLastError(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
+	defer f.observe(ctx, "UpsertChatOrganizationSubagentLimits", time.Now())
+	return f.s.UpsertChatOrganizationSubagentLimits(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
