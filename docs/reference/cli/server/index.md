@@ -2248,4 +2248,4 @@ The module registry host the template builder uses for module source paths (for 
 | YAML        | <code>chat.maxSubagentDepth</code>          |
 | Default     | <code>2</code>                              |
 
-Maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0 and its subagents at depth 1. Explore and computer use subagents never spawn subagents. Must be at least 1.
+Maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0 and its subagents at depth 1. Explore and computer use subagents never spawn subagents. Must be between 1 and 16.

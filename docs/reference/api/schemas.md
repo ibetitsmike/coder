@@ -1141,6 +1141,9 @@ title: Schemas
   "chat": {
     "acquire_batch_size": 0,
     "debug_logging_enabled": true,
+    "fork": {
+      "max_subagent_depth": 0
+    },
     "hook_allow_insecure": true,
     "hook_enabled": true,
     "hook_secret": "string",
@@ -2930,6 +2933,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 {
   "acquire_batch_size": 0,
   "debug_logging_enabled": true,
+  "fork": {
+    "max_subagent_depth": 0
+  },
   "hook_allow_insecure": true,
   "hook_enabled": true,
   "hook_secret": "string",
@@ -2959,22 +2965,23 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                               | Type                       | Required | Restrictions | Description                                                                                                                               |
-|------------------------------------|----------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `acquire_batch_size`               | integer                    | false    |              |                                                                                                                                           |
-| `debug_logging_enabled`            | boolean                    | false    |              |                                                                                                                                           |
-| `hook_allow_insecure`              | boolean                    | false    |              |                                                                                                                                           |
-| `hook_enabled`                     | boolean                    | false    |              |                                                                                                                                           |
-| `hook_secret`                      | string                     | false    |              |                                                                                                                                           |
-| `hook_timeout`                     | integer                    | false    |              |                                                                                                                                           |
-| `hook_url`                         | [serpent.URL](#serpenturl) | false    |              |                                                                                                                                           |
-| `max_attachments_per_chat`         | integer                    | false    |              | Max attachments per chat is the maximum number of files linked to a chat.                                                                 |
-| `max_concurrent_recording_uploads` | integer                    | false    |              | Max concurrent recording uploads is the maximum number of virtual desktop recordings that each Coder server stores at the same time.      |
-| `max_generation_retries`           | integer                    | false    |              | Max generation retries is the maximum number of consecutive retries after a model generation fails with a transient error.                |
-| `max_prompt_bytes`                 | integer                    | false    |              | Max prompt bytes is the maximum size in bytes of the deployment system prompt, the plan mode instructions, and each user's custom prompt. |
-| `max_queued_messages_per_chat`     | integer                    | false    |              | Max queued messages per chat is the maximum number of messages that can be queued in a chat.                                              |
-| `max_steps_per_turn`               | integer                    | false    |              | Max steps per turn is the maximum number of steps in a chat turn.                                                                         |
-| `stream_silence_timeout`           | integer                    | false    |              |                                                                                                                                           |
+| Name                               | Type                                               | Required | Restrictions | Description                                                                                                                               |
+|------------------------------------|----------------------------------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `acquire_batch_size`               | integer                                            | false    |              |                                                                                                                                           |
+| `debug_logging_enabled`            | boolean                                            | false    |              |                                                                                                                                           |
+| `fork`                             | [codersdk.ForkChatConfig](#codersdkforkchatconfig) | false    |              | Fork holds the fork-only chat options.                                                                                                    |
+| `hook_allow_insecure`              | boolean                                            | false    |              |                                                                                                                                           |
+| `hook_enabled`                     | boolean                                            | false    |              |                                                                                                                                           |
+| `hook_secret`                      | string                                             | false    |              |                                                                                                                                           |
+| `hook_timeout`                     | integer                                            | false    |              |                                                                                                                                           |
+| `hook_url`                         | [serpent.URL](#serpenturl)                         | false    |              |                                                                                                                                           |
+| `max_attachments_per_chat`         | integer                                            | false    |              | Max attachments per chat is the maximum number of files linked to a chat.                                                                 |
+| `max_concurrent_recording_uploads` | integer                                            | false    |              | Max concurrent recording uploads is the maximum number of virtual desktop recordings that each Coder server stores at the same time.      |
+| `max_generation_retries`           | integer                                            | false    |              | Max generation retries is the maximum number of consecutive retries after a model generation fails with a transient error.                |
+| `max_prompt_bytes`                 | integer                                            | false    |              | Max prompt bytes is the maximum size in bytes of the deployment system prompt, the plan mode instructions, and each user's custom prompt. |
+| `max_queued_messages_per_chat`     | integer                                            | false    |              | Max queued messages per chat is the maximum number of messages that can be queued in a chat.                                              |
+| `max_steps_per_turn`               | integer                                            | false    |              | Max steps per turn is the maximum number of steps in a chat turn.                                                                         |
+| `stream_silence_timeout`           | integer                                            | false    |              |                                                                                                                                           |
 
 ## codersdk.ChatContext
 
@@ -8335,6 +8342,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       "chat": {
         "acquire_batch_size": 0,
         "debug_logging_enabled": true,
+        "fork": {
+          "max_subagent_depth": 0
+        },
         "hook_allow_insecure": true,
         "hook_enabled": true,
         "hook_secret": "string",
@@ -8973,6 +8983,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
     "chat": {
       "acquire_batch_size": 0,
       "debug_logging_enabled": true,
+      "fork": {
+        "max_subagent_depth": 0
+      },
       "hook_allow_insecure": true,
       "hook_enabled": true,
       "hook_secret": "string",
@@ -10028,9 +10041,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                      |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-chat-todos`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -10358,6 +10371,20 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `limit`        | integer                                      | false    |              | Limit is the maximum value the license grants for the feature, in the feature's own unit. For FeatureAgentRuntimeHours, an enabled feature with Limit omitted means the license grants unlimited runtime hours.                                                                                                                                                                                                                                                             |
 | `soft_limit`   | integer                                      | false    |              | Soft limit is the advisory warning threshold that accompanies Limit for features whose license carries it. For these features, Limit carries the purchased allocation; an unlimited allocation has no thresholds, so SoftLimit is omitted alongside the omitted Limit. Only FeatureAgentRuntimeHours sets this field.                                                                                                                                                       |
 | `usage_period` | [codersdk.UsagePeriod](#codersdkusageperiod) | false    |              | Usage period denotes that the usage is a counter that accumulates over this period (and most likely resets with the issuance of the next license). These dates are determined from the license that this entitlement comes from, see enterprise/coderd/license/license.go. Only FeatureManagedAgentLimit and FeatureAgentRuntimeHours set this field.                                                                                                                       |
+
+## codersdk.ForkChatConfig
+
+```json
+{
+  "max_subagent_depth": 0
+}
+```
+
+### Properties
+
+| Name                 | Type    | Required | Restrictions | Description                                                                                                                                       |
+|----------------------|---------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_subagent_depth` | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
 
 ## codersdk.FriendlyDiagnostic
 
