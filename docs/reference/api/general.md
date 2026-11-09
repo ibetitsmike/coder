@@ -221,6 +221,7 @@ curl -X GET http://coder-server:8080/api/v2/deployment/config \
         "fork": {
           "max_concurrent_subagents": 0,
           "max_concurrent_subagents_per_family": 0,
+          "max_live_subagents_per_family": 0,
           "max_subagent_depth": 0
         },
         "hook_allow_insecure": true,

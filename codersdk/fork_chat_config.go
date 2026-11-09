@@ -33,6 +33,10 @@ type ForkChatConfig struct {
 	// subagent chats under one root chat, not counting a subagent's own
 	// ancestors. 0 means no limit.
 	MaxConcurrentSubagentsPerFamily serpent.Int64 `json:"max_concurrent_subagents_per_family" typescript:",notnull"`
+	// MaxLiveSubagentsPerFamily is the maximum number of live subagent chats
+	// under one root chat, checked when a subagent is spawned or when
+	// message_agent resumes a finished one. 0 means no limit.
+	MaxLiveSubagentsPerFamily serpent.Int64 `json:"max_live_subagents_per_family" typescript:",notnull"`
 }
 
 func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionSet {
@@ -67,6 +71,16 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 			Group:       group,
 			YAML:        "maxConcurrentSubagentsPerFamily",
 		},
+		{
+			Name:        "Chat: Max Live Subagents Per Family",
+			Description: "Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one with message_agent, fails at the limit. 0 means no limit. An organization can set a lower value.",
+			Flag:        "chat-max-live-subagents-per-family",
+			Env:         "CODER_CHAT_MAX_LIVE_SUBAGENTS_PER_FAMILY",
+			Value:       &c.AI.Chat.Fork.MaxLiveSubagentsPerFamily,
+			Default:     "0",
+			Group:       group,
+			YAML:        "maxLiveSubagentsPerFamily",
+		},
 	}
 }
 
@@ -82,6 +96,7 @@ func (c *DeploymentValues) validateForkChat() error {
 	}{
 		{"chat-max-concurrent-subagents", c.AI.Chat.Fork.MaxConcurrentSubagents.Value()},
 		{"chat-max-concurrent-subagents-per-family", c.AI.Chat.Fork.MaxConcurrentSubagentsPerFamily.Value()},
+		{"chat-max-live-subagents-per-family", c.AI.Chat.Fork.MaxLiveSubagentsPerFamily.Value()},
 	} {
 		if limit.value < 0 {
 			return xerrors.Errorf("--%s (%d) must be 0 or greater", limit.flag, limit.value)

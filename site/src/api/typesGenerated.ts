@@ -6286,6 +6286,12 @@ export interface ForkChatConfig {
 	 * ancestors. 0 means no limit.
 	 */
 	readonly max_concurrent_subagents_per_family: number;
+	/**
+	 * MaxLiveSubagentsPerFamily is the maximum number of live subagent chats
+	 * under one root chat, checked when a subagent is spawned or when
+	 * message_agent resumes a finished one. 0 means no limit.
+	 */
+	readonly max_live_subagents_per_family: number;
 }
 
 // From codersdk/fork_subagent_limits.go
@@ -6293,7 +6299,6 @@ export interface ForkChatConfig {
  * ForkOrganizationSubagentLimits are the subagent limits of an organization.
  * A nil limit, which is omitted from JSON, uses the deployment value, and a
  * set limit can only lower it.
- * MaxLivePerFamily is stored but not enforced yet.
  */
 export interface ForkOrganizationSubagentLimits {
 	/**
@@ -6312,8 +6317,11 @@ export interface ForkOrganizationSubagentLimits {
 	 */
 	readonly max_concurrent_per_family?: number;
 	/**
-	 * MaxLivePerFamily is the maximum number of unarchived subagent chats
-	 * under one root chat.
+	 * MaxLivePerFamily is the maximum number of live subagent chats under one
+	 * root chat, checked when a subagent is spawned or when message_agent
+	 * resumes a finished one. A live subagent has status running,
+	 * interrupting, requires_action or paused and is not archived. A finished
+	 * one is waiting or error and does not count.
 	 */
 	readonly max_live_per_family?: number;
 }

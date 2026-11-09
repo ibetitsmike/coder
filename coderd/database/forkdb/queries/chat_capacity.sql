@@ -26,3 +26,12 @@ WHERE c.worker_id IS NOT NULL
 	AND c.parent_chat_id IS NOT NULL
 	AND c.id NOT IN (SELECT lineage.id FROM lineage)
 	AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int);
+
+-- name: CountLiveSubagentsInFamily :one
+-- Counts the unarchived subagent chats under @root_chat_id that have not
+-- finished. A finished subagent is waiting or error.
+SELECT COUNT(*)::bigint AS live_count
+FROM chats
+WHERE chats.root_chat_id = @root_chat_id::uuid
+	AND chats.archived = false
+	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status);

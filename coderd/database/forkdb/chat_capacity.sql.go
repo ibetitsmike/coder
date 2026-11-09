@@ -65,3 +65,20 @@ func (q *Queries) CountActiveSubagentsForCapacity(ctx context.Context, arg Count
 	err := row.Scan(&i.ActiveCount, &i.ActiveOrganizationCount, &i.ActiveFamilyCount)
 	return i, err
 }
+
+const countLiveSubagentsInFamily = `-- name: CountLiveSubagentsInFamily :one
+SELECT COUNT(*)::bigint AS live_count
+FROM chats
+WHERE chats.root_chat_id = $1::uuid
+	AND chats.archived = false
+	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status)
+`
+
+// Counts the unarchived subagent chats under @root_chat_id that have not
+// finished. A finished subagent is waiting or error.
+func (q *Queries) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countLiveSubagentsInFamily, rootChatID)
+	var live_count int64
+	err := row.Scan(&live_count)
+	return live_count, err
+}

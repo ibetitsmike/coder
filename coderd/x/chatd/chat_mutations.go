@@ -146,6 +146,9 @@ func (p *Server) SendMessage(
 		if lockedChat.Archived {
 			return ErrChatArchived
 		}
+		if err := p.forkValidateSubagentResume(ctx, store, lockedChat, true); err != nil {
+			return err
+		}
 
 		if opts.PlanMode != nil {
 			lockedChat, err = store.UpdateChatPlanModeByID(ctx, database.UpdateChatPlanModeByIDParams{
