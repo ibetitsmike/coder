@@ -743,7 +743,9 @@ func (p *Server) buildTurnEnvironment(
 		}
 	}
 
-	tools = p.appendForkTools(ctx, tools, chat)
+	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID); err != nil {
+		return turnEnvironment{}, err
+	}
 	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
 		_, ok := tool.(acpSpawnTool)
 		return ok

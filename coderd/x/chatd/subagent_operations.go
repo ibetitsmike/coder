@@ -40,7 +40,7 @@ func (p *Server) awaitSubagent(
 	targetChatID uuid.UUID,
 	timeout time.Duration,
 ) (subagentAwaitOutcome, error) {
-	isDescendant, err := isSubagentDescendant(ctx, p.db, parent.ID, targetChatID)
+	isDescendant, err := p.isSubagentTarget(ctx, parent.ID, targetChatID)
 	if err != nil {
 		return subagentAwaitOutcome{}, xerrors.Errorf("failed to verify subagent relationship: %v", err)
 	}
@@ -109,7 +109,7 @@ func (p *Server) sendSubagentMessage(
 		return database.Chat{}, xerrors.New("message is required")
 	}
 
-	isDescendant, err := isSubagentDescendant(ctx, p.db, parentChatID, targetChatID)
+	isDescendant, err := p.isSubagentTarget(ctx, parentChatID, targetChatID)
 	if err != nil {
 		return database.Chat{}, err
 	}
@@ -141,7 +141,7 @@ func (p *Server) interruptSubagent(
 	parentChatID uuid.UUID,
 	targetChatID uuid.UUID,
 ) (database.Chat, bool, error) {
-	isDescendant, err := isSubagentDescendant(ctx, p.db, parentChatID, targetChatID)
+	isDescendant, err := p.isSubagentTarget(ctx, parentChatID, targetChatID)
 	if err != nil {
 		return database.Chat{}, false, err
 	}
@@ -229,8 +229,10 @@ func (p *Server) loadSubagentSpawnParentChat(
 		return database.Chat{}, err
 	}
 	// Fail before prompt hooks run for a child that cannot be created.
-	// Spawn parents are always roots, so this is the family's archived
-	// flag. The locked check in chatstate.CreateChat stays authoritative.
+	// Archiving applies to a whole family, so a spawn parent (a root, or
+	// with nested subagents a general chat below the maximum depth) carries
+	// the family's archived flag. The locked check in chatstate.CreateChat
+	// stays authoritative.
 	if parent.Archived {
 		return database.Chat{}, errSpawnUnderArchivedParent(chatstate.ErrChatFamilyArchived)
 	}
@@ -362,9 +364,11 @@ func (p *Server) createChildSubagentChatWithOptions(
 	if err != nil {
 		return database.Chat{}, err
 	}
-	// Delegated chats cannot call list_agents or message_agent, so
-	// strip the root-only orchestration guidance from their prompt.
-	deploymentPrompt = strings.Replace(deploymentPrompt, subagentOrchestrationPromptBlock, "", 1)
+	// Delegated chats that cannot spawn have no list_agents or
+	// message_agent, so they lose the orchestration guidance.
+	if !p.childGetsOrchestrationPrompt(ctx, parent, opts.chatMode) {
+		deploymentPrompt = strings.Replace(deploymentPrompt, subagentOrchestrationPromptBlock, "", 1)
+	}
 	organizationPrompt, err := p.resolveOrganizationSystemPrompt(ctx, parent.OrganizationID)
 	if err != nil {
 		return database.Chat{}, err
@@ -510,7 +514,7 @@ func (p *Server) awaitSubagentCompletion(
 	targetChatID uuid.UUID,
 	timeout time.Duration,
 ) (database.Chat, string, error) {
-	isDescendant, err := isSubagentDescendant(ctx, p.db, parentChatID, targetChatID)
+	isDescendant, err := p.isSubagentTarget(ctx, parentChatID, targetChatID)
 	if err != nil {
 		return database.Chat{}, "", err
 	}

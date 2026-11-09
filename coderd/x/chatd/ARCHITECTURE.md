@@ -1184,6 +1184,7 @@ The generation goroutine supports:
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
+  <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
 - file links
 - workspace binding
 - plan mode

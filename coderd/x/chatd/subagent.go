@@ -591,7 +591,7 @@ func (p *Server) subagentTools(
 					offset = *args.Offset
 				}
 				parent := currentChat()
-				if parent.ParentChatID.Valid {
+				if parent.ParentChatID.Valid && !p.nestedSubagentsEnabled() {
 					return fantasy.NewTextErrorResponse("list_agents is only available on root chats"), nil
 				}
 				children, err := p.listSubagents(ctx, parent.ID)

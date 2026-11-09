@@ -1,18 +1,24 @@
 package chatd
 
 // This file is fork code: it implements nested subagents behind the
-// fork-nested-subagents experiment. Upstream's subagent_operations.go calls
-// forkValidateSpawnParent and createSubagentChatWithID, which keep upstream's
-// behavior when the experiment is off.
+// fork-nested-subagents experiment. Upstream's chatd files call the hooks in
+// this file (forkValidateSpawnParent, createSubagentChatWithID,
+// isSubagentTarget, childGetsOrchestrationPrompt and
+// forkSpawnAgentDescription), which keep upstream's behavior when the
+// experiment is off.
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
@@ -115,4 +121,95 @@ func (p *Server) createSubagentChatWithID(
 		return chatstate.CreateChatResult{}, err
 	}
 	return result, buffer.Flush()
+}
+
+// subagentCanSpawn reports whether chat may spawn children: explore and
+// computer use chats never can, and a general chat can only while its
+// children stay within the maximum subagent depth.
+func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool, error) {
+	if !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(chat.Mode) {
+		return false, nil
+	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return false, xerrors.Errorf("fork queries: %w", err)
+	}
+	depth, err := subagentDepth(ctx, fdb, chat)
+	if err != nil {
+		return false, err
+	}
+	return int(depth)+1 <= p.chatLimits.Fork.MaxSubagentDepth, nil
+}
+
+func subagentModeCanSpawn(mode database.NullChatMode) bool {
+	if isExploreSubagentMode(mode) {
+		return false
+	}
+	return !mode.Valid || mode.ChatMode != database.ChatModeComputerUse
+}
+
+// nestedSubagentTools returns the subagent tools of a delegated chat that can
+// spawn. Root chats get them from appendRootChatTools instead.
+func (p *Server) nestedSubagentTools(ctx context.Context, chat database.Chat, modelConfigID uuid.UUID) ([]fantasy.AgentTool, error) {
+	if !chat.ParentChatID.Valid {
+		return nil, nil
+	}
+	canSpawn, err := p.subagentCanSpawn(ctx, chat)
+	if err != nil || !canSpawn {
+		return nil, err
+	}
+	return p.subagentTools(ctx, func() database.Chat { return chat }, modelConfigID)
+}
+
+// isSubagentTarget reports whether parentChatID may wait on, message,
+// interrupt or list targetChatID. Upstream allows any descendant; nested
+// subagents allow only direct children, so each level manages its own.
+func (p *Server) isSubagentTarget(ctx context.Context, parentChatID, targetChatID uuid.UUID) (bool, error) {
+	if !p.nestedSubagentsEnabled() {
+		return isSubagentDescendant(ctx, p.db, parentChatID, targetChatID)
+	}
+	target, err := p.db.GetChatByID(ctx, targetChatID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, xerrors.Errorf("get chat %s: %w", targetChatID, err)
+	}
+	return target.ParentChatID.Valid && target.ParentChatID.UUID == parentChatID, nil
+}
+
+// childGetsOrchestrationPrompt reports whether a child of parent with
+// childMode keeps the subagent orchestration guidance, which is true only
+// when the child will have the subagent tools.
+func (p *Server) childGetsOrchestrationPrompt(ctx context.Context, parent database.Chat, childMode database.NullChatMode) bool {
+	if !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(childMode) {
+		return false
+	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		p.logger.Warn(ctx, "fork queries for subagent orchestration prompt", slog.Error(err))
+		return false
+	}
+	depth, err := subagentDepth(ctx, fdb, parent)
+	if err != nil {
+		p.logger.Warn(ctx, "get parent subagent depth for orchestration prompt",
+			slog.F("chat_id", parent.ID), slog.Error(err))
+		return false
+	}
+	return int(depth)+2 <= p.chatLimits.Fork.MaxSubagentDepth
+}
+
+const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own subagents; its tools depend on its type and mode. "
+
+// forkSpawnAgentDescription rewrites upstream's spawn_agent description,
+// which says children cannot spawn, when nested subagents are enabled.
+func (p *Server) forkSpawnAgentDescription(_ context.Context, _ database.Chat, description string) string {
+	if !p.nestedSubagentsEnabled() {
+		return description
+	}
+	return strings.Replace(description, upstreamSpawnAgentChildToolsSentence, fmt.Sprintf(
+		"A general child can spawn its own subagents while it is below the maximum subagent depth of %d; "+
+			"explore and computer use children cannot. Its tools depend on its type and mode. ",
+		p.chatLimits.Fork.MaxSubagentDepth,
+	), 1)
 }

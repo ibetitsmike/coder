@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
 )
@@ -17,8 +18,11 @@ import (
 // experiment with Server.experiments and
 // codersdk.Experiment("fork-<feature>"), the way chatd gates upstream
 // experiments, so with no fork experiment enabled the list is exactly the
-// upstream list. The blank parameters name what a fork tool needs, and become
-// named when the first fork tool lands.
-func (*Server) appendForkTools(_ context.Context, tools []fantasy.AgentTool, _ database.Chat) []fantasy.AgentTool {
-	return tools
+// upstream list.
+func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool, chat database.Chat, modelConfigID uuid.UUID) ([]fantasy.AgentTool, error) {
+	nested, err := p.nestedSubagentTools(ctx, chat, modelConfigID)
+	if err != nil {
+		return nil, err
+	}
+	return append(tools, nested...), nil
 }

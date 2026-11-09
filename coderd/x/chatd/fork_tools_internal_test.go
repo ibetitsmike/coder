@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -32,7 +33,8 @@ func TestAppendForkTools(t *testing.T) {
 
 	for _, experiments := range []codersdk.Experiments{{}, upstream} {
 		p := &Server{experiments: experiments}
-		got := p.appendForkTools(ctx, tools, chat)
+		got, err := p.appendForkTools(ctx, tools, chat, uuid.Nil)
+		require.NoError(t, err)
 		require.Len(t, got, len(tools), "tool count changed with experiments %v", experiments)
 		for i, want := range tools {
 			require.Samef(t, want, got[i], "tool %d changed with experiments %v", i, experiments)
