@@ -612,7 +612,9 @@ type sqlcQuerier interface {
 	// requires-action chats follow so their runner can enforce the action deadline
 	// before new generations start. Pools are interleaved by that per-pool rank, so
 	// a saturated pool's refused high-priority rows cannot crowd the other pool's
-	// candidates out of the limit.
+	// candidates out of the limit. Subagents interleave organizations, then the
+	// families within each, then age, so the refused rows of a capped organization
+	// or family cannot crowd the others out either. Roots keep age order.
 	GetChatWorkerAcquisitionCandidates(ctx context.Context, arg GetChatWorkerAcquisitionCandidatesParams) ([]GetChatWorkerAcquisitionCandidatesRow, error)
 	// Returns the global TTL for chat workspaces as a Go duration string.
 	// Returns "0s" (disabled) when no value has been configured.

@@ -11059,11 +11059,26 @@ candidates AS (
         candidate_partitions.pool_priority,
         ROW_NUMBER() OVER (
             PARTITION BY candidate_partitions.is_root
-            ORDER BY candidate_partitions.status_priority ASC, candidate.updated_at ASC, candidate.id ASC
+            ORDER BY candidate_partitions.status_priority ASC, candidate.fair_position ASC, candidate.updated_at ASC, candidate.id ASC
         ) AS pool_position
     FROM candidate_partitions
     CROSS JOIN LATERAL (
-        SELECT chats.id, chats.updated_at
+        SELECT
+            family_ranked.id,
+            family_ranked.updated_at,
+            CASE WHEN candidate_partitions.is_root THEN 1 ELSE ROW_NUMBER() OVER (
+                PARTITION BY family_ranked.organization_id
+                ORDER BY family_ranked.family_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
+            ) END AS fair_position
+        FROM (
+        SELECT
+            chats.id,
+            chats.updated_at,
+            chats.organization_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(chats.root_chat_id, chats.parent_chat_id)
+                ORDER BY chats.updated_at ASC, chats.id ASC
+            ) AS family_position
         FROM chats
         WHERE (chats.parent_chat_id IS NULL) = candidate_partitions.is_root
           AND chats.status = candidate_partitions.status
@@ -11079,7 +11094,8 @@ candidates AS (
                     AND current_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
               )
           )
-        ORDER BY chats.updated_at ASC, chats.id ASC
+        ) family_ranked
+        ORDER BY fair_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
         LIMIT $1::int
     ) candidate
 )
@@ -11112,7 +11128,9 @@ type GetChatWorkerAcquisitionCandidatesRow struct {
 // requires-action chats follow so their runner can enforce the action deadline
 // before new generations start. Pools are interleaved by that per-pool rank, so
 // a saturated pool's refused high-priority rows cannot crowd the other pool's
-// candidates out of the limit.
+// candidates out of the limit. Subagents interleave organizations, then the
+// families within each, then age, so the refused rows of a capped organization
+// or family cannot crowd the others out either. Roots keep age order.
 func (q *sqlQuerier) GetChatWorkerAcquisitionCandidates(ctx context.Context, arg GetChatWorkerAcquisitionCandidatesParams) ([]GetChatWorkerAcquisitionCandidatesRow, error) {
 	rows, err := q.db.QueryContext(ctx, getChatWorkerAcquisitionCandidates, arg.LimitCount, arg.StaleSeconds)
 	if err != nil {
