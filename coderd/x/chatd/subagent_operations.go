@@ -262,8 +262,8 @@ type childSubagentChatOptions struct {
 	reasoningEffortOverride *string
 	planModeOverride        *database.NullChatPlanMode
 	inheritedMCPServerIDs   []uuid.UUID
-	// agentType is the custom agent type name, empty for built-in types.
-	agentType string
+	// customAgent is the custom agent definition, nil for built-in types.
+	customAgent *workspacesdk.AgentDefinition
 }
 
 // resolveExploreToolSnapshot computes the child chat's inherited MCP
@@ -371,7 +371,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	}
 	// Delegated chats that cannot spawn have no list_agents or
 	// message_agent, so they lose the orchestration guidance.
-	if !p.childGetsOrchestrationPrompt(ctx, parent, opts.chatMode) {
+	if !p.childGetsOrchestrationPrompt(ctx, parent, opts.chatMode, opts.customAgent) {
 		deploymentPrompt = strings.Replace(deploymentPrompt, subagentOrchestrationPromptBlock, "", 1)
 	}
 	organizationPrompt, err := p.resolveOrganizationSystemPrompt(ctx, parent.OrganizationID)
@@ -471,7 +471,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	if publisher == nil {
 		publisher = dbpubsub.NewInMemory()
 	}
-	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, opts.agentType, chatstate.CreateChatInput{
+	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, opts.customAgent, chatstate.CreateChatInput{
 		OrganizationID:    parent.OrganizationID,
 		OwnerID:           parent.OwnerID,
 		WorkspaceID:       parent.WorkspaceID,

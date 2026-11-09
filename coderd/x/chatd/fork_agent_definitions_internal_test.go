@@ -4,15 +4,20 @@ package chatd
 // the fork-agent-definitions experiment.
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -36,12 +41,13 @@ func newAgentDefinitionsFixture(
 	t *testing.T,
 	experiments codersdk.Experiments,
 	definitions func(otherModel database.ChatModelConfig) map[string]string,
+	opts ...internalTestServerOpt,
 ) agentDefinitionsFixture {
 	t.Helper()
 
 	db, ps := dbtestutil.NewDB(t)
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
-		withInternalTestServerExperiments(experiments))
+		append(opts, withInternalTestServerExperiments(experiments))...)
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
 
@@ -119,6 +125,18 @@ func (f agentDefinitionsFixture) systemPrompt(t *testing.T, chatID uuid.UUID) st
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+// applyStoredToolPolicy filters tools and candidates by the tool policy
+// stored for chat, as a turn of chat does.
+func applyStoredToolPolicy(t *testing.T, server *Server, chat database.Chat, tools []fantasy.AgentTool, candidates []deferredMCPTool) ([]fantasy.AgentTool, []deferredMCPTool) {
+	t.Helper()
+	ctx := chatdTestContext(t)
+	policy, err := server.customAgentToolPolicyOfChat(ctx, chat)
+	require.NoError(t, err)
+	tools, candidates, _, err = server.applyCustomAgentToolPolicy(ctx, chat, policy, tools, candidates, nil)
+	require.NoError(t, err)
+	return tools, candidates
 }
 
 func agentDefinitionMarkdown(frontmatter, body string) string {
@@ -268,5 +286,176 @@ func TestForkAgentDefinitionDescriptionBudget(t *testing.T) {
 			continue
 		}
 		require.Equal(t, customAgentFallbackDescription, description, "entry %d", i)
+	}
+}
+
+func TestForkAgentDefinitionToolPolicy(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions, codersdk.ExperimentForkNestedSubagents},
+		func(database.ChatModelConfig) map[string]string {
+			return map[string]string{
+				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
+				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file, lookups__lookup]", "No writes."),
+				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [docs]", "Docs only."),
+				"no-wait":     agentDefinitionMarkdown("name: no-wait\ndisallowed_tools: [wait_agent]", "No waiting."),
+			}
+		},
+		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
+	turnToolNames := func(t *testing.T, child database.Chat) []string {
+		t.Helper()
+		ctx := chatdTestContext(t)
+		messages, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+		require.NoError(t, err)
+		env, err := f.server.buildTurnEnvironment(ctx, generationPrepareInput{Chat: child, Messages: messages})
+		require.NoError(t, err)
+		t.Cleanup(env.Close)
+		return toolNames(env.Tools)
+	}
+
+	t.Run("ReadOnly", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "reader"})
+		require.NoError(t, err)
+		row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
+		require.NoError(t, err)
+		var policy customAgentToolPolicy
+		require.NoError(t, json.Unmarshal(row.ToolPolicy.RawMessage, &policy))
+		require.True(t, policy.ReadOnly)
+
+		names := turnToolNames(t, child)
+		require.Contains(t, names, "execute")
+		require.NotContains(t, names, "write_file")
+		require.NotContains(t, names, "edit_files")
+		require.NotContains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
+	})
+
+	t.Run("DisallowedTools", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "no-writes"})
+		require.NoError(t, err)
+		names := turnToolNames(t, child)
+		require.Contains(t, names, "edit_files")
+		require.NotContains(t, names, "write_file")
+		require.Contains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
+		noWait, err := f.spawn(t, spawnAgentArgs{Type: "no-wait"})
+		require.NoError(t, err)
+		require.NotContains(t, f.systemPrompt(t, noWait.ID), subagentOrchestrationPromptBlock)
+
+		searchTool := newTestMCPAgentTool("lookups__search", uuid.New())
+		lookupTool := newTestMCPAgentTool("lookups__lookup", uuid.New())
+		tools, candidates := applyStoredToolPolicy(t, f.server, child,
+			[]fantasy.AgentTool{newTestAgentTool("read_file"), searchTool, lookupTool},
+			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}})
+		require.Equal(t, []string{"read_file", "lookups__search"}, toolNames(tools))
+		require.Len(t, candidates, 1)
+		require.Equal(t, "lookups__search", candidates[0].tool.Info().Name)
+	})
+
+	t.Run("AllowlistAndNamedMCP", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "docs-reader"})
+		require.NoError(t, err)
+		require.NotContains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
+		docs := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs"})
+		// The tools of this server are named docs__mirror__<tool>, so their
+		// name alone would attribute them to docs.
+		mirror := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs__mirror"})
+		inline := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "docs"})
+		// Slugs match exactly, so DOCS is a different server.
+		inlineUpper := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "DOCS"})
+		internal := InternalMCPServer{Slug: "docs"}
+		server := &Server{db: f.db, experiments: f.server.experiments, internalMCPServers: []InternalMCPServer{internal}}
+		docsTool := newTestMCPAgentTool("docs__search", docs.ID)
+		mirrorTool := newTestMCPAgentTool("docs__mirror__search", mirror.ID)
+
+		tools, candidates := applyStoredToolPolicy(t, server, child,
+			[]fantasy.AgentTool{
+				newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, mirrorTool,
+				newTestMCPAgentTool("docs__fetch", inline.ID), newTestMCPAgentTool("DOCS__fetch", inlineUpper.ID),
+				newTestMCPAgentTool("docs__kb", internal.id()),
+			},
+			[]deferredMCPTool{{tool: mirrorTool}, {tool: docsTool}})
+		require.Equal(t, []string{"read_file", "docs__search", "docs__fetch", "docs__kb"}, toolNames(tools))
+		require.Len(t, candidates, 1)
+		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
+	})
+
+	t.Run("BuiltinType", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: subagentTypeGeneral})
+		require.NoError(t, err)
+		row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
+		require.NoError(t, err)
+		require.False(t, row.ToolPolicy.Valid)
+		require.Contains(t, turnToolNames(t, child), "write_file")
+	})
+
+	t.Run("UndecodablePolicyFailsClosed", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		for _, policy := range []string{`{"tools": "Read"}`, `{"mcp_mode": "everything"}`} {
+			child := dbgen.Chat(t, f.db, database.Chat{
+				OrganizationID:    f.root.OrganizationID,
+				OwnerID:           f.root.OwnerID,
+				LastModelConfigID: f.root.LastModelConfigID,
+				ParentChatID:      uuid.NullUUID{UUID: f.root.ID, Valid: true},
+				RootChatID:        uuid.NullUUID{UUID: f.root.ID, Valid: true},
+			})
+			dbgen.ChatSubagent(t, f.db, forkdb.ChatSubagent{
+				ChatID:     child.ID,
+				AgentType:  "reader",
+				ToolPolicy: pqtype.NullRawMessage{RawMessage: json.RawMessage(policy), Valid: true},
+			})
+			_, err := f.server.customAgentToolPolicyOfChat(ctx, child)
+			require.Error(t, err, policy)
+		}
+	})
+}
+
+// TestForkAgentDefinitionToolPolicySkillIndex checks that a child keeps the
+// skill index only when its tool policy keeps read_skill.
+func TestForkAgentDefinitionToolPolicySkillIndex(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions},
+		func(database.ChatModelConfig) map[string]string {
+			return map[string]string{
+				"reader":    agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
+				"no-skills": agentDefinitionMarkdown("name: no-skills\ntools: [Read]", "No skills."),
+				"denied":    agentDefinitionMarkdown("name: denied\ndisallowed_tools: [read_skill]", "No skills."),
+			}
+		},
+		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
+	ctx := chatdTestContext(t)
+	_, err := f.db.InsertUserSkill(ctx, database.InsertUserSkillParams{
+		ID: uuid.New(), UserID: f.root.OwnerID, Name: "notes", Content: "---\nname: notes\ndescription: Notes\n---\n\nTake notes.\n",
+	})
+	require.NoError(t, err)
+
+	for _, tt := range []struct {
+		agentType string
+		keeps     bool
+	}{
+		{agentType: subagentTypeGeneral, keeps: true},
+		{agentType: "reader", keeps: true},
+		{agentType: "no-skills"},
+		{agentType: "denied"},
+	} {
+		t.Run(tt.agentType, func(t *testing.T) {
+			t.Parallel()
+			ctx := chatdTestContext(t)
+			child, err := f.spawn(t, spawnAgentArgs{Type: tt.agentType})
+			require.NoError(t, err)
+			messages, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+			require.NoError(t, err)
+			env, err := f.server.buildTurnEnvironment(ctx, generationPrepareInput{Chat: child, Messages: messages})
+			require.NoError(t, err)
+			t.Cleanup(env.Close)
+			require.Equal(t, tt.keeps, strings.Contains(systemPromptText(t, env.Prompt), "<available-skills>"))
+			require.Equal(t, tt.keeps, slices.Contains(toolNames(env.Tools), "read_skill"))
+		})
 	}
 }
