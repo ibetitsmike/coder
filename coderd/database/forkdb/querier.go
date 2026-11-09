@@ -16,6 +16,12 @@ type Querier interface {
 	// concurrent replicas from blocking on, or double leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
+	// Counts the subagent chats that hold a capacity slot: owned by a worker with
+	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
+	// ancestors never count: a coordinator blocked in wait_agent holds a slot, so
+	// its own descendants must never wait for it. The depth guard stops the walk
+	// if a cycle ever appears in the hierarchy.
+	CountActiveSubagentsForCapacity(ctx context.Context, arg CountActiveSubagentsForCapacityParams) (CountActiveSubagentsForCapacityRow, error)
 	DeleteExpiredPluginLinkCodes(ctx context.Context) error
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error

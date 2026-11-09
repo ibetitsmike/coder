@@ -13,8 +13,7 @@ import (
 
 // ForkOrganizationSubagentLimits are the subagent limits of an organization.
 // A nil limit uses the deployment value, and a set limit can only lower it.
-// chatd enforces MaxDepth; the capacity limits are stored but not enforced
-// yet.
+// MaxLivePerFamily is stored but not enforced yet.
 type ForkOrganizationSubagentLimits struct {
 	// MaxDepth is the maximum depth of nested subagent chats, between 1 and
 	// 16.

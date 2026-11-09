@@ -25,6 +25,12 @@ type ForkChatConfig struct {
 	// the fork-nested-subagents experiment is enabled. A root chat is at
 	// depth 0.
 	MaxSubagentDepth serpent.Int64 `json:"max_subagent_depth" typescript:",notnull"`
+	// MaxConcurrentSubagents is the maximum number of running subagent chats
+	// in the deployment. 0 means no limit.
+	MaxConcurrentSubagents serpent.Int64 `json:"max_concurrent_subagents" typescript:",notnull"`
+	// MaxConcurrentSubagentsPerFamily is the maximum number of running
+	// subagent chats under one root chat. 0 means no limit.
+	MaxConcurrentSubagentsPerFamily serpent.Int64 `json:"max_concurrent_subagents_per_family" typescript:",notnull"`
 }
 
 func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionSet {
@@ -39,6 +45,26 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 			Group:       group,
 			YAML:        "maxSubagentDepth",
 		},
+		{
+			Name:        "Chat: Max Concurrent Subagents",
+			Description: "Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value for its own chats.",
+			Flag:        "chat-max-concurrent-subagents",
+			Env:         "CODER_CHAT_MAX_CONCURRENT_SUBAGENTS",
+			Value:       &c.AI.Chat.Fork.MaxConcurrentSubagents,
+			Default:     "0",
+			Group:       group,
+			YAML:        "maxConcurrentSubagents",
+		},
+		{
+			Name:        "Chat: Max Concurrent Subagents Per Family",
+			Description: "Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value.",
+			Flag:        "chat-max-concurrent-subagents-per-family",
+			Env:         "CODER_CHAT_MAX_CONCURRENT_SUBAGENTS_PER_FAMILY",
+			Value:       &c.AI.Chat.Fork.MaxConcurrentSubagentsPerFamily,
+			Default:     "0",
+			Group:       group,
+			YAML:        "maxConcurrentSubagentsPerFamily",
+		},
 	}
 }
 
@@ -47,6 +73,17 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 func (c *DeploymentValues) validateForkChat() error {
 	if depth := c.AI.Chat.Fork.MaxSubagentDepth.Value(); depth < 1 || depth > MaxChatMaxSubagentDepth {
 		return xerrors.Errorf("--chat-max-subagent-depth (%d) must be between 1 and %d", depth, MaxChatMaxSubagentDepth)
+	}
+	for _, limit := range []struct {
+		flag  string
+		value int64
+	}{
+		{"chat-max-concurrent-subagents", c.AI.Chat.Fork.MaxConcurrentSubagents.Value()},
+		{"chat-max-concurrent-subagents-per-family", c.AI.Chat.Fork.MaxConcurrentSubagentsPerFamily.Value()},
+	} {
+		if limit.value < 0 {
+			return xerrors.Errorf("--%s (%d) must be 0 or greater", limit.flag, limit.value)
+		}
 	}
 	return nil
 }

@@ -231,8 +231,16 @@ func TestNestedSubagentOrganizationMaxDepth(t *testing.T) {
 func TestForkLimitsFromConfig(t *testing.T) {
 	t.Parallel()
 
-	cfg := codersdk.ChatConfig{Fork: codersdk.ForkChatConfig{MaxSubagentDepth: serpent.Int64(4)}}
-	require.Equal(t, ForkLimits{MaxSubagentDepth: 4}, LimitsFromConfig(cfg).Fork)
+	cfg := codersdk.ChatConfig{Fork: codersdk.ForkChatConfig{
+		MaxSubagentDepth:                serpent.Int64(4),
+		MaxConcurrentSubagents:          serpent.Int64(5),
+		MaxConcurrentSubagentsPerFamily: serpent.Int64(6),
+	}}
+	require.Equal(t, ForkLimits{
+		MaxSubagentDepth:                4,
+		MaxConcurrentSubagents:          5,
+		MaxConcurrentSubagentsPerFamily: 6,
+	}, LimitsFromConfig(cfg).Fork)
 }
 
 func TestNestedSubagentLeaves(t *testing.T) {

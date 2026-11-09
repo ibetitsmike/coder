@@ -907,6 +907,16 @@ chat:
   # computer use subagents never spawn subagents. Must be between 1 and 16.
   # (default: 2, type: int)
   maxSubagentDepth: 2
+  # Maximum number of running subagent chats in the deployment when the
+  # fork-nested-subagents experiment is enabled. 0 means no limit. An organization
+  # can set a lower value for its own chats.
+  # (default: 0, type: int)
+  maxConcurrentSubagents: 0
+  # Maximum number of running subagent chats under one root chat when the
+  # fork-nested-subagents experiment is enabled. 0 means no limit. An organization
+  # can set a lower value.
+  # (default: 0, type: int)
+  maxConcurrentSubagentsPerFamily: 0
 aibridge:
   # Deprecated: use --ai-gateway-enabled or CODER_AI_GATEWAY_ENABLED instead.
   # Whether to start an in-memory aibridged instance.
