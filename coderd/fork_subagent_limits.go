@@ -62,12 +62,12 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 	ctx := r.Context()
 	organization := httpmw.OrganizationParam(r)
 	object := rbac.ResourceChatModelConfig.InOrg(organization.ID)
-	if !api.Authorize(r, policy.ActionRead, object) {
-		httpapi.ResourceNotFound(rw)
-		return
-	}
 	if !api.Authorize(r, policy.ActionUpdate, object) {
-		httpapi.Forbidden(rw)
+		if api.Authorize(r, policy.ActionRead, object) {
+			httpapi.Forbidden(rw)
+		} else {
+			httpapi.ResourceNotFound(rw)
+		}
 		return
 	}
 
