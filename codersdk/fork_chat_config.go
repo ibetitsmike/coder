@@ -73,7 +73,7 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 		},
 		{
 			Name:        "Chat: Max Live Subagents Per Family",
-			Description: "Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one, fails at the limit. 0 means no limit. An organization can set a lower value.",
+			Description: "Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one with message_agent, fails at the limit. 0 means no limit. An organization can set a lower value.",
 			Flag:        "chat-max-live-subagents-per-family",
 			Env:         "CODER_CHAT_MAX_LIVE_SUBAGENTS_PER_FAMILY",
 			Value:       &c.AI.Chat.Fork.MaxLiveSubagentsPerFamily,
