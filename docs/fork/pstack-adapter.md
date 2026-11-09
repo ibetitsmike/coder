@@ -116,7 +116,7 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 | Cursor                                        | Coder Agents today                                                                                                                                                                                                                                            | Do this                                                                                                                                                                                                                                              | Removed by |
 |-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
 | `subagent_type: generalPurpose`               | Types `general`, `explore`, `computer_use`, and custom types with the `fork-agent-definitions` experiment                                                                                                                                                     | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
-| `poteto-agent`, `comment-sicko`               | Custom types only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)                                                                                                                                            | If the `spawn_agent` description lists `<name>`, pass `type: "<name>"`. Otherwise `type: "general"`, and paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                                             | W1         |
+| `poteto-agent`, `comment-sicko`               | Custom types only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types)                                                                                                                                            | If the `spawn_agent` description lists `<name>` or `workspace/<name>`, pass that type. Otherwise `type: "general"`, and paste the body of `<pstack>/agents/<name>.md`, without its frontmatter, at the top of `prompt`.                              | W1         |
 | `readonly: true`                              | `explore` has `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file` and the deployment MCP tools allowed in subagents, and no file-writing tool                                                                                           | `type: "explore"` for narrow code discovery, else `type: "general"`. Neither type enforces read-only, because `execute` can change files. Say "do not edit files or run commands that change state" in the prompt, and check `git status` afterward. | Stays      |
 | `readonly: false`                             | `general`                                                                                                                                                                                                                                                     | `type: "general"`.                                                                                                                                                                                                                                   | Stays      |
 | A subagent that spawns its own workers        | Only with the `fork-nested-subagents` experiment, up to a depth limit. Refer to [Nested subagents](#nested-subagents)                                                                                                                                         | If the child has `spawn_agent`, it spawns and collects its own workers. Otherwise the root spawns every worker itself and does the sub-coordinator's job.                                                                                            | W2         |
@@ -142,7 +142,11 @@ A definition whose effort isn't a valid reasoning effort fails every spawn.
 A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
-With the experiment, the API also stores definitions for one user in an organization and for a whole organization, but `spawn_agent` doesn't offer stored definitions yet.
+With the experiment, the API also stores definitions for one user in an organization and for a whole organization.
+`spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization and the enabled organization definitions that the owner can read.
+A name that only one of the workspace, personal, and organization sources defines keeps its bare name.
+A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, or `org/<name>`.
+A bare name that more than one source defines fails with `type must be one of:` and the listed types.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
 ### Custom agent tool policy
@@ -282,7 +286,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `25f19f624d`:
+Checked against fork `main` at `e6cd44a997`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -294,9 +298,9 @@ Checked against fork `main` at `25f19f624d`:
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
   Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
-  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:40-42`, `:61-64`, `:86-88`, called from `subagent_catalog.go:185` and `:233`.
-  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:177`.
-  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:147-159`, and the model match, `:187-210`.
+  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-54`, `:101-111`, called from `subagent_catalog.go:185` and `:233`.
+  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:346`.
+  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:317-328`, and the model match, `:353-379`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
   Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
@@ -313,7 +317,8 @@ Checked against fork `main` at `25f19f624d`:
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
   `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:883`, `:893-895`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
-  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, and custom types still read only from the chat's pinned context, `coderd/x/chatd/fork_agent_definitions.go:61-66`.
+  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:179-272`.
+  Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-140`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
