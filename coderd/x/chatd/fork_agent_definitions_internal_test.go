@@ -286,6 +286,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
 				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file, lookups__lookup]", "No writes."),
 				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [docs]", "Docs only."),
+				"no-wait":     agentDefinitionMarkdown("name: no-wait\ndisallowed_tools: [wait_agent]", "No waiting."),
 			}
 		},
 		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
@@ -326,6 +327,9 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.Contains(t, names, "edit_files")
 		require.NotContains(t, names, "write_file")
 		require.Contains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
+		noWait, err := f.spawn(t, spawnAgentArgs{Type: "no-wait"})
+		require.NoError(t, err)
+		require.NotContains(t, f.systemPrompt(t, noWait.ID), subagentOrchestrationPromptBlock)
 
 		searchTool := newTestMCPAgentTool("lookups__search", uuid.New())
 		lookupTool := newTestMCPAgentTool("lookups__lookup", uuid.New())

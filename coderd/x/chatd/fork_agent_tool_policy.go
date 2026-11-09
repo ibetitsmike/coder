@@ -117,9 +117,12 @@ func (policy customAgentToolPolicy) allowsNonMCPTool(name string) bool {
 		(policy.Tools == nil || customAgentToolNames(policy.Tools)[name])
 }
 
-// keepsSpawnAgent reports whether policy leaves the child spawn_agent.
-func (policy customAgentToolPolicy) keepsSpawnAgent() bool {
-	return !policy.ReadOnly && policy.allowsNonMCPTool(spawnAgentToolName)
+// keepsOrchestrationTools reports whether policy leaves the child the tools
+// that the subagent orchestration guidance tells it to call.
+func (policy customAgentToolPolicy) keepsOrchestrationTools() bool {
+	return !policy.ReadOnly && !slices.ContainsFunc([]string{spawnAgentToolName, "wait_agent", "list_agents"}, func(name string) bool {
+		return !policy.allowsNonMCPTool(name)
+	})
 }
 
 // filter returns the tools, deferred MCP candidates and provider tools that

@@ -241,7 +241,7 @@ func (p *Server) childGetsOrchestrationPrompt(
 	if !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(childMode) {
 		return false
 	}
-	if customAgent != nil && !customAgentToolPolicyFromDefinition(*customAgent).keepsSpawnAgent() {
+	if customAgent != nil && !customAgentToolPolicyFromDefinition(*customAgent).keepsOrchestrationTools() {
 		return false
 	}
 	fdb, err := forkdb.From(p.db)
