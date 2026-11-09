@@ -260,8 +260,8 @@ The `chat_subagents` node and its queries are a complete example.
    `CREATE TABLE` in the new file. Run `chatdmig check`.
 2. Add the node file to the `schema` list of `forkdb/sqlc.yaml`, in graph
    order.
-3. Write the queries in `forkdb/queries/<table>.sql`, with sqlc's
-   `-- name: <Query> :one` headers.
+3. Write the queries in `forkdb/queries/<table>.sql`, each with a sqlc
+   `-- name: <Query> :one`, `:many` or `:exec` header.
 4. Run `./coderd/database/forkdb/generate.sh`.
 5. Fix what no longer compiles: authorize the query in
    `dbauthz/fork_forkdb.go`, add its case to `TestForkQuerier`, and time it
