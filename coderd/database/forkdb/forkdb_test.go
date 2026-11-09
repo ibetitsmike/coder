@@ -197,6 +197,36 @@ func TestInTx(t *testing.T) {
 		_, err = fdb.GetPluginByID(ctx, plugin.ID)
 		require.ErrorIs(t, err, sql.ErrNoRows)
 	})
+
+	t.Run("RollbackChatSubagent", func(t *testing.T) {
+		t.Parallel()
+
+		errRollback := xerrors.New("roll back")
+		var chat database.Chat
+		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+			chat = dbgen.Chat(t, tx, database.Chat{
+				OrganizationID:    dbgen.Organization(t, tx, database.Organization{}).ID,
+				OwnerID:           dbgen.User(t, tx, database.User{}).ID,
+				LastModelConfigID: dbgen.ChatModelConfig(t, tx, database.ChatModelConfig{}).ID,
+			})
+			_, err := ftx.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
+				ChatID:    chat.ID,
+				AgentType: "explore",
+				Depth:     1,
+				Isolation: "shared",
+			})
+			require.NoError(t, err)
+			return errRollback
+		}, nil)
+		require.ErrorIs(t, err, errRollback)
+
+		_, err = db.GetChatByID(ctx, chat.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+		// Read the table without dbauthz, which would fail on the missing chat
+		// before it reads chat_subagents.
+		_, err = mustFrom(t, raw).GetChatSubagentByChatID(ctx, chat.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+	})
 }
 
 // wrap wraps db in dbauthz like coderd does.

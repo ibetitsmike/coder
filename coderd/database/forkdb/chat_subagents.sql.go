@@ -29,3 +29,42 @@ func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID)
 	)
 	return i, err
 }
+
+const insertChatSubagent = `-- name: InsertChatSubagent :one
+INSERT INTO chat_subagents (chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id
+`
+
+type InsertChatSubagentParams struct {
+	ChatID       uuid.UUID     `db:"chat_id" json:"chat_id"`
+	AgentType    string        `db:"agent_type" json:"agent_type"`
+	Depth        int32         `db:"depth" json:"depth"`
+	Isolation    string        `db:"isolation" json:"isolation"`
+	WorktreePath string        `db:"worktree_path" json:"worktree_path"`
+	Branch       string        `db:"branch" json:"branch"`
+	WorkspaceID  uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
+}
+
+func (q *Queries) InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error) {
+	row := q.db.QueryRowContext(ctx, insertChatSubagent,
+		arg.ChatID,
+		arg.AgentType,
+		arg.Depth,
+		arg.Isolation,
+		arg.WorktreePath,
+		arg.Branch,
+		arg.WorkspaceID,
+	)
+	var i ChatSubagent
+	err := row.Scan(
+		&i.ChatID,
+		&i.AgentType,
+		&i.Depth,
+		&i.Isolation,
+		&i.WorktreePath,
+		&i.Branch,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
