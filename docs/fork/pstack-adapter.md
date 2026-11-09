@@ -126,7 +126,8 @@ The `spawn_agent` description lists the custom types after the built-in ones.
 The child gets the definition's body as a system message, so do not paste the body into `prompt`.
 A definition without `model` runs on your model, and pstack's agents set none.
 A `model` that matches no config in `list_subagent_models` fails the spawn.
-An explicit `model_config_id` or `reasoning_effort` overrides the definition.
+An explicit `model_config_id` overrides the definition's `model`, and an explicit `reasoning_effort` overrides a valid definition effort.
+A definition whose effort isn't a valid reasoning effort fails every spawn.
 Coder Agents doesn't enforce `tools`, `readonly`, `mcp`, or `disallowedTools` yet.
 A custom type gets the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
@@ -183,10 +184,11 @@ Follow its steps with these changes:
 When the deployment enables the `fork-chat-todos` experiment, `read_chat_transcript` reads the stored messages of a chat in pages.
 Leave `chat_id` empty to read your own chat, including messages that compaction took out of your context.
 Pass a child's `chat_id` from `spawn_agent` or `list_agents` to read that child, or the ID of any other chat your user can read.
-With the same experiment, `search_chats` finds the top-level chats your user can read with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
+With the same experiment, `search_chats` finds top-level chats with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
+By default it searches only the chats your user created, so add `source:created_by_me,shared_with_me` to include chats shared with your user.
 It returns no subagent chats, so get a child's ID from `list_agents` in its parent.
 Plan-mode turns and `explore` children don't get either tool.
-With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds that many of the child's latest tool calls, oldest first, to its reply.
+With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds up to that many of the child's latest tool calls, oldest first, to its reply.
 Without the experiment, there is no transcript or chat search tool.
 Root chats in a project have `read_memory` and `save_memory`, but Setup creates no project.
 
