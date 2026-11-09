@@ -81,12 +81,31 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if _, err := validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth); err != nil {
 		return err
 	}
-	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily)
+	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily, "create a child agent")
+}
+
+// forkValidateSubagentResume returns an error when a message to the finished
+// subagent target would resume it while its family already has the maximum
+// number of live subagents.
+func (p *Server) forkValidateSubagentResume(ctx context.Context, target database.Chat) error {
+	if !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid || target.Archived ||
+		(target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
+		return nil
+	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return xerrors.Errorf("fork queries: %w", err)
+	}
+	limits, err := p.subagentLimits(ctx, fdb, target.OrganizationID)
+	if err != nil {
+		return err
+	}
+	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(target), limits.maxLivePerFamily, "resume the child agent")
 }
 
 // validateFamilyLiveSubagents returns an error when the family of rootChatID
 // already has maxLive live subagents. 0 means no limit.
-func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int) error {
+func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int, action string) error {
 	if maxLive == 0 {
 		return nil
 	}
@@ -95,7 +114,7 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 		return xerrors.Errorf("count live subagents of chat family %s: %w", rootChatID, err)
 	}
 	if live >= int64(maxLive) {
-		return xerrors.Errorf("cannot create a child agent: this chat family has %d live subagents and the maximum is %d", live, maxLive)
+		return xerrors.Errorf("cannot %s: this chat family has %d live subagents and the maximum is %d", action, live, maxLive)
 	}
 	return nil
 }
@@ -135,7 +154,7 @@ func (p *Server) createSubagentChatWithID(
 			if err := tx.AcquireLock(ctx, database.GenLockID("fork_chat_family_spawn:"+rootChatID.String())); err != nil {
 				return xerrors.Errorf("acquire chat family spawn lock: %w", err)
 			}
-			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily); err != nil {
+			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily, "create a child agent"); err != nil {
 				return err
 			}
 		}

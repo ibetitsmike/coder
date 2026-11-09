@@ -122,6 +122,9 @@ func (p *Server) sendSubagentMessage(
 	if err != nil {
 		return database.Chat{}, xerrors.Errorf("get target chat: %w", err)
 	}
+	if err := p.forkValidateSubagentResume(ctx, targetChat); err != nil {
+		return database.Chat{}, err
+	}
 
 	sendResult, err := p.SendMessage(ctx, SendMessageOptions{
 		ChatID:       targetChatID,
