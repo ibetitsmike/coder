@@ -9,7 +9,6 @@ const meta: Meta<typeof ForkAttachmentPreview> = {
 	title: "pages/AgentsPage/ChatConversation/ForkAttachmentPreview",
 	component: ForkAttachmentPreview,
 	decorators: [withDashboardProvider],
-	parameters: { experiments: ["fork-chat-todos"] },
 	args: {
 		block: MockChatVideoFilePart,
 		children: (
@@ -26,4 +25,10 @@ const meta: Meta<typeof ForkAttachmentPreview> = {
 export default meta;
 type Story = StoryObj<typeof ForkAttachmentPreview>;
 
-export const AttachedVideo: Story = {};
+export const AttachedVideo: Story = {
+	parameters: { experiments: ["fork-chat-todos"] },
+};
+
+export const ExperimentOff: Story = {
+	parameters: { experiments: [] },
+};

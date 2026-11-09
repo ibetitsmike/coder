@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Experiment } from "#/api/typesGenerated";
@@ -11,7 +11,6 @@ import {
 } from "#/testHelpers/entities";
 import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
 import { renderComponent } from "#/testHelpers/renderHelpers";
-import { getAttachmentHref } from "../../utils/chatAttachments";
 import { AttachmentBlock } from "./AttachmentBlocks";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 
@@ -42,9 +41,10 @@ const renderPreview = (experiments: Experiment[]) =>
 describe("ForkAttachmentPreview", () => {
 	it("plays an attached MP4 when fork-chat-todos is on", async () => {
 		renderPreview(["fork-chat-todos"]);
+		const preview = screen.getByRole("figure", { name: "review.mp4" });
 
 		await userEvent.click(
-			screen.getByRole("button", { name: "View recording" }),
+			within(preview).getByRole("button", { name: "View recording" }),
 		);
 
 		await screen.findByRole("dialog", { name: "Recording playback" });
@@ -53,11 +53,11 @@ describe("ForkAttachmentPreview", () => {
 	it("offers the upstream download when fork-chat-todos is off", () => {
 		renderPreview([]);
 
-		expect(screen.queryByRole("button", { name: "View recording" })).toBeNull();
+		expect(screen.queryByRole("figure", { name: "review.mp4" })).toBeNull();
 		expect(
 			screen
 				.getByRole("link", { name: "Download review.mp4" })
 				.getAttribute("href"),
-		).toBe(getAttachmentHref(MockChatVideoFilePart));
+		).toBe("/api/v2/chats/files/chat-file-1");
 	});
 });
