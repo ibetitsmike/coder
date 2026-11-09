@@ -1,0 +1,39 @@
+# sqlc config of the fork's queries. See
+# ../migrations/chatdmig/README.md#fork-queries.
+#
+# The schema is upstream's dump.sql, then every fork node in graph order.
+# TestSQLCSchemaOrder fails when this list and the graph disagree.
+version: "2"
+sql:
+  - schema:
+      - "../dump.sql"
+      - "../migrations/chatdmig/nodes/01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema.up.sql"
+      - "../migrations/chatdmig/nodes/01a1bd31-6117-7cbd-bb14-1a8ca7a596b3_chat_subagents.up.sql"
+    queries: "./queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "forkdb"
+        out: "."
+        emit_interface: true
+        emit_json_tags: true
+        emit_db_tags: true
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
+        # Emit only the models of fork queries, not one per upstream table.
+        omit_unused_structs: true
+        initialisms:
+          - id
+          - ai
+          - nats
+        # Upstream types that fork queries use come from package database.
+        overrides:
+          - db_type: "chat_status"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatStatus"
+          - db_type: "chat_status"
+            nullable: true
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatStatus"

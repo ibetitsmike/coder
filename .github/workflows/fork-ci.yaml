@@ -68,7 +68,7 @@ jobs:
       - name: Start Postgres
         run: ./.github/fork/start-postgres.sh
       - name: Chat and database packages
-        run: go test -count=1 ./coderd/x/... ./coderd/database/...
+        run: go test -count=1 ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
       - name: Chat API tests
         run: go test -count=1 -run '(?i)chat|skill|mcp' ./coderd ./enterprise/coderd
 
@@ -84,3 +84,31 @@ jobs:
           go-version-file: go.mod
       - name: Build coder
         run: go build -o /dev/null ./enterprise/cmd/coder
+
+  forkdb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # mise.toml pins the coder sqlc fork that upstream generates with.
+      - name: Install sqlc
+        run: |
+          version=$(sed -n '/^\[tools\."go:github.com\/coder\/sqlc\/cmd\/sqlc"\]/,/^version/s/^version = "\(.*\)"/\1/p' mise.toml)
+          test -n "$version"
+          CGO_ENABLED=1 go install "github.com/coder/sqlc/cmd/sqlc@${version}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Generate fork queries
+        run: ./coderd/database/forkdb/generate.sh
+      - name: Check for drift
+        run: |
+          if [ -n "$(git status --porcelain -- coderd/database/forkdb)" ]; then
+            echo "forkdb is out of date. Run ./coderd/database/forkdb/generate.sh and commit the result."
+            git status --porcelain -- coderd/database/forkdb
+            git diff -- coderd/database/forkdb
+            exit 1
+          fi
