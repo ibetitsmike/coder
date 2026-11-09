@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"cdr.dev/slog/v3"
-
 	"github.com/coder/coder/v2/coderd/database/migrations"
 	"github.com/coder/coder/v2/coderd/database/migrations/chatdmig"
+	"github.com/coder/coder/v2/testutil"
 )
 
 // TestUpGraphLockTimeout holds a lock that the next migration needs, as a
@@ -70,7 +70,7 @@ func TestUpGraphLockTimeout(t *testing.T) {
 	}()
 	<-retrying
 	for range 5 {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitShort)
 		start := time.Now()
 		_, err := db.ExecContext(ctx, "SELECT count(*) FROM organizations")
 		cancel()

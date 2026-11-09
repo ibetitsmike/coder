@@ -196,6 +196,12 @@ export const RBACResourceActions: Partial<
 		share: "share an organization skill with other users or groups",
 		update: "update an organization skill",
 	},
+	plugin: {
+		create: "install a plugin",
+		delete: "remove a plugin",
+		read: "read plugins and their grants",
+		update: "change the config of a plugin or disable it",
+	},
 	prebuilt_workspace: {
 		delete: "delete prebuilt workspace",
 		update: "update prebuilt workspace settings",

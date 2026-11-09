@@ -5,10 +5,11 @@ import {
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 
 export const Sidebar: React.FC = () => {
-	const { entitlements, buildInfo } = useDashboard();
+	const { entitlements, buildInfo, experiments } = useDashboard();
 	const showSchedulePage =
 		entitlements.features.advanced_template_scheduling.enabled;
 	const showOAuth2Page = buildInfo.oauth2_provider;
+	const showLinkedAccountsPage = experiments.includes("plugins");
 
 	return (
 		<BaseSidebar>
@@ -20,6 +21,11 @@ export const Sidebar: React.FC = () => {
 				<SettingsSidebarNavItem href="external-auth">
 					External Authentication
 				</SettingsSidebarNavItem>
+				{showLinkedAccountsPage && (
+					<SettingsSidebarNavItem href="linked-accounts">
+						Linked Accounts
+					</SettingsSidebarNavItem>
+				)}
 				{showOAuth2Page && (
 					<SettingsSidebarNavItem href="oauth2-provider">
 						OAuth2 Applications

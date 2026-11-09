@@ -135,12 +135,12 @@ func stripLiterals(sql string) string {
 				}
 				j++
 			}
-			b.WriteString("''")
+			_, _ = b.WriteString("''")
 			i = j + 1
 		case sql[i] == '$':
 			tag := dollarTag.FindString(sql[i:])
 			if tag == "" {
-				b.WriteByte(sql[i])
+				_ = b.WriteByte(sql[i])
 				i++
 				continue
 			}
@@ -148,10 +148,10 @@ func stripLiterals(sql string) string {
 			if j < 0 {
 				return b.String()
 			}
-			b.WriteString(" '' ")
+			_, _ = b.WriteString(" '' ")
 			i += len(tag) + j + len(tag)
 		default:
-			b.WriteByte(sql[i])
+			_ = b.WriteByte(sql[i])
 			i++
 		}
 	}

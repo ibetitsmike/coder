@@ -29,6 +29,10 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "check-scopes: error reading dump: %v\n", err)
 		os.Exit(2)
 	}
+	if err := addForkEnumValues(*dumpPathFlag, have); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "check-scopes: error reading fork nodes: %v\n", err)
+		os.Exit(2)
+	}
 
 	// Compute missing: want - have
 	var missing []string

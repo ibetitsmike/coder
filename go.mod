@@ -580,6 +580,7 @@ require (
 	github.com/shopspring/decimal v1.6.0
 	github.com/smallstep/pkcs7 v0.2.1
 	github.com/sony/gobreaker/v2 v2.4.0
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/tidwall/sjson v1.2.5
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.6

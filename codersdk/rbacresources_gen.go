@@ -41,6 +41,7 @@ const (
 	ResourceOrganization                  RBACResource = "organization"
 	ResourceOrganizationMember            RBACResource = "organization_member"
 	ResourceOrganizationSkill             RBACResource = "organization_skill"
+	ResourcePlugin                        RBACResource = "plugin"
 	ResourcePrebuiltWorkspace             RBACResource = "prebuilt_workspace"
 	ResourceProvisionerDaemon             RBACResource = "provisioner_daemon"
 	ResourceProvisionerJobs               RBACResource = "provisioner_jobs"
@@ -126,6 +127,7 @@ var RBACResourceActions = map[RBACResource][]RBACAction{
 	ResourceOrganization:                  {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceOrganizationMember:            {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceOrganizationSkill:             {ActionCreate, ActionDelete, ActionRead, ActionShare, ActionUpdate},
+	ResourcePlugin:                        {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourcePrebuiltWorkspace:             {ActionDelete, ActionUpdate},
 	ResourceProvisionerDaemon:             {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceProvisionerJobs:               {ActionCreate, ActionRead, ActionUpdate},

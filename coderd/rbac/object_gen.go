@@ -347,6 +347,16 @@ var (
 		Type: "organization_skill",
 	}
 
+	// ResourcePlugin
+	// Valid Actions
+	//  - "ActionCreate" :: install a plugin
+	//  - "ActionDelete" :: remove a plugin
+	//  - "ActionRead" :: read plugins and their grants
+	//  - "ActionUpdate" :: change the config of a plugin or disable it
+	ResourcePlugin = Object{
+		Type: "plugin",
+	}
+
 	// ResourcePrebuiltWorkspace
 	// Valid Actions
 	//  - "ActionDelete" :: delete prebuilt workspace
@@ -589,6 +599,7 @@ func AllResources() []Objecter {
 		ResourceOrganization,
 		ResourceOrganizationMember,
 		ResourceOrganizationSkill,
+		ResourcePlugin,
 		ResourcePrebuiltWorkspace,
 		ResourceProvisionerDaemon,
 		ResourceProvisionerJobs,

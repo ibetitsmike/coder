@@ -168,6 +168,11 @@ var compositePerms = map[ScopeName]map[string][]policy.Action{
 	"coder:apikeys.manage_self": {
 		ResourceApiKey.Type: {policy.ActionRead, policy.ActionCreate, policy.ActionUpdate, policy.ActionDelete},
 	},
+	"coder:chats.converse": {
+		ResourceChat.Type:               {policy.ActionCreate, policy.ActionRead, policy.ActionUpdate},
+		ResourceChatModelConfig.Type:    {policy.ActionRead},
+		ResourceOrganizationMember.Type: {policy.ActionRead},
+	},
 }
 
 // CompositeSitePermissions returns the site-level Permission list for a coder:* scope.

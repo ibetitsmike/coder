@@ -42,6 +42,106 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 	return m.recorder
 }
 
+// AcquirePluginLeases mocks base method.
+func (m *MockStore) AcquirePluginLeases(ctx context.Context, arg forkdb.AcquirePluginLeasesParams) ([]forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AcquirePluginLeases", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AcquirePluginLeases indicates an expected call of AcquirePluginLeases.
+func (mr *MockStoreMockRecorder) AcquirePluginLeases(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquirePluginLeases", reflect.TypeOf((*MockStore)(nil).AcquirePluginLeases), ctx, arg)
+}
+
+// ConsumePluginLinkCode mocks base method.
+func (m *MockStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumePluginLinkCode", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginLinkCode)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumePluginLinkCode indicates an expected call of ConsumePluginLinkCode.
+func (mr *MockStoreMockRecorder) ConsumePluginLinkCode(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumePluginLinkCode", reflect.TypeOf((*MockStore)(nil).ConsumePluginLinkCode), ctx, arg)
+}
+
+// DeleteExpiredPluginLinkCodes mocks base method.
+func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredPluginLinkCodes", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpiredPluginLinkCodes indicates an expected call of DeleteExpiredPluginLinkCodes.
+func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx)
+}
+
+// DeletePluginByID mocks base method.
+func (m *MockStore) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePluginByID", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeletePluginByID indicates an expected call of DeletePluginByID.
+func (mr *MockStoreMockRecorder) DeletePluginByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginByID", reflect.TypeOf((*MockStore)(nil).DeletePluginByID), ctx, id)
+}
+
+// DeletePluginLinkCodesByUser mocks base method.
+func (m *MockStore) DeletePluginLinkCodesByUser(ctx context.Context, arg forkdb.DeletePluginLinkCodesByUserParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePluginLinkCodesByUser", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeletePluginLinkCodesByUser indicates an expected call of DeletePluginLinkCodesByUser.
+func (mr *MockStoreMockRecorder) DeletePluginLinkCodesByUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginLinkCodesByUser", reflect.TypeOf((*MockStore)(nil).DeletePluginLinkCodesByUser), ctx, arg)
+}
+
+// DeletePluginUserLink mocks base method.
+func (m *MockStore) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePluginUserLink", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeletePluginUserLink indicates an expected call of DeletePluginUserLink.
+func (mr *MockStoreMockRecorder) DeletePluginUserLink(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginUserLink", reflect.TypeOf((*MockStore)(nil).DeletePluginUserLink), ctx, arg)
+}
+
+// EnsurePluginChatBindings mocks base method.
+func (m *MockStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnsurePluginChatBindings", ctx, pluginID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EnsurePluginChatBindings indicates an expected call of EnsurePluginChatBindings.
+func (mr *MockStoreMockRecorder) EnsurePluginChatBindings(ctx, pluginID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsurePluginChatBindings", reflect.TypeOf((*MockStore)(nil).EnsurePluginChatBindings), ctx, pluginID)
+}
+
 // GetChatSubagentByChatID mocks base method.
 func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	m.ctrl.T.Helper()
@@ -55,4 +155,267 @@ func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUI
 func (mr *MockStoreMockRecorder) GetChatSubagentByChatID(ctx, chatID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentByChatID), ctx, chatID)
+}
+
+// GetPluginByID mocks base method.
+func (m *MockStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginByID", ctx, id)
+	ret0, _ := ret[0].(forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginByID indicates an expected call of GetPluginByID.
+func (mr *MockStoreMockRecorder) GetPluginByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginByID", reflect.TypeOf((*MockStore)(nil).GetPluginByID), ctx, id)
+}
+
+// GetPluginChatBindingsDue mocks base method.
+func (m *MockStore) GetPluginChatBindingsDue(ctx context.Context, arg forkdb.GetPluginChatBindingsDueParams) ([]forkdb.GetPluginChatBindingsDueRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginChatBindingsDue", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetPluginChatBindingsDueRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginChatBindingsDue indicates an expected call of GetPluginChatBindingsDue.
+func (mr *MockStoreMockRecorder) GetPluginChatBindingsDue(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginChatBindingsDue", reflect.TypeOf((*MockStore)(nil).GetPluginChatBindingsDue), ctx, arg)
+}
+
+// GetPluginUserLink mocks base method.
+func (m *MockStore) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginUserLink", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginUserLink)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginUserLink indicates an expected call of GetPluginUserLink.
+func (mr *MockStoreMockRecorder) GetPluginUserLink(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginUserLink", reflect.TypeOf((*MockStore)(nil).GetPluginUserLink), ctx, arg)
+}
+
+// GetPluginUserLinksByPluginAndUser mocks base method.
+func (m *MockStore) GetPluginUserLinksByPluginAndUser(ctx context.Context, arg forkdb.GetPluginUserLinksByPluginAndUserParams) ([]forkdb.PluginUserLink, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginUserLinksByPluginAndUser", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.PluginUserLink)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginUserLinksByPluginAndUser indicates an expected call of GetPluginUserLinksByPluginAndUser.
+func (mr *MockStoreMockRecorder) GetPluginUserLinksByPluginAndUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginUserLinksByPluginAndUser", reflect.TypeOf((*MockStore)(nil).GetPluginUserLinksByPluginAndUser), ctx, arg)
+}
+
+// GetPluginUserLinksByPluginID mocks base method.
+func (m *MockStore) GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]forkdb.PluginUserLink, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginUserLinksByPluginID", ctx, pluginID)
+	ret0, _ := ret[0].([]forkdb.PluginUserLink)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginUserLinksByPluginID indicates an expected call of GetPluginUserLinksByPluginID.
+func (mr *MockStoreMockRecorder) GetPluginUserLinksByPluginID(ctx, pluginID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginUserLinksByPluginID", reflect.TypeOf((*MockStore)(nil).GetPluginUserLinksByPluginID), ctx, pluginID)
+}
+
+// GetPluginUserLinksByUserID mocks base method.
+func (m *MockStore) GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.PluginUserLink, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginUserLinksByUserID", ctx, userID)
+	ret0, _ := ret[0].([]forkdb.PluginUserLink)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginUserLinksByUserID indicates an expected call of GetPluginUserLinksByUserID.
+func (mr *MockStoreMockRecorder) GetPluginUserLinksByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginUserLinksByUserID", reflect.TypeOf((*MockStore)(nil).GetPluginUserLinksByUserID), ctx, userID)
+}
+
+// GetPluginsByOrganizationID mocks base method.
+func (m *MockStore) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginsByOrganizationID", ctx, organizationID)
+	ret0, _ := ret[0].([]forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginsByOrganizationID indicates an expected call of GetPluginsByOrganizationID.
+func (mr *MockStoreMockRecorder) GetPluginsByOrganizationID(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginsByOrganizationID", reflect.TypeOf((*MockStore)(nil).GetPluginsByOrganizationID), ctx, organizationID)
+}
+
+// InsertPlugin mocks base method.
+func (m *MockStore) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertPlugin", ctx, arg)
+	ret0, _ := ret[0].(forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertPlugin indicates an expected call of InsertPlugin.
+func (mr *MockStoreMockRecorder) InsertPlugin(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPlugin", reflect.TypeOf((*MockStore)(nil).InsertPlugin), ctx, arg)
+}
+
+// InsertPluginLinkCode mocks base method.
+func (m *MockStore) InsertPluginLinkCode(ctx context.Context, arg forkdb.InsertPluginLinkCodeParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertPluginLinkCode", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertPluginLinkCode indicates an expected call of InsertPluginLinkCode.
+func (mr *MockStoreMockRecorder) InsertPluginLinkCode(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPluginLinkCode", reflect.TypeOf((*MockStore)(nil).InsertPluginLinkCode), ctx, arg)
+}
+
+// ReleasePluginLeases mocks base method.
+func (m *MockStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleasePluginLeases", ctx, runnerID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReleasePluginLeases indicates an expected call of ReleasePluginLeases.
+func (mr *MockStoreMockRecorder) ReleasePluginLeases(ctx, runnerID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleasePluginLeases", reflect.TypeOf((*MockStore)(nil).ReleasePluginLeases), ctx, runnerID)
+}
+
+// SetPluginUserLinkActiveChat mocks base method.
+func (m *MockStore) SetPluginUserLinkActiveChat(ctx context.Context, arg forkdb.SetPluginUserLinkActiveChatParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPluginUserLinkActiveChat", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetPluginUserLinkActiveChat indicates an expected call of SetPluginUserLinkActiveChat.
+func (mr *MockStoreMockRecorder) SetPluginUserLinkActiveChat(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinkActiveChat", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinkActiveChat), ctx, arg)
+}
+
+// SetPluginUserLinksActiveChatByUser mocks base method.
+func (m *MockStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPluginUserLinksActiveChatByUser", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetPluginUserLinksActiveChatByUser indicates an expected call of SetPluginUserLinksActiveChatByUser.
+func (mr *MockStoreMockRecorder) SetPluginUserLinksActiveChatByUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinksActiveChatByUser", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinksActiveChatByUser), ctx, arg)
+}
+
+// UpdatePluginChatBindingDelivered mocks base method.
+func (m *MockStore) UpdatePluginChatBindingDelivered(ctx context.Context, arg forkdb.UpdatePluginChatBindingDeliveredParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginChatBindingDelivered", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdatePluginChatBindingDelivered indicates an expected call of UpdatePluginChatBindingDelivered.
+func (mr *MockStoreMockRecorder) UpdatePluginChatBindingDelivered(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginChatBindingDelivered", reflect.TypeOf((*MockStore)(nil).UpdatePluginChatBindingDelivered), ctx, arg)
+}
+
+// UpdatePluginChatBindingFailed mocks base method.
+func (m *MockStore) UpdatePluginChatBindingFailed(ctx context.Context, arg forkdb.UpdatePluginChatBindingFailedParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginChatBindingFailed", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdatePluginChatBindingFailed indicates an expected call of UpdatePluginChatBindingFailed.
+func (mr *MockStoreMockRecorder) UpdatePluginChatBindingFailed(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginChatBindingFailed", reflect.TypeOf((*MockStore)(nil).UpdatePluginChatBindingFailed), ctx, arg)
+}
+
+// UpdatePluginConfig mocks base method.
+func (m *MockStore) UpdatePluginConfig(ctx context.Context, arg forkdb.UpdatePluginConfigParams) (forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginConfig", ctx, arg)
+	ret0, _ := ret[0].(forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdatePluginConfig indicates an expected call of UpdatePluginConfig.
+func (mr *MockStoreMockRecorder) UpdatePluginConfig(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginConfig", reflect.TypeOf((*MockStore)(nil).UpdatePluginConfig), ctx, arg)
+}
+
+// UpdatePluginEnabled mocks base method.
+func (m *MockStore) UpdatePluginEnabled(ctx context.Context, arg forkdb.UpdatePluginEnabledParams) (forkdb.Plugin, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginEnabled", ctx, arg)
+	ret0, _ := ret[0].(forkdb.Plugin)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdatePluginEnabled indicates an expected call of UpdatePluginEnabled.
+func (mr *MockStoreMockRecorder) UpdatePluginEnabled(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginEnabled", reflect.TypeOf((*MockStore)(nil).UpdatePluginEnabled), ctx, arg)
+}
+
+// UpdatePluginLastError mocks base method.
+func (m *MockStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginLastError", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdatePluginLastError indicates an expected call of UpdatePluginLastError.
+func (mr *MockStoreMockRecorder) UpdatePluginLastError(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginLastError", reflect.TypeOf((*MockStore)(nil).UpdatePluginLastError), ctx, arg)
+}
+
+// UpsertPluginUserLink mocks base method.
+func (m *MockStore) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertPluginUserLink", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginUserLink)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertPluginUserLink indicates an expected call of UpsertPluginUserLink.
+func (mr *MockStoreMockRecorder) UpsertPluginUserLink(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertPluginUserLink", reflect.TypeOf((*MockStore)(nil).UpsertPluginUserLink), ctx, arg)
 }

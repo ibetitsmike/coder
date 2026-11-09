@@ -23,3 +23,7 @@ export const OAuth2ProviderDisabled: Story = {
 		buildInfo: { version: "v2.99.99-devel+abcdef", oauth2_provider: false },
 	},
 };
+
+export const PluginsExperimentEnabled: Story = {
+	parameters: { experiments: ["plugins"] },
+};

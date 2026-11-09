@@ -8,6 +8,7 @@ sql:
   - schema:
       - "../dump.sql"
       - "../migrations/chatdmig/nodes/01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema.up.sql"
+      - "../migrations/chatdmig/nodes/01a1bc7b-6e0c-783d-8945-1c634ab35eea_plugins.up.sql"
       - "../migrations/chatdmig/nodes/01a1bd31-6117-7cbd-bb14-1a8ca7a596b3_chat_subagents.up.sql"
     queries: "./queries"
     engine: "postgresql"

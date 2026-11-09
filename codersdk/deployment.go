@@ -5512,6 +5512,7 @@ const (
 	ExperimentChatProjectSharing        Experiment = "chat-project-sharing"        // Enables sharing agent chat projects with other users and groups.
 	ExperimentChatVirtualDesktop        Experiment = "chat-virtual-desktop"        // Enables virtual desktop and computer use for agents.
 	ExperimentAgentLifecycleHooks       Experiment = "agent-lifecycle-hooks"       // Enables chat lifecycle hook webhooks for agent chats.
+	ExperimentPlugins                   Experiment = "plugins"                     // Enables sandboxed Wasm plugins for Coder Agents chats.
 	ExperimentChatInlineMCPServers      Experiment = "chat-inline-mcp-servers"     // Enables inline MCP servers declared on POST /chats.
 	ExperimentEnableAIWorkspaceDebug    Experiment = "enable-ai-workspace-debug"   // Enables debugging failed workspace builds with Coder Agents.
 	ExperimentChatStageMetrics          Experiment = "chat-stage-metrics"          // Exposes chat lifecycle stage durations as Prometheus metrics.
@@ -5544,6 +5545,8 @@ func (e Experiment) DisplayName() string {
 		return "Chat Virtual Desktop"
 	case ExperimentAgentLifecycleHooks:
 		return "Agent Lifecycle Hooks"
+	case ExperimentPlugins:
+		return "Plugins"
 	case ExperimentChatInlineMCPServers:
 		return "Chat Inline MCP Servers"
 	case ExperimentEnableAIWorkspaceDebug:
@@ -5572,6 +5575,7 @@ var ExperimentsKnown = Experiments{
 	ExperimentChatProjectSharing,
 	ExperimentChatVirtualDesktop,
 	ExperimentAgentLifecycleHooks,
+	ExperimentPlugins,
 	ExperimentChatInlineMCPServers,
 	ExperimentEnableAIWorkspaceDebug,
 	ExperimentChatStageMetrics,

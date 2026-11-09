@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac"
@@ -35,7 +36,7 @@ const scopeDocsURL = "https://coder.com/docs/reference/api-key-scopes"
 // reports the relevant detail.
 func writeUnrequestableScope(ctx context.Context, rw http.ResponseWriter, name rbac.ScopeName) {
 	detail := fmt.Sprintf("unknown API key scope: %q. See %s for the scopes a token may request.", name, scopeDocsURL)
-	if database.APIKeyScope(name).Valid() {
+	if forkdb.ValidAPIKeyScope(database.APIKeyScope(name)) {
 		detail = fmt.Sprintf("API key scope %q is internal and cannot be requested by a token. See %s for the scopes a token may request.", name, scopeDocsURL)
 	}
 	httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
