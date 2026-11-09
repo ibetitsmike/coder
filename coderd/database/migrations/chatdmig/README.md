@@ -256,8 +256,9 @@ of the fork nodes next to `dump.sql`.
 
 The `chat_subagents` node and its queries are a complete example.
 
-1. Write the node: `chatdmig new chat_tags -requires <parent node>`, then the
-   `CREATE TABLE` in the new file. Run `chatdmig check`.
+1. Write the node as in [Add a fork migration](#add-a-fork-migration), then
+   the `CREATE TABLE` in the new file. Run
+   `go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check`.
 2. Add the node file to the `schema` list of `forkdb/sqlc.yaml`, in graph
    order.
 3. Write the queries in `forkdb/queries/<table>.sql`, each with a sqlc
