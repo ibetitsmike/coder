@@ -10386,6 +10386,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 |----------------------|---------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `max_subagent_depth` | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
 
+## codersdk.ForkOrganizationSubagentLimits
+
+```json
+{
+  "max_concurrent": 0,
+  "max_concurrent_per_family": 0,
+  "max_depth": 0,
+  "max_live_per_family": 0
+}
+```
+
+### Properties
+
+| Name                        | Type    | Required | Restrictions | Description                                                                                    |
+|-----------------------------|---------|----------|--------------|------------------------------------------------------------------------------------------------|
+| `max_concurrent`            | integer | false    |              | Max concurrent is the maximum number of running subagent chats in the organization.            |
+| `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
+| `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats, between 1 and 16.                     |
+| `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of unarchived subagent chats under one root chat.    |
+
 ## codersdk.FriendlyDiagnostic
 
 ```json

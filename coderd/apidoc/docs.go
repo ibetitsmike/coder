@@ -4615,6 +4615,86 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/subagent-limits": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get organization subagent limits",
+                "operationId": "get-organization-subagent-limits",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update organization subagent limits",
+                "operationId": "update-organization-subagent-limits",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            }
+        },
         "/api/v2/chats/watch": {
             "get": {
                 "produces": [
@@ -27291,6 +27371,27 @@ const docTemplate = `{
             "properties": {
                 "max_subagent_depth": {
                     "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
+                    "type": "integer"
+                }
+            }
+        },
+        "codersdk.ForkOrganizationSubagentLimits": {
+            "type": "object",
+            "properties": {
+                "max_concurrent": {
+                    "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization.",
+                    "type": "integer"
+                },
+                "max_concurrent_per_family": {
+                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
+                    "type": "integer"
+                },
+                "max_depth": {
+                    "description": "MaxDepth is the maximum depth of nested subagent chats, between 1 and\n16.",
+                    "type": "integer"
+                },
+                "max_live_per_family": {
+                    "description": "MaxLivePerFamily is the maximum number of unarchived subagent chats\nunder one root chat.",
                     "type": "integer"
                 }
             }
