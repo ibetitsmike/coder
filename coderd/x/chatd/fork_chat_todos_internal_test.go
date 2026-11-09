@@ -37,7 +37,7 @@ func TestChatTodoTools(t *testing.T) {
 
 	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)
-	require.Equal(t, []string{"todo_write", "todo_read", "search_chats"}, toolNames(tools))
+	require.Equal(t, []string{"todo_write", "todo_read", "read_chat_transcript", "search_chats"}, toolNames(tools))
 
 	events := make(chan coderdpubsub.ChatTodosEvent, 4)
 	cancel, err := ps.Subscribe(coderdpubsub.ChatTodosEventChannel(chat.ID), func(_ context.Context, message []byte) {
