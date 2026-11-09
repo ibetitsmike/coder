@@ -1144,6 +1144,7 @@ title: Schemas
     "fork": {
       "max_concurrent_subagents": 0,
       "max_concurrent_subagents_per_family": 0,
+      "max_live_subagents_per_family": 0,
       "max_subagent_depth": 0
     },
     "hook_allow_insecure": true,
@@ -2938,6 +2939,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "fork": {
     "max_concurrent_subagents": 0,
     "max_concurrent_subagents_per_family": 0,
+    "max_live_subagents_per_family": 0,
     "max_subagent_depth": 0
   },
   "hook_allow_insecure": true,
@@ -8349,6 +8351,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
         "fork": {
           "max_concurrent_subagents": 0,
           "max_concurrent_subagents_per_family": 0,
+          "max_live_subagents_per_family": 0,
           "max_subagent_depth": 0
         },
         "hook_allow_insecure": true,
@@ -8992,6 +8995,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       "fork": {
         "max_concurrent_subagents": 0,
         "max_concurrent_subagents_per_family": 0,
+        "max_live_subagents_per_family": 0,
         "max_subagent_depth": 0
       },
       "hook_allow_insecure": true,
@@ -10386,17 +10390,19 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 {
   "max_concurrent_subagents": 0,
   "max_concurrent_subagents_per_family": 0,
+  "max_live_subagents_per_family": 0,
   "max_subagent_depth": 0
 }
 ```
 
 ### Properties
 
-| Name                                  | Type    | Required | Restrictions | Description                                                                                                                                       |
-|---------------------------------------|---------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `max_concurrent_subagents`            | integer | false    |              | Max concurrent subagents is the maximum number of running subagent chats in the deployment. 0 means no limit.                                     |
-| `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat. 0 means no limit.                        |
-| `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
+| Name                                  | Type    | Required | Restrictions | Description                                                                                                                                           |
+|---------------------------------------|---------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_concurrent_subagents`            | integer | false    |              | Max concurrent subagents is the maximum number of running subagent chats in the deployment. 0 means no limit.                                         |
+| `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat. 0 means no limit.                            |
+| `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned. 0 means no limit. |
+| `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0.     |
 
 ## codersdk.ForkOrganizationSubagentLimits
 
@@ -10411,12 +10417,12 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name                        | Type    | Required | Restrictions | Description                                                                                    |
-|-----------------------------|---------|----------|--------------|------------------------------------------------------------------------------------------------|
-| `max_concurrent`            | integer | false    |              | Max concurrent is the maximum number of running subagent chats in the organization.            |
-| `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
-| `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats, between 1 and 16.                     |
-| `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of unarchived subagent chats under one root chat.    |
+| Name                        | Type    | Required | Restrictions | Description                                                                                                                                                                                                                                                                       |
+|-----------------------------|---------|----------|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_concurrent`            | integer | false    |              | Max concurrent is the maximum number of running subagent chats in the organization.                                                                                                                                                                                               |
+| `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat.                                                                                                                                                                                    |
+| `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats, between 1 and 16.                                                                                                                                                                                                        |
+| `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned. A live subagent has status running, interrupting, requires_action or paused and is not archived; a finished one is waiting or error and does not count. |
 
 ## codersdk.FriendlyDiagnostic
 
