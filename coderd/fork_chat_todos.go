@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
@@ -83,6 +84,12 @@ func (api *API) getChatTodos(rw http.ResponseWriter, r *http.Request) {
 // @Description Streams the todo list of the chat over a websocket: the current
 // @Description list first, then the latest list after writes to it. Writes close
 // @Description together can arrive as one list.
+// chatTodosWatchResync is how often a todo list watcher rereads the list
+// without a change event. Events can go missing, as when publishing one fails
+// after the write committed or the read after one fails, and the resync bounds
+// how long a client then shows an old list.
+const chatTodosWatchResync = 30 * time.Second
+
 func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
@@ -143,6 +150,8 @@ func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lastSent := list.Version
+	resync := api.Clock.NewTicker(chatTodosWatchResync, "chat_todos_watch")
+	defer resync.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -150,6 +159,7 @@ func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 		case <-api.ctx.Done():
 			return
 		case <-changed:
+		case <-resync.C:
 		}
 		list, err := readForkChatTodos(ctx, api.Database, chat.ID)
 		if err != nil {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -22,13 +23,14 @@ import (
 	"github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
 	"github.com/coder/serpent"
 )
 
 // newForkChatTodosAPI starts coderd with the fork-chat-todos experiment
 // enabled. It returns the unwrapped store and pubsub so a test can write a
 // todo list the way the chat daemon does.
-func newForkChatTodosAPI(t *testing.T, enabled bool) (*codersdk.Client, database.Store, dbpubsub.Pubsub) {
+func newForkChatTodosAPI(t *testing.T, enabled bool, clock quartz.Clock) (*codersdk.Client, database.Store, dbpubsub.Pubsub) {
 	t.Helper()
 
 	db, ps := dbtestutil.NewDB(t)
@@ -41,6 +43,7 @@ func newForkChatTodosAPI(t *testing.T, enabled bool) (*codersdk.Client, database
 		DeploymentValues: values,
 		Database:         db,
 		Pubsub:           ps,
+		Clock:            clock,
 	})
 	return client, db, ps
 }
@@ -71,6 +74,18 @@ func writeForkChatTodos(
 ) int64 {
 	t.Helper()
 
+	version := storeForkChatTodos(ctx, t, db, chatID, items)
+	payload, err := json.Marshal(pubsub.ChatTodosEvent{ChatID: chatID, Version: version})
+	require.NoError(t, err)
+	require.NoError(t, ps.Publish(pubsub.ChatTodosEventChannel(chatID), payload))
+	return version
+}
+
+// storeForkChatTodos stores a todo list without publishing its event, like a
+// write whose publish failed.
+func storeForkChatTodos(ctx context.Context, t testing.TB, db database.Store, chatID uuid.UUID, items string) int64 {
+	t.Helper()
+
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
 	row, err := fdb.UpsertChatTodos(ctx, forkdb.UpsertChatTodosParams{
@@ -79,10 +94,6 @@ func writeForkChatTodos(
 		UpdatedAt: dbtime.Now(),
 	})
 	require.NoError(t, err)
-
-	payload, err := json.Marshal(pubsub.ChatTodosEvent{ChatID: chatID, Version: row.Version})
-	require.NoError(t, err)
-	require.NoError(t, ps.Publish(pubsub.ChatTodosEventChannel(chatID), payload))
 	return row.Version
 }
 
@@ -92,7 +103,7 @@ func TestForkChatTodosExperimentOff(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client, db, _ := newForkChatTodosAPI(t, false)
+	client, db, _ := newForkChatTodosAPI(t, false, nil)
 	user := coderdtest.CreateFirstUser(t, client)
 	chat := newForkChatTodosChat(t, db, user)
 
@@ -112,7 +123,7 @@ func TestForkChatTodos(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client, db, ps := newForkChatTodosAPI(t, true)
+	client, db, ps := newForkChatTodosAPI(t, true, nil)
 	user := coderdtest.CreateFirstUser(t, client)
 	chat := newForkChatTodosChat(t, db, user)
 
@@ -159,7 +170,7 @@ func TestForkChatTodosPermission(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client, db, ps := newForkChatTodosAPI(t, true)
+	client, db, ps := newForkChatTodosAPI(t, true, nil)
 	user := coderdtest.CreateFirstUser(t, client)
 	chat := newForkChatTodosChat(t, db, user)
 	writeForkChatTodos(ctx, t, db, ps, chat.ID,
@@ -183,7 +194,7 @@ func TestForkChatTodosWatch(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client, db, ps := newForkChatTodosAPI(t, true)
+	client, db, ps := newForkChatTodosAPI(t, true, nil)
 	user := coderdtest.CreateFirstUser(t, client)
 	chat := newForkChatTodosChat(t, db, user)
 
@@ -210,4 +221,38 @@ func TestForkChatTodosWatch(t *testing.T) {
 	require.Equal(t, version, second.Version)
 	require.Len(t, second.Todos, 2)
 	require.Equal(t, codersdk.ChatTodoStatusDone, second.Todos[0].Status)
+}
+
+// TestForkChatTodosWatchResync checks that a watcher picks up a write whose
+// change event never arrived once the resync interval passes.
+func TestForkChatTodosWatchResync(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	clock := quartz.NewMock(t)
+	tickerTrap := clock.Trap().NewTicker("chat_todos_watch")
+	defer tickerTrap.Close()
+	client, db, _ := newForkChatTodosAPI(t, true, clock)
+	user := coderdtest.CreateFirstUser(t, client)
+	chat := newForkChatTodosChat(t, db, user)
+
+	events, closer, err := client.WatchChatTodos(ctx, chat.ID)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = closer.Close() })
+	initial := testutil.RequireReceive(ctx, t, events)
+	require.Zero(t, initial.Version)
+	tickerTrap.MustWait(ctx).MustRelease(ctx)
+
+	version := storeForkChatTodos(ctx, t, db, chat.ID,
+		`[{"id": "one", "content": "plan the work", "status": "pending"}]`)
+	// Other tickers on the clock, such as the websocket ping, fire first, so
+	// step through every tick until the resync interval has passed.
+	for elapsed := time.Duration(0); elapsed < 30*time.Second; {
+		step, waiter := clock.AdvanceNext()
+		waiter.MustWait(ctx)
+		elapsed += step
+	}
+	resynced := testutil.RequireReceive(ctx, t, events)
+	require.Equal(t, version, resynced.Version)
+	require.Len(t, resynced.Todos, 1)
 }
