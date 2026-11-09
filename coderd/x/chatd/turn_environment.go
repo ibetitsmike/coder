@@ -884,9 +884,6 @@ func (p *Server) buildTurnEnvironment(
 			return !exploreToolAllowed(tool)
 		})
 	}
-	if tools, deferredCandidates, err = p.applyCustomAgentToolPolicy(ctx, chat, tools, deferredCandidates); err != nil {
-		return turnEnvironment{}, err
-	}
 
 	var dynamicToolNames map[string]bool
 	if p.disableCallerSuppliedTools {
@@ -936,6 +933,10 @@ func (p *Server) buildTurnEnvironment(
 		if err != nil {
 			return turnEnvironment{}, err
 		}
+	}
+
+	if tools, deferredCandidates, providerTools, err = p.applyCustomAgentToolPolicy(ctx, chat, tools, deferredCandidates, providerTools); err != nil {
+		return turnEnvironment{}, err
 	}
 
 	activeToolNames := activeToolNamesForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)

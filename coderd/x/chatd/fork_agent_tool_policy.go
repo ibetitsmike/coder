@@ -15,11 +15,12 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
+	aidmcp "github.com/coder/coder/v2/aibridge/mcp"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/mcpclient"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -39,12 +40,16 @@ type customAgentToolPolicy struct {
 }
 
 // customAgentToolAliases maps Claude Code tool names to chatd tool names.
+// Grep and Glob become shell searches, as in docs/fork/pstack-adapter.md.
 var customAgentToolAliases = map[string][]string{
 	"Read":      {"read_file"},
 	"Write":     {"write_file"},
 	"Edit":      {"edit_files"},
 	"MultiEdit": {"edit_files"},
 	"Bash":      {"execute", "process_output"},
+	"Grep":      {"read_file", "execute", "process_output"},
+	"Glob":      {"read_file", "execute", "process_output"},
+	"WebSearch": {"web_search"},
 }
 
 func customAgentToolPolicyFromDefinition(def workspacesdk.AgentDefinition) customAgentToolPolicy {
@@ -69,46 +74,59 @@ func customAgentToolNames(names []string) map[string]bool {
 }
 
 // customAgentMCPServer reports whether tool is an MCP tool and, if so, the
-// name of its server. An MCP tool whose config ID is not in mcpServerSlugs
-// has no name.
-func customAgentMCPServer(tool fantasy.AgentTool, mcpServerSlugs map[uuid.UUID]string) (string, bool) {
-	if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok {
-		return mcpServerSlugs[identified.MCPServerConfigID()], true
-	}
+// name of its server.
+func customAgentMCPServer(tool fantasy.AgentTool) (string, bool) {
 	if namer, ok := tool.(interface{ ServerName() string }); ok {
 		return strings.TrimSpace(namer.ServerName()), true
+	}
+	if _, ok := tool.(mcpclient.MCPToolIdentifier); ok {
+		// mcpclient names the tools of org, inline and internal servers
+		// alike <sanitized server slug>__<tool>.
+		server, _, found := strings.Cut(tool.Info().Name, "__")
+		if !found {
+			return "", true
+		}
+		return server, true
 	}
 	return "", false
 }
 
-// filter returns the tools and deferred MCP candidates that policy allows,
-// in their original order. mcpServerSlugs is only read in named mode.
+func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
+	switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
+	case workspacesdk.AgentDefinitionMCPNone:
+		return false
+	case workspacesdk.AgentDefinitionMCPNamed:
+		return server != "" && slices.ContainsFunc(policy.MCPServers, func(name string) bool {
+			name = strings.TrimSpace(name)
+			return strings.EqualFold(name, server) || strings.EqualFold(aidmcp.SanitizeToolName(name), server)
+		})
+	default:
+		return true
+	}
+}
+
+// filter returns the tools, deferred MCP candidates and provider tools that
+// policy allows, in their original order. readonly keeps web_search, the
+// provider tool that Explore children keep.
 func (policy customAgentToolPolicy) filter(
 	tools []fantasy.AgentTool,
 	candidates []deferredMCPTool,
-	mcpServerSlugs map[uuid.UUID]string,
-) ([]fantasy.AgentTool, []deferredMCPTool) {
+	providerTools []chatloop.ProviderTool,
+) ([]fantasy.AgentTool, []deferredMCPTool, []chatloop.ProviderTool) {
 	allowed := customAgentToolNames(policy.Tools)
 	disallowed := customAgentToolNames(policy.DisallowedTools)
+	keepNonMCP := func(name string) bool {
+		return !disallowed[name] && (policy.Tools == nil || allowed[name])
+	}
 	keep := func(tool fantasy.AgentTool) bool {
 		name := tool.Info().Name
 		if disallowed[name] || (policy.ReadOnly && !exploreToolAllowed(tool)) {
 			return false
 		}
-		server, isMCP := customAgentMCPServer(tool, mcpServerSlugs)
-		if !isMCP {
-			return policy.Tools == nil || allowed[name]
+		if server, isMCP := customAgentMCPServer(tool); isMCP {
+			return policy.allowsMCPServer(server)
 		}
-		switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
-		case workspacesdk.AgentDefinitionMCPNone:
-			return false
-		case workspacesdk.AgentDefinitionMCPNamed:
-			return server != "" && slices.ContainsFunc(policy.MCPServers, func(name string) bool {
-				return strings.EqualFold(strings.TrimSpace(name), server)
-			})
-		default:
-			return true
-		}
+		return keepNonMCP(name)
 	}
 	tools = slices.DeleteFunc(slices.Clone(tools), func(tool fantasy.AgentTool) bool {
 		return !keep(tool)
@@ -116,84 +134,50 @@ func (policy customAgentToolPolicy) filter(
 	candidates = slices.DeleteFunc(slices.Clone(candidates), func(candidate deferredMCPTool) bool {
 		return !keep(candidate.tool)
 	})
-	return tools, candidates
+	providerTools = slices.DeleteFunc(slices.Clone(providerTools), func(tool chatloop.ProviderTool) bool {
+		name := tool.Definition.GetName()
+		return (policy.ReadOnly && name != "web_search") || !keepNonMCP(name)
+	})
+	return tools, candidates, providerTools
 }
 
-// applyCustomAgentToolPolicy filters the turn's tools and deferred MCP
-// candidates by the tool policy stored when chat was spawned. A policy that
-// cannot be read fails the turn instead of running it unrestricted.
+// applyCustomAgentToolPolicy filters the turn's tools, deferred MCP
+// candidates and provider tools by the tool policy stored when chat was
+// spawned. A policy that cannot be read fails the turn instead of running it
+// unrestricted.
 func (p *Server) applyCustomAgentToolPolicy(
 	ctx context.Context,
 	chat database.Chat,
 	tools []fantasy.AgentTool,
 	candidates []deferredMCPTool,
-) ([]fantasy.AgentTool, []deferredMCPTool, error) {
+	providerTools []chatloop.ProviderTool,
+) ([]fantasy.AgentTool, []deferredMCPTool, []chatloop.ProviderTool, error) {
 	if !p.agentDefinitionsEnabled() || !chat.ParentChatID.Valid {
-		return tools, candidates, nil
+		return tools, candidates, providerTools, nil
 	}
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
-		return nil, nil, xerrors.Errorf("fork queries: %w", err)
+		return nil, nil, nil, xerrors.Errorf("fork queries: %w", err)
 	}
 	row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return tools, candidates, nil
+		return tools, candidates, providerTools, nil
 	}
 	if err != nil {
-		return nil, nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
+		return nil, nil, nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
 	}
 	if !row.ToolPolicy.Valid {
-		return tools, candidates, nil
+		return tools, candidates, providerTools, nil
 	}
 	var policy customAgentToolPolicy
 	if err := json.Unmarshal(row.ToolPolicy.RawMessage, &policy); err != nil {
-		return nil, nil, xerrors.Errorf("decode tool policy of chat %s: %w", chat.ID, err)
+		return nil, nil, nil, xerrors.Errorf("decode tool policy of chat %s: %w", chat.ID, err)
 	}
-	var mcpServerSlugs map[uuid.UUID]string
 	switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
-	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone:
-	case workspacesdk.AgentDefinitionMCPNamed:
-		mcpServerSlugs, err = p.customAgentMCPServerSlugs(ctx, chat, tools, candidates)
-		if err != nil {
-			return nil, nil, err
-		}
+	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone, workspacesdk.AgentDefinitionMCPNamed:
 	default:
-		return nil, nil, xerrors.Errorf("tool policy of chat %s has unknown mcp mode %q", chat.ID, policy.MCPMode)
+		return nil, nil, nil, xerrors.Errorf("tool policy of chat %s has unknown mcp mode %q", chat.ID, policy.MCPMode)
 	}
-	tools, candidates = policy.filter(tools, candidates, mcpServerSlugs)
-	return tools, candidates, nil
-}
-
-// customAgentMCPServerSlugs returns the server slug of every MCP server
-// config that tools and candidates come from.
-func (p *Server) customAgentMCPServerSlugs(
-	ctx context.Context,
-	chat database.Chat,
-	tools []fantasy.AgentTool,
-	candidates []deferredMCPTool,
-) (map[uuid.UUID]string, error) {
-	var ids []uuid.UUID
-	addID := func(tool fantasy.AgentTool) {
-		if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok && !slices.Contains(ids, identified.MCPServerConfigID()) {
-			ids = append(ids, identified.MCPServerConfigID())
-		}
-	}
-	for _, tool := range tools {
-		addID(tool)
-	}
-	for _, candidate := range candidates {
-		addID(candidate.tool)
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	configs, err := enabledMCPServerConfigsForChatOrg(ctx, p.db, chat.OrganizationID, ids)
-	if err != nil {
-		return nil, xerrors.Errorf("resolve MCP servers of chat %s: %w", chat.ID, err)
-	}
-	slugs := make(map[uuid.UUID]string, len(configs))
-	for _, config := range configs {
-		slugs[config.ID] = config.Slug
-	}
-	return slugs, nil
+	tools, candidates, providerTools = policy.filter(tools, candidates, providerTools)
+	return tools, candidates, providerTools, nil
 }

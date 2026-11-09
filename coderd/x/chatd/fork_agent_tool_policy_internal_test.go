@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -49,7 +50,7 @@ func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 			server := &Server{experiments: tt.experiments}
 			tools := []fantasy.AgentTool{newTestAgentTool("write_file")}
 			candidates := []deferredMCPTool{{tool: newTestMCPAgentTool("docs__search", uuid.New()), server: "docs"}}
-			gotTools, gotCandidates, err := server.applyCustomAgentToolPolicy(chatdTestContext(t), tt.chat, tools, candidates)
+			gotTools, gotCandidates, _, err := server.applyCustomAgentToolPolicy(chatdTestContext(t), tt.chat, tools, candidates, nil)
 			require.NoError(t, err)
 			require.Equal(t, tools, gotTools)
 			require.Equal(t, candidates, gotCandidates)
@@ -60,10 +61,8 @@ func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 func TestCustomAgentToolPolicyFilter(t *testing.T) {
 	t.Parallel()
 
-	docsID, otherID := uuid.New(), uuid.New()
-	slugs := map[uuid.UUID]string{docsID: "docs", otherID: "other"}
-	docs := newTestMCPAgentTool("docs__search", docsID)
-	other := newTestMCPAgentTool("other__lookup", otherID)
+	docs := newTestMCPAgentTool("docs__search", uuid.New())
+	other := newTestMCPAgentTool("other__lookup", uuid.New())
 	workspace := &testWorkspaceMCPAgentTool{
 		testAgentTool: &testAgentTool{info: fantasy.ToolInfo{Name: "Workspace__echo"}},
 		server:        "Workspace",
@@ -77,62 +76,75 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		newTestAgentTool("spawn_agent"),
 		docs,
 		other,
-		// An MCP tool whose server config is unknown has no server name.
-		newTestMCPAgentTool("ghost__lookup", uuid.New()),
+		// An MCP tool whose name has no server prefix has no server name.
+		newTestMCPAgentTool("unprefixed", uuid.New()),
 		workspace,
 	}
 	candidates := []deferredMCPTool{{tool: docs, server: "docs"}, {tool: other, server: "other"}, {tool: workspace, server: "Workspace"}}
+	providerTools := []chatloop.ProviderTool{
+		{Definition: fantasy.ProviderDefinedTool{Name: "web_search"}},
+		{Definition: fantasy.ProviderDefinedTool{Name: "code_execution"}},
+	}
 	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent"}
-	allMCP := []string{"docs__search", "other__lookup", "ghost__lookup", "Workspace__echo"}
+	allMCP := []string{"docs__search", "other__lookup", "unprefixed", "Workspace__echo"}
 	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo"}
+	allProvider := []string{"web_search", "code_execution"}
 
 	tests := []struct {
 		name         string
 		policy       customAgentToolPolicy
 		want         []string
 		wantDeferred []string
+		wantProvider []string
 	}{
 		{
 			name:         "Inherit",
 			policy:       customAgentToolPolicy{MCPMode: "inherit"},
 			want:         append(append([]string{}, builtins...), allMCP...),
 			wantDeferred: allDeferred,
+			wantProvider: allProvider,
 		},
 		{
 			name:         "ReadOnly",
 			policy:       customAgentToolPolicy{ReadOnly: true, MCPMode: "inherit"},
-			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "ghost__lookup"},
+			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "unprefixed"},
 			wantDeferred: []string{"docs__search", "other__lookup"},
+			wantProvider: []string{"web_search"},
 		},
 		{
 			name:         "AllowlistAliases",
-			policy:       customAgentToolPolicy{Tools: []string{"Read", "Bash"}, MCPMode: "inherit"},
+			policy:       customAgentToolPolicy{Tools: []string{"Grep", "WebSearch"}, MCPMode: "inherit"},
 			want:         append([]string{"read_file", "execute", "process_output"}, allMCP...),
 			wantDeferred: allDeferred,
+			wantProvider: []string{"web_search"},
 		},
 		{
 			name:         "EmptyAllowlist",
 			policy:       customAgentToolPolicy{Tools: []string{}, MCPMode: "inherit"},
 			want:         allMCP,
 			wantDeferred: allDeferred,
+			wantProvider: []string{},
 		},
 		{
 			name:         "Disallowed",
-			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "other__lookup"}, MCPMode: "inherit"},
-			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "ghost__lookup", "Workspace__echo"},
+			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "other__lookup", "web_search"}, MCPMode: "inherit"},
+			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "unprefixed", "Workspace__echo"},
 			wantDeferred: []string{"docs__search", "Workspace__echo"},
+			wantProvider: []string{"code_execution"},
 		},
 		{
 			name:         "MCPNone",
 			policy:       customAgentToolPolicy{MCPMode: "none"},
 			want:         builtins,
 			wantDeferred: []string{},
+			wantProvider: allProvider,
 		},
 		{
 			name:         "MCPNamed",
 			policy:       customAgentToolPolicy{MCPMode: "named", MCPServers: []string{"DOCS", "workspace"}},
 			want:         append(append([]string{}, builtins...), "docs__search", "Workspace__echo"),
 			wantDeferred: []string{"docs__search", "Workspace__echo"},
+			wantProvider: allProvider,
 		},
 	}
 	for _, tt := range tests {
@@ -145,13 +157,18 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 			var policy customAgentToolPolicy
 			require.NoError(t, json.Unmarshal(raw, &policy))
 
-			gotTools, gotCandidates := policy.filter(tools, candidates, slugs)
+			gotTools, gotCandidates, gotProvider := policy.filter(tools, candidates, providerTools)
 			gotDeferred := make([]string, 0, len(gotCandidates))
 			for _, candidate := range gotCandidates {
 				gotDeferred = append(gotDeferred, candidate.tool.Info().Name)
 			}
+			gotProviderNames := make([]string, 0, len(gotProvider))
+			for _, tool := range gotProvider {
+				gotProviderNames = append(gotProviderNames, tool.Definition.GetName())
+			}
 			require.Equal(t, tt.want, toolNames(gotTools))
 			require.Equal(t, tt.wantDeferred, gotDeferred)
+			require.Equal(t, tt.wantProvider, gotProviderNames)
 		})
 	}
 }

@@ -325,12 +325,11 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.Contains(t, names, "edit_files")
 		require.NotContains(t, names, "write_file")
 
-		lookups := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "lookups"})
-		searchTool := newTestMCPAgentTool("lookups__search", lookups.ID)
-		lookupTool := newTestMCPAgentTool("lookups__lookup", lookups.ID)
-		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
+		searchTool := newTestMCPAgentTool("lookups__search", uuid.New())
+		lookupTool := newTestMCPAgentTool("lookups__lookup", uuid.New())
+		tools, candidates, _, err := f.server.applyCustomAgentToolPolicy(ctx, child,
 			[]fantasy.AgentTool{newTestAgentTool("read_file"), searchTool, lookupTool},
-			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}})
+			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}}, nil)
 		require.NoError(t, err)
 		require.Equal(t, []string{"read_file", "lookups__search"}, toolNames(tools))
 		require.Len(t, candidates, 1)
@@ -342,14 +341,12 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		ctx := chatdTestContext(t)
 		child, err := f.spawn(t, spawnAgentArgs{Type: "docs-reader"})
 		require.NoError(t, err)
-		docs := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs"})
-		other := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "other"})
-		docsTool := newTestMCPAgentTool("docs__search", docs.ID)
-		otherTool := newTestMCPAgentTool("other__lookup", other.ID)
+		docsTool := newTestMCPAgentTool("docs__search", uuid.New())
+		otherTool := newTestMCPAgentTool("other__lookup", uuid.New())
 
-		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
+		tools, candidates, _, err := f.server.applyCustomAgentToolPolicy(ctx, child,
 			[]fantasy.AgentTool{newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, otherTool},
-			[]deferredMCPTool{{tool: otherTool, server: "other"}, {tool: docsTool, server: "docs"}})
+			[]deferredMCPTool{{tool: otherTool, server: "other"}, {tool: docsTool, server: "docs"}}, nil)
 		require.NoError(t, err)
 		require.Equal(t, []string{"read_file", "docs__search"}, toolNames(tools))
 		require.Len(t, candidates, 1)
@@ -377,15 +374,12 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 				ParentChatID:      uuid.NullUUID{UUID: f.root.ID, Valid: true},
 				RootChatID:        uuid.NullUUID{UUID: f.root.ID, Valid: true},
 			})
-			_, err := f.fdb.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
+			dbgen.ChatSubagent(t, f.db, forkdb.ChatSubagent{
 				ChatID:     child.ID,
 				AgentType:  "reader",
-				Depth:      1,
-				Isolation:  "shared",
 				ToolPolicy: pqtype.NullRawMessage{RawMessage: json.RawMessage(policy), Valid: true},
 			})
-			require.NoError(t, err)
-			_, _, err = f.server.applyCustomAgentToolPolicy(ctx, child, []fantasy.AgentTool{newTestAgentTool("write_file")}, nil)
+			_, _, _, err := f.server.applyCustomAgentToolPolicy(ctx, child, []fantasy.AgentTool{newTestAgentTool("write_file")}, nil, nil)
 			require.Error(t, err, policy)
 		}
 	})
