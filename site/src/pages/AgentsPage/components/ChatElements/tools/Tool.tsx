@@ -122,7 +122,7 @@ type ToolProps = Omit<React.ComponentProps<"div">, "children"> & {
 
 // Props passed to each tool-specific renderer function. Each renderer
 // only computes the expensive values it needs from the raw args/result.
-export type ToolRendererProps = {
+type ToolRendererProps = {
 	organizationId: string;
 	name: string;
 	toolCallId?: string;

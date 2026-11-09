@@ -9,4 +9,8 @@ type ForkComposerSlotProps = {
 	isDisabled: boolean;
 };
 
+/**
+ * Renders fork composer controls at the start of the AgentChatInput controls
+ * row. It renders nothing until a fork feature adds a control.
+ */
 export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = () => null;

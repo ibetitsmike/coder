@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { forkToolRenderers } from "./forkToolRenderers";
-import { toolRenderers } from "./Tool";
 
 // Tool.tsx spreads forkToolRenderers last, so a fork name that matches an
 // upstream name would take over that tool row.
@@ -14,10 +13,15 @@ describe("forkToolRenderers", () => {
 		expect(outsideNamespace).toEqual([]);
 	});
 
-	it("is the only source of fork_ prefixed names in toolRenderers", () => {
-		const mergedForkNames = Object.keys(toolRenderers)
-			.filter((name) => name.startsWith(forkNamePrefix))
-			.sort();
-		expect(mergedForkNames).toEqual(Object.keys(forkToolRenderers).sort());
+	it("leaves the fork_ namespace unused by upstream renderers", async () => {
+		vi.resetModules();
+		vi.doMock("./forkToolRenderers", () => ({ forkToolRenderers: {} }));
+		const { toolRenderers } = await import("./Tool");
+		vi.doUnmock("./forkToolRenderers");
+
+		const upstreamForkNames = Object.keys(toolRenderers).filter((name) =>
+			name.startsWith(forkNamePrefix),
+		);
+		expect(upstreamForkNames).toEqual([]);
 	});
 });
