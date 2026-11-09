@@ -24,7 +24,7 @@ SET
     updated_at = $2
 WHERE chat_id = $3
     AND status IN ('active', 'paused')
-RETURNING id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
 `
 
 type CancelChatWakeupsByChatIDParams struct {
@@ -45,6 +45,7 @@ func (q *Queries) CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatW
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatID,
+			&i.OrganizationID,
 			&i.CreatedBy,
 			&i.Source,
 			&i.Kind,
@@ -92,7 +93,7 @@ WHERE id IN (
     LIMIT $3::int
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
 `
 
 type ClaimDueChatWakeupsParams struct {
@@ -115,6 +116,7 @@ func (q *Queries) ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeu
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatID,
+			&i.OrganizationID,
 			&i.CreatedBy,
 			&i.Source,
 			&i.Kind,
@@ -208,7 +210,7 @@ SET
     updated_at = $6
 WHERE id = $7
     AND lease_expires_at = $8::timestamptz
-RETURNING id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
 `
 
 type FinishChatWakeupClaimParams struct {
@@ -240,6 +242,7 @@ func (q *Queries) FinishChatWakeupClaim(ctx context.Context, arg FinishChatWakeu
 	err := row.Scan(
 		&i.ID,
 		&i.ChatID,
+		&i.OrganizationID,
 		&i.CreatedBy,
 		&i.Source,
 		&i.Kind,
@@ -263,7 +266,7 @@ func (q *Queries) FinishChatWakeupClaim(ctx context.Context, arg FinishChatWakeu
 }
 
 const getChatWakeupByID = `-- name: GetChatWakeupByID :one
-SELECT id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1
+SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1
 `
 
 func (q *Queries) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error) {
@@ -272,6 +275,7 @@ func (q *Queries) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWake
 	err := row.Scan(
 		&i.ID,
 		&i.ChatID,
+		&i.OrganizationID,
 		&i.CreatedBy,
 		&i.Source,
 		&i.Kind,
@@ -298,6 +302,7 @@ const insertChatWakeup = `-- name: InsertChatWakeup :one
 INSERT INTO chat_wakeups (
     id,
     chat_id,
+    organization_id,
     created_by,
     source,
     kind,
@@ -313,8 +318,11 @@ INSERT INTO chat_wakeups (
     max_runs,
     created_at,
     updated_at
-) VALUES (
+)
+SELECT
     $1,
+    c.id,
+    c.organization_id,
     $2,
     $3,
     $4,
@@ -329,15 +337,14 @@ INSERT INTO chat_wakeups (
     $13,
     $14,
     $15,
-    $16,
-    $17
-)
-RETURNING id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+    $16
+FROM chats c
+WHERE c.id = $17::uuid
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
 `
 
 type InsertChatWakeupParams struct {
 	ID              uuid.UUID        `db:"id" json:"id"`
-	ChatID          uuid.UUID        `db:"chat_id" json:"chat_id"`
 	CreatedBy       uuid.UUID        `db:"created_by" json:"created_by"`
 	Source          string           `db:"source" json:"source"`
 	Kind            ChatWakeupKind   `db:"kind" json:"kind"`
@@ -353,12 +360,13 @@ type InsertChatWakeupParams struct {
 	MaxRuns         sql.NullInt32    `db:"max_runs" json:"max_runs"`
 	CreatedAt       time.Time        `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time        `db:"updated_at" json:"updated_at"`
+	ChatID          uuid.UUID        `db:"chat_id" json:"chat_id"`
 }
 
+// The organization comes from the chat.
 func (q *Queries) InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error) {
 	row := q.db.QueryRowContext(ctx, insertChatWakeup,
 		arg.ID,
-		arg.ChatID,
 		arg.CreatedBy,
 		arg.Source,
 		arg.Kind,
@@ -374,11 +382,13 @@ func (q *Queries) InsertChatWakeup(ctx context.Context, arg InsertChatWakeupPara
 		arg.MaxRuns,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.ChatID,
 	)
 	var i ChatWakeup
 	err := row.Scan(
 		&i.ID,
 		&i.ChatID,
+		&i.OrganizationID,
 		&i.CreatedBy,
 		&i.Source,
 		&i.Kind,
@@ -417,14 +427,13 @@ SELECT
     $1,
     w.id,
     w.chat_id,
-    c.organization_id,
+    w.organization_id,
     $2,
     $3,
     $4,
     $5,
     $6
 FROM chat_wakeups w
-JOIN chats c ON c.id = w.chat_id
 WHERE w.id = $7::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING id, wakeup_id, chat_id, organization_id, run_key, status, error, created_at, updated_at
@@ -469,7 +478,7 @@ func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupR
 }
 
 const listChatWakeupsByChatID = `-- name: ListChatWakeupsByChatID :many
-SELECT id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE chat_id = $1 ORDER BY created_at, id
+SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE chat_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error) {
@@ -484,6 +493,7 @@ func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID)
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatID,
+			&i.OrganizationID,
 			&i.CreatedBy,
 			&i.Source,
 			&i.Kind,
@@ -564,7 +574,7 @@ SET
     lease_expires_at = NULL,
     updated_at = $4
 WHERE id = $5
-RETURNING id, chat_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
 `
 
 type UpdateChatWakeupStatusParams struct {
@@ -589,6 +599,7 @@ func (q *Queries) UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWake
 	err := row.Scan(
 		&i.ID,
 		&i.ChatID,
+		&i.OrganizationID,
 		&i.CreatedBy,
 		&i.Source,
 		&i.Kind,

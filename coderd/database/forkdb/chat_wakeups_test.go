@@ -206,6 +206,7 @@ func insertDelayWakeup(ctx context.Context, t *testing.T, fdb forkdb.Store, chat
 		UpdatedAt: now,
 	})
 	require.NoError(t, err)
+	require.Equal(t, chat.OrganizationID, wakeup.OrganizationID, "the wake-up takes the chat's organization")
 	return wakeup
 }
 

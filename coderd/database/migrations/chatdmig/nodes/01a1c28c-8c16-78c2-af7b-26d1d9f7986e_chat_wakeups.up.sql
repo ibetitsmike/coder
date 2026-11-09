@@ -8,6 +8,8 @@ CREATE TYPE chat_wakeup_run_status AS ENUM ('pending', 'delivered', 'skipped', '
 CREATE TABLE chat_wakeups (
     id uuid PRIMARY KEY,
     chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    -- The organization of the chat, copied when the wake-up is created.
+    organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     -- The user whose action created it (the chat owner for tool calls).
     created_by uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     -- What created it: 'schedule_wakeup', 'loop' or 'wait_for_events'.
@@ -42,6 +44,7 @@ CREATE TABLE chat_wakeups (
 );
 CREATE INDEX chat_wakeups_due_idx ON chat_wakeups (next_run_at) WHERE status = 'active';
 CREATE INDEX chat_wakeups_chat_id_idx ON chat_wakeups (chat_id);
+CREATE INDEX chat_wakeups_organization_id_idx ON chat_wakeups (organization_id);
 
 -- One row per delivery attempt. Kept when its wake-up is deleted, so daily
 -- caps still count it.

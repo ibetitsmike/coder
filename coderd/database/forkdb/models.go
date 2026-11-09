@@ -260,6 +260,7 @@ type ChatTodo struct {
 type ChatWakeup struct {
 	ID              uuid.UUID        `db:"id" json:"id"`
 	ChatID          uuid.UUID        `db:"chat_id" json:"chat_id"`
+	OrganizationID  uuid.UUID        `db:"organization_id" json:"organization_id"`
 	CreatedBy       uuid.UUID        `db:"created_by" json:"created_by"`
 	Source          string           `db:"source" json:"source"`
 	Kind            ChatWakeupKind   `db:"kind" json:"kind"`

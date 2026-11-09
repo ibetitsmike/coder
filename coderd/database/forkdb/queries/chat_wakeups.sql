@@ -1,7 +1,9 @@
+-- The organization comes from the chat.
 -- name: InsertChatWakeup :one
 INSERT INTO chat_wakeups (
     id,
     chat_id,
+    organization_id,
     created_by,
     source,
     kind,
@@ -17,9 +19,11 @@ INSERT INTO chat_wakeups (
     max_runs,
     created_at,
     updated_at
-) VALUES (
+)
+SELECT
     @id,
-    @chat_id,
+    c.id,
+    c.organization_id,
     @created_by,
     @source,
     @kind,
@@ -35,7 +39,8 @@ INSERT INTO chat_wakeups (
     @max_runs,
     @created_at,
     @updated_at
-)
+FROM chats c
+WHERE c.id = @chat_id::uuid
 RETURNING *;
 
 -- name: GetChatWakeupByID :one
@@ -127,14 +132,13 @@ SELECT
     @id,
     w.id,
     w.chat_id,
-    c.organization_id,
+    w.organization_id,
     @run_key,
     @status,
     @error,
     @created_at,
     @updated_at
 FROM chat_wakeups w
-JOIN chats c ON c.id = w.chat_id
 WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
