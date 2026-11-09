@@ -196,8 +196,13 @@ func TestForkAgentDefinitionModel(t *testing.T) {
 				"pinned-model":  agentDefinitionMarkdown("name: pinned-model\nmodel: "+strings.ToUpper(otherModel.DisplayName)+"\neffort: High", "Pinned."),
 				"missing-model": agentDefinitionMarkdown("name: missing-model\nmodel: no-such-model", "Missing."),
 				"bad-effort":    agentDefinitionMarkdown("name: bad-effort\neffort: turbo", "Bad effort."),
+				"inherits":      agentDefinitionMarkdown("name: inherits\nmodel: inherit", "Inherits."),
 			}
 		})
+	// Definitions without a model inherit the parent's model, not the
+	// general subagent override.
+	upsertInternalChatOrganizationModelOverride(t, f.db, f.root.OrganizationID,
+		codersdk.ChatModelOverrideContextGeneral, f.otherModel.ID.String())
 	high := database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffortHigh, Valid: true}
 	low := database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffortLow, Valid: true}
 
@@ -225,6 +230,13 @@ func TestForkAgentDefinitionModel(t *testing.T) {
 		t.Parallel()
 		_, err := f.spawn(t, spawnAgentArgs{Type: "missing-model"})
 		require.ErrorContains(t, err, `agent "missing-model" sets model "no-such-model", which is not an available model`)
+	})
+
+	t.Run("InheritsParentModel", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "inherits"})
+		require.NoError(t, err)
+		require.Equal(t, f.root.LastModelConfigID, child.LastModelConfigID)
 	})
 
 	t.Run("InvalidEffort", func(t *testing.T) {

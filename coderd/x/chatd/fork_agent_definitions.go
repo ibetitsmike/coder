@@ -144,10 +144,16 @@ func customSubagentDefinition(def workspacesdk.AgentDefinition, description stri
 			if !ok {
 				return childSubagentChatOptions{}, xerrors.Errorf("agent %q has unknown base type %q", def.Name, def.BaseType)
 			}
-			if explicitModelConfigID == nil && def.Model != "" {
-				modelConfigID, err := p.resolveCustomAgentModel(ctx, parent, def)
-				if err != nil {
-					return childSubagentChatOptions{}, err
+			// A definition without a model inherits the parent's model
+			// rather than the base type's subagent model override.
+			if explicitModelConfigID == nil {
+				modelConfigID := currentModelConfigID
+				if def.Model != "" {
+					var err error
+					modelConfigID, err = p.resolveCustomAgentModel(ctx, parent, def)
+					if err != nil {
+						return childSubagentChatOptions{}, err
+					}
 				}
 				explicitModelConfigID = &modelConfigID
 			}
