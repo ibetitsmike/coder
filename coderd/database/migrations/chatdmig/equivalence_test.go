@@ -12,6 +12,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
@@ -88,6 +89,94 @@ func TestUpgradeMatchesFresh(t *testing.T) {
 			require.NoError(t, migrations.EnsureCleanAll(oldDB))
 			requireSameBlocks(t, fresh, dumpBlocks(t, oldURL, false))
 		})
+	}
+
+	// A database that ran every node but one, as when the node lands on
+	// main, gets the same schema once the node runs.
+	for _, n := range g.Nodes {
+		if n.Source != chatdmig.SourceFork || n.ID == chatdmig.AdoptNodeID {
+			continue
+		}
+		t.Run("without "+n.Name, func(t *testing.T) {
+			t.Parallel()
+			oldURL, oldDB := createDB(t, admin)
+			require.NoError(t, migrations.UpGraph(oldDB, withoutNode(g, n)))
+			require.NoError(t, migrations.UpAll(oldDB))
+			require.NoError(t, migrations.EnsureCleanAll(oldDB))
+			requireSameBlocks(t, fresh, dumpBlocks(t, oldURL, false))
+		})
+	}
+}
+
+// withoutNode returns g without n and the nodes that need n.
+func withoutNode(g *chatdmig.Graph, n *chatdmig.Node) *chatdmig.Graph {
+	out := *g
+	out.Nodes = nil
+	dropped := map[uuid.UUID]bool{n.ID: true}
+	// g.Nodes is in topological order, so parents come first.
+	for _, m := range g.Nodes {
+		for _, r := range m.Requires {
+			if dropped[r.Node] {
+				dropped[m.ID] = true
+			}
+		}
+		if !dropped[m.ID] {
+			out.Nodes = append(out.Nodes, m)
+		}
+	}
+	return &out
+}
+
+// chatdObject matches a dump block that creates or changes an object in
+// chatd. pg_dump names public objects without a schema.
+var chatdObject = regexp.MustCompile(`^(CREATE (TABLE|TYPE|FUNCTION|SEQUENCE|VIEW|(UNIQUE )?INDEX \S+ ON|TRIGGER .+\bON)|ALTER (TABLE( ONLY)?|SEQUENCE)|COMMENT ON \w+) chatd\.`)
+
+// enumBlock matches a dump block that creates an enum type.
+var enumBlock = regexp.MustCompile(`^CREATE TYPE (\S+) AS ENUM \(`)
+
+// TestForkNodesOnlyAddToChatd migrates one database with the routed graph
+// and one with every node. Fork nodes may create objects in chatd and add
+// values to enums, and nothing else. So upstream's dump.sql, and the queries
+// that sqlc generates from it, still describe every core object.
+func TestForkNodesOnlyAddToChatd(t *testing.T) {
+	t.Parallel()
+	admin := adminURL(t)
+	g, err := migrations.LoadGraph()
+	require.NoError(t, err)
+
+	routedURL, routedDB := createDB(t, admin)
+	require.NoError(t, migrations.UpGraph(routedDB, g.WithoutForkNodes()))
+	fullURL, fullDB := createDB(t, admin)
+	require.NoError(t, migrations.UpAll(fullDB))
+	routed := dumpBlocks(t, routedURL, false)
+	full := dumpBlocks(t, fullURL, false)
+
+	enumValues := regexp.MustCompile(`'([^']*)'`)
+	fullEnums := map[string][]string{}
+	for b := range full {
+		if m := enumBlock.FindStringSubmatch(b); m != nil {
+			for _, v := range enumValues.FindAllStringSubmatch(b, -1) {
+				fullEnums[m[1]] = append(fullEnums[m[1]], v[1])
+			}
+		}
+	}
+	for b := range routed {
+		if full[b] > 0 {
+			continue
+		}
+		m := enumBlock.FindStringSubmatch(b)
+		require.NotNil(t, m, "a fork node changed or dropped an object:\n%s", b)
+		var values []string
+		for _, v := range enumValues.FindAllStringSubmatch(b, -1) {
+			values = append(values, v[1])
+		}
+		require.Subset(t, fullEnums[m[1]], values, "a fork node dropped a value of enum %s", m[1])
+	}
+	for b := range full {
+		if routed[b] > 0 || enumBlock.MatchString(b) {
+			continue
+		}
+		require.Regexp(t, chatdObject, b, "a fork node created an object outside chatd")
 	}
 }
 

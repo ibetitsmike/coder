@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 }
 
 var _ Querier = (*Queries)(nil)

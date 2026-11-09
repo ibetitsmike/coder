@@ -56,3 +56,8 @@ func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chat
 	defer f.observe(ctx, "GetChatSubagentByChatID", time.Now())
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
 }
+
+func (f forkQueryMetricsStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
+	defer f.observe(ctx, "InsertChatSubagent", time.Now())
+	return f.s.InsertChatSubagent(ctx, arg)
+}

@@ -78,13 +78,15 @@ func TestFrom(t *testing.T) {
 			LastModelConfigID: dbgen.ChatModelConfig(t, raw, database.ChatModelConfig{}).ID,
 		})
 
+		sub := dbgen.ChatSubagent(t, raw, forkdb.ChatSubagent{ChatID: chat.ID})
+
 		_, err := fdb.GetChatSubagentByChatID(context.Background(), chat.ID)
 		require.ErrorIs(t, err, dbauthz.ErrNoActor, "dbauthz authorizes fork queries")
 
-		// The chat has no subagent row, so the query runs and finds none.
 		ctx := dbauthz.AsSystemRestricted(testutil.Context(t, testutil.WaitShort))
-		_, err = fdb.GetChatSubagentByChatID(ctx, chat.ID)
-		require.ErrorIs(t, err, sql.ErrNoRows)
+		got, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
+		require.NoError(t, err)
+		require.Equal(t, sub, got)
 		require.True(t, hasQueryCount(t, reg, "GetChatSubagentByChatID"), "dbmetrics measures fork queries")
 	})
 
@@ -100,38 +102,70 @@ func TestFrom(t *testing.T) {
 	})
 }
 
-// TestInTx checks that the fork queries of forkdb.InTx run in the
-// transaction of the upstream queries: they see its uncommitted rows and roll
-// back with it.
+// TestInTx checks that forkdb.InTx runs fork and upstream queries in one
+// transaction: a chat and its subagent commit together, and a rollback leaves
+// neither.
 func TestInTx(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
-	ctx := testutil.Context(t, testutil.WaitShort)
-	errRollback := xerrors.New("roll back")
-
-	var chat database.Chat
-	err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
-		chat = dbgen.Chat(t, tx, database.Chat{
+	// createChatWithSubagent inserts a chat through tx and its subagent
+	// through ftx. The subagent insert passes its foreign key only if ftx
+	// sees the uncommitted chat.
+	createChatWithSubagent := func(t *testing.T, tx database.Store, ftx forkdb.Store) (database.Chat, forkdb.ChatSubagent) {
+		t.Helper()
+		chat := dbgen.Chat(t, tx, database.Chat{
 			OrganizationID:    dbgen.Organization(t, tx, database.Organization{}).ID,
 			OwnerID:           dbgen.User(t, tx, database.User{}).ID,
 			LastModelConfigID: dbgen.ChatModelConfig(t, tx, database.ChatModelConfig{}).ID,
 		})
-		// No fork query inserts a subagent yet, so insert one on the
-		// connection of the transaction.
-		_, err := tx.(interface{ ForkDBTX() database.DBTX }).ForkDBTX().ExecContext(ctx,
-			"INSERT INTO chat_subagents (chat_id, agent_type) VALUES ($1, 'explore')", chat.ID)
+		sub, err := ftx.InsertChatSubagent(testutil.Context(t, testutil.WaitShort), forkdb.InsertChatSubagentParams{
+			ChatID:    chat.ID,
+			AgentType: "explore",
+			Depth:     1,
+			Isolation: "shared",
+		})
+		require.NoError(t, err, "fork query runs in the transaction")
+		return chat, sub
+	}
+
+	t.Run("Commit", func(t *testing.T) {
+		t.Parallel()
+		db, _ := dbtestutil.NewDB(t)
+		ctx := testutil.Context(t, testutil.WaitShort)
+
+		var chat database.Chat
+		var sub forkdb.ChatSubagent
+		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+			chat, sub = createChatWithSubagent(t, tx, ftx)
+			return nil
+		}, nil)
 		require.NoError(t, err)
 
-		sub, err := ftx.GetChatSubagentByChatID(ctx, chat.ID)
-		require.NoError(t, err, "fork query runs in the transaction")
-		require.Equal(t, forkdb.ChatSubagent{ChatID: chat.ID, AgentType: "explore", Depth: 1, Isolation: "shared"}, sub)
-		return errRollback
-	}, nil)
-	require.ErrorIs(t, err, errRollback)
+		_, err = db.GetChatByID(ctx, chat.ID)
+		require.NoError(t, err, "the chat commits")
+		got, err := mustFrom(t, db).GetChatSubagentByChatID(ctx, chat.ID)
+		require.NoError(t, err, "the subagent commits with the chat")
+		require.Equal(t, sub, got)
+	})
 
-	_, err = mustFrom(t, db).GetChatSubagentByChatID(ctx, chat.ID)
-	require.ErrorIs(t, err, sql.ErrNoRows, "the subagent rolls back with the transaction")
+	t.Run("Rollback", func(t *testing.T) {
+		t.Parallel()
+		db, _ := dbtestutil.NewDB(t)
+		ctx := testutil.Context(t, testutil.WaitShort)
+		errRollback := xerrors.New("roll back")
+
+		var chat database.Chat
+		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+			chat, _ = createChatWithSubagent(t, tx, ftx)
+			return errRollback
+		}, nil)
+		require.ErrorIs(t, err, errRollback)
+
+		_, err = db.GetChatByID(ctx, chat.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows, "the chat rolls back")
+		_, err = mustFrom(t, db).GetChatSubagentByChatID(ctx, chat.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows, "the subagent rolls back with the chat")
+	})
 }
 
 // wrap wraps db in dbauthz like coderd does.

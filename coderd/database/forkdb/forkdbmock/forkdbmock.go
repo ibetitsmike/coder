@@ -56,3 +56,18 @@ func (mr *MockStoreMockRecorder) GetChatSubagentByChatID(ctx, chatID any) *gomoc
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentByChatID), ctx, chatID)
 }
+
+// InsertChatSubagent mocks base method.
+func (m *MockStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatSubagent", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatSubagent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertChatSubagent indicates an expected call of InsertChatSubagent.
+func (mr *MockStoreMockRecorder) InsertChatSubagent(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatSubagent", reflect.TypeOf((*MockStore)(nil).InsertChatSubagent), ctx, arg)
+}
