@@ -213,7 +213,7 @@ func (p *Server) loadSubagentSpawnParentChat(
 	currentChat func() database.Chat,
 ) (database.Chat, error) {
 	parent := currentChat()
-	if err := validateSubagentSpawnParent(parent); err != nil {
+	if err := p.forkValidateSpawnParent(ctx, parent); err != nil {
 		return database.Chat{}, err
 	}
 	reloadedParent, err := p.db.GetChatByID(ctx, parent.ID)
@@ -225,7 +225,7 @@ func (p *Server) loadSubagentSpawnParentChat(
 		return database.Chat{}, xerrors.New("failed to load parent chat")
 	}
 	parent = reloadedParent
-	if err := validateSubagentSpawnParent(parent); err != nil {
+	if err := p.forkValidateSpawnParent(ctx, parent); err != nil {
 		return database.Chat{}, err
 	}
 	// Fail before prompt hooks run for a child that cannot be created.
@@ -314,7 +314,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	title string,
 	opts childSubagentChatOptions,
 ) (database.Chat, error) {
-	if parent.ParentChatID.Valid {
+	if parent.ParentChatID.Valid && !p.nestedSubagentsEnabled() {
 		return database.Chat{}, xerrors.New("delegated chats cannot create child subagents")
 	}
 
@@ -462,7 +462,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	if publisher == nil {
 		publisher = dbpubsub.NewInMemory()
 	}
-	result, err := chatstate.CreateChatWithID(ctx, p.db, publisher, childChatID, chatstate.CreateChatInput{
+	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, chatstate.CreateChatInput{
 		OrganizationID:    parent.OrganizationID,
 		OwnerID:           parent.OwnerID,
 		WorkspaceID:       parent.WorkspaceID,

@@ -22490,6 +22490,14 @@ const docTemplate = `{
                 "debug_logging_enabled": {
                     "type": "boolean"
                 },
+                "fork": {
+                    "description": "Fork holds the fork-only chat options.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkChatConfig"
+                        }
+                    ]
+                },
                 "hook_allow_insecure": {
                     "type": "boolean"
                 },
@@ -26875,7 +26883,9 @@ const docTemplate = `{
                 "chat-inline-mcp-servers",
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
-                "chat-acp-subagents"
+                "chat-acp-subagents",
+                "fork-chat-todos",
+                "fork-nested-subagents"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -26913,7 +26923,9 @@ const docTemplate = `{
                 "Enables inline MCP servers declared on POST /chats.",
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
-                "Enables workspace-local ACP subagent tools in root chats."
+                "Enables workspace-local ACP subagent tools in root chats.",
+                "",
+                ""
             ],
             "x-enum-varnames": [
                 "ExperimentExample",
@@ -26932,7 +26944,9 @@ const docTemplate = `{
                 "ExperimentChatInlineMCPServers",
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
-                "ExperimentChatACPSubagents"
+                "ExperimentChatACPSubagents",
+                "ExperimentForkChatTodos",
+                "ExperimentForkNestedSubagents"
             ]
         },
         "codersdk.ExperimentRule": {
@@ -27269,6 +27283,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.UsagePeriod"
                         }
                     ]
+                }
+            }
+        },
+        "codersdk.ForkChatConfig": {
+            "type": "object",
+            "properties": {
+                "max_subagent_depth": {
+                    "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
+                    "type": "integer"
                 }
             }
         },

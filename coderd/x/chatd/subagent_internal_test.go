@@ -108,7 +108,7 @@ func withInternalTestServerLimits(limits Limits) internalTestServerOpt {
 
 func experimentsOrDefault(experiments codersdk.Experiments) codersdk.Experiments {
 	if experiments == nil {
-		return codersdk.ExperimentsKnown
+		return upstreamExperimentsKnown()
 	}
 	return experiments
 }
