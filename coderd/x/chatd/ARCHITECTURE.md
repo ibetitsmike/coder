@@ -561,6 +561,8 @@ This section maps the public endpoints that mutate chat state to the transitions
 
 Chat routes are registered by `registerChatAPIRoutes` and mounted under `/api/v2`. The routes that were not promoted are registered by `registerExperimentalChatRoutes` and answer only on `/api/experimental`: `GET /chats/{chat}/stream/desktop` and `GET /chats/{chat}/debug/runs` with `GET /chats/{chat}/debug/runs/{debugRun}`. The `/api/v2` mount reserves `/chats/model-configs` so it returns 404 instead of matching the `{chat}` wildcard and failing UUID parsing.
 
+<!-- TODO(ibetitsmike): describe `registerForkChatRoutes`, which mounts fork-only chat routes under `/api/v2/chats/fork` and reserves that segment so it does not match the `{chat}` wildcard. -->
+
 ### Organization-scoped model discovery
 
 Clients discover models through `GET /api/v2/organizations/{organization}/chats/models`. The handler requires either full API token scope or chat model configuration read scope, then queries only configs in the requested organization that pass the caller's RBAC filter.
@@ -1181,6 +1183,7 @@ The generation goroutine supports:
 - memory tools (`read_memory`, `save_memory`, `delete_memory`) for root chats in a project, see [Project memory](#project-memory)
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
+  <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
 - file links
 - workspace binding
 - plan mode
