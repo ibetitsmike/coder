@@ -11104,7 +11104,17 @@ candidates AS (
                     unowned_chats.organization_id,
                     ROW_NUMBER() OVER (
                         PARTITION BY COALESCE(unowned_chats.root_chat_id, unowned_chats.parent_chat_id)
-                        ORDER BY unowned_chats.updated_at ASC, unowned_chats.id ASC
+                        ORDER BY EXISTS (
+                            SELECT 1
+                            FROM chats parent
+                            JOIN chat_heartbeats parent_lease
+                                ON parent_lease.chat_id = parent.id
+                                AND parent_lease.runner_id = parent.runner_id
+                            WHERE parent.id = unowned_chats.parent_chat_id
+                              AND parent.parent_chat_id IS NOT NULL
+                              AND parent.worker_id IS NOT NULL
+                              AND parent_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
+                        ) DESC, unowned_chats.updated_at ASC, unowned_chats.id ASC
                     ) AS family_position
                 FROM unowned_chats
                 WHERE unowned_chats.parent_chat_id IS NOT NULL
@@ -11151,7 +11161,10 @@ type GetChatWorkerAcquisitionCandidatesRow struct {
 //
 // With interleave_subagents set, subagents interleave organizations, then the
 // families within each, then status and age, so the refused rows of a capped
-// organization or family cannot crowd the others out either. That ranks every
+// organization or family cannot crowd the others out either. Within a family,
+// children of a subagent that holds a slot come first: they exclude that
+// ancestor from their family count, so they may fit where their queued
+// siblings cannot, and the ancestor may be waiting for them. That ranks every
 // unowned subagent of a status, so roots, and subagents without it, keep the
 // indexed age order.
 func (q *sqlQuerier) GetChatWorkerAcquisitionCandidates(ctx context.Context, arg GetChatWorkerAcquisitionCandidatesParams) ([]GetChatWorkerAcquisitionCandidatesRow, error) {
