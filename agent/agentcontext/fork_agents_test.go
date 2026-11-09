@@ -88,6 +88,19 @@ func TestResolver_DuplicateAgentNamesFirstRootWins(t *testing.T) {
 	require.Equal(t, filepath.Join(first, ".claude", "agents", "reviewer.md"), agents[0].Source)
 }
 
+func TestResolver_AgentDefinitionsInAgentsScanRoot(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "agents")
+	mustWriteFile(t, filepath.Join(root, "reviewer.md"), "---\ndescription: d\n---\nReview.")
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	got := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(root, "reviewer.md"))
+	require.Equal(t, agentcontext.StatusOK, got.Status)
+	require.Equal(t, "reviewer", got.Name)
+}
+
 func TestResolver_AgentDefinitionSymlinkOutsideScanRootRejected(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks require admin privileges on Windows runners")
