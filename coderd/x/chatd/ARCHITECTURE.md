@@ -142,6 +142,7 @@ Queued messages wait in two lanes. These rules apply to every transition that qu
 - `Create(initialMessages, initialStatus)` creates a new chat, initializes `snapshot_version` to 1, inserts its initial history, and lands in `initialStatus`. The initial status defaults to `running`; a caller can request `waiting` instead to create an idle chat, which starts running with its first `SendMessage`. The inserted initial history sets `history_version` to 1. Since the queue has not changed, `queue_version` remains 0. This transition is a special case: since the chat does not exist at the time it's run, the chat row cannot be locked before the transition is applied.
 - When `Create(initialMessages, initialStatus)` creates a child chat, it first locks the family's root chat row with `FOR SHARE` and fails if the root is archived, so a new child never joins an archived family.
   <!-- TODO(ibetitsmike): describe fork-nested-subagents depth tracking: with the experiment on, spawning a child records its `chat_subagents` row (depth = parent depth + 1) in the same transaction as the chat insert and rechecks the maximum subagent depth there. -->
+  <!-- TODO(ibetitsmike): describe fork-agent-definitions: spawn_agent resolves custom agent types from the chat's pinned subagent context resources after the built-in types, and records the custom type in the child's chat_subagents row. -->
 - `SetArchived(archived)` sets or clears the archived marker for one chat.
 - `SetProject(project)` sets or clears the project of one chat without changing its execution state. A move of a root chat applies it to the root and each descendant in one transaction, and fails without changing any chat if one of them isn't in `W`, `E0`, `E1`, `E1P` or `P`. Only the root's `project_id` changes; subagents go through `SetProject` only so that their execution state is checked too. As in a family archive, the root row is locked first, so a concurrent child creation either joins the move or waits for it. A move to the root's current project applies no transition.
 - `SendMessage(m, busy_behavior)` inserts a user message directly when the chat is idle, or queues it when the chat is busy. `busy_behavior` must be `queue`, `steer` or `interrupt`. `queue` and `steer` name the lane (see [Queued message lanes](#queued-message-lanes)). Outside `E1`, a busy send with one of them stores `m` in its lane and keeps the status, except a `steer` send from `E1P` or `P`. From `E1`, `E1P`, and `P`, `busy_behavior=steer` inserts the queued `steer` messages and then `m` into history, and `queue` messages stay queued. From `E1`, `busy_behavior=queue` queues `m` as a `queue` message and promotes the next messages. With `busy_behavior=interrupt`, it also requests interruption, or cancels a pending dynamic-tool action and inserts the message directly. A queued interrupt message goes to the end of the `steer` lane. A `queue` send never runs before a message under edit; an interrupt send runs before it, unless the chat is running or interrupting and the message under edit is a `steer` message.
@@ -779,6 +780,8 @@ The endpoint also accepts an unowned chat that is already in `I0`, `I1`, or `I1P
 
 No other input states are supported.
 
+<!-- TODO(ibetitsmike): describe fork-nested-subagents interrupt cascade and archive of an active family. -->
+
 ### `POST /api/v2/chats/{chat}/tool-results`
 
 This endpoint uses `CompleteRequiresAction(results)`:
@@ -1188,7 +1191,7 @@ The generation goroutine supports:
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
-  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
+  <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
 - file links
 - workspace binding
 - plan mode

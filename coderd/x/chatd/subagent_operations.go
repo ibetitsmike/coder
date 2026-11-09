@@ -156,7 +156,7 @@ func (p *Server) interruptSubagent(
 
 	// Idle and paused chats have no turn to interrupt.
 	if targetChat.Status == database.ChatStatusWaiting || targetChat.Status == database.ChatStatusPaused {
-		return targetChat, false, nil
+		return targetChat, p.forkInterruptDescendants(ctx, targetChat), nil
 	}
 
 	updatedChat, err := p.InterruptChat(ctx, targetChat)
@@ -259,6 +259,8 @@ type childSubagentChatOptions struct {
 	reasoningEffortOverride *string
 	planModeOverride        *database.NullChatPlanMode
 	inheritedMCPServerIDs   []uuid.UUID
+	// agentType is the custom agent type name, empty for built-in types.
+	agentType string
 }
 
 // resolveExploreToolSnapshot computes the child chat's inherited MCP
@@ -466,7 +468,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	if publisher == nil {
 		publisher = dbpubsub.NewInMemory()
 	}
-	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, chatstate.CreateChatInput{
+	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, opts.agentType, chatstate.CreateChatInput{
 		OrganizationID:    parent.OrganizationID,
 		OwnerID:           parent.OwnerID,
 		WorkspaceID:       parent.WorkspaceID,

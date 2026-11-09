@@ -24609,6 +24609,7 @@
 			"enum": [
 				"fork-chat-todos",
 				"fork-nested-subagents",
+				"fork-agent-definitions",
 				"example",
 				"notifications",
 				"workspace-usage",
@@ -24649,6 +24650,7 @@
 			"x-enum-descriptions": [
 				"",
 				"",
+				"",
 				"This isn't used for anything.",
 				"Sends notifications via SMTP and webhooks following certain events.",
 				"Enables the new workspace usage tracking.",
@@ -24670,6 +24672,7 @@
 			"x-enum-varnames": [
 				"ExperimentForkChatTodos",
 				"ExperimentForkNestedSubagents",
+				"ExperimentForkAgentDefinitions",
 				"ExperimentExample",
 				"ExperimentNotifications",
 				"ExperimentWorkspaceUsage",
