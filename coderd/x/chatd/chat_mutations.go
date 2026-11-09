@@ -146,7 +146,7 @@ func (p *Server) SendMessage(
 		if lockedChat.Archived {
 			return ErrChatArchived
 		}
-		if err := p.forkValidateSubagentResume(ctx, store, lockedChat); err != nil {
+		if err := p.forkValidateSubagentResume(ctx, store, lockedChat, true); err != nil {
 			return err
 		}
 

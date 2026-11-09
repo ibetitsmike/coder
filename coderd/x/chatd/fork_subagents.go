@@ -95,10 +95,12 @@ func withSubagentResume(ctx context.Context) context.Context {
 
 // forkValidateSubagentResume returns an error when a message_agent send would
 // resume the finished subagent target while its family already has the
-// maximum number of live subagents. SendMessage calls it in the transaction
-// that resumes target, and it takes the lock that serializes the family's
-// spawns, so a concurrent spawn cannot pass the same count.
-func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat) error {
+// maximum number of live subagents. sendSubagentMessage calls it before
+// SendMessage runs the prompt hooks, and SendMessage calls it again with inTx
+// in the transaction that resumes target. That call takes the lock that
+// serializes the family's spawns, so a concurrent spawn cannot pass the same
+// count.
+func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
 	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
 		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
 		return nil
@@ -115,8 +117,10 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 		return nil
 	}
 	rootChatID := subagentRootChatID(target)
-	if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
-		return xerrors.Errorf("acquire chat family admission lock: %w", err)
+	if inTx {
+		if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
+			return xerrors.Errorf("acquire chat family admission lock: %w", err)
+		}
 	}
 	return validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
 }
@@ -174,6 +178,13 @@ func (p *Server) createSubagentChatWithID(
 		}
 		if limits.maxLivePerFamily > 0 {
 			rootChatID := subagentRootChatID(parent)
+			// Family operations lock the root first, and CreateChatWithID
+			// locks it too. Taking it before the admission lock keeps that
+			// order, so this spawn never holds the admission lock while it
+			// waits for the root.
+			if _, err := tx.GetChatByIDForShare(ctx, rootChatID); err != nil {
+				return xerrors.Errorf("lock root chat: %w", err)
+			}
 			if err := tx.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
 				return xerrors.Errorf("acquire chat family admission lock: %w", err)
 			}
