@@ -2281,4 +2281,4 @@ Maximum number of running subagent chats under one root chat when the fork-neste
 | YAML        | <code>chat.maxLiveSubagentsPerFamily</code>            |
 | Default     | <code>0</code>                                         |
 
-Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one, fails at the limit. 0 means no limit. An organization can set a lower value.
+Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one with message_agent, fails at the limit. 0 means no limit. An organization can set a lower value.
