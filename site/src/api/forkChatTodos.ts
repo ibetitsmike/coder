@@ -5,6 +5,7 @@ import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import { API, SessionTokenCookie } from "./api";
 import type { ChatTodoList } from "./typesGenerated";
 
+/** Fetches the chat's current todo list. */
 export const getChatTodos = async (
 	chatId: string,
 	signal?: AbortSignal,

@@ -92,6 +92,10 @@ type ChatTodoPillViewProps = {
 	error: unknown;
 };
 
+/**
+ * Renders the todo pill. Renders nothing while todos are loading or the list
+ * is empty, and a warning pill when the fetch failed.
+ */
 export const ChatTodoPillView: React.FC<ChatTodoPillViewProps> = ({
 	todos,
 	error,
