@@ -12,6 +12,7 @@ import (
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbmock"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/forkdb/forkdbmock"
 	"github.com/coder/coder/v2/coderd/rbac"
@@ -51,6 +53,149 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(sub, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(sub)
+		},
+		"InsertPlugin": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			arg := forkdb.InsertPluginParams{ID: plugin.ID, OrganizationID: plugin.OrganizationID, Name: plugin.Name}
+			fdb.EXPECT().InsertPlugin(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourcePlugin.InOrg(plugin.OrganizationID), policy.ActionCreate).Returns(plugin)
+		},
+		"GetPluginByID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			fdb.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+			check.Args(plugin.ID).Asserts(plugin, policy.ActionRead).Returns(plugin)
+		},
+		"GetPluginsByOrganizationID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			fdb.EXPECT().GetPluginsByOrganizationID(gomock.Any(), plugin.OrganizationID).Return([]forkdb.Plugin{plugin}, nil).AnyTimes()
+			check.Args(plugin.OrganizationID).
+				Asserts(rbac.ResourcePlugin.InOrg(plugin.OrganizationID), policy.ActionRead).
+				Returns([]forkdb.Plugin{plugin})
+		},
+		"UpdatePluginConfig": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			arg := forkdb.UpdatePluginConfigParams{ID: plugin.ID, Config: `{"k":"v"}`}
+			fdb.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+			fdb.EXPECT().UpdatePluginConfig(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+			check.Args(arg).Asserts(plugin, policy.ActionUpdate).Returns(plugin)
+		},
+		"UpdatePluginEnabled": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			arg := forkdb.UpdatePluginEnabledParams{ID: plugin.ID, Enabled: false}
+			fdb.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+			fdb.EXPECT().UpdatePluginEnabled(gomock.Any(), arg).Return(plugin, nil).AnyTimes()
+			check.Args(arg).Asserts(plugin, policy.ActionUpdate).Returns(plugin)
+		},
+		"DeletePluginByID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			fdb.EXPECT().GetPluginByID(gomock.Any(), plugin.ID).Return(plugin, nil).AnyTimes()
+			fdb.EXPECT().DeletePluginByID(gomock.Any(), plugin.ID).Return(nil).AnyTimes()
+			check.Args(plugin.ID).Asserts(plugin, policy.ActionDelete).Returns()
+		},
+		"UpdatePluginLastError": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.UpdatePluginLastErrorParams{ID: uuid.New(), LastError: "boom"}
+			fdb.EXPECT().UpdatePluginLastError(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"AcquirePluginLeases": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
+			arg := forkdb.AcquirePluginLeasesParams{RunnerID: uuid.New(), LeaseSeconds: 30, MaxPlugins: 10}
+			fdb.EXPECT().AcquirePluginLeases(gomock.Any(), arg).Return([]forkdb.Plugin{plugin}, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns([]forkdb.Plugin{plugin})
+		},
+		"ReleasePluginLeases": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			runnerID := uuid.New()
+			fdb.EXPECT().ReleasePluginLeases(gomock.Any(), runnerID).Return(nil).AnyTimes()
+			check.Args(runnerID).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"InsertPluginLinkCode": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.InsertPluginLinkCodeParams{CodeHash: []byte("hash"), PluginID: uuid.New(), UserID: uuid.New(), ExpiresAt: dbtime.Now()}
+			fdb.EXPECT().InsertPluginLinkCode(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
+		},
+		"ConsumePluginLinkCode": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			code := testutil.Fake(t, faker, forkdb.PluginLinkCode{})
+			arg := forkdb.ConsumePluginLinkCodeParams{PluginID: code.PluginID, CodeHash: code.CodeHash}
+			fdb.EXPECT().ConsumePluginLinkCode(gomock.Any(), arg).Return(code, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(code)
+		},
+		"DeleteExpiredPluginLinkCodes": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			fdb.EXPECT().DeleteExpiredPluginLinkCodes(gomock.Any()).Return(nil).AnyTimes()
+			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+		},
+		"DeletePluginLinkCodesByUser": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.DeletePluginLinkCodesByUserParams{PluginID: uuid.New(), UserID: uuid.New()}
+			fdb.EXPECT().DeletePluginLinkCodesByUser(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+		},
+		"UpsertPluginUserLink": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
+			arg := forkdb.UpsertPluginUserLinkParams{PluginID: link.PluginID, ExternalID: link.ExternalID, UserID: link.UserID}
+			fdb.EXPECT().UpsertPluginUserLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(link)
+		},
+		"GetPluginUserLink": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
+			arg := forkdb.GetPluginUserLinkParams{PluginID: link.PluginID, ExternalID: link.ExternalID}
+			fdb.EXPECT().GetPluginUserLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(link)
+		},
+		"GetPluginUserLinksByPluginID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
+			fdb.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), link.PluginID).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()
+			check.Args(link.PluginID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.PluginUserLink{link})
+		},
+		"GetPluginUserLinksByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
+			fdb.EXPECT().GetPluginUserLinksByUserID(gomock.Any(), link.UserID).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()
+			check.Args(link.UserID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.PluginUserLink{link})
+		},
+		"GetPluginUserLinksByPluginAndUser": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
+			arg := forkdb.GetPluginUserLinksByPluginAndUserParams{PluginID: link.PluginID, UserID: link.UserID}
+			fdb.EXPECT().GetPluginUserLinksByPluginAndUser(gomock.Any(), arg).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.PluginUserLink{link})
+		},
+		"DeletePluginUserLink": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.DeletePluginUserLinkParams{PluginID: uuid.New(), ExternalID: "+15550100"}
+			fdb.EXPECT().DeletePluginUserLink(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
+		},
+		"SetPluginUserLinkActiveChat": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.SetPluginUserLinkActiveChatParams{PluginID: uuid.New(), ExternalID: "+15550100", ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+			fdb.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"SetPluginUserLinksActiveChatByUser": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.SetPluginUserLinksActiveChatByUserParams{PluginID: uuid.New(), UserID: uuid.New(), ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+			fdb.EXPECT().SetPluginUserLinksActiveChatByUser(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"EnsurePluginChatBindings": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			pluginID := uuid.New()
+			fdb.EXPECT().EnsurePluginChatBindings(gomock.Any(), pluginID).Return(nil).AnyTimes()
+			check.Args(pluginID).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
+		},
+		"GetPluginChatBindingsDue": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			row := testutil.Fake(t, faker, forkdb.GetPluginChatBindingsDueRow{})
+			arg := forkdb.GetPluginChatBindingsDueParams{PluginID: row.PluginID, LimitCount: 10}
+			fdb.EXPECT().GetPluginChatBindingsDue(gomock.Any(), arg).Return([]forkdb.GetPluginChatBindingsDueRow{row}, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.GetPluginChatBindingsDueRow{row})
+		},
+		"UpdatePluginChatBindingDelivered": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.UpdatePluginChatBindingDeliveredParams{
+				PluginID:      uuid.New(),
+				ChatID:        uuid.New(),
+				SentMessageID: 42,
+				SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusWaiting, Valid: true},
+			}
+			fdb.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"UpdatePluginChatBindingFailed": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.UpdatePluginChatBindingFailedParams{PluginID: uuid.New(), ChatID: uuid.New(), NextAttemptAt: dbtime.Now()}
+			fdb.EXPECT().UpdatePluginChatBindingFailed(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
 		},
 	}
 

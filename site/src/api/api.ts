@@ -397,6 +397,8 @@ export const mcpServerOAuth2ConnectPath = (organization: string, id: string) =>
 	`${mcpServerConfigPath(organization, id)}/oauth2/connect`;
 const mcpServerOAuth2DisconnectPath = (id: string) =>
 	`/api/v2/mcp/servers/${encodeURIComponent(id)}/oauth2/disconnect`;
+const pluginPath = (pluginId: string) =>
+	`/api/experimental/plugins/${encodeURIComponent(pluginId)}`;
 
 // Headers for chat file upload endpoints that stream the raw File as
 // the request body. The filename travels in Content-Disposition using
@@ -4034,6 +4036,31 @@ class ExperimentalApiMethods {
 
 	deleteUserSkill = async (user: string, name: string): Promise<void> => {
 		await this.axios.delete(userSkillPath(user, name));
+	};
+
+	getLinkablePlugins = async (): Promise<TypesGen.LinkablePlugin[]> => {
+		const response = await this.axios.get<TypesGen.LinkablePlugin[]>(
+			"/api/experimental/users/me/plugins",
+		);
+		return response.data;
+	};
+
+	createPluginLinkCode = async (
+		pluginId: string,
+	): Promise<TypesGen.PluginLinkCode> => {
+		const response = await this.axios.post<TypesGen.PluginLinkCode>(
+			`${pluginPath(pluginId)}/link-codes`,
+		);
+		return response.data;
+	};
+
+	deletePluginLink = async (
+		pluginId: string,
+		externalId: string,
+	): Promise<void> => {
+		await this.axios.delete(
+			`${pluginPath(pluginId)}/links/${encodeURIComponent(externalId)}`,
+		);
 	};
 
 	createOrganizationSkill = async (

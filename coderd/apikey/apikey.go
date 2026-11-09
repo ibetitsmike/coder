@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/util/namesgenerator"
@@ -91,7 +92,7 @@ func Generate(params CreateParams) (database.InsertAPIKeyParams, string, error) 
 	scopes := make(database.APIKeyScopes, 0, len(requested))
 	for _, s := range requested {
 		canonical := database.APIKeyScope(rbac.CanonicalScopeName(rbac.ScopeName(s)))
-		if !canonical.Valid() {
+		if !forkdb.ValidAPIKeyScope(canonical) {
 			return database.InsertAPIKeyParams{}, "", xerrors.Errorf("invalid API key scope: %q", s)
 		}
 		scopes = append(scopes, canonical)

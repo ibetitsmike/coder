@@ -21,6 +21,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbmetrics"
 	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/migrations"
 	"github.com/coder/coder/v2/coderd/database/migrations/chatdmig"
@@ -55,6 +56,33 @@ func TestSQLCSchemaOrder(t *testing.T) {
 	require.Equal(t, want, cfg.SQL[0].Schema)
 }
 
+// TestAPIKeyScopeValues checks that upstream's scopes and the fork's scopes
+// together are exactly the values of the api_key_scope enum.
+func TestAPIKeyScopeValues(t *testing.T) {
+	t.Parallel()
+
+	_, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	rows, err := sqlDB.QueryContext(ctx, "SELECT unnest(enum_range(NULL::public.api_key_scope))::text")
+	require.NoError(t, err)
+	var got []database.APIKeyScope
+	for rows.Next() {
+		var s string
+		require.NoError(t, rows.Scan(&s))
+		got = append(got, database.APIKeyScope(s))
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+
+	want := append(database.AllAPIKeyScopeValues(), forkdb.APIKeyScopeValues()...)
+	require.ElementsMatch(t, want, got)
+	for _, s := range got {
+		require.True(t, forkdb.ValidAPIKeyScope(s), "scope %q", s)
+	}
+	require.False(t, forkdb.ValidAPIKeyScope("plugin:nope"))
+}
+
 func TestFrom(t *testing.T) {
 	t.Parallel()
 
@@ -72,20 +100,16 @@ func TestFrom(t *testing.T) {
 		reg := prometheus.NewRegistry()
 		db := wrap(t, dbmetrics.NewQueryMetrics(raw, slogtest.Make(t, nil), reg))
 		fdb := mustFrom(t, db)
-		chat := dbgen.Chat(t, raw, database.Chat{
-			OrganizationID:    dbgen.Organization(t, raw, database.Organization{}).ID,
-			OwnerID:           dbgen.User(t, raw, database.User{}).ID,
-			LastModelConfigID: dbgen.ChatModelConfig(t, raw, database.ChatModelConfig{}).ID,
-		})
+		orgID := uuid.New()
 
-		_, err := fdb.GetChatSubagentByChatID(context.Background(), chat.ID)
+		_, err := fdb.GetPluginsByOrganizationID(context.Background(), orgID)
 		require.ErrorIs(t, err, dbauthz.ErrNoActor, "dbauthz authorizes fork queries")
 
-		// The chat has no subagent row, so the query runs and finds none.
 		ctx := dbauthz.AsSystemRestricted(testutil.Context(t, testutil.WaitShort))
-		_, err = fdb.GetChatSubagentByChatID(ctx, chat.ID)
-		require.ErrorIs(t, err, sql.ErrNoRows)
-		require.True(t, hasQueryCount(t, reg, "GetChatSubagentByChatID"), "dbmetrics measures fork queries")
+		plugins, err := fdb.GetPluginsByOrganizationID(ctx, orgID)
+		require.NoError(t, err)
+		require.Empty(t, plugins)
+		require.True(t, hasQueryCount(t, reg, "GetPluginsByOrganizationID"), "dbmetrics measures fork queries")
 	})
 
 	t.Run("DBMetrics", func(t *testing.T) {
@@ -106,32 +130,73 @@ func TestFrom(t *testing.T) {
 func TestInTx(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
-	ctx := testutil.Context(t, testutil.WaitShort)
-	errRollback := xerrors.New("roll back")
+	raw, _ := dbtestutil.NewDB(t)
+	db := wrap(t, raw)
+	fdb := mustFrom(t, db)
+	// The system subject may not create plugins, so act as an owner.
+	ctx := dbauthz.As(testutil.Context(t, testutil.WaitShort), rbac.Subject{
+		ID:     uuid.NewString(),
+		Roles:  rbac.RoleIdentifiers{rbac.RoleOwner()},
+		Groups: []string{},
+		Scope:  rbac.ScopeAll,
+	})
 
-	var chat database.Chat
-	err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
-		chat = dbgen.Chat(t, tx, database.Chat{
-			OrganizationID:    dbgen.Organization(t, tx, database.Organization{}).ID,
-			OwnerID:           dbgen.User(t, tx, database.User{}).ID,
-			LastModelConfigID: dbgen.ChatModelConfig(t, tx, database.ChatModelConfig{}).ID,
+	// insert inserts a plugin whose organization, user and file come from
+	// the upstream queries of the same transaction, so the foreign keys
+	// fail unless both run in it.
+	insert := func(tx database.Store, ftx forkdb.Store) (database.Organization, forkdb.Plugin, error) {
+		org := dbgen.Organization(t, tx, database.Organization{})
+		user := dbgen.User(t, tx, database.User{})
+		file := dbgen.File(t, tx, database.File{CreatedBy: user.ID})
+		plugin, err := ftx.InsertPlugin(ctx, forkdb.InsertPluginParams{
+			ID:             uuid.New(),
+			OrganizationID: org.ID,
+			Name:           "signal",
+			FileID:         file.ID,
+			Manifest:       []byte("{}"),
+			Grants:         []byte("{}"),
+			CreatedBy:      user.ID,
+			CreatedAt:      dbtime.Now(),
+			UpdatedAt:      dbtime.Now(),
 		})
-		// No fork query inserts a subagent yet, so insert one on the
-		// connection of the transaction.
-		_, err := tx.(interface{ ForkDBTX() database.DBTX }).ForkDBTX().ExecContext(ctx,
-			"INSERT INTO chat_subagents (chat_id, agent_type) VALUES ($1, 'explore')", chat.ID)
+		return org, plugin, err
+	}
+
+	t.Run("Commit", func(t *testing.T) {
+		t.Parallel()
+
+		var plugin forkdb.Plugin
+		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+			var err error
+			_, plugin, err = insert(tx, ftx)
+			return err
+		}, nil)
 		require.NoError(t, err)
 
-		sub, err := ftx.GetChatSubagentByChatID(ctx, chat.ID)
-		require.NoError(t, err, "fork query runs in the transaction")
-		require.Equal(t, forkdb.ChatSubagent{ChatID: chat.ID, AgentType: "explore", Depth: 1, Isolation: "shared"}, sub)
-		return errRollback
-	}, nil)
-	require.ErrorIs(t, err, errRollback)
+		got, err := fdb.GetPluginByID(ctx, plugin.ID)
+		require.NoError(t, err)
+		require.Equal(t, plugin.ID, got.ID)
+	})
 
-	_, err = mustFrom(t, db).GetChatSubagentByChatID(ctx, chat.ID)
-	require.ErrorIs(t, err, sql.ErrNoRows, "the subagent rolls back with the transaction")
+	t.Run("Rollback", func(t *testing.T) {
+		t.Parallel()
+
+		errRollback := xerrors.New("roll back")
+		var org database.Organization
+		var plugin forkdb.Plugin
+		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+			var err error
+			org, plugin, err = insert(tx, ftx)
+			require.NoError(t, err)
+			return errRollback
+		}, nil)
+		require.ErrorIs(t, err, errRollback)
+
+		_, err = db.GetOrganizationByID(ctx, org.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+		_, err = fdb.GetPluginByID(ctx, plugin.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+	})
 }
 
 // wrap wraps db in dbauthz like coderd does.
@@ -139,13 +204,6 @@ func wrap(t *testing.T, db database.Store) database.Store {
 	t.Helper()
 	authz := rbac.NewAuthorizer(prometheus.NewRegistry())
 	return dbauthz.New(db, authz, slogtest.Make(t, nil), coderdtest.AccessControlStorePointer())
-}
-
-func mustFrom(t *testing.T, db database.Store) forkdb.Store {
-	t.Helper()
-	fdb, err := forkdb.From(db)
-	require.NoError(t, err)
-	return fdb
 }
 
 func hasQueryCount(t *testing.T, reg *prometheus.Registry, query string) bool {

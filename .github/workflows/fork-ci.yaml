@@ -31,6 +31,8 @@ jobs:
         run: go run ./coderd/database/migrations/chatdmig/cmd/chatdmig check
       - name: Unit tests
         run: go test -count=1 ./coderd/database/migrations/chatdmig/...
+      - name: Check API key scopes
+        run: go run ./scripts/check-scopes
 
   schema:
     runs-on: ubuntu-latest
@@ -70,7 +72,9 @@ jobs:
       - name: Chat and database packages
         run: go test -count=1 ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
       - name: Chat API tests
-        run: go test -count=1 -run '(?i)chat|skill|mcp' ./coderd ./enterprise/coderd
+        run: go test -count=1 -run '(?i)chat|skill|mcp|plugin' ./coderd ./enterprise/coderd
+      - name: Plugin CLI tests
+        run: go test -count=1 -run TestExpPlugins ./cli
 
   build:
     runs-on: ubuntu-latest

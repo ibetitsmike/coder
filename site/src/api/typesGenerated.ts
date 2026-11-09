@@ -822,6 +822,7 @@ export type APIKeyScope =
 	| "coder:all"
 	| "coder:apikeys.manage_self"
 	| "coder:application_connect"
+	| "coder:chats.converse"
 	| "coder:templates.author"
 	| "coder:templates.build"
 	| "coder:workspaces.access"
@@ -911,6 +912,11 @@ export type APIKeyScope =
 	| "organization_skill:share"
 	| "organization_skill:update"
 	| "organization:update"
+	| "plugin:*"
+	| "plugin:create"
+	| "plugin:delete"
+	| "plugin:read"
+	| "plugin:update"
 	| "prebuilt_workspace:*"
 	| "prebuilt_workspace:delete"
 	| "prebuilt_workspace:update"
@@ -1090,6 +1096,7 @@ export const APIKeyScopes: APIKeyScope[] = [
 	"coder:all",
 	"coder:apikeys.manage_self",
 	"coder:application_connect",
+	"coder:chats.converse",
 	"coder:templates.author",
 	"coder:templates.build",
 	"coder:workspaces.access",
@@ -1179,6 +1186,11 @@ export const APIKeyScopes: APIKeyScope[] = [
 	"organization_skill:share",
 	"organization_skill:update",
 	"organization:update",
+	"plugin:*",
+	"plugin:create",
+	"plugin:delete",
+	"plugin:read",
+	"plugin:update",
 	"prebuilt_workspace:*",
 	"prebuilt_workspace:delete",
 	"prebuilt_workspace:update",
@@ -4624,6 +4636,17 @@ export interface CreateOrganizationRequest {
 	readonly icon?: string;
 }
 
+// From codersdk/plugins.go
+/**
+ * CreatePluginRequest installs a plugin. Grants must equal the manifest of
+ * the module, or the request fails.
+ */
+export interface CreatePluginRequest {
+	readonly wasm: string;
+	readonly grants: PluginGrants;
+	readonly config?: Record<string, string>;
+}
+
 // From codersdk/provisionerdaemons.go
 export interface CreateProvisionerKeyRequest {
 	readonly name: string;
@@ -5769,6 +5792,7 @@ export type Experiment =
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
+	| "plugins"
 	| "workspace-build-updates"
 	| "workspace-capable-licensing"
 	| "workspace-usage";
@@ -5848,6 +5872,7 @@ export const Experiments: Experiment[] = [
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",
+	"plugins",
 	"workspace-build-updates",
 	"workspace-capable-licensing",
 	"workspace-usage",
@@ -6607,6 +6632,16 @@ export const InsightsReportIntervals: InsightsReportInterval[] = [
 	"week",
 ];
 
+// From codersdk/plugins.go
+/**
+ * InspectPluginResponse is the manifest of a module that is not installed.
+ */
+export interface InspectPluginResponse {
+	readonly manifest: PluginManifest;
+	readonly sha256: string;
+	readonly size_bytes: number;
+}
+
 // From codersdk/templates.go
 export interface InvalidatePresetsResponse {
 	readonly invalidated: readonly InvalidatedPreset[];
@@ -6713,6 +6748,20 @@ export interface LinkConfig {
 	readonly target: string;
 	readonly icon: string;
 	readonly location?: string;
+}
+
+// From codersdk/plugins.go
+/**
+ * LinkablePlugin is a plugin the user can link an external account to.
+ */
+export interface LinkablePlugin {
+	readonly id: string;
+	readonly organization_id: string;
+	readonly organization_name: string;
+	readonly name: string;
+	readonly version: string;
+	readonly chats: readonly string[];
+	readonly links: readonly PluginUserLink[];
 }
 
 // From codersdk/chats.go
@@ -8490,6 +8539,119 @@ export interface Permission {
 	readonly action: RBACAction;
 }
 
+// From codersdk/plugins.go
+/**
+ * Plugin is an installed plugin. Config values are never returned.
+ */
+export interface Plugin {
+	readonly id: string;
+	readonly organization_id: string;
+	readonly name: string;
+	readonly version: string;
+	readonly file_id: string;
+	readonly manifest: PluginManifest;
+	readonly grants: PluginGrants;
+	/**
+	 * ConfigKeysSet lists the config keys that have a value.
+	 */
+	readonly config_keys_set: readonly string[];
+	readonly enabled: boolean;
+	readonly runner_id?: string;
+	readonly last_error: string;
+	readonly created_by: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+}
+
+// From codersdk/plugins.go
+/**
+ * Plugin chat capabilities a plugin can request in its manifest. A plugin
+ * always acts as a linked user, so these never exceed what that user can do.
+ */
+export const PluginChatCreate = "create";
+
+// From codersdk/plugins.go
+/**
+ * Plugin chat capabilities a plugin can request in its manifest. A plugin
+ * always acts as a linked user, so these never exceed what that user can do.
+ */
+export const PluginChatRead = "read";
+
+// From codersdk/plugins.go
+/**
+ * Plugin chat capabilities a plugin can request in its manifest. A plugin
+ * always acts as a linked user, so these never exceed what that user can do.
+ */
+export const PluginChatSend = "send";
+
+// From codersdk/plugins.go
+/**
+ * Plugin event names a plugin can request in its manifest.
+ */
+export const PluginEventChatMessagesAdded = "chat.messages_added";
+
+// From codersdk/plugins.go
+/**
+ * Plugin event names a plugin can request in its manifest.
+ */
+export const PluginEventChatStatusChanged = "chat.status_changed";
+
+// From codersdk/plugins.go
+/**
+ * PluginGrants is what an owner granted a plugin. The capabilities must equal
+ * the manifest. PrivateCIDRs is the only grant a manifest cannot request.
+ */
+export interface PluginGrants {
+	readonly events: readonly string[];
+	readonly chats: readonly string[];
+	readonly http_origins: readonly string[];
+	readonly tick_seconds: number;
+	readonly webhook: boolean;
+	readonly config_keys: readonly string[];
+	/**
+	 * PrivateCIDRs lets HTTP requests of the plugin reach these private
+	 * address ranges, for example a signal-cli-rest-api in the cluster.
+	 */
+	readonly private_cidrs: readonly string[];
+}
+
+// From codersdk/plugins.go
+/**
+ * PluginLinkCode is a one-time code that links an external account, for
+ * example a Signal number, to the user that made it.
+ */
+export interface PluginLinkCode {
+	readonly code: string;
+	readonly expires_at: string;
+}
+
+// From codersdk/plugins.go
+/**
+ * PluginManifest is what a plugin module requests. coderd reads it from the
+ * module in a sandbox before it stores the module.
+ */
+export interface PluginManifest {
+	readonly name: string;
+	readonly version: string;
+	readonly events: readonly string[];
+	readonly chats: readonly string[];
+	readonly http_origins: readonly string[];
+	readonly tick_seconds: number;
+	readonly webhook: boolean;
+	readonly config_keys: readonly string[];
+}
+
+// From codersdk/plugins.go
+/**
+ * PluginUserLink connects an external account to a Coder user.
+ */
+export interface PluginUserLink {
+	readonly plugin_id: string;
+	readonly external_id: string;
+	readonly user_id: string;
+	readonly created_at: string;
+}
+
 // From codersdk/oauth2.go
 export interface PostOAuth2ProviderAppRequest {
 	readonly name: string;
@@ -9153,6 +9315,7 @@ export type RBACResource =
 	| "organization"
 	| "organization_member"
 	| "organization_skill"
+	| "plugin"
 	| "prebuilt_workspace"
 	| "provisioner_daemon"
 	| "provisioner_jobs"
@@ -9211,6 +9374,7 @@ export const RBACResources: RBACResource[] = [
 	"organization",
 	"organization_member",
 	"organization_skill",
+	"plugin",
 	"prebuilt_workspace",
 	"provisioner_daemon",
 	"provisioner_jobs",
@@ -11288,6 +11452,16 @@ export interface UpdateOrganizationSkillPreferencesRequest {
  */
 export interface UpdateOrganizationSkillSettingsRequest {
 	readonly members_can_disable_skills: boolean;
+}
+
+// From codersdk/plugins.go
+/**
+ * UpdatePluginRequest changes a plugin. A nil field does not change. A
+ * non-nil Config replaces all config values, so an empty map clears them.
+ */
+export interface UpdatePluginRequest {
+	readonly enabled?: boolean;
+	readonly config?: Record<string, string>;
 }
 
 // From codersdk/users.go

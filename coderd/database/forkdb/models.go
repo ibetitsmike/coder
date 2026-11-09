@@ -5,6 +5,10 @@
 package forkdb
 
 import (
+	"database/sql"
+	"encoding/json"
+	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -16,4 +20,46 @@ type ChatSubagent struct {
 	WorktreePath string        `db:"worktree_path" json:"worktree_path"`
 	Branch       string        `db:"branch" json:"branch"`
 	WorkspaceID  uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
+}
+
+type Plugin struct {
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Name           string    `db:"name" json:"name"`
+	Version        string    `db:"version" json:"version"`
+	FileID         uuid.UUID `db:"file_id" json:"file_id"`
+	// Capabilities the plugin module requests.
+	Manifest json.RawMessage `db:"manifest" json:"manifest"`
+	// Capabilities the owner granted to the plugin.
+	Grants json.RawMessage `db:"grants" json:"grants"`
+	// JSON object of string to string. Encrypted by dbcrypt when config_key_id is set.
+	Config      string         `db:"config" json:"config"`
+	ConfigKeyID sql.NullString `db:"config_key_id" json:"config_key_id"`
+	Enabled     bool           `db:"enabled" json:"enabled"`
+	// Replica that holds the lease to run the plugin.
+	RunnerID       uuid.NullUUID `db:"runner_id" json:"runner_id"`
+	LeaseExpiresAt sql.NullTime  `db:"lease_expires_at" json:"lease_expires_at"`
+	LastError      string        `db:"last_error" json:"last_error"`
+	CreatedBy      uuid.UUID     `db:"created_by" json:"created_by"`
+	CreatedAt      time.Time     `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time     `db:"updated_at" json:"updated_at"`
+}
+
+type PluginLinkCode struct {
+	// SHA-256 of the link code.
+	CodeHash  []byte    `db:"code_hash" json:"code_hash"`
+	PluginID  uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type PluginUserLink struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	// Identity of the user on the external service, for example a phone number.
+	ExternalID string    `db:"external_id" json:"external_id"`
+	UserID     uuid.UUID `db:"user_id" json:"user_id"`
+	// Chat that last spoke to the external identity. Replies go to this chat.
+	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
+	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }

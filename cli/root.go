@@ -154,6 +154,7 @@ func (r *RootCmd) CoreSubcommands() []*serpent.Command {
 		// Hidden
 		r.connectCmd(),
 		gitssh(),
+		r.pluginHost(),
 		r.support(),
 		r.vpnDaemon(),
 		r.vscodeSSH(),
@@ -174,6 +175,7 @@ func (r *RootCmd) AGPLExperimental() []*serpent.Command {
 		r.syncCommand(),
 		r.updateUserEmail(),
 		r.experimentRulesCommand(),
+		r.pluginsCommand(),
 	}
 }
 

@@ -68,6 +68,8 @@ endif
 	provisionerd/proto/provisionerd.pb.go \
 	vpn/vpn.pb.go \
 	coderd/aibridged/proto/aibridged.pb.go \
+	codersdk/x/pluginsdk/pluginproto/plugin.pb.go \
+	coderd/x/plugins/pluginhost/proto/host.pb.go \
 	site/src/api/typesGenerated.ts \
 	site/e2e/provisionerGenerated.ts \
 	site/src/api/chatModelOptionsGenerated.json \
@@ -1117,6 +1119,8 @@ GEN_FILES := \
 	provisionerd/proto/provisionerd.pb.go \
 	vpn/vpn.pb.go \
 	coderd/aibridged/proto/aibridged.pb.go \
+	codersdk/x/pluginsdk/pluginproto/plugin.pb.go \
+	coderd/x/plugins/pluginhost/proto/host.pb.go \
 	$(DB_GEN_FILES) \
 	$(SITE_GEN_FILES) \
 	coderd/rbac/object_gen.go \
@@ -1214,6 +1218,8 @@ gen/mark-fresh:
 		agent/boundarylogproxy/codec/boundary.pb.go \
 		vpn/vpn.pb.go \
 		coderd/aibridged/proto/aibridged.pb.go \
+		codersdk/x/pluginsdk/pluginproto/plugin.pb.go \
+		coderd/x/plugins/pluginhost/proto/host.pb.go \
 		coderd/database/dump.sql \
 		coderd/database/querier.go \
 		coderd/database/unique_constraint.go \
@@ -1383,6 +1389,20 @@ coderd/aibridged/proto/aibridged.pb.go: coderd/aibridged/proto/aibridged.proto
 		--go-drpc_out=. \
 		--go-drpc_opt=paths=source_relative \
 		./coderd/aibridged/proto/aibridged.proto
+
+codersdk/x/pluginsdk/pluginproto/plugin.pb.go: codersdk/x/pluginsdk/pluginproto/plugin.proto
+	./scripts/atomic_protoc.sh \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+		./codersdk/x/pluginsdk/pluginproto/plugin.proto
+
+coderd/x/plugins/pluginhost/proto/host.pb.go: coderd/x/plugins/pluginhost/proto/host.proto codersdk/x/pluginsdk/pluginproto/plugin.proto
+	./scripts/atomic_protoc.sh \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+		--go-drpc_out=. \
+		--go-drpc_opt=paths=source_relative \
+		./coderd/x/plugins/pluginhost/proto/host.proto
 
 site/src/api/typesGenerated.ts: site/node_modules/.installed $(wildcard scripts/apitypings/*) \
 		$(shell find ./codersdk $(FIND_EXCLUSIONS) -type f -name '*.go') \
