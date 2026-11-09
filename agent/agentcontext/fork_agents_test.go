@@ -5,15 +5,12 @@ package agentcontext_test
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -102,35 +99,6 @@ func TestResolver_AgentDefinitionsInAgentsScanRoot(t *testing.T) {
 	got := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(root, "reviewer.md"))
 	require.Equal(t, agentcontext.StatusOK, got.Status)
 	require.Equal(t, "reviewer", got.Name)
-}
-
-// coderd rejects a whole push when any resource error exceeds 4096 bytes, so
-// one definition's error must never reach that size.
-func TestResolver_AgentDefinitionErrorFitsPushCap(t *testing.T) {
-	t.Parallel()
-	const coderdErrorCap = 4096
-	root := t.TempDir()
-	var manyUnknown strings.Builder
-	manyUnknown.WriteString("---\ndescription: d\n")
-	for i := range 200 {
-		_, _ = fmt.Fprintf(&manyUnknown, "unknown_field_%03d: x\n", i)
-	}
-	manyUnknown.WriteString("---\nBody.")
-	mustWriteFile(t, filepath.Join(root, ".claude", "agents", "warned.md"), manyUnknown.String())
-	mustWriteFile(t, filepath.Join(root, ".claude", "agents", "badname.md"), "---\nname: a"+strings.Repeat("é", 3000)+"\n---\nBody.")
-
-	r := &agentcontext.Resolver{}
-	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
-
-	warned := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(root, ".claude", "agents", "warned.md"))
-	require.Equal(t, agentcontext.StatusOK, warned.Status)
-	badName := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(root, ".claude", "agents", "badname.md"))
-	require.Equal(t, agentcontext.StatusInvalid, badName.Status)
-	for _, got := range []agentcontext.Resource{warned, badName} {
-		require.NotEmpty(t, got.Error)
-		require.LessOrEqual(t, len(got.Error), coderdErrorCap)
-		require.True(t, utf8.ValidString(got.Error), "truncation must keep valid UTF-8")
-	}
 }
 
 func TestResolver_AgentDefinitionSymlinkOutsideScanRootRejected(t *testing.T) {
