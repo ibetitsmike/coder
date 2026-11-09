@@ -7625,10 +7625,8 @@ func (api *API) postChatWorkspaceFile(rw http.ResponseWriter, r *http.Request) {
 
 	// Mirror chatd's connection headers so agent-side chat state (e.g.
 	// the git-watch PathStore) attributes this request to the chat.
-	var ancestorIDs []string
-	if chat.ParentChatID.Valid {
-		ancestorIDs = append(ancestorIDs, chat.ParentChatID.UUID.String())
-	}
+	nestedSubagents := api.Experiments.Enabled(codersdk.ExperimentForkNestedSubagents)
+	ancestorIDs := chatd.AncestorChatIDs(ctx, api.Database, api.Logger, nestedSubagents, chat)
 	ancestorJSON, err := json.Marshal(ancestorIDs)
 	if err != nil {
 		ancestorJSON = []byte("[]")

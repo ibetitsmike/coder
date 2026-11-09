@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -25,17 +26,22 @@ func TestAppendForkTools(t *testing.T) {
 		forkToolsTestTool("ask_user_question"),
 	}
 	ctx := context.Background()
-	chat := database.Chat{}
+	// The Server has no database, so a fork hook that reaches the store
+	// for a delegated chat with its experiment off fails the test.
+	chats := []database.Chat{{}, {ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}}
 	upstream := slices.DeleteFunc(slices.Clone(codersdk.ExperimentsKnown), func(e codersdk.Experiment) bool {
 		return slices.Contains(codersdk.ForkExperiments, e)
 	})
 
 	for _, experiments := range []codersdk.Experiments{{}, upstream} {
-		p := &Server{experiments: experiments}
-		got := p.appendForkTools(ctx, tools, chat)
-		require.Len(t, got, len(tools), "tool count changed with experiments %v", experiments)
-		for i, want := range tools {
-			require.Samef(t, want, got[i], "tool %d changed with experiments %v", i, experiments)
+		for _, chat := range chats {
+			p := &Server{experiments: experiments}
+			got, err := p.appendForkTools(ctx, tools, chat, uuid.Nil)
+			require.NoError(t, err)
+			require.Len(t, got, len(tools), "tool count changed with experiments %v", experiments)
+			for i, want := range tools {
+				require.Samef(t, want, got[i], "tool %d changed with experiments %v", i, experiments)
+			}
 		}
 	}
 }

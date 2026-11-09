@@ -743,7 +743,9 @@ func (p *Server) buildTurnEnvironment(
 		}
 	}
 
-	tools = p.appendForkTools(ctx, tools, chat)
+	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID); err != nil {
+		return turnEnvironment{}, err
+	}
 	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
 		_, ok := tool.(acpSpawnTool)
 		return ok
@@ -1940,16 +1942,16 @@ func (c *turnWorkspaceContext) getWorkspaceConn(ctx context.Context) (workspaces
 			continue
 		}
 
+		// The ancestor walk reads the database, so it runs before the lock that
+		// guards the cached agent connection.
+		ancestorIDs := AncestorChatIDs(ctx, c.server.db, c.server.logger, c.server.nestedSubagentsEnabled(), chatSnapshot)
+
 		c.mu.Lock()
 		if c.conn == nil {
 			c.conn = agentConn
 			c.releaseConn = agentRelease
 			c.cachedWorkspaceID = chatSnapshot.WorkspaceID
 
-			var ancestorIDs []string
-			if chatSnapshot.ParentChatID.Valid {
-				ancestorIDs = append(ancestorIDs, chatSnapshot.ParentChatID.UUID.String())
-			}
 			ancestorJSON, marshalErr := json.Marshal(ancestorIDs)
 			if marshalErr != nil {
 				ancestorJSON = []byte("[]")

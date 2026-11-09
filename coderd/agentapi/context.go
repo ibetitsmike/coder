@@ -400,6 +400,8 @@ func marshalContextResourceBody(r *agentproto.ContextResource) (kind database.Wo
 		}
 		body, err = marshalBody(payload)
 		return database.WorkspaceAgentContextBodyKindAcpHarness, body, err
+	case *agentproto.ContextResource_Subagent:
+		return marshalSubagentBody(b)
 	case nil:
 		return "", nil, xerrors.Errorf("missing body variant; status %s requires a typed body", r.Status)
 	default:

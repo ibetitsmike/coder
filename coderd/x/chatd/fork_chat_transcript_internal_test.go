@@ -82,7 +82,8 @@ func TestReadChatTranscript(t *testing.T) {
 	// every chat, so only the owner check can refuse a read.
 	read := func(t *testing.T, chat database.Chat, args readChatTranscriptArgs, wantError bool) string {
 		t.Helper()
-		tools := server.appendForkTools(chatdTestContext(t), nil, chat)
+		tools, err := server.appendForkTools(chatdTestContext(t), nil, chat, chat.LastModelConfigID)
+		require.NoError(t, err)
 		return runChatTodoTool(chatdTestContext(t), t, tools, readChatTranscriptToolName, args, wantError)
 	}
 	readPage := func(t *testing.T, chat database.Chat, args readChatTranscriptArgs) chatTranscriptResult {

@@ -35,7 +35,8 @@ func TestChatTodoTools(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
-	tools := server.appendForkTools(ctx, nil, chat)
+	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+	require.NoError(t, err)
 	require.Equal(t, []string{"todo_write", "todo_read", "read_chat_transcript"}, toolNames(tools))
 
 	events := make(chan coderdpubsub.ChatTodosEvent, 4)
@@ -114,7 +115,9 @@ func TestForkListAgents(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
-	runChatTodoTool(ctx, t, server.appendForkTools(ctx, nil, child), "todo_write", todoWriteArgs{Todos: []todoWriteItem{
+	childTools, err := server.appendForkTools(ctx, nil, child, child.LastModelConfigID)
+	require.NoError(t, err)
+	runChatTodoTool(ctx, t, childTools, "todo_write", todoWriteArgs{Todos: []todoWriteItem{
 		{ID: "explore", Content: "Read the code", Status: "in_progress"},
 	}}, false)
 
