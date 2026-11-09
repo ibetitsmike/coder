@@ -18,6 +18,12 @@ type Story = StoryObj<typeof ChatTodoPillView>;
 
 export const Collapsed: Story = {};
 
+export const Empty: Story = {
+	args: {
+		todos: [],
+	},
+};
+
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
