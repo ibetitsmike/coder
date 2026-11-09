@@ -88,6 +88,14 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
 }
 
+// GetChatTodosByChatID authorizes through the owning chat.
+func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return forkdb.ChatTodo{}, err
+	}
+	return f.db.GetChatTodosByChatID(ctx, chatID)
+}
+
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginByID)(ctx, id)
 }
@@ -215,6 +223,19 @@ func (f *forkQuerier) UpdatePluginLastError(ctx context.Context, arg forkdb.Upda
 		return err
 	}
 	return f.db.UpdatePluginLastError(ctx, arg)
+}
+
+// UpsertChatTodos authorizes as an update of the owning chat, like
+// InsertChatSubagent.
+func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
+	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return forkdb.ChatTodo{}, err
+	}
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+		return forkdb.ChatTodo{}, err
+	}
+	return f.db.UpsertChatTodos(ctx, arg)
 }
 
 func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {
