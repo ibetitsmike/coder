@@ -195,6 +195,13 @@ func TestForkChatQueuedForCapacity(t *testing.T) {
 	require.True(t, queued(nested, f.waiting))
 	require.False(t, queued(nested, f.root))
 	require.False(t, queued(server(upstreamExperimentsKnown()), f.waiting))
+	// Only a running, unarchived subagent waits for a slot.
+	archived := f.waiting
+	archived.Archived = true
+	require.False(t, queued(nested, archived))
+	idle := f.waiting
+	idle.Status = database.ChatStatusWaiting
+	require.False(t, queued(nested, idle))
 
 	// The family is over its limit, as after the limit is lowered, yet the
 	// chats that hold a slot do not wait for one.
