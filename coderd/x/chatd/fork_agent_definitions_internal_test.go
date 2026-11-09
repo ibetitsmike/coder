@@ -285,7 +285,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 			return map[string]string{
 				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
 				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file, lookups__lookup]", "No writes."),
-				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [Docs]", "Docs only."),
+				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [docs]", "Docs only."),
 			}
 		},
 		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
@@ -348,7 +348,9 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		// The tools of this server are named docs__mirror__<tool>, so their
 		// name alone would attribute them to docs.
 		mirror := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs__mirror"})
-		inline := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "DOCS"})
+		inline := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "docs"})
+		// Slugs match exactly, so DOCS is a different server.
+		inlineUpper := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "DOCS"})
 		internal := InternalMCPServer{Slug: "docs"}
 		server := &Server{db: f.db, experiments: f.server.experiments, internalMCPServers: []InternalMCPServer{internal}}
 		docsTool := newTestMCPAgentTool("docs__search", docs.ID)
@@ -357,11 +359,12 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		tools, candidates, _, err := server.applyCustomAgentToolPolicy(ctx, child,
 			[]fantasy.AgentTool{
 				newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, mirrorTool,
-				newTestMCPAgentTool("DOCS__fetch", inline.ID), newTestMCPAgentTool("docs__kb", internal.id()),
+				newTestMCPAgentTool("docs__fetch", inline.ID), newTestMCPAgentTool("DOCS__fetch", inlineUpper.ID),
+				newTestMCPAgentTool("docs__kb", internal.id()),
 			},
 			[]deferredMCPTool{{tool: mirrorTool}, {tool: docsTool}}, nil)
 		require.NoError(t, err)
-		require.Equal(t, []string{"read_file", "docs__search", "DOCS__fetch", "docs__kb"}, toolNames(tools))
+		require.Equal(t, []string{"read_file", "docs__search", "docs__fetch", "docs__kb"}, toolNames(tools))
 		require.Len(t, candidates, 1)
 		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
 	})

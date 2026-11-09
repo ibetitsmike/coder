@@ -98,9 +98,7 @@ func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
 	case workspacesdk.AgentDefinitionMCPNone:
 		return false
 	case workspacesdk.AgentDefinitionMCPNamed:
-		return server != "" && slices.ContainsFunc(policy.MCPServers, func(name string) bool {
-			return strings.EqualFold(name, server)
-		})
+		return server != "" && slices.Contains(policy.MCPServers, server)
 	default:
 		return true
 	}

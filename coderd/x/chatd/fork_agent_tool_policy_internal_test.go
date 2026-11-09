@@ -152,7 +152,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		},
 		{
 			name:         "MCPNamed",
-			policy:       customAgentToolPolicy{MCPMode: "named", MCPServers: []string{"DOCS", "workspace"}},
+			policy:       customAgentToolPolicy{MCPMode: "named", MCPServers: []string{"docs", "Workspace"}},
 			want:         append(append([]string{}, builtins...), "docs__search", "Workspace__echo"),
 			wantDeferred: []string{"docs__search", "Workspace__echo"},
 			wantProvider: allProvider,
