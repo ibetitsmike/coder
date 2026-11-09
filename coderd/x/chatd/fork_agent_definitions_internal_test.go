@@ -137,10 +137,10 @@ func TestForkAgentDefinitionSpawn(t *testing.T) {
 				"broken":   agentDefinitionMarkdown("name: [broken", "BROKEN-MARKER"),
 			}
 		})
-	ctx := chatdTestContext(t)
 
 	t.Run("CustomType", func(t *testing.T) {
 		t.Parallel()
+		ctx := chatdTestContext(t)
 		child, err := f.spawn(t, spawnAgentArgs{Type: "reviewer"})
 		require.NoError(t, err)
 		require.Contains(t, f.systemPrompt(t, child.ID), "Review the diff for REVIEWER-MARKER.")
