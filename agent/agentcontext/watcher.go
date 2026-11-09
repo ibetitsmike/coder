@@ -278,7 +278,7 @@ func (w *Watcher) run() {
 // are picked up.
 func (*Watcher) eventRelevant(ev fsnotify.Event) bool {
 	name := filepath.Base(ev.Name)
-	if recognizedInstructionFile(name) || name == mcpConfigFileName || name == skillMetaFileName {
+	if recognizedInstructionFile(name) || name == mcpConfigFileName || name == skillMetaFileName || isAgentDefinitionPath(ev.Name) {
 		return true
 	}
 	// Directory create/remove flips re-resolve so new subtrees
@@ -337,6 +337,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) map[string]struct{} {
 			continue
 		}
 		out[root.Path] = struct{}{}
+		addAgentWatchDirs(root.Path, out)
 		for _, container := range skillContainersFor(root.Path) {
 			out[container] = struct{}{}
 			entries, err := os.ReadDir(container)
