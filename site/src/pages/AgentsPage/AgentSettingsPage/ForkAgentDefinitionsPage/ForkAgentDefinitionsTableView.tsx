@@ -12,9 +12,9 @@ import {
 } from "#/components/Table/Table";
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
-import { formatDate } from "#/utils/time";
 import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
+import { formatUpdatedAt } from "../../components/SkillsTableView";
 
 const title = "Agent definitions";
 
@@ -26,22 +26,6 @@ type ForkAgentDefinitionsTableViewProps = {
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
-};
-
-const formatUpdatedAt = (value: string) => {
-	const date = new Date(value);
-	if (!Number.isFinite(date.getTime())) {
-		return "Unknown";
-	}
-	return formatDate(date, {
-		locale: "en-US",
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-		hour: "numeric",
-		second: undefined,
-		minute: "2-digit",
-	});
 };
 
 export const ForkAgentDefinitionsTableView: React.FC<

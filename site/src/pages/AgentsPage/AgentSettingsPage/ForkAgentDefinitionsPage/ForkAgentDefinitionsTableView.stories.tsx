@@ -45,3 +45,12 @@ export const LoadError: Story = {
 export const Empty: Story = {
 	args: { definitions: [] },
 };
+
+export const RefreshError: Story = {
+	args: {
+		error: mockApiError({
+			message: "Failed to list agent definitions.",
+			detail: "connection reset",
+		}),
+	},
+};

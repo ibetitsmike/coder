@@ -33,16 +33,14 @@ const ForkAgentDefinitionsPage: React.FC = () => {
 		<ForkAgentDefinitionsTable
 			organizationId={organization.id}
 			action={
-				memberOrganizations.length > 1 && (
-					<OrganizationField
-						id="agent-definitions-organization"
-						className="w-full sm:w-60"
-						organizations={memberOrganizations}
-						organization={organization}
-						onChange={(org) => setSelectedOrganizationId(org.id)}
-						showLabel={false}
-					/>
-				)
+				<OrganizationField
+					id="agent-definitions-organization"
+					className="w-full sm:w-60"
+					organizations={memberOrganizations}
+					organization={organization}
+					onChange={(org) => setSelectedOrganizationId(org.id)}
+					showLabel={false}
+				/>
 			}
 		/>
 	);
