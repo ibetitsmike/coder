@@ -4,9 +4,11 @@ package chatd
 // fork-nested-subagents experiment.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,12 +20,14 @@ import (
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/serpent"
 )
 
 type nestedSubagentsFixture struct {
 	server *Server
 	db     database.Store
+	sqlDB  *sql.DB
 	fdb    forkdb.Store
 	root   database.Chat
 }
@@ -31,7 +35,7 @@ type nestedSubagentsFixture struct {
 func newNestedSubagentsFixture(t *testing.T, experiments codersdk.Experiments, limits Limits, opts ...internalTestServerOpt) nestedSubagentsFixture {
 	t.Helper()
 
-	db, ps := dbtestutil.NewDB(t)
+	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
 		append([]internalTestServerOpt{
 			withInternalTestServerExperiments(experiments),
@@ -57,7 +61,7 @@ func newNestedSubagentsFixture(t *testing.T, experiments codersdk.Experiments, l
 	require.NoError(t, err)
 	root, err = db.GetChatByID(ctx, root.ID)
 	require.NoError(t, err)
-	return nestedSubagentsFixture{server: server, db: db, fdb: fdb, root: root}
+	return nestedSubagentsFixture{server: server, db: db, sqlDB: sqlDB, fdb: fdb, root: root}
 }
 
 func (f nestedSubagentsFixture) spawn(t *testing.T, parent database.Chat, opts childSubagentChatOptions) (database.Chat, error) {
@@ -253,6 +257,69 @@ func TestNestedSubagentLiveLimit(t *testing.T) {
 	f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
 	_, err = f.spawn(t, f.root, childSubagentChatOptions{})
 	require.NoError(t, err)
+	// Resuming the finished child would make two live subagents.
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "continue", SendMessageBusyBehaviorQueue)
+	require.ErrorContains(t, err, "cannot resume the child agent: this chat family has 1 live subagents and the maximum is 1")
+}
+
+// A resume that races a spawn of the same family waits for the spawn to
+// commit, so it counts the spawned child against the live limit.
+func TestNestedSubagentLiveLimitSerializesResume(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	_, err := f.fdb.UpsertChatOrganizationSubagentLimits(ctx, forkdb.UpsertChatOrganizationSubagentLimitsParams{
+		OrganizationID:   f.root.OrganizationID,
+		MaxLivePerFamily: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	require.NoError(t, err)
+	first, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	f.setStatus(t, first, database.ChatStatusWaiting, uuid.NullUUID{})
+	second, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	f.setStatus(t, second, database.ChatStatusWaiting, uuid.NullUUID{})
+
+	// The holder stands in for a spawn that has passed the count and
+	// commits a live child.
+	lockID := chatFamilyAdmissionLockID(f.root.ID)
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	releaseLock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseLock)
+	holderErr := make(chan error, 1)
+	go func() {
+		holderErr <- f.db.InTx(func(tx database.Store) error {
+			if err := tx.AcquireLock(ctx, lockID); err != nil {
+				return err
+			}
+			close(holding)
+			<-release
+			_, err := tx.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: second.ID, Status: database.ChatStatusRunning})
+			return err
+		}, nil)
+	}()
+	testutil.TryReceive(ctx, t, holding)
+
+	resumeErr := make(chan error, 1)
+	go func() {
+		_, err := f.server.sendSubagentMessage(ctx, f.root.ID, first.ID, "continue", SendMessageBusyBehaviorQueue)
+		resumeErr <- err
+	}()
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		var waiting int
+		err := f.sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
+			AND classid::bigint = $1 AND objid::bigint = $2`,
+			int64(uint32(lockID>>32)), int64(uint32(lockID))).Scan(&waiting)
+		return err == nil && waiting == 1
+	}, testutil.IntervalFast, "the resume waits for the family admission lock")
+	releaseLock()
+	require.NoError(t, testutil.TryReceive(ctx, t, holderErr))
+
+	require.ErrorContains(t, testutil.TryReceive(ctx, t, resumeErr), "cannot resume the child agent: this chat family has 1 live subagents and the maximum is 1")
+	f.requireStatus(t, database.ChatStatusWaiting, first)
 }
 
 func TestForkLimitsFromConfig(t *testing.T) {

@@ -23,12 +23,16 @@ import (
 // testForkCapacityLimiter wraps an unlocked upstream limiter, so only the
 // fork limits can refuse.
 func testForkCapacityLimiter(experiments codersdk.Experiments, limits ForkLimits) AgentCapacityLimiter {
+	return testForkCapacityLimiterWithInner(experiments, limits, newAgentCapacityLimiter(staticAgentCapacityUnlock(true), 30))
+}
+
+func testForkCapacityLimiterWithInner(experiments codersdk.Experiments, limits ForkLimits, inner AgentCapacityLimiter) AgentCapacityLimiter {
 	server := &Server{
 		experiments:            experiments,
 		chatLimits:             Limits{Fork: limits},
 		inFlightChatStaleAfter: 30 * time.Second,
 	}
-	return server.forkCapacityLimiter(newAgentCapacityLimiter(staticAgentCapacityUnlock(true), 30))
+	return server.forkCapacityLimiter(inner)
 }
 
 func setOrgSubagentCapacity(t *testing.T, db database.Store, organizationID uuid.UUID, maxConcurrent, maxConcurrentPerFamily int32) {
@@ -121,6 +125,25 @@ func TestForkCapacityAdmission(t *testing.T) {
 		admitted, err := testForkCapacityLimiter(nested, ForkLimits{}).Admit(ctx, f.db, subagent(t, f, parent))
 		require.NoError(t, err)
 		require.True(t, admitted)
+	})
+
+	t.Run("UpstreamPoolExcludesAncestors", func(t *testing.T) {
+		t.Parallel()
+		f := newAdmissionFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		pool := newAgentCapacityLimiter(staticAgentCapacityUnlock(false), 30)
+		pool.subagentCapacity = 1
+		limiter := testForkCapacityLimiterWithInner(nested, ForkLimits{}, pool)
+		// The parent holds the only pool slot while it waits for its child.
+		parent := f.occupiedSubagent(t, f.occupiedRoot(t))
+
+		admitted, err := limiter.Admit(ctx, f.db, subagent(t, f, parent))
+		require.NoError(t, err)
+		require.True(t, admitted)
+
+		admitted, err = limiter.Admit(ctx, f.db, subagent(t, f, f.occupiedRoot(t)))
+		require.ErrorIs(t, err, errSkipAcquire)
+		require.False(t, admitted)
 	})
 
 	t.Run("RootsAreNotCapped", func(t *testing.T) {

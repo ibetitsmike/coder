@@ -144,7 +144,7 @@ Queued messages wait in two lanes. These rules apply to every transition that qu
   <!-- TODO(ibetitsmike): describe fork-nested-subagents depth tracking: with the experiment on, spawning a child records its `chat_subagents` row (depth = parent depth + 1) in the same transaction as the chat insert and rechecks the maximum subagent depth there. -->
   <!-- TODO(ibetitsmike): describe chat_organization_subagent_limits and how the organization max_depth lowers the deployment maximum subagent depth. -->
   <!-- TODO(ibetitsmike): describe the fork subagent concurrency caps (deployment, organization, family) and why a chat's ancestors do not count against its admission. -->
-  <!-- TODO(ibetitsmike): describe the fork live subagent cap per family, checked at spawn time under a per-family advisory lock. -->
+  <!-- TODO(ibetitsmike): describe the fork live subagent cap per family, checked when a child spawns and when message_agent resumes a finished child, each in its own transaction under one per-family advisory lock. -->
   <!-- TODO(ibetitsmike): describe how a subagent held by a fork concurrency cap reports queued_for_capacity and the list_agents waiting_for_capacity field. -->
 - `SetArchived(archived)` sets or clears the archived marker for one chat.
 - `SetProject(project)` sets or clears the project of one chat without changing its execution state. A move of a root chat applies it to the root and each descendant in one transaction, and fails without changing any chat if one of them isn't in `W`, `E0`, `E1`, `E1P` or `P`. Only the root's `project_id` changes; subagents go through `SetProject` only so that their execution state is checked too. As in a family archive, the root row is locked first, so a concurrent child creation either joins the move or waits for it. A move to the root's current project applies no transition.
@@ -1194,7 +1194,7 @@ The generation goroutine supports:
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
-  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos and the list_agents todos field. -->
+  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
 - file links
 - workspace binding
 - plan mode

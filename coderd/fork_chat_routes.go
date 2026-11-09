@@ -32,6 +32,17 @@ import (
 // route matches would answer the middleware's 403 or 400.
 func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
 	r.With(apiKeyMiddleware).Route("/chats/fork", func(r chi.Router) {
+		// The fork routes take their middleware inline rather than from a
+		// {chat} subrouter: a subrouter is mounted as a prefix, so it would
+		// also run for fork paths that match no route, and the reserved 404
+		// below would become an experiment or chat parameter error.
+		chatTodos := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatTodos),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatTodos.Get("/{chat}/todos", api.getChatTodos)
+		chatTodos.Get("/{chat}/todos/watch", api.watchChatTodos)
+
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})

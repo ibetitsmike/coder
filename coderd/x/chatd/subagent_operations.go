@@ -122,8 +122,7 @@ func (p *Server) sendSubagentMessage(
 	if err != nil {
 		return database.Chat{}, xerrors.Errorf("get target chat: %w", err)
 	}
-
-	sendResult, err := p.SendMessage(ctx, SendMessageOptions{
+	sendResult, err := p.SendMessage(withSubagentResume(ctx), SendMessageOptions{
 		ChatID:       targetChatID,
 		CreatedBy:    targetChat.OwnerID,
 		Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText(message)},

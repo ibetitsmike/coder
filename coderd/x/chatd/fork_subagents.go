@@ -3,9 +3,9 @@ package chatd
 // This file is fork code: it implements nested subagents behind the
 // fork-nested-subagents experiment. Upstream's chatd files call the hooks in
 // this file (forkValidateSpawnParent, createSubagentChatWithID,
-// isSubagentTarget, childGetsOrchestrationPrompt and
-// forkSpawnAgentDescription), which keep upstream's behavior when the
-// experiment is off.
+// forkValidateSubagentResume, withSubagentResume, isSubagentTarget,
+// childGetsOrchestrationPrompt and forkSpawnAgentDescription), which keep
+// upstream's behavior when the experiment is off.
 
 import (
 	"context"
@@ -81,12 +81,56 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if _, err := validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth); err != nil {
 		return err
 	}
-	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily)
+	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily, "create a child agent")
+}
+
+type subagentResumeKey struct{}
+
+// withSubagentResume marks ctx as a message_agent send, so SendMessage
+// applies the family live subagent limit when the message resumes a finished
+// child. Messages that the owner sends through the chat API do not carry it.
+func withSubagentResume(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subagentResumeKey{}, true)
+}
+
+// forkValidateSubagentResume returns an error when a message_agent send would
+// resume the finished subagent target while its family already has the
+// maximum number of live subagents. SendMessage calls it in the transaction
+// that resumes target, and it takes the lock that serializes the family's
+// spawns, so a concurrent spawn cannot pass the same count.
+func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat) error {
+	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
+		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
+		return nil
+	}
+	fdb, err := forkdb.From(store)
+	if err != nil {
+		return xerrors.Errorf("fork queries: %w", err)
+	}
+	limits, err := p.subagentLimits(ctx, fdb, target.OrganizationID)
+	if err != nil {
+		return err
+	}
+	if limits.maxLivePerFamily == 0 {
+		return nil
+	}
+	rootChatID := subagentRootChatID(target)
+	if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
+		return xerrors.Errorf("acquire chat family admission lock: %w", err)
+	}
+	return validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
+}
+
+// chatFamilyAdmissionLockID is the transaction lock that serializes the
+// spawns and resumes of one chat family, so two of them cannot both pass the
+// live subagent count.
+func chatFamilyAdmissionLockID(rootChatID uuid.UUID) int64 {
+	return database.GenLockID("fork_chat_family_admission:" + rootChatID.String())
 }
 
 // validateFamilyLiveSubagents returns an error when the family of rootChatID
 // already has maxLive live subagents. 0 means no limit.
-func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int) error {
+func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int, action string) error {
 	if maxLive == 0 {
 		return nil
 	}
@@ -95,7 +139,7 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 		return xerrors.Errorf("count live subagents of chat family %s: %w", rootChatID, err)
 	}
 	if live >= int64(maxLive) {
-		return xerrors.Errorf("cannot create a child agent: this chat family has %d live subagents and the maximum is %d", live, maxLive)
+		return xerrors.Errorf("cannot %s: this chat family has %d live subagents and the maximum is %d", action, live, maxLive)
 	}
 	return nil
 }
@@ -130,12 +174,10 @@ func (p *Server) createSubagentChatWithID(
 		}
 		if limits.maxLivePerFamily > 0 {
 			rootChatID := subagentRootChatID(parent)
-			// Serializes the spawns of one family, so concurrent spawns
-			// cannot both pass the count.
-			if err := tx.AcquireLock(ctx, database.GenLockID("fork_chat_family_spawn:"+rootChatID.String())); err != nil {
-				return xerrors.Errorf("acquire chat family spawn lock: %w", err)
+			if err := tx.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
+				return xerrors.Errorf("acquire chat family admission lock: %w", err)
 			}
-			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily); err != nil {
+			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily, "create a child agent"); err != nil {
 				return err
 			}
 		}

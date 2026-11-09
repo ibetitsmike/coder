@@ -4009,6 +4009,20 @@ export interface ChatTodo {
 }
 
 // From codersdk/fork_chat_todos.go
+/**
+ * ChatTodoList is the whole todo list of a chat. Version is 0 while the chat
+ * has no stored list, and increases by one with every write.
+ */
+export interface ChatTodoList {
+	readonly todos: readonly ChatTodo[];
+	/**
+	 * Version is the revision of Todos. It lets a watcher drop an event for
+	 * a version it has already sent.
+	 */
+	readonly version: number;
+}
+
+// From codersdk/fork_chat_todos.go
 export type ChatTodoStatus = "cancelled" | "done" | "in_progress" | "pending";
 
 export const ChatTodoStatuses: ChatTodoStatus[] = [
@@ -6227,8 +6241,8 @@ export interface ForkChatConfig {
 	readonly max_concurrent_subagents_per_family: number;
 	/**
 	 * MaxLiveSubagentsPerFamily is the maximum number of live subagent chats
-	 * under one root chat, checked when a subagent is spawned. 0 means no
-	 * limit.
+	 * under one root chat, checked when a subagent is spawned or resumed. 0
+	 * means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
 }
@@ -6256,9 +6270,10 @@ export interface ForkOrganizationSubagentLimits {
 	readonly max_concurrent_per_family: number | null;
 	/**
 	 * MaxLivePerFamily is the maximum number of live subagent chats under one
-	 * root chat, checked when a subagent is spawned. A live subagent has
-	 * status running, interrupting, requires_action or paused and is not
-	 * archived; a finished one is waiting or error and does not count.
+	 * root chat, checked when a subagent is spawned or resumed. A live
+	 * subagent has status running, interrupting, requires_action or paused
+	 * and is not archived; a finished one is waiting or error and does not
+	 * count.
 	 */
 	readonly max_live_per_family: number | null;
 }
