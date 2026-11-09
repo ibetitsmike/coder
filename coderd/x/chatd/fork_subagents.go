@@ -262,22 +262,26 @@ func (p *Server) childGetsOrchestrationPrompt(ctx context.Context, parent databa
 const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own subagents; its tools depend on its type and mode. "
 
 // forkSpawnAgentDescription rewrites upstream's spawn_agent description,
-// which says children cannot spawn, when nested subagents are enabled.
-func (p *Server) forkSpawnAgentDescription(ctx context.Context, chat database.Chat, description string) (string, error) {
+// which says children cannot spawn, when nested subagents are enabled. The
+// depth it states is advisory, since spawning enforces it, so a failed
+// organization lookup states the deployment value instead of failing the turn.
+func (p *Server) forkSpawnAgentDescription(ctx context.Context, chat database.Chat, description string) string {
 	if !p.nestedSubagentsEnabled() {
-		return description, nil
+		return description
 	}
+	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
 	fdb, err := forkdb.From(p.db)
-	if err != nil {
-		return "", xerrors.Errorf("fork queries: %w", err)
+	if err == nil {
+		maxDepth, err = p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
 	}
-	maxDepth, err := p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
 	if err != nil {
-		return "", err
+		p.logger.Warn(ctx, "get maximum subagent depth for spawn_agent description",
+			slog.F("chat_id", chat.ID), slog.Error(err))
+		maxDepth = p.chatLimits.Fork.MaxSubagentDepth
 	}
 	return strings.Replace(description, upstreamSpawnAgentChildToolsSentence, fmt.Sprintf(
 		"A general child can spawn its own subagents while it is below the maximum subagent depth of %d; "+
 			"explore and computer use children cannot. Its tools depend on its type and mode. ",
 		maxDepth,
-	), 1), nil
+	), 1)
 }
