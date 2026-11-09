@@ -4598,6 +4598,18 @@ export interface CreateFirstUserTrialInfo {
 	readonly developers: string;
 }
 
+// From codersdk/fork_agent_definitions.go
+/**
+ * CreateForkAgentDefinitionRequest creates a stored agent definition.
+ */
+export interface CreateForkAgentDefinitionRequest {
+	/**
+	 * Content is a Claude Code or Cursor agent markdown file. Its
+	 * front-matter must include name and must be followed by a prompt body.
+	 */
+	readonly content: string;
+}
+
 // From codersdk/groups.go
 export interface CreateGroupRequest {
 	readonly name: string;
@@ -6219,6 +6231,37 @@ export const FeatureNames: FeatureName[] = [
 export type FeatureSet = "enterprise" | "" | "premium";
 
 export const FeatureSets: FeatureSet[] = ["enterprise", "", "premium"];
+
+// From codersdk/fork_agent_definitions.go
+/**
+ * ForkAgentDefinition is a stored custom agent definition with its raw
+ * markdown content.
+ */
+export interface ForkAgentDefinition extends ForkAgentDefinitionMetadata {
+	readonly content: string;
+}
+
+// From codersdk/fork_agent_definitions.go
+/**
+ * ForkAgentDefinitionMetadata describes a stored custom agent definition
+ * without its content.
+ */
+export interface ForkAgentDefinitionMetadata {
+	readonly id: string;
+	readonly organization_id: string;
+	/**
+	 * Name is the spawn_agent type, taken from the front-matter of the
+	 * content.
+	 */
+	readonly name: string;
+	readonly description: string;
+	/**
+	 * Enabled reports whether chats are offered the definition.
+	 */
+	readonly enabled: boolean;
+	readonly created_at: string;
+	readonly updated_at: string;
+}
 
 // From codersdk/fork_chat_config.go
 /**
@@ -11405,6 +11448,17 @@ export interface UpdateCheckResponse {
 	 * URL to download the latest release of Coder.
 	 */
 	readonly url: string;
+}
+
+// From codersdk/fork_agent_definitions.go
+/**
+ * UpdateForkAgentDefinitionRequest updates a stored agent definition. At
+ * least one field must be set, and new content must keep the definition's
+ * name.
+ */
+export interface UpdateForkAgentDefinitionRequest {
+	readonly content?: string;
+	readonly enabled?: boolean;
 }
 
 // From healthsdk/healthsdk.go

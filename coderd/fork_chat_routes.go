@@ -52,5 +52,17 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		)
 		orgSubagents.Get("/organizations/{organization}/subagent-limits", api.forkOrganizationSubagentLimits)
 		orgSubagents.Put("/organizations/{organization}/subagent-limits", api.updateForkOrganizationSubagentLimits)
+
+		userAgentDefinitions := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
+			httpmw.ExtractOrganizationParam(api.Database),
+			httpmw.ExtractOrganizationMemberParam(api.Database),
+		)
+		const userAgentDefinitionsPath = "/organizations/{organization}/members/{user}/agent-definitions"
+		userAgentDefinitions.Get(userAgentDefinitionsPath, api.forkUserAgentDefinitions)
+		userAgentDefinitions.Post(userAgentDefinitionsPath, api.postForkUserAgentDefinition)
+		userAgentDefinitions.Get(userAgentDefinitionsPath+"/{agentDefinition}", api.forkUserAgentDefinition)
+		userAgentDefinitions.Patch(userAgentDefinitionsPath+"/{agentDefinition}", api.patchForkUserAgentDefinition)
+		userAgentDefinitions.Delete(userAgentDefinitionsPath+"/{agentDefinition}", api.deleteForkUserAgentDefinition)
 	})
 }

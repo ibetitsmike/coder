@@ -1563,6 +1563,253 @@ curl -X GET http://coder-server:8080/api/v2/chats/files/{file} \
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
+## List user agent definitions
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`GET /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions`
+
+### Parameters
+
+| Name           | In   | Type   | Required | Description              |
+|----------------|------|--------|----------|--------------------------|
+| `organization` | path | string | true     | Organization ID or name  |
+| `user`         | path | string | true     | User ID, username, or me |
+
+### Example responses
+
+> 200 Response
+
+```json
+[
+  {
+    "created_at": "2019-08-24T14:15:22Z",
+    "description": "string",
+    "enabled": true,
+    "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+    "name": "string",
+    "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+    "updated_at": "2019-08-24T14:15:22Z"
+  }
+]
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                          |
+|--------|---------------------------------------------------------|-------------|-------------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | array of [codersdk.ForkAgentDefinitionMetadata](schemas.md#codersdkforkagentdefinitionmetadata) |
+
+<h3 id="list-user-agent-definitions-responseschema">Response Schema</h3>
+
+Status Code **200**
+
+| Name                | Type              | Required | Restrictions | Description                                                               |
+|---------------------|-------------------|----------|--------------|---------------------------------------------------------------------------|
+| `[array item]`      | array             | false    |              |                                                                           |
+| `» created_at`      | string(date-time) | false    |              |                                                                           |
+| `» description`     | string            | false    |              |                                                                           |
+| `» enabled`         | boolean           | false    |              | Enabled reports whether chats are offered the definition.                 |
+| `» id`              | string(uuid)      | false    |              |                                                                           |
+| `» name`            | string            | false    |              | Name is the spawn_agent type, taken from the front-matter of the content. |
+| `» organization_id` | string(uuid)      | false    |              |                                                                           |
+| `» updated_at`      | string(date-time) | false    |              |                                                                           |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Create a user agent definition
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X POST http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`POST /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions`
+
+> Body parameter
+
+```json
+{
+  "content": "string"
+}
+```
+
+### Parameters
+
+| Name           | In   | Type                                                                                             | Required | Description              |
+|----------------|------|--------------------------------------------------------------------------------------------------|----------|--------------------------|
+| `organization` | path | string                                                                                           | true     | Organization ID or name  |
+| `user`         | path | string                                                                                           | true     | User ID, username, or me |
+| `body`         | body | [codersdk.CreateForkAgentDefinitionRequest](schemas.md#codersdkcreateforkagentdefinitionrequest) | true     | Request body             |
+
+### Example responses
+
+> 201 Response
+
+```json
+{
+  "content": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "description": "string",
+  "enabled": true,
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Responses
+
+| Status | Meaning                                                      | Description | Schema                                                                 |
+|--------|--------------------------------------------------------------|-------------|------------------------------------------------------------------------|
+| 201    | [Created](https://tools.ietf.org/html/rfc7231#section-6.3.2) | Created     | [codersdk.ForkAgentDefinition](schemas.md#codersdkforkagentdefinition) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Get a user agent definition
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`GET /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition}`
+
+### Parameters
+
+| Name              | In   | Type   | Required | Description              |
+|-------------------|------|--------|----------|--------------------------|
+| `organization`    | path | string | true     | Organization ID or name  |
+| `user`            | path | string | true     | User ID, username, or me |
+| `agentDefinition` | path | string | true     | Agent definition name    |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "content": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "description": "string",
+  "enabled": true,
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                 |
+|--------|---------------------------------------------------------|-------------|------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkAgentDefinition](schemas.md#codersdkforkagentdefinition) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Delete a user agent definition
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X DELETE http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`DELETE /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition}`
+
+### Parameters
+
+| Name              | In   | Type   | Required | Description              |
+|-------------------|------|--------|----------|--------------------------|
+| `organization`    | path | string | true     | Organization ID or name  |
+| `user`            | path | string | true     | User ID, username, or me |
+| `agentDefinition` | path | string | true     | Agent definition name    |
+
+### Responses
+
+| Status | Meaning                                                         | Description | Schema |
+|--------|-----------------------------------------------------------------|-------------|--------|
+| 204    | [No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5) | No Content  |        |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Update a user agent definition
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X PATCH http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition} \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`PATCH /api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions/{agentDefinition}`
+
+> Body parameter
+
+```json
+{
+  "content": "string",
+  "enabled": true
+}
+```
+
+### Parameters
+
+| Name              | In   | Type                                                                                             | Required | Description              |
+|-------------------|------|--------------------------------------------------------------------------------------------------|----------|--------------------------|
+| `organization`    | path | string                                                                                           | true     | Organization ID or name  |
+| `user`            | path | string                                                                                           | true     | User ID, username, or me |
+| `agentDefinition` | path | string                                                                                           | true     | Agent definition name    |
+| `body`            | body | [codersdk.UpdateForkAgentDefinitionRequest](schemas.md#codersdkupdateforkagentdefinitionrequest) | true     | Request body             |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "content": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "description": "string",
+  "enabled": true,
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                 |
+|--------|---------------------------------------------------------|-------------|------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkAgentDefinition](schemas.md#codersdkforkagentdefinition) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
 ## Get organization subagent limits
 
 ### Code samples
