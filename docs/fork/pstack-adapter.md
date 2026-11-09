@@ -17,15 +17,18 @@ This page is fork-only: it is not in `docs/manifest.json`.
 
 ## Setup
 
-1. Clone pstack in the workspace and pin it: `git clone https://github.com/cursor/plugins ~/pstack-src`, then `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
+1. Clone pstack in the workspace: `git clone https://github.com/cursor/plugins ~/pstack-src`.
+2. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
    `<pstack>` is `~/pstack-src/pstack`.
-2. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
-   The copy replaces a skill that has the same name, so move any such skill out of `~/.coder/skills/` first.
+3. If `~/.coder/skills/` holds a skill with the name of a pstack skill, `deslop`, `control-ui` or `control-cli`, move it out of `~/.coder/skills/`.
+   The next step replaces a skill that has the same name.
+4. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
    A chat's first message cannot run a skill: it fails with `Skill workspace/<name> is not available.`
    Send one plain message first, then pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
    A bare `/<name>` loads nothing.
-3. Copy this page to `~/.coder/pstack-adapter.md` and append the block below to `~/.coder/AGENTS.md`.
+5. Copy this page to `~/.coder/pstack-adapter.md`.
+6. Append the block below to `~/.coder/AGENTS.md`.
    Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it does not load this page, so the block carries the mappings that most skills need:
 
    ```markdown
@@ -53,7 +56,8 @@ This page is fork-only: it is not in `docs/manifest.json`.
    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
    To check a model, ask a new chat to quote the `pstack-adapter` block without any tool call.
 
-   A chat pins `AGENTS.md` and the skills when it starts, so start a new chat after this step.
+7. Start a new chat.
+   A chat pins `AGENTS.md` and the skills when it starts.
    A chat that was already open keeps its old copy until you select **Refresh context** in it.
 
 ## Tools
