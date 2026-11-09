@@ -55,6 +55,14 @@ func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg f
 	return f.db.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
+// CountLiveSubagentsInFamily authorizes through the family's root chat.
+func (f *forkQuerier) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
+	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+		return 0, err
+	}
+	return f.db.CountLiveSubagentsInFamily(ctx, rootChatID)
+}
+
 func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return err

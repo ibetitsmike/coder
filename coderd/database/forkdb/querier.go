@@ -22,6 +22,9 @@ type Querier interface {
 	// its own descendants must never wait for it. The depth guard stops the walk
 	// if a cycle ever appears in the hierarchy.
 	CountActiveSubagentsForCapacity(ctx context.Context, arg CountActiveSubagentsForCapacityParams) (CountActiveSubagentsForCapacityRow, error)
+	// Counts the unarchived subagent chats under @root_chat_id that have not
+	// finished. A finished subagent is waiting or error.
+	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	DeleteExpiredPluginLinkCodes(ctx context.Context) error
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error

@@ -228,6 +228,33 @@ func TestNestedSubagentOrganizationMaxDepth(t *testing.T) {
 	})
 }
 
+func TestNestedSubagentLiveLimit(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	_, err := f.fdb.UpsertChatOrganizationSubagentLimits(ctx, forkdb.UpsertChatOrganizationSubagentLimitsParams{
+		OrganizationID:   f.root.OrganizationID,
+		MaxLivePerFamily: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	require.NoError(t, err)
+
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	require.Equal(t, database.ChatStatusRunning, child.Status)
+	_, err = f.spawn(t, f.root, childSubagentChatOptions{})
+	require.ErrorContains(t, err, "this chat family has 1 live subagents and the maximum is 1")
+	// The limit covers the whole family, not only the root's children.
+	_, err = f.spawn(t, child, childSubagentChatOptions{})
+	require.ErrorContains(t, err, "the maximum is 1")
+	f.requireNoChildren(t, child)
+	require.ErrorContains(t, f.server.forkValidateSpawnParent(ctx, f.root), "the maximum is 1")
+
+	f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
+	_, err = f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+}
+
 func TestForkLimitsFromConfig(t *testing.T) {
 	t.Parallel()
 
@@ -235,11 +262,13 @@ func TestForkLimitsFromConfig(t *testing.T) {
 		MaxSubagentDepth:                serpent.Int64(4),
 		MaxConcurrentSubagents:          serpent.Int64(5),
 		MaxConcurrentSubagentsPerFamily: serpent.Int64(6),
+		MaxLiveSubagentsPerFamily:       serpent.Int64(7),
 	}}
 	require.Equal(t, ForkLimits{
 		MaxSubagentDepth:                4,
 		MaxConcurrentSubagents:          5,
 		MaxConcurrentSubagentsPerFamily: 6,
+		MaxLiveSubagentsPerFamily:       7,
 	}, LimitsFromConfig(cfg).Fork)
 }
 

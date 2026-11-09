@@ -39,6 +39,7 @@ func TestForkChatSubagentCapacityOptions(t *testing.T) {
 	for _, flag := range []string{
 		"chat-max-concurrent-subagents",
 		"chat-max-concurrent-subagents-per-family",
+		"chat-max-live-subagents-per-family",
 	} {
 		t.Run(flag, func(t *testing.T) {
 			t.Parallel()

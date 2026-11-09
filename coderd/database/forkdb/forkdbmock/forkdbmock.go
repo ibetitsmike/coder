@@ -87,6 +87,21 @@ func (mr *MockStoreMockRecorder) CountActiveSubagentsForCapacity(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountActiveSubagentsForCapacity", reflect.TypeOf((*MockStore)(nil).CountActiveSubagentsForCapacity), ctx, arg)
 }
 
+// CountLiveSubagentsInFamily mocks base method.
+func (m *MockStore) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountLiveSubagentsInFamily", ctx, rootChatID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountLiveSubagentsInFamily indicates an expected call of CountLiveSubagentsInFamily.
+func (mr *MockStoreMockRecorder) CountLiveSubagentsInFamily(ctx, rootChatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountLiveSubagentsInFamily", reflect.TypeOf((*MockStore)(nil).CountLiveSubagentsInFamily), ctx, rootChatID)
+}
+
 // DeleteExpiredPluginLinkCodes mocks base method.
 func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	m.ctrl.T.Helper()

@@ -78,13 +78,31 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if err != nil {
 		return err
 	}
-	_, err = validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth)
-	return err
+	if _, err := validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth); err != nil {
+		return err
+	}
+	return validateFamilyLiveSubagents(ctx, fdb, subagentRootChatID(parent), limits.maxLivePerFamily)
+}
+
+// validateFamilyLiveSubagents returns an error when the family of rootChatID
+// already has maxLive live subagents. 0 means no limit.
+func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChatID uuid.UUID, maxLive int) error {
+	if maxLive == 0 {
+		return nil
+	}
+	live, err := fdb.CountLiveSubagentsInFamily(ctx, rootChatID)
+	if err != nil {
+		return xerrors.Errorf("count live subagents of chat family %s: %w", rootChatID, err)
+	}
+	if live >= int64(maxLive) {
+		return xerrors.Errorf("cannot create a child agent: this chat family has %d live subagents and the maximum is %d", live, maxLive)
+	}
+	return nil
 }
 
 // createSubagentChatWithID creates the child chat of parent. With nested
 // subagents enabled it also records the child's chat_subagents row in the
-// same transaction, rechecking the depth limit there.
+// same transaction, rechecking the depth and live subagent limits there.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -109,6 +127,17 @@ func (p *Server) createSubagentChatWithID(
 		depth, err := validateNestedSpawnParent(ctx, ftx, parent, limits.maxDepth)
 		if err != nil {
 			return err
+		}
+		if limits.maxLivePerFamily > 0 {
+			rootChatID := subagentRootChatID(parent)
+			// Serializes the spawns of one family, so concurrent spawns
+			// cannot both pass the count.
+			if err := tx.AcquireLock(ctx, database.GenLockID("fork_chat_family_spawn:"+rootChatID.String())); err != nil {
+				return xerrors.Errorf("acquire chat family spawn lock: %w", err)
+			}
+			if err := validateFamilyLiveSubagents(ctx, ftx, rootChatID, limits.maxLivePerFamily); err != nil {
+				return err
+			}
 		}
 		result, err = chatstate.CreateChatWithID(ctx, tx, buffer, chatID, input)
 		if err != nil {
