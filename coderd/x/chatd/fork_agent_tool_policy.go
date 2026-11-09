@@ -106,6 +106,16 @@ func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
 	}
 }
 
+func (policy customAgentToolPolicy) allowsNonMCPTool(name string) bool {
+	return !customAgentToolNames(policy.DisallowedTools)[name] &&
+		(policy.Tools == nil || customAgentToolNames(policy.Tools)[name])
+}
+
+// keepsSpawnAgent reports whether policy leaves the child spawn_agent.
+func (policy customAgentToolPolicy) keepsSpawnAgent() bool {
+	return !policy.ReadOnly && policy.allowsNonMCPTool(spawnAgentToolName)
+}
+
 // filter returns the tools, deferred MCP candidates and provider tools that
 // policy allows, in their original order. readonly keeps web_search, the
 // provider tool that Explore children keep. mcpServerSlugs is only read in
@@ -116,11 +126,8 @@ func (policy customAgentToolPolicy) filter(
 	providerTools []chatloop.ProviderTool,
 	mcpServerSlugs map[uuid.UUID]string,
 ) ([]fantasy.AgentTool, []deferredMCPTool, []chatloop.ProviderTool) {
-	allowed := customAgentToolNames(policy.Tools)
 	disallowed := customAgentToolNames(policy.DisallowedTools)
-	keepNonMCP := func(name string) bool {
-		return !disallowed[name] && (policy.Tools == nil || allowed[name])
-	}
+	keepNonMCP := policy.allowsNonMCPTool
 	keep := func(tool fantasy.AgentTool) bool {
 		name := tool.Info().Name
 		if disallowed[name] || (policy.ReadOnly && !exploreToolAllowed(tool)) {

@@ -368,7 +368,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	}
 	// Delegated chats that cannot spawn have no list_agents or
 	// message_agent, so they lose the orchestration guidance.
-	if !p.childGetsOrchestrationPrompt(ctx, parent, opts.chatMode) {
+	if !p.childGetsOrchestrationPrompt(ctx, parent, opts.chatMode, opts.customAgent) {
 		deploymentPrompt = strings.Replace(deploymentPrompt, subagentOrchestrationPromptBlock, "", 1)
 	}
 	organizationPrompt, err := p.resolveOrganizationSystemPrompt(ctx, parent.OrganizationID)

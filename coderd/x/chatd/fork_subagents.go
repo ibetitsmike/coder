@@ -229,10 +229,19 @@ func (p *Server) isSubagentTarget(ctx context.Context, parentChatID, targetChatI
 }
 
 // childGetsOrchestrationPrompt reports whether a child of parent with
-// childMode keeps the subagent orchestration guidance, which is true only
-// when the child will have the subagent tools.
-func (p *Server) childGetsOrchestrationPrompt(ctx context.Context, parent database.Chat, childMode database.NullChatMode) bool {
+// childMode and customAgent (nil for built-in types) keeps the subagent
+// orchestration guidance, which is true only when the child will have the
+// subagent tools.
+func (p *Server) childGetsOrchestrationPrompt(
+	ctx context.Context,
+	parent database.Chat,
+	childMode database.NullChatMode,
+	customAgent *workspacesdk.AgentDefinition,
+) bool {
 	if !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(childMode) {
+		return false
+	}
+	if customAgent != nil && !customAgentToolPolicyFromDefinition(*customAgent).keepsSpawnAgent() {
 		return false
 	}
 	fdb, err := forkdb.From(p.db)

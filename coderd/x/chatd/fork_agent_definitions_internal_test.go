@@ -314,6 +314,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.Contains(t, names, "execute")
 		require.NotContains(t, names, "write_file")
 		require.NotContains(t, names, "edit_files")
+		require.NotContains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
 	})
 
 	t.Run("DisallowedTools", func(t *testing.T) {
@@ -324,6 +325,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		names := turnToolNames(t, child)
 		require.Contains(t, names, "edit_files")
 		require.NotContains(t, names, "write_file")
+		require.Contains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
 
 		searchTool := newTestMCPAgentTool("lookups__search", uuid.New())
 		lookupTool := newTestMCPAgentTool("lookups__lookup", uuid.New())
@@ -341,6 +343,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		ctx := chatdTestContext(t)
 		child, err := f.spawn(t, spawnAgentArgs{Type: "docs-reader"})
 		require.NoError(t, err)
+		require.NotContains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
 		docs := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs"})
 		// The tools of this server are named docs__mirror__<tool>, so their
 		// name alone would attribute them to docs.
