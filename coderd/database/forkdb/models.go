@@ -9,9 +9,31 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 )
+
+// Stored custom agent definitions. A row is in the organization tier when user_id and project_id are NULL, in the user tier when user_id is set, and in the project tier when project_id is set.
+type AgentDefinition struct {
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	// The owner of a user-tier row. Unlike personal skills, a user-tier row also belongs to one organization of the user.
+	UserID      uuid.NullUUID `db:"user_id" json:"user_id"`
+	ProjectID   uuid.NullUUID `db:"project_id" json:"project_id"`
+	Name        string        `db:"name" json:"name"`
+	Description string        `db:"description" json:"description"`
+	// The agent markdown file: front-matter and prompt body, parsed by workspacesdk.ParseAgentDefinition.
+	Content string `db:"content" json:"content"`
+	// Whether the definition is offered to chats. A disabled definition is kept but not resolved.
+	Enabled bool `db:"enabled" json:"enabled"`
+	// Group permissions on an organization-tier row. Empty on the other tiers.
+	GroupAcl database.ChatACL `db:"group_acl" json:"group_acl"`
+	// User permissions on an organization-tier row. Empty on the other tiers.
+	UserAcl   database.ChatACL `db:"user_acl" json:"user_acl"`
+	CreatedAt time.Time        `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
+}
 
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
