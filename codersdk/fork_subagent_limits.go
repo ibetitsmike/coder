@@ -18,16 +18,16 @@ import (
 type ForkOrganizationSubagentLimits struct {
 	// MaxDepth is the maximum depth of nested subagent chats, between 1 and
 	// 16.
-	MaxDepth *int32 `json:"max_depth"`
+	MaxDepth *int32 `json:"max_depth" example:"2"`
 	// MaxConcurrent is the maximum number of running subagent chats in the
 	// organization.
-	MaxConcurrent *int32 `json:"max_concurrent"`
+	MaxConcurrent *int32 `json:"max_concurrent" example:"8"`
 	// MaxConcurrentPerFamily is the maximum number of running subagent chats
 	// under one root chat.
-	MaxConcurrentPerFamily *int32 `json:"max_concurrent_per_family"`
+	MaxConcurrentPerFamily *int32 `json:"max_concurrent_per_family" example:"4"`
 	// MaxLivePerFamily is the maximum number of unarchived subagent chats
 	// under one root chat.
-	MaxLivePerFamily *int32 `json:"max_live_per_family"`
+	MaxLivePerFamily *int32 `json:"max_live_per_family" example:"6"`
 }
 
 // ForkOrganizationSubagentLimits returns the subagent limits of an
