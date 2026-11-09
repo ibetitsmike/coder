@@ -1,6 +1,7 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { ChatFilePart, Experiment } from "#/api/typesGenerated";
+import type { Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import {
 	MockAppearanceConfig,
@@ -8,17 +9,11 @@ import {
 	MockDefaultOrganization,
 	MockEntitlements,
 } from "#/testHelpers/entities";
+import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
 import { renderComponent } from "#/testHelpers/renderHelpers";
-import { getChatFileURL } from "../../utils/chatAttachments";
+import { getAttachmentHref } from "../../utils/chatAttachments";
 import { AttachmentBlock } from "./AttachmentBlocks";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
-
-const videoBlock: ChatFilePart = {
-	type: "file",
-	media_type: "video/mp4",
-	name: "review.mp4",
-	file_id: "6f1c2a9e-0d7b-4c43-9f0e-2b8d1a5c7e31",
-};
 
 const renderPreview = (experiments: Experiment[]) =>
 	renderComponent(
@@ -33,9 +28,9 @@ const renderPreview = (experiments: Experiment[]) =>
 				canViewOrganizationSettings: false,
 			}}
 		>
-			<ForkAttachmentPreview block={videoBlock}>
+			<ForkAttachmentPreview block={MockChatVideoFilePart}>
 				<AttachmentBlock
-					block={videoBlock}
+					block={MockChatVideoFilePart}
 					onImageClick={vi.fn()}
 					onTextFileClick={vi.fn()}
 					framePreview
@@ -45,25 +40,24 @@ const renderPreview = (experiments: Experiment[]) =>
 	);
 
 describe("ForkAttachmentPreview", () => {
-	it("plays an attached MP4 from its chat file URL", () => {
+	it("plays an attached MP4 when fork-chat-todos is on", async () => {
 		renderPreview(["fork-chat-todos"]);
 
-		expect(screen.getByLabelText("review.mp4").getAttribute("src")).toBe(
-			getChatFileURL("6f1c2a9e-0d7b-4c43-9f0e-2b8d1a5c7e31"),
+		await userEvent.click(
+			screen.getByRole("button", { name: "View recording" }),
 		);
+
+		await screen.findByRole("dialog", { name: "Recording playback" });
 	});
 
-	it("keeps the upstream download card when fork-chat-todos is off", () => {
+	it("offers the upstream download when fork-chat-todos is off", () => {
 		renderPreview([]);
 
-		expect(screen.queryByLabelText("review.mp4")).toBeNull();
-	});
-
-	it("falls back to the download card when the MP4 cannot play", () => {
-		renderPreview(["fork-chat-todos"]);
-
-		fireEvent.error(screen.getByLabelText("review.mp4"));
-
-		expect(screen.queryByLabelText("review.mp4")).toBeNull();
+		expect(screen.queryByRole("button", { name: "View recording" })).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Download review.mp4" })
+				.getAttribute("href"),
+		).toBe(getAttachmentHref(MockChatVideoFilePart));
 	});
 });
