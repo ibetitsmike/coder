@@ -20,9 +20,12 @@ import (
 // The mount reserves /chats/fork even with no fork route registered: the
 // subrouter answers 404 instead of letting a fork path fall into the /chats
 // wildcard, where UUID parsing of {chat} turns it into a 400.
+//
+// The API key middleware wraps the mount instead of being Use'd inside the
+// subrouter: chi builds a subrouter's middleware chain only when its first
+// route is registered, so with no fork route the 404 would skip authentication.
 func (*API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
-	r.Route("/chats/fork", func(r chi.Router) {
-		r.Use(apiKeyMiddleware)
+	r.With(apiKeyMiddleware).Route("/chats/fork", func(r chi.Router) {
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})
