@@ -156,7 +156,7 @@ func (p *Server) interruptSubagent(
 
 	// Idle and paused chats have no turn to interrupt.
 	if targetChat.Status == database.ChatStatusWaiting || targetChat.Status == database.ChatStatusPaused {
-		return targetChat, false, nil
+		return targetChat, p.forkInterruptDescendants(ctx, targetChat), nil
 	}
 
 	updatedChat, err := p.InterruptChat(ctx, targetChat)

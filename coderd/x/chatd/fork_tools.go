@@ -27,6 +27,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	tools = append(tools, nested...)
 	if p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		tools = append(tools, p.chatTodoTools(chat)...)
+		tools = append(tools, p.chatTranscriptTool(chat))
 	}
 	return tools, nil
 }
