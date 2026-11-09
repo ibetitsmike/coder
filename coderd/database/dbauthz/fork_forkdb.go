@@ -175,8 +175,6 @@ func (f *forkQuerier) GetPluginsByOrganizationID(ctx context.Context, organizati
 	return f.db.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
-// InsertChatSubagent authorizes as an update of the owning chat, like
-// InsertChatDebugRun.
 func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -184,6 +182,8 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 	return f.db.GetUserAgentDefinitionByName(ctx, arg)
 }
 
+// InsertChatSubagent authorizes as an update of the owning chat, like
+// InsertChatDebugRun.
 func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
 	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
 	if err != nil {
