@@ -182,7 +182,7 @@ func availableSubagentDefinitions(
 	p *Server,
 	currentChat database.Chat,
 ) ([]subagentDefinition, error) {
-	defs := allSubagentDefinitions()
+	defs := forkSubagentDefinitions(ctx, p, currentChat)
 	available := make([]subagentDefinition, 0, len(defs))
 	for _, def := range defs {
 		reason, err := def.unavailableReasonText(ctx, p, currentChat)
@@ -230,7 +230,7 @@ func resolveSubagentDefinition(
 	rawSubagentType string,
 ) (subagentDefinition, error) {
 	subagentType := strings.TrimSpace(rawSubagentType)
-	def, ok := lookupSubagentDefinition(subagentType)
+	def, ok := forkLookupSubagentDefinition(ctx, p, currentChat, subagentType)
 	if !ok {
 		ids, err := availableSubagentTypeIDs(ctx, p, currentChat)
 		if err != nil {
