@@ -63,6 +63,10 @@ type Querier interface {
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
+	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
+	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
+	// rows take, so a child transaction can commit while the lock is held.
+	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error

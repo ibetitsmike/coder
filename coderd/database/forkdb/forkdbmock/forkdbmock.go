@@ -516,6 +516,21 @@ func (mr *MockStoreMockRecorder) ListUserAgentDefinitionMetadata(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserAgentDefinitionMetadata", reflect.TypeOf((*MockStore)(nil).ListUserAgentDefinitionMetadata), ctx, arg)
 }
 
+// LockChatForNoKeyUpdate mocks base method.
+func (m *MockStore) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockChatForNoKeyUpdate", ctx, id)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockChatForNoKeyUpdate indicates an expected call of LockChatForNoKeyUpdate.
+func (mr *MockStoreMockRecorder) LockChatForNoKeyUpdate(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockChatForNoKeyUpdate", reflect.TypeOf((*MockStore)(nil).LockChatForNoKeyUpdate), ctx, id)
+}
+
 // ReleasePluginLeases mocks base method.
 func (m *MockStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	m.ctrl.T.Helper()

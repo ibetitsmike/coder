@@ -192,6 +192,66 @@ func TestNestedArchiveActiveFamily(t *testing.T) {
 		f.requireArchived(t, false, f.root, child, grandchild)
 	})
 
+	// A transition updates its chat row twice, so its second update takes
+	// FOR KEY SHARE on the parent and the root. The archive must not hold
+	// either of them in a mode that blocks that while it waits for the
+	// transition (issue 79).
+	t.Run("ConcurrentTransition", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, nested, Limits{})
+		ctx := chatdTestContext(t)
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		for _, chat := range []database.Chat{f.root, child, grandchild} {
+			f.setStatus(t, chat, database.ChatStatusWaiting, uuid.NullUUID{})
+		}
+
+		locked := make(chan struct{}, 1)
+		release := make(chan struct{})
+		transitionErr := make(chan error, 1)
+		go func() {
+			transitionErr <- chatstate.NewChatMachine(f.db, f.server.pubsub, grandchild.ID).Update(ctx, func(_ *chatstate.Tx, store database.Store) error {
+				locked <- struct{}{}
+				<-release
+				current, err := store.GetChatByID(ctx, grandchild.ID)
+				if err != nil {
+					return err
+				}
+				_, err = store.UpdateChatExecutionState(ctx, database.UpdateChatExecutionStateParams{
+					ID:                       current.ID,
+					Status:                   current.Status,
+					Archived:                 current.Archived,
+					WorkerID:                 current.WorkerID,
+					RunnerID:                 current.RunnerID,
+					LastError:                current.LastError,
+					RequiresActionDeadlineAt: current.RequiresActionDeadlineAt,
+					CompactionRequestedAt:    current.CompactionRequestedAt,
+				})
+				return err
+			})
+		}()
+		testutil.RequireReceive(ctx, t, locked)
+
+		archiveErr := make(chan error, 1)
+		go func() {
+			archiveErr <- f.server.ArchiveChat(ctx, f.root)
+		}()
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			var waiting int
+			err := f.sqlDB.QueryRowContext(ctx,
+				"SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+			).Scan(&waiting)
+			return err == nil && waiting > 0
+		}, testutil.IntervalFast, "archive waits for the grandchild")
+		close(release)
+
+		require.NoError(t, testutil.RequireReceive(ctx, t, transitionErr))
+		require.NoError(t, testutil.RequireReceive(ctx, t, archiveErr))
+		f.requireArchived(t, true, f.root, child, grandchild)
+	})
+
 	t.Run("ExperimentOff", func(t *testing.T) {
 		t.Parallel()
 		f := newNestedSubagentsFixture(t, upstreamExperimentsKnown(), Limits{})

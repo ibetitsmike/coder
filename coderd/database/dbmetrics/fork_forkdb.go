@@ -212,6 +212,11 @@ func (f forkQueryMetricsStore) ListUserAgentDefinitionMetadata(ctx context.Conte
 	return f.s.ListUserAgentDefinitionMetadata(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	defer f.observe(ctx, "LockChatForNoKeyUpdate", time.Now())
+	return f.s.LockChatForNoKeyUpdate(ctx, id)
+}
+
 func (f forkQueryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	defer f.observe(ctx, "ReleasePluginLeases", time.Now())
 	return f.s.ReleasePluginLeases(ctx, runnerID)
