@@ -49,8 +49,8 @@ This page is fork-only: it isn't in `docs/manifest.json`.
    - Work in the repository the user names, or else in the Working Directory of <workspace-context>.
      Write no files outside it unless the step names the path.
    - SendToUser: put the message in your reply.
-   - Your own or a child's transcript: read_chat_transcript, if you have it.
-   - Other transcripts, recent chats, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
+   - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
+   - Transcripts with no known chat ID, recent chats, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
      Never invent the skipped result.
    <!-- /pstack-adapter -->
    ```
