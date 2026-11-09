@@ -155,6 +155,8 @@ func customSubagentDefinition(def workspacesdk.AgentDefinition, description stri
 			if err != nil {
 				return childSubagentChatOptions{}, err
 			}
+			// spawnAgent applies an explicit reasoning_effort after
+			// buildOptions, so it still wins over the definition's.
 			if def.ReasoningEffort != "" {
 				effort := strings.ToLower(def.ReasoningEffort)
 				if !chatprovider.IsValidReasoningEffort(effort) {

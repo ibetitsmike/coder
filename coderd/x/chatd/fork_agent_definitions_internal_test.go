@@ -134,6 +134,7 @@ func TestForkAgentDefinitionSpawn(t *testing.T) {
 			return map[string]string{
 				"reviewer": agentDefinitionMarkdown("name: reviewer\ndescription: Reviews diffs.", "Review the diff for REVIEWER-MARKER."),
 				"explore":  agentDefinitionMarkdown("name: explore\ndescription: Shadows explore.", "SHADOW-EXPLORE-MARKER"),
+				"broken":   agentDefinitionMarkdown("name: [broken", "BROKEN-MARKER"),
 			}
 		})
 	ctx := chatdTestContext(t)
@@ -154,6 +155,7 @@ func TestForkAgentDefinitionSpawn(t *testing.T) {
 		require.Positive(t, reviewer, description)
 		require.Greater(t, reviewer, strings.Index(description, "explore ("))
 		require.NotContains(t, description, "Shadows explore")
+		require.NotContains(t, description, "broken")
 	})
 
 	t.Run("BuiltinWins", func(t *testing.T) {
@@ -193,6 +195,7 @@ func TestForkAgentDefinitionModel(t *testing.T) {
 			return map[string]string{
 				"pinned-model":  agentDefinitionMarkdown("name: pinned-model\nmodel: "+strings.ToUpper(otherModel.DisplayName)+"\neffort: High", "Pinned."),
 				"missing-model": agentDefinitionMarkdown("name: missing-model\nmodel: no-such-model", "Missing."),
+				"bad-effort":    agentDefinitionMarkdown("name: bad-effort\neffort: turbo", "Bad effort."),
 			}
 		})
 	high := database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffortHigh, Valid: true}
@@ -222,6 +225,12 @@ func TestForkAgentDefinitionModel(t *testing.T) {
 		t.Parallel()
 		_, err := f.spawn(t, spawnAgentArgs{Type: "missing-model"})
 		require.ErrorContains(t, err, `agent "missing-model" sets model "no-such-model", which is not an available model`)
+	})
+
+	t.Run("InvalidEffort", func(t *testing.T) {
+		t.Parallel()
+		_, err := f.spawn(t, spawnAgentArgs{Type: "bad-effort"})
+		require.ErrorContains(t, err, `agent "bad-effort" sets reasoning_effort "turbo", which is not one of`)
 	})
 }
 
