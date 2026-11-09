@@ -286,6 +286,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
 				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file]", "No writes."),
 				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [Docs]", "Docs only."),
+				"no-lookup":   agentDefinitionMarkdown("name: no-lookup\ndisallowed_tools: [lookups__lookup]", "No lookups."),
 			}
 		},
 		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
@@ -350,6 +351,28 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.Equal(t, []string{"read_file", "docs__search"}, names)
 		require.Len(t, candidates, 1)
 		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
+	})
+
+	t.Run("DisallowedMCPTool", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		child, err := f.spawn(t, spawnAgentArgs{Type: "no-lookup"})
+		require.NoError(t, err)
+		lookups := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "lookups"})
+		searchTool := newTestMCPAgentTool("lookups__search", lookups.ID)
+		lookupTool := newTestMCPAgentTool("lookups__lookup", lookups.ID)
+
+		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
+			[]fantasy.AgentTool{newTestAgentTool("read_file"), searchTool, lookupTool},
+			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}})
+		require.NoError(t, err)
+		names := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			names = append(names, tool.Info().Name)
+		}
+		require.Equal(t, []string{"read_file", "lookups__search"}, names)
+		require.Len(t, candidates, 1)
+		require.Equal(t, "lookups__search", candidates[0].tool.Info().Name)
 	})
 
 	t.Run("BuiltinType", func(t *testing.T) {
