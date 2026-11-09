@@ -26884,6 +26884,7 @@ const docTemplate = `{
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
                 "chat-acp-subagents",
+                "fork-chat-todos",
                 "fork-nested-subagents"
             ],
             "x-enum-comments": {
@@ -26923,6 +26924,7 @@ const docTemplate = `{
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
                 "Enables workspace-local ACP subagent tools in root chats.",
+                "",
                 ""
             ],
             "x-enum-varnames": [
@@ -26943,6 +26945,7 @@ const docTemplate = `{
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
                 "ExperimentChatACPSubagents",
+                "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents"
             ]
         },

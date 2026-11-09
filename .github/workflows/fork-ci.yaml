@@ -80,6 +80,8 @@ jobs:
         run: go test -count=1 -run '(?i)chat|skill|mcp|plugin' ./coderd ./enterprise/coderd
       - name: Plugin CLI tests
         run: go test -count=1 -run TestExpPlugins ./cli
+      - name: Swagger annotation tests
+        run: go test -count=1 -run 'EndpointsDocumented|TestSwagger' ./coderd/coderdtest ./enterprise/coderd/coderdenttest
 
   agent-sdk:
     runs-on: ubuntu-latest

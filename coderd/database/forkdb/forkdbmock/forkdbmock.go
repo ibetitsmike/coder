@@ -172,6 +172,21 @@ func (mr *MockStoreMockRecorder) GetChatSubtreeIDs(ctx, rootID any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubtreeIDs", reflect.TypeOf((*MockStore)(nil).GetChatSubtreeIDs), ctx, rootID)
 }
 
+// GetChatTodosByChatID mocks base method.
+func (m *MockStore) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatTodosByChatID", ctx, chatID)
+	ret0, _ := ret[0].(forkdb.ChatTodo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatTodosByChatID indicates an expected call of GetChatTodosByChatID.
+func (mr *MockStoreMockRecorder) GetChatTodosByChatID(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatTodosByChatID", reflect.TypeOf((*MockStore)(nil).GetChatTodosByChatID), ctx, chatID)
+}
+
 // GetPluginByID mocks base method.
 func (m *MockStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	m.ctrl.T.Helper()
@@ -433,6 +448,21 @@ func (m *MockStore) UpdatePluginLastError(ctx context.Context, arg forkdb.Update
 func (mr *MockStoreMockRecorder) UpdatePluginLastError(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginLastError", reflect.TypeOf((*MockStore)(nil).UpdatePluginLastError), ctx, arg)
+}
+
+// UpsertChatTodos mocks base method.
+func (m *MockStore) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChatTodos", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatTodo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChatTodos indicates an expected call of UpsertChatTodos.
+func (mr *MockStoreMockRecorder) UpsertChatTodos(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatTodos", reflect.TypeOf((*MockStore)(nil).UpsertChatTodos), ctx, arg)
 }
 
 // UpsertPluginUserLink mocks base method.

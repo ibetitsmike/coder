@@ -265,6 +265,34 @@ func TestNestedSubagentTools(t *testing.T) {
 	require.Empty(t, off.toolNames(t, offChild))
 }
 
+// Lowering the maximum depth below an existing family leaves the parent of
+// the deeper children with the tools to manage them, but not to spawn more.
+func TestNestedSubagentToolsAfterDepthLowered(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents},
+		Limits{Fork: ForkLimits{MaxSubagentDepth: 1}})
+	ctx := chatdTestContext(t)
+
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	require.Empty(t, f.toolNames(t, child), "a chat at the maximum depth with no children gets no subagent tools")
+
+	// CreateChat skips the depth check, standing in for a grandchild
+	// spawned while the maximum depth was higher.
+	_, err = f.server.CreateChat(ctx, CreateOptions{
+		OrganizationID:     child.OrganizationID,
+		OwnerID:            child.OwnerID,
+		ParentChatID:       uuid.NullUUID{UUID: child.ID, Valid: true},
+		RootChatID:         uuid.NullUUID{UUID: f.root.ID, Valid: true},
+		Title:              "grandchild",
+		ModelConfigID:      child.LastModelConfigID,
+		InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do work")},
+	})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"list_agents", "wait_agent", "message_agent", "interrupt_agent"}, f.toolNames(t, child))
+}
+
 func TestNestedSubagentSpawnDescription(t *testing.T) {
 	t.Parallel()
 

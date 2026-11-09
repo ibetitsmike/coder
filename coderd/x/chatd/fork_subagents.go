@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/fantasy"
@@ -148,17 +149,39 @@ func subagentModeCanSpawn(mode database.NullChatMode) bool {
 	return !mode.Valid || mode.ChatMode != database.ChatModeComputerUse
 }
 
-// nestedSubagentTools returns the subagent tools of a delegated chat that can
-// spawn. Root chats get them from appendRootChatTools instead.
+// nestedSubagentTools returns the subagent tools of a delegated general chat.
+// Root chats get them from appendRootChatTools instead. A chat past the
+// spawn boundary, which happens when the maximum subagent depth is lowered
+// after its children exist, keeps the tools that manage those children:
+// targeting is limited to direct children, so no other chat can reach them.
 func (p *Server) nestedSubagentTools(ctx context.Context, chat database.Chat, modelConfigID uuid.UUID) ([]fantasy.AgentTool, error) {
-	if !chat.ParentChatID.Valid {
+	if !chat.ParentChatID.Valid || !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(chat.Mode) {
 		return nil, nil
 	}
 	canSpawn, err := p.subagentCanSpawn(ctx, chat)
-	if err != nil || !canSpawn {
+	if err != nil {
 		return nil, err
 	}
-	return p.subagentTools(ctx, func() database.Chat { return chat }, modelConfigID)
+	if !canSpawn {
+		children, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
+			ParentIds: []uuid.UUID{chat.ID},
+			Archived:  sql.NullBool{Bool: false, Valid: true},
+		})
+		if err != nil {
+			return nil, xerrors.Errorf("get child chats of %s: %w", chat.ID, err)
+		}
+		if len(children) == 0 {
+			return nil, nil
+		}
+	}
+	tools, err := p.subagentTools(ctx, func() database.Chat { return chat }, modelConfigID)
+	if err != nil || canSpawn {
+		return tools, err
+	}
+	return slices.DeleteFunc(tools, func(tool fantasy.AgentTool) bool {
+		name := tool.Info().Name
+		return name == spawnAgentToolName || name == listSubagentModelsToolName
+	}), nil
 }
 
 // isSubagentTarget reports whether parentChatID may wait on, message,

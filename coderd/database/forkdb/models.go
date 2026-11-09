@@ -22,6 +22,13 @@ type ChatSubagent struct {
 	WorkspaceID  uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
 }
 
+type ChatTodo struct {
+	ChatID    uuid.UUID       `db:"chat_id" json:"chat_id"`
+	Items     json.RawMessage `db:"items" json:"items"`
+	Version   int64           `db:"version" json:"version"`
+	UpdatedAt time.Time       `db:"updated_at" json:"updated_at"`
+}
+
 type Plugin struct {
 	ID             uuid.UUID `db:"id" json:"id"`
 	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`

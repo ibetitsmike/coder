@@ -328,7 +328,7 @@ schedule registers stays active until the next hourly pass.
 |--------------|----------------------------------------------------------------------------------------------------------|
 | `graph`      | `chatdmig check`, the unit tests of this package and `scripts/check-scopes`.                             |
 | `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version), from the split, or from a database without one fork node equals a fresh database. Fork nodes only add chatd objects and enum values. Lock timeouts, retries and the node options work on a real database. |
-| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP and plugin tests of `./coderd` and `./enterprise/coderd`, and `TestExpPlugins` of `./cli`. |
+| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP and plugin tests of `./coderd` and `./enterprise/coderd`, `TestExpPlugins` of `./cli`, and the swagger annotation tests of `./coderd/coderdtest` and `./enterprise/coderd/coderdenttest`. |
 | `agent-sdk`  | `./agent/agentcontext/...`, `./agent/agentgit/...` and `./codersdk/`.                                    |
 | `site`       | `tsc` of `site` and the unit tests of `site/src/pages/AgentsPage`.                                       |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
