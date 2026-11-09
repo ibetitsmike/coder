@@ -1588,10 +1588,10 @@ curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 ```json
 {
-  "max_concurrent": 0,
-  "max_concurrent_per_family": 0,
-  "max_depth": 0,
-  "max_live_per_family": 0
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
 }
 ```
 
@@ -1621,10 +1621,10 @@ curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 ```json
 {
-  "max_concurrent": 0,
-  "max_concurrent_per_family": 0,
-  "max_depth": 0,
-  "max_live_per_family": 0
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
 }
 ```
 
@@ -1641,10 +1641,10 @@ curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 ```json
 {
-  "max_concurrent": 0,
-  "max_concurrent_per_family": 0,
-  "max_depth": 0,
-  "max_live_per_family": 0
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
 }
 ```
 

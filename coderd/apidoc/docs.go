@@ -27380,19 +27380,23 @@ const docTemplate = `{
             "properties": {
                 "max_concurrent": {
                     "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization.",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 8
                 },
                 "max_concurrent_per_family": {
                     "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 4
                 },
                 "max_depth": {
                     "description": "MaxDepth is the maximum depth of nested subagent chats, between 1 and\n16.",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 2
                 },
                 "max_live_per_family": {
                     "description": "MaxLivePerFamily is the maximum number of unarchived subagent chats\nunder one root chat.",
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 6
                 }
             }
         },
