@@ -277,6 +277,21 @@ func (mr *MockStoreMockRecorder) GetOrganizationAgentDefinitionByName(ctx, arg a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetOrganizationAgentDefinitionByName), ctx, arg)
 }
 
+// GetOrganizationAgentDefinitionByNameForUpdate mocks base method.
+func (m *MockStore) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams) (forkdb.AgentDefinition, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrganizationAgentDefinitionByNameForUpdate", ctx, arg)
+	ret0, _ := ret[0].(forkdb.AgentDefinition)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrganizationAgentDefinitionByNameForUpdate indicates an expected call of GetOrganizationAgentDefinitionByNameForUpdate.
+func (mr *MockStoreMockRecorder) GetOrganizationAgentDefinitionByNameForUpdate(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationAgentDefinitionByNameForUpdate", reflect.TypeOf((*MockStore)(nil).GetOrganizationAgentDefinitionByNameForUpdate), ctx, arg)
+}
+
 // GetPluginByID mocks base method.
 func (m *MockStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	m.ctrl.T.Helper()
@@ -541,6 +556,21 @@ func (m *MockStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg 
 func (mr *MockStoreMockRecorder) SetPluginUserLinksActiveChatByUser(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinksActiveChatByUser", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinksActiveChatByUser), ctx, arg)
+}
+
+// UpdateOrganizationAgentDefinitionACLByName mocks base method.
+func (m *MockStore) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateOrganizationAgentDefinitionACLByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.AgentDefinition)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateOrganizationAgentDefinitionACLByName indicates an expected call of UpdateOrganizationAgentDefinitionACLByName.
+func (mr *MockStoreMockRecorder) UpdateOrganizationAgentDefinitionACLByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOrganizationAgentDefinitionACLByName", reflect.TypeOf((*MockStore)(nil).UpdateOrganizationAgentDefinitionACLByName), ctx, arg)
 }
 
 // UpdateOrganizationAgentDefinitionByName mocks base method.

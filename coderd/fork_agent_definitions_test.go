@@ -189,6 +189,9 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		_, err := client.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
 		require.NoError(t, err)
 
+		_, err = scopedClient("organization_skill:share").ForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer")
+		require.NoError(t, err)
+
 		// A key that can neither read nor delete must not learn that the
 		// definition exists.
 		err = scopedClient("organization_skill:update").DeleteForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
@@ -200,6 +203,58 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		err = deleter.DeleteForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		require.NoError(t, err)
 		_, err = client.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("ACL", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := coderdtest.New(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		orgAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(orgID))
+		grantee, granteeUser := coderdtest.CreateAnotherUser(t, client, orgID)
+		member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+
+		_, err := orgAdmin.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		require.NoError(t, err)
+		err = orgAdmin.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+			UserRoles:  map[string]codersdk.OrganizationSkillRole{granteeUser.ID.String(): codersdk.OrganizationSkillRoleRead},
+			GroupRoles: map[string]codersdk.OrganizationSkillRole{orgID.String(): codersdk.OrganizationSkillRoleDeleted},
+		})
+		require.NoError(t, err)
+		acl, err := orgAdmin.ForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer")
+		require.NoError(t, err)
+		require.Empty(t, acl.Groups)
+		require.Len(t, acl.Users, 1)
+		require.Equal(t, granteeUser.ID, acl.Users[0].ID)
+
+		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		require.NoError(t, err)
+		_, err = member.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		list, err := member.ForkOrganizationAgentDefinitions(ctx, orgID)
+		require.NoError(t, err)
+		require.Empty(t, list)
+		// Readers who cannot share see neither the grants nor the ACL route.
+		_, err = grantee.ForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = grantee.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+			UserRoles: map[string]codersdk.OrganizationSkillRole{granteeUser.ID.String(): codersdk.OrganizationSkillRoleDeleted},
+		})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = orgAdmin.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+			UserRoles: map[string]codersdk.OrganizationSkillRole{"not-a-uuid": codersdk.OrganizationSkillRoleRead},
+		})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+
+		require.NoError(t, client.DeleteOrganizationMember(ctx, orgID, granteeUser.ID.String()))
+		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
 
