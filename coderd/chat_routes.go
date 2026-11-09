@@ -108,6 +108,7 @@ func (api *API) registerChatAPIRoutes(r chi.Router, apiKeyMiddleware func(http.H
 			})
 		})
 	})
+	api.registerForkChatRoutes(r, apiKeyMiddleware)
 }
 
 // registerExperimentalChatRoutes mounts the chat routes that were not
