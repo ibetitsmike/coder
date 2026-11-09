@@ -27503,7 +27503,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_live_subagents_per_family": {
-                    "description": "MaxLiveSubagentsPerFamily is the maximum number of live subagent chats\nunder one root chat, checked when a subagent is spawned or resumed. 0\nmeans no limit.",
+                    "description": "MaxLiveSubagentsPerFamily is the maximum number of live subagent chats\nunder one root chat, checked when a subagent is spawned or when\nmessage_agent resumes a finished one. 0 means no limit.",
                     "type": "integer"
                 },
                 "max_subagent_depth": {
@@ -27531,7 +27531,7 @@ const docTemplate = `{
                     "example": 2
                 },
                 "max_live_per_family": {
-                    "description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat, checked when a subagent is spawned or resumed. A live\nsubagent has status running, interrupting, requires_action or paused\nand is not archived; a finished one is waiting or error and does not\ncount.",
+                    "description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat, checked when a subagent is spawned or when message_agent\nresumes a finished one. A live subagent has status running,\ninterrupting, requires_action or paused and is not archived. A finished\none is waiting or error and does not count.",
                     "type": "integer",
                     "example": 6
                 }

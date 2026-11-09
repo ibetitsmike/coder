@@ -25,10 +25,10 @@ type ForkOrganizationSubagentLimits struct {
 	// under one root chat, not counting a subagent's own ancestors.
 	MaxConcurrentPerFamily *int32 `json:"max_concurrent_per_family,omitempty" example:"4"`
 	// MaxLivePerFamily is the maximum number of live subagent chats under one
-	// root chat, checked when a subagent is spawned or resumed. A live
-	// subagent has status running, interrupting, requires_action or paused
-	// and is not archived; a finished one is waiting or error and does not
-	// count.
+	// root chat, checked when a subagent is spawned or when message_agent
+	// resumes a finished one. A live subagent has status running,
+	// interrupting, requires_action or paused and is not archived. A finished
+	// one is waiting or error and does not count.
 	MaxLivePerFamily *int32 `json:"max_live_per_family,omitempty" example:"6"`
 }
 
