@@ -127,6 +127,11 @@ func (f forkQueryMetricsStore) GetPluginsByOrganizationID(ctx context.Context, o
 	return f.s.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
+func (f forkQueryMetricsStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
+	defer f.observe(ctx, "InsertChatSubagent", time.Now())
+	return f.s.InsertChatSubagent(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
 	defer f.observe(ctx, "InsertPlugin", time.Now())
 	return f.s.InsertPlugin(ctx, arg)
