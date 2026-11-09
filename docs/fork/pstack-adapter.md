@@ -31,8 +31,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
 6. Copy pstack's agents: `mkdir -p ~/.coder/agents && cp ~/pstack-src/pstack/agents/*.md ~/.coder/agents/`.
    `ls ~/.coder/agents/*.md | wc -l` then prints at least 2.
-   Chats use them only with the `fork-agent-definitions` experiment.
-   Refer to [Custom agent types](#custom-agent-types).
+   With the `fork-agent-definitions` experiment, chats also get them as [custom agent types](#custom-agent-types).
 7. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`.
 8. If the downloaded page pins a different pstack commit than step 3, start again at step 1 with the downloaded page.
@@ -55,7 +54,8 @@ This page is fork-only: it isn't in `docs/manifest.json`.
       Write no files outside it unless the step names the path.
     - SendToUser: put the message in your reply.
     - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
-    - Recent chats, or a chat ID you don't have: search_chats, if you have it.
+    - Recent chats, or a top-level chat ID you don't have: search_chats, if you have it.
+    - A child's chat ID you don't have: list_agents in its parent.
     - Transcripts and recent chats without those tools, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
       Never invent the skipped result.
     <!-- /pstack-adapter -->
@@ -129,7 +129,7 @@ A `model` that matches no config in `list_subagent_models` fails the spawn.
 An explicit `model_config_id` or `reasoning_effort` overrides the definition.
 `tools`, `readonly`, `mcp`, and `disallowedTools` aren't enforced yet.
 A custom type gets the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
-A definition named `general`, `explore`, or `computer_use` is ignored.
+Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
 ### Nested subagents
@@ -139,8 +139,8 @@ The default depth of 2 allows a root, a coordinator, and its workers.
 An `explore` or `computer_use` child never gets them.
 With the experiment, each chat can wait on, message, interrupt, and list only its direct children, so the root waits on the coordinator, not on its workers.
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
-Archiving a root whose family is still working interrupts the family, waits up to 30 seconds for it to stop, then archives every member.
-If a member is still working after 30 seconds, the archive fails and archives nothing.
+Archiving a root whose family is still working interrupts the family, waits up to 30&nbsp;seconds for it to stop, then archives every member.
+If a member is still working after 30&nbsp;seconds, the archive fails and archives nothing.
 Without the experiment, or at the maximum depth, a child has no `spawn_agent`, and a call fails with `Tool not active in this turn: spawn_agent`.
 
 ## Models
