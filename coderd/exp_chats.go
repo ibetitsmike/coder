@@ -1,6 +1,7 @@
 package coderd
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -7311,7 +7312,7 @@ func (api *API) downloadChatFile(rw http.ResponseWriter, r *http.Request) {
 	// Never let private caches replay a signed URL past its expiry;
 	// revocation is re-checked only when the request reaches coderd.
 	rw.Header().Set("Cache-Control", "no-store")
-	api.serveChatFile(ctx, rw, chatFile)
+	serveChatFile(rw, r, chatFile)
 }
 
 // @Summary Get chat file
@@ -7348,13 +7349,15 @@ func (api *API) chatFileByID(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	api.serveChatFile(r.Context(), rw, chatFile)
+	serveChatFile(rw, r, chatFile)
 }
 
 // serveChatFile writes the file body and content headers; callers set
 // Cache-Control because signed and session-authenticated downloads have
-// different caching requirements.
-func (api *API) serveChatFile(ctx context.Context, rw http.ResponseWriter, chatFile database.ChatFile) {
+// different caching requirements. http.ServeContent answers Range requests,
+// which Safari requires before it plays a video.
+func serveChatFile(rw http.ResponseWriter, r *http.Request, chatFile database.ChatFile) {
+	// Set before ServeContent so it never sniffs the type from the body.
 	rw.Header().Set("Content-Type", chatFile.Mimetype)
 	disposition := "attachment"
 	if chatfiles.IsInlineRenderableStoredMediaType(chatFile.Mimetype) {
@@ -7365,11 +7368,7 @@ func (api *API) serveChatFile(ctx context.Context, rw http.ResponseWriter, chatF
 	} else {
 		rw.Header().Set("Content-Disposition", disposition)
 	}
-	rw.Header().Set("Content-Length", strconv.Itoa(len(chatFile.Data)))
-	rw.WriteHeader(http.StatusOK)
-	if _, err := rw.Write(chatFile.Data); err != nil {
-		api.Logger.Debug(ctx, "failed to write chat file response", slog.Error(err))
-	}
+	http.ServeContent(rw, r, "", chatFile.CreatedAt, bytes.NewReader(chatFile.Data))
 }
 
 const (

@@ -77,6 +77,11 @@ func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context)
 	return f.s.DeleteExpiredPluginLinkCodes(ctx)
 }
 
+func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "DeleteOrganizationAgentDefinitionByName", time.Now())
+	return f.s.DeleteOrganizationAgentDefinitionByName(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
 	defer f.observe(ctx, "DeletePluginByID", time.Now())
 	return f.s.DeletePluginByID(ctx, id)
@@ -90,6 +95,11 @@ func (f forkQueryMetricsStore) DeletePluginLinkCodesByUser(ctx context.Context, 
 func (f forkQueryMetricsStore) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
 	defer f.observe(ctx, "DeletePluginUserLink", time.Now())
 	return f.s.DeletePluginUserLink(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteUserAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "DeleteUserAgentDefinitionByName", time.Now())
+	return f.s.DeleteUserAgentDefinitionByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
@@ -120,6 +130,11 @@ func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uui
 func (f forkQueryMetricsStore) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
 	defer f.observe(ctx, "GetChatTodosByChatID", time.Now())
 	return f.s.GetChatTodosByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "GetOrganizationAgentDefinitionByName", time.Now())
+	return f.s.GetOrganizationAgentDefinitionByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
@@ -157,9 +172,19 @@ func (f forkQueryMetricsStore) GetPluginsByOrganizationID(ctx context.Context, o
 	return f.s.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
+func (f forkQueryMetricsStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "GetUserAgentDefinitionByName", time.Now())
+	return f.s.GetUserAgentDefinitionByName(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "InsertChatSubagent", time.Now())
 	return f.s.InsertChatSubagent(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "InsertOrganizationAgentDefinition", time.Now())
+	return f.s.InsertOrganizationAgentDefinition(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
@@ -170,6 +195,21 @@ func (f forkQueryMetricsStore) InsertPlugin(ctx context.Context, arg forkdb.Inse
 func (f forkQueryMetricsStore) InsertPluginLinkCode(ctx context.Context, arg forkdb.InsertPluginLinkCodeParams) error {
 	defer f.observe(ctx, "InsertPluginLinkCode", time.Now())
 	return f.s.InsertPluginLinkCode(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "InsertUserAgentDefinition", time.Now())
+	return f.s.InsertUserAgentDefinition(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
+	defer f.observe(ctx, "ListOrganizationAgentDefinitionMetadata", time.Now())
+	return f.s.ListOrganizationAgentDefinitionMetadata(ctx, organizationID)
+}
+
+func (f forkQueryMetricsStore) ListUserAgentDefinitionMetadata(ctx context.Context, arg forkdb.ListUserAgentDefinitionMetadataParams) ([]forkdb.ListUserAgentDefinitionMetadataRow, error) {
+	defer f.observe(ctx, "ListUserAgentDefinitionMetadata", time.Now())
+	return f.s.ListUserAgentDefinitionMetadata(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
@@ -185,6 +225,11 @@ func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, 
 func (f forkQueryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
 	defer f.observe(ctx, "SetPluginUserLinksActiveChatByUser", time.Now())
 	return f.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "UpdateOrganizationAgentDefinitionByName", time.Now())
+	return f.s.UpdateOrganizationAgentDefinitionByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdatePluginChatBindingDelivered(ctx context.Context, arg forkdb.UpdatePluginChatBindingDeliveredParams) error {
@@ -210,6 +255,11 @@ func (f forkQueryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg fork
 func (f forkQueryMetricsStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
 	defer f.observe(ctx, "UpdatePluginLastError", time.Now())
 	return f.s.UpdatePluginLastError(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateUserAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "UpdateUserAgentDefinitionByName", time.Now())
+	return f.s.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
