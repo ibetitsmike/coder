@@ -26965,7 +26965,8 @@ const docTemplate = `{
                 "chat-stage-metrics",
                 "chat-acp-subagents",
                 "fork-chat-todos",
-                "fork-nested-subagents"
+                "fork-nested-subagents",
+                "fork-agent-definitions"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -27026,7 +27027,8 @@ const docTemplate = `{
                 "ExperimentChatStageMetrics",
                 "ExperimentChatACPSubagents",
                 "ExperimentForkChatTodos",
-                "ExperimentForkNestedSubagents"
+                "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions"
             ]
         },
         "codersdk.ExperimentRule": {

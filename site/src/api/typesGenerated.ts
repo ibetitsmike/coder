@@ -5834,6 +5834,7 @@ export type Experiment =
 	| "chat-virtual-desktop"
 	| "enable-ai-workspace-debug"
 	| "example"
+	| "fork-agent-definitions"
 	| "fork-chat-todos"
 	| "fork-nested-subagents"
 	| "mcp-server-http"
@@ -5916,6 +5917,7 @@ export const Experiments: Experiment[] = [
 	"chat-virtual-desktop",
 	"enable-ai-workspace-debug",
 	"example",
+	"fork-agent-definitions",
 	"fork-chat-todos",
 	"fork-nested-subagents",
 	"mcp-server-http",
