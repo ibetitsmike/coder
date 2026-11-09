@@ -15,11 +15,16 @@ import * as apiModule from "#/api/api";
 import { API } from "#/api/api";
 import { chatProjectSkillsKey } from "#/api/queries/chatProjectSkills";
 import type * as TypesGen from "#/api/typesGenerated";
-import { MockChat, MockChatQueuedMessage } from "#/testHelpers/chatEntities";
+import {
+	MockChat,
+	MockChatMessage,
+	MockChatQueuedMessage,
+} from "#/testHelpers/chatEntities";
 import {
 	MockChatModel,
 	MockChatModelProviderDescriptor,
 } from "#/testHelpers/chatModels";
+import { createDeferred } from "#/testHelpers/deferred";
 import {
 	MockUserPreferenceSettings,
 	mockApiError,
@@ -30,8 +35,10 @@ import {
 	createMockWebSocket,
 	type MockWebSocketServer,
 } from "#/testHelpers/websockets";
+import { mobileViewportMediaQuery } from "#/utils/mobile";
 import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import type { AgentsPageOutletContext } from "../AgentsPageLayout";
+import { MockAsyncQuestionMessages } from "../components/ChatConversation/storyFixtures";
 import { parseStoredDraft } from "../utils/draftStorage";
 import AgentChatPage from "./AgentChatPage";
 
@@ -46,6 +53,7 @@ const outletContext: Partial<AgentsPageOutletContext> = {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.clear();
 });
 
@@ -154,38 +162,48 @@ const renderQueuedChat = ({
 	};
 };
 
+const mockChatPageAPI = (messages: TypesGen.ChatMessage[] = []) => {
+	vi.spyOn(apiModule, "watchChat").mockImplementation(
+		() =>
+			new OneWayWebSocket({
+				apiRoute: `/api/experimental/chats/${mockProjectChat.id}/stream`,
+				websocketInit: (url, protocol) => createMockWebSocket(url, protocol)[0],
+			}),
+	);
+	vi.spyOn(API.experimental, "getChat").mockResolvedValue(mockProjectChat);
+	vi.spyOn(API.experimental, "getChatMessages").mockResolvedValue({
+		messages,
+		queued_messages: [],
+		has_more: false,
+	});
+	vi.spyOn(API.experimental, "getChatModels").mockResolvedValue({
+		models: [
+			{
+				...MockChatModel,
+				id: mockProjectChat.last_model_config_id,
+				organization_id: mockProjectChat.organization_id,
+				is_default: true,
+			},
+		],
+		providers: [MockChatModelProviderDescriptor],
+		unsupported_providers: [],
+	});
+	vi.spyOn(API, "getUserPreferenceSettings").mockResolvedValue(
+		MockUserPreferenceSettings,
+	);
+	vi.spyOn(API.experimental, "getMCPServerConfigs").mockResolvedValue([]);
+};
+
+const renderChatPage = () =>
+	renderWithAuth(<Outlet context={outletContext} />, {
+		path: "/agents",
+		route: `/agents/${mockProjectChat.id}`,
+		children: [{ path: ":agentId", element: <AgentChatPage /> }],
+	});
+
 describe("AgentChatPage", () => {
 	it("refreshes the project actions after a send fails", async () => {
-		vi.spyOn(apiModule, "watchChat").mockImplementation(
-			() =>
-				new OneWayWebSocket({
-					apiRoute: `/api/experimental/chats/${mockProjectChat.id}/stream`,
-					websocketInit: (url, protocol) =>
-						createMockWebSocket(url, protocol)[0],
-				}),
-		);
-		vi.spyOn(API.experimental, "getChat").mockResolvedValue(mockProjectChat);
-		vi.spyOn(API.experimental, "getChatMessages").mockResolvedValue({
-			messages: [],
-			queued_messages: [],
-			has_more: false,
-		});
-		vi.spyOn(API.experimental, "getChatModels").mockResolvedValue({
-			models: [
-				{
-					...MockChatModel,
-					id: mockProjectChat.last_model_config_id,
-					organization_id: mockProjectChat.organization_id,
-					is_default: true,
-				},
-			],
-			providers: [MockChatModelProviderDescriptor],
-			unsupported_providers: [],
-		});
-		vi.spyOn(API, "getUserPreferenceSettings").mockResolvedValue(
-			MockUserPreferenceSettings,
-		);
-		vi.spyOn(API.experimental, "getMCPServerConfigs").mockResolvedValue([]);
+		mockChatPageAPI();
 		const getChatProjectSkills = vi
 			.spyOn(API.experimental, "getChatProjectSkills")
 			.mockResolvedValue([{ ...MockSkill, name: "deploy", action: true }]);
@@ -196,11 +214,7 @@ describe("AgentChatPage", () => {
 			);
 		const user = userEvent.setup();
 
-		const { queryClient } = renderWithAuth(<Outlet context={outletContext} />, {
-			path: "/agents",
-			route: `/agents/${mockProjectChat.id}`,
-			children: [{ path: ":agentId", element: <AgentChatPage /> }],
-		});
+		const { queryClient } = renderChatPage();
 
 		await user.click(await screen.findByRole("button", { name: "deploy" }));
 		// The page and the actions bar share the list, so let both settle.
@@ -385,6 +399,36 @@ describe("AgentChatPage", () => {
 			expect(localStorage.getItem(savedEditKey)).toBeNull();
 		});
 
+		it("saving a queued async answer edits it without its call line and keeps the line", async () => {
+			const answerPrefix = "Answer to ask_user_question call question:\n";
+			const page = renderQueuedChat({
+				queuedMessages: [
+					{
+						...row,
+						content: [{ type: "text", text: `${answerPrefix}queued text` }],
+					},
+				],
+			});
+			await page.rowAction("Edit");
+			await waitFor(() =>
+				expect(page.composer().textContent).toBe("queued text"),
+			);
+			await page.type(" edit");
+			await page.user.click(screen.getByRole("button", { name: "Save Edit" }));
+
+			await waitFor(() =>
+				expect(page.editChatQueuedMessage).toHaveBeenCalledWith(
+					MockChat.id,
+					row.id,
+					expect.objectContaining({
+						content: [
+							{ type: "text", text: `${answerPrefix}queued text edit` },
+						],
+					}),
+				),
+			);
+		});
+
 		// react-query delivers the failed request's state to the page on a
 		// scheduler it owns, which may run before the request's own error
 		// handlers.
@@ -429,5 +473,125 @@ describe("AgentChatPage", () => {
 				expect(page.composer().textContent).toBe("draft");
 			},
 		);
+	});
+
+	const answerFromDockOnNarrowScreen = async () => {
+		const originalMatchMedia = window.matchMedia;
+		vi.stubGlobal("matchMedia", (query: string) => {
+			const result = originalMatchMedia(query);
+			return query === mobileViewportMediaQuery
+				? { ...result, matches: true }
+				: result;
+		});
+		const user = userEvent.setup();
+		renderChatPage();
+		const dock = await screen.findByRole("region", { name: "Open question" });
+		const composer = screen.getByRole("textbox", { name: "Chat message" });
+		// jsdom focuses the editor only while the DOM selection is in it, and a
+		// click on the form would move the selection out, so answer by keyboard.
+		await user.click(composer);
+		act(() =>
+			within(dock)
+				.getByRole("radio", { name: /^Frontend/ })
+				.focus(),
+		);
+		await user.keyboard(" ");
+		act(() => within(dock).getByRole("button", { name: "Submit" }).focus());
+		await user.keyboard("{Enter}");
+		return { dock, composer };
+	};
+
+	it("focuses the chat input after an answer sends on a narrow screen", async () => {
+		mockChatPageAPI(MockAsyncQuestionMessages);
+		vi.spyOn(API.experimental, "createChatMessage").mockResolvedValue({
+			queued: true,
+		});
+
+		const { composer } = await answerFromDockOnNarrowScreen();
+
+		await waitFor(() => expect(composer).toHaveFocus());
+	});
+
+	it("leaves focus out of the chat input when an answer fails to send", async () => {
+		mockChatPageAPI(MockAsyncQuestionMessages);
+		vi.spyOn(API.experimental, "createChatMessage").mockRejectedValue(
+			new Error("The answer failed."),
+		);
+
+		const { dock, composer } = await answerFromDockOnNarrowScreen();
+
+		await within(dock).findByText("The answer failed.");
+		// jsdom keeps the focus on the Submit button that the send disabled, and
+		// browsers move it to the page body, so only the chat input is checked.
+		expect(composer).not.toHaveFocus();
+	});
+
+	const answerWithPendingSend = async () => {
+		mockChatPageAPI(MockAsyncQuestionMessages);
+		const pendingSend = createDeferred<TypesGen.CreateChatMessageResponse>();
+		vi.spyOn(API.experimental, "createChatMessage").mockReturnValue(
+			pendingSend.promise,
+		);
+		const { composer } = await answerFromDockOnNarrowScreen();
+		return { composer, pendingSend };
+	};
+
+	it("leaves focus that the user moved to another control while an answer was sending", async () => {
+		const { composer, pendingSend } = await answerWithPendingSend();
+		const editButton = screen.getByRole("button", { name: "Edit message" });
+		act(() => editButton.focus());
+		await act(async () => pendingSend.resolve({ queued: true }));
+
+		expect(editButton).toHaveFocus();
+		expect(composer).not.toHaveFocus();
+	});
+
+	it("leaves the chat input alone after a click on the page background while an answer was sending", async () => {
+		const { composer, pendingSend } = await answerWithPendingSend();
+		await userEvent.click(document.body);
+		await act(async () => pendingSend.resolve({ queued: true }));
+
+		// jsdom keeps the focus on the Submit button that the send disabled, and
+		// browsers move it to the page body, so only the chat input is checked.
+		expect(composer).not.toHaveFocus();
+	});
+
+	it("keeps the call line when an async answer that starts with a skill chip is edited", async () => {
+		mockChatPageAPI([
+			{
+				...MockChatMessage,
+				id: 5,
+				chat_id: mockProjectChat.id,
+				content: [
+					{ type: "text", text: "Answer to ask_user_question call question:" },
+					{
+						type: "skill-invocation",
+						skill_source: "personal",
+						skill_name: "triage",
+					},
+					{ type: "text", text: "Backend" },
+				],
+			},
+		]);
+		const editChatMessage = vi
+			.spyOn(API.experimental, "editChatMessage")
+			.mockResolvedValue({ message: { ...MockChatMessage, id: 5 } });
+		const user = userEvent.setup();
+
+		renderChatPage();
+		await user.click(
+			await screen.findByRole("button", { name: "Edit message" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Save Edit" }));
+
+		await waitFor(() => expect(editChatMessage).toHaveBeenCalledTimes(1));
+		expect(editChatMessage.mock.calls[0][2].content.slice(0, 2)).toEqual([
+			{ type: "text", text: "Answer to ask_user_question call question:\n" },
+			{
+				type: "skill-invocation",
+				skill_source: "personal",
+				skill_name: "triage",
+			},
+		]);
 	});
 });

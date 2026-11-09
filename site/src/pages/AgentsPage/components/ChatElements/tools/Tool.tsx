@@ -45,6 +45,7 @@ import {
 	asString,
 	buildEditDiff,
 	DIFFS_FONT_STYLE,
+	findAskUserQuestionResultRecord,
 	formatModelIntentLabel,
 	formatResultOutput,
 	formatToolInput,
@@ -53,6 +54,7 @@ import {
 	getFileViewerOptionsNoHeader,
 	getWriteFileDiff,
 	humanizeMCPToolName,
+	isAsyncAskUserQuestionResult,
 	mapSubagentStatusToToolStatus,
 	parseArgs,
 	parseArray,
@@ -74,6 +76,7 @@ import { WriteFileTool } from "./WriteFileTool";
 type ToolProps = Omit<React.ComponentProps<"div">, "children"> & {
 	organizationId: string;
 	name: string;
+	toolCallId?: string;
 	status?: ToolStatus;
 	args?: unknown;
 	result?: unknown;
@@ -100,6 +103,7 @@ type ToolProps = Omit<React.ComponentProps<"div">, "children"> & {
 	onSendAskUserQuestionResponse?: (message: string) => Promise<void> | void;
 	isChatCompleted?: boolean;
 	isLatestAskUserQuestion?: boolean;
+	isDockedAskUserQuestion?: boolean;
 	previousResponseText?: string;
 	/** Human-readable intent extracted from the model's tool-call args. */
 	modelIntent?: string;
@@ -120,6 +124,7 @@ type ToolProps = Omit<React.ComponentProps<"div">, "children"> & {
 type ToolRendererProps = {
 	organizationId: string;
 	name: string;
+	toolCallId?: string;
 	status: ToolStatus;
 	args: unknown;
 	result: unknown;
@@ -136,6 +141,7 @@ type ToolRendererProps = {
 	onSendAskUserQuestionResponse?: (message: string) => Promise<void> | void;
 	isChatCompleted?: boolean;
 	isLatestAskUserQuestion?: boolean;
+	isDockedAskUserQuestion?: boolean;
 	previousResponseText?: string;
 	mcpServerConfigId?: string;
 	mcpServers: readonly TypesGen.MCPServerConfig[];
@@ -166,10 +172,9 @@ const parseAskUserQuestionOptions = (
 			continue;
 		}
 
-		options.push({
-			label: asString(optionRecord.label).trim(),
-			description: asString(optionRecord.description).trim(),
-		});
+		const label = asString(optionRecord.label).trim();
+		const description = asString(optionRecord.description).trim();
+		options.push(description ? { label, description } : { label });
 	}
 
 	return options;
@@ -208,37 +213,18 @@ const getWorkspaceQuotaTitle = (
 	return asString(rec.title).trim() || "Workspace quota reached";
 };
 
-const parseAskUserQuestionResult = (
+export const getAskUserQuestions = (
+	args: unknown,
 	result: unknown,
-): AskUserQuestion[] | null => {
-	const parsedResult = parseArgs(result);
-	const directQuestions = parsedResult
-		? parseAskUserQuestions(parsedResult.questions)
-		: null;
-	if (directQuestions) {
-		return directQuestions;
+): AskUserQuestion[] => {
+	const questionsFromArgs = parseAskUserQuestions(parseArgs(args)?.questions);
+	if (questionsFromArgs && questionsFromArgs.length > 0) {
+		return questionsFromArgs;
 	}
-
-	const resultRecord = asRecord(result);
-	if (!resultRecord) {
-		return null;
-	}
-
-	for (const value of [
-		resultRecord.output,
-		resultRecord.content,
-		resultRecord.text,
-	]) {
-		const parsedValue = parseArgs(value);
-		const questions = parsedValue
-			? parseAskUserQuestions(parsedValue.questions)
-			: null;
-		if (questions) {
-			return questions;
-		}
-	}
-
-	return null;
+	return (
+		parseAskUserQuestions(findAskUserQuestionResultRecord(result)?.questions) ??
+		[]
+	);
 };
 
 const ExecuteRenderer: React.FC<ToolRendererProps> = ({
@@ -688,6 +674,8 @@ const ChatSummarizedRenderer: React.FC<ToolRendererProps> = ({
 };
 
 const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
+	toolCallId,
+	startedAt,
 	args,
 	status,
 	result,
@@ -695,19 +683,9 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 	onSendAskUserQuestionResponse,
 	isChatCompleted,
 	isLatestAskUserQuestion,
+	isDockedAskUserQuestion,
 	previousResponseText,
 }) => {
-	const parsedArgs = parseArgs(args);
-	const questionsFromArgs = parsedArgs
-		? parseAskUserQuestions(parsedArgs.questions)
-		: null;
-	const questionsFromResult = parseAskUserQuestionResult(result);
-	const questions =
-		questionsFromArgs && questionsFromArgs.length > 0
-			? questionsFromArgs
-			: questionsFromResult && questionsFromResult.length > 0
-				? questionsFromResult
-				: (questionsFromArgs ?? questionsFromResult ?? []);
 	const resultRecord = asRecord(result);
 	const errorMessage =
 		(resultRecord
@@ -716,14 +694,20 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 
 	return (
 		<AskUserQuestionTool
-			questions={questions}
+			questions={getAskUserQuestions(args, result)}
 			status={status}
 			isError={isError}
 			errorMessage={errorMessage || undefined}
 			onSubmitAnswer={onSendAskUserQuestionResponse}
 			isChatCompleted={isChatCompleted}
 			isLatestAskUserQuestion={isLatestAskUserQuestion}
+			isDocked={isDockedAskUserQuestion}
 			previousResponseText={previousResponseText}
+			toolCallId={toolCallId}
+			startedAt={startedAt}
+			asyncToolCallId={
+				isAsyncAskUserQuestionResult(result) ? toolCallId : undefined
+			}
 		/>
 	);
 };
@@ -1218,6 +1202,7 @@ export const Tool = memo(
 		className,
 		organizationId,
 		name,
+		toolCallId,
 		status = "completed",
 		args,
 		result,
@@ -1235,6 +1220,7 @@ export const Tool = memo(
 		onSendAskUserQuestionResponse,
 		isChatCompleted,
 		isLatestAskUserQuestion,
+		isDockedAskUserQuestion,
 		previousResponseText,
 		modelIntent,
 		parsedCommands,
@@ -1271,6 +1257,7 @@ export const Tool = memo(
 					<Renderer
 						organizationId={organizationId}
 						name={name}
+						toolCallId={toolCallId}
 						status={status}
 						args={args}
 						result={result}
@@ -1288,6 +1275,7 @@ export const Tool = memo(
 						onSendAskUserQuestionResponse={onSendAskUserQuestionResponse}
 						isChatCompleted={isChatCompleted}
 						isLatestAskUserQuestion={isLatestAskUserQuestion}
+						isDockedAskUserQuestion={isDockedAskUserQuestion}
 						previousResponseText={previousResponseText}
 						modelIntent={modelIntent}
 						parsedCommands={parsedCommands}

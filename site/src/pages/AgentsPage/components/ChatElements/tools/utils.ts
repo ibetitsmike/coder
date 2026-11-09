@@ -159,7 +159,7 @@ export const mapSubagentStatusToToolStatus = (
 };
 
 /** JSON.parse that returns undefined for invalid JSON. */
-const parseJSON = (text: string): unknown => {
+export const parseJSON = (text: string): unknown => {
 	try {
 		return JSON.parse(text);
 	} catch {
@@ -197,6 +197,28 @@ export const parseStringList = (value: unknown): string[] | null =>
 	parseArray(value, (item) =>
 		typeof item === "string" ? item.trim() : null,
 	)?.filter(Boolean) ?? null;
+
+export const findAskUserQuestionResultRecord = (
+	result: unknown,
+): Record<string, unknown> | null => {
+	const resultRecord = asRecord(result);
+	for (const value of [
+		result,
+		resultRecord?.output,
+		resultRecord?.content,
+		resultRecord?.text,
+	]) {
+		const parsedValue = parseArgs(value);
+		if (Array.isArray(parsedValue?.questions)) {
+			return parsedValue;
+		}
+	}
+	return null;
+};
+
+/** Reports whether the server marked the question as not ending the agent's turn. */
+export const isAsyncAskUserQuestionResult = (result: unknown): boolean =>
+	findAskUserQuestionResultRecord(result)?.async === true;
 
 const getToolInputPayload = (args: unknown): unknown => {
 	const rec = asRecord(args);

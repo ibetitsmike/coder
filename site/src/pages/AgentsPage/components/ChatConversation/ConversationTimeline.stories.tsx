@@ -17,10 +17,17 @@ import { MockUserPreferenceSettings } from "#/testHelpers/entities";
 import { MockPngBase64 } from "#/testHelpers/files";
 import { MessageScroller } from "#/vendor/message-scroller";
 import { getChatFileURL } from "../../utils/chatAttachments";
+import { getAsyncAnswerPrefix } from "../ChatElements/tools/asyncAnswer";
 import { ChatMessageScroller } from "../ChatMessageScroller";
 import { ConversationTimeline } from "./ConversationTimeline";
 import { parseMessagesWithMergedTools } from "./messageParsing";
-import { buildLiveStatus } from "./storyFixtures";
+import {
+	buildLiveStatus,
+	buildQuestionTimelineArgs,
+	MockAsyncQuestionThenUnrelatedMessages,
+	MockEmptyQuestionState,
+	MockQueuedQuestionAnswer,
+} from "./storyFixtures";
 import type { ParsedMessageEntry } from "./types";
 
 // The timeline renders scroller items, so every story needs the scroller
@@ -63,40 +70,24 @@ const askUserQuestionPayload = {
 			header: "Implementation Approach",
 			question: "How should we structure the database migration?",
 			options: [
-				{
-					label: "Single migration",
-					description:
-						"One migration file with all changes. Simpler but harder to roll back.",
-				},
-				{
-					label: "Incremental migrations",
-					description:
-						"Split into multiple sequential migrations. More flexible rollback.",
-				},
+				{ label: "Use a single migration." },
+				{ label: "Use incremental migrations." },
 			],
 		},
 		{
 			header: "Release Plan",
 			question: "Which rollout path should we use for the new agent workflow?",
 			options: [
-				{
-					label: "Internal dry run",
-					description:
-						"Ship to the team first and confirm the migration flow before broader rollout.",
-				},
-				{
-					label: "Small beta",
-					description:
-						"Start with a limited set of workspaces so we can gather feedback quickly.",
-				},
+				{ label: "Do an internal dry run first." },
+				{ label: "Start with a small beta." },
 			],
 		},
 	],
 };
 
 const askUserQuestionSubmittedResponse = [
-	"1. Implementation Approach: Incremental migrations",
-	"2. Release Plan: Small beta",
+	"1. Implementation Approach: Use incremental migrations.",
+	"2. Release Plan: Start with a small beta.",
 ].join("\n");
 
 type AttachmentResponse = {
@@ -457,6 +448,7 @@ const defaultArgs: Omit<
 	isAwaitingFirstStreamChunk: false,
 	chatStatus: null,
 	hasMoreMessages: false,
+	askUserQuestionState: MockEmptyQuestionState,
 };
 
 const meta: Meta<typeof ConversationTimeline> = {
@@ -841,6 +833,61 @@ export const UserMessageWithMarkdown: Story = {
 			),
 		],
 	}),
+};
+
+/** An async question answer shows an Answer label in place of its call line. */
+export const UserMessageAsyncQuestionAnswer: Story = {
+	args: buildStoryArgs(
+		buildUserMessage({
+			text: `${getAsyncAnswerPrefix("ask-tool-async")}${askUserQuestionSubmittedResponse}`,
+		}),
+		{
+			...baseMessage,
+			id: 2,
+			role: "user",
+			content: [
+				{ type: "text", text: "Answer to ask_user_question call ask-tool-2:" },
+				{
+					type: "skill-invocation",
+					skill_source: "project",
+					skill_name: "triage",
+				},
+				{ type: "text", text: "on the rollout plan." },
+			],
+		},
+	),
+};
+
+/** An answer that is only a skill chip has no text to copy. */
+export const UserMessageAsyncQuestionChipAnswer: Story = {
+	args: {
+		...buildStoryArgs({
+			...baseMessage,
+			id: 1,
+			role: "user",
+			content: [
+				{
+					type: "text",
+					text: "Answer to ask_user_question call ask-tool-async:",
+				},
+				{
+					type: "skill-invocation",
+					skill_source: "project",
+					skill_name: "triage",
+				},
+			],
+		}),
+		onEditUserMessage: fn(),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const userRow = canvas.getByText("Answer").closest('[data-role="user"]');
+		if (!userRow?.parentElement) {
+			throw new Error("Missing the answer's message row.");
+		}
+
+		await userEvent.hover(userRow.parentElement);
+	},
 };
 
 /** Regression guard: a single image attachment must not be duplicated. */
@@ -1830,7 +1877,7 @@ export const AskUserQuestionSubmittedAnswer: Story = {
 	args: {
 		...defaultArgs,
 		isChatCompleted: true,
-		parsedMessages: buildMessages([
+		...buildQuestionTimelineArgs([
 			{
 				...baseMessage,
 				id: 1,
@@ -1868,6 +1915,35 @@ export const AskUserQuestionSubmittedAnswer: Story = {
 				id: 4,
 				role: "user",
 				content: [{ type: "text", text: askUserQuestionSubmittedResponse }],
+			},
+		]),
+	},
+};
+
+export const AsyncAskUserQuestionAnswerQueued: Story = {
+	args: {
+		...defaultArgs,
+		isChatCompleted: false,
+		onSendAskUserQuestionResponse: fn(),
+		...buildQuestionTimelineArgs(MockAsyncQuestionThenUnrelatedMessages, {
+			queuedMessages: [MockQueuedQuestionAnswer],
+		}),
+	},
+};
+
+export const AsyncAskUserQuestionAnsweredAfterUnrelatedMessage: Story = {
+	args: {
+		...defaultArgs,
+		isChatCompleted: true,
+		...buildQuestionTimelineArgs([
+			...MockAsyncQuestionThenUnrelatedMessages,
+			{
+				...baseMessage,
+				id: 8,
+				role: "user",
+				content: [
+					{ type: "text", text: `${getAsyncAnswerPrefix("question")}Backend` },
+				],
 			},
 		]),
 	},
