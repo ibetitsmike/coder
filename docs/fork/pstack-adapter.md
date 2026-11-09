@@ -1,7 +1,7 @@
 # pstack on Coder Agents
 
 This page maps pstack onto Coder Agents as this fork's `main` runs it.
-It is for a Coder Agents user who wants pstack skills in a workspace's chats, and for the agent that follows those skills.
+It is for a Coder Agents user who wants to run pstack skills in a workspace's chats.
 It tracks pstack v0.15.36 (`cursor/plugins` commit `c742dd61706f`, folder `pstack/`) and is modeled on pstack's Claude Code adapter, `docs/harness/claude-code.md`.
 
 pstack skills use Cursor names.
@@ -24,11 +24,9 @@ This page is fork-only: it is not in `docs/manifest.json`.
    The next step replaces a skill that has the same name.
 4. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
-   A chat's first message cannot run a skill: it fails with `Skill workspace/<name> is not available.`
-   Send one plain message first, then pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
-   A bare `/<name>` loads nothing.
 5. Copy this page to `~/.coder/pstack-adapter.md`.
-6. Append the block below to `~/.coder/AGENTS.md`.
+6. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
+7. Append the block below to `~/.coder/AGENTS.md`.
    Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it does not load this page, so the block carries the mappings that most skills need:
 
    ```markdown
@@ -56,9 +54,13 @@ This page is fork-only: it is not in `docs/manifest.json`.
    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
    To check a model, ask a new chat to quote the `pstack-adapter` block without any tool call.
 
-7. Start a new chat.
+8. Start a new chat.
    A chat pins `AGENTS.md` and the skills when it starts.
    A chat that was already open keeps its old copy until you select **Refresh context** in it.
+9. Send one plain message in the new chat.
+   A chat's first message cannot run a skill: it fails with `Skill workspace/<name> is not available.`
+10. Pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
+    A bare `/<name>` loads nothing.
 
 ## Tools
 
@@ -126,20 +128,20 @@ When a step needs a feature that Coder Agents lacks, put one line in your reply,
 Do not stop, ask, or retry.
 When a later step needs what the skipped step made, such as a URL or a key, leave a placeholder and name it in the line.
 
-| Cursor                                                                                                   | Coder Agents today                                                 | Do this                                                                                                                                                      | Removed by            |
-|----------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
-| Sticky `/poteto-mode`                                                                                    | No pinned skills                                                   | Read `poteto-mode` again at the start of each turn while the mode is on.                                                                                     | W6                    |
-| `/loop`, watchers that wake you, PR and CI subscriptions                                                 | A chat runs only when a message arrives                            | Wait inside the turn (`wait_agent` timeouts, `gh pr checks --watch`). Skip a step that needs a later wake, and tell the user to send the next message.       | W5                    |
-| `SendToUser`                                                                                             | No notification tool                                               | Put the message in your reply.                                                                                                                               | W5 (`notify_user`)    |
-| `SendToUser` secret requests                                                                             | No masked input                                                    | Skip with the line. Ask the user to put the secret in the workspace environment.                                                                             | W2 (secret questions) |
-| Cursor Automations: routines, `update_state` calls, `api2.cursor.sh/automations` webhooks, routine wakes | None                                                               | Skip with the line.                                                                                                                                          | Stays                 |
-| Bugbot                                                                                                   | Bugbot comments on a GitHub PR are ordinary review threads         | Triage them with the forge command that the step gives. Skip a step that starts, waits for, or configures Bugbot when the PR has no Bugbot check or comment. | Stays                 |
-| Cursor cloud agents                                                                                      | None                                                               | Refer to `environment: "cloud"`. Skip a step that needs the cloud agent itself, such as its dashboard.                                                       | Stays                 |
-| A built-in PR tool                                                                                       | No PR tool                                                         | Use the forge command that the step gives, such as `gh pr create`. That is not a skip, so write no line.                                                     | Stays                 |
-| Recent work across chats, such as in `recall`                                                            | No tool lists or reads other chats. Project memory needs a project | Skip the transcript step with the line. Report prior state from `git log`, `git status` and `gh pr list --author @me`, and never invent files or results.    | W4                    |
-| Origin CLI                                                                                               | `execute` runs it when it is installed                             | Use it when `command -v origin` succeeds. Otherwise skip with the line.                                                                                      | Stays                 |
-| `/create-skill`                                                                                          | No skill-creation tool                                             | Write `~/.coder/skills/<name>/SKILL.md` with frontmatter `name`, equal to the kebab-case directory name, and `description`.                                  | Stays                 |
-| Image generation                                                                                         | No built-in image tool                                             | Use an image tool if `find_tools` or your tool list offers one. Otherwise skip with the line.                                                                | Stays                 |
+| Cursor                                                                                                   | Coder Agents today                                                 | Do this                                                                                                                                                                                                                             | Removed by            |
+|----------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
+| Sticky `/poteto-mode`                                                                                    | No pinned skills                                                   | Read `poteto-mode` again at the start of each turn while the mode is on.                                                                                                                                                            | W6                    |
+| `/loop`, watchers that wake you, PR and CI subscriptions                                                 | A chat runs only when a message arrives                            | Wait inside the turn (`wait_agent` timeouts, `gh pr checks --watch`). Skip a step that needs a later wake, and tell the user to send the next message.                                                                              | W5                    |
+| `SendToUser`                                                                                             | No notification tool                                               | Put the message in your reply.                                                                                                                                                                                                      | W5 (`notify_user`)    |
+| `SendToUser` secret requests                                                                             | No masked input                                                    | Skip with the line. Ask the user to put the secret in the workspace environment.                                                                                                                                                    | W2 (secret questions) |
+| Cursor Automations: routines, `update_state` calls, `api2.cursor.sh/automations` webhooks, routine wakes | None                                                               | Skip with the line.                                                                                                                                                                                                                 | Stays                 |
+| Bugbot                                                                                                   | Bugbot comments on a GitHub PR are ordinary review threads         | Triage them with the forge command that the step gives. Skip a step that starts, waits for, or configures Bugbot when the PR has no Bugbot check or comment.                                                                        | Stays                 |
+| Cursor cloud agents                                                                                      | None                                                               | Refer to `environment: "cloud"`. Skip a step that needs the cloud agent itself, such as its dashboard.                                                                                                                              | Stays                 |
+| A built-in PR tool                                                                                       | No PR tool                                                         | Use the forge command that the step gives, such as `gh pr create`. That is not a skip, so write no line.                                                                                                                            | Stays                 |
+| Recent work across chats, such as in `recall`                                                            | No tool lists or reads other chats. Project memory needs a project | Skip the transcript step with the line. Report prior state from `git log`, `git status` and `gh pr list --author @me`, and never invent files or results.                                                                           | W4                    |
+| Origin CLI                                                                                               | `execute` runs it when it is installed                             | Use it when `command -v origin` succeeds. Otherwise skip with the line.                                                                                                                                                             | Stays                 |
+| `/create-skill`                                                                                          | No skill-creation tool                                             | For a project skill, write the repository's `.agents/skills/<name>/SKILL.md`. For a personal skill, write `~/.coder/skills/<name>/SKILL.md`. Give it frontmatter `name`, equal to the kebab-case directory name, and `description`. | Stays                 |
+| Image generation                                                                                         | No built-in image tool                                             | Use an image tool if `find_tools` or your tool list offers one. Otherwise skip with the line.                                                                                                                                       | Stays                 |
 
 ## Evidence
 
