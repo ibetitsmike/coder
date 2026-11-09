@@ -229,9 +229,9 @@ func (p *Server) loadSubagentSpawnParentChat(
 		return database.Chat{}, err
 	}
 	// Fail before prompt hooks run for a child that cannot be created.
-	// Archiving applies to a whole family, so a spawn parent (a root, or
-	// with nested subagents a general chat below the maximum depth) carries
-	// the family's archived flag. The locked check in chatstate.CreateChat
+	// For a root parent this is the family's archived flag; with nested
+	// subagents a delegated parent can also spawn, and its own flag is
+	// checked here. The locked check of the root in chatstate.CreateChat
 	// stays authoritative.
 	if parent.Archived {
 		return database.Chat{}, errSpawnUnderArchivedParent(chatstate.ErrChatFamilyArchived)
