@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/xerrors"
 	"gopkg.in/yaml.v3"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
@@ -97,6 +98,40 @@ func TestFrom(t *testing.T) {
 		_, err := fdb.GetChatSubagentByChatID(testutil.Context(t, testutil.WaitShort), uuid.New())
 		require.ErrorIs(t, err, sql.ErrNoRows)
 	})
+}
+
+// TestInTx checks that the fork queries of forkdb.InTx run in the
+// transaction of the upstream queries: they see its uncommitted rows and roll
+// back with it.
+func TestInTx(t *testing.T) {
+	t.Parallel()
+
+	db, _ := dbtestutil.NewDB(t)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	errRollback := xerrors.New("roll back")
+
+	var chat database.Chat
+	err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+		chat = dbgen.Chat(t, tx, database.Chat{
+			OrganizationID:    dbgen.Organization(t, tx, database.Organization{}).ID,
+			OwnerID:           dbgen.User(t, tx, database.User{}).ID,
+			LastModelConfigID: dbgen.ChatModelConfig(t, tx, database.ChatModelConfig{}).ID,
+		})
+		// No fork query inserts a subagent yet, so insert one on the
+		// connection of the transaction.
+		_, err := tx.(interface{ ForkDBTX() database.DBTX }).ForkDBTX().ExecContext(ctx,
+			"INSERT INTO chat_subagents (chat_id, agent_type) VALUES ($1, 'explore')", chat.ID)
+		require.NoError(t, err)
+
+		sub, err := ftx.GetChatSubagentByChatID(ctx, chat.ID)
+		require.NoError(t, err, "fork query runs in the transaction")
+		require.Equal(t, forkdb.ChatSubagent{ChatID: chat.ID, AgentType: "explore", Depth: 1, Isolation: "shared"}, sub)
+		return errRollback
+	}, nil)
+	require.ErrorIs(t, err, errRollback)
+
+	_, err = mustFrom(t, db).GetChatSubagentByChatID(ctx, chat.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows, "the subagent rolls back with the transaction")
 }
 
 // wrap wraps db in dbauthz like coderd does.
