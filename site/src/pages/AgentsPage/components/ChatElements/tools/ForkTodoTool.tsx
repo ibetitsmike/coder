@@ -19,7 +19,7 @@ import {
 } from "./utils";
 
 const isChatTodoStatus = (value: unknown): value is ChatTodoStatus =>
-	ChatTodoStatuses.includes(value as ChatTodoStatus);
+	ChatTodoStatuses.some((status) => status === value);
 
 const parseChatTodo = (item: unknown): ChatTodo | null => {
 	const record = asRecord(item);
@@ -46,36 +46,34 @@ type ForkTodoToolProps = {
  * Renders a todo_write or todo_read call as the todo checklist, collapsed
  * behind a header with the done count.
  */
-export const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
+const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
 	action,
 	todos,
 	status,
 	isError,
 	errorMessage,
 }) => {
-	const progress =
-		todos.length > 0 ? ` (${formatChatTodoProgress(todos)} done)` : "";
+	const failureLabel =
+		action === "write" ? "Failed to update todos" : "Failed to read todos";
 	let label: string;
 	if (status === "running") {
-		label = action === "write" ? "Updating todos" : "Reading todos";
+		label = action === "write" ? "Updating todos…" : "Reading todos…";
 	} else if (isError) {
-		label =
-			action === "write" ? "Failed to update todos" : "Failed to read todos";
+		label = failureLabel;
 	} else if (todos.length === 0) {
 		label = action === "write" ? "Cleared todos" : "No todos";
 	} else {
-		label = `${action === "write" ? "Updated" : "Read"} todos${progress}`;
+		label = `${action === "write" ? "Updated" : "Read"} todos (${formatChatTodoProgress(todos)} done)`;
 	}
 	const errorDetail = isError ? errorMessage?.trim() : undefined;
-	// A failed write stored nothing, so its requested list stays hidden.
-	const showTodos = !isError && todos.length > 0;
+	const showTodos = todos.length > 0;
 
 	return (
 		<ToolCall.Root
 			className="w-full"
 			status={status}
 			isError={isError}
-			errorMessage={errorMessage || label}
+			errorMessage={errorMessage || failureLabel}
 			hasContent={showTodos || Boolean(errorDetail)}
 		>
 			<ToolCall.Header iconName="fork_todo" label={label} />
@@ -95,8 +93,8 @@ export const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
 };
 
 /**
- * Parses a todo tool call for ForkTodoTool. The stored list comes from the
- * result; while todo_write runs, the requested list comes from its args.
+ * The stored list comes from the result; while todo_write runs, the
+ * requested list comes from its args.
  */
 export const ForkTodoToolRenderer: React.FC<ForkToolRendererProps> = ({
 	fallback: Fallback,
@@ -109,12 +107,13 @@ export const ForkTodoToolRenderer: React.FC<ForkToolRendererProps> = ({
 			? asString(resultRecord.error || resultRecord.message)
 			: asString(props.result);
 		return (
+			// A failed write stored nothing, so its requested list stays hidden.
 			<ForkTodoTool
 				action={action}
 				todos={[]}
 				status={props.status}
 				isError
-				errorMessage={errorMessage || undefined}
+				errorMessage={errorMessage}
 			/>
 		);
 	}

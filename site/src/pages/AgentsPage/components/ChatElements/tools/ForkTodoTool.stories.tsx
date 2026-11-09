@@ -34,7 +34,9 @@ export default meta;
 type Story = StoryObj<typeof Tool>;
 
 const expand: Story["play"] = async ({ canvasElement }) => {
-	await userEvent.click(within(canvasElement).getByRole("button"));
+	await userEvent.click(
+		within(canvasElement).getByRole("button", { name: /todo/i }),
+	);
 };
 
 export const Updated: Story = { play: expand };
@@ -61,6 +63,10 @@ export const Read: Story = {
 	play: expand,
 };
 
+export const ReadRunning: Story = {
+	args: { name: "todo_read", args: {}, status: "running", result: undefined },
+};
+
 export const ReadEmpty: Story = {
 	args: { name: "todo_read", args: {}, result: { todos: [], version: 0 } },
 };
@@ -79,13 +85,21 @@ export const Failed: Story = {
 	play: expand,
 };
 
-// With fork-chat-todos off, the tool keeps upstream's generic row.
+export const ReadFailed: Story = {
+	args: {
+		name: "todo_read",
+		args: {},
+		result: { error: "chat not found" },
+		isError: true,
+	},
+	play: expand,
+};
+
 export const ExperimentOff: Story = {
 	parameters: { experiments: [] },
 	play: expand,
 };
 
-// A result the card cannot parse falls back to the generic row.
 export const UnparsableResult: Story = {
 	args: { name: "todo_read", args: {}, result: { todos: "none" } },
 	play: expand,

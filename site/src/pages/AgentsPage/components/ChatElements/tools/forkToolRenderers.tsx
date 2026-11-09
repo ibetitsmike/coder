@@ -38,12 +38,9 @@ const gate = (
 };
 
 /**
- * Returns the tool renderers added by fork features. Tool.tsx spreads them
- * into toolRenderers last, so a name must not match an upstream renderer,
- * which forkToolRenderers.test.tsx enforces. While a renderer's experiment
- * is off, fallback renders the tool, so the row matches upstream. Tool.tsx
- * passes its generic renderer as fallback, which keeps this file free of a
- * runtime import of Tool.tsx.
+ * A name must not match an upstream renderer: Tool.tsx spreads these last,
+ * so a match would silently replace it. fallback is a parameter, not an
+ * import, so this file avoids a runtime import cycle with Tool.tsx.
  */
 export const createForkToolRenderers = (
 	fallback: ToolRenderer,

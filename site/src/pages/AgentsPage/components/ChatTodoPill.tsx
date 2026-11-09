@@ -179,7 +179,7 @@ type ChatTodoChecklistProps = {
 	className?: string;
 };
 
-/** Lists todo items with an icon for each item's status. */
+/** Renders todos in their given order; className sets the outer spacing. */
 export const ChatTodoChecklist: React.FC<ChatTodoChecklistProps> = ({
 	todos,
 	className,
