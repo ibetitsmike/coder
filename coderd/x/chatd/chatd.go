@@ -1553,7 +1553,7 @@ func (p *Server) publishChatEvent(ownerID, chatID uuid.UUID, event codersdk.Chat
 // ChatQueuedForCapacity reports whether the chat is waiting for a
 // concurrent-agent capacity slot. Uncapped deployments always return false.
 func (p *Server) ChatQueuedForCapacity(ctx context.Context, chat database.Chat) (bool, error) {
-	if queued, err := p.forkChatQueuedForCapacity(ctx, chat); err != nil || queued {
+	if queued, handled, err := p.forkChatQueuedForCapacity(ctx, chat); handled {
 		return queued, err
 	}
 	limits, capped := p.agentCapacityLimiter.Limits()

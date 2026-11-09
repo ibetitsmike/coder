@@ -238,6 +238,48 @@ func TestForkChatQueuedForCapacity(t *testing.T) {
 	require.False(t, queued(nested, f.waiting))
 }
 
+// With nested subagents on, the fork limiter applies upstream's subagent
+// pool without the candidate's ancestors, so its answer replaces upstream's.
+func TestForkChatQueuedForCapacityUpstreamPool(t *testing.T) {
+	t.Parallel()
+	f := newAdmissionFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	pool := newAgentCapacityLimiter(staticAgentCapacityUnlock(false), 30)
+	pool.subagentCapacity = 1
+	server := func(experiments codersdk.Experiments) *Server {
+		return &Server{
+			db:                     f.db,
+			experiments:            experiments,
+			inFlightChatStaleAfter: 30 * time.Second,
+			agentCapacityLimiter:   pool,
+		}
+	}
+	queued := func(p *Server, chat database.Chat) bool {
+		t.Helper()
+		got, err := p.ChatQueuedForCapacity(ctx, chat)
+		require.NoError(t, err)
+		return got
+	}
+	// The coordinator holds the only pool slot while it waits for its child.
+	root := f.occupiedRoot(t)
+	coordinator := f.occupiedSubagent(t, root)
+	child := f.chat(t, database.Chat{
+		ParentChatID: uuid.NullUUID{UUID: coordinator.ID, Valid: true},
+		RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
+	})
+	// A subagent of another family has no ancestor in the pool.
+	otherRoot := f.occupiedRoot(t)
+	other := f.chat(t, database.Chat{
+		ParentChatID: uuid.NullUUID{UUID: otherRoot.ID, Valid: true},
+		RootChatID:   uuid.NullUUID{UUID: otherRoot.ID, Valid: true},
+	})
+
+	nested := server(codersdk.Experiments{codersdk.ExperimentForkNestedSubagents})
+	require.False(t, queued(nested, child))
+	require.True(t, queued(server(upstreamExperimentsKnown()), child))
+	require.True(t, queued(nested, other))
+}
+
 func TestForkListAgentsWaitingForCapacity(t *testing.T) {
 	t.Parallel()
 	f := newCapacityWaitFixture(t)

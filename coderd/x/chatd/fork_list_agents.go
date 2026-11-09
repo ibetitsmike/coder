@@ -68,7 +68,7 @@ func (p *Server) forkListAgents(ctx context.Context, parent database.Chat, child
 			}
 		}
 		if child, ok := childrenByID[entry.ChatID]; ok {
-			waiting, err := p.forkChatQueuedForCapacity(ctx, child)
+			waiting, _, err := p.forkChatQueuedForCapacity(ctx, child)
 			if err != nil {
 				p.logger.Warn(ctx, "check subagent capacity wait for list_agents",
 					slog.F("chat_id", parent.ID), slog.F("child_chat_id", entry.ChatID), slog.Error(err))
