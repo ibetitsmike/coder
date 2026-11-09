@@ -15,9 +15,9 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	aidmcp "github.com/coder/coder/v2/aibridge/mcp"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
@@ -74,19 +74,14 @@ func customAgentToolNames(names []string) map[string]bool {
 }
 
 // customAgentMCPServer reports whether tool is an MCP tool and, if so, the
-// name of its server.
-func customAgentMCPServer(tool fantasy.AgentTool) (string, bool) {
+// name of its server. An MCP tool whose server ID is not in mcpServerSlugs
+// has no name.
+func customAgentMCPServer(tool fantasy.AgentTool, mcpServerSlugs map[uuid.UUID]string) (string, bool) {
 	if namer, ok := tool.(interface{ ServerName() string }); ok {
 		return strings.TrimSpace(namer.ServerName()), true
 	}
-	if _, ok := tool.(mcpclient.MCPToolIdentifier); ok {
-		// mcpclient names the tools of org, inline and internal servers
-		// alike <sanitized server slug>__<tool>.
-		server, _, found := strings.Cut(tool.Info().Name, "__")
-		if !found {
-			return "", true
-		}
-		return server, true
+	if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok {
+		return mcpServerSlugs[identified.MCPServerConfigID()], true
 	}
 	return "", false
 }
@@ -97,8 +92,7 @@ func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
 		return false
 	case workspacesdk.AgentDefinitionMCPNamed:
 		return server != "" && slices.ContainsFunc(policy.MCPServers, func(name string) bool {
-			name = strings.TrimSpace(name)
-			return strings.EqualFold(name, server) || strings.EqualFold(aidmcp.SanitizeToolName(name), server)
+			return strings.EqualFold(strings.TrimSpace(name), server)
 		})
 	default:
 		return true
@@ -107,11 +101,13 @@ func (policy customAgentToolPolicy) allowsMCPServer(server string) bool {
 
 // filter returns the tools, deferred MCP candidates and provider tools that
 // policy allows, in their original order. readonly keeps web_search, the
-// provider tool that Explore children keep.
+// provider tool that Explore children keep. mcpServerSlugs is only read in
+// named mode.
 func (policy customAgentToolPolicy) filter(
 	tools []fantasy.AgentTool,
 	candidates []deferredMCPTool,
 	providerTools []chatloop.ProviderTool,
+	mcpServerSlugs map[uuid.UUID]string,
 ) ([]fantasy.AgentTool, []deferredMCPTool, []chatloop.ProviderTool) {
 	allowed := customAgentToolNames(policy.Tools)
 	disallowed := customAgentToolNames(policy.DisallowedTools)
@@ -123,7 +119,7 @@ func (policy customAgentToolPolicy) filter(
 		if disallowed[name] || (policy.ReadOnly && !exploreToolAllowed(tool)) {
 			return false
 		}
-		if server, isMCP := customAgentMCPServer(tool); isMCP {
+		if server, isMCP := customAgentMCPServer(tool, mcpServerSlugs); isMCP {
 			return policy.allowsMCPServer(server)
 		}
 		return keepNonMCP(name)
@@ -173,11 +169,67 @@ func (p *Server) applyCustomAgentToolPolicy(
 	if err := json.Unmarshal(row.ToolPolicy.RawMessage, &policy); err != nil {
 		return nil, nil, nil, xerrors.Errorf("decode tool policy of chat %s: %w", chat.ID, err)
 	}
+	var mcpServerSlugs map[uuid.UUID]string
 	switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
-	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone, workspacesdk.AgentDefinitionMCPNamed:
+	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone:
+	case workspacesdk.AgentDefinitionMCPNamed:
+		mcpServerSlugs, err = p.customAgentMCPServerSlugs(ctx, chat, tools, candidates)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	default:
 		return nil, nil, nil, xerrors.Errorf("tool policy of chat %s has unknown mcp mode %q", chat.ID, policy.MCPMode)
 	}
-	tools, candidates, providerTools = policy.filter(tools, candidates, providerTools)
+	tools, candidates, providerTools = policy.filter(tools, candidates, providerTools, mcpServerSlugs)
 	return tools, candidates, providerTools, nil
+}
+
+// customAgentMCPServerSlugs maps the server ID of every MCP tool in tools and
+// candidates to its exact slug: org server configs, the root chat's inline
+// servers, and internal servers. Tool names are no substitute, because
+// mcpclient sanitizes and truncates them.
+func (p *Server) customAgentMCPServerSlugs(
+	ctx context.Context,
+	chat database.Chat,
+	tools []fantasy.AgentTool,
+	candidates []deferredMCPTool,
+) (map[uuid.UUID]string, error) {
+	var ids []uuid.UUID
+	addID := func(tool fantasy.AgentTool) {
+		if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok && !slices.Contains(ids, identified.MCPServerConfigID()) {
+			ids = append(ids, identified.MCPServerConfigID())
+		}
+	}
+	for _, tool := range tools {
+		addID(tool)
+	}
+	for _, candidate := range candidates {
+		addID(candidate.tool)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	slugs := make(map[uuid.UUID]string, len(ids))
+	for _, internal := range p.internalMCPServers {
+		slugs[internal.id()] = internal.Slug
+	}
+	configs, err := enabledMCPServerConfigsForChatOrg(ctx, p.db, chat.OrganizationID, ids)
+	if err != nil {
+		return nil, xerrors.Errorf("resolve MCP servers of chat %s: %w", chat.ID, err)
+	}
+	for _, config := range configs {
+		slugs[config.ID] = config.Slug
+	}
+	rootChatID := chat.ID
+	if chat.RootChatID.Valid {
+		rootChatID = chat.RootChatID.UUID
+	}
+	inline, err := p.db.GetChatMCPServersByChatID(ctx, rootChatID)
+	if err != nil {
+		return nil, xerrors.Errorf("get inline MCP servers of chat %s: %w", chat.ID, err)
+	}
+	for _, server := range inline {
+		slugs[server.ID] = server.Slug
+	}
+	return slugs, nil
 }

@@ -61,8 +61,10 @@ func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 func TestCustomAgentToolPolicyFilter(t *testing.T) {
 	t.Parallel()
 
-	docs := newTestMCPAgentTool("docs__search", uuid.New())
-	other := newTestMCPAgentTool("other__lookup", uuid.New())
+	docsID, otherID := uuid.New(), uuid.New()
+	slugs := map[uuid.UUID]string{docsID: "docs", otherID: "other"}
+	docs := newTestMCPAgentTool("docs__search", docsID)
+	other := newTestMCPAgentTool("other__lookup", otherID)
 	workspace := &testWorkspaceMCPAgentTool{
 		testAgentTool: &testAgentTool{info: fantasy.ToolInfo{Name: "Workspace__echo"}},
 		server:        "Workspace",
@@ -76,8 +78,8 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		newTestAgentTool("spawn_agent"),
 		docs,
 		other,
-		// An MCP tool whose name has no server prefix has no server name.
-		newTestMCPAgentTool("unprefixed", uuid.New()),
+		// An MCP tool whose server is unknown has no server name.
+		newTestMCPAgentTool("ghost__lookup", uuid.New()),
 		workspace,
 	}
 	candidates := []deferredMCPTool{{tool: docs, server: "docs"}, {tool: other, server: "other"}, {tool: workspace, server: "Workspace"}}
@@ -86,7 +88,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{Definition: fantasy.ProviderDefinedTool{Name: "code_execution"}},
 	}
 	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent"}
-	allMCP := []string{"docs__search", "other__lookup", "unprefixed", "Workspace__echo"}
+	allMCP := []string{"docs__search", "other__lookup", "ghost__lookup", "Workspace__echo"}
 	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo"}
 	allProvider := []string{"web_search", "code_execution"}
 
@@ -107,7 +109,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "ReadOnly",
 			policy:       customAgentToolPolicy{ReadOnly: true, MCPMode: "inherit"},
-			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "unprefixed"},
+			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "ghost__lookup"},
 			wantDeferred: []string{"docs__search", "other__lookup"},
 			wantProvider: []string{"web_search"},
 		},
@@ -128,7 +130,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "Disallowed",
 			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "other__lookup", "web_search"}, MCPMode: "inherit"},
-			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "unprefixed", "Workspace__echo"},
+			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "ghost__lookup", "Workspace__echo"},
 			wantDeferred: []string{"docs__search", "Workspace__echo"},
 			wantProvider: []string{"code_execution"},
 		},
@@ -157,7 +159,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 			var policy customAgentToolPolicy
 			require.NoError(t, json.Unmarshal(raw, &policy))
 
-			gotTools, gotCandidates, gotProvider := policy.filter(tools, candidates, providerTools)
+			gotTools, gotCandidates, gotProvider := policy.filter(tools, candidates, providerTools, slugs)
 			gotDeferred := make([]string, 0, len(gotCandidates))
 			for _, candidate := range gotCandidates {
 				gotDeferred = append(gotDeferred, candidate.tool.Info().Name)

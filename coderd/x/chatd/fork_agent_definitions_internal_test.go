@@ -341,14 +341,24 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		ctx := chatdTestContext(t)
 		child, err := f.spawn(t, spawnAgentArgs{Type: "docs-reader"})
 		require.NoError(t, err)
-		docsTool := newTestMCPAgentTool("docs__search", uuid.New())
-		otherTool := newTestMCPAgentTool("other__lookup", uuid.New())
+		docs := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs"})
+		// The tools of this server are named docs__mirror__<tool>, so their
+		// name alone would attribute them to docs.
+		mirror := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "docs__mirror"})
+		inline := dbgen.ChatMCPServer(t, f.db, database.ChatMCPServer{ChatID: f.root.ID, Slug: "DOCS"})
+		internal := InternalMCPServer{Slug: "docs"}
+		server := &Server{db: f.db, experiments: f.server.experiments, internalMCPServers: []InternalMCPServer{internal}}
+		docsTool := newTestMCPAgentTool("docs__search", docs.ID)
+		mirrorTool := newTestMCPAgentTool("docs__mirror__search", mirror.ID)
 
-		tools, candidates, _, err := f.server.applyCustomAgentToolPolicy(ctx, child,
-			[]fantasy.AgentTool{newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, otherTool},
-			[]deferredMCPTool{{tool: otherTool, server: "other"}, {tool: docsTool, server: "docs"}}, nil)
+		tools, candidates, _, err := server.applyCustomAgentToolPolicy(ctx, child,
+			[]fantasy.AgentTool{
+				newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, mirrorTool,
+				newTestMCPAgentTool("DOCS__fetch", inline.ID), newTestMCPAgentTool("docs__kb", internal.id()),
+			},
+			[]deferredMCPTool{{tool: mirrorTool}, {tool: docsTool}}, nil)
 		require.NoError(t, err)
-		require.Equal(t, []string{"read_file", "docs__search"}, toolNames(tools))
+		require.Equal(t, []string{"read_file", "docs__search", "DOCS__fetch", "docs__kb"}, toolNames(tools))
 		require.Len(t, candidates, 1)
 		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
 	})
