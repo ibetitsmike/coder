@@ -1,8 +1,9 @@
 // Command chatdmig manages the fork's chatd migrations.
 //
-//	chatdmig route        route new upstream migrations; exit 3 if one is mixed
+//	chatdmig route        route new upstream migrations; exit 3 if one is mixed,
+//	                     1 if one is at or below a migration in early.txt
 //	chatdmig new <name>   create a fork node; -requires adds a parent
-//	chatdmig check        validate the graph and print its order
+//	chatdmig check        validate the graph and early.txt, print the order
 package main
 
 import (
@@ -63,6 +64,9 @@ func check(dir string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := loadEarly(dir, uint64(g.SplitVersion)); err != nil {
+		return err
+	}
 	fmt.Printf("split %06d_%s, %d routes, %d nodes\n", g.SplitVersion, g.SplitName, len(g.Routes), len(g.Nodes))
 	for _, n := range g.Nodes {
 		var flags []string
@@ -103,6 +107,7 @@ func route(dir string) error {
 	var header []string
 	var split string
 	known := map[string]chatdmig.Ledger{}
+	routedAt := map[string]uint64{}
 	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
 		f := strings.Fields(line)
 		switch {
@@ -112,7 +117,12 @@ func route(dir string) error {
 			split = f[1]
 			header = append(header, line)
 		case len(f) == 3:
+			v, err := strconv.ParseUint(f[0], 10, 32)
+			if err != nil {
+				return xerrors.Errorf("routes.txt: bad line %q", line)
+			}
 			known[f[1]] = chatdmig.Ledger(f[2])
+			routedAt[f[1]] = v
 		default:
 			return xerrors.Errorf("routes.txt: bad line %q", line)
 		}
@@ -143,9 +153,17 @@ func route(dir string) error {
 	if splitVersion == 0 {
 		return xerrors.Errorf("split migration %q not found in %s", split, dir)
 	}
+	early, err := loadEarly(dir, splitVersion)
+	if err != nil {
+		return err
+	}
+	earlyNames := map[string]bool{}
+	for _, x := range early {
+		earlyNames[x.name] = true
+	}
 
 	out := header
-	var mixed []string
+	var mixed, skipped []string
 	for _, e := range entries {
 		if e.version <= splitVersion {
 			continue
@@ -159,12 +177,26 @@ func route(dir string) error {
 			led = classifier.Classify(string(sql))
 			fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
 		}
+		// A migration routed before an early entry was added may sit below it,
+		// so only new or renumbered migrations are checked. Databases that ran
+		// one early migration ran every other one too.
+		if !earlyNames[e.name] && routedAt[e.name] != e.version {
+			for _, x := range early {
+				if e.version <= x.version {
+					skipped = append(skipped, fmt.Sprintf("upstream %06d_%s is at or below %06d_%s, which the fork took early from %s: a database that ran it would skip %06d_%s",
+						e.version, e.name, x.version, x.name, x.source, e.version, e.name))
+				}
+			}
+		}
 		out = append(out, fmt.Sprintf("%06d %s %s", e.version, e.name, led))
 		if led == chatdmig.LedgerMixed {
 			if _, err := os.Stat(filepath.Join(dir, "chatdmig", "override", e.name+".up.sql")); err != nil {
 				mixed = append(mixed, e.name)
 			}
 		}
+	}
+	if len(skipped) > 0 {
+		return xerrors.Errorf("renumber or move the migration before syncing:\n%s", strings.Join(skipped, "\n"))
 	}
 	if err := os.WriteFile(routesPath, []byte(strings.Join(out, "\n")+"\n"), 0o600); err != nil {
 		return err
@@ -174,6 +206,38 @@ func route(dir string) error {
 	}
 	_, err = load(dir)
 	return err
+}
+
+type earlyMigration struct {
+	version uint64
+	name    string
+	source  string
+}
+
+// loadEarly parses early.txt, the upstream migrations that the fork took
+// before upstream main merged them. Each must be above the split, because
+// route ignores the migrations at or below it.
+func loadEarly(dir string, splitVersion uint64) ([]earlyMigration, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "chatdmig", "early.txt"))
+	if err != nil {
+		return nil, xerrors.Errorf("read early.txt: %w", err)
+	}
+	var early []earlyMigration
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		v, err := strconv.ParseUint(f[0], 10, 32)
+		if len(f) != 3 || len(f[0]) != 6 || err != nil {
+			return nil, xerrors.Errorf("early.txt: bad line %q", line)
+		}
+		if v <= splitVersion {
+			return nil, xerrors.Errorf("early.txt: %06d_%s is at or below the split, which route does not check", v, f[1])
+		}
+		early = append(early, earlyMigration{v, f[1], f[2]})
+	}
+	return early, nil
 }
 
 func newNode(dir string, args []string) error {
