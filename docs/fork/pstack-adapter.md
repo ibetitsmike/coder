@@ -24,54 +24,55 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 3. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
    `git -C ~/pstack-src rev-parse HEAD` then prints that commit.
    `<pstack>` is `~/pstack-src/pstack`.
-4. If a skill in `~/.coder/skills/` shares a name with one you copy next, move it out.
-   The next step replaces a skill that has the same name.
+4. If `~/.coder/skills/` or `~/.coder/agents/` holds a name that steps 5 and 6 copy, move it out.
+   Those steps replace a skill or agent that has the same name.
 5. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    `ls ~/.coder/skills/*/SKILL.md | wc -l` then prints at least 61.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
-   Then copy pstack's agents: `mkdir -p ~/.coder/agents && cp ~/pstack-src/pstack/agents/*.md ~/.coder/agents/`.
+6. Copy pstack's agents: `mkdir -p ~/.coder/agents && cp ~/pstack-src/pstack/agents/*.md ~/.coder/agents/`.
    `ls ~/.coder/agents/*.md | wc -l` then prints at least 2.
-   Chats use them only with the `fork-agent-definitions` experiment. Refer to [Custom agent types](#custom-agent-types).
-6. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
+   Chats use them only with the `fork-agent-definitions` experiment.
+   Refer to [Custom agent types](#custom-agent-types).
+7. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`.
-7. If the downloaded page pins a different pstack commit than step 3, start again at step 1 with the downloaded page.
-8. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
-9. Append the block below to `~/.coder/AGENTS.md`.
-   Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it doesn't load this page, so the block carries the mappings that most skills need:
+8. If the downloaded page pins a different pstack commit than step 3, start again at step 1 with the downloaded page.
+9. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
+10. Append the block below to `~/.coder/AGENTS.md`.
+    Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it doesn't load this page, so the block carries the mappings that most skills need:
 
-   ```markdown
-   <!-- pstack-adapter -->
-   pstack skills use Cursor names.
-   Before you follow one, read ~/.coder/pstack-adapter.md with read_file and map each Cursor name with it.
-   read_file needs an absolute path, so replace ~ with your home directory.
-   - Task: spawn_agent, then wait_agent.
-     readonly: true is type "explore" only for narrow code lookup.
-     A custom subagent_type such as poteto-agent: that type if spawn_agent lists it, else type "general" with the body of ~/.coder/agents/<name>.md at the top of prompt.
-   - AskQuestion: ask_user_question if you have it, else ask in plain text and end the turn.
-   - Todo list: todo_write with the whole list, if you have it; otherwise keep it in your reply.
-   - Another pstack skill: read_file ~/.coder/skills/<name>/SKILL.md.
-   - Work in the repository the user names, or else in the Working Directory of <workspace-context>.
-     Write no files outside it unless the step names the path.
-   - SendToUser: put the message in your reply.
-   - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
-   - Recent chats, or a chat ID you don't have: search_chats, if you have it.
-   - Transcripts and recent chats without those tools, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
-     Never invent the skipped result.
-   <!-- /pstack-adapter -->
-   ```
+    ```markdown
+    <!-- pstack-adapter -->
+    pstack skills use Cursor names.
+    Before you follow one, read ~/.coder/pstack-adapter.md with read_file and map each Cursor name with it.
+    read_file needs an absolute path, so replace ~ with your home directory.
+    - Task: spawn_agent, then wait_agent.
+      readonly: true is type "explore" only for narrow code lookup.
+      A custom subagent_type such as poteto-agent: that type if spawn_agent lists it, else type "general" with the body of ~/.coder/agents/<name>.md at the top of prompt.
+    - AskQuestion: ask_user_question if you have it, else ask in plain text and end the turn.
+    - Todo list: todo_write with the whole list if you have it, else keep the list in your reply.
+    - Another pstack skill: read_file ~/.coder/skills/<name>/SKILL.md.
+    - Work in the repository the user names, or else in the Working Directory of <workspace-context>.
+      Write no files outside it unless the step names the path.
+    - SendToUser: put the message in your reply.
+    - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
+    - Recent chats, or a chat ID you don't have: search_chats, if you have it.
+    - Transcripts and recent chats without those tools, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
+      Never invent the skipped result.
+    <!-- /pstack-adapter -->
+    ```
 
-10. Start a new chat.
+11. Start a new chat.
     A chat pins `AGENTS.md` and the skills when it starts.
     A chat that was already open keeps its old copy until you select **Refresh context** in it.
-11. Ask the chat to quote the `pstack-adapter` block without any tool call.
+12. Ask the chat to quote the `pstack-adapter` block without any tool call.
     The chat replies with the block's lines.
     This message is also the plain first message the chat needs, because a chat's first message can't run a skill.
-12. If the chat can't quote the block, switch to a model server that keeps every system message.
+13. If the chat can't quote the block, switch to a model server that keeps every system message.
     Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
     A model server that keeps only the first system message drops the block without an error.
     Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
-13. If you switched model servers, start again at step 10.
-14. Select the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
+14. If you switched model servers, start again at step 11.
+15. Select the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
 
 ## Tools
@@ -122,7 +123,7 @@ When the deployment enables the `fork-agent-definitions` experiment, `spawn_agen
 It reads the `*.md` files in `agents/`, `.agents/agents/`, `.claude/agents/`, and `.cursor/agents/` of each scan root, including `~/.coder/agents/`.
 A chat pins the definitions when it starts, like `AGENTS.md` and the skills, so start a new chat or select **Refresh context** after you add one.
 The `spawn_agent` description lists the custom types after the built-in ones.
-The child gets the definition's body as a system message, so don't paste the body into `prompt`.
+The child gets the definition's body as a system message, so do not paste the body into `prompt`.
 A definition without `model` runs on your model, and pstack's agents set none.
 A `model` that matches no config in `list_subagent_models` fails the spawn.
 An explicit `model_config_id` or `reasoning_effort` overrides the definition.
@@ -139,6 +140,7 @@ An `explore` or `computer_use` child never gets them.
 With the experiment, each chat can wait on, message, interrupt, and list only its direct children, so the root waits on the coordinator, not on its workers.
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
 Archiving a root whose family is still working interrupts the family, waits up to 30 seconds for it to stop, then archives every member.
+If a member is still working after 30 seconds, the archive fails and archives nothing.
 Without the experiment, or at the maximum depth, a child has no `spawn_agent`, and a call fails with `Tool not active in this turn: spawn_agent`.
 
 ## Models
