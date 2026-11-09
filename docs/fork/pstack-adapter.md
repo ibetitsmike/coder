@@ -128,10 +128,32 @@ A definition without `model` runs on your model, and pstack's agents set none.
 A `model` that matches no config in `list_subagent_models` fails the spawn.
 An explicit `model_config_id` overrides the definition's `model`, and an explicit `reasoning_effort` overrides a valid definition effort.
 A definition whose effort isn't a valid reasoning effort fails every spawn.
-Coder Agents doesn't enforce `tools`, `readonly`, `mcp`, or `disallowedTools` yet.
-A custom type gets the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
+A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
+Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
+
+### Custom agent tool policy
+
+When Coder Agents spawns a custom type, it stores the definition's tool fields with the child chat.
+On every turn of the child while the experiment is on, Coder Agents removes the tools that the stored fields don't allow.
+A change to the definition doesn't change a child that already exists.
+pstack's agents set none of these fields, so their children keep every tool of `general`.
+
+- `readonly: true` keeps only the `explore` tools: `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file`, and the deployment MCP tools allowed in subagents.
+  Of the provider tools, it keeps only `web_search`.
+- `tools` lists the non-MCP tools that the child keeps, and an empty list keeps none.
+  Claude Code names work: `Read`, `Write`, `Edit`, `MultiEdit`, `Bash`, `Grep`, `Glob`, `WebSearch`, and `Task`, which stands for the subagent tools.
+- `disallowed_tools`, or `disallowedTools`, removes each tool that it names, MCP tools included.
+  A Claude Code ID, `mcp__<server>__<tool>`, matches the Coder Agents tool `<server>__<tool>`.
+- `mcp: none` removes every MCP tool.
+  A list of server names keeps only the MCP tools of those servers, and each name must match the server's name exactly, case included.
+- `find_tools` follows `mcp`, and only `disallowed_tools` removes it by name.
+
+A child without `spawn_agent`, `wait_agent`, or `list_agents` also loses the subagent orchestration guidance in its system prompt.
+A child without `read_skill` loses the skill index in its system prompt.
+`readonly` doesn't make a child read-only, because `execute` can change files.
+Do not rely on the policy as a sandbox, because a child that keeps `execute` can run any command that the workspace allows.
 
 ### Nested subagents
 
@@ -215,13 +237,13 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `106a9355f6`:
+Checked against fork `main` at `b457b3f1bf`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:170-187`, `:201-229`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:234-246`.
-  Depth flag, `codersdk/fork_chat_config.go:33-40`, lowered by the organization's `max_depth`, `fork_subagents.go:55-69`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:185-202`, `:216-244`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:249-261`.
+  Depth flag, `codersdk/fork_chat_config.go:33-40`, lowered by the organization's `max_depth`, `fork_subagents.go:57-71`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
@@ -230,6 +252,9 @@ Checked against fork `main` at `106a9355f6`:
   Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:40-42`, `:61-64`, `:86-88`, called from `subagent_catalog.go:185` and `:233`.
   The definition's body becomes the child's system prompt, `fork_agent_definitions.go:177`.
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:147-159`, and the model match, `:187-210`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:124-131`, `:169`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
+  The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
+  Orchestration guidance dropped, `fork_subagents.go:276-278`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:471-476`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:640-672`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, `coderd/x/chatd/worker.go:273-281`.
@@ -239,8 +264,8 @@ Checked against fork `main` at `106a9355f6`:
 - Skills one level deep, with `name` equal to the directory: `resolve.go:61-64`, `:632-647`.
 - No skill in a chat's first message: `coderd/x/chatd/chatd.go:659-667`, `coderd/x/chatd/skill_invocation.go:37`.
 - Working directory: `coderd/x/chatd/context_prompt.go:195-198`, `agent/agentproc/process.go:400-413`.
-- `explore` tools: `turn_environment.go:2113-2122`.
-- Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2174-2190`.
+- `explore` tools: `turn_environment.go:2124-2133`.
+- Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2185-2201`.
 - `find_tools`: `coderd/x/chatd/chattool/findtools.go:19`, only with MCP tools, `coderd/x/chatd/mcp_tool_search.go:121-136`, which also omits it on a name collision.
 - Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:337-340`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
