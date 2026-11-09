@@ -125,7 +125,8 @@ a new or renumbered migration at or below an early version, and the sync stops.
 A person then renumbers or moves the migration before the sync continues.
 Migrations that were routed before the early entry was added are not checked.
 An early version must be above the split, because route ignores the
-migrations at or below it.
+migrations at or below it. `chatdmig check` validates `early.txt` too, so
+fork-ci rejects a bad entry in the PR that adds it.
 
 ## Add a fork migration
 

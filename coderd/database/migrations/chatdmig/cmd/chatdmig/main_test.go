@@ -81,7 +81,8 @@ func TestRouteEarly(t *testing.T) {
 
 	t.Run("MigrationRoutedBeforeEarlyEntryRoutes", func(t *testing.T) {
 		t.Parallel()
-		routes := routesHeader + "000640 a core\n000641 b core\n"
+		// A hand-edited ledger may leave a version unpadded.
+		routes := routesHeader + "640 a core\n000641 b core\n"
 		dir := writeMigrations(t, routes, map[string]string{
 			"000640_a.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
 			"000641_b.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
@@ -91,12 +92,27 @@ func TestRouteEarly(t *testing.T) {
 		require.NoError(t, route(dir))
 	})
 
+	t.Run("EveryEarlyMigrationRoutes", func(t *testing.T) {
+		t.Parallel()
+		dir := writeMigrations(t, routesHeader, map[string]string{
+			"000640_a_q.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
+			"000641_b_q.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
+		})
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000640 a_q coder/coder#1\n000641 b_q coder/coder#1\n"), 0o600))
+
+		require.NoError(t, route(dir))
+		got, err := os.ReadFile(filepath.Join(dir, "chatdmig", "routes.txt"))
+		require.NoError(t, err)
+		require.Equal(t, routesHeader+"000640 a_q core\n000641 b_q core\n", string(got))
+	})
+
 	t.Run("EarlyAtOrBelowSplitFails", func(t *testing.T) {
 		t.Parallel()
 		dir := writeMigrations(t, routesHeader, nil)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000639 chat_x coder/coder#1\n"), 0o600))
 
 		require.ErrorContains(t, route(dir), "000639_chat_x is at or below the split")
+		require.ErrorContains(t, check(dir), "000639_chat_x is at or below the split")
 	})
 
 	t.Run("EarlyMigrationRoutes", func(t *testing.T) {
@@ -119,6 +135,7 @@ func TestRouteEarly(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte(line+"\n"), 0o600))
 
 			require.ErrorContains(t, route(dir), fmt.Sprintf("early.txt: bad line %q", line))
+			require.ErrorContains(t, check(dir), fmt.Sprintf("early.txt: bad line %q", line))
 		})
 	}
 }

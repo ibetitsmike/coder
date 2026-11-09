@@ -3,7 +3,7 @@
 //	chatdmig route        route new upstream migrations; exit 3 if one is mixed,
 //	                     1 if one is at or below a migration in early.txt
 //	chatdmig new <name>   create a fork node; -requires adds a parent
-//	chatdmig check        validate the graph and print its order
+//	chatdmig check        validate the graph and early.txt, print the order
 package main
 
 import (
@@ -64,6 +64,9 @@ func check(dir string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := loadEarly(dir, uint64(g.SplitVersion)); err != nil {
+		return err
+	}
 	fmt.Printf("split %06d_%s, %d routes, %d nodes\n", g.SplitVersion, g.SplitName, len(g.Routes), len(g.Nodes))
 	for _, n := range g.Nodes {
 		var flags []string
@@ -100,15 +103,11 @@ func route(dir string) error {
 		return err
 	}
 	classifier := chatdmig.NewClassifier(string(dump))
-	early, err := readEarly(filepath.Join(dir, "chatdmig", "early.txt"))
-	if err != nil {
-		return err
-	}
 
 	var header []string
 	var split string
 	known := map[string]chatdmig.Ledger{}
-	routedAt := map[string]string{}
+	routedAt := map[string]uint64{}
 	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
 		f := strings.Fields(line)
 		switch {
@@ -118,8 +117,12 @@ func route(dir string) error {
 			split = f[1]
 			header = append(header, line)
 		case len(f) == 3:
+			v, err := strconv.ParseUint(f[0], 10, 32)
+			if err != nil {
+				return xerrors.Errorf("routes.txt: bad line %q", line)
+			}
 			known[f[1]] = chatdmig.Ledger(f[2])
-			routedAt[f[1]] = f[0]
+			routedAt[f[1]] = v
 		default:
 			return xerrors.Errorf("routes.txt: bad line %q", line)
 		}
@@ -150,10 +153,13 @@ func route(dir string) error {
 	if splitVersion == 0 {
 		return xerrors.Errorf("split migration %q not found in %s", split, dir)
 	}
+	early, err := loadEarly(dir, splitVersion)
+	if err != nil {
+		return err
+	}
+	earlyNames := map[string]bool{}
 	for _, x := range early {
-		if x.version <= splitVersion {
-			return xerrors.Errorf("early.txt: %06d_%s is at or below the split, which route does not check", x.version, x.name)
-		}
+		earlyNames[x.name] = true
 	}
 
 	out := header
@@ -172,10 +178,11 @@ func route(dir string) error {
 			fmt.Printf("%06d_%s: %s\n", e.version, e.name, led)
 		}
 		// A migration routed before an early entry was added may sit below it,
-		// so only new or renumbered migrations are checked.
-		if routedAt[e.name] != fmt.Sprintf("%06d", e.version) {
+		// so only new or renumbered migrations are checked. Databases that ran
+		// one early migration ran every other one too.
+		if !earlyNames[e.name] && routedAt[e.name] != e.version {
 			for _, x := range early {
-				if e.name != x.name && e.version <= x.version {
+				if e.version <= x.version {
 					skipped = append(skipped, fmt.Sprintf("upstream %06d_%s is at or below %06d_%s, which the fork took early from %s: a database that ran it would skip %06d_%s",
 						e.version, e.name, x.version, x.name, x.source, e.version, e.name))
 				}
@@ -207,10 +214,11 @@ type earlyMigration struct {
 	source  string
 }
 
-// readEarly parses early.txt, the upstream migrations that the fork took
-// before upstream main merged them.
-func readEarly(path string) ([]earlyMigration, error) {
-	raw, err := os.ReadFile(path)
+// loadEarly parses early.txt, the upstream migrations that the fork took
+// before upstream main merged them. Each must be above the split, because
+// route ignores the migrations at or below it.
+func loadEarly(dir string, splitVersion uint64) ([]earlyMigration, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "chatdmig", "early.txt"))
 	if err != nil {
 		return nil, xerrors.Errorf("read early.txt: %w", err)
 	}
@@ -223,6 +231,9 @@ func readEarly(path string) ([]earlyMigration, error) {
 		v, err := strconv.ParseUint(f[0], 10, 32)
 		if len(f) != 3 || len(f[0]) != 6 || err != nil {
 			return nil, xerrors.Errorf("early.txt: bad line %q", line)
+		}
+		if v <= splitVersion {
+			return nil, xerrors.Errorf("early.txt: %06d_%s is at or below the split, which route does not check", v, f[1])
 		}
 		early = append(early, earlyMigration{v, f[1], f[2]})
 	}
