@@ -44,8 +44,13 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 
 	const download = getAttachmentDownload(block, href);
 	return (
-		<figure aria-labelledby={nameId} className="m-0 flex flex-col gap-1">
-			<RecordingPreview recordingFileId={block.file_id} />
+		<figure
+			aria-labelledby={nameId}
+			className="m-0 flex w-fit max-w-full flex-col gap-1"
+		>
+			<div className="w-fit">
+				<RecordingPreview recordingFileId={block.file_id} />
+			</div>
 			<figcaption className="flex min-w-0 items-center gap-1 text-xs text-content-secondary">
 				<span id={nameId} className="truncate">
 					{download.displayName}
