@@ -16,6 +16,7 @@ import (
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
@@ -31,6 +32,12 @@ const todoSnapshotHeader = "Your todo list for this chat, read from the store. I
 // todoSnapshotVersionLine starts the line that names the stored version the
 // snapshot holds, so the prompt can be compared with the store.
 const todoSnapshotVersionLine = "Version: "
+
+// todoSnapshotMaxBytes caps a snapshot at chatloop's smallest per-result
+// budget, the one a model with the smallest context window gets. A todo result
+// over its budget is truncated without its version, which makes a snapshot due,
+// and the snapshot must not bring back the size the truncation removed.
+const todoSnapshotMaxBytes = 16 << 10
 
 // syncForkContext commits the model-only messages the fork features want in
 // the prompt before this step, if any, and returns the reloaded chat when it
@@ -109,6 +116,10 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("read todo list: %w", err)
 	}
+	if version == 0 {
+		// No list was ever stored, so the prompt cannot show a stale one.
+		return chatstate.Message{}, false, nil
+	}
 	// Prompt rows include the model-only rows this sends, and exclude rows
 	// compaction has replaced.
 	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
@@ -135,16 +146,16 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	if err != nil {
 		return chatstate.Message{}, false, err
 	}
-	switch {
-	case found && shown == version:
+	if found && shown == version {
 		// The prompt already shows this exact list.
 		return chatstate.Message{}, false, nil
-	case !found && len(todos) == 0:
-		// Nothing to restore: the chat has no list and never showed one.
-		return chatstate.Message{}, false, nil
+	}
+	text, err := formatChatTodoSnapshot(todos, version)
+	if err != nil {
+		return chatstate.Message{}, false, err
 	}
 	content, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
-		codersdk.ChatMessageText(formatChatTodoSnapshot(todos, version)),
+		codersdk.ChatMessageText(text),
 	})
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("marshal todo snapshot: %w", err)
@@ -227,9 +238,11 @@ func todoSnapshotVersion(text string) (int64, bool) {
 }
 
 // formatChatTodoSnapshot renders todos and the version they are stored at as
-// the snapshot message text. An empty list says so, so a model holding a plan
-// that was cleared drops it instead of finishing a task nobody asked for.
-func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) string {
+// the snapshot message text, one JSON object per item so a line break inside
+// an item cannot read as another item. An empty list says so, so a model
+// holding a plan that was cleared drops it instead of finishing a task nobody
+// asked for, including one the compaction summary still mentions.
+func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) (string, error) {
 	var sb strings.Builder
 	sb.WriteString(todoSnapshotHeader)
 	sb.WriteString("\n")
@@ -237,15 +250,15 @@ func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) string {
 	sb.WriteString(strconv.FormatInt(version, 10))
 	if len(todos) == 0 {
 		sb.WriteString("\n(empty)")
-		return sb.String()
 	}
 	for _, todo := range todos {
-		sb.WriteString("\n- [")
-		sb.WriteString(string(todo.Status))
-		sb.WriteString("] ")
-		sb.WriteString(todo.ID)
-		sb.WriteString(": ")
-		sb.WriteString(todo.Content)
+		item, err := json.Marshal(todo)
+		if err != nil {
+			return "", xerrors.Errorf("marshal todo item: %w", err)
+		}
+		sb.WriteString("\n")
+		sb.Write(item)
 	}
-	return sb.String()
+	text, _ := chatloop.TruncateToolResultText(sb.String(), todoSnapshotMaxBytes)
+	return text, nil
 }

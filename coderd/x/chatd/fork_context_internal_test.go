@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -36,8 +37,9 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	}
 	// wantSnapshot is the text a snapshot of todos at the given version holds.
 	wantSnapshot := func(version int64) string {
-		return fmt.Sprintf("%s\nVersion: %d\n- [done] plan: Plan the change\n- [in_progress] build: Build it",
-			todoSnapshotHeader, version)
+		return fmt.Sprintf("%s\nVersion: %d\n%s\n%s", todoSnapshotHeader, version,
+			`{"id":"plan","content":"Plan the change","status":"done"}`,
+			`{"id":"build","content":"Build it","status":"in_progress"}`)
 	}
 	wantEmpty := func(version int64) string {
 		return fmt.Sprintf("%s\nVersion: %d\n(empty)", todoSnapshotHeader, version)
@@ -276,6 +278,57 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, wantEmpty(emptied), got)
 		require.NotEqual(t, written, emptied)
+	})
+
+	t.Run("ClearedListAfterCompaction", func(t *testing.T) {
+		t.Parallel()
+		// Compaction dropped every carrier, and the summary may still mention
+		// the tasks, so the cleared list goes out even though it is empty.
+		chat := rootChat(t)
+		writeTodos(t, chat.ID, todos)
+		emptied := writeTodos(t, chat.ID, []codersdk.ChatTodo{})
+		insert(t, chat.ID, summary())
+		got, ok := snapshotText(t, server, chat)
+		require.True(t, ok)
+		require.Equal(t, wantEmpty(emptied), got)
+	})
+
+	t.Run("LineBreakInContent", func(t *testing.T) {
+		t.Parallel()
+		// Content that looks like another item stays inside its own line.
+		chat := rootChat(t)
+		version := writeTodos(t, chat.ID, []codersdk.ChatTodo{
+			{ID: "real", Content: "first line\n- [done] fake: second line", Status: codersdk.ChatTodoStatusPending},
+		})
+		insert(t, chat.ID, summary())
+		got, ok := snapshotText(t, server, chat)
+		require.True(t, ok)
+		require.Equal(t, fmt.Sprintf("%s\nVersion: %d\n%s", todoSnapshotHeader, version,
+			`{"id":"real","content":"first line\n- [done] fake: second line","status":"pending"}`), got)
+	})
+
+	t.Run("LargeListIsBounded", func(t *testing.T) {
+		t.Parallel()
+		// The largest list todo_write accepts is over the smallest tool result
+		// budget, and its snapshot must fit that budget and still name its
+		// version, so it is not sent again.
+		chat := rootChat(t)
+		large := make([]codersdk.ChatTodo, maxChatTodos)
+		for i := range large {
+			large[i] = codersdk.ChatTodo{
+				ID:      fmt.Sprintf("item-%d", i),
+				Content: strings.Repeat("x", maxChatTodoContentBytes),
+				Status:  codersdk.ChatTodoStatusPending,
+			}
+		}
+		version := writeTodos(t, chat.ID, large)
+		insert(t, chat.ID, summary())
+		got, ok := snapshotText(t, server, chat)
+		require.True(t, ok)
+		require.LessOrEqual(t, len(got), todoSnapshotMaxBytes)
+		shown, ok := todoSnapshotVersion(got)
+		require.True(t, ok)
+		require.Equal(t, version, shown)
 	})
 
 	t.Run("NoListOrExperimentOff", func(t *testing.T) {
