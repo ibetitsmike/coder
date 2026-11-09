@@ -5379,6 +5379,13 @@ export const DefaultChatMaxQueuedMessagesPerChat = 20;
  */
 export const DefaultChatMaxStepsPerTurn = 1200;
 
+// From codersdk/fork_chat_config.go
+/**
+ * DefaultChatMaxSubagentDepth is the default maximum depth of nested subagent
+ * chats.
+ */
+export const DefaultChatMaxSubagentDepth = 2;
+
 // From codersdk/chats.go
 /**
  * DefaultChatWorkspaceTTL is the default TTL for chat workspaces.
