@@ -6,3 +6,4 @@
 # version must be above the split. See README.md.
 #
 # <version> <name> <source>
+000640 chat_queued_message_busy_behavior coder/coder#30073

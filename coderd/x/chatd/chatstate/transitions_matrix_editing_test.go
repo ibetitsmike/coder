@@ -50,26 +50,25 @@ func seedBlockedHead(t *testing.T, f *testFixture, from chatstate.ExecutionState
 	case chatstate.StateE1, chatstate.StateR1, chatstate.StateI1:
 		created := createTestChat(t, f)
 		m := chatstate.NewChatMachine(f.DB, f.Pub, created.Chat.ID)
+		if from == chatstate.StateI1 {
+			// Interrupt without a message: an interrupt send stores a
+			// steer row, and every row here must share the queue lane.
+			require.NoError(t, m.Update(ctx, func(tx *chatstate.Tx, store database.Store) error {
+				if err := ownChat(ctx, tx, store, created.Chat.ID); err != nil {
+					return err
+				}
+				_, err := tx.Interrupt(chatstate.InterruptInput{Reason: "seed"})
+				return err
+			}))
+		}
 		var ids []int64
 		var bodies []string
 		for i := range rows {
 			body := fmt.Sprintf("queued-editing-%s-%d", from, i)
-			var sm chatstate.SendMessageResult
-			if from == chatstate.StateI1 && i == rows-1 {
-				sm = sendInterruptMessage(t, f, m, created.Chat.ID, body)
-			} else {
-				sm = sendQueuedMessage(t, f, m, body)
-			}
+			sm := sendQueuedMessage(t, f, m, body)
 			require.NotNil(t, sm.QueuedMessage)
 			ids = append(ids, sm.QueuedMessage.ID)
 			bodies = append(bodies, body)
-		}
-		if from == chatstate.StateI1 {
-			// The interrupt that starts the interruption goes to the
-			// queue head, so it is the first row in queue order.
-			last := len(ids) - 1
-			ids = append([]int64{ids[last]}, ids[:last]...)
-			bodies = append([]string{bodies[last]}, bodies[:last]...)
 		}
 		if from == chatstate.StateE1 {
 			require.NoError(t, m.Update(ctx, func(tx *chatstate.Tx, _ database.Store) error {
@@ -98,7 +97,12 @@ func seedBlockedHead(t *testing.T, f *testFixture, from chatstate.ExecutionState
 // after FinishTurn from R1P.
 func seedPaused(t *testing.T, f *testFixture, extra int) seededChat {
 	t.Helper()
-	seeded := seedBlockedHead(t, f, chatstate.StateR1, extra)
+	return pauseSeeded(t, f, seedBlockedHead(t, f, chatstate.StateR1, extra))
+}
+
+// pauseSeeded runs FinishTurn on a seeded R1P chat, which pauses it.
+func pauseSeeded(t *testing.T, f *testFixture, seeded seededChat) seededChat {
+	t.Helper()
 	m := chatstate.NewChatMachine(f.DB, f.Pub, seeded.chatID)
 	require.NoError(t, m.Update(testutil.Context(t, testutil.WaitShort), func(tx *chatstate.Tx, _ database.Store) error {
 		_, err := tx.FinishTurn(chatstate.FinishTurnInput{})
@@ -133,11 +137,11 @@ func applySetEditing(idx int, editing bool) applierFn {
 	}
 }
 
-func applyPromoteQueuedMessageAt(idx int) applierFn {
+func applySteerQueuedMessageAt(idx int) applierFn {
 	return func(t *testing.T, _ *testFixture, tx *chatstate.Tx, seeded seededChat, _ chatstate.ExecutionState, result *transitionCaseResult) error {
 		t.Helper()
 		var err error
-		result.promoteQueuedMessage, err = tx.PromoteQueuedMessage(chatstate.PromoteQueuedMessageInput{
+		result.steerQueuedMessage, err = tx.SteerQueuedMessage(chatstate.SteerQueuedMessageInput{
 			QueuedMessageID: seeded.queuedMessageIDs[idx],
 		})
 		return err
@@ -188,9 +192,9 @@ func withPromotedRow(spec transitionCaseSpec, idx int) transitionCaseSpec {
 	spec.assert = func(ctx context.Context, t *testing.T, f *testFixture, seeded seededChat, base snapshotBaseline, result transitionCaseResult) {
 		assertCase(ctx, t, f, seeded, base, result)
 		promotedQueuedAt := map[chatstate.Transition]time.Time{
-			chatstate.TransitionEditQueuedMessage:    result.editQueuedMessage.PromotedQueuedAt,
-			chatstate.TransitionDeleteQueuedMessage:  result.deleteQueuedMessage.PromotedQueuedAt,
-			chatstate.TransitionPromoteQueuedMessage: result.promoteQueuedMessage.PromotedQueuedAt,
+			chatstate.TransitionEditQueuedMessage:   result.editQueuedMessage.PromotedQueuedAt,
+			chatstate.TransitionDeleteQueuedMessage: result.deleteQueuedMessage.PromotedQueuedAt,
+			chatstate.TransitionSteerQueuedMessage:  result.steerQueuedMessage.PromotedQueuedAt,
 		}[spec.transition]
 		require.False(t, promotedQueuedAt.IsZero(), "the result reports the promoted row's queued time")
 		newIDs := newActiveMessageIDs(base, activeHistoryIDs(ctx, t, f, seeded.chatID))
@@ -245,12 +249,16 @@ func editingQueueMatrixCases() []transitionCaseSpec {
 		withPromotedRow(editingCase(chatstate.TransitionDeleteQueuedMessage, chatstate.StateP, chatstate.StateR1, "", seedP(2), applyDeleteQueuedMessage,
 			func(s seededChat) []int64 { return append([]int64{}, s.queuedMessageIDs[2:]...) }, -1), 1),
 		editingCase(chatstate.TransitionDeleteQueuedMessage, chatstate.StateP, chatstate.StateP, scenarioTargetBehindHead, seedP(1), applyDeleteQueuedMessageAt(1), headOnly, 0),
-		// P: promoting the blocked head ends its edit and sends it; promoting
+		// P: steering the blocked head ends its edit and sends it; steering
 		// the row behind it sends that row and leaves the head blocked, so
-		// the resumed turn runs as R1P.
-		withPromotedRow(editingCase(chatstate.TransitionPromoteQueuedMessage, chatstate.StateP, chatstate.StateR0, "", seedP(0), applyPromoteQueuedMessage, noRows, -1), 0),
-		withPromotedRow(editingCase(chatstate.TransitionPromoteQueuedMessage, chatstate.StateP, chatstate.StateR1, "", seedP(1), applyPromoteQueuedMessage, tailRows, -1), 0),
-		withPromotedRow(editingCase(chatstate.TransitionPromoteQueuedMessage, chatstate.StateP, chatstate.StateR1P, scenarioTargetBehindHead, seedP(1), applyPromoteQueuedMessageAt(1), headOnly, 0), 1),
+		// the resumed turn runs as R1P. A row steered behind a steer row
+		// under edit waits for that edit.
+		withPromotedRow(editingCase(chatstate.TransitionSteerQueuedMessage, chatstate.StateP, chatstate.StateR0, "", seedP(0), applySteerQueuedMessage, noRows, -1), 0),
+		withPromotedRow(editingCase(chatstate.TransitionSteerQueuedMessage, chatstate.StateP, chatstate.StateR1, "", seedP(1), applySteerQueuedMessage, tailRows, -1), 0),
+		withPromotedRow(editingCase(chatstate.TransitionSteerQueuedMessage, chatstate.StateP, chatstate.StateR1P, scenarioTargetBehindHead, seedP(1), applySteerQueuedMessageAt(1), headOnly, 0), 1),
+		editingCase(chatstate.TransitionSteerQueuedMessage, chatstate.StateP, chatstate.StateP, scenarioEditSteerHead, func(t *testing.T, f *testFixture) seededChat {
+			return pauseSeeded(t, f, seedSteerHeadUnderEdit(t, f, chatstate.StateR1P))
+		}, applySteerQueuedMessageAt(1), allRows, 0),
 		// P: a history edit clears the queue.
 		editingCase(chatstate.TransitionEditMessage, chatstate.StateP, chatstate.StateR0, "", seedP(1), applyEditMessage, noRows, -1),
 	}
