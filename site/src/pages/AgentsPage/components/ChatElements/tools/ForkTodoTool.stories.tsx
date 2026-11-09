@@ -1,0 +1,92 @@
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { userEvent, within } from "storybook/test";
+import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
+import { withDashboardProvider } from "#/testHelpers/storybook";
+import { Tool } from "./Tool";
+
+const meta: Meta<typeof Tool> = {
+	title: "pages/AgentsPage/ChatElements/tools/ForkTodoTool",
+	component: Tool,
+	args: {
+		name: "todo_write",
+		status: "completed",
+		args: { todos: MockChatTodoList.todos },
+		result: MockChatTodoList,
+		isError: false,
+		organizationId: "organization-id",
+		mcpServers: [],
+		subagentTitles: new Map(),
+		subagentVariants: new Map(),
+		shellToolDisplayMode: "auto",
+		codeDiffDisplayMode: "auto",
+	},
+	parameters: { experiments: ["fork-chat-todos"] },
+	decorators: [
+		(Story) => (
+			<div className="mx-auto w-full max-w-3xl py-6 font-sans text-xs">
+				<Story />
+			</div>
+		),
+		withDashboardProvider,
+	],
+};
+export default meta;
+type Story = StoryObj<typeof Tool>;
+
+const expand: Story["play"] = async ({ canvasElement }) => {
+	await userEvent.click(within(canvasElement).getByRole("button"));
+};
+
+export const Updated: Story = { play: expand };
+
+// While todo_write runs, the card lists the streamed args, skipping the
+// partial last item.
+export const Updating: Story = {
+	args: {
+		status: "running",
+		result: undefined,
+		args: {
+			todos: [...MockChatTodoList.todos.slice(0, 2), { id: "te" }],
+		},
+	},
+	play: expand,
+};
+
+export const Cleared: Story = {
+	args: { args: { todos: [] }, result: { todos: [], version: 4 } },
+};
+
+export const Read: Story = {
+	args: { name: "todo_read", args: {} },
+	play: expand,
+};
+
+export const ReadEmpty: Story = {
+	args: { name: "todo_read", args: {}, result: { todos: [], version: 0 } },
+};
+
+export const Failed: Story = {
+	args: {
+		args: {
+			todos: [
+				{ id: "a", content: "Buy bread", status: "pending" },
+				{ id: "a", content: "Buy milk", status: "pending" },
+			],
+		},
+		result: { error: 'todo "a": id appears more than once' },
+		isError: true,
+	},
+	play: expand,
+};
+
+// With fork-chat-todos off, the tool keeps upstream's generic row.
+export const ExperimentOff: Story = {
+	parameters: { experiments: [] },
+	play: expand,
+};
+
+// A result the card cannot parse falls back to the generic row.
+export const UnparsableResult: Story = {
+	args: { name: "todo_read", args: {}, result: { todos: "none" } },
+	play: expand,
+};

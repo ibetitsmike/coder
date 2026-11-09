@@ -140,14 +140,19 @@ const ChatTodoPopover: React.FC<ChatTodoPopoverProps> = ({
 	);
 };
 
+/** Formats done items over the items that count, which excludes cancelled. */
+export const formatChatTodoProgress = (todos: readonly ChatTodo[]): string => {
+	const counted = todos.filter((todo) => todo.status !== "cancelled");
+	const done = counted.filter((todo) => todo.status === "done").length;
+	return `${done}/${counted.length}`;
+};
+
 type ChatTodoListPillProps = {
 	todos: readonly ChatTodo[];
 };
 
 const ChatTodoListPill: React.FC<ChatTodoListPillProps> = ({ todos }) => {
-	const counted = todos.filter((todo) => todo.status !== "cancelled");
-	const done = counted.filter((todo) => todo.status === "done").length;
-	const progress = `${done}/${counted.length}`;
+	const progress = formatChatTodoProgress(todos);
 
 	return (
 		<ChatTodoPopover
@@ -164,12 +169,27 @@ const ChatTodoListPill: React.FC<ChatTodoListPillProps> = ({ todos }) => {
 				</>
 			}
 		>
-			<ul className="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
-				{todos.map((todo) => (
-					<ChatTodoItem key={todo.id} todo={todo} />
-				))}
-			</ul>
+			<ChatTodoChecklist todos={todos} className="mt-2" />
 		</ChatTodoPopover>
+	);
+};
+
+type ChatTodoChecklistProps = {
+	todos: readonly ChatTodo[];
+	className?: string;
+};
+
+/** Lists todo items with an icon for each item's status. */
+export const ChatTodoChecklist: React.FC<ChatTodoChecklistProps> = ({
+	todos,
+	className,
+}) => {
+	return (
+		<ul className={cn("m-0 flex list-none flex-col gap-1.5 p-0", className)}>
+			{todos.map((todo) => (
+				<ChatTodoItem key={todo.id} todo={todo} />
+			))}
+		</ul>
 	);
 };
 

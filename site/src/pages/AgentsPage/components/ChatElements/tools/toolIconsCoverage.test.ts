@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { createForkToolRenderers } from "./forkToolRenderers";
 import { toolRenderers } from "./Tool";
 import { toolIcons } from "./ToolIcon";
 
 // ReadSkillFileRenderer renders ReadSkillTool, which passes the
-// hardcoded iconName "read_skill" for read_skill_file calls.
-const aliasedIconNames = new Set(["read_skill_file"]);
+// hardcoded iconName "read_skill" for read_skill_file calls. Fork cards
+// pass the icon names of forkToolIcons.ts.
+const aliasedIconNames = new Set([
+	"read_skill_file",
+	...Object.keys(createForkToolRenderers(() => null)),
+]);
 
 describe("toolIcons coverage", () => {
 	// A registered tool name without a table entry silently degrades to

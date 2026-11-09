@@ -1,27 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import { forkToolRenderers } from "./forkToolRenderers";
+import { createForkToolRenderers } from "./forkToolRenderers";
+import { isSubagentToolName } from "./subagentDescriptor";
 
-// Tool.tsx spreads forkToolRenderers last, so a fork name that matches an
-// upstream name would take over that tool row.
-const forkNamePrefix = "fork_";
-
-describe("forkToolRenderers", () => {
-	it("registers only names in the reserved fork_ namespace", () => {
-		const outsideNamespace = Object.keys(forkToolRenderers).filter(
-			(name) => !name.startsWith(forkNamePrefix),
-		);
-		expect(outsideNamespace).toEqual([]);
-	});
-
-	it("leaves the fork_ namespace unused by upstream renderers", async () => {
+describe("createForkToolRenderers", () => {
+	// Tool.tsx spreads the fork renderers last and dispatches subagent names
+	// before the map, so a colliding name would replace an upstream row or
+	// never render.
+	it("uses no upstream tool name", async () => {
 		vi.resetModules();
-		vi.doMock("./forkToolRenderers", () => ({ forkToolRenderers: {} }));
+		vi.doMock("./forkToolRenderers", () => ({
+			createForkToolRenderers: () => ({}),
+		}));
 		const { toolRenderers } = await import("./Tool");
 		vi.doUnmock("./forkToolRenderers");
 
-		const upstreamForkNames = Object.keys(toolRenderers).filter((name) =>
-			name.startsWith(forkNamePrefix),
+		const forkToolNames = Object.keys(createForkToolRenderers(() => null));
+		const collisions = forkToolNames.filter(
+			(name) => name in toolRenderers || isSubagentToolName(name),
 		);
-		expect(upstreamForkNames).toEqual([]);
+		expect(forkToolNames).not.toEqual([]);
+		expect(collisions).toEqual([]);
 	});
 });
