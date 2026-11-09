@@ -4005,18 +4005,6 @@ export interface ChatTodo {
 }
 
 // From codersdk/fork_chat_todos.go
-/**
- * ChatTodoList is the todo list of a chat. Version grows by one on every
- * write, so a reader can tell which of two lists is newer.
- */
-export interface ChatTodoList {
-	readonly chat_id: string;
-	readonly items: readonly ChatTodo[];
-	readonly version: number;
-	readonly updated_at: string;
-}
-
-// From codersdk/fork_chat_todos.go
 export type ChatTodoStatus = "cancelled" | "done" | "in_progress" | "pending";
 
 export const ChatTodoStatuses: ChatTodoStatus[] = [
