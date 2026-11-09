@@ -1189,6 +1189,7 @@ The generation goroutine supports:
 - memory tools (`read_memory`, `save_memory`, `delete_memory`) for root chats in a project, see [Project memory](#project-memory)
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
+  <!-- TODO(fork-chat-todos): document search_chats. -->
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
   <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
