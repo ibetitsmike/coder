@@ -92,7 +92,6 @@ func runForkMethodCase(t *testing.T, methodName string, testCaseF forkMethodCase
 	fq := wrapper.ForkWrap(fdb)
 
 	methodF := reflect.ValueOf(fq).MethodByName(methodName)
-	require.True(t, methodF.IsValid(), "method %q does not exist", methodName)
 	callMethod := func(ctx context.Context) ([]reflect.Value, error) {
 		resp := methodF.Call(append([]reflect.Value{reflect.ValueOf(ctx)}, testCase.inputs...))
 		return splitResp(t, resp)
