@@ -42,7 +42,8 @@ type customAgentToolPolicy struct {
 }
 
 // customAgentToolAliases maps Claude Code tool names to chatd tool names.
-// Grep and Glob become shell searches, as in docs/fork/pstack-adapter.md.
+// Grep and Glob become shell searches and Task the subagent tools, as in
+// docs/fork/pstack-adapter.md.
 var customAgentToolAliases = map[string][]string{
 	"Read":      {"read_file"},
 	"Write":     {"write_file"},
@@ -52,6 +53,10 @@ var customAgentToolAliases = map[string][]string{
 	"Grep":      {"read_file", "execute", "process_output"},
 	"Glob":      {"read_file", "execute", "process_output"},
 	"WebSearch": {"web_search"},
+	"Task": {
+		spawnAgentToolName, "wait_agent", "message_agent", "interrupt_agent", "list_agents",
+		listSubagentModelsToolName,
+	},
 }
 
 func customAgentToolPolicyFromDefinition(def workspacesdk.AgentDefinition) customAgentToolPolicy {

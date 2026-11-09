@@ -124,8 +124,8 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		},
 		{
 			name:         "AllowlistAliases",
-			policy:       customAgentToolPolicy{Tools: []string{"Grep", "WebSearch"}, MCPMode: "inherit"},
-			want:         append([]string{"read_file", "execute", "process_output"}, allMCP...),
+			policy:       customAgentToolPolicy{Tools: []string{"Grep", "WebSearch", "Task"}, MCPMode: "inherit"},
+			want:         append([]string{"read_file", "execute", "process_output", "spawn_agent"}, allMCP...),
 			wantDeferred: allDeferred,
 			wantProvider: []string{"web_search"},
 		},
