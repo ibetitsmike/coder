@@ -163,7 +163,6 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 		},
 	});
 	const getFieldHelpers = getFormHelpers(form, saveError);
-	const showSave = canEdit && form.dirty;
 
 	return (
 		<AgentSettingLayout
@@ -177,7 +176,7 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 						: "You can view these limits but not change them."}
 				</>
 			}
-			showSave={showSave}
+			showSave={canEdit && form.dirty}
 			isSaving={isSaving}
 			isSavedVisible={isSavedVisible}
 			saveDisabled={isSaving || !form.isValid}
@@ -191,7 +190,7 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 			}
 		>
 			<div className="grid w-full gap-6 sm:grid-cols-2">
-				{limitConfigs.map(({ field, label, description, max }) => (
+				{limitConfigs.map(({ field, label, description }) => (
 					<FormField
 						key={field}
 						field={getFieldHelpers(field)}
@@ -205,16 +204,10 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 								</p>
 							</>
 						}
-						// Formik parses number inputs to numbers; the form keeps the
-						// raw text so empty and invalid values validate as typed.
-						onChange={(event) =>
-							void form.setFieldValue(field, event.currentTarget.value)
-						}
-						type="number"
+						// A text input keeps what was typed: a number input reports
+						// unparsable text as empty, which would silently unset the limit.
+						type="text"
 						inputMode="numeric"
-						min={1}
-						max={max}
-						step={1}
 						placeholder="Deployment value"
 						disabled={!canEdit || isSaving}
 					/>

@@ -67,6 +67,14 @@ export const LoadError: Story = {
 	},
 };
 
+export const RefetchError: Story = {
+	args: {
+		loadError: mockApiError({
+			message: "Failed to refresh the organization's subagent limits.",
+		}),
+	},
+};
+
 export const SaveError: Story = {
 	args: {
 		saveError: mockApiError({ message: "Invalid subagent limits." }),

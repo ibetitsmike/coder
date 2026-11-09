@@ -110,6 +110,7 @@ describe("ForkSubagentLimits", () => {
 
 	it.each([
 		{ label: "Max depth", value: "17" },
+		{ label: "Max depth", value: "abc" },
 		{ label: "Live subagents per chat family", value: "0" },
 	])("does not save $label set to $value", async ({ label, value }) => {
 		const { updateLimits } = renderLimits();
@@ -132,7 +133,7 @@ describe("ForkSubagentLimits", () => {
 		);
 		await user.type(input, "2");
 
-		expect(input).toHaveValue(null);
+		expect(input).toHaveValue("");
 	});
 
 	it("does not request the limits while fork-nested-subagents is off", () => {
