@@ -18,49 +18,51 @@ This page is fork-only: it isn't in `docs/manifest.json`.
 ## Setup
 
 1. Clone pstack in the workspace: `git clone https://github.com/cursor/plugins ~/pstack-src`.
+   The clone creates `~/pstack-src/pstack/`.
 2. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
+   `git -C ~/pstack-src rev-parse HEAD` then prints that commit.
    `<pstack>` is `~/pstack-src/pstack`.
 3. If a skill in `~/.coder/skills/` shares a name with one you copy next, move it out.
    The next step replaces a skill that has the same name.
 4. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
+   `ls ~/.coder/skills/*/SKILL.md | wc -l` then prints at least 61.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
 5. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
+   `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`.
 6. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
 7. Append the block below to `~/.coder/AGENTS.md`.
    Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it doesn't load this page, so the block carries the mappings that most skills need:
 
    ```markdown
    <!-- pstack-adapter -->
-   pstack skills use Cursor names. Before you follow one, read
-   ~/.coder/pstack-adapter.md with read_file and map each Cursor name with it.
+   pstack skills use Cursor names.
+   Before you follow one, read ~/.coder/pstack-adapter.md with read_file and map each Cursor name with it.
    read_file needs an absolute path, so replace ~ with your home directory.
-   - Task: spawn_agent, then wait_agent. readonly: true is type "explore"
-     only for narrow code lookup.
+   - Task: spawn_agent, then wait_agent.
+     readonly: true is type "explore" only for narrow code lookup.
    - AskQuestion: ask in plain text and end the turn.
    - Todo list: keep it in your reply.
    - Another pstack skill: read_file ~/.coder/skills/<name>/SKILL.md.
-   - Work in the repository the user names, or else in the Working Directory
-     of <workspace-context>. Write no files outside it unless the step names
-     the path.
+   - Work in the repository the user names, or else in the Working Directory of <workspace-context>.
+     Write no files outside it unless the step names the path.
    - SendToUser: put the message in your reply.
-   - Transcripts, recent chats, wake-ups: write
-     "Skipped in Coder Agents: <step>. <reason>." and go on. Never invent
-     the skipped result.
+   - Transcripts, recent chats, wake-ups: write "Skipped in Coder Agents: <step>. <reason>." and go on.
+     Never invent the skipped result.
    <!-- /pstack-adapter -->
    ```
-
-   Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
-   A model server that keeps only the first system message drops the block without an error.
-   Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
-   To check a model, ask a new chat to quote the `pstack-adapter` block without any tool call.
-   If it can't, switch to a model server that keeps every system message before you run pstack skills.
 
 8. Start a new chat.
    A chat pins `AGENTS.md` and the skills when it starts.
    A chat that was already open keeps its old copy until you select **Refresh context** in it.
-9. Send one plain message in the new chat.
-   A chat's first message can't run a skill: it fails with `Skill workspace/<name> is not available.`
-10. Pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
+9. Ask the chat to quote the `pstack-adapter` block without any tool call.
+   The chat replies with the block's lines.
+   This message is also the plain first message the chat needs, because a chat's first message can't run a skill.
+10. If the chat can't quote the block, switch to a model server that keeps every system message.
+    Then start again at step 8.
+    Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
+    A model server that keeps only the first system message drops the block without an error.
+    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
+11. Pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
 
 ## Tools
