@@ -71,11 +71,12 @@ func subagentRootChatID(chat database.Chat) uuid.UUID {
 	}
 }
 
-// forkCapacityLimiter admits a subagent only when its own limiter does and
-// the subagent stays within the deployment, organization and family
-// concurrency limits. The deployment limit counts every organization, and
-// the organization's own limit counts only its chats.
-// Root chats are never subject to these limits.
+// forkCapacityLimiter admits subagents under the deployment, organization
+// and family concurrency limits and the upstream subagent pool, counting
+// none of the candidate's ancestors. The deployment limit and the pool count
+// every organization, and the organization's own limit counts only its chats.
+// Root chats, and every chat with the experiment off, go to the inner
+// limiter.
 type forkCapacityLimiter struct {
 	AgentCapacityLimiter
 	server *Server
@@ -86,9 +87,8 @@ func (p *Server) forkCapacityLimiter(inner AgentCapacityLimiter) AgentCapacityLi
 }
 
 func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, chat database.Chat) (bool, error) {
-	admitted, err := l.AgentCapacityLimiter.Admit(ctx, store, chat)
-	if err != nil || !admitted || !chat.ParentChatID.Valid || !l.server.nestedSubagentsEnabled() {
-		return admitted, err
+	if !chat.ParentChatID.Valid || !l.server.nestedSubagentsEnabled() {
+		return l.AgentCapacityLimiter.Admit(ctx, store, chat)
 	}
 	//nolint:gocritic // Capacity accounting is chatd-internal state.
 	ctx = dbauthz.AsChatd(ctx)
@@ -101,11 +101,17 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	if err != nil {
 		return false, err
 	}
-	if limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
+	// Upstream's pool count includes the candidate's ancestors, so
+	// coordinators blocked in wait_agent could fill the pool and starve
+	// their own children forever. The pool cap is applied here instead,
+	// with the ancestors excluded.
+	maxConcurrent := l.server.chatLimits.Fork.MaxConcurrentSubagents
+	if pool, capped := l.AgentCapacityLimiter.Limits(); capped && (maxConcurrent == 0 || int(pool.Subagent) < maxConcurrent) {
+		maxConcurrent = int(pool.Subagent)
+	}
+	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
 		return true, nil
 	}
-	// The inner limiter skips the lock when its caps are unlocked. The
-	// transaction lock is reentrant when it took it.
 	if err := store.SetTransactionLockTimeout(ctx, admissionLockTimeout.Milliseconds()); err != nil {
 		return false, xerrors.Errorf("set lock timeout: %w", err)
 	}
@@ -121,12 +127,13 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	if err != nil {
 		return false, xerrors.Errorf("count active subagents: %w", err)
 	}
-	if overCapacityLimit(counts.ActiveCount, l.server.chatLimits.Fork.MaxConcurrentSubagents) ||
+	if overCapacityLimit(counts.ActiveCount, maxConcurrent) ||
 		overCapacityLimit(counts.ActiveOrganizationCount, limits.maxConcurrent) ||
 		overCapacityLimit(counts.ActiveFamilyCount, limits.maxConcurrentPerFamily) {
 		// A plain refusal makes the worker skip every other subagent in its
-		// batch as if the whole subagent pool were full, so one full family
-		// would starve the others. errSkipAcquire skips only this chat.
+		// batch as if the whole subagent pool were full, but each count
+		// excludes the candidate's own ancestors, so another subagent may
+		// still fit. errSkipAcquire skips only this chat.
 		return false, errSkipAcquire
 	}
 	return true, nil
