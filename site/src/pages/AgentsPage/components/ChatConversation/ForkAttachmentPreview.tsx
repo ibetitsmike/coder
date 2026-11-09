@@ -1,6 +1,7 @@
 // This file is fork code: it is the only place fork features add inline
-// attachment previews. Upstream's MessageBlocks.tsx wraps each file block in
-// ForkAttachmentPreview once, so an upstream sync of it stays clean.
+// attachment previews. Upstream's MessageBlocks.tsx wraps each file block, and
+// TurnAttachments.tsx each Attachments menu card, in ForkAttachmentPreview
+// once, so an upstream sync of them stays clean.
 
 import { DownloadIcon } from "lucide-react";
 import type React from "react";
