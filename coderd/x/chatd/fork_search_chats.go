@@ -26,7 +26,7 @@ const (
 )
 
 type searchChatsArgs struct {
-	Query   string `json:"query,omitempty" description:"Space-separated key:value filters, combined with AND. Keys: search (full-text search over titles, PR titles, PR numbers and message text; quote phrases), title, status (waiting, running, error, requires_action, interrupting, paused), archived (true or false, default false), has_unread, pr_status (draft, open, merged, closed, none), pr, repo, pr_title, diff_url, source (created_by_me, shared_with_me, or both comma-separated; default created_by_me). Bare words are rejected. Empty lists your recent chats."`
+	Query   string `json:"query,omitempty" description:"Space-separated key:value filters, combined with AND. Keys: search (full-text search over titles, PR titles, PR numbers and message text; quote phrases), title, status (waiting, running, error, requires_action, interrupting, paused), archived (true or false, default false), has_unread, pr_status (draft, open, merged, closed, none), pr, repo, pr_title, diff_url, source (created_by_me, shared_with_me, or both comma-separated; default created_by_me). search cannot be combined with title, pr_title or pr. Bare words are rejected. Empty lists your recent chats."`
 	AfterID string `json:"after_id,omitempty" description:"Return chats after this chat ID. Leave it empty for the first page, then use next_after_id of the previous page."`
 	Limit   int    `json:"limit,omitempty" description:"The most chats to return, 1 to 50. The default is 20."`
 }
@@ -51,10 +51,11 @@ type searchChatsEntry struct {
 func (p *Server) searchChatsTool(chat database.Chat) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		searchChatsToolName,
-		"Find chats your user can read, newest activity first, with the "+
-			"chat list search syntax. Returns top-level chats only; "+
-			"list_agents and read_chat_transcript reach their subagents. "+
-			"Continue with after_id set to next_after_id while has_more is true.",
+		"Find chats your user can read with the chat list search syntax, "+
+			"in the chat list order: pinned chats first, then the most "+
+			"recently updated. Returns top-level chats only, not subagent "+
+			"chats. Continue with after_id set to next_after_id while "+
+			"has_more is true.",
 		func(ctx context.Context, args searchChatsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			result, err := p.searchChats(ctx, chat, args)
 			if err != nil {
