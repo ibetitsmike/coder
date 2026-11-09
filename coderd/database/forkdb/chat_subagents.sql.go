@@ -9,10 +9,11 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const getChatSubagentByChatID = `-- name: GetChatSubagentByChatID :one
-SELECT chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id FROM chat_subagents WHERE chat_id = $1::uuid
+SELECT chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id, tool_policy FROM chat_subagents WHERE chat_id = $1::uuid
 `
 
 func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error) {
@@ -26,24 +27,26 @@ func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID)
 		&i.WorktreePath,
 		&i.Branch,
 		&i.WorkspaceID,
+		&i.ToolPolicy,
 	)
 	return i, err
 }
 
 const insertChatSubagent = `-- name: InsertChatSubagent :one
-INSERT INTO chat_subagents (chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id
+INSERT INTO chat_subagents (chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id, tool_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id, tool_policy
 `
 
 type InsertChatSubagentParams struct {
-	ChatID       uuid.UUID     `db:"chat_id" json:"chat_id"`
-	AgentType    string        `db:"agent_type" json:"agent_type"`
-	Depth        int32         `db:"depth" json:"depth"`
-	Isolation    string        `db:"isolation" json:"isolation"`
-	WorktreePath string        `db:"worktree_path" json:"worktree_path"`
-	Branch       string        `db:"branch" json:"branch"`
-	WorkspaceID  uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
+	ChatID       uuid.UUID             `db:"chat_id" json:"chat_id"`
+	AgentType    string                `db:"agent_type" json:"agent_type"`
+	Depth        int32                 `db:"depth" json:"depth"`
+	Isolation    string                `db:"isolation" json:"isolation"`
+	WorktreePath string                `db:"worktree_path" json:"worktree_path"`
+	Branch       string                `db:"branch" json:"branch"`
+	WorkspaceID  uuid.NullUUID         `db:"workspace_id" json:"workspace_id"`
+	ToolPolicy   pqtype.NullRawMessage `db:"tool_policy" json:"tool_policy"`
 }
 
 func (q *Queries) InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error) {
@@ -55,6 +58,7 @@ func (q *Queries) InsertChatSubagent(ctx context.Context, arg InsertChatSubagent
 		arg.WorktreePath,
 		arg.Branch,
 		arg.WorkspaceID,
+		arg.ToolPolicy,
 	)
 	var i ChatSubagent
 	err := row.Scan(
@@ -65,6 +69,7 @@ func (q *Queries) InsertChatSubagent(ctx context.Context, arg InsertChatSubagent
 		&i.WorktreePath,
 		&i.Branch,
 		&i.WorkspaceID,
+		&i.ToolPolicy,
 	)
 	return i, err
 }
