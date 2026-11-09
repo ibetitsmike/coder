@@ -1,36 +1,30 @@
 # pstack on Coder Agents
 
-This page maps pstack onto Coder Agents as this fork's `main` runs it. It tracks
-pstack v0.15.36 (`cursor/plugins` commit `c742dd61706f`, folder `pstack/`) and
-is modeled on pstack's Claude Code adapter, `docs/harness/claude-code.md`.
+This page maps pstack onto Coder Agents as this fork's `main` runs it.
+It tracks pstack v0.15.36 (`cursor/plugins` commit `c742dd61706f`, folder `pstack/`) and is modeled on pstack's Claude Code adapter, `docs/harness/claude-code.md`.
 
-pstack skills use Cursor names. In a Coder Agents chat, read this page once per
-chat, then map each Cursor name in a skill with the tables below. `<pstack>`
-means the folder that holds pstack's `skills/`, `agents/` and `docs/`. If a
-Cursor field has no row, drop it and say so. Never pass a field or value that a
-tool schema rejects.
+pstack skills use Cursor names.
+In a Coder Agents chat, read this page once per chat, then map each Cursor name in a skill with the tables below.
+`<pstack>` means the folder that holds pstack's `skills/`, `agents/` and `docs/`.
+If a Cursor field has no row, drop it and say so.
+Never pass a field or value that a tool schema rejects.
 
-Each row names what Coder Agents offers today and what to do instead. The last
-column names the pstack parity workstream (ibetitsmike/coder#4) whose merge
-removes the row. "Stays" means no workstream removes it. This page is fork-only:
-it is not in `docs/manifest.json`.
+Each row names what Coder Agents offers today and what to do instead.
+The last column names the pstack parity workstream (ibetitsmike/coder#4) whose merge removes the row.
+"Stays" means no workstream removes it.
+This page is fork-only: it is not in `docs/manifest.json`.
 
 ## Setup
 
-1. Clone pstack in the workspace and pin it:
-   `git clone https://github.com/cursor/plugins ~/pstack-src`, then
-   `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
+1. Clone pstack in the workspace and pin it: `git clone https://github.com/cursor/plugins ~/pstack-src`, then `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
    `<pstack>` is `~/pstack-src/pstack`.
 2. Copy the skills: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/.coder/skills/`.
-   The workspace agent reads `~/.coder/skills/<name>/SKILL.md`. A chat's
-   first message cannot run a skill: it fails with
-   `Skill workspace/<name> is not available.` Send one plain message first,
-   then pick the skill in the composer's `/` menu, which inserts
-   `/workspace/<name>`. A bare `/<name>` loads nothing.
-3. Copy this page to `~/.coder/pstack-adapter.md` and append the block below to
-   `~/.coder/AGENTS.md`. Coder Agents loads `~/.coder/AGENTS.md` into every
-   chat that uses the workspace, but it does not load this page, so the block
-   carries the mappings that most skills need:
+   The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
+   A chat's first message cannot run a skill: it fails with `Skill workspace/<name> is not available.`
+   Send one plain message first, then pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
+   A bare `/<name>` loads nothing.
+3. Copy this page to `~/.coder/pstack-adapter.md` and append the block below to `~/.coder/AGENTS.md`.
+   Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it does not load this page, so the block carries the mappings that most skills need:
 
    ```markdown
    <!-- pstack-adapter -->
@@ -50,16 +44,13 @@ it is not in `docs/manifest.json`.
    <!-- /pstack-adapter -->
    ```
 
-   Coder Agents sends `AGENTS.md` as its own system message, after the base
-   system prompt. A model server that keeps only the first system message
-   drops the block without an error. Ollama's `qwen3-coder` renderer (Ollama
-   0.34.4) does this; the oMLX Qwen3.8 chat template keeps every system
-   message. To check a model, ask a new chat to quote the `pstack-adapter`
-   block without any tool call.
+   Coder Agents sends `AGENTS.md` as its own system message, after the base system prompt.
+   A model server that keeps only the first system message drops the block without an error.
+   Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this; the oMLX Qwen3.8 chat template keeps every system message.
+   To check a model, ask a new chat to quote the `pstack-adapter` block without any tool call.
 
-   A chat pins `AGENTS.md` and the skills when it starts, so start a new chat
-   after this step. A chat that was already open keeps its old copy until you
-   select **Refresh context** in it.
+   A chat pins `AGENTS.md` and the skills when it starts, so start a new chat after this step.
+   A chat that was already open keeps its old copy until you select **Refresh context** in it.
 
 ## Tools
 
@@ -102,14 +93,12 @@ it is not in `docs/manifest.json`.
 
 Follow its steps with these changes:
 
-- Detect. The detected models are the configs that `list_subagent_models`
-  returns. Write each as `<model_config_id> <effort>`. The effort is the last
-  token, so the budget step works as written.
-- Defaults. Map each default slug with the Models rows.
-- Write. Put the comment lines, the `# budget` line and one line per role
-  between `<!-- pstack-models -->` and `<!-- /pstack-models -->` in
-  `~/.coder/AGENTS.md`. Replace only that block; the file holds other
-  instructions.
+- Detect: the detected models are the configs that `list_subagent_models` returns.
+  Write each as `<model_config_id> <effort>`.
+  The effort is the last token, so the budget step works as written.
+- Defaults: map each default slug with the Models rows.
+- Write: put the comment lines, the `# budget` line and one line per role between `<!-- pstack-models -->` and `<!-- /pstack-models -->` in `~/.coder/AGENTS.md`.
+  Replace only that block; the file holds other instructions.
 
 ## Paths
 
@@ -125,10 +114,9 @@ Follow its steps with these changes:
 
 ## Missing and Cursor-only features
 
-When a step needs a feature that Coder Agents lacks, put one line in your reply,
-`Skipped in Coder Agents: <step>. <reason>.`, then go on to the next step. Do not
-stop, ask, or retry. When a later step needs what the skipped step made, such as
-a URL or a key, leave a placeholder and name it in the line.
+When a step needs a feature that Coder Agents lacks, put one line in your reply, `Skipped in Coder Agents: <step>. <reason>.`, then go on to the next step.
+Do not stop, ask, or retry.
+When a later step needs what the skipped step made, such as a URL or a key, leave a placeholder and name it in the line.
 
 | Cursor                                                                                                   | Coder Agents today                                                 | Do this                                                                                                                                                      | Removed by            |
 |----------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
@@ -159,6 +147,7 @@ Checked against fork `main` at `b3a57df790`:
 - Working directory: `coderd/x/chatd/context_prompt.go:195-198`, `agent/agentproc/process.go:400-413`.
 - `explore` tools: `turn_environment.go:2100-2109`.
 - Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2161-2177`.
-- `find_tools`: `coderd/x/chatd/chattool/findtools.go:19`; only with MCP tools, `coderd/x/chatd/mcp_tool_search.go:121-136`.
+- `find_tools`: `coderd/x/chatd/chattool/findtools.go:19`; only with MCP tools, `coderd/x/chatd/mcp_tool_search.go:121-136`, which also omits it on a name collision.
+- Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77`, `:84-102`; else the parent's model, `subagent_operations.go:333-336`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
 - No todo, wake-up, transcript, notification or PR tool: no matches in `coderd/x/chatd` for `todo_write`, `schedule_wakeup`, `read_chat_transcript`, `notify_user` or `pull_request`.
