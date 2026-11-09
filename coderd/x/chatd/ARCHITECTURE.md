@@ -47,6 +47,8 @@ There is other data that is held in the database and is associated with a chat, 
 - project memory;
 - file links.
 
+<!-- TODO(fork-chat-todos): classify the chat todo list in `chatd.chat_todos` (fork-chat-todos experiment) as execution state or metadata. -->
+
 We call it **metadata**. The core state machine concerns itself with **execution state**. As a general guideline, a piece of data is execution state if the core state machine needs it to decide what the next state transition may be, or if it's directly modified by a state transition. For example, a queued message is part of the execution state because it impacts what the next action of the agent loop can be. If the agent loop finishes processing a user message and would otherwise stop, but there's a queued message, the agent loop will start processing the queued message instead. On the other hand, a chat's title does not impact the agent loop at all - it's just a label that helps the user identify the chat.
 
 Each title has a source: `fallback` for a title derived from the first prompt or the default title of a chat created without one, `generated` for a title written by automatic title generation, and `user` for a title the caller supplied. A title write applies only when the current source ranks the same as or lower than the incoming one, in the order `fallback`, `generated`, `user`. Title writes set `title_updated_at` and do not change `updated_at`; clients order title events by `title_updated_at`.
@@ -1185,6 +1187,7 @@ The generation goroutine supports:
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
+  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos and the list_agents todos field. -->
 - file links
 - workspace binding
 - plan mode
