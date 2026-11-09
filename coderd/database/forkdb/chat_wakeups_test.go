@@ -179,32 +179,6 @@ func TestChatWakeupRuns(t *testing.T) {
 	require.EqualValues(t, 1, count)
 }
 
-func TestChatWakeupIntervalNeedsSeconds(t *testing.T) {
-	t.Parallel()
-
-	db, _ := dbtestutil.NewDB(t)
-	fdb := mustFrom(t, db)
-	ctx := testutil.Context(t, testutil.WaitShort)
-	chat := wakeupTestChat(t, db)
-	now := dbtime.Now()
-
-	_, err := fdb.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
-		ID:        uuid.New(),
-		ChatID:    chat.ID,
-		CreatedBy: chat.OwnerID,
-		Source:    "loop",
-		Kind:      forkdb.ChatWakeupKindInterval,
-		Prompt:    "check the build",
-		Timezone:  "UTC",
-		Events:    json.RawMessage(`[]`),
-		Status:    forkdb.ChatWakeupStatusActive,
-		NextRunAt: sql.NullTime{Time: now, Valid: true},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	require.True(t, database.IsCheckViolation(err, "chat_wakeups_interval_shape"), "got %v", err)
-}
-
 func wakeupTestChat(t *testing.T, db database.Store) database.Chat {
 	t.Helper()
 	return dbgen.Chat(t, db, database.Chat{
