@@ -2259,7 +2259,7 @@ Maximum depth of nested subagent chats when the fork-nested-subagents experiment
 | YAML        | <code>chat.maxConcurrentSubagents</code>          |
 | Default     | <code>0</code>                                    |
 
-Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value for its own chats.
+Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value for its own chats.
 
 ### --chat-max-concurrent-subagents-per-family
 
@@ -2270,15 +2270,4 @@ Maximum number of running subagent chats in the deployment when the fork-nested-
 | YAML        | <code>chat.maxConcurrentSubagentsPerFamily</code>            |
 | Default     | <code>0</code>                                               |
 
-Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value.
-
-### --chat-max-live-subagents-per-family
-
-| Property    | Value                                                  |
-|-------------|--------------------------------------------------------|
-| Type        | <code>int</code>                                       |
-| Environment | <code>$CODER_CHAT_MAX_LIVE_SUBAGENTS_PER_FAMILY</code> |
-| YAML        | <code>chat.maxLiveSubagentsPerFamily</code>            |
-| Default     | <code>0</code>                                         |
-
-Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one, fails at the limit. 0 means no limit. An organization can set a lower value.
+Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value.

@@ -58,7 +58,7 @@ func pushRequestToProto(req *PushRequest) *agentproto.PushContextStateRequest {
 		Version:       req.Version,
 		AggregateHash: append([]byte(nil), req.AggregateHash[:]...),
 		Initial:       req.Initial,
-		SnapshotError: req.SnapshotError,
+		SnapshotError: truncatePushError(req.SnapshotError),
 		Resources:     make([]*agentproto.ContextResource, 0, len(req.Resources)),
 	}
 	for i := range req.Resources {
@@ -68,7 +68,7 @@ func pushRequestToProto(req *PushRequest) *agentproto.PushContextStateRequest {
 			ContentHash: append([]byte(nil), r.ContentHash[:]...),
 			Status:      resourceStatusToProto(r.Status),
 			SizeBytes:   r.SizeBytes,
-			Error:       r.Error,
+			Error:       truncatePushError(r.Error),
 		}
 		setResourceBody(entry, r)
 		if r.SourcePath != "" {

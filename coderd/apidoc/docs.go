@@ -4695,6 +4695,84 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/todos": {
+            "get": {
+                "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the chat todo list",
+                "operationId": "get-the-chat-todo-list",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatTodoList"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/todos/watch": {
+            "get": {
+                "description": "Streams the todo list of the chat over a websocket: the current\nlist first, then the latest list after writes to it. Writes close\ntogether can arrive as one list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Watch the chat todo list",
+                "operationId": "watch-the-chat-todo-list",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatTodoList"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/watch": {
             "get": {
                 "produces": [
@@ -24635,6 +24713,50 @@ const docTemplate = `{
                 "ChatTitleSourceUser"
             ]
         },
+        "codersdk.ChatTodo": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/codersdk.ChatTodoStatus"
+                }
+            }
+        },
+        "codersdk.ChatTodoList": {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatTodo"
+                    }
+                },
+                "version": {
+                    "description": "Version is the revision of Todos. It lets a watcher drop an event for\na version it has already sent.",
+                    "type": "integer"
+                }
+            }
+        },
+        "codersdk.ChatTodoStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "in_progress",
+                "done",
+                "cancelled"
+            ],
+            "x-enum-varnames": [
+                "ChatTodoStatusPending",
+                "ChatTodoStatusInProgress",
+                "ChatTodoStatusDone",
+                "ChatTodoStatusCancelled"
+            ]
+        },
         "codersdk.ChatUnsupportedProvider": {
             "type": "object",
             "properties": {
@@ -26949,6 +27071,7 @@ const docTemplate = `{
             "enum": [
                 "fork-chat-todos",
                 "fork-nested-subagents",
+                "fork-agent-definitions",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -26989,6 +27112,7 @@ const docTemplate = `{
             "x-enum-descriptions": [
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -27010,6 +27134,7 @@ const docTemplate = `{
             "x-enum-varnames": [
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -27370,11 +27495,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "max_concurrent_subagents": {
-                    "description": "MaxConcurrentSubagents is the maximum number of running subagent chats\nin the deployment. 0 means no limit.",
+                    "description": "MaxConcurrentSubagents is the maximum number of running subagent chats\nin the deployment, not counting a subagent's own ancestors. 0 means no\nlimit.",
                     "type": "integer"
                 },
                 "max_concurrent_subagents_per_family": {
-                    "description": "MaxConcurrentSubagentsPerFamily is the maximum number of running\nsubagent chats under one root chat. 0 means no limit.",
+                    "description": "MaxConcurrentSubagentsPerFamily is the maximum number of running\nsubagent chats under one root chat, not counting a subagent's own\nancestors. 0 means no limit.",
                     "type": "integer"
                 },
                 "max_live_subagents_per_family": {
@@ -27391,12 +27516,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "max_concurrent": {
-                    "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization.",
+                    "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization, not counting a subagent's own ancestors.",
                     "type": "integer",
                     "example": 8
                 },
                 "max_concurrent_per_family": {
-                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
+                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat, not counting a subagent's own ancestors.",
                     "type": "integer",
                     "example": 4
                 },

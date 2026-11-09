@@ -8,6 +8,7 @@ package chatd
 // upstream's behavior when the experiment is off.
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -159,16 +160,19 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 }
 
 // createSubagentChatWithID creates the child chat of parent. With nested
-// subagents enabled it also records the child's chat_subagents row in the
-// same transaction, rechecking the depth and live subagent limits there.
+// subagents enabled, or for a custom agentType, it also records the child's
+// chat_subagents row in the same transaction. Nested subagents also recheck
+// the depth and live subagent limits there.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
 	chatID uuid.UUID,
 	parent database.Chat,
+	agentType string,
 	input chatstate.CreateChatInput,
 ) (chatstate.CreateChatResult, error) {
-	if !p.nestedSubagentsEnabled() {
+	nested := p.nestedSubagentsEnabled()
+	if !nested && agentType == "" {
 		return chatstate.CreateChatWithID(ctx, p.db, publisher, chatID, input)
 	}
 	// CreateChatWithID publishes into this buffer when its nested
@@ -178,11 +182,20 @@ func (p *Server) createSubagentChatWithID(
 	defer buffer.Discard()
 	var result chatstate.CreateChatResult
 	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
-		limits, err := p.subagentLimits(ctx, ftx, parent.OrganizationID)
-		if err != nil {
-			return err
+		// Without nested subagents the parent is a root chat that was
+		// already validated, so only its depth is needed.
+		var depth int32
+		var limits forkSubagentLimits
+		var err error
+		if nested {
+			limits, err = p.subagentLimits(ctx, ftx, parent.OrganizationID)
+			if err != nil {
+				return err
+			}
+			depth, err = validateNestedSpawnParent(ctx, ftx, parent, limits.maxDepth)
+		} else {
+			depth, err = subagentDepth(ctx, ftx, parent)
 		}
-		depth, err := validateNestedSpawnParent(ctx, ftx, parent, limits.maxDepth)
 		if err != nil {
 			return err
 		}
@@ -208,7 +221,7 @@ func (p *Server) createSubagentChatWithID(
 		}
 		_, err = ftx.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
 			ChatID:    result.Chat.ID,
-			AgentType: subagentTypeFromChat(result.Chat),
+			AgentType: cmp.Or(agentType, subagentTypeFromChat(result.Chat)),
 			Depth:     depth + 1,
 			Isolation: "shared",
 		})
