@@ -196,7 +196,7 @@ func TestNestedSubagentOrganizationMaxDepth(t *testing.T) {
 		setOrgMaxDepth(t, f, 1)
 		ctx := chatdTestContext(t)
 
-		require.False(t, f.server.childGetsOrchestrationPrompt(ctx, f.root, database.NullChatMode{}))
+		require.False(t, f.server.childGetsOrchestrationPrompt(ctx, f.root, database.NullChatMode{}, nil))
 		tools, err := f.server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
 		require.NoError(t, err)
 		spawnTool := findToolByName(tools, spawnAgentToolName)
