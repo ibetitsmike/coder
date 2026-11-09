@@ -7,7 +7,7 @@ import type React from "react";
 import { useContext, useId } from "react";
 import type * as TypesGen from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
-import { getAttachmentHref } from "../../utils/chatAttachments";
+import { getChatFileURL } from "../../utils/chatAttachments";
 import { RecordingPreview } from "../ChatElements/tools/RecordingPreview";
 import { getAttachmentDownload } from "./AttachmentBlocks";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink";
@@ -33,19 +33,17 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	const experiments = useContext(DashboardContext)?.experiments ?? [];
 	const { hasExpired } = useFileProbes();
 	const nameId = useId();
-	const href = getAttachmentHref(block);
 
 	if (
 		!experiments.includes("fork-chat-todos") ||
 		block.media_type !== "video/mp4" ||
 		!block.file_id ||
-		hasExpired(block.file_id) ||
-		!href
+		hasExpired(block.file_id)
 	) {
 		return children;
 	}
 
-	const download = getAttachmentDownload(block, href);
+	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
 	return (
 		<figure
 			aria-labelledby={nameId}

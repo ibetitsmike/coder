@@ -12,13 +12,9 @@ import {
 import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
 import { renderComponent } from "#/testHelpers/renderHelpers";
 import { AttachmentBlock } from "./AttachmentBlocks";
-import { FileProbeProvider } from "./FileProbeContext";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 
-const renderPreview = (
-	experiments: Experiment[],
-	evictedFileIds: ReadonlySet<string> = new Set(),
-) =>
+const renderPreview = (experiments: Experiment[]) =>
 	renderComponent(
 		<DashboardContext.Provider
 			value={{
@@ -31,16 +27,14 @@ const renderPreview = (
 				canViewOrganizationSettings: false,
 			}}
 		>
-			<FileProbeProvider evictedFileIds={evictedFileIds}>
-				<ForkAttachmentPreview block={MockChatVideoFilePart}>
-					<AttachmentBlock
-						block={MockChatVideoFilePart}
-						onImageClick={vi.fn()}
-						onTextFileClick={vi.fn()}
-						framePreview
-					/>
-				</ForkAttachmentPreview>
-			</FileProbeProvider>
+			<ForkAttachmentPreview block={MockChatVideoFilePart}>
+				<AttachmentBlock
+					block={MockChatVideoFilePart}
+					onImageClick={vi.fn()}
+					onTextFileClick={vi.fn()}
+					framePreview
+				/>
+			</ForkAttachmentPreview>
 		</DashboardContext.Provider>,
 	);
 
@@ -65,13 +59,5 @@ describe("ForkAttachmentPreview", () => {
 				.getByRole("link", { name: "Download review.mp4" })
 				.getAttribute("href"),
 		).toBe("/api/v2/chats/files/chat-file-1");
-	});
-
-	it("offers no download link for an expired MP4", () => {
-		renderPreview(["fork-chat-todos"], new Set(["chat-file-1"]));
-
-		expect(
-			screen.queryByRole("link", { name: "Download review.mp4" }),
-		).toBeNull();
 	});
 });

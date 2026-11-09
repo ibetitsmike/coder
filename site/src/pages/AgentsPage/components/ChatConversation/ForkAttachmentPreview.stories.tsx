@@ -3,6 +3,7 @@ import { fn } from "storybook/test";
 import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { AttachmentBlock } from "./AttachmentBlocks";
+import { FileProbeProvider } from "./FileProbeContext";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 
 const meta: Meta<typeof ForkAttachmentPreview> = {
@@ -31,4 +32,17 @@ export const AttachedVideo: Story = {
 
 export const ExperimentOff: Story = {
 	parameters: { experiments: [] },
+};
+
+export const ExpiredVideo: Story = {
+	parameters: { experiments: ["fork-chat-todos"] },
+	decorators: [
+		(Story) => (
+			<FileProbeProvider
+				evictedFileIds={new Set([MockChatVideoFilePart.file_id ?? ""])}
+			>
+				<Story />
+			</FileProbeProvider>
+		),
+	],
 };
