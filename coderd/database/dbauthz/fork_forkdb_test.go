@@ -308,7 +308,7 @@ func TestForkQuerier(t *testing.T) {
 			def := organizationAgentDefinition(uuid.New(), "reviewer")
 			arg := forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
-			check.Args(arg).Asserts(def, policy.ActionRead).Returns(def)
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns(def)
 		},
 		// The NotAuthorized subtest gets no rows back: the post-filter drops
 		// every row that the actor cannot read.
@@ -316,21 +316,21 @@ func TestForkQuerier(t *testing.T) {
 			def := organizationAgentDefinition(uuid.New(), "reviewer")
 			row := forkdb.ListOrganizationAgentDefinitionMetadataRow{ID: def.ID, OrganizationID: def.OrganizationID, Name: def.Name, GroupAcl: def.GroupAcl, UserAcl: def.UserAcl}
 			fdb.EXPECT().ListOrganizationAgentDefinitionMetadata(gomock.Any(), def.OrganizationID).Return([]forkdb.ListOrganizationAgentDefinitionMetadataRow{row}, nil).AnyTimes()
-			check.Args(def.OrganizationID).Asserts(row, policy.ActionRead).Returns([]forkdb.ListOrganizationAgentDefinitionMetadataRow{row})
+			check.Args(def.OrganizationID).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns([]forkdb.ListOrganizationAgentDefinitionMetadataRow{row})
 		},
 		"UpdateOrganizationAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			def := organizationAgentDefinition(uuid.New(), "reviewer")
 			arg := forkdb.UpdateOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name, Enabled: sql.NullBool{Bool: false, Valid: true}}
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}).Return(def, nil).AnyTimes()
 			fdb.EXPECT().UpdateOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
-			check.Args(arg).Asserts(def, policy.ActionUpdate).Returns(def)
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionUpdate).Returns(def)
 		},
 		"DeleteOrganizationAgentDefinitionByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			def := organizationAgentDefinition(uuid.New(), "reviewer")
 			arg := forkdb.DeleteOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams(arg)).Return(def, nil).AnyTimes()
 			fdb.EXPECT().DeleteOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
-			check.Args(arg).Asserts(def, policy.ActionDelete).Returns(def)
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionDelete).Returns(def)
 		},
 	}
 
@@ -420,6 +420,8 @@ func runForkMethodCase(t *testing.T, methodName string, testCaseF forkMethodCase
 func userAgentDefinition(organizationID, userID uuid.UUID, name string) forkdb.AgentDefinition {
 	def := organizationAgentDefinition(organizationID, name)
 	def.UserID = uuid.NullUUID{UUID: userID, Valid: true}
+	def.GroupAcl = database.ChatACL{}
+	def.UserAcl = database.ChatACL{}
 	return def
 }
 
@@ -430,9 +432,15 @@ func organizationAgentDefinition(organizationID uuid.UUID, name string) forkdb.A
 		Name:           name,
 		Content:        "---\nname: " + name + "\n---\nReview the change.",
 		Enabled:        true,
-		GroupAcl:       database.ChatACL{},
-		UserAcl:        database.ChatACL{},
+		GroupAcl:       database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead}}},
+		UserAcl:        database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead, policy.ActionUpdate}}},
 	}
+}
+
+func organizationAgentDefinitionObject(def forkdb.AgentDefinition) rbac.Object {
+	return rbac.ResourceOrganizationSkill.WithID(def.ID).InOrg(def.OrganizationID).
+		WithGroupACL(def.GroupAcl.RBACACL()).
+		WithACLUserList(def.UserAcl.RBACACL())
 }
 
 // TestUserAgentDefinitionOrganizationMembership runs the user-tier queries

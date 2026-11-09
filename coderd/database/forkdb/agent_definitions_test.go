@@ -2,6 +2,7 @@ package forkdb_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -69,6 +70,32 @@ func TestAgentDefinitions(t *testing.T) {
 		require.True(t, database.IsCheckViolation(err, "agent_definitions_acl_only_on_organization_tier"), "ACL on a user-tier row: %v", err)
 	})
 
+	t.Run("PerOwnerLimit", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		user := dbgen.User(t, db, database.User{})
+		limitOrg := dbgen.Organization(t, db, database.Organization{})
+		insertOrg := func(name string) error {
+			_, err := fdb.InsertOrganizationAgentDefinition(ctx, forkdb.InsertOrganizationAgentDefinitionParams{OrganizationID: limitOrg.ID, Name: name, Content: "Review the change."})
+			return err
+		}
+
+		for i := range 100 {
+			_, err := insertUser(t, limitOrg.ID, user.ID, fmt.Sprintf("agent-%d", i))
+			require.NoError(t, err)
+		}
+		_, err := insertUser(t, limitOrg.ID, user.ID, "one-too-many")
+		require.True(t, database.IsCheckViolation(err, "agent_definitions_per_user_limit"), "user limit: %v", err)
+		_, err = insertUser(t, org.ID, user.ID, "one-too-many")
+		require.NoError(t, err, "the user limit counts per organization")
+
+		for i := range 100 {
+			require.NoError(t, insertOrg(fmt.Sprintf("agent-%d", i)), "user-tier rows do not count toward the organization limit")
+		}
+		err = insertOrg("one-too-many")
+		require.True(t, database.IsCheckViolation(err, "agent_definitions_per_organization_limit"), "organization limit: %v", err)
+	})
+
 	t.Run("UserDeleteCascades", func(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitShort)
@@ -93,6 +120,11 @@ func TestAgentDefinitions(t *testing.T) {
 		require.NoError(t, err)
 		inserted, err := insertUser(t, listOrg.ID, user.ID, "reviewer")
 		require.NoError(t, err)
+		_, err = insertUser(t, org.ID, user.ID, "reviewer")
+		require.NoError(t, err)
+		getOtherOrg := func() (forkdb.AgentDefinition, error) {
+			return fdb.GetUserAgentDefinitionByName(ctx, forkdb.GetUserAgentDefinitionByNameParams{OrganizationID: org.ID, UserID: user.ID, Name: "reviewer"})
+		}
 
 		updated, err := fdb.UpdateUserAgentDefinitionByName(ctx, forkdb.UpdateUserAgentDefinitionByNameParams{
 			OrganizationID: listOrg.ID,
@@ -103,6 +135,9 @@ func TestAgentDefinitions(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "Review it again.", updated.Content)
 		require.True(t, updated.UpdatedAt.After(inserted.UpdatedAt), "update moves updated_at")
+		other, err := getOtherOrg()
+		require.NoError(t, err)
+		require.Equal(t, "Review the change.", other.Content, "the update stays in its organization")
 
 		rows, err := fdb.ListUserAgentDefinitionMetadata(ctx, forkdb.ListUserAgentDefinitionMetadataParams{OrganizationID: listOrg.ID, UserID: user.ID})
 		require.NoError(t, err)
@@ -116,5 +151,14 @@ func TestAgentDefinitions(t *testing.T) {
 		orgRows, err := fdb.ListOrganizationAgentDefinitionMetadata(ctx, listOrg.ID)
 		require.NoError(t, err)
 		require.Empty(t, orgRows)
+		_, err = fdb.UpdateOrganizationAgentDefinitionByName(ctx, forkdb.UpdateOrganizationAgentDefinitionByNameParams{OrganizationID: listOrg.ID, Name: "reviewer", Content: sql.NullString{String: "Overwritten.", Valid: true}})
+		require.ErrorIs(t, err, sql.ErrNoRows)
+		_, err = fdb.DeleteOrganizationAgentDefinitionByName(ctx, forkdb.DeleteOrganizationAgentDefinitionByNameParams{OrganizationID: listOrg.ID, Name: "reviewer"})
+		require.ErrorIs(t, err, sql.ErrNoRows)
+
+		_, err = fdb.DeleteUserAgentDefinitionByName(ctx, forkdb.DeleteUserAgentDefinitionByNameParams{OrganizationID: listOrg.ID, UserID: user.ID, Name: "reviewer"})
+		require.NoError(t, err)
+		_, err = getOtherOrg()
+		require.NoError(t, err, "the delete stays in its organization")
 	})
 }
