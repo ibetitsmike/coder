@@ -10402,10 +10402,10 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ```json
 {
-  "max_concurrent": 0,
-  "max_concurrent_per_family": 0,
-  "max_depth": 0,
-  "max_live_per_family": 0
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
 }
 ```
 
