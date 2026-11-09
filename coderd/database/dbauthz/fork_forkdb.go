@@ -80,6 +80,13 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
+		return forkdb.ChatOrganizationSubagentLimit{}, err
+	}
+	return f.db.GetChatOrganizationSubagentLimits(ctx, organizationID)
+}
+
 // GetChatSubagentByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
@@ -231,6 +238,13 @@ func (f *forkQuerier) UpdatePluginLastError(ctx context.Context, arg forkdb.Upda
 		return err
 	}
 	return f.db.UpdatePluginLastError(ctx, arg)
+}
+
+func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChatModelConfig.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.ChatOrganizationSubagentLimit{}, err
+	}
+	return f.db.UpsertChatOrganizationSubagentLimits(ctx, arg)
 }
 
 // UpsertChatTodos authorizes as an update of the owning chat, like
