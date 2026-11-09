@@ -197,7 +197,11 @@ After either error, call `list_agents` to see which of your children are live.
 If a child is `running` or `interrupting`, call `wait_agent` on it, and retry when it finishes.
 A `requires_action` child waits for a tool result, so `wait_agent` returns for it at once.
 If you don't need its result, call `interrupt_agent` on it, then `wait_agent`.
-If only `paused` children remain, tell the user that the family is at its live limit.
+`list_agents` shows only your direct children, so a child that finished can still have live descendants that hold the limit.
+If none of your children is live, call `interrupt_agent` on a finished child that spawned workers.
+That interrupts its `running`, `interrupting`, and `requires_action` descendants.
+They still count until they stop, so if the retry fails, run `sleep 10` with `execute` and retry.
+If only `paused` subagents remain, tell the user that the family is at its live limit.
 
 These three flags default to 0, which means no limit.
 An organization's `max_concurrent`, `max_concurrent_per_family`, and `max_live_per_family` subagent limits apply too, and the lower of the deployment and organization values wins.
@@ -299,7 +303,7 @@ Checked against fork `main` at `e155b422a2`:
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, `coderd/x/chatd/worker.go:274-282`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-61`.
   Concurrency limits without the ancestors, `fork_capacity.go:91-142`.
-  `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
+  `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`, or interrupts the active descendants of a finished child, `:160-162`, `coderd/x/chatd/fork_cascade.go:32-39`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
   Stored definitions: user routes only, `coderd/fork_agent_definitions.go:32-170`, and custom types still read only from the chat's pinned context, `coderd/x/chatd/fork_agent_definitions.go:61-66`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
