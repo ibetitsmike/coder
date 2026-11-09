@@ -170,57 +170,65 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 	tests := []struct {
 		name string
 		// setup prepares repo and root and returns the request.
-		setup      func(t *testing.T, repo, root string) workspacesdk.ForkCreateWorktreeRequest
-		wantStatus int
+		setup       func(t *testing.T, repo, root string) workspacesdk.ForkCreateWorktreeRequest
+		wantStatus  int
+		wantMessage string
 	}{
 		{
 			name: "RelativeRepoPath",
 			setup: func(_ *testing.T, _, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: "repo", Name: "child", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "must be an absolute path",
 		},
 		{
 			name: "NotAGitRepo",
 			setup: func(t *testing.T, _, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: testutil.TempDirResolved(t), Name: "child", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not inside a git work tree",
 		},
 		{
 			name: "NameTraversal",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "../x", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "must be a single path segment",
 		},
 		{
 			name: "NameWithSlash",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "a/b", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "must be a single path segment",
 		},
 		{
 			name: "NameLooksLikeOption",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "-x", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "must be a single path segment",
 		},
 		{
 			name: "InvalidBranch",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "bad..name"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not a valid branch name",
 		},
 		{
 			name: "BranchLooksLikeOption",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "-x"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "branch \"-x\" must be non-empty and must not start with",
 		},
 		{
 			name: "ExistingBranch",
@@ -228,7 +236,8 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 				wtGit(t, repo, "branch", "taken")
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "taken"}
 			},
-			wantStatus: http.StatusConflict,
+			wantStatus:  http.StatusConflict,
+			wantMessage: "branch \"taken\" already exists",
 		},
 		{
 			name: "ExistingTargetDir",
@@ -236,21 +245,24 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 				require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.Base(repo), "child"), 0o755))
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"}
 			},
-			wantStatus: http.StatusConflict,
+			wantStatus:  http.StatusConflict,
+			wantMessage: "worktree path",
 		},
 		{
 			name: "UnresolvableBaseRef",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature", BaseRef: "nope"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "does not resolve to a commit",
 		},
 		{
 			name: "BaseRefLooksLikeOption",
 			setup: func(_ *testing.T, repo, _ string) workspacesdk.ForkCreateWorktreeRequest {
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature", BaseRef: "-x"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "base_ref \"-x\" must not start with",
 		},
 		{
 			name: "RepoDirSymlinkEscapesRoot",
@@ -259,7 +271,8 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 				require.NoError(t, os.Symlink(testutil.TempDirResolved(t), filepath.Join(root, filepath.Base(repo))))
 				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"}
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "worktree parent",
 		},
 	}
 	for _, tt := range tests {
@@ -271,7 +284,8 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 
 			rec := doWorktreeRequest(t, h, http.MethodPost, req)
 
-			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Contains(t, wtErrorMessage(t, rec), tt.wantMessage)
 			assert.Equal(t, 1, wtWorktreeCount(t, repo))
 		})
 	}
@@ -308,6 +322,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 		setup       func(t *testing.T, repo, root string, wt workspacesdk.ForkWorktree) string
 		wantStatus  int
 		wantMessage string
+		// keepBranch means a 204 must leave branch "feature" in place.
+		keepBranch bool
 	}{
 		{
 			name: "Clean",
@@ -333,6 +349,15 @@ func TestForkWorktreeDelete(t *testing.T) {
 				return wt.Path
 			},
 			wantStatus: http.StatusNoContent,
+		},
+		{
+			name: "DetachedClean",
+			setup: func(t *testing.T, _, _ string, wt workspacesdk.ForkWorktree) string {
+				wtGit(t, wt.Path, "checkout", "--detach")
+				return wt.Path
+			},
+			wantStatus: http.StatusNoContent,
+			keepBranch: true,
 		},
 		{
 			name: "Dirty",
@@ -364,20 +389,32 @@ func TestForkWorktreeDelete(t *testing.T) {
 			wantMessage: "has 1 commits that are not on any branch or remote",
 		},
 		{
-			name: "OutsideRoot",
-			setup: func(t *testing.T, repo, _ string, _ workspacesdk.ForkWorktree) string {
-				outside := filepath.Join(testutil.TempDirResolved(t), "outside")
+			name: "RelativePath",
+			setup: func(t *testing.T, _, root string, wt workspacesdk.ForkWorktree) string {
+				rel, err := filepath.Rel(root, wt.Path)
+				require.NoError(t, err)
+				return rel
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "must be an absolute path",
+		},
+		{
+			name: "BesideRoot",
+			setup: func(t *testing.T, repo, root string, _ workspacesdk.ForkWorktree) string {
+				outside := filepath.Join(filepath.Dir(root), "outside")
 				wtGit(t, repo, "worktree", "add", "-b", "outside", outside)
 				return outside
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not a worktree directory under",
 		},
 		{
 			name: "Missing",
 			setup: func(_ *testing.T, _, _ string, wt workspacesdk.ForkWorktree) string {
 				return filepath.Join(filepath.Dir(wt.Path), "missing")
 			},
-			wantStatus: http.StatusNotFound,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "does not exist",
 		},
 		{
 			name: "DirectlyUnderRoot",
@@ -386,7 +423,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 				wtGit(t, repo, "worktree", "add", "-b", "shallow", shallow)
 				return shallow
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not a worktree directory under",
 		},
 		{
 			name: "NestedBelowName",
@@ -395,7 +433,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 				wtGit(t, repo, "worktree", "add", "-b", "deep", deep)
 				return deep
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not a worktree directory under",
 		},
 		{
 			name: "SymlinkEscapesRoot",
@@ -406,7 +445,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 				require.NoError(t, os.Symlink(outside, link))
 				return link
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is not a worktree directory under",
 		},
 		{
 			name: "MainWorkingTree",
@@ -416,7 +456,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 				wtGit(t, mainTree, "init")
 				return mainTree
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "is a main working tree, not a linked worktree",
 		},
 	}
 	for _, tt := range tests {
@@ -436,7 +477,11 @@ func TestForkWorktreeDelete(t *testing.T) {
 				assert.NoDirExists(t, wt.Path)
 				assert.Equal(t, before-1, wtWorktreeCount(t, repo))
 				branches := wtGit(t, repo, "branch", "--list", "feature")
-				assert.Empty(t, branches, "branch feature must be deleted")
+				if tt.keepBranch {
+					assert.NotEmpty(t, branches, "branch feature must be kept")
+				} else {
+					assert.Empty(t, branches, "branch feature must be deleted")
+				}
 				return
 			}
 			assert.Contains(t, wtErrorMessage(t, rec), tt.wantMessage)
