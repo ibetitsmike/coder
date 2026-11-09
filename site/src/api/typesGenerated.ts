@@ -6274,6 +6274,18 @@ export interface ForkChatConfig {
 	 * depth 0.
 	 */
 	readonly max_subagent_depth: number;
+	/**
+	 * MaxConcurrentSubagents is the maximum number of running subagent chats
+	 * in the deployment, not counting a subagent's own ancestors. 0 means no
+	 * limit.
+	 */
+	readonly max_concurrent_subagents: number;
+	/**
+	 * MaxConcurrentSubagentsPerFamily is the maximum number of running
+	 * subagent chats under one root chat, not counting a subagent's own
+	 * ancestors. 0 means no limit.
+	 */
+	readonly max_concurrent_subagents_per_family: number;
 }
 
 // From codersdk/fork_subagent_limits.go
@@ -6281,8 +6293,7 @@ export interface ForkChatConfig {
  * ForkOrganizationSubagentLimits are the subagent limits of an organization.
  * A nil limit, which is omitted from JSON, uses the deployment value, and a
  * set limit can only lower it.
- * chatd enforces MaxDepth; the capacity limits are stored but not enforced
- * yet.
+ * MaxLivePerFamily is stored but not enforced yet.
  */
 export interface ForkOrganizationSubagentLimits {
 	/**
@@ -6292,12 +6303,12 @@ export interface ForkOrganizationSubagentLimits {
 	readonly max_depth?: number;
 	/**
 	 * MaxConcurrent is the maximum number of running subagent chats in the
-	 * organization.
+	 * organization, not counting a subagent's own ancestors.
 	 */
 	readonly max_concurrent?: number;
 	/**
 	 * MaxConcurrentPerFamily is the maximum number of running subagent chats
-	 * under one root chat.
+	 * under one root chat, not counting a subagent's own ancestors.
 	 */
 	readonly max_concurrent_per_family?: number;
 	/**

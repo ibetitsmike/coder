@@ -23,7 +23,6 @@ import (
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
@@ -49,25 +48,6 @@ func subagentDepth(ctx context.Context, fdb forkdb.Store, chat database.Chat) (i
 		return 0, xerrors.Errorf("get subagent depth of chat %s: %w", chat.ID, err)
 	}
 	return row.Depth, nil
-}
-
-// maxSubagentDepth returns the maximum subagent depth of chats in the
-// organization: the deployment value, lowered by the organization's max_depth
-// when it sets one.
-func (p *Server) maxSubagentDepth(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID) (int, error) {
-	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
-	//nolint:gocritic // Chat creators cannot read organization config, so chatd reads it.
-	limits, err := fdb.GetChatOrganizationSubagentLimits(dbauthz.AsChatd(ctx), organizationID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return maxDepth, nil
-	}
-	if err != nil {
-		return 0, xerrors.Errorf("get subagent limits of organization %s: %w", organizationID, err)
-	}
-	if limits.MaxDepth.Valid {
-		maxDepth = min(maxDepth, int(limits.MaxDepth.Int32))
-	}
-	return maxDepth, nil
 }
 
 // validateNestedSpawnParent returns the depth of parent, or an error when
@@ -97,11 +77,11 @@ func (p *Server) forkValidateSpawnParent(ctx context.Context, parent database.Ch
 	if err != nil {
 		return xerrors.Errorf("fork queries: %w", err)
 	}
-	maxDepth, err := p.maxSubagentDepth(ctx, fdb, parent.OrganizationID)
+	limits, err := p.subagentLimits(ctx, fdb, parent.OrganizationID)
 	if err != nil {
 		return err
 	}
-	_, err = validateNestedSpawnParent(ctx, fdb, parent, maxDepth)
+	_, err = validateNestedSpawnParent(ctx, fdb, parent, limits.maxDepth)
 	return err
 }
 
@@ -141,12 +121,12 @@ func (p *Server) createSubagentChatWithID(
 		var depth int32
 		var err error
 		if nested {
-			var maxDepth int
-			maxDepth, err = p.maxSubagentDepth(ctx, ftx, parent.OrganizationID)
+			var limits forkSubagentLimits
+			limits, err = p.subagentLimits(ctx, ftx, parent.OrganizationID)
 			if err != nil {
 				return err
 			}
-			depth, err = validateNestedSpawnParent(ctx, ftx, parent, maxDepth)
+			depth, err = validateNestedSpawnParent(ctx, ftx, parent, limits.maxDepth)
 		} else {
 			depth, err = subagentDepth(ctx, ftx, parent)
 		}
@@ -194,11 +174,11 @@ func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool
 	if err != nil {
 		return false, err
 	}
-	maxDepth, err := p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
+	limits, err := p.subagentLimits(ctx, fdb, chat.OrganizationID)
 	if err != nil {
 		return false, err
 	}
-	return int(depth)+1 <= maxDepth, nil
+	return int(depth)+1 <= limits.maxDepth, nil
 }
 
 func subagentModeCanSpawn(mode database.NullChatMode) bool {
@@ -287,13 +267,13 @@ func (p *Server) childGetsOrchestrationPrompt(
 			slog.F("chat_id", parent.ID), slog.Error(err))
 		return false
 	}
-	maxDepth, err := p.maxSubagentDepth(ctx, fdb, parent.OrganizationID)
+	limits, err := p.subagentLimits(ctx, fdb, parent.OrganizationID)
 	if err != nil {
 		p.logger.Warn(ctx, "get maximum subagent depth for orchestration prompt",
 			slog.F("chat_id", parent.ID), slog.Error(err))
 		return false
 	}
-	return int(depth)+2 <= maxDepth
+	return int(depth)+2 <= limits.maxDepth
 }
 
 const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own subagents; its tools depend on its type and mode. "
@@ -309,7 +289,9 @@ func (p *Server) forkSpawnAgentDescription(ctx context.Context, chat database.Ch
 	maxDepth := p.chatLimits.Fork.MaxSubagentDepth
 	fdb, err := forkdb.From(p.db)
 	if err == nil {
-		maxDepth, err = p.maxSubagentDepth(ctx, fdb, chat.OrganizationID)
+		var limits forkSubagentLimits
+		limits, err = p.subagentLimits(ctx, fdb, chat.OrganizationID)
+		maxDepth = limits.maxDepth
 	}
 	if err != nil {
 		p.logger.Warn(ctx, "get maximum subagent depth for spawn_agent description",

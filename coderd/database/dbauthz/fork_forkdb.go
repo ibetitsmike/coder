@@ -48,6 +48,13 @@ func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.Cons
 	return f.db.ConsumePluginLinkCode(ctx, arg)
 }
 
+func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return forkdb.CountActiveSubagentsForCapacityRow{}, err
+	}
+	return f.db.CountActiveSubagentsForCapacity(ctx, arg)
+}
+
 func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return err

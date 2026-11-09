@@ -32,3 +32,28 @@ func TestForkChatMaxSubagentDepthOption(t *testing.T) {
 	require.EqualValues(t, 3, values.AI.Chat.Fork.MaxSubagentDepth.Value())
 	require.NoError(t, values.Validate())
 }
+
+func TestForkChatSubagentCapacityOptions(t *testing.T) {
+	t.Parallel()
+
+	for _, flag := range []string{
+		"chat-max-concurrent-subagents",
+		"chat-max-concurrent-subagents-per-family",
+	} {
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+			var values codersdk.DeploymentValues
+			opts := values.Options()
+			require.NoError(t, opts.SetDefaults())
+			opt := opts.ByFlag(flag)
+			require.NotNil(t, opt)
+			require.Equal(t, "0", opt.Value.String(), "the default is no limit")
+			require.NoError(t, values.Validate())
+
+			require.NoError(t, opt.Value.Set("-1"))
+			require.ErrorContains(t, values.Validate(), "--"+flag+" (-1) must be 0 or greater")
+			require.NoError(t, opt.Value.Set("3"))
+			require.NoError(t, values.Validate())
+		})
+	}
+}

@@ -72,6 +72,21 @@ func (mr *MockStoreMockRecorder) ConsumePluginLinkCode(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumePluginLinkCode", reflect.TypeOf((*MockStore)(nil).ConsumePluginLinkCode), ctx, arg)
 }
 
+// CountActiveSubagentsForCapacity mocks base method.
+func (m *MockStore) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountActiveSubagentsForCapacity", ctx, arg)
+	ret0, _ := ret[0].(forkdb.CountActiveSubagentsForCapacityRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountActiveSubagentsForCapacity indicates an expected call of CountActiveSubagentsForCapacity.
+func (mr *MockStoreMockRecorder) CountActiveSubagentsForCapacity(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountActiveSubagentsForCapacity", reflect.TypeOf((*MockStore)(nil).CountActiveSubagentsForCapacity), ctx, arg)
+}
+
 // DeleteExpiredPluginLinkCodes mocks base method.
 func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	m.ctrl.T.Helper()

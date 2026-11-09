@@ -11053,34 +11053,78 @@ WITH candidate_partitions AS (
     UNION ALL
     SELECT false, 'running'::chat_status, 2, 1
 ),
+unowned_chats AS NOT MATERIALIZED (
+    SELECT chats.id, chats.status, chats.parent_chat_id, chats.root_chat_id, chats.organization_id, chats.updated_at
+    FROM chats
+    WHERE chats.archived = false
+      AND (
+          chats.worker_id IS NULL
+          OR chats.runner_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM chat_heartbeats current_lease
+              WHERE current_lease.chat_id = chats.id
+                AND current_lease.runner_id = chats.runner_id
+                AND current_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
+          )
+      )
+),
 candidates AS (
     SELECT
         candidate.id,
         candidate_partitions.pool_priority,
         ROW_NUMBER() OVER (
             PARTITION BY candidate_partitions.is_root
-            ORDER BY candidate_partitions.status_priority ASC, candidate.updated_at ASC, candidate.id ASC
+            ORDER BY candidate.fair_position ASC, candidate_partitions.status_priority ASC, candidate.updated_at ASC, candidate.id ASC
         ) AS pool_position
     FROM candidate_partitions
     CROSS JOIN LATERAL (
-        SELECT chats.id, chats.updated_at
-        FROM chats
-        WHERE (chats.parent_chat_id IS NULL) = candidate_partitions.is_root
-          AND chats.status = candidate_partitions.status
-          AND chats.archived = false
-          AND (
-              chats.worker_id IS NULL
-              OR chats.runner_id IS NULL
-              OR NOT EXISTS (
-                  SELECT 1
-                  FROM chat_heartbeats current_lease
-                  WHERE current_lease.chat_id = chats.id
-                    AND current_lease.runner_id = chats.runner_id
-                    AND current_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
-              )
-          )
-        ORDER BY chats.updated_at ASC, chats.id ASC
-        LIMIT $1::int
+        (
+            SELECT unowned_chats.id, unowned_chats.updated_at, 1::bigint AS fair_position
+            FROM unowned_chats
+            WHERE (unowned_chats.parent_chat_id IS NULL) = candidate_partitions.is_root
+              AND unowned_chats.status = candidate_partitions.status
+              AND (candidate_partitions.is_root OR NOT $3::boolean)
+            ORDER BY unowned_chats.updated_at ASC, unowned_chats.id ASC
+            LIMIT $1::int
+        )
+        UNION ALL
+        (
+            SELECT
+                family_ranked.id,
+                family_ranked.updated_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY family_ranked.organization_id
+                    ORDER BY family_ranked.family_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
+                ) AS fair_position
+            FROM (
+                SELECT
+                    unowned_chats.id,
+                    unowned_chats.updated_at,
+                    unowned_chats.organization_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(unowned_chats.root_chat_id, unowned_chats.parent_chat_id)
+                        ORDER BY EXISTS (
+                            SELECT 1
+                            FROM chats parent
+                            JOIN chat_heartbeats parent_lease
+                                ON parent_lease.chat_id = parent.id
+                                AND parent_lease.runner_id = parent.runner_id
+                            WHERE parent.id = unowned_chats.parent_chat_id
+                              AND parent.parent_chat_id IS NOT NULL
+                              AND parent.worker_id IS NOT NULL
+                              AND parent_lease.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
+                        ) DESC, unowned_chats.updated_at ASC, unowned_chats.id ASC
+                    ) AS family_position
+                FROM unowned_chats
+                WHERE unowned_chats.parent_chat_id IS NOT NULL
+                  AND unowned_chats.status = candidate_partitions.status
+                  AND NOT candidate_partitions.is_root
+                  AND $3::boolean
+            ) family_ranked
+            ORDER BY fair_position ASC, family_ranked.updated_at ASC, family_ranked.id ASC
+            LIMIT $1::int
+        )
     ) candidate
 )
 SELECT
@@ -11097,8 +11141,9 @@ LIMIT $1::int
 `
 
 type GetChatWorkerAcquisitionCandidatesParams struct {
-	LimitCount   int32 `db:"limit_count" json:"limit_count"`
-	StaleSeconds int32 `db:"stale_seconds" json:"stale_seconds"`
+	LimitCount          int32 `db:"limit_count" json:"limit_count"`
+	StaleSeconds        int32 `db:"stale_seconds" json:"stale_seconds"`
+	InterleaveSubagents bool  `db:"interleave_subagents" json:"interleave_subagents"`
 }
 
 type GetChatWorkerAcquisitionCandidatesRow struct {
@@ -11113,8 +11158,17 @@ type GetChatWorkerAcquisitionCandidatesRow struct {
 // before new generations start. Pools are interleaved by that per-pool rank, so
 // a saturated pool's refused high-priority rows cannot crowd the other pool's
 // candidates out of the limit.
+//
+// With interleave_subagents set, subagents interleave organizations, then the
+// families within each, then status and age, so the refused rows of a capped
+// organization or family cannot crowd the others out either. Within a family,
+// children of a subagent that holds a slot come first: they exclude that
+// ancestor from their family count, so they may fit where their queued
+// siblings cannot, and the ancestor may be waiting for them. That ranks every
+// unowned subagent of a status, so roots, and subagents without it, keep the
+// indexed age order.
 func (q *sqlQuerier) GetChatWorkerAcquisitionCandidates(ctx context.Context, arg GetChatWorkerAcquisitionCandidatesParams) ([]GetChatWorkerAcquisitionCandidatesRow, error) {
-	rows, err := q.db.QueryContext(ctx, getChatWorkerAcquisitionCandidates, arg.LimitCount, arg.StaleSeconds)
+	rows, err := q.db.QueryContext(ctx, getChatWorkerAcquisitionCandidates, arg.LimitCount, arg.StaleSeconds, arg.InterleaveSubagents)
 	if err != nil {
 		return nil, err
 	}
