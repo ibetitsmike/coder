@@ -13,7 +13,7 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-func TestForkOrganizationSubagentLimits(t *testing.T) {
+func TestForkChatOrganizationSubagentLimits(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Enabled", func(t *testing.T) {
