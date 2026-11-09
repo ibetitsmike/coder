@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
+import type { ChatTodoList } from "#/api/typesGenerated";
 import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { Tool } from "./Tool";
@@ -33,6 +34,8 @@ const meta: Meta<typeof Tool> = {
 export default meta;
 type Story = StoryObj<typeof Tool>;
 
+const mockEmptyChatTodoList: ChatTodoList = { ...MockChatTodoList, todos: [] };
+
 const expand: Story["play"] = async ({ canvasElement }) => {
 	await userEvent.click(
 		within(canvasElement).getByRole("button", { name: /todo/i }),
@@ -55,7 +58,7 @@ export const Updating: Story = {
 };
 
 export const Cleared: Story = {
-	args: { args: { todos: [] }, result: { todos: [], version: 4 } },
+	args: { args: { todos: [] }, result: mockEmptyChatTodoList },
 };
 
 export const Read: Story = {
@@ -68,7 +71,7 @@ export const ReadRunning: Story = {
 };
 
 export const ReadEmpty: Story = {
-	args: { name: "todo_read", args: {}, result: { todos: [], version: 0 } },
+	args: { name: "todo_read", args: {}, result: mockEmptyChatTodoList },
 };
 
 export const Failed: Story = {

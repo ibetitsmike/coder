@@ -179,7 +179,7 @@ type ChatTodoChecklistProps = {
 	className?: string;
 };
 
-/** Renders todos in their given order; className sets the outer spacing. */
+/** Renders todos in their given order; className merges onto the list. */
 export const ChatTodoChecklist: React.FC<ChatTodoChecklistProps> = ({
 	todos,
 	className,

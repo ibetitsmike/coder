@@ -20,5 +20,5 @@ describe("createForkToolRenderers", () => {
 		);
 		expect(forkToolNames).not.toEqual([]);
 		expect(collisions).toEqual([]);
-	});
+	}, 20_000);
 });

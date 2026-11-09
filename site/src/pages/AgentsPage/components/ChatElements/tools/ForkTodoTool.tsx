@@ -34,6 +34,21 @@ const parseChatTodo = (item: unknown): ChatTodo | null => {
 	return { id: record.id, content: record.content, status: record.status };
 };
 
+const actionLabels = {
+	write: {
+		running: "Updating todos…",
+		failed: "Failed to update todos",
+		empty: "Cleared todos",
+		done: "Updated todos",
+	},
+	read: {
+		running: "Reading todos…",
+		failed: "Failed to read todos",
+		empty: "No todos",
+		done: "Read todos",
+	},
+};
+
 type ForkTodoToolProps = {
 	action: "write" | "read";
 	todos: readonly ChatTodo[];
@@ -42,10 +57,6 @@ type ForkTodoToolProps = {
 	errorMessage?: string;
 };
 
-/**
- * Renders a todo_write or todo_read call as the todo checklist, collapsed
- * behind a header with the done count.
- */
 const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
 	action,
 	todos,
@@ -53,19 +64,18 @@ const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
 	isError,
 	errorMessage,
 }) => {
-	const failureLabel =
-		action === "write" ? "Failed to update todos" : "Failed to read todos";
+	const labels = actionLabels[action];
 	let label: string;
 	if (status === "running") {
-		label = action === "write" ? "Updating todos…" : "Reading todos…";
+		label = labels.running;
 	} else if (isError) {
-		label = failureLabel;
+		label = labels.failed;
 	} else if (todos.length === 0) {
-		label = action === "write" ? "Cleared todos" : "No todos";
+		label = labels.empty;
 	} else {
-		label = `${action === "write" ? "Updated" : "Read"} todos (${formatChatTodoProgress(todos)} done)`;
+		label = `${labels.done} (${formatChatTodoProgress(todos)} done)`;
 	}
-	const errorDetail = isError ? errorMessage?.trim() : undefined;
+	const errorDetail = errorMessage?.trim();
 	const showTodos = todos.length > 0;
 
 	return (
@@ -73,7 +83,7 @@ const ForkTodoTool: React.FC<ForkTodoToolProps> = ({
 			className="w-full"
 			status={status}
 			isError={isError}
-			errorMessage={errorMessage || failureLabel}
+			errorMessage={errorMessage || labels.failed}
 			hasContent={showTodos || Boolean(errorDetail)}
 		>
 			<ToolCall.Header iconName="fork_todo" label={label} />

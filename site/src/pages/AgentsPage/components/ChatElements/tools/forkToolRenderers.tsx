@@ -12,10 +12,7 @@ type ToolRendererProps = React.ComponentProps<(typeof toolRenderers)[string]>;
 
 type ToolRenderer = React.FC<ToolRendererProps>;
 
-/**
- * Props of a fork tool renderer. A renderer shows fallback for output it
- * cannot parse.
- */
+/** A renderer shows fallback for output it cannot parse. */
 export type ForkToolRendererProps = ToolRendererProps & {
 	fallback: ToolRenderer;
 };
