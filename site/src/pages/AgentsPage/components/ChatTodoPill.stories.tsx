@@ -32,6 +32,14 @@ export const Expanded: Story = {
 	},
 };
 
+export const ExpandedMobile: Story = {
+	parameters: {
+		viewport: { defaultViewport: "mobile1" },
+		pixel: { matrix: { viewports: ["phone"] } },
+	},
+	play: Expanded.play,
+};
+
 export const LongContent: Story = {
 	args: {
 		todos: [

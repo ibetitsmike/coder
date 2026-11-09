@@ -1,5 +1,5 @@
 import { act, waitFor } from "@testing-library/react";
-import { QueryClientProvider } from "react-query";
+import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
@@ -24,9 +24,11 @@ import {
 import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import { ForkComposerSlot } from "./ForkComposerSlot";
 
-const renderSlot = (experiments: Experiment[]) => {
-	const queryClient = createTestQueryClient();
-	renderComponent(
+const renderSlot = (
+	experiments: Experiment[],
+	queryClient = createTestQueryClient(),
+) => {
+	const { unmount } = renderComponent(
 		<QueryClientProvider client={queryClient}>
 			<DashboardContext.Provider
 				value={{
@@ -43,7 +45,7 @@ const renderSlot = (experiments: Experiment[]) => {
 			</DashboardContext.Provider>
 		</QueryClientProvider>,
 	);
-	return queryClient;
+	return { queryClient, unmount };
 };
 
 const mockTodoWatchSocket = () => {
@@ -96,7 +98,7 @@ describe("ForkComposerSlot todo list", () => {
 		);
 		const { watch, publish } = mockTodoWatchSocket();
 
-		const queryClient = renderSlot(["fork-chat-todos"]);
+		const { queryClient } = renderSlot(["fork-chat-todos"]);
 
 		await waitFor(() => expect(watch).toHaveBeenCalledWith(MockChat.id));
 		const updated: ChatTodoList = {
@@ -120,7 +122,7 @@ describe("ForkComposerSlot todo list", () => {
 		);
 		const { watch } = mockTodoWatchSocket();
 
-		const queryClient = renderSlot(["fork-chat-todos"]);
+		const { queryClient } = renderSlot(["fork-chat-todos"]);
 
 		await waitFor(() =>
 			expect(queryClient.getQueryState(chatTodosKey(MockChat.id))?.status).toBe(
@@ -128,5 +130,36 @@ describe("ForkComposerSlot todo list", () => {
 			),
 		);
 		expect(watch).not.toHaveBeenCalled();
+	});
+
+	it("reads the list again before watching a revisited chat", async () => {
+		const getTodos = vi
+			.spyOn(forkChatTodosApi, "getChatTodos")
+			.mockResolvedValue(MockChatTodoList);
+		const { watch } = mockTodoWatchSocket();
+		// The app's client keeps unobserved queries, unlike the test default.
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+
+		const first = renderSlot(["fork-chat-todos"], queryClient);
+		await waitFor(() => expect(watch).toHaveBeenCalledTimes(1));
+		first.unmount();
+		await waitFor(() =>
+			expect(
+				queryClient
+					.getQueryCache()
+					.find({ queryKey: chatTodosKey(MockChat.id) }),
+			).toBeUndefined(),
+		);
+		getTodos.mockRejectedValue(new Error("forbidden"));
+		renderSlot(["fork-chat-todos"], queryClient);
+
+		await waitFor(() =>
+			expect(queryClient.getQueryState(chatTodosKey(MockChat.id))?.status).toBe(
+				"error",
+			),
+		);
+		expect(watch).toHaveBeenCalledTimes(1);
 	});
 });

@@ -12,4 +12,7 @@ export const chatTodos = (chatId: string) =>
 		queryFn: ({ signal }) => getChatTodos(chatId, signal),
 		// The todo watch socket keeps this cache current, so refetches add nothing.
 		staleTime: Number.POSITIVE_INFINITY,
+		// The watch opens only after a successful read, so a revisited chat must
+		// read again instead of reusing a cached success: access may be gone.
+		gcTime: 0,
 	});
