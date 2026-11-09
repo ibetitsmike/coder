@@ -312,6 +312,7 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 	for _, container := range skillContainersFor(root.Path) {
 		r.emitSkillsFromContainer(container, root, out, seenID)
 	}
+	r.emitAgents(root, out, seenID)
 }
 
 // discoverTopLevelFiles classifies the instruction files and
@@ -844,8 +845,8 @@ const (
 	KindPlugin
 	// KindHook is reserved for plugin hooks. Not emitted by v1.
 	KindHook
-	// KindSubagent is reserved for plugin-declared subagents.
-	// Not emitted by v1.
+	// KindSubagent is a custom agent definition file
+	// (emitted by fork_agents.go).
 	KindSubagent
 	// KindCommand is reserved for plugin slash commands.
 	// Not emitted by v1.
@@ -960,8 +961,8 @@ type Resource struct {
 	// also carry a non-fatal warning when Status == StatusOK.
 	Error string
 	// Name is the resource's own short identifier. Currently
-	// populated for KindSkill (from front-matter) and
-	// KindMCPServer (server name); empty for other kinds.
+	// populated for KindSkill and KindSubagent (from front-matter)
+	// and KindMCPServer (server name); empty for other kinds.
 	Name string
 	// Description is a short human-readable summary (skill
 	// front-matter description, MCP server description,

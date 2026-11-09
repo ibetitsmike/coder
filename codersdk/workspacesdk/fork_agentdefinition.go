@@ -186,12 +186,27 @@ func ParseAgentDefinition(content, fallbackName string) (AgentDefinition, error)
 }
 
 // parseAgentMCP sets def.MCPMode and def.MCPServers from the mcp key. The
-// Claude Code mcpServers key only adds servers to the inherited set, so it
-// keeps the inherit mode: named references are already inherited, and inline
-// server definitions cannot be honored.
+// Claude Code mcpServers key only adds servers to the inherited set, so named
+// references keep the inherit mode. Inline server definitions are rejected:
+// they often hold credentials in env or headers, and the workspace agent ships
+// the whole definition file to coderd.
 func parseAgentMCP(fm map[string]any, def *AgentDefinition) (warnings []string, err error) {
 	mcp, hasMCP := fm["mcp"]
 	servers, hasServers := fm["mcpServers"]
+	if hasServers && servers != nil {
+		switch v := servers.(type) {
+		case []any:
+			for _, entry := range v {
+				if _, ok := entry.(string); !ok {
+					return nil, errInlineMCPServers
+				}
+			}
+		case map[string]any:
+			return nil, errInlineMCPServers
+		default:
+			return nil, xerrors.New(`front-matter field "mcpServers" must be a list of server names`)
+		}
+	}
 	if hasMCP && mcp != nil {
 		if hasServers {
 			warnings = append(warnings, "mcpServers ignored because mcp is set")
@@ -218,27 +233,10 @@ func parseAgentMCP(fm map[string]any, def *AgentDefinition) (warnings []string, 
 		}
 		return warnings, nil
 	}
-	if !hasServers || servers == nil {
-		return warnings, nil
-	}
-	inline := false
-	switch v := servers.(type) {
-	case []any:
-		for _, entry := range v {
-			if _, ok := entry.(string); !ok {
-				inline = true
-			}
-		}
-	case map[string]any:
-		inline = true
-	default:
-		return nil, xerrors.New(`front-matter field "mcpServers" must be a list of server names`)
-	}
-	if inline {
-		warnings = append(warnings, "inline MCP server definitions in mcpServers are not supported and were ignored")
-	}
 	return warnings, nil
 }
+
+var errInlineMCPServers = xerrors.New(`front-matter field "mcpServers" has inline server definitions, which are not supported; list server names instead`)
 
 func agentStringField(fm map[string]any, key string) (string, error) {
 	switch v := fm[key].(type) {
