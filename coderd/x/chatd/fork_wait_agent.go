@@ -23,7 +23,6 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac"
-	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -151,7 +150,7 @@ func (p *Server) lastToolCalls(ctx context.Context, chat database.Chat, childID 
 				case codersdk.ChatMessagePartTypeToolCall:
 					entry := waitAgentToolCall{
 						ToolName:  part.ToolName,
-						Args:      truncateToolCallJSON(part.Args),
+						Args:      truncateTranscriptJSON(part.Args, maxWaitAgentToolCallBytes),
 						CreatedAt: message.CreatedAt,
 					}
 					if part.CreatedAt != nil {
@@ -160,7 +159,7 @@ func (p *Server) lastToolCalls(ctx context.Context, chat database.Chat, childID 
 					// Providers can reuse a call ID in a later step, so a
 					// result settles only the newest call with its ID.
 					if result, ok := results[part.ToolCallID]; ok {
-						entry.Result = truncateToolCallJSON(result.Result)
+						entry.Result = truncateTranscriptJSON(result.Result, maxWaitAgentToolCallBytes)
 						entry.IsError = result.IsError
 						delete(results, part.ToolCallID)
 					}
@@ -178,18 +177,4 @@ func (p *Server) lastToolCalls(ctx context.Context, chat database.Chat, childID 
 	}
 	slices.Reverse(calls)
 	return calls, nil
-}
-
-// truncateToolCallJSON returns raw unchanged when it fits, and otherwise
-// the truncated text as a JSON string, since a cut JSON value is not valid.
-func truncateToolCallJSON(raw json.RawMessage) json.RawMessage {
-	text, truncated := chatloop.TruncateToolResultText(string(raw), maxWaitAgentToolCallBytes)
-	if !truncated {
-		return raw
-	}
-	encoded, err := json.Marshal(text)
-	if err != nil {
-		return nil
-	}
-	return encoded
 }
