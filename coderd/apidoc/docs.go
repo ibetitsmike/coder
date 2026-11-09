@@ -23018,6 +23018,13 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "subagent_description": {
+                    "type": "string"
+                },
+                "subagent_name": {
+                    "description": "SubagentName and SubagentDescription are populated only for OK\nsubagent kinds.",
+                    "type": "string"
+                },
                 "tools": {
                     "description": "Tools lists the tools exposed by an MCP server. Populated only for the\nmcp_server kind; nil otherwise.",
                     "type": "array",
@@ -23030,6 +23037,7 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
@@ -23037,6 +23045,7 @@ const docTemplate = `{
                 "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",

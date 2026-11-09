@@ -82,13 +82,15 @@ curl -X GET http://coder-server:8080/api/v2/chats \
       "resources": [
         {
           "error": "string",
-          "kind": "instruction_file",
+          "kind": "subagent",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
           "source": "string",
           "source_path": "string",
           "status": "ok",
+          "subagent_description": "string",
+          "subagent_name": "string",
           "tools": [
             {
               "description": "string",
@@ -252,6 +254,8 @@ Status Code **200**
 | `»»» source`               | string                                                                             | false    |              | Source is the resource locator: the canonical file path for an instruction file, the skill directory for a skill, the file path for an MCP config, the server name for an MCP server, or an ACP harness slug.                                                              |
 | `»»» source_path`          | string                                                                             | false    |              | Source path is the configuration directory for an ACP harness.                                                                                                                                                                                                             |
 | `»»» status`               | [codersdk.ChatContextResourceStatus](schemas.md#codersdkchatcontextresourcestatus) | false    |              | Status is the resource's health. Non-ok resources (invalid, unreadable, oversize, excluded) are still reported so the UI can surface why a resource was dropped from the prompt instead of silently omitting it; their body-specific fields (skill name, tools) are empty. |
+| `»»» subagent_description` | string                                                                             | false    |              |                                                                                                                                                                                                                                                                            |
+| `»»» subagent_name`        | string                                                                             | false    |              | Subagent name and SubagentDescription are populated only for OK subagent kinds.                                                                                                                                                                                            |
 | `»»» tools`                | array                                                                              | false    |              | Tools lists the tools exposed by an MCP server. Populated only for the mcp_server kind; nil otherwise.                                                                                                                                                                     |
 | `»»»» description`         | string                                                                             | false    |              | Description is the tool's human-readable summary; may be empty.                                                                                                                                                                                                            |
 | `»»»» name`                | string                                                                             | false    |              | Name is the tool name with the `<server>__` prefix the agent adds stripped, so it reads as the server exposes it.                                                                                                                                                          |
@@ -356,13 +360,13 @@ Status Code **200**
 
 #### Enumerated Values
 
-| Property       | Value(s)                                                                                                                                                                                                                                                                         |
-|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `client_type`  | `api`, `ui`                                                                                                                                                                                                                                                                      |
-| `kind`         | `acp_harness`, `auth`, `config`, `content_filter`, `generic`, `hook_denied`, `hook_dispatch_failed`, `instruction_file`, `mcp_config`, `mcp_server`, `missing_key`, `overloaded`, `provider_disabled`, `rate_limit`, `skill`, `stream_silence_timeout`, `timeout`, `usage_limit` |
-| `status`       | `error`, `excluded`, `interrupting`, `invalid`, `ok`, `oversize`, `paused`, `requires_action`, `running`, `unreadable`, `waiting`                                                                                                                                                |
-| `plan_mode`    | `plan`                                                                                                                                                                                                                                                                           |
-| `title_source` | `fallback`, `generated`, `user`                                                                                                                                                                                                                                                  |
+| Property       | Value(s)                                                                                                                                                                                                                                                                                     |
+|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `client_type`  | `api`, `ui`                                                                                                                                                                                                                                                                                  |
+| `kind`         | `acp_harness`, `auth`, `config`, `content_filter`, `generic`, `hook_denied`, `hook_dispatch_failed`, `instruction_file`, `mcp_config`, `mcp_server`, `missing_key`, `overloaded`, `provider_disabled`, `rate_limit`, `skill`, `stream_silence_timeout`, `subagent`, `timeout`, `usage_limit` |
+| `status`       | `error`, `excluded`, `interrupting`, `invalid`, `ok`, `oversize`, `paused`, `requires_action`, `running`, `unreadable`, `waiting`                                                                                                                                                            |
+| `plan_mode`    | `plan`                                                                                                                                                                                                                                                                                       |
+| `title_source` | `fallback`, `generated`, `user`                                                                                                                                                                                                                                                              |
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
@@ -476,13 +480,15 @@ curl -X POST http://coder-server:8080/api/v2/chats \
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -621,13 +627,15 @@ curl -X POST http://coder-server:8080/api/v2/chats \
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",
@@ -1719,13 +1727,15 @@ curl -X GET http://coder-server:8080/api/v2/chats/watch \
       "resources": [
         {
           "error": "string",
-          "kind": "instruction_file",
+          "kind": "subagent",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
           "source": "string",
           "source_path": "string",
           "status": "ok",
+          "subagent_description": "string",
+          "subagent_name": "string",
           "tools": [
             {
               "description": "string",
@@ -1916,13 +1926,15 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat} \
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -2061,13 +2073,15 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat} \
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",
@@ -2354,13 +2368,15 @@ curl -X PUT http://coder-server:8080/api/v2/chats/{chat}/context \
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -2499,13 +2515,15 @@ curl -X PUT http://coder-server:8080/api/v2/chats/{chat}/context \
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",
@@ -2781,13 +2799,15 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/interrupt \
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -2926,13 +2946,15 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/interrupt \
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",
@@ -3992,13 +4014,15 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/reconcile-invalid \
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -4137,13 +4161,15 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/reconcile-invalid \
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",

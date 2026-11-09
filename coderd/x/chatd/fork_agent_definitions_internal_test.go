@@ -4,6 +4,7 @@ package chatd
 // the fork-agent-definitions experiment.
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -13,11 +14,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -456,6 +459,79 @@ func TestForkAgentDefinitionToolPolicySkillIndex(t *testing.T) {
 			t.Cleanup(env.Close)
 			require.Equal(t, tt.keeps, strings.Contains(systemPromptText(t, env.Prompt), "<available-skills>"))
 			require.Equal(t, tt.keeps, slices.Contains(toolNames(env.Tools), "read_skill"))
+		})
+	}
+}
+
+func TestForkAgentDefinitionContextResources(t *testing.T) {
+	t.Parallel()
+
+	subagent := func(source, name string, status database.WorkspaceAgentContextResourceStatus, errText string) database.ChatContextResource {
+		return database.ChatContextResource{
+			Source:   source,
+			BodyKind: database.WorkspaceAgentContextBodyKindSubagent,
+			Body: mustMarshalContextBody(t, &agentproto.SubagentBody{
+				Definition:  []byte(agentDefinitionMarkdown("name: "+name, "Review.")),
+				Name:        name,
+				Description: "Reviews diffs",
+			}),
+			SizeBytes: 42,
+			Status:    status,
+			Error:     errText,
+		}
+	}
+	pinned := []database.ChatContextResource{
+		instructionResource(t, "/home/coder/AGENTS.md", "be helpful", database.WorkspaceAgentContextResourceStatusOk),
+		subagent("/home/coder/.agents/agents/reviewer.md", "reviewer", database.WorkspaceAgentContextResourceStatusOk, "missing description"),
+		subagent("/home/coder/.agents/agents/broken.md", "", database.WorkspaceAgentContextResourceStatusInvalid, "missing name"),
+		// An OK row without a name is skipped, like an OK skill without one.
+		subagent("/home/coder/.agents/agents/unnamed.md", "", database.WorkspaceAgentContextResourceStatusOk, ""),
+	}
+	want := []codersdk.ChatContextResource{
+		{
+			Source: "/home/coder/AGENTS.md",
+			Kind:   codersdk.ChatContextResourceKindInstructionFile,
+			Status: codersdk.ChatContextResourceStatusOK,
+		},
+		{
+			Source:              "/home/coder/.agents/agents/reviewer.md",
+			Kind:                codersdk.ChatContextResourceKindSubagent,
+			SizeBytes:           42,
+			Status:              codersdk.ChatContextResourceStatusOK,
+			Error:               "missing description",
+			SubagentName:        "reviewer",
+			SubagentDescription: "Reviews diffs",
+		},
+		{
+			Source:    "/home/coder/.agents/agents/broken.md",
+			Kind:      codersdk.ChatContextResourceKindSubagent,
+			SizeBytes: 42,
+			Status:    codersdk.ChatContextResourceStatusInvalid,
+			Error:     "missing name",
+		},
+	}
+
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		want    []codersdk.ChatContextResource
+	}{
+		{name: "Enabled", enabled: true, want: want},
+		{name: "ExperimentOff", want: want[:1]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := dbmock.NewMockStore(gomock.NewController(t))
+			chatID := uuid.New()
+			db.EXPECT().ListChatContextResourcesByChatID(gomock.Any(), chatID).Return(pinned, nil)
+			server := newPinServer(t, db)
+			if tc.enabled {
+				server.experiments = codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}
+			}
+			got, err := server.ContextResources(context.Background(), database.Chat{ID: chatID})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
 		})
 	}
 }
