@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
+	aidmcp "github.com/coder/coder/v2/aibridge/mcp"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
@@ -65,13 +66,14 @@ func customAgentToolPolicyFromDefinition(def workspacesdk.AgentDefinition) custo
 
 // customAgentToolNames expands names with their aliases. A Claude Code MCP
 // tool ID, mcp__<server>__<tool>, also matches the chatd tool name
-// <server>__<tool>.
+// <server>__<tool>, sanitized and capped the way chatd exposes MCP tools.
 func customAgentToolNames(names []string) map[string]bool {
 	out := make(map[string]bool, len(names))
 	for _, name := range names {
 		out[name] = true
 		if tool, ok := strings.CutPrefix(name, "mcp__"); ok {
-			out[tool] = true
+			tool = aidmcp.SanitizeToolName(tool)
+			out[tool[:min(len(tool), aidmcp.MaxToolNameLen)]] = true
 		}
 		for _, alias := range customAgentToolAliases[name] {
 			out[alias] = true

@@ -84,7 +84,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		docs,
 		other,
 		// An MCP tool whose server is unknown has no server name.
-		newTestMCPAgentTool("ghost__lookup", uuid.New()),
+		newTestMCPAgentTool("ghost_x__lookup", uuid.New()),
 		workspace,
 		padded,
 	}
@@ -97,7 +97,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{Definition: fantasy.ProviderDefinedTool{Name: "code_execution"}},
 	}
 	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent"}
-	allMCP := []string{"docs__search", "other__lookup", "ghost__lookup", "Workspace__echo", "_Workspace__ping"}
+	allMCP := []string{"docs__search", "other__lookup", "ghost_x__lookup", "Workspace__echo", "_Workspace__ping"}
 	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo", "_Workspace__ping"}
 	allProvider := []string{"web_search", "code_execution"}
 
@@ -118,7 +118,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "ReadOnly",
 			policy:       customAgentToolPolicy{ReadOnly: true, MCPMode: "inherit"},
-			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "ghost__lookup"},
+			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "ghost_x__lookup"},
 			wantDeferred: []string{"docs__search", "other__lookup"},
 			wantProvider: []string{"web_search"},
 		},
@@ -138,7 +138,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		},
 		{
 			name:         "Disallowed",
-			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "mcp__other__lookup", "ghost__lookup", "web_search"}, MCPMode: "inherit"},
+			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "mcp__other__lookup", "mcp__ghost.x__lookup", "web_search"}, MCPMode: "inherit"},
 			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "Workspace__echo", "_Workspace__ping"},
 			wantDeferred: []string{"docs__search", "Workspace__echo", "_Workspace__ping"},
 			wantProvider: []string{"code_execution"},
