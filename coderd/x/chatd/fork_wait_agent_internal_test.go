@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -52,7 +53,12 @@ func TestWaitAgentIncludeToolCalls(t *testing.T) {
 		return codersdk.ChatMessageToolResult(id, name, json.RawMessage(result), isError, false)
 	}
 	both, userOnly := database.ChatMessageVisibilityBoth, database.ChatMessageVisibilityUser
-	insert(database.ChatMessageRoleAssistant, both, call("c1", "read_file", `{"path":"first.go"}`))
+	// An older call reuses the ID of a later one and never got a result.
+	insert(database.ChatMessageRoleAssistant, both, call("c2", "grep", `{"pattern":"old"}`))
+	emitted := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	first := call("c1", "read_file", `{"path":"first.go"}`)
+	first.CreatedAt = &emitted
+	insert(database.ChatMessageRoleAssistant, both, first)
 	insert(database.ChatMessageRoleTool, both, result("c1", "read_file", `{"content":"one"}`, false))
 	insert(database.ChatMessageRoleAssistant, both,
 		call("c2", "execute", `{"command":"make"}`),
@@ -73,7 +79,7 @@ func TestWaitAgentIncludeToolCalls(t *testing.T) {
 		return runChatTodoTool(ctx, t, tools, waitAgentToolName, args, wantError)
 	}
 
-	raw := wait(map[string]any{"chat_id": child.ID.String(), "include_tool_calls": 2}, false)
+	raw := wait(map[string]any{"chat_id": " " + child.ID.String(), "include_tool_calls": 2}, false)
 	require.NotContains(t, raw, "secret")
 	var got struct {
 		Report    string              `json:"report"`
@@ -94,10 +100,14 @@ func TestWaitAgentIncludeToolCalls(t *testing.T) {
 	require.Contains(t, truncated, "Coder truncated")
 
 	all := wait(map[string]any{"chat_id": child.ID.String(), "include_tool_calls": maxWaitAgentToolCalls}, false)
+	got.ToolCalls = nil
 	require.NoError(t, json.Unmarshal([]byte(all), &got))
-	require.Len(t, got.ToolCalls, 3)
-	require.Equal(t, "read_file", got.ToolCalls[0].ToolName)
-	require.JSONEq(t, `{"content":"one"}`, string(got.ToolCalls[0].Result))
+	require.Len(t, got.ToolCalls, 4)
+	require.Equal(t, "grep", got.ToolCalls[0].ToolName)
+	require.Nil(t, got.ToolCalls[0].Result)
+	require.Equal(t, "read_file", got.ToolCalls[1].ToolName)
+	require.JSONEq(t, `{"content":"one"}`, string(got.ToolCalls[1].Result))
+	require.True(t, emitted.Equal(got.ToolCalls[1].CreatedAt))
 
 	require.NotContains(t, wait(map[string]any{"chat_id": child.ID.String()}, false), "tool_calls")
 	wait(map[string]any{"chat_id": child.ID.String(), "include_tool_calls": maxWaitAgentToolCalls + 1}, true)

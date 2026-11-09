@@ -91,7 +91,7 @@ func (t forkWaitAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fant
 	}
 	// The upstream tool answered without an error, so chat_id is a child
 	// this chat may wait on.
-	childID, err := uuid.Parse(args.ChatID)
+	childID, err := parseSubagentToolChatID(args.ChatID)
 	if err != nil {
 		return resp, nil
 	}
@@ -154,9 +154,15 @@ func (p *Server) lastToolCalls(ctx context.Context, chat database.Chat, childID 
 						Args:      truncateToolCallJSON(part.Args),
 						CreatedAt: message.CreatedAt,
 					}
+					if part.CreatedAt != nil {
+						entry.CreatedAt = *part.CreatedAt
+					}
+					// Providers can reuse a call ID in a later step, so a
+					// result settles only the newest call with its ID.
 					if result, ok := results[part.ToolCallID]; ok {
 						entry.Result = truncateToolCallJSON(result.Result)
 						entry.IsError = result.IsError
+						delete(results, part.ToolCallID)
 					}
 					calls = append(calls, entry)
 					if len(calls) == n {
