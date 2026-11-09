@@ -31,7 +31,6 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	})
 	offServer := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(upstream))
-	ctx := chatdTestContext(t)
 	user, org, model := seedInternalChatDeps(t, db)
 
 	todos := []codersdk.ChatTodo{
@@ -87,7 +86,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 
 	newChat := func(t *testing.T, parent uuid.NullUUID) database.Chat {
 		t.Helper()
-		chat, err := server.CreateChat(ctx, CreateOptions{
+		chat, err := server.CreateChat(chatdTestContext(t), CreateOptions{
 			OrganizationID:     org.ID,
 			OwnerID:            user.ID,
 			ParentChatID:       parent,
@@ -107,7 +106,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	// it landed at, which rises by one per write.
 	writeTodos := func(t *testing.T, chatID uuid.UUID, items []codersdk.ChatTodo) int64 {
 		t.Helper()
-		version, err := server.writeChatTodos(ctx, chatID, items)
+		version, err := server.writeChatTodos(chatdTestContext(t), chatID, items)
 		require.NoError(t, err)
 		return version
 	}
@@ -136,7 +135,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 			params.Compressed = append(params.Compressed, r.compressed)
 			params.RuntimeMs = append(params.RuntimeMs, 0)
 		}
-		_, err := db.InsertChatMessages(ctx, params)
+		_, err := db.InsertChatMessages(chatdTestContext(t), params)
 		require.NoError(t, err)
 	}
 
@@ -144,7 +143,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	// as due.
 	snapshotText := func(t *testing.T, srv *Server, chat database.Chat) (string, bool) {
 		t.Helper()
-		message, ok, err := srv.todoSnapshotMessage(ctx, chat)
+		message, ok, err := srv.todoSnapshotMessage(chatdTestContext(t), chat)
 		require.NoError(t, err)
 		if !ok {
 			return "", false
@@ -339,7 +338,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 			OrganizationID: org.ID,
 			ContextLimit:   smallContextLimit,
 		})
-		small, err := server.CreateChat(ctx, CreateOptions{
+		small, err := server.CreateChat(chatdTestContext(t), CreateOptions{
 			OrganizationID:     org.ID,
 			OwnerID:            user.ID,
 			Title:              "todos",
