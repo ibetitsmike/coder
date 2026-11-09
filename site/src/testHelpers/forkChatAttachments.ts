@@ -11,7 +11,7 @@ export const MockChatVideoFilePart: ChatFilePart & { file_id: string } = {
 	name: "review.mp4",
 };
 
-/** The MP4 above as an entry in its turn's Attachments menu. */
+/** {@link MockChatVideoFilePart} with its chat file URL. */
 export const MockChatVideoAttachment: MessageAttachment = {
 	key: "1:0",
 	role: "assistant",

@@ -112,8 +112,10 @@ describe("TurnAttachments with an attached MP4", () => {
 		);
 
 		expect(
-			within(menu).queryByRole("button", { name: "Play review.mp4" }),
-		).toBeNull();
+			within(menu)
+				.getByRole("button", { name: "review.mp4 Attachment expired" })
+				.getAttribute("aria-disabled"),
+		).toBe("true");
 		expect(
 			within(menu).queryByRole("link", { name: "Download review.mp4" }),
 		).toBeNull();
