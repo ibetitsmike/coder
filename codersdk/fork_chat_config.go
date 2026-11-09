@@ -26,10 +26,12 @@ type ForkChatConfig struct {
 	// depth 0.
 	MaxSubagentDepth serpent.Int64 `json:"max_subagent_depth" typescript:",notnull"`
 	// MaxConcurrentSubagents is the maximum number of running subagent chats
-	// in the deployment. 0 means no limit.
+	// in the deployment, not counting a subagent's own ancestors. 0 means no
+	// limit.
 	MaxConcurrentSubagents serpent.Int64 `json:"max_concurrent_subagents" typescript:",notnull"`
 	// MaxConcurrentSubagentsPerFamily is the maximum number of running
-	// subagent chats under one root chat. 0 means no limit.
+	// subagent chats under one root chat, not counting a subagent's own
+	// ancestors. 0 means no limit.
 	MaxConcurrentSubagentsPerFamily serpent.Int64 `json:"max_concurrent_subagents_per_family" typescript:",notnull"`
 }
 
@@ -47,7 +49,7 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 		},
 		{
 			Name:        "Chat: Max Concurrent Subagents",
-			Description: "Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value for its own chats.",
+			Description: "Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value for its own chats.",
 			Flag:        "chat-max-concurrent-subagents",
 			Env:         "CODER_CHAT_MAX_CONCURRENT_SUBAGENTS",
 			Value:       &c.AI.Chat.Fork.MaxConcurrentSubagents,
@@ -57,7 +59,7 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 		},
 		{
 			Name:        "Chat: Max Concurrent Subagents Per Family",
-			Description: "Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. 0 means no limit. An organization can set a lower value.",
+			Description: "Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value.",
 			Flag:        "chat-max-concurrent-subagents-per-family",
 			Env:         "CODER_CHAT_MAX_CONCURRENT_SUBAGENTS_PER_FAMILY",
 			Value:       &c.AI.Chat.Fork.MaxConcurrentSubagentsPerFamily,

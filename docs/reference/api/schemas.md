@@ -5925,6 +5925,60 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |---------------------------------|
 | `fallback`, `generated`, `user` |
 
+## codersdk.ChatTodo
+
+```json
+{
+  "content": "string",
+  "id": "string",
+  "status": "pending"
+}
+```
+
+### Properties
+
+| Name      | Type                                               | Required | Restrictions | Description |
+|-----------|----------------------------------------------------|----------|--------------|-------------|
+| `content` | string                                             | false    |              |             |
+| `id`      | string                                             | false    |              |             |
+| `status`  | [codersdk.ChatTodoStatus](#codersdkchattodostatus) | false    |              |             |
+
+## codersdk.ChatTodoList
+
+```json
+{
+  "todos": [
+    {
+      "content": "string",
+      "id": "string",
+      "status": "pending"
+    }
+  ],
+  "version": 0
+}
+```
+
+### Properties
+
+| Name      | Type                                            | Required | Restrictions | Description                                                                                          |
+|-----------|-------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------|
+| `todos`   | array of [codersdk.ChatTodo](#codersdkchattodo) | false    |              |                                                                                                      |
+| `version` | integer                                         | false    |              | Version is the revision of Todos. It lets a watcher drop an event for a version it has already sent. |
+
+## codersdk.ChatTodoStatus
+
+```json
+"pending"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                                      |
+|-----------------------------------------------|
+| `cancelled`, `done`, `in_progress`, `pending` |
+
 ## codersdk.ChatUnsupportedProvider
 
 ```json
@@ -10049,9 +10103,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-chat-todos`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -10397,6 +10451,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_subagents`            | integer | false    |              | Max concurrent subagents is the maximum number of running subagent chats in the deployment. 0 means no limit.                                     |
 | `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat. 0 means no limit.                        |
 | `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0. |
+
+## codersdk.ForkOrganizationSubagentLimits
+
+```json
+{
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
+}
+```
+
+### Properties
+
+| Name                        | Type    | Required | Restrictions | Description                                                                                    |
+|-----------------------------|---------|----------|--------------|------------------------------------------------------------------------------------------------|
+| `max_concurrent`            | integer | false    |              | Max concurrent is the maximum number of running subagent chats in the organization.            |
+| `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
+| `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats, between 1 and 16.                     |
+| `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of unarchived subagent chats under one root chat.    |
 
 ## codersdk.ForkOrganizationSubagentLimits
 
