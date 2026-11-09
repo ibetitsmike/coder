@@ -176,7 +176,8 @@ const DownloadOverlay: React.FC<AttachmentDownload> = (download) => (
 	</AttachmentDownloadLink>
 );
 
-const AttachmentPreviewFrame: React.FC<{
+/** Wraps an inline attachment preview with a hover download button. */
+export const AttachmentPreviewFrame: React.FC<{
 	href: string;
 	displayName: string;
 	downloadName: string;

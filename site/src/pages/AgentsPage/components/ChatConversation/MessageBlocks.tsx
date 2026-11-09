@@ -18,6 +18,7 @@ import {
 	type PreviewTextAttachment,
 } from "./AttachmentBlocks";
 import { groupSequentialReadFileBlocks } from "./blockUtils";
+import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 import { ReasoningDisclosure, ResponseBlock } from "./MessageText";
 import type { MergedTool, RenderBlock } from "./types";
 
@@ -270,13 +271,17 @@ export const BlockList: React.FC<BlockListProps> = ({
 					}
 					case "file":
 						return (
-							<AttachmentBlock
+							<ForkAttachmentPreview
 								key={`${keyPrefix}-file-${block.file_id ?? index}`}
 								block={block}
-								onImageClick={onImageClick}
-								onTextFileClick={onTextFileClick}
-								framePreview
-							/>
+							>
+								<AttachmentBlock
+									block={block}
+									onImageClick={onImageClick}
+									onTextFileClick={onTextFileClick}
+									framePreview
+								/>
+							</ForkAttachmentPreview>
 						);
 					case "sources":
 						return (
