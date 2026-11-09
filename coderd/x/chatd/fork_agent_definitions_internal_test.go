@@ -284,13 +284,12 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		func(database.ChatModelConfig) map[string]string {
 			return map[string]string{
 				"reader":      agentDefinitionMarkdown("name: reader\nreadonly: true", "Read only."),
-				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file]", "No writes."),
+				"no-writes":   agentDefinitionMarkdown("name: no-writes\ndisallowed_tools: [write_file, lookups__lookup]", "No writes."),
 				"docs-reader": agentDefinitionMarkdown("name: docs-reader\ntools: [Read]\nmcp: [Docs]", "Docs only."),
-				"no-lookup":   agentDefinitionMarkdown("name: no-lookup\ndisallowed_tools: [lookups__lookup]", "No lookups."),
 			}
 		},
 		withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
-	toolNames := func(t *testing.T, child database.Chat) []string {
+	turnToolNames := func(t *testing.T, child database.Chat) []string {
 		t.Helper()
 		ctx := chatdTestContext(t)
 		messages, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
@@ -298,11 +297,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		env, err := f.server.buildTurnEnvironment(ctx, generationPrepareInput{Chat: child, Messages: messages})
 		require.NoError(t, err)
 		t.Cleanup(env.Close)
-		names := make([]string, 0, len(env.Tools))
-		for _, tool := range env.Tools {
-			names = append(names, tool.Info().Name)
-		}
-		return names
+		return toolNames(env.Tools)
 	}
 
 	t.Run("ReadOnly", func(t *testing.T) {
@@ -315,7 +310,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.NoError(t, json.Unmarshal(row.ToolPolicy.RawMessage, &policy))
 		require.True(t, policy.ReadOnly)
 
-		names := toolNames(t, child)
+		names := turnToolNames(t, child)
 		require.Contains(t, names, "execute")
 		require.NotContains(t, names, "write_file")
 		require.NotContains(t, names, "edit_files")
@@ -323,11 +318,23 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 
 	t.Run("DisallowedTools", func(t *testing.T) {
 		t.Parallel()
+		ctx := chatdTestContext(t)
 		child, err := f.spawn(t, spawnAgentArgs{Type: "no-writes"})
 		require.NoError(t, err)
-		names := toolNames(t, child)
+		names := turnToolNames(t, child)
 		require.Contains(t, names, "edit_files")
 		require.NotContains(t, names, "write_file")
+
+		lookups := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "lookups"})
+		searchTool := newTestMCPAgentTool("lookups__search", lookups.ID)
+		lookupTool := newTestMCPAgentTool("lookups__lookup", lookups.ID)
+		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
+			[]fantasy.AgentTool{newTestAgentTool("read_file"), searchTool, lookupTool},
+			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}})
+		require.NoError(t, err)
+		require.Equal(t, []string{"read_file", "lookups__search"}, toolNames(tools))
+		require.Len(t, candidates, 1)
+		require.Equal(t, "lookups__search", candidates[0].tool.Info().Name)
 	})
 
 	t.Run("AllowlistAndNamedMCP", func(t *testing.T) {
@@ -344,35 +351,9 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 			[]fantasy.AgentTool{newTestAgentTool("read_file"), newTestAgentTool("write_file"), docsTool, otherTool},
 			[]deferredMCPTool{{tool: otherTool, server: "other"}, {tool: docsTool, server: "docs"}})
 		require.NoError(t, err)
-		names := make([]string, 0, len(tools))
-		for _, tool := range tools {
-			names = append(names, tool.Info().Name)
-		}
-		require.Equal(t, []string{"read_file", "docs__search"}, names)
+		require.Equal(t, []string{"read_file", "docs__search"}, toolNames(tools))
 		require.Len(t, candidates, 1)
 		require.Equal(t, "docs__search", candidates[0].tool.Info().Name)
-	})
-
-	t.Run("DisallowedMCPTool", func(t *testing.T) {
-		t.Parallel()
-		ctx := chatdTestContext(t)
-		child, err := f.spawn(t, spawnAgentArgs{Type: "no-lookup"})
-		require.NoError(t, err)
-		lookups := dbgen.MCPServerConfig(t, f.db, database.MCPServerConfig{OrganizationID: f.root.OrganizationID, Slug: "lookups"})
-		searchTool := newTestMCPAgentTool("lookups__search", lookups.ID)
-		lookupTool := newTestMCPAgentTool("lookups__lookup", lookups.ID)
-
-		tools, candidates, err := f.server.applyCustomAgentToolPolicy(ctx, child,
-			[]fantasy.AgentTool{newTestAgentTool("read_file"), searchTool, lookupTool},
-			[]deferredMCPTool{{tool: lookupTool, server: "lookups"}, {tool: searchTool, server: "lookups"}})
-		require.NoError(t, err)
-		names := make([]string, 0, len(tools))
-		for _, tool := range tools {
-			names = append(names, tool.Info().Name)
-		}
-		require.Equal(t, []string{"read_file", "lookups__search"}, names)
-		require.Len(t, candidates, 1)
-		require.Equal(t, "lookups__search", candidates[0].tool.Info().Name)
 	})
 
 	t.Run("BuiltinType", func(t *testing.T) {
@@ -382,7 +363,7 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
 		require.NoError(t, err)
 		require.False(t, row.ToolPolicy.Valid)
-		require.Contains(t, toolNames(t, child), "write_file")
+		require.Contains(t, turnToolNames(t, child), "write_file")
 	})
 
 	t.Run("UndecodablePolicyFailsClosed", func(t *testing.T) {

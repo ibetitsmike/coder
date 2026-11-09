@@ -146,15 +146,11 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &policy))
 
 			gotTools, gotCandidates := policy.filter(tools, candidates, slugs)
-			got := make([]string, 0, len(gotTools))
-			for _, tool := range gotTools {
-				got = append(got, tool.Info().Name)
-			}
 			gotDeferred := make([]string, 0, len(gotCandidates))
 			for _, candidate := range gotCandidates {
 				gotDeferred = append(gotDeferred, candidate.tool.Info().Name)
 			}
-			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, toolNames(gotTools))
 			require.Equal(t, tt.wantDeferred, gotDeferred)
 		})
 	}
