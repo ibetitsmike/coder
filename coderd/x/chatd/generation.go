@@ -86,9 +86,10 @@ type generationDebug struct {
 
 // generationOutcome describes a completed generation outcome.
 type generationOutcome struct {
-	Chat      database.Chat
-	Kind      runnerActionKind
-	LastError string
+	Chat          database.Chat
+	Kind          runnerActionKind
+	LastError     string
+	AsyncQuestion string
 }
 
 type generationActionKind string
@@ -1202,6 +1203,7 @@ func (s *taskStarter) executeLocalTools(
 		outcome.Content = append(outcome.Content, result)
 	}
 	chathooks.RestoreToolCallOrder(outcome.Content, decision.localToolCalls)
+	asyncQuestion := s.lastAsyncQuestion(ctx, input, outcome.Content)
 	step := stepDataFromPersisted(outcome)
 	messages, err := buildCommitStepMessages(buildCommitStepMessagesInput{
 		modelConfigID:       prepared.ModelConfigID,
@@ -1236,7 +1238,33 @@ func (s *taskStarter) executeLocalTools(
 	}
 	return s.commitGenerationStep(ctx, machine, input, attempt.number, generationActionExecuteLocalTools, messages, generationCommitHooks{
 		PostCommitError: postCommitErr,
+		AsyncQuestion:   asyncQuestion,
 	})
+}
+
+// lastAsyncQuestion returns the question of the last async
+// ask_user_question result in content, the one the UI offers.
+func (s *taskStarter) lastAsyncQuestion(ctx context.Context, input chatWorkerTaskStartInput, content []fantasy.Content) string {
+	var question string
+	for _, block := range content {
+		toolResult, ok := asToolResultContent(block)
+		if !ok {
+			continue
+		}
+		asked, err := chattool.AsyncQuestion(toolResult)
+		if err != nil {
+			s.opts.Logger.Warn(ctx, "skip question web push for unreadable tool result",
+				slog.F("chat_id", input.ChatID),
+				slog.F("tool_call_id", toolResult.ToolCallID),
+				slog.Error(err),
+			)
+			continue
+		}
+		if asked != "" {
+			question = asked
+		}
+	}
+	return question
 }
 
 // compactionSourceForDecision maps a compact decision to the
@@ -1549,6 +1577,10 @@ func (s *taskStarter) openGenerationAttempt(
 
 type generationCommitHooks struct {
 	PostCommitError error
+	// AsyncQuestion is pushed to the chat owner only after the step
+	// commits, because the UI cannot offer an uncommitted question. A
+	// fail-closed commit sends only the error push.
+	AsyncQuestion string
 }
 
 func (s *taskStarter) commitGenerationStep(
@@ -1633,8 +1665,9 @@ func (s *taskStarter) commitGenerationStep(
 	}
 	s.routeStateHint(ctx, stateUpdateFromChat(committed))
 	return s.afterGenerationOutcome(ctx, generationOutcome{
-		Chat: committed,
-		Kind: runnerActionKind(kind),
+		Chat:          committed,
+		Kind:          runnerActionKind(kind),
+		AsyncQuestion: commitHooks.AsyncQuestion,
 	})
 }
 
