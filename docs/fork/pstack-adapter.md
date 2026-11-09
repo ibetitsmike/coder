@@ -196,10 +196,10 @@ A child that finished doesn't count.
 At the limit, `spawn_agent` fails with `cannot create a child agent: this chat family has` and the count, instead of queueing the child.
 `message_agent` to a finished child fails the same way with `cannot resume the child agent:`.
 After either error, call `list_agents`, and follow `has_more` with `offset` until you have every direct child.
-If no child is live, retry at once.
+If no child is live, retry one time without waiting.
 If a child is `running`, `interrupting`, or `paused`, call `wait_agent` on it, and retry when it finishes.
 A `paused` child waits for its owner to finish editing a queued message, so keep waiting on it unless the user says otherwise.
-Otherwise, `requires_action` children or your children's own workers hold the limit.
+Otherwise, or if that retry fails, `requires_action` children or your children's own workers hold the limit.
 `wait_agent` returns at once for a `requires_action` child, and `list_agents` doesn't show your children's workers.
 In that case, call `interrupt_agent` on each child whose remaining work you don't need.
 Whatever the child's status, `interrupt_agent` interrupts its `running`, `interrupting`, and `requires_action` descendants, and the child itself when it has a turn.
@@ -209,7 +209,8 @@ Tell the user that the family is at its live limit only after several retries fa
 
 These three flags default to 0, which means no limit.
 An organization's `max_concurrent`, `max_concurrent_per_family`, and `max_live_per_family` subagent limits apply too, and the lower of the deployment and organization values wins.
-An organization admin or auditor can read the deployment values and the values in force in the `deployment` and `effective` fields of `GET /api/v2/chats/fork/organizations/{organization}/subagent-limits`.
+An organization admin or auditor can read the flag values and the lower values in the `deployment` and `effective` fields of `GET /api/v2/chats/fork/organizations/{organization}/subagent-limits`.
+Neither field includes the default cap of 10 subagent turns.
 
 ## Models
 
@@ -306,7 +307,7 @@ Checked against fork `main` at `25f19f624d`:
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:474-479`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:643-675`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:274-282`.
-  Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`.
+  Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
   Concurrency limits without the ancestors, `fork_capacity.go:75-117`, and `waiting_for_capacity` in `list_agents`, `coderd/x/chatd/fork_list_agents.go:34-40`, `:81-88`, from `fork_capacity.go:146-192`.
   `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:570-589`, and `wait_agent` on a `paused` child, `:479-487`.
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
