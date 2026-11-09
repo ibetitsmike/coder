@@ -13,21 +13,21 @@ Never pass a field or value that a tool schema rejects.
 Each row names what Coder Agents offers today and what to do instead.
 The last column names the pstack parity workstream (ibetitsmike/coder#4) whose merge removes the row.
 "Stays" means no workstream removes it.
-This page is fork-only: it is not in `docs/manifest.json`.
+This page is fork-only: it isn't in `docs/manifest.json`.
 
 ## Setup
 
 1. Clone pstack in the workspace: `git clone https://github.com/cursor/plugins ~/pstack-src`.
 2. Pin it: `git -C ~/pstack-src checkout c742dd61706fbacc1b95f1a20b7b988cf096ce6c`.
    `<pstack>` is `~/pstack-src/pstack`.
-3. If `~/.coder/skills/` holds a skill with the name of a pstack skill, `deslop`, `control-ui` or `control-cli`, move it out of `~/.coder/skills/`.
+3. If a skill in `~/.coder/skills/` shares a name with one you copy next, move it out.
    The next step replaces a skill that has the same name.
 4. Copy the skills and the three `cursor-team-kit` skills that pstack calls: `mkdir -p ~/.coder/skills && cp -R ~/pstack-src/pstack/skills/. ~/pstack-src/cursor-team-kit/skills/deslop ~/pstack-src/cursor-team-kit/skills/control-ui ~/pstack-src/cursor-team-kit/skills/control-cli ~/.coder/skills/`.
    The workspace agent reads `~/.coder/skills/<name>/SKILL.md`.
-5. Copy this page to `~/.coder/pstack-adapter.md`.
+5. Download this page: `curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md`.
 6. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
 7. Append the block below to `~/.coder/AGENTS.md`.
-   Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it does not load this page, so the block carries the mappings that most skills need:
+   Coder Agents loads `~/.coder/AGENTS.md` into every chat that uses the workspace, but it doesn't load this page, so the block carries the mappings that most skills need:
 
    ```markdown
    <!-- pstack-adapter -->
@@ -53,12 +53,13 @@ This page is fork-only: it is not in `docs/manifest.json`.
    A model server that keeps only the first system message drops the block without an error.
    Ollama's `qwen3-coder` renderer (Ollama 0.34.4) does this, but the oMLX Qwen3.8 chat template keeps every system message.
    To check a model, ask a new chat to quote the `pstack-adapter` block without any tool call.
+   If it can't, switch to a model server that keeps every system message before you run pstack skills.
 
 8. Start a new chat.
    A chat pins `AGENTS.md` and the skills when it starts.
    A chat that was already open keeps its old copy until you select **Refresh context** in it.
 9. Send one plain message in the new chat.
-   A chat's first message cannot run a skill: it fails with `Skill workspace/<name> is not available.`
+   A chat's first message can't run a skill: it fails with `Skill workspace/<name> is not available.`
 10. Pick the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
 
@@ -109,6 +110,7 @@ Follow its steps with these changes:
 - Defaults: map each default slug with the Models rows.
 - Write: put the comment lines, the `# budget` line and one line per role between `<!-- pstack-models -->` and `<!-- /pstack-models -->` in `~/.coder/AGENTS.md`.
   Replace only that block, because the file holds other instructions.
+- After the write, start a new chat or select **Refresh context** before you run another pstack skill.
 
 ## Paths
 
@@ -137,8 +139,8 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 | Cursor Automations: routines, `update_state` calls, `api2.cursor.sh/automations` webhooks, routine wakes | None                                                               | Skip with the line.                                                                                                                                                                                                                 | Stays                 |
 | Bugbot                                                                                                   | Bugbot comments on a GitHub PR are ordinary review threads         | Triage them with the forge command that the step gives. Skip a step that starts, waits for, or configures Bugbot when the PR has no Bugbot check or comment.                                                                        | Stays                 |
 | Cursor cloud agents                                                                                      | None                                                               | Refer to `environment: "cloud"`. Skip a step that needs the cloud agent itself, such as its dashboard.                                                                                                                              | Stays                 |
-| A built-in PR tool                                                                                       | No PR tool                                                         | Use the forge command that the step gives, such as `gh pr create`. That is not a skip, so write no line.                                                                                                                            | Stays                 |
-| Recent work across chats, such as in `recall`                                                            | No tool lists or reads other chats. Project memory needs a project | Skip the transcript step with the line. Report prior state from `git log`, `git status` and `gh pr list --author @me`, and never invent files or results.                                                                           | W4                    |
+| A built-in PR tool                                                                                       | No PR tool                                                         | Use the forge command that the step gives, such as `gh pr create`. That isn't a skip, so write no line.                                                                                                                             | Stays                 |
+| Recent work across chats, such as in `recall`                                                            | No tool lists or reads other chats. Project memory needs a project | Skip the transcript step with the line. Report prior state from `git log`, `git status` and `gh pr list --author @me --state all`, and never invent files or results.                                                               | W4                    |
 | Origin CLI                                                                                               | `execute` runs it when it is installed                             | Use it when `command -v origin` succeeds. Otherwise skip with the line.                                                                                                                                                             | Stays                 |
 | `/create-skill`                                                                                          | No skill-creation tool                                             | For a project skill, write the repository's `.agents/skills/<name>/SKILL.md`. For a personal skill, write `~/.coder/skills/<name>/SKILL.md`. Give it frontmatter `name`, equal to the kebab-case directory name, and `description`. | Stays                 |
 | Image generation                                                                                         | No built-in image tool                                             | Use an image tool if `find_tools` or your tool list offers one. Otherwise skip with the line.                                                                                                                                       | Stays                 |
