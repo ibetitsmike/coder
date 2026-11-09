@@ -5004,7 +5004,7 @@ Write out the current server config as YAML to stdout.`,
 		},
 	}
 
-	return opts
+	return append(opts, c.forkChatOptions(&deploymentGroupChat)...)
 }
 
 type AIBridgeConfig struct {
@@ -5100,6 +5100,8 @@ type ChatConfig struct {
 	// Deprecated: AI Gateway routing is now the only routing path. Setting this
 	// value has no effect. This option will be removed in a future release.
 	AIGatewayRoutingEnabled serpent.Bool `json:"ai_gateway_routing_enabled" typescript:",notnull" swaggerignore:"true"`
+	// Fork holds the fork-only chat options.
+	Fork ForkChatConfig `json:"fork" typescript:",notnull"`
 }
 
 type AIConfig struct {
