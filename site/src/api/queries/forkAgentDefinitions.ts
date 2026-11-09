@@ -8,7 +8,6 @@ import {
 } from "#/api/forkAgentDefinitions";
 import type { UpdateForkAgentDefinitionRequest } from "#/api/typesGenerated";
 
-/** Query key for the current user's agent definitions in an organization. */
 const userAgentDefinitionsKey = (organizationId: string) =>
 	["chats", "fork-agent-definitions", "user", organizationId] as const;
 
