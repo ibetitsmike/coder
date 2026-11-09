@@ -80,10 +80,11 @@ func (p *Server) chatTranscriptTool(chat database.Chat) fantasy.AgentTool {
 	)
 }
 
-// readChatTranscript reads one page of the target chat's user-visible
-// messages. Every read runs as the owner of chat, never as chatd, which can
-// read every chat: the owner's own chats, their subagent chats and chats
-// shared with them are readable, and other chats are not.
+// readChatTranscript reads one page of the target chat's messages that
+// both its user and its model see. Every read runs as the owner of chat,
+// never as chatd, which can read every chat: the owner's own chats, their
+// subagent chats and chats shared with them are readable, and other chats
+// are not.
 func (p *Server) readChatTranscript(ctx context.Context, chat database.Chat, args readChatTranscriptArgs) (chatTranscriptResult, error) {
 	limit, maxBytes, err := transcriptPageSize(args)
 	if err != nil {
@@ -206,7 +207,13 @@ func transcriptFilters(args readChatTranscriptArgs) (roles []codersdk.ChatMessag
 // transcriptMessage converts row for a transcript page. db2sdk.ChatMessage
 // drops model-only parts and strips provider metadata and credentials with
 // StripInternal. It reports false when the filters leave nothing of row.
+// User-only rows are skipped: they are projections kept from the model,
+// such as a tool result whose user view holds a subagent's private
+// reasoning while the model gets a separate model-only row.
 func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int) (chatTranscriptMessage, bool) {
+	if row.Visibility != database.ChatMessageVisibilityBoth {
+		return chatTranscriptMessage{}, false
+	}
 	message := db2sdk.ChatMessage(row)
 	if len(roles) > 0 && !slices.Contains(roles, message.Role) {
 		return chatTranscriptMessage{}, false

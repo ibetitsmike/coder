@@ -113,11 +113,12 @@ func TestReadChatTranscript(t *testing.T) {
 			userText("first question"),
 			row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{reasoning, codersdk.ChatMessageText("answer")}},
 			row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityModel, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("model-only context")}},
+			row{role: database.ChatMessageRoleTool, visibility: database.ChatMessageVisibilityUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("secret-user-projection")}},
 			userText("second question"),
 		)
 
 		raw := read(t, chat, readChatTranscriptArgs{Limit: 2}, false)
-		for _, secret := range []string{"secret-signature", "secret-credential", "secret-identity", "provider_metadata"} {
+		for _, secret := range []string{"secret-signature", "secret-credential", "secret-identity", "provider_metadata", "secret-user-projection"} {
 			require.NotContains(t, raw, secret)
 		}
 		var first chatTranscriptResult
