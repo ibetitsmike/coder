@@ -27826,6 +27826,14 @@ const docTemplate = `{
         "codersdk.ForkChatConfig": {
             "type": "object",
             "properties": {
+                "max_concurrent_subagents": {
+                    "description": "MaxConcurrentSubagents is the maximum number of running subagent chats\nin the deployment, not counting a subagent's own ancestors. 0 means no\nlimit.",
+                    "type": "integer"
+                },
+                "max_concurrent_subagents_per_family": {
+                    "description": "MaxConcurrentSubagentsPerFamily is the maximum number of running\nsubagent chats under one root chat, not counting a subagent's own\nancestors. 0 means no limit.",
+                    "type": "integer"
+                },
                 "max_subagent_depth": {
                     "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
                     "type": "integer"
@@ -27836,12 +27844,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "max_concurrent": {
-                    "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization.",
+                    "description": "MaxConcurrent is the maximum number of running subagent chats in the\norganization, not counting a subagent's own ancestors.",
                     "type": "integer",
                     "example": 8
                 },
                 "max_concurrent_per_family": {
-                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
+                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat, not counting a subagent's own ancestors.",
                     "type": "integer",
                     "example": 4
                 },

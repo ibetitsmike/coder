@@ -1394,10 +1394,10 @@ func New(ps pubsub.Pubsub, cfg Config) (*Server, error) {
 	p.streamPartsDialer = streamPartsDialerForServer(workerID, localStreamPartsDialer, cfg.StreamPartsDialer)
 	p.streamSyncPoller = newStreamSyncPoller(ctx, cfg.Database, clk, cfg.Logger.Named("chatstream"))
 	p.streamSyncPoller.Start()
-	agentCapacityLimiter := newAgentCapacityLimiter(
+	agentCapacityLimiter := p.forkCapacityLimiter(newAgentCapacityLimiter(
 		cfg.AgentCapacityUnlock,
 		int32(inFlightChatStaleAfter.Seconds()),
-	)
+	))
 	var agentCapacityMetrics *capacityMetrics
 	if cfg.PrometheusRegistry != nil {
 		agentCapacityMetrics = newCapacityMetrics(cfg.PrometheusRegistry)

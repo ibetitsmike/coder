@@ -2249,3 +2249,25 @@ The module registry host the template builder uses for module source paths (for 
 | Default     | <code>2</code>                              |
 
 Maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0 and its subagents at depth 1. Explore and computer use subagents never spawn subagents. Must be between 1 and 16.
+
+### --chat-max-concurrent-subagents
+
+| Property    | Value                                             |
+|-------------|---------------------------------------------------|
+| Type        | <code>int</code>                                  |
+| Environment | <code>$CODER_CHAT_MAX_CONCURRENT_SUBAGENTS</code> |
+| YAML        | <code>chat.maxConcurrentSubagents</code>          |
+| Default     | <code>0</code>                                    |
+
+Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value for its own chats.
+
+### --chat-max-concurrent-subagents-per-family
+
+| Property    | Value                                                        |
+|-------------|--------------------------------------------------------------|
+| Type        | <code>int</code>                                             |
+| Environment | <code>$CODER_CHAT_MAX_CONCURRENT_SUBAGENTS_PER_FAMILY</code> |
+| YAML        | <code>chat.maxConcurrentSubagentsPerFamily</code>            |
+| Default     | <code>0</code>                                               |
+
+Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit. An organization can set a lower value.
