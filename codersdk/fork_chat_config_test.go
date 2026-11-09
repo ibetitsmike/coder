@@ -21,7 +21,12 @@ func TestForkChatMaxSubagentDepthOption(t *testing.T) {
 	require.NoError(t, opts.SetDefaults())
 	require.EqualValues(t, codersdk.DefaultChatMaxSubagentDepth, values.AI.Chat.Fork.MaxSubagentDepth.Value())
 
-	require.Error(t, opt.Value.Set("0"))
+	require.NoError(t, values.Validate())
+
+	// Validate covers YAML, which sets values without per-option validators.
+	require.NoError(t, opt.Value.Set("0"))
+	require.ErrorContains(t, values.Validate(), "--chat-max-subagent-depth (0) must be between 1 and")
 	require.NoError(t, opt.Value.Set("3"))
 	require.EqualValues(t, 3, values.AI.Chat.Fork.MaxSubagentDepth.Value())
+	require.NoError(t, values.Validate())
 }
