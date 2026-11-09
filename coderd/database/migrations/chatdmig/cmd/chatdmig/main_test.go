@@ -92,23 +92,25 @@ func TestRouteEarly(t *testing.T) {
 		t.Parallel()
 		// A hand-edited ledger may leave a version unpadded.
 		routes := routesHeader + "640 a core\n000641 b core\n"
+		chatX := "ALTER TABLE chats ADD COLUMN x int;\n"
 		dir := writeMigrations(t, routes, map[string]string{
 			"000640_a.up.sql":      "ALTER TABLE users ADD COLUMN a int;\n",
 			"000641_b.up.sql":      "ALTER TABLE users ADD COLUMN b int;\n",
-			"000642_chat_x.up.sql": "ALTER TABLE chats ADD COLUMN x int;\n",
+			"000642_chat_x.up.sql": chatX,
 		})
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000642 chat_x coder/coder#1 "+sha("ALTER TABLE chats ADD COLUMN x int;\n")+"\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000642 chat_x coder/coder#1 "+sha(chatX)+"\n"), 0o600))
 
 		require.NoError(t, route(dir))
 	})
 
 	t.Run("EveryEarlyMigrationRoutes", func(t *testing.T) {
 		t.Parallel()
+		a, b := "ALTER TABLE users ADD COLUMN a int;\n", "ALTER TABLE users ADD COLUMN b int;\n"
 		dir := writeMigrations(t, routesHeader, map[string]string{
-			"000640_a_q.up.sql": "ALTER TABLE users ADD COLUMN a int;\n",
-			"000641_b_q.up.sql": "ALTER TABLE users ADD COLUMN b int;\n",
+			"000640_a_q.up.sql": a,
+			"000641_b_q.up.sql": b,
 		})
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000640 a_q coder/coder#1 "+sha("ALTER TABLE users ADD COLUMN a int;\n")+"\n000641 b_q coder/coder#1 "+sha("ALTER TABLE users ADD COLUMN b int;\n")+"\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "chatdmig", "early.txt"), []byte("000640 a_q coder/coder#1 "+sha(a)+"\n000641 b_q coder/coder#1 "+sha(b)+"\n"), 0o600))
 
 		require.NoError(t, route(dir))
 		got, err := os.ReadFile(filepath.Join(dir, "chatdmig", "routes.txt"))

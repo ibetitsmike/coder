@@ -120,10 +120,10 @@ migrations, so sqlc and the generated queries do not change.
 coder/coder branch before upstream main merged them, one
 `<version> <name> <source> <sha256>` per line. `<sha256>` is the sha256 of
 the `.up.sql` file that the fork took, as `shasum -a 256 <file>` prints it.
-golang-migrate keeps one version per
-database, so a database that ran one of them skips every later upstream
-migration at or below its version. `chatdmig route` fails when upstream brings
-a new or renumbered migration at or below an early version, and the sync stops.
+golang-migrate keeps one version per database, so a database that ran one of
+them skips every later upstream migration at or below its version.
+`chatdmig route` fails when upstream brings a new or renumbered migration at or
+below an early version, and the sync stops.
 A person then renumbers or moves the migration before the sync continues.
 Migrations that were routed before the early entry was added are not checked.
 An early version must be above the split, because route ignores the
