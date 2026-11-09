@@ -122,7 +122,17 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 			return xerrors.Errorf("acquire chat family admission lock: %w", err)
 		}
 	}
-	return validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
+	err = validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
+	if err != nil && !inTx {
+		// A concurrent message_agent may have resumed target after the
+		// caller loaded it. The send then only queues on a live child, and
+		// the transactional check reloads target and skips the limit.
+		current, getErr := store.GetChatByID(ctx, target.ID)
+		if getErr == nil && current.Status != database.ChatStatusWaiting && current.Status != database.ChatStatusError {
+			return nil
+		}
+	}
+	return err
 }
 
 // chatFamilyAdmissionLockID is the transaction lock that serializes the
