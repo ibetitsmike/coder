@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // registerForkChatRoutes mounts the fork-only chat routes on /chats/fork of r,
@@ -24,10 +26,20 @@ import (
 // The API key middleware wraps the mount instead of being Use'd inside the
 // subrouter: chi builds a subrouter's middleware chain only when its first
 // route is registered, so with no fork route the 404 would skip authentication.
-func (*API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
+//
+// Register fork leaves with r.With(...) instead of Use'ing middleware in a
+// subrouter: a Use applies to the reserved 404 too, so a fork path that no
+// route matches would answer the middleware's 403 or 400.
+func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
 	r.With(apiKeyMiddleware).Route("/chats/fork", func(r chi.Router) {
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})
+		orgSubagents := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkNestedSubagents),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		orgSubagents.Get("/organizations/{organization}/subagent-limits", api.forkOrganizationSubagentLimits)
+		orgSubagents.Put("/organizations/{organization}/subagent-limits", api.updateForkOrganizationSubagentLimits)
 	})
 }
