@@ -24,6 +24,8 @@ import (
 )
 
 const (
+	todoWriteToolName       = "todo_write"
+	todoReadToolName        = "todo_read"
 	maxChatTodos            = 50
 	maxChatTodoIDBytes      = 64
 	maxChatTodoContentBytes = 500
@@ -49,7 +51,7 @@ type chatTodosResult struct {
 func (p *Server) chatTodoTools(chat database.Chat) []fantasy.AgentTool {
 	return []fantasy.AgentTool{
 		fantasy.NewAgentTool(
-			"todo_write",
+			todoWriteToolName,
 			"Replace the todo list of this chat. Use it to plan multi-step "+
 				"work and to track progress. Send the full list every time, "+
 				"since items you leave out are removed. Keep exactly one item "+
@@ -68,7 +70,7 @@ func (p *Server) chatTodoTools(chat database.Chat) []fantasy.AgentTool {
 			},
 		),
 		fantasy.NewAgentTool(
-			"todo_read",
+			todoReadToolName,
 			"Read the todo list of this chat and its version. The version is "+
 				"0 when the chat has no list yet.",
 			func(ctx context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -171,9 +173,9 @@ func (p *Server) readChatTodos(ctx context.Context, chatID uuid.UUID) ([]codersd
 	if err != nil {
 		return nil, 0, xerrors.Errorf("read todo list: %w", err)
 	}
-	todos := []codersdk.ChatTodo{}
-	if err := json.Unmarshal(row.Items, &todos); err != nil {
-		return nil, 0, xerrors.Errorf("decode todo list: %w", err)
+	todos, err := codersdk.DecodeChatTodoItems(row.Items)
+	if err != nil {
+		return nil, 0, err
 	}
 	return todos, row.Version, nil
 }

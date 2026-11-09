@@ -95,30 +95,6 @@ func TestParseAgentDefinition(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:    "InlineMCPServersIgnored",
-			content: "---\nname: a\ndescription: d\nmcpServers:\n  - github\n  - slack:\n      command: slack-mcp\n---\nBody.",
-			want: workspacesdk.AgentDefinition{
-				Name:        "a",
-				Description: "d",
-				Prompt:      "Body.",
-				MCPMode:     workspacesdk.AgentDefinitionMCPInherit,
-				BaseType:    workspacesdk.AgentDefinitionBaseGeneral,
-				Warnings:    []string{"inline MCP server definitions in mcpServers are not supported and were ignored"},
-			},
-		},
-		{
-			name:    "InlineMCPServersMap",
-			content: "---\nname: a\ndescription: d\nmcpServers:\n  slack:\n    command: slack-mcp\n---\nBody.",
-			want: workspacesdk.AgentDefinition{
-				Name:        "a",
-				Description: "d",
-				Prompt:      "Body.",
-				MCPMode:     workspacesdk.AgentDefinitionMCPInherit,
-				BaseType:    workspacesdk.AgentDefinitionBaseGeneral,
-				Warnings:    []string{"inline MCP server definitions in mcpServers are not supported and were ignored"},
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -148,6 +124,9 @@ func TestParseAgentDefinitionErrors(t *testing.T) {
 		{name: "DisallowedToolsNonString", content: "---\nname: a\ndisallowedTools: [1]\n---\nBody.", errMsg: `"disallowedTools"`},
 		{name: "DescriptionWrongType", content: "---\nname: a\ndescription: [x]\n---\nBody.", errMsg: `"description"`},
 		{name: "BadMCPMode", content: "---\nname: a\nmcp: all\n---\nBody.", errMsg: `"mcp"`},
+		{name: "InlineMCPServersList", content: "---\nname: a\nmcpServers:\n  - github\n  - slack:\n      env: {TOKEN: x}\n---\nBody.", errMsg: `"mcpServers" has inline server definitions`},
+		{name: "InlineMCPServersMap", content: "---\nname: a\nmcpServers:\n  slack:\n    command: slack-mcp\n---\nBody.", errMsg: `"mcpServers" has inline server definitions`},
+		{name: "InlineMCPServersWithMCP", content: "---\nname: a\nmcp: none\nmcpServers:\n  slack:\n    command: slack-mcp\n---\nBody.", errMsg: `"mcpServers" has inline server definitions`},
 		{name: "UnclosedFrontmatter", content: "---\nname: a\nBody.", errMsg: "missing closing frontmatter delimiter"},
 	}
 	for _, tt := range tests {
