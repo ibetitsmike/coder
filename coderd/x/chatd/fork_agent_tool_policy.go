@@ -75,8 +75,8 @@ func customAgentMCPServer(tool fantasy.AgentTool, mcpServerSlugs map[uuid.UUID]s
 	if identified, ok := tool.(mcpclient.MCPToolIdentifier); ok {
 		return mcpServerSlugs[identified.MCPServerConfigID()], true
 	}
-	if _, ok := tool.(interface{ ServerName() string }); ok {
-		return strings.TrimSpace(workspaceMCPServerName(tool)), true
+	if namer, ok := tool.(interface{ ServerName() string }); ok {
+		return strings.TrimSpace(namer.ServerName()), true
 	}
 	return "", false
 }
