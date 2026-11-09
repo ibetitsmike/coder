@@ -9,7 +9,13 @@ package codersdk
 // an upstream experiment name now or after a sync. Every fork feature sits
 // behind one of these experiments, so a deployment with no fork experiment
 // enabled behaves exactly like upstream.
-var ForkExperiments = Experiments{}
+var ForkExperiments = Experiments{
+	ExperimentForkChatTodos,
+}
+
+// ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
+// the chat todo list.
+const ExperimentForkChatTodos Experiment = "fork-chat-todos"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

@@ -1186,6 +1186,7 @@ The generation goroutine supports:
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
+  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos and the list_agents todos field. -->
 - file links
 - workspace binding
 - plan mode

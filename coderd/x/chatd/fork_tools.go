@@ -10,15 +10,17 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // appendForkTools returns the turn tool list plus the tools of the fork
 // features enabled for this deployment. A fork feature gates on its own
-// experiment with Server.experiments and
-// codersdk.Experiment("fork-<feature>"), the way chatd gates upstream
-// experiments, so with no fork experiment enabled the list is exactly the
-// upstream list. The blank parameters name what a fork tool needs, and become
-// named when the first fork tool lands.
-func (*Server) appendForkTools(_ context.Context, tools []fantasy.AgentTool, _ database.Chat) []fantasy.AgentTool {
+// experiment with Server.experiments and a codersdk.ExperimentFork* constant,
+// the way chatd gates upstream experiments, so with no fork experiment enabled
+// the list is exactly the upstream list.
+func (p *Server) appendForkTools(_ context.Context, tools []fantasy.AgentTool, chat database.Chat) []fantasy.AgentTool {
+	if p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
+		tools = append(tools, p.chatTodoTools(chat)...)
+	}
 	return tools
 }

@@ -3994,6 +3994,38 @@ export const ChatTitleSources: ChatTitleSource[] = [
 	"user",
 ];
 
+// From codersdk/fork_chat_todos.go
+/**
+ * ChatTodo is one item of a chat todo list.
+ */
+export interface ChatTodo {
+	readonly id: string;
+	readonly content: string;
+	readonly status: ChatTodoStatus;
+}
+
+// From codersdk/fork_chat_todos.go
+/**
+ * ChatTodoList is the todo list of a chat. Version grows by one on every
+ * write, so a reader can tell which of two lists is newer.
+ */
+export interface ChatTodoList {
+	readonly chat_id: string;
+	readonly items: readonly ChatTodo[];
+	readonly version: number;
+	readonly updated_at: string;
+}
+
+// From codersdk/fork_chat_todos.go
+export type ChatTodoStatus = "cancelled" | "done" | "in_progress" | "pending";
+
+export const ChatTodoStatuses: ChatTodoStatus[] = [
+	"cancelled",
+	"done",
+	"in_progress",
+	"pending",
+];
+
 // From codersdk/chats.go
 export interface ChatToolCallPart {
 	readonly type: "tool-call";
@@ -5789,6 +5821,7 @@ export type Experiment =
 	| "chat-virtual-desktop"
 	| "enable-ai-workspace-debug"
 	| "example"
+	| "fork-chat-todos"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
@@ -5869,6 +5902,7 @@ export const Experiments: Experiment[] = [
 	"chat-virtual-desktop",
 	"enable-ai-workspace-debug",
 	"example",
+	"fork-chat-todos",
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",
