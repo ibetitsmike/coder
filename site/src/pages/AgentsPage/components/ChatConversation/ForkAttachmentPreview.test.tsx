@@ -1,0 +1,65 @@
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import type { Experiment } from "#/api/typesGenerated";
+import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
+import {
+	MockAppearanceConfig,
+	MockBuildInfo,
+	MockDefaultOrganization,
+	MockEntitlements,
+} from "#/testHelpers/entities";
+import { MockChatVideoFilePart } from "#/testHelpers/forkChatAttachments";
+import { renderComponent } from "#/testHelpers/renderHelpers";
+import { AttachmentBlock } from "./AttachmentBlocks";
+import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
+
+const renderPreview = (experiments: Experiment[]) =>
+	renderComponent(
+		<DashboardContext.Provider
+			value={{
+				entitlements: MockEntitlements,
+				experiments,
+				appearance: MockAppearanceConfig,
+				buildInfo: MockBuildInfo,
+				organizations: [MockDefaultOrganization],
+				showOrganizations: false,
+				canViewOrganizationSettings: false,
+			}}
+		>
+			<ForkAttachmentPreview block={MockChatVideoFilePart}>
+				<AttachmentBlock
+					block={MockChatVideoFilePart}
+					onImageClick={vi.fn()}
+					onTextFileClick={vi.fn()}
+					framePreview
+				/>
+			</ForkAttachmentPreview>
+		</DashboardContext.Provider>,
+	);
+
+describe("ForkAttachmentPreview", () => {
+	it("plays an attached MP4 when fork-chat-todos is on", async () => {
+		renderPreview(["fork-chat-todos"]);
+		const preview = screen.getByRole("figure", { name: "review.mp4" });
+
+		await userEvent.click(
+			within(preview).getByRole("button", { name: "Play review.mp4" }),
+		);
+
+		await screen.findByRole("dialog", { name: "Recording playback" });
+	});
+
+	it("offers the upstream download when fork-chat-todos is off", () => {
+		renderPreview([]);
+
+		expect(
+			screen.queryByRole("button", { name: "Play review.mp4" }),
+		).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Download review.mp4" })
+				.getAttribute("href"),
+		).toBe("/api/v2/chats/files/chat-file-1");
+	});
+});
