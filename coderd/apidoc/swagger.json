@@ -4118,6 +4118,205 @@
 				}
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/agent-definitions": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List organization agent definitions",
+				"operationId": "list-organization-agent-definitions",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkAgentDefinitionMetadata"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"post": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Create an organization agent definition",
+				"operationId": "create-an-organization-agent-definition",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.CreateForkAgentDefinitionRequest"
+						}
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkAgentDefinition"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get an organization agent definition",
+				"operationId": "get-an-organization-agent-definition",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Agent definition name",
+						"name": "agentDefinition",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkAgentDefinition"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Delete an organization agent definition",
+				"operationId": "delete-an-organization-agent-definition",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Agent definition name",
+						"name": "agentDefinition",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"patch": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Update an organization agent definition",
+				"operationId": "update-an-organization-agent-definition",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Agent definition name",
+						"name": "agentDefinition",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.UpdateForkAgentDefinitionRequest"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkAgentDefinition"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions": {
 			"get": {
 				"produces": ["application/json"],
@@ -4372,7 +4571,7 @@
 					"200": {
 						"description": "OK",
 						"schema": {
-							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimitsResponse"
 						}
 					}
 				},
@@ -4411,7 +4610,7 @@
 					"200": {
 						"description": "OK",
 						"schema": {
-							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimitsResponse"
 						}
 					}
 				},
@@ -25448,6 +25647,60 @@
 				},
 				"max_live_per_family": {
 					"description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat, checked when a subagent is spawned or when message_agent\nresumes a finished one. A live subagent has status running,\ninterrupting, requires_action or paused and is not archived. A finished\none is waiting or error and does not count.",
+					"type": "integer",
+					"example": 6
+				}
+			}
+		},
+		"codersdk.ForkOrganizationSubagentLimitsResponse": {
+			"type": "object",
+			"properties": {
+				"deployment": {
+					"description": "Deployment holds the deployment limits.",
+					"allOf": [
+						{
+							"$ref": "#/definitions/codersdk.ForkSubagentLimitValues"
+						}
+					]
+				},
+				"effective": {
+					"description": "Effective holds the limits in force in the organization.",
+					"allOf": [
+						{
+							"$ref": "#/definitions/codersdk.ForkSubagentLimitValues"
+						}
+					]
+				},
+				"organization": {
+					"description": "Organization holds the stored organization limits. A nil limit is\nunset.",
+					"allOf": [
+						{
+							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+						}
+					]
+				}
+			}
+		},
+		"codersdk.ForkSubagentLimitValues": {
+			"type": "object",
+			"properties": {
+				"max_concurrent": {
+					"description": "MaxConcurrent is the maximum number of running subagent chats.",
+					"type": "integer",
+					"example": 8
+				},
+				"max_concurrent_per_family": {
+					"description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
+					"type": "integer",
+					"example": 4
+				},
+				"max_depth": {
+					"description": "MaxDepth is the maximum depth of nested subagent chats.",
+					"type": "integer",
+					"example": 2
+				},
+				"max_live_per_family": {
+					"description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat.",
 					"type": "integer",
 					"example": 6
 				}

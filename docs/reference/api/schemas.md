@@ -10546,6 +10546,59 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats, between 1 and 16.                                                                                                                                                                                                                                                     |
 | `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. A live subagent has status running, interrupting, requires_action or paused and is not archived. A finished one is waiting or error and does not count. |
 
+## codersdk.ForkOrganizationSubagentLimitsResponse
+
+```json
+{
+  "deployment": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "effective": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  },
+  "organization": {
+    "max_concurrent": 8,
+    "max_concurrent_per_family": 4,
+    "max_depth": 2,
+    "max_live_per_family": 6
+  }
+}
+```
+
+### Properties
+
+| Name           | Type                                                                               | Required | Restrictions | Description                                                              |
+|----------------|------------------------------------------------------------------------------------|----------|--------------|--------------------------------------------------------------------------|
+| `deployment`   | [codersdk.ForkSubagentLimitValues](#codersdkforksubagentlimitvalues)               | false    |              | Deployment holds the deployment limits.                                  |
+| `effective`    | [codersdk.ForkSubagentLimitValues](#codersdkforksubagentlimitvalues)               | false    |              | Effective holds the limits in force in the organization.                 |
+| `organization` | [codersdk.ForkOrganizationSubagentLimits](#codersdkforkorganizationsubagentlimits) | false    |              | Organization holds the stored organization limits. A nil limit is unset. |
+
+## codersdk.ForkSubagentLimitValues
+
+```json
+{
+  "max_concurrent": 8,
+  "max_concurrent_per_family": 4,
+  "max_depth": 2,
+  "max_live_per_family": 6
+}
+```
+
+### Properties
+
+| Name                        | Type    | Required | Restrictions | Description                                                                                    |
+|-----------------------------|---------|----------|--------------|------------------------------------------------------------------------------------------------|
+| `max_concurrent`            | integer | false    |              | Max concurrent is the maximum number of running subagent chats.                                |
+| `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
+| `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats.                                       |
+| `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of live subagent chats under one root chat.          |
+
 ## codersdk.FriendlyDiagnostic
 
 ```json

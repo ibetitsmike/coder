@@ -6328,6 +6328,54 @@ export interface ForkOrganizationSubagentLimits {
 	readonly max_live_per_family?: number;
 }
 
+// From codersdk/fork_subagent_limits.go
+/**
+ * ForkOrganizationSubagentLimitsResponse holds the subagent limits of an
+ * organization with the deployment limits and the limits in force, where the
+ * lower of the deployment and organization values wins.
+ */
+export interface ForkOrganizationSubagentLimitsResponse {
+	/**
+	 * Organization holds the stored organization limits. A nil limit is
+	 * unset.
+	 */
+	readonly organization: ForkOrganizationSubagentLimits;
+	/**
+	 * Deployment holds the deployment limits.
+	 */
+	readonly deployment: ForkSubagentLimitValues;
+	/**
+	 * Effective holds the limits in force in the organization.
+	 */
+	readonly effective: ForkSubagentLimitValues;
+}
+
+// From codersdk/fork_subagent_limits.go
+/**
+ * ForkSubagentLimitValues are subagent limits in force. A capacity limit of
+ * 0 means no limit, and the depth is always set.
+ */
+export interface ForkSubagentLimitValues {
+	/**
+	 * MaxDepth is the maximum depth of nested subagent chats.
+	 */
+	readonly max_depth: number;
+	/**
+	 * MaxConcurrent is the maximum number of running subagent chats.
+	 */
+	readonly max_concurrent: number;
+	/**
+	 * MaxConcurrentPerFamily is the maximum number of running subagent chats
+	 * under one root chat.
+	 */
+	readonly max_concurrent_per_family: number;
+	/**
+	 * MaxLivePerFamily is the maximum number of live subagent chats under one
+	 * root chat.
+	 */
+	readonly max_live_per_family: number;
+}
+
 // From codersdk/files.go
 export const FormatZip = "zip";
 
