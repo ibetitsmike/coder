@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -161,6 +163,43 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		_, err = member.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 		_, err = orgAdmin.UpdateForkOrganizationAgentDefinition(ctx, orgID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("ScopedAPIKeys", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		scopedClient := func(scope database.APIKeyScope) *codersdk.Client {
+			_, token := dbgen.APIKey(t, db, database.APIKey{
+				UserID: owner.UserID,
+				Scopes: database.APIKeyScopes{"organization:read", scope},
+			})
+			scoped := codersdk.New(client.URL)
+			scoped.SetSessionToken(token)
+			return scoped
+		}
+		_, err := client.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		require.NoError(t, err)
+
+		// A key that can neither read nor delete must not learn that the
+		// definition exists.
+		err = scopedClient("organization_skill:update").DeleteForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		deleter := scopedClient("organization_skill:delete")
+		_, err = deleter.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = deleter.DeleteForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		require.NoError(t, err)
+		_, err = client.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
 

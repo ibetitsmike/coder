@@ -157,18 +157,21 @@ func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	current, ok := api.readForkOrganizationAgentDefinition(rw, r)
-	if !ok {
-		return
-	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
 	}
+	// Delete authorizes before reading so that delete-only API key scopes
+	// work. A caller who can neither delete nor read gets 404.
 	_, err := fdb.DeleteOrganizationAgentDefinitionByName(ctx, forkdb.DeleteOrganizationAgentDefinitionByNameParams{
-		OrganizationID: current.OrganizationID,
-		Name:           current.Name,
+		OrganizationID: httpmw.OrganizationParam(r).ID,
+		Name:           chi.URLParam(r, "agentDefinition"),
 	})
+	if httpapi.IsUnauthorizedError(err) {
+		if _, ok := api.readForkOrganizationAgentDefinition(rw, r); !ok {
+			return
+		}
+	}
 	if err != nil {
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
@@ -177,7 +180,7 @@ func (api *API) deleteForkOrganizationAgentDefinition(rw http.ResponseWriter, r 
 }
 
 // readForkOrganizationAgentDefinition reads the organization definition
-// named in the path. Updates and deletes read it first so that a caller who
+// named in the path. Updates read it first so that a caller who
 // cannot read the definition gets 404, and only readers get 403.
 func (api *API) readForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) (forkdb.AgentDefinition, bool) {
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
