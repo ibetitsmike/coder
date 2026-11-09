@@ -1189,7 +1189,7 @@ The generation goroutine supports:
   <!-- TODO(fork-chat-todos): document search_chats. -->
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
-  <!-- TODO(fork-chat-todos): document todo_write, todo_read, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
+  <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
 - file links
 - workspace binding
 - plan mode
