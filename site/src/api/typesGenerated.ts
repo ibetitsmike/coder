@@ -7058,6 +7058,13 @@ export const MaxAISpendPeriodDays = 31;
  */
 export const MaxChatFileSizeBytes = 10485760;
 
+// From codersdk/fork_chat_config.go
+/**
+ * MaxChatMaxSubagentDepth caps --chat-max-subagent-depth so walks over a
+ * subagent family stay small and bounded.
+ */
+export const MaxChatMaxSubagentDepth = 16;
+
 // From codersdk/chats.go
 /**
  * MaxChatTitleRunes is the longest title accepted at creation or rename,

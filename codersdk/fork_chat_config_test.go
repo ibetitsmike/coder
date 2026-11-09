@@ -25,7 +25,9 @@ func TestForkChatMaxSubagentDepthOption(t *testing.T) {
 
 	// Validate covers YAML, which sets values without per-option validators.
 	require.NoError(t, opt.Value.Set("0"))
-	require.ErrorContains(t, values.Validate(), "--chat-max-subagent-depth (0) must be between 1 and")
+	require.ErrorContains(t, values.Validate(), "--chat-max-subagent-depth (0) must be between 1 and 16")
+	require.NoError(t, opt.Value.Set("17"))
+	require.ErrorContains(t, values.Validate(), "--chat-max-subagent-depth (17) must be between 1 and 16")
 	require.NoError(t, opt.Value.Set("3"))
 	require.EqualValues(t, 3, values.AI.Chat.Fork.MaxSubagentDepth.Value())
 	require.NoError(t, values.Validate())

@@ -5275,11 +5275,13 @@ func (c *DeploymentValues) Validate() error {
 		{"chat-max-attachments-per-chat", c.AI.Chat.MaxAttachmentsPerChat.Value()},
 		{"chat-max-prompt-bytes", c.AI.Chat.MaxPromptBytes.Value()},
 		{"chat-max-concurrent-recording-uploads", c.AI.Chat.MaxConcurrentRecordingUploads.Value()},
-		{"chat-max-subagent-depth", c.AI.Chat.Fork.MaxSubagentDepth.Value()},
 	} {
 		if limit.value < 1 || limit.value > math.MaxInt32 {
 			return xerrors.Errorf("--%s (%d) must be between 1 and %d", limit.flag, limit.value, math.MaxInt32)
 		}
+	}
+	if err := c.validateForkChat(); err != nil {
+		return err
 	}
 
 	// Gated on the builder being enabled and run here rather than as a per-option
