@@ -312,8 +312,9 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	t.Run("LargeList", func(t *testing.T) {
 		t.Parallel()
 		// The largest list todo_write accepts fits the tool result budget of a
-		// model with a common context window, and is truncated to the budget of
-		// a small one while still naming its version, so it is not sent again.
+		// model with a common context window. With a small one its items are
+		// truncated to the budget and the version stays, so it is not sent
+		// again.
 		large := make([]codersdk.ChatTodo, maxChatTodos)
 		for i := range large {
 			large[i] = codersdk.ChatTodo{
@@ -350,7 +351,9 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		insert(t, small.ID, summary())
 		got, ok = snapshotText(t, server, small)
 		require.True(t, ok)
-		require.LessOrEqual(t, len(got), chatloop.ToolResultByteBudget(smallContextLimit))
+		_, items, ok := strings.Cut(got, fmt.Sprintf("\n%s%d\n", todoSnapshotVersionLine, version))
+		require.True(t, ok)
+		require.LessOrEqual(t, len(items), chatloop.ToolResultByteBudget(smallContextLimit))
 		shown, ok := todoSnapshotVersion(got)
 		require.True(t, ok)
 		require.Equal(t, version, shown)

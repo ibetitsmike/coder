@@ -144,7 +144,7 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 		// The prompt already shows this exact list.
 		return chatstate.Message{}, false, nil
 	}
-	// A snapshot gets the room a todo result gets with the chat's model. A
+	// The items get the room a todo result gets with the chat's model. A
 	// result over that budget is truncated without its version, which makes a
 	// snapshot due, and the snapshot must not bring back the size the
 	// truncation removed.
@@ -247,25 +247,24 @@ func todoSnapshotVersion(text string) (int64, bool) {
 // the snapshot message text, one JSON object per item so a line break inside
 // an item cannot read as another item. An empty list says so, so a model
 // holding a plan that was cleared drops it instead of finishing a task nobody
-// asked for, including one the compaction summary still mentions. A text over
-// maxBytes keeps its head, which names the version, and its tail.
+// asked for, including one the compaction summary still mentions. maxBytes
+// bounds the item lines, which take no more bytes than the items of a todo
+// tool result, so they are cut only when that result was cut too.
 func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64, maxBytes int) (string, error) {
-	var sb strings.Builder
-	sb.WriteString(todoSnapshotHeader)
-	sb.WriteString("\n")
-	sb.WriteString(todoSnapshotVersionLine)
-	sb.WriteString(strconv.FormatInt(version, 10))
-	if len(todos) == 0 {
-		sb.WriteString("\n(empty)")
-	}
-	for _, todo := range todos {
-		item, err := json.Marshal(todo)
-		if err != nil {
-			return "", xerrors.Errorf("marshal todo item: %w", err)
+	items := "(empty)"
+	if len(todos) > 0 {
+		var sb strings.Builder
+		for i, todo := range todos {
+			item, err := json.Marshal(todo)
+			if err != nil {
+				return "", xerrors.Errorf("marshal todo item: %w", err)
+			}
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			sb.Write(item)
 		}
-		sb.WriteString("\n")
-		sb.Write(item)
+		items, _ = chatloop.TruncateToolResultText(sb.String(), maxBytes)
 	}
-	text, _ := chatloop.TruncateToolResultText(sb.String(), maxBytes)
-	return text, nil
+	return todoSnapshotHeader + "\n" + todoSnapshotVersionLine + strconv.FormatInt(version, 10) + "\n" + items, nil
 }
