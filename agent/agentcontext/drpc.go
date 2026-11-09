@@ -121,6 +121,8 @@ func setResourceBody(entry *agentproto.ContextResource, r Resource) {
 		entry.Body = &agentproto.ContextResource_McpConfig{
 			McpConfig: &agentproto.MCPConfigBody{},
 		}
+	case KindSubagent:
+		entry.Body = subagentBody(r)
 	case KindMCPServer:
 		entry.Body = &agentproto.ContextResource_McpServer{
 			McpServer: &agentproto.MCPServerBody{

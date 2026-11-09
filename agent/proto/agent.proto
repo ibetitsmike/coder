@@ -642,6 +642,9 @@ message ContextResource {
 		MCPConfigBody mcp_config = 12;
 		MCPServerBody mcp_server = 13;
 		ACPHarnessBody acp_harness = 17;
+		// Fork: tags from 100 up keep fork variants clear of
+		// upstream additions.
+		SubagentBody subagent = 100;
 	}
 
 	// Reserved tags from the legacy v2.10 schema that carried
@@ -665,6 +668,17 @@ message InstructionFileBody {
 // demand via the agent's local HTTP API.
 message SkillMetaBody {
 	bytes meta = 1;
+	string name = 2;
+	string description = 3;
+}
+
+// SubagentBody carries a custom agent definition file (Claude
+// Code or Cursor agent markdown) plus the identity fields parsed
+// from its front-matter. The whole file is shipped so coderd can
+// use the body as the agent's system prompt without dialing the
+// workspace.
+message SubagentBody {
+	bytes definition = 1;
 	string name = 2;
 	string description = 3;
 }
