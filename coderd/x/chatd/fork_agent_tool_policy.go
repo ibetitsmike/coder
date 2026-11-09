@@ -3,8 +3,9 @@ package chatd
 // This file is fork code: it enforces a custom agent's readonly, tools,
 // disallowed_tools and mcp fields behind the fork-agent-definitions
 // experiment. Spawn stores the policy on the child's chat_subagents row, and
-// upstream's buildTurnEnvironment calls applyCustomAgentToolPolicy, which
-// changes nothing when the experiment is off or the chat is a root chat.
+// upstream's buildTurnEnvironment loads it with customAgentToolPolicyOfChat
+// and filters with applyCustomAgentToolPolicy. Both change nothing when the
+// experiment is off or the chat is a root chat.
 
 import (
 	"context"
@@ -125,6 +126,12 @@ func (policy customAgentToolPolicy) keepsOrchestrationTools() bool {
 	})
 }
 
+// keepsSkillTools reports whether policy leaves the child read_skill, which
+// the skill index tells it to call. readonly keeps it.
+func (policy customAgentToolPolicy) keepsSkillTools() bool {
+	return policy.allowsNonMCPTool("read_skill")
+}
+
 // filter returns the tools, deferred MCP candidates and provider tools that
 // policy allows, in their original order. readonly keeps web_search, the
 // provider tool that Explore children keep. mcpServerSlugs is only read in
@@ -162,48 +169,60 @@ func (policy customAgentToolPolicy) filter(
 	return tools, candidates, providerTools
 }
 
+// customAgentToolPolicyOfChat returns the tool policy stored when chat was
+// spawned, or nil when there is none. A policy that cannot be read fails the
+// turn instead of running it unrestricted.
+func (p *Server) customAgentToolPolicyOfChat(ctx context.Context, chat database.Chat) (*customAgentToolPolicy, error) {
+	if !p.agentDefinitionsEnabled() || !chat.ParentChatID.Valid {
+		return nil, nil
+	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return nil, xerrors.Errorf("fork queries: %w", err)
+	}
+	row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
+	}
+	if !row.ToolPolicy.Valid {
+		return nil, nil
+	}
+	var policy customAgentToolPolicy
+	if err := json.Unmarshal(row.ToolPolicy.RawMessage, &policy); err != nil {
+		return nil, xerrors.Errorf("decode tool policy of chat %s: %w", chat.ID, err)
+	}
+	switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
+	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone, workspacesdk.AgentDefinitionMCPNamed:
+	default:
+		return nil, xerrors.Errorf("tool policy of chat %s has unknown mcp mode %q", chat.ID, policy.MCPMode)
+	}
+	return &policy, nil
+}
+
 // applyCustomAgentToolPolicy filters the turn's tools, deferred MCP
-// candidates and provider tools by the tool policy stored when chat was
-// spawned. A policy that cannot be read fails the turn instead of running it
-// unrestricted.
+// candidates and provider tools of chat by policy, from
+// customAgentToolPolicyOfChat. A nil policy keeps them all.
 func (p *Server) applyCustomAgentToolPolicy(
 	ctx context.Context,
 	chat database.Chat,
+	policy *customAgentToolPolicy,
 	tools []fantasy.AgentTool,
 	candidates []deferredMCPTool,
 	providerTools []chatloop.ProviderTool,
 ) ([]fantasy.AgentTool, []deferredMCPTool, []chatloop.ProviderTool, error) {
-	if !p.agentDefinitionsEnabled() || !chat.ParentChatID.Valid {
+	if policy == nil {
 		return tools, candidates, providerTools, nil
-	}
-	fdb, err := forkdb.From(p.db)
-	if err != nil {
-		return nil, nil, nil, xerrors.Errorf("fork queries: %w", err)
-	}
-	row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return tools, candidates, providerTools, nil
-	}
-	if err != nil {
-		return nil, nil, nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
-	}
-	if !row.ToolPolicy.Valid {
-		return tools, candidates, providerTools, nil
-	}
-	var policy customAgentToolPolicy
-	if err := json.Unmarshal(row.ToolPolicy.RawMessage, &policy); err != nil {
-		return nil, nil, nil, xerrors.Errorf("decode tool policy of chat %s: %w", chat.ID, err)
 	}
 	var mcpServerSlugs map[uuid.UUID]string
-	switch workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) {
-	case workspacesdk.AgentDefinitionMCPInherit, workspacesdk.AgentDefinitionMCPNone:
-	case workspacesdk.AgentDefinitionMCPNamed:
+	if workspacesdk.AgentDefinitionMCPMode(policy.MCPMode) == workspacesdk.AgentDefinitionMCPNamed {
+		var err error
 		mcpServerSlugs, err = p.customAgentMCPServerSlugs(ctx, chat, tools, candidates)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-	default:
-		return nil, nil, nil, xerrors.Errorf("tool policy of chat %s has unknown mcp mode %q", chat.ID, policy.MCPMode)
 	}
 	tools, candidates, providerTools = policy.filter(tools, candidates, providerTools, mcpServerSlugs)
 	return tools, candidates, providerTools, nil

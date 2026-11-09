@@ -50,7 +50,10 @@ func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 			server := &Server{experiments: tt.experiments}
 			tools := []fantasy.AgentTool{newTestAgentTool("write_file")}
 			candidates := []deferredMCPTool{{tool: newTestMCPAgentTool("docs__search", uuid.New()), server: "docs"}}
-			gotTools, gotCandidates, _, err := server.applyCustomAgentToolPolicy(chatdTestContext(t), tt.chat, tools, candidates, nil)
+			policy, err := server.customAgentToolPolicyOfChat(chatdTestContext(t), tt.chat)
+			require.NoError(t, err)
+			require.Nil(t, policy)
+			gotTools, gotCandidates, _, err := server.applyCustomAgentToolPolicy(chatdTestContext(t), tt.chat, policy, tools, candidates, nil)
 			require.NoError(t, err)
 			require.Equal(t, tools, gotTools)
 			require.Equal(t, candidates, gotCandidates)
