@@ -2,6 +2,7 @@ package chatd
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -33,7 +34,14 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		{ID: "plan", Content: "Plan the change", Status: codersdk.ChatTodoStatusDone},
 		{ID: "build", Content: "Build it", Status: codersdk.ChatTodoStatusInProgress},
 	}
-	snapshot := todoSnapshotHeader + "\n- [done] plan: Plan the change\n- [in_progress] build: Build it"
+	// wantSnapshot is the text a snapshot of todos at the given version holds.
+	wantSnapshot := func(version int64) string {
+		return fmt.Sprintf("%s\nVersion: %d\n- [done] plan: Plan the change\n- [in_progress] build: Build it",
+			todoSnapshotHeader, version)
+	}
+	wantEmpty := func(version int64) string {
+		return fmt.Sprintf("%s\nVersion: %d\n(empty)", todoSnapshotHeader, version)
+	}
 
 	type row struct {
 		role       database.ChatMessageRole
@@ -50,14 +58,26 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	toolCall := func(id, name string) codersdk.ChatMessagePart {
 		return codersdk.ChatMessageToolCall(id, name, json.RawMessage(`{}`))
 	}
-	toolResult := func(id, name string) codersdk.ChatMessagePart {
-		return codersdk.ChatMessageToolResult(id, name, json.RawMessage(`{}`), false, false)
+	// todoResult is what a todo_write or todo_read result holds: the list it
+	// wrote or read, and the version it answered with.
+	todoResult := func(id, name string, version int64, isError bool) codersdk.ChatMessagePart {
+		payload := json.RawMessage(fmt.Sprintf(`{"todos":[],"version":%d}`, version))
+		return codersdk.ChatMessageToolResult(id, name, payload, isError, false)
 	}
 	text := func(s string) codersdk.ChatMessagePart { return codersdk.ChatMessageText(s) }
+	// snapshotRow is a snapshot an earlier turn sent.
+	snapshotRow := func(version int64) row {
+		return modelOnly(database.ChatMessageRoleUser, text(wantSnapshot(version)))
+	}
 	// summary is the row compaction writes: the prompt starts at the newest
 	// compressed model-only row and drops every row before it.
 	summary := func() row {
-		return row{role: database.ChatMessageRoleUser, visibility: database.ChatMessageVisibilityModel, compressed: true, parts: []codersdk.ChatMessagePart{text("Compacted summary.")}}
+		return row{
+			role:       database.ChatMessageRoleUser,
+			visibility: database.ChatMessageVisibilityModel,
+			compressed: true,
+			parts:      []codersdk.ChatMessagePart{text("Compacted summary.")},
+		}
 	}
 
 	newChat := func(t *testing.T, parent uuid.NullUUID) database.Chat {
@@ -78,12 +98,13 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		t.Helper()
 		return newChat(t, uuid.NullUUID{})
 	}
-	// writeTodos stores the todo list, which is what a todo_write call leaves
-	// behind.
-	writeTodos := func(t *testing.T, chatID uuid.UUID) {
+	// writeTodos stores a list the way todo_write does and returns the version
+	// it landed at, which rises by one per write.
+	writeTodos := func(t *testing.T, chatID uuid.UUID, items []codersdk.ChatTodo) int64 {
 		t.Helper()
-		_, err := server.writeChatTodos(ctx, chatID, todos)
+		version, err := server.writeChatTodos(ctx, chatID, items)
 		require.NoError(t, err)
+		return version
 	}
 	// insert appends messages outside a turn, so a test can hold the prompt
 	// the next turn starts from.
@@ -139,70 +160,132 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	t.Run("RestoredAfterCompaction", func(t *testing.T) {
 		t.Parallel()
 		// A todo_write call and its result, then the summary compaction wrote
-		// after them.
+		// after them, which drops both from the prompt.
 		chat := rootChat(t)
-		writeTodos(t, chat.ID)
+		version := writeTodos(t, chat.ID, todos)
 		insert(t, chat.ID,
 			visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoWriteToolName)),
-			visible(database.ChatMessageRoleTool, toolResult("call-1", todoWriteToolName)),
+			visible(database.ChatMessageRoleTool, todoResult("call-1", todoWriteToolName, version, false)),
 			summary(),
 		)
 		got, ok := snapshotText(t, server, chat)
 		require.True(t, ok)
-		require.Equal(t, snapshot, got)
+		require.Equal(t, wantSnapshot(version), got)
 	})
 
 	t.Run("SubagentChat", func(t *testing.T) {
 		t.Parallel()
 		parent := rootChat(t)
 		chat := newChat(t, uuid.NullUUID{UUID: parent.ID, Valid: true})
-		writeTodos(t, chat.ID)
+		version := writeTodos(t, chat.ID, todos)
 		insert(t, chat.ID, summary())
 		got, ok := snapshotText(t, server, chat)
 		require.True(t, ok)
-		require.Equal(t, snapshot, got)
+		require.Equal(t, wantSnapshot(version), got)
 	})
 
-	t.Run("AlreadyInPrompt", func(t *testing.T) {
+	// A prompt that shows the stored version needs nothing, and one that shows
+	// an older version needs the current list, whether the list changed under
+	// it or the model read it before a parallel write landed.
+	carrierCases := []struct {
+		name string
+		// storeWrites is how many lists to store, so version 2 means the
+		// prompt shows an older version than the store holds.
+		storeWrites int
+		rows        []row
+		snapshotDue bool // whether these rows leave the store's version unshown
+	}{
+		{
+			name:        "CurrentSnapshot",
+			storeWrites: 1,
+			rows:        []row{snapshotRow(1)},
+		},
+		{
+			name:        "CurrentResult",
+			storeWrites: 1,
+			rows: []row{
+				visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoWriteToolName)),
+				modelOnly(database.ChatMessageRoleTool, todoResult("call-1", todoWriteToolName, 1, false)),
+			},
+		},
+		{
+			name:        "StaleSnapshot",
+			storeWrites: 2,
+			rows:        []row{snapshotRow(1)},
+			snapshotDue: true,
+		},
+		{
+			name:        "StaleResult",
+			storeWrites: 2,
+			rows: []row{
+				visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoReadToolName)),
+				modelOnly(database.ChatMessageRoleTool, todoResult("call-1", todoReadToolName, 1, false)),
+			},
+			snapshotDue: true,
+		},
+		{
+			// A failed call answered nothing, so the model never saw a list.
+			name:        "ErrorResult",
+			storeWrites: 1,
+			rows: []row{
+				visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoWriteToolName)),
+				modelOnly(database.ChatMessageRoleTool, todoResult("call-1", todoWriteToolName, 1, true)),
+			},
+			snapshotDue: true,
+		},
+		{
+			// A result from an older build, or a wrapped error text, holds no
+			// version, so it proves nothing about what the model saw.
+			name:        "ResultWithoutVersion",
+			storeWrites: 1,
+			rows: []row{
+				visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoReadToolName)),
+				modelOnly(database.ChatMessageRoleTool, codersdk.ChatMessageToolResult(
+					"call-1", todoReadToolName, json.RawMessage(`{"output":"no list"}`), false, false)),
+			},
+			snapshotDue: true,
+		},
+	}
+	for _, tc := range carrierCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			chat := rootChat(t)
+			var stored int64
+			for range tc.storeWrites {
+				stored = writeTodos(t, chat.ID, todos)
+			}
+			require.Equal(t, int64(tc.storeWrites), stored, "each write bumps the version")
+			insert(t, chat.ID, tc.rows...)
+			got, ok := snapshotText(t, server, chat)
+			require.Equal(t, tc.snapshotDue, ok)
+			if tc.snapshotDue {
+				require.Equal(t, wantSnapshot(stored), got)
+			}
+		})
+	}
+
+	t.Run("ClearedList", func(t *testing.T) {
 		t.Parallel()
-		// A todo_write or todo_read call the model made itself, whose result
-		// holds the list, and a snapshot an earlier turn sent.
-		cases := []struct {
-			name string
-			rows []row
-		}{
-			{
-				name: "ToolCall",
-				rows: []row{
-					visible(database.ChatMessageRoleAssistant, toolCall("call-1", todoWriteToolName)),
-					modelOnly(database.ChatMessageRoleTool, toolResult("call-1", todoWriteToolName)),
-				},
-			},
-			{
-				name: "Snapshot",
-				rows: []row{modelOnly(database.ChatMessageRoleUser, text(snapshot))},
-			},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				chat := rootChat(t)
-				writeTodos(t, chat.ID)
-				insert(t, chat.ID, tc.rows...)
-				_, ok := snapshotText(t, server, chat)
-				require.False(t, ok)
-			})
-		}
+		// The prompt shows a list the model wrote, and the list has since been
+		// emptied, so the snapshot tells the model to drop it.
+		chat := rootChat(t)
+		written := writeTodos(t, chat.ID, todos)
+		insert(t, chat.ID, snapshotRow(written))
+		emptied := writeTodos(t, chat.ID, []codersdk.ChatTodo{})
+		got, ok := snapshotText(t, server, chat)
+		require.True(t, ok)
+		require.Equal(t, wantEmpty(emptied), got)
+		require.NotEqual(t, written, emptied)
 	})
 
 	t.Run("NoListOrExperimentOff", func(t *testing.T) {
 		t.Parallel()
 		chat := rootChat(t)
 		_, ok := snapshotText(t, server, chat)
-		require.False(t, ok, "a chat without a list has nothing to restore")
+		require.False(t, ok, "a chat without a list and without a stale one has nothing to say")
 
 		stored := rootChat(t)
-		writeTodos(t, stored.ID)
+		writeTodos(t, stored.ID, todos)
 		_, ok = snapshotText(t, offServer, stored)
 		require.False(t, ok, "with the experiment off the prompt is upstream's")
 	})
@@ -212,17 +295,18 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		// One result of the step is committed and another is pending, so
 		// nothing may go between a call and its result.
 		chat := rootChat(t)
-		writeTodos(t, chat.ID)
+		version := writeTodos(t, chat.ID, todos)
 		insert(t, chat.ID,
 			visible(database.ChatMessageRoleAssistant, toolCall("call-1", "bash"), toolCall("call-2", "bash")),
-			modelOnly(database.ChatMessageRoleTool, toolResult("call-1", "bash")),
+			modelOnly(database.ChatMessageRoleTool, codersdk.ChatMessageToolResult("call-1", "bash", json.RawMessage(`{}`), false, false)),
 		)
 		_, ok := snapshotText(t, server, chat)
 		require.False(t, ok)
 
-		insert(t, chat.ID, modelOnly(database.ChatMessageRoleTool, toolResult("call-2", "bash")))
+		insert(t, chat.ID, modelOnly(database.ChatMessageRoleTool,
+			codersdk.ChatMessageToolResult("call-2", "bash", json.RawMessage(`{}`), false, false)))
 		got, ok := snapshotText(t, server, chat)
 		require.True(t, ok, "the snapshot goes out once every call has a result")
-		require.Equal(t, snapshot, got)
+		require.Equal(t, wantSnapshot(version), got)
 	})
 }

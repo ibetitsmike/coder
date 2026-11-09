@@ -7,6 +7,8 @@ package chatd
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -20,8 +22,15 @@ import (
 )
 
 // todoSnapshotHeader starts the model-only message that restores the todo
-// list, so the prompt can tell the list is already in the conversation.
-const todoSnapshotHeader = "Your todo list for this chat, restored after earlier messages were compacted. Keep it current with todo_write."
+// list, and is the prefix that identifies one already in the prompt. It says
+// nothing about why the list was missing, since a prompt can lack it after
+// compaction, after an edit that deleted the tool rows, or because a tool call
+// raced the write.
+const todoSnapshotHeader = "Your todo list for this chat, read from the store. It may differ from what this conversation shows, so treat this as current and keep it updated with todo_write."
+
+// todoSnapshotVersionLine starts the line that names the stored version the
+// snapshot holds, so the prompt can be compared with the store.
+const todoSnapshotVersionLine = "Version: "
 
 // syncForkContext commits the model-only messages the fork features want in
 // the prompt before this step, if any, and returns the reloaded chat when it
@@ -81,24 +90,24 @@ func (s *taskStarter) commitForkContextMessage(
 }
 
 // todoSnapshotMessage returns the model-only message that puts the chat's todo
-// list back into the prompt, or ok=false when none is due. The model normally
-// sees the list in the todo_write and todo_read rows it wrote itself, and
-// compaction replaces those rows, which would leave the model working without
-// the plan it made. Like the memory index, the snapshot is an appended message
-// so the cached prompt prefix stays intact.
+// list in the prompt, or ok=false when none is due. The model normally sees the
+// list in the todo_write and todo_read results it made itself, and those rows
+// leave the prompt at compaction or when an edit deletes them, which would
+// leave the model working from a plan it can no longer read. A snapshot names
+// the stored version and goes out whenever the version the prompt last showed
+// differs, so a list that changed while the model was not looking, or that was
+// cleared, reaches it too. Like the memory index, the snapshot is an appended
+// message so the cached prompt prefix stays intact.
 //
-// A subagent chat gets a snapshot too: its todo list is its own, so compaction
-// loses its plan the same way.
+// A subagent chat gets a snapshot too: its todo list is its own, so it loses
+// its plan the same way.
 func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		return chatstate.Message{}, false, nil
 	}
-	todos, _, err := p.readChatTodos(ctx, chat.ID)
+	todos, version, err := p.readChatTodos(ctx, chat.ID)
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("read todo list: %w", err)
-	}
-	if len(todos) == 0 {
-		return chatstate.Message{}, false, nil
 	}
 	// Prompt rows include the model-only rows this sends, and exclude rows
 	// compaction has replaced.
@@ -122,15 +131,20 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 			return chatstate.Message{}, false, nil
 		}
 	}
-	carried, err := promptCarriesChatTodos(promptRows)
+	shown, found, err := promptTodoVersion(promptRows)
 	if err != nil {
 		return chatstate.Message{}, false, err
 	}
-	if carried {
+	switch {
+	case found && shown == version:
+		// The prompt already shows this exact list.
+		return chatstate.Message{}, false, nil
+	case !found && len(todos) == 0:
+		// Nothing to restore: the chat has no list and never showed one.
 		return chatstate.Message{}, false, nil
 	}
 	content, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
-		codersdk.ChatMessageText(formatChatTodoSnapshot(todos)),
+		codersdk.ChatMessageText(formatChatTodoSnapshot(todos, version)),
 	})
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("marshal todo snapshot: %w", err)
@@ -144,41 +158,87 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	}, true, nil
 }
 
-// promptCarriesChatTodos reports whether the prompt already shows the todo
-// list, either as a snapshot this sends or as a todo_write or todo_read call
-// the model made itself, whose result holds the list.
-func promptCarriesChatTodos(messages []database.ChatMessage) (bool, error) {
-	// Users cannot author model-only rows, so snapshot text cannot be forged
-	// from chat input.
-	for _, text := range memoryIndexTexts(messages) {
-		if strings.HasPrefix(text, todoSnapshotHeader) {
-			return true, nil
+// promptTodoVersion returns the version of the todo list the prompt last showed
+// the model, and whether it showed one at all. The carriers are a snapshot this
+// sends, which names the version under its header, and a todo_write or
+// todo_read result, whose JSON holds it. Rows compaction replaced and rows an
+// edit deleted are absent from messages, so scanning from the end stops at what
+// the model can still see. An error result shows nothing, since the model never
+// got a list from it.
+func promptTodoVersion(messages []database.ChatMessage) (int64, bool, error) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Deleted || msg.Compressed {
+			continue
 		}
-	}
-	for _, msg := range messages {
-		if msg.Deleted || msg.Compressed || msg.Role != database.ChatMessageRoleAssistant {
+		// Only a model-only user row can hold a snapshot, and users cannot
+		// author one, so snapshot text cannot be forged from chat input.
+		isSnapshotRow := msg.Role == database.ChatMessageRoleUser &&
+			msg.Visibility == database.ChatMessageVisibilityModel
+		if !isSnapshotRow && msg.Role != database.ChatMessageRoleTool {
 			continue
 		}
 		parts, err := chatprompt.ParseContent(msg)
 		if err != nil {
-			return false, xerrors.Errorf("parse assistant message: %w", err)
+			return 0, false, xerrors.Errorf("parse prompt message: %w", err)
 		}
-		for _, part := range parts {
-			if part.Type != codersdk.ChatMessagePartTypeToolCall {
-				continue
-			}
-			if part.ToolName == todoWriteToolName || part.ToolName == todoReadToolName {
-				return true, nil
+		for j := len(parts) - 1; j >= 0; j-- {
+			part := parts[j]
+			switch {
+			case isSnapshotRow && part.Type == codersdk.ChatMessagePartTypeText:
+				if version, ok := todoSnapshotVersion(part.Text); ok {
+					return version, true, nil
+				}
+			case msg.Role == database.ChatMessageRoleTool && !part.IsError &&
+				part.Type == codersdk.ChatMessagePartTypeToolResult &&
+				(part.ToolName == todoWriteToolName || part.ToolName == todoReadToolName):
+				// Both todo tools answer with the version they read or wrote,
+				// so a result without one is not an answer to show.
+				var result struct {
+					Version *int64 `json:"version"`
+				}
+				payloadErr := json.Unmarshal(part.Result, &result)
+				if payloadErr != nil || result.Version == nil {
+					continue
+				}
+				return *result.Version, true, nil
 			}
 		}
 	}
-	return false, nil
+	return 0, false, nil
 }
 
-// formatChatTodoSnapshot renders todos as the snapshot message text.
-func formatChatTodoSnapshot(todos []codersdk.ChatTodo) string {
+// todoSnapshotVersion reads the version a snapshot records under its header.
+func todoSnapshotVersion(text string) (int64, bool) {
+	rest, ok := strings.CutPrefix(text, todoSnapshotHeader)
+	if !ok {
+		return 0, false
+	}
+	line, _, _ := strings.Cut(strings.TrimPrefix(rest, "\n"), "\n")
+	value, ok := strings.CutPrefix(line, todoSnapshotVersionLine)
+	if !ok {
+		return 0, false
+	}
+	version, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || version < 0 {
+		return 0, false
+	}
+	return version, true
+}
+
+// formatChatTodoSnapshot renders todos and the version they are stored at as
+// the snapshot message text. An empty list says so, so a model holding a plan
+// that was cleared drops it instead of finishing a task nobody asked for.
+func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64) string {
 	var sb strings.Builder
 	sb.WriteString(todoSnapshotHeader)
+	sb.WriteString("\n")
+	sb.WriteString(todoSnapshotVersionLine)
+	sb.WriteString(strconv.FormatInt(version, 10))
+	if len(todos) == 0 {
+		sb.WriteString("\n(empty)")
+		return sb.String()
+	}
 	for _, todo := range todos {
 		sb.WriteString("\n- [")
 		sb.WriteString(string(todo.Status))
