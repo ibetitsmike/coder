@@ -11,6 +11,7 @@ import { getAttachmentHref } from "../../utils/chatAttachments";
 import { RecordingPreview } from "../ChatElements/tools/RecordingPreview";
 import { getAttachmentDownload } from "./AttachmentBlocks";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink";
+import { useFileProbes } from "./FileProbeContext";
 
 type ForkAttachmentPreviewProps = {
 	block: TypesGen.ChatFilePart;
@@ -30,6 +31,7 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	// Timeline stories and tests render without a DashboardProvider; treat
 	// that as every fork experiment being off, which is upstream behavior.
 	const experiments = useContext(DashboardContext)?.experiments ?? [];
+	const { hasExpired } = useFileProbes();
 	const nameId = useId();
 	const href = getAttachmentHref(block);
 
@@ -37,6 +39,7 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 		!experiments.includes("fork-chat-todos") ||
 		block.media_type !== "video/mp4" ||
 		!block.file_id ||
+		hasExpired(block.file_id) ||
 		!href
 	) {
 		return children;
