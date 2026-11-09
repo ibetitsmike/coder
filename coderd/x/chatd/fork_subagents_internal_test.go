@@ -395,15 +395,10 @@ func TestAncestorChatIDs(t *testing.T) {
 		return AncestorChatIDs(ctx, f.db, f.server.logger, nested, chat)
 	}
 
-	// A root attributes its own work, so it has no ancestors to send.
 	require.Nil(t, ids(true, f.root))
 	require.Equal(t, []string{f.root.ID.String()}, ids(true, child))
-	// Nearest ancestor first ending at the family root, so a grandchild's
-	// touched paths reach the root's path store.
 	require.Equal(t, []string{child.ID.String(), f.root.ID.String()}, ids(true, grandchild))
 
-	// Without nested subagents the header is exactly upstream's: the immediate
-	// parent and nothing above it.
 	require.Nil(t, ids(false, f.root))
 	require.Equal(t, []string{f.root.ID.String()}, ids(false, child))
 	require.Equal(t, []string{child.ID.String()}, ids(false, grandchild))
