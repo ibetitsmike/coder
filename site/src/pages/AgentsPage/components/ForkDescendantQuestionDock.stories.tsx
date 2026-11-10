@@ -158,7 +158,9 @@ export const SecretAnswerSubmitting: Story = {
 		],
 	},
 	beforeEach: () => {
-		spyOn(API.getAxiosInstance(), "post").mockReturnValue(new Promise(() => {}));
+		spyOn(API.getAxiosInstance(), "post").mockReturnValue(
+			new Promise(() => {}),
+		);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
