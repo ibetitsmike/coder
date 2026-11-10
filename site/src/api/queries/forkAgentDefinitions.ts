@@ -69,6 +69,9 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 			}),
 	});
 
+const isNewer = (a: { updated_at: string }, b: { updated_at: string }) =>
+	new Date(a.updated_at) > new Date(b.updated_at);
+
 type UpdateUserAgentDefinitionArgs = {
 	organizationId: string;
 	name: string;
@@ -90,18 +93,25 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
 		// Writing the result keeps an accepted change visible, in the list and
 		// in a reopened editor, even if the reconciling refetch below fails.
+		// A response that arrives after a later change was cached is older
+		// than it, so it does not replace it.
 		onSuccess: (definition, { organizationId, name }) => {
 			const { content: _content, ...updated } = definition;
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
 				(definitions) =>
 					definitions?.map((listed) =>
-						listed.id === updated.id ? updated : listed,
+						listed.id === updated.id && !isNewer(listed, updated)
+							? updated
+							: listed,
 					),
 			);
 			queryClient.setQueryData(
 				userAgentDefinition(organizationId, name).queryKey,
-				definition,
+				(cached) =>
+					cached?.id === definition.id && isNewer(cached, definition)
+						? cached
+						: definition,
 			);
 		},
 		// Not exact, so a reopened editor refetches the definition it saved.

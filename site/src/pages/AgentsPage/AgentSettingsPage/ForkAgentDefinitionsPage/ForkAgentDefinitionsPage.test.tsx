@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { AxiosError } from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
@@ -40,6 +41,9 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	});
 	return { getDefinitions, queryClient, router };
 };
+
+// A request whose response never arrived, so the server's outcome is unknown.
+const networkError = () => new AxiosError("Network Error", "ERR_NETWORK");
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -378,14 +382,16 @@ describe("ForkAgentDefinitionsPage", () => {
 		});
 	});
 
-	it("treats a failed create as done when the refetched list newly has it", async () => {
+	// Submits a create that fails with error while the refetched list gains
+	// the name, from this create or from another tab's.
+	const failCreateWhileListed = async (error: unknown) => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();
 		const toastSuccess = vi.spyOn(toast, "success");
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"createUserAgentDefinition",
-		).mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+		).mockRejectedValue(error);
 
 		await user.click(
 			await screen.findByRole("button", { name: "New agent definition" }),
@@ -404,13 +410,29 @@ describe("ForkAgentDefinitionsPage", () => {
 				name: "release-notes",
 			},
 		]);
-		await user.click(
-			within(dialog).getByRole("button", { name: "Create agent definition" }),
-		);
+		const createButton = within(dialog).getByRole("button", {
+			name: "Create agent definition",
+		});
+		await user.click(createButton);
+		await waitFor(() => expect(getDefinitions).toHaveBeenCalledTimes(2));
+		return { createButton, toastSuccess };
+	};
+
+	it("treats a create whose response was lost as done when the refetched list newly has it", async () => {
+		const { toastSuccess } = await failCreateWhileListed(networkError());
 
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
 		);
+	});
+
+	it("keeps a create the server rejected failed when another tab lists the name", async () => {
+		const { createButton, toastSuccess } = await failCreateWhileListed(
+			mockApiError({ message: "An agent definition with this name exists." }),
+		);
+
+		await waitFor(() => expect(createButton).toBeEnabled());
+		expect(toastSuccess).not.toHaveBeenCalled();
 	});
 
 	it("keeps a rejected create failed when the name was already listed", async () => {
@@ -507,7 +529,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 		const content = (description: string) =>
 			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
-		const saved = {
+		const MockSavedDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			updated_at: "2030-01-01T00:00:00Z",
 		};
@@ -521,7 +543,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			forkAgentDefinitionsApi,
 			"updateUserAgentDefinition",
 		).mockResolvedValue({
-			...saved,
+			...MockSavedDefinition,
 			content: content("Reviews diffs for bugs."),
 		});
 		const toastSuccess = vi.spyOn(toast, "success");
@@ -538,7 +560,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		const description = await screen.findByLabelText("Description");
 		await user.clear(description);
 		await user.type(description, "Reviews diffs for bugs.");
-		getDefinitions.mockResolvedValue([saved]);
+		getDefinitions.mockResolvedValue([MockSavedDefinition]);
 		await user.click(
 			screen.getByRole("button", { name: "Save agent definition" }),
 		);
@@ -570,7 +592,10 @@ describe("ForkAgentDefinitionsPage", () => {
 			queryClient.setQueryDefaults(listKey, {
 				gcTime: Number.POSITIVE_INFINITY,
 			});
-			const listed = { ...MockForkAgentDefinitionMetadata, ...current };
+			const MockListedDefinition = {
+				...MockForkAgentDefinitionMetadata,
+				...current,
+			};
 			vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
 				.mockResolvedValueOnce({
 					...MockForkAgentDefinitionMetadata,
@@ -578,7 +603,7 @@ describe("ForkAgentDefinitionsPage", () => {
 						"---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
 				})
 				.mockResolvedValue({
-					...listed,
+					...MockListedDefinition,
 					content:
 						"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
 				});
@@ -593,7 +618,7 @@ describe("ForkAgentDefinitionsPage", () => {
 
 			await openEditor();
 			await screen.findByLabelText("Description");
-			getDefinitions.mockResolvedValue([listed]);
+			getDefinitions.mockResolvedValue([MockListedDefinition]);
 			await queryClient.refetchQueries({ queryKey: listKey, exact: true });
 			await user.keyboard("{Escape}");
 			await openEditor();
@@ -690,6 +715,121 @@ describe("ForkAgentDefinitionsPage", () => {
 		expect(screen.getByLabelText("Description")).toHaveValue(
 			"Reviews diffs for bugs.",
 		);
+	});
+
+	it("treats a save whose response was lost as done when the refetched definition has it", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		const content = (description: string) =>
+			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: content("Reviews diffs."),
+			})
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content: content("Reviews diffs for bugs."),
+			});
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockRejectedValue(networkError());
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+	});
+
+	it("does not open content older than the listed definition, and retries", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const MockEditedDefinition = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+		};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+			})
+			.mockResolvedValue({
+				...MockEditedDefinition,
+				content:
+					"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
+			});
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		});
+		getDefinitions.mockResolvedValue([MockEditedDefinition]);
+		await queryClient.refetchQueries({ queryKey: listKey, exact: true });
+
+		await user.click(
+			screen.getByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+		expect(await screen.findByLabelText("Description")).toHaveValue("Current.");
+	});
+
+	it("keeps saved content when an older toggle response arrives later", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const detailKey = [
+			...userAgentDefinitionsKey(MockDefaultOrganization.id),
+			MockForkAgentDefinitionMetadata.name,
+		];
+		queryClient.setQueryDefaults(detailKey, {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		const MockSavedDefinition = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+			content: "---\nname: code-reviewer\n---\nSaved body.\n",
+		};
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			enabled: false,
+			content: "---\nname: code-reviewer\n---\nOld body.\n",
+		});
+
+		const toggle = await screen.findByRole("switch", {
+			name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+		});
+		queryClient.setQueryData(detailKey, MockSavedDefinition);
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(toggle);
+
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryState(
+					userAgentDefinitionsKey(MockDefaultOrganization.id),
+				)?.status,
+			).toBe("error"),
+		);
+		expect(queryClient.getQueryData(detailKey)).toEqual(MockSavedDefinition);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {

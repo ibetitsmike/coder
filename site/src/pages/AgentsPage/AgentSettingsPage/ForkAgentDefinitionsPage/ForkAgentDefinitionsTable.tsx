@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { getErrorDetail, getErrorMessage, isApiError } from "#/api/errors";
 import {
 	createUserAgentDefinition,
 	deleteUserAgentDefinition,
@@ -144,14 +144,17 @@ export const ForkAgentDefinitionsTable: React.FC<
 						.getQueryData(listKey)
 						?.some((definition) => definition.name === name);
 				// A lost response can hide a create that committed, which the
-				// refetched list then shows. A name listed before the request,
-				// or an unknown list, means the failure is real.
+				// refetched list then shows. A server error, a name listed before
+				// the request, or an unknown list means the failure is real.
 				const existedBefore = isListed() ?? true;
 				createMutation.mutate(
 					{ organizationId, req: { content } },
 					{
 						onSettled: (_data, error) => {
-							if (!error || (!existedBefore && isListed())) {
+							if (
+								!error ||
+								(!isApiError(error) && !existedBefore && isListed())
+							) {
 								setEditorTarget(undefined);
 								toast.success("Agent definition created.");
 							}
@@ -167,15 +170,20 @@ export const ForkAgentDefinitionsTable: React.FC<
 		const listed = definitionsQuery.data?.find(
 			(definition) => definition.name === editorTarget.name,
 		);
-		// Cached content can predate a save, delete, or recreate that the
-		// list already shows, so it seeds the editor only when it is as new
-		// as the listed definition or a fetch just returned it.
+		// Content, cached or just fetched, can predate a save, delete, or
+		// recreate that the list already shows, so it seeds the editor only
+		// when it is as new as the listed definition.
 		const isCurrent =
 			detail !== undefined &&
 			(!listed ||
-				(detail.id === listed.id &&
-					new Date(detail.updated_at) >= new Date(listed.updated_at)) ||
-				(definitionQuery.isSuccess && !definitionQuery.isFetching));
+				(detail.id === listed.id
+					? new Date(detail.updated_at) >= new Date(listed.updated_at)
+					: new Date(detail.updated_at) > new Date(listed.updated_at)));
+		const isOutdated =
+			detail !== undefined &&
+			!isCurrent &&
+			definitionQuery.isSuccess &&
+			!definitionQuery.isFetching;
 		const loaded = isCurrent ? editFormValues(detail) : undefined;
 		// The editor keeps the first values it gets, cached or fetched, so a
 		// later refetch cannot reset the user's edits.
@@ -185,17 +193,22 @@ export const ForkAgentDefinitionsTable: React.FC<
 		const { name, values } = editorTarget;
 		const loadError = values
 			? undefined
-			: (loaded?.error ?? definitionQuery.error);
+			: (loaded?.error ??
+				definitionQuery.error ??
+				(isOutdated
+					? new Error("The agent definition changed while it loaded.")
+					: undefined));
 		editorState = {
 			mode: "edit",
 			initialValues: values,
 			isLoading: !values && !loadError,
 			loadError,
-			onRetry: definitionQuery.error
-				? () => {
-						void definitionQuery.refetch();
-					}
-				: undefined,
+			onRetry:
+				definitionQuery.error || isOutdated
+					? () => {
+							void definitionQuery.refetch();
+						}
+					: undefined,
 			isRetrying: definitionQuery.isFetching,
 			submitError: submitError(
 				saveMutation.error,
@@ -206,11 +219,21 @@ export const ForkAgentDefinitionsTable: React.FC<
 				saveMutation.mutate(
 					{ organizationId, name, req: { content } },
 					{
-						onSuccess: () => {
-							setEditorTarget(undefined);
-							toast.success("Agent definition saved.");
+						// A lost response can hide a save that committed, which the
+						// refetched definition then shows.
+						onSettled: (_data, error) => {
+							const saved = queryClient.getQueryData(
+								userAgentDefinition(organizationId, name).queryKey,
+							);
+							if (
+								!error ||
+								(!isApiError(error) && saved?.content === content)
+							) {
+								setEditorTarget(undefined);
+								toast.success("Agent definition saved.");
+							}
+							onSettled();
 						},
-						onSettled,
 					},
 				),
 			onClose: () => closeEditor(saveMutation.isPending),
