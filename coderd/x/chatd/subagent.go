@@ -406,6 +406,9 @@ func (p *Server) listSpawnableModelConfigs(
 				if efforts := chatprovider.SelectableReasoningEfforts(callConfig.ReasoningEffort); len(efforts) > 0 {
 					entry["reasoning_efforts"] = efforts
 				}
+				if len(callConfig.Aliases) > 0 && p.agentDefinitionsEnabled() {
+					entry["aliases"] = callConfig.Aliases
+				}
 			}
 		}
 		models = append(models, entry)

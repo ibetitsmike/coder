@@ -47,10 +47,12 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 			httpmw.ExtractChatParam(api.Database),
 		).Get("/{chat}/family", api.getForkChatFamilyCapacity)
 
-		r.With(
+		chatQuestions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkNestedSubagents),
 			httpmw.ExtractChatParam(api.Database),
-		).Get("/{chat}/questions", api.getChatDescendantQuestions)
+		)
+		chatQuestions.Get("/{chat}/questions", api.getChatDescendantQuestions)
+		chatQuestions.Post("/{chat}/questions/secret-answer", api.postChatSecretAnswer)
 
 		chatWakeups := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatWakeups),
