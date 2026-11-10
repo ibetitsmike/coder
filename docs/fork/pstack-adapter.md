@@ -363,7 +363,7 @@ When Coder Agents can't read the workspace, the result has `workspace_error` ins
 
 `isolation: "workspace"` fails for a `computer_use` child with `isolation workspace is not supported for computer use agents`, and in a chat without a workspace with `isolation workspace copies this chat's workspace, and this chat has none`.
 `repo_path` or `base_branch` with it fails with `repo_path and base_branch need isolation worktree`.
-When the build fails, or the agent or its startup scripts don't get ready, `spawn_agent` fails with `create the child's workspace: ` and the `create_workspace` result.
+When the build fails, or the agent or its startup scripts don't get ready, `spawn_agent` fails with `create the child's workspace: <result>`, where `<result>` is the `create_workspace` result.
 Coder Agents then archives the child and stops the workspace, if it created one.
 Otherwise Coder Agents doesn't stop or delete the child's workspace, not even after you archive the chats.
 Delete it on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
