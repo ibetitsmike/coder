@@ -1,7 +1,8 @@
 package chatd
 
 // This file is fork code: it tests the worktree cleanup that follows a family
-// archive behind the fork-subagent-isolation experiment.
+// archive behind the fork-subagent-isolation experiment, and the stop of
+// its subagents' workspaces.
 
 import (
 	"context"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 	"github.com/coder/coder/v2/testutil"
@@ -179,4 +181,40 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 		require.Contains(t, notices[0], "`/wt/"+child.ID.String()+"`")
 		require.Contains(t, notices[0], ": agent unreachable")
 	})
+}
+
+func TestForkArchiveStopsSubagentWorkspaces(t *testing.T) {
+	t.Parallel()
+	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
+	ctx := chatdTestContext(t)
+	workspaces := &fakeWorkspaces{t: t, db: f.db}
+	root, _ := f.workspaceRoot(t, workspaces)
+	isolated := map[string]any{"isolation": "workspace"}
+	f.spawnChild(t, root, isolated)
+	f.spawnChild(t, root, isolated)
+	f.spawnChild(t, root, map[string]any{})
+	require.NoError(t, WaitUntilIdleForTest(ctx, f.server))
+
+	workspaces.mu.Lock()
+	running, stopped := workspaces.created[0], workspaces.created[1]
+	workspaces.mu.Unlock()
+	dbfake.WorkspaceBuild(t, f.db, stopped).
+		Seed(database.WorkspaceBuild{BuildNumber: 2, Transition: database.WorkspaceTransitionStop}).
+		Do()
+
+	family := []uuid.UUID{root.ID}
+	for _, row := range f.children(t, root) {
+		family = append(family, row.Chat.ID)
+	}
+	for _, id := range family {
+		_, err := f.db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: id, Status: database.ChatStatusWaiting})
+		require.NoError(t, err)
+	}
+	require.NoError(t, f.server.ArchiveChat(ctx, root))
+	// The cleanup runs in the background after the archive commits.
+	f.server.drainInflight()
+
+	workspaces.mu.Lock()
+	defer workspaces.mu.Unlock()
+	require.Equal(t, []uuid.UUID{running.ID}, workspaces.stops)
 }

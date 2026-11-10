@@ -618,6 +618,7 @@ The family update locks the root chat row first, and creating a child chat takes
 
 <!-- TODO(ibetitsmike): describe the fork-nested-subagents lock order of a family archive: the root FOR NO KEY UPDATE, then each descendant leaves first, so a member transition whose second row update takes FOR KEY SHARE on its parent and the root cannot deadlock with the archive (issue 79). -->
 <!-- TODO(ibetitsmike): describe the fork-subagent-isolation archive cleanup: after the family archive commits, a background task asks each worktree subagent's workspace agent to remove its worktree and branch, and posts a user-visible system notice on the root (chatstate `ForkAppendNotice`, which changes no execution state) listing each worktree it kept and why. -->
+<!-- TODO(ibetitsmike): describe how the same background task stops the workspace of each workspace subagent (isolation workspace) as the chat owner, unless its latest build already stops or deletes it. Unarchiving the family does not start the workspace again. -->
 
 For `archived` updates, the supported input and output states are:
 

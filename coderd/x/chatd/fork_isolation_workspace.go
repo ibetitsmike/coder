@@ -182,15 +182,39 @@ func (p *Server) discardSubagent(ctx context.Context, chatID uuid.UUID) {
 		return
 	}
 	p.publishChatPubsubEvent(archived, codersdk.ChatWatchEventKindDeleted, nil)
-	if !archived.WorkspaceID.Valid || p.stopWorkspaceFn == nil {
+	if !archived.WorkspaceID.Valid {
 		return
 	}
-	if _, err := p.stopWorkspaceFn(ctx, archived.OwnerID, archived.WorkspaceID.UUID, codersdk.CreateWorkspaceBuildRequest{
-		Transition: codersdk.WorkspaceTransitionStop,
-	}); err != nil {
+	if err := p.stopSubagentWorkspace(ctx, archived.OwnerID, archived.WorkspaceID.UUID); err != nil {
 		p.logger.Warn(ctx, "stop workspace of subagent that failed to start",
 			slog.F("chat_id", chatID), slog.F("workspace_id", archived.WorkspaceID.UUID), slog.Error(err))
 	}
+}
+
+// stopSubagentWorkspace stops workspaceID as ownerID unless its latest build
+// already stops or deletes it.
+func (p *Server) stopSubagentWorkspace(ctx context.Context, ownerID, workspaceID uuid.UUID) error {
+	if p.stopWorkspaceFn == nil {
+		return nil
+	}
+	owner, err := p.chatOwnerSubject(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	//nolint:gocritic // The child's workspace is stopped as the chat owner.
+	build, err := p.db.GetLatestWorkspaceBuildByWorkspaceID(dbauthz.As(ctx, owner), workspaceID)
+	if err != nil {
+		return xerrors.Errorf("get latest workspace build: %w", err)
+	}
+	if build.Transition != database.WorkspaceTransitionStart {
+		return nil
+	}
+	if _, err := p.stopWorkspaceFn(ctx, ownerID, workspaceID, codersdk.CreateWorkspaceBuildRequest{
+		Transition: codersdk.WorkspaceTransitionStop,
+	}); err != nil {
+		return xerrors.Errorf("stop workspace: %w", err)
+	}
+	return nil
 }
 
 // subagentWorkspaceName returns the name of the workspace of a child spawned
