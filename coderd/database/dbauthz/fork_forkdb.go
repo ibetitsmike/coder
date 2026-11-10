@@ -260,6 +260,13 @@ func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (fork
 	return f.authorizeChatWakeup(ctx, policy.ActionRead, id)
 }
 
+func (f *forkQuerier) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.GetChatWakeupByIDForUpdate(ctx, id)
+}
+
 // GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
 func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
 	if _, err := f.q.GetChatByID(ctx, arg.RootChatID); err != nil {

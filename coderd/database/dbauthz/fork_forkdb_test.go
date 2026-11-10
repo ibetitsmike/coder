@@ -220,6 +220,14 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(wakeup)
 		},
+		"GetChatWakeupByIDForUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByIDForUpdate(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
+		},
 		"ListChatWakeupsByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeups := []forkdb.ChatWakeup{testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})}

@@ -54,6 +54,13 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		chatQuestions.Get("/{chat}/questions", api.getChatDescendantQuestions)
 		chatQuestions.Post("/{chat}/questions/secret-answer", api.postChatSecretAnswer)
 
+		chatWakeups := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatWakeups),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatWakeups.Get("/{chat}/wakeups", api.getChatWakeups)
+		chatWakeups.Patch("/{chat}/wakeups/{wakeup}", api.patchChatWakeup)
+
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})

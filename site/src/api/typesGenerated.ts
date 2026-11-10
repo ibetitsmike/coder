@@ -4202,6 +4202,91 @@ export interface ChatUser extends MinimalUser {
 	readonly role: ChatRole;
 }
 
+// From codersdk/fork_chat_wakeups.go
+/**
+ * ChatWakeup is a scheduled message that a chat sends itself, created by the
+ * schedule_wakeup or wait_for_events tool or the /loop command.
+ */
+export interface ChatWakeup {
+	readonly id: string;
+	readonly chat_id: string;
+	readonly organization_id: string;
+	readonly created_by: string;
+	readonly source: string;
+	readonly kind: ChatWakeupKind;
+	readonly prompt: string;
+	/**
+	 * IntervalSeconds is set for an interval wake-up.
+	 */
+	readonly interval_seconds?: number;
+	/**
+	 * Cron is set for a cron wake-up, which runs in Timezone.
+	 */
+	readonly cron?: string;
+	readonly timezone: string;
+	readonly events: readonly ChatWakeupEvent[];
+	readonly status: ChatWakeupStatus;
+	/**
+	 * StatusReason tells why the wake-up paused, completed or was canceled.
+	 */
+	readonly status_reason?: string;
+	/**
+	 * NextRunAt is when an active wake-up runs next. A paused wake-up keeps
+	 * the run time it had, unless the worker paused it.
+	 */
+	readonly next_run_at?: string;
+	readonly expires_at?: string;
+	readonly max_runs?: number;
+	readonly run_count: number;
+	readonly last_run_at?: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+}
+
+// From codersdk/fork_chat_wakeups.go
+/**
+ * ChatWakeupEvent is one event that an events wake-up waits for.
+ */
+export interface ChatWakeupEvent {
+	/**
+	 * Type is child_done for a child chat that finishes, or pull_request for
+	 * activity on a pull request.
+	 */
+	readonly type: string;
+	/**
+	 * ChatID is the child chat of a child_done event.
+	 */
+	readonly chat_id?: string;
+	/**
+	 * URL is the pull request of a pull_request event.
+	 */
+	readonly url?: string;
+	/**
+	 * On lists the pull request activity that wakes the chat.
+	 */
+	readonly on?: readonly string[];
+}
+
+// From codersdk/fork_chat_wakeups.go
+export type ChatWakeupKind = "cron" | "delay" | "events" | "interval";
+
+export const ChatWakeupKinds: ChatWakeupKind[] = [
+	"cron",
+	"delay",
+	"events",
+	"interval",
+];
+
+// From codersdk/fork_chat_wakeups.go
+export type ChatWakeupStatus = "active" | "canceled" | "completed" | "paused";
+
+export const ChatWakeupStatuses: ChatWakeupStatus[] = [
+	"active",
+	"canceled",
+	"completed",
+	"paused",
+];
+
 // From codersdk/chats.go
 /**
  * ChatWatchEvent represents an event from the global chat watch stream.
@@ -11604,6 +11689,15 @@ export interface UpdateChatRetentionDaysRequest {
 export interface UpdateChatSystemPromptRequest {
 	readonly system_prompt: string;
 	readonly include_default_system_prompt?: boolean;
+}
+
+// From codersdk/fork_chat_wakeups.go
+/**
+ * UpdateChatWakeupRequest pauses (paused), resumes (active) or cancels
+ * (canceled) a chat wake-up.
+ */
+export interface UpdateChatWakeupRequest {
+	readonly status: ChatWakeupStatus;
 }
 
 // From codersdk/chats.go
