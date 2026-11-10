@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os/exec"
 	"runtime"
+	"slices"
 	"testing"
 
 	"charm.land/fantasy"
@@ -275,6 +276,10 @@ func TestScrubSecretAnswers(t *testing.T) {
 	require.Equal(t, "{{secret:call_u}} {{secret:call_u}}",
 		scrubSecretAnswers(`p\u00e4ss-\ud83d\udd11-word p\u00E4ss-\uD83D\uDD11-word`, unicodeValue),
 		"an ASCII-only JSON encoder escapes each non-ASCII character")
+	upper := []forkdb.ChatSecretAnswer{{ToolCallID: "call_x", Value: "abc<defg"}, {ToolCallID: "call_y", Value: "abc\x1bdefg-\u00e4"}}
+	require.Equal(t, "{{secret:call_x}} {{secret:call_y}} {{secret:call_y}}",
+		scrubSecretAnswers(`abc\u003Cdefg abc\u001Bdefg-\u00E4 abc\u001Bdefg-ä`, upper),
+		"a JSON encoder can write uppercase hex in the escape of an ASCII character")
 	slash := []forkdb.ChatSecretAnswer{{ToolCallID: "call_p", Value: "a/bcdefg"}}
 	require.Equal(t, `{"p":"{{secret:call_p}}"}`, scrubSecretAnswers(`{"p":"a\/bcdefg"}`, slash),
 		"a JSON encoder can escape /")
@@ -303,16 +308,18 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	ctx := chatdTestContext(t)
 	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
 	require.NoError(t, err)
-	ask := func(questions string) {
+	ask := func(questions string) string {
+		callID := uuid.NewString()
 		_, err := f.fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
-			ChatID: child.ID, ToolCallID: uuid.NewString(), Questions: json.RawMessage(questions),
+			ChatID: child.ID, ToolCallID: callID, Questions: json.RawMessage(questions),
 		})
 		require.NoError(t, err)
+		return callID
 	}
 
 	// A message would answer the secret question without the value.
-	ask(`[{"header":"Token","question":"Paste the token.","secret":true}]`)
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "the token is x", SendMessageBusyBehaviorQueue)
+	callID := ask(`[{"header":"Token","question":"Paste the token.","secret":true}]`)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "the token is x")
 	require.ErrorContains(t, err, "it waits for a secret answer")
 	// A chat API send checks before SendMessage, so SendMessage checks
 	// again under the chat lock, and only the report of the answer passes.
@@ -325,10 +332,28 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 		return err
 	}
 	require.ErrorIs(t, send(ctx), ErrSecretQuestionPending)
-	require.NoError(t, send(WithSecretAnswerReport(ctx)))
+	messages, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+	require.NoError(t, err)
+	userMessage := slices.IndexFunc(messages, func(m database.ChatMessage) bool { return m.Role == database.ChatMessageRoleUser })
+	require.GreaterOrEqual(t, userMessage, 0)
+	_, err = f.server.EditMessage(ctx, EditMessageOptions{
+		ChatID: child.ID, CreatedBy: child.OwnerID, EditedMessageID: messages[userMessage].ID,
+		Content: []codersdk.ChatMessagePart{codersdk.ChatMessageText("the token is x")},
+	})
+	require.ErrorIs(t, err, ErrSecretQuestionPending, "an edit would answer the question too")
+	// The report passes only for the pending question, with its answer
+	// stored.
+	require.ErrorIs(t, send(WithSecretAnswerReport(ctx, callID)), ErrSecretAnswerNotPending)
+	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		ChatID: child.ID, ToolCallID: callID, Value: "a-secret-value",
+	}))
+	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
+	// A late report of the answer must not answer a newer question.
+	ask(`[{"header":"Key","question":"Paste the key.","secret":true}]`)
+	require.ErrorIs(t, send(WithSecretAnswerReport(ctx, callID)), ErrSecretAnswerNotPending)
 
 	ask(`[{"header":"DB","question":"Which one?","options":[{"label":"a"},{"label":"b"}]}]`)
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a", SendMessageBusyBehaviorQueue)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a")
 	require.NoError(t, err, "the parent may answer an ordinary question")
 }
 

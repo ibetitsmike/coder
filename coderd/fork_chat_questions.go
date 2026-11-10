@@ -198,12 +198,18 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = api.sendChatMessage(chatd.WithSecretAnswerReport(ctx), apiKey.UserID, chat, codersdk.CreateChatMessageRequest{
+	_, err = api.sendChatMessage(chatd.WithSecretAnswerReport(ctx, toolCallID), apiKey.UserID, chat, codersdk.CreateChatMessageRequest{
 		Content: []codersdk.ChatInputPart{{
 			Type: codersdk.ChatInputPartTypeText,
 			Text: questionAnswerPrefix + toolCallID + ":\nThe user gave a secret answer. Write {{secret:" + toolCallID + "}} where the value belongs in execute, write_file or edit_files input.",
 		}},
 	})
+	if errors.Is(err, chatd.ErrSecretAnswerNotPending) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The chat has no pending question with this tool call ID.",
+		})
+		return
+	}
 	if err != nil {
 		// The answer stays stored. The question stays pending without the
 		// message, and the next answer replaces it as an unreported one.
@@ -326,8 +332,9 @@ func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Ch
 }
 
 // secretQuestionPendingError is the response to a message for a chat whose
-// pending question is secret. SendMessage returns chatd.ErrSecretQuestionPending
-// when the question is recorded after rejectSecretQuestionAnswer runs.
+// pending question is secret. SendMessage and EditMessage return
+// chatd.ErrSecretQuestionPending when the question is recorded after
+// rejectSecretQuestionAnswer runs.
 func secretQuestionPendingError(err error) error {
 	return httperror.WrapResponseError(http.StatusConflict, codersdk.Response{
 		Message: "The chat's question takes a secret answer, which a chat message cannot carry.",

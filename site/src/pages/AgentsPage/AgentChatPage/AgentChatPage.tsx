@@ -615,8 +615,6 @@ const AgentChatPage: React.FC = () => {
 			id,
 			store,
 			promoteQueuedMessage,
-			fetchQueueConvergence,
-			setCacheQueuedMessages,
 			agentId,
 			clearChatErrorReason,
 			onError: handleRequestError,
@@ -823,6 +821,7 @@ const AgentChatPage: React.FC = () => {
 		message,
 		attachments,
 		workspaceUploads,
+		busyBehavior,
 		editingTarget,
 		composerParts,
 	}: SendChatTurnOptions) {
@@ -831,6 +830,7 @@ const AgentChatPage: React.FC = () => {
 			message,
 			attachments,
 			workspaceUploads,
+			busyBehavior,
 			composerParts:
 				composerParts ?? editing.chatInputRef.current?.getContentParts() ?? [],
 			editingTarget,

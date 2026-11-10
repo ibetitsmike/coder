@@ -133,7 +133,7 @@ func TestSecretAnswerReachesToolsNotModel(t *testing.T) {
 		ChatID: child.ID, ToolCallID: callID, Value: secret,
 	}))
 
-	_, err = server.SendMessage(chatd.WithSecretAnswerReport(ctx), chatd.SendMessageOptions{
+	_, err = server.SendMessage(chatd.WithSecretAnswerReport(ctx, callID), chatd.SendMessageOptions{
 		ChatID:    child.ID,
 		CreatedBy: user.ID,
 		Content: []codersdk.ChatMessagePart{codersdk.ChatMessageText(
