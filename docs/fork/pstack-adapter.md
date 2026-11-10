@@ -148,6 +148,8 @@ It offers project definitions only when the chat owner owns the project or the p
 A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
 A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
+A new organization definition is shared with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
+`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` report a custom child's type name in `type`, not `general`.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
 ### Custom agent tool policy
@@ -287,7 +289,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `e6cd44a997`:
+Checked against fork `main` at `1ef5ccc60b`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -299,9 +301,9 @@ Checked against fork `main` at `e6cd44a997`:
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
   Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
-  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-54`, `:101-111`, called from `subagent_catalog.go:185` and `:233`.
-  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:346`.
-  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:317-328`, and the model match, `:353-379`.
+  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-54`, `:102-112`, called from `subagent_catalog.go:185` and `:233`.
+  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:379`.
+  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:350-361`, and the model match, `:386-412`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
   Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
@@ -318,8 +320,10 @@ Checked against fork `main` at `e6cd44a997`:
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
   `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:883`, `:893-895`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
-  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:179-272`.
-  Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-140`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
+  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
+  Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:181-305`, and for a project the owner owns or that is shared with them, `:258-262`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
+  The custom type name in subagent tool results, `coderd/x/chatd/fork_subagent_types.go:25-51`, `fork_tools.go:34`.
+  Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-142`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
