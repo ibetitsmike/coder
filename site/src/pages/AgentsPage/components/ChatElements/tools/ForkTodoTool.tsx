@@ -131,11 +131,9 @@ export const ForkTodoToolRenderer: React.FC<ForkToolRendererProps> = ({
 	if (resultRecord) {
 		todos = parseArray(resultRecord.todos, parseChatTodo);
 	} else if (props.status === "running") {
-		// Streamed args can end in a partial item, so skip invalid items.
-		const argsTodos = parseArgs(props.args)?.todos;
-		todos = Array.isArray(argsTodos)
-			? argsTodos.map(parseChatTodo).filter((todo) => todo !== null)
-			: [];
+		// Streamed args omit todos until its array closes, so a running write
+		// shows no list until then.
+		todos = parseArray(parseArgs(props.args)?.todos, parseChatTodo) ?? [];
 	}
 	if (!todos) {
 		return <Fallback {...props} />;

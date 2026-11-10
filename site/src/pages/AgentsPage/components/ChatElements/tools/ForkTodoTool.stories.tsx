@@ -44,16 +44,9 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 
 export const Updated: Story = { play: expand };
 
-// While todo_write runs, the card lists the streamed args, skipping the
-// partial last item.
+// Once its args finish streaming, a running todo_write lists them.
 export const Updating: Story = {
-	args: {
-		status: "running",
-		result: undefined,
-		args: {
-			todos: [...MockChatTodoList.todos.slice(0, 2), { id: "te" }],
-		},
-	},
+	args: { status: "running", result: undefined },
 	play: expand,
 };
 
