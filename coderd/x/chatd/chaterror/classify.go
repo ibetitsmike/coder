@@ -196,7 +196,7 @@ func Classify(err error) ClassifiedError {
 	combinedText := lower + "\n" + strings.ToLower(structured.detail)
 	providerDisabledMatch := containsAny(combinedText, providerDisabledPatterns...)
 	deadline := errors.Is(err, context.DeadlineExceeded) || strings.Contains(lower, "context deadline exceeded")
-	overloadedMatch := statusCode == 529 || containsAny(combinedText, overloadedPatterns...)
+	overloadedMatch := statusCode == 529 || containsAny(combinedText, overloadedPatterns...) || isOMLXPrefillGuardRejection(combinedText)
 	usageLimitMatch := containsAny(combinedText, usageLimitAnyStatusPatterns...) ||
 		(statusCode != 429 && containsAny(combinedText, usageLimitPatterns...))
 	authStrong := statusCode == 401 || containsAny(combinedText, authStrongPatterns...)
