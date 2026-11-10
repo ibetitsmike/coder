@@ -133,7 +133,7 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 	switch {
 	case chat.Archived:
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"})
-	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now):
+	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) && !eventsFinalPoll(wakeup):
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
 	case chat.Status == database.ChatStatusRunning,
 		chat.Status == database.ChatStatusInterrupting,
@@ -344,7 +344,7 @@ func nextWakeupRun(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32) wake
 		}
 		next = schedule.Next(now)
 	case forkdb.ChatWakeupKindEvents:
-		next = now.Add(wakeupPollInterval)
+		return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(wakeupPollInterval))
 	default:
 		finish.status, finish.reason = forkdb.ChatWakeupStatusCompleted, "done"
 		return finish

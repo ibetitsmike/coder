@@ -67,6 +67,9 @@ type wakeupEvent struct {
 	Since       time.Time `json:"since,omitzero"`
 	HeadSHA     string    `json:"head_sha,omitempty"`
 	ChecksState string    `json:"checks_state,omitempty"`
+	// Seen lists the URLs of reviews and comments the baseline read already
+	// listed.
+	Seen []string `json:"seen,omitempty"`
 }
 
 // waitForEventsTool returns the wait_for_events tool, which creates an events
@@ -350,7 +353,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			if next == nil {
 				summary, err := p.pullRequestWakeupText(ctx, chat, event)
 				if err != nil {
-					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, err))
+					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
 				}
 				if summary != "" {
 					next = &wakeupDelivery{
@@ -394,19 +397,27 @@ func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32,
 	return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(interval))
 }
 
-// eventsWakeupRunAt is nextWakeupRun of an events wake-up whose next poll is
-// at next instead of one wakeupPollInterval from now, with the same max_runs
-// and expiry rules.
+// eventsWakeupRunAt schedules the next poll of an events wake-up at next. A
+// poll that would land after the expiry lands at the expiry instead, so the
+// watch covers its whole lifetime, and the wake-up completes once that last
+// poll is done or its max_runs are used up.
 func eventsWakeupRunAt(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, next time.Time) wakeupFinish {
-	finish := nextWakeupRun(wakeup, now, runDelta)
-	if finish.status != forkdb.ChatWakeupStatusActive {
-		return finish
-	}
-	if wakeup.ExpiresAt.Valid && !next.Before(wakeup.ExpiresAt.Time) {
+	switch {
+	case wakeup.MaxRuns.Valid && wakeup.RunCount+runDelta >= wakeup.MaxRuns.Int32:
+		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "max_runs", runDelta: runDelta}
+	case wakeup.ExpiresAt.Valid && !now.Before(wakeup.ExpiresAt.Time):
 		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired", runDelta: runDelta}
+	case wakeup.ExpiresAt.Valid && next.After(wakeup.ExpiresAt.Time):
+		next = wakeup.ExpiresAt.Time
 	}
-	finish.nextRunAt.Time = next
-	return finish
+	return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}, runDelta: runDelta}
+}
+
+// eventsFinalPoll reports whether wakeup is the last poll of an events
+// wake-up, which eventsWakeupRunAt schedules at the expiry.
+func eventsFinalPoll(wakeup forkdb.ChatWakeup) bool {
+	return wakeup.Kind == forkdb.ChatWakeupKindEvents && wakeup.ExpiresAt.Valid && wakeup.NextRunAt.Valid &&
+		!wakeup.NextRunAt.Time.Before(wakeup.ExpiresAt.Time)
 }
 
 // childDoneRunKey names the run of a child_done event, so each child wakes
