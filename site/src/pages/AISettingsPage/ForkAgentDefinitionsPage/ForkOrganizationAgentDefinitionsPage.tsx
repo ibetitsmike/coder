@@ -41,14 +41,16 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 		organizationPermissionsQuery.data,
 	);
 	const requestedOrganizationName = searchParams.get(orgSearchParam);
+	const defaultOrganization =
+		readableOrganizations.length > 0
+			? selectOrganization(readableOrganizations, null)
+			: undefined;
 	// A requested organization the user cannot read is denied rather than
 	// replaced, so a definition is never added to an organization the URL did
 	// not name.
 	const organization =
 		requestedOrganizationName === null
-			? readableOrganizations.length > 0
-				? selectOrganization(readableOrganizations, null)
-				: undefined
+			? defaultOrganization
 			: readableOrganizations.find(
 					(organization) => organization.name === requestedOrganizationName,
 				);
