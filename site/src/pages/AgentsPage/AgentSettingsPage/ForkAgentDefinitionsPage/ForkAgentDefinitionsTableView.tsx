@@ -1,6 +1,6 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
-import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, EllipsisVerticalIcon, PlusIcon, XIcon } from "lucide-react";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { Alert, AlertDescription } from "#/components/Alert/Alert";
@@ -42,6 +42,7 @@ const title = "Agent definitions";
  */
 export type ForkAgentDefinitionDeleteState = {
 	definition: ForkAgentDefinitionMetadata;
+	message: string;
 	error?: unknown;
 	isDeleting: boolean;
 	onConfirm: () => void;
@@ -52,7 +53,10 @@ type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
 	description: string;
 	emptyMessage: string;
-	/** Hides the controls for actions the user is not allowed to take. */
+	/**
+	 * Hides the create, edit, and delete controls the user may not use, and
+	 * shows the enabled state as a static status without update access.
+	 */
 	access?: SkillAccess;
 	/** Rendered in the section header, for example an organization picker. */
 	action?: React.ReactNode;
@@ -135,14 +139,30 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						)}
 					</TableCell>
 					<TableCell>
-						<Switch
-							aria-label={`Enable ${definition.name}`}
-							checked={pendingEnabled ?? definition.enabled}
-							disabled={!access.update || pendingEnabled !== undefined}
-							onCheckedChange={(enabled) =>
-								onToggleEnabled(definition.name, enabled)
-							}
-						/>
+						{!access.update ? (
+							definition.enabled ? (
+								<CheckIcon
+									role="img"
+									aria-label="Enabled"
+									className="size-icon-sm text-content-success"
+								/>
+							) : (
+								<XIcon
+									role="img"
+									aria-label="Disabled"
+									className="size-icon-sm text-content-secondary"
+								/>
+							)
+						) : (
+							<Switch
+								aria-label={`Enable ${definition.name}`}
+								checked={pendingEnabled ?? definition.enabled}
+								disabled={pendingEnabled !== undefined}
+								onCheckedChange={(enabled) =>
+									onToggleEnabled(definition.name, enabled)
+								}
+							/>
+						)}
 					</TableCell>
 					<TableCell className="hidden whitespace-nowrap sm:table-cell">
 						{formatUpdatedAt(definition.updated_at)}
@@ -257,11 +277,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 					confirmText="Delete"
 					description={
 						<>
-							<p className="m-0">
-								Your personal definition {deleteState.definition.name} will be
-								deleted. Organization, project, and workspace definitions with
-								the same name are not affected. This action cannot be undone.
-							</p>
+							<p className="m-0">{deleteState.message}</p>
 							{Boolean(deleteState.error) && (
 								<Alert severity="error" className="mt-3">
 									<AlertDescription>

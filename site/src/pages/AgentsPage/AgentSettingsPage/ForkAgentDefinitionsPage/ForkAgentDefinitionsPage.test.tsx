@@ -24,7 +24,6 @@ import {
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { render, renderWithAuth } from "#/testHelpers/renderHelpers";
-import type { SkillAccess } from "../../utils/skills";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
 import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
 
@@ -1236,7 +1235,7 @@ describe("ForkAgentDefinitionsPage", () => {
 	});
 
 	describe("organization tier", () => {
-		const renderOrganizationTable = (access?: SkillAccess) => {
+		const renderOrganizationTable = () => {
 			vi.spyOn(
 				forkAgentDefinitionsApi,
 				"getOrganizationAgentDefinitions",
@@ -1250,7 +1249,6 @@ describe("ForkAgentDefinitionsPage", () => {
 						tier: "organization",
 						organizationId: MockDefaultOrganization.id,
 					}}
-					access={access}
 				/>,
 			);
 			return { update };
@@ -1273,23 +1271,6 @@ describe("ForkAgentDefinitionsPage", () => {
 					{ enabled: false },
 				),
 			);
-		});
-
-		it("does not toggle without update access", async () => {
-			const user = userEvent.setup();
-			const { update } = renderOrganizationTable({
-				create: false,
-				update: false,
-				delete: false,
-			});
-
-			await user.click(
-				await screen.findByRole("switch", {
-					name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
-				}),
-			);
-
-			expect(update).not.toHaveBeenCalled();
 		});
 	});
 });

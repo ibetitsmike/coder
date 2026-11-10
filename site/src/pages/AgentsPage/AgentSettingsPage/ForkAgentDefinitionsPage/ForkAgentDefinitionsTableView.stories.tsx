@@ -91,10 +91,13 @@ export const ReadOnly: Story = {
 	args: { access: { create: false, update: false, delete: false } },
 };
 
+const deleteMessage = `Your personal definition ${MockForkAgentDefinitionMetadata.name} will be deleted. Organization, project, and workspace definitions with the same name are not affected. This action cannot be undone.`;
+
 export const DeleteConfirm: Story = {
 	args: {
 		deleteState: {
 			definition: MockForkAgentDefinitionMetadata,
+			message: deleteMessage,
 			isDeleting: false,
 			onConfirm: fn(),
 			onClose: fn(),
@@ -106,6 +109,7 @@ export const DeletePending: Story = {
 	args: {
 		deleteState: {
 			definition: MockForkAgentDefinitionMetadata,
+			message: deleteMessage,
 			isDeleting: true,
 			onConfirm: fn(),
 			onClose: fn(),
@@ -117,6 +121,7 @@ export const DeleteFailed: Story = {
 	args: {
 		deleteState: {
 			definition: MockForkAgentDefinitionMetadata,
+			message: deleteMessage,
 			error: mockApiError({
 				message: "Agent definition not found.",
 				detail: "It may have been deleted in another tab.",

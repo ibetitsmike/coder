@@ -24,15 +24,23 @@ const copy = {
 		description:
 			"Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file.",
 		emptyMessage: "No personal agent definitions in this organization yet.",
+		deleteMessage: (name: string) =>
+			`Your personal definition ${name} will be deleted. Organization, project, and workspace definitions with the same name are not affected. This action cannot be undone.`,
 	},
 	organization: {
 		description:
 			"Custom agent types that chats in this organization can spawn with spawn_agent. Each definition is a Claude Code or Cursor agent markdown file and is shared with everyone in the organization by default.",
 		emptyMessage: "No organization agent definitions yet.",
+		deleteMessage: (name: string) =>
+			`The organization definition ${name} will be deleted for everyone in the organization. Personal, project, and workspace definitions with the same name are not affected. This action cannot be undone.`,
 	},
 } satisfies Record<
 	AgentDefinitionScope["tier"],
-	{ description: string; emptyMessage: string }
+	{
+		description: string;
+		emptyMessage: string;
+		deleteMessage: (name: string) => string;
+	}
 >;
 
 const scopeKey = ({ tier, organizationId }: AgentDefinitionScope) =>
@@ -115,6 +123,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 		const isDeleting = isTarget && deleteMutation.isPending;
 		deleteState = {
 			definition: deleteTarget,
+			message: copy[scope.tier].deleteMessage(deleteTarget.name),
 			error: isTarget ? deleteMutation.error : undefined,
 			isDeleting,
 			onConfirm: () =>
@@ -150,7 +159,8 @@ export const ForkAgentDefinitionsTable: React.FC<
 	return (
 		<ForkAgentDefinitionsTableView
 			definitions={definitionsQuery.data ?? []}
-			{...copy[scope.tier]}
+			description={copy[scope.tier].description}
+			emptyMessage={copy[scope.tier].emptyMessage}
 			access={access}
 			action={action}
 			error={definitionsQuery.error}
