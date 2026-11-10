@@ -76,8 +76,8 @@ type ContextMcpServerItem = {
 	readonly source: string;
 	readonly tools: readonly ChatContextTool[];
 };
-// An agent definition file the agent parsed. Warnings holds its non-fatal
-// parse warnings, which the server reports in an OK row's error.
+// The server reports an OK definition's non-fatal parse warnings in its
+// error field.
 type ContextAgentDefinitionItem = {
 	readonly source: string;
 	readonly name: string;

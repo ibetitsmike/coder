@@ -43,7 +43,7 @@ describe("ContextUsageIndicator", () => {
 		expect(section).toHaveAccessibleName(/2 issues/);
 		await user.click(section);
 		expect(screen.getByText(/unknown front-matter field/)).toHaveTextContent(
-			'unknown front-matter field "color" ignored; missing description',
+			'missing description; unknown front-matter field "temperature" ignored',
 		);
 		expect(screen.getByText(/is not kebab-case/)).toHaveTextContent(
 			'agent name "Broken" is not kebab-case',

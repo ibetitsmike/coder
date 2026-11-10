@@ -198,7 +198,8 @@ export const MockChatContextAgentDefinitions: ChatContext = {
 			kind: "subagent",
 			size_bytes: 256,
 			status: "ok",
-			error: 'unknown front-matter field "color" ignored; missing description',
+			error:
+				'missing description; unknown front-matter field "temperature" ignored',
 			subagent_name: "sicko",
 		},
 		{
