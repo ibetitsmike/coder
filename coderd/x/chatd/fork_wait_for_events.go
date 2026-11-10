@@ -67,8 +67,10 @@ type wakeupEvent struct {
 	Since       time.Time `json:"since,omitzero"`
 	HeadSHA     string    `json:"head_sha,omitempty"`
 	ChecksState string    `json:"checks_state,omitempty"`
-	// Seen lists the URLs of reviews and comments the baseline read already
-	// listed.
+	// ChecksUpdatedAt is the baseline's CheckSummary.UpdatedAt.
+	ChecksUpdatedAt time.Time `json:"checks_updated_at,omitzero"`
+	// Seen lists the URLs of reviews and comments that the baseline read
+	// listed and that count as the baseline.
 	Seen []string `json:"seen,omitempty"`
 }
 
@@ -351,7 +353,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			// At most one read per tick: a later entry waits until next
 			// is delivered.
 			if next == nil {
-				summary, err := p.pullRequestWakeupText(ctx, chat, event)
+				summary, err := p.pullRequestWakeupText(ctx, chat, event, wakeup.ExpiresAt.Time)
 				if err != nil {
 					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
 				}
