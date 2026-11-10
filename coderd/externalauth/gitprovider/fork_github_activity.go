@@ -205,14 +205,35 @@ func FetchPullRequestActivity(
 	}
 	commitEndpoint := repoEndpoint + "/commits/" + url.PathEscape(pull.Head.SHA)
 
+	// GitHub keeps every run of a commit, so a check that was cancelled and
+	// then run again appears twice. Only the newest run of each check name
+	// and app counts, which matches GitHub's status rollup, but two
+	// workflows with a job of the same name also count as one check. Only
+	// the first 100 runs are read, a known limit like the reviews.
 	var checkRuns struct {
 		CheckRuns []struct {
+			ID         int64  `json:"id"`
+			Name       string `json:"name"`
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
+			App        struct {
+				ID int64 `json:"id"`
+			} `json:"app"`
 		} `json:"check_runs"`
 	}
 	if err := g.decodeJSON(ctx, commitEndpoint+"/check-runs?per_page=100", token, &checkRuns); err != nil {
 		return nil, xerrors.Errorf("fetch commit check runs: %w", err)
+	}
+	type checkKey struct {
+		appID int64
+		name  string
+	}
+	latest := make(map[checkKey]int, len(checkRuns.CheckRuns))
+	for i, run := range checkRuns.CheckRuns {
+		key := checkKey{appID: run.App.ID, name: run.Name}
+		if j, ok := latest[key]; !ok || run.ID > checkRuns.CheckRuns[j].ID {
+			latest[key] = i
+		}
 	}
 	var combined struct {
 		State      string `json:"state"`
@@ -222,9 +243,10 @@ func FetchPullRequestActivity(
 		return nil, xerrors.Errorf("fetch commit status: %w", err)
 	}
 
-	checks := CheckSummary{Total: len(checkRuns.CheckRuns) + combined.TotalCount}
+	checks := CheckSummary{Total: len(latest) + combined.TotalCount}
 	pending := false
-	for _, run := range checkRuns.CheckRuns {
+	for _, i := range latest {
+		run := checkRuns.CheckRuns[i]
 		if !strings.EqualFold(run.Status, "completed") {
 			pending = true
 			continue
