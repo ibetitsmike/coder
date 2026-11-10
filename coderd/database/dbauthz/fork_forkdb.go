@@ -70,6 +70,15 @@ func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg f
 	return f.db.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
+// CountChatUserNotificationsSince reads notification messages, like
+// GetNotificationMessagesByStatus.
+func (f *forkQuerier) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceNotificationMessage); err != nil {
+		return 0, err
+	}
+	return f.db.CountChatUserNotificationsSince(ctx, arg)
+}
+
 func (f *forkQuerier) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.CountChatWakeupRunsSinceParams) (int64, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return 0, err
@@ -404,6 +413,21 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f *forkQuerier) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
+		return 0, err
+	}
+	return f.db.SumChatCostMicrosSince(ctx, arg)
+}
+
+// SumOrganizationWakeupChatCostMicrosSince spans chats, so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg forkdb.SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return 0, err
+	}
+	return f.db.SumOrganizationWakeupChatCostMicrosSince(ctx, arg)
 }
 
 // UpdateChatWakeupRunStatus is worker-only, so it needs site-wide chat access, like chatd's.

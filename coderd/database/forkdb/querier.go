@@ -30,6 +30,11 @@ type Querier interface {
 	// its own descendants must never wait for it. The depth guard stops the walk
 	// if a cycle ever appears in the hierarchy.
 	CountActiveSubagentsForCapacity(ctx context.Context, arg CountActiveSubagentsForCapacityParams) (CountActiveSubagentsForCapacityRow, error)
+	// Counts the notifications of one template that were enqueued for a user
+	// about a chat. One enqueue stores a row per delivery method, all with the
+	// same payload, and the enqueuer's dedupe rejects a second identical payload
+	// on the same day, so distinct payloads count enqueues.
+	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
 	CountChatWakeupRunsSince(ctx context.Context, arg CountChatWakeupRunsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
 	// finished. A finished subagent is waiting or error.
@@ -100,6 +105,12 @@ type Querier interface {
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
+	// Deleted messages count too: they were paid for. Messages without a price
+	// have a NULL cost and count as zero.
+	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
+	// Sums the spend of the chats of the organization that have a wake-up, so
+	// chats that only humans drive do not count.
+	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatWakeupRunStatus(ctx context.Context, arg UpdateChatWakeupRunStatusParams) (ChatWakeupRun, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.

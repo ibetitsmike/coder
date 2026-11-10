@@ -332,6 +332,46 @@ func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 }
 
 // createChildAgent creates a direct child of parent with title and status.
+// An events wake-up checks the caps only when a child is about to be sent.
+func TestWakeupEventsCap(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		childStatus database.ChatStatus
+		wantStatus  forkdb.ChatWakeupStatus
+	}{
+		{name: "ChildDone", childStatus: database.ChatStatusWaiting, wantStatus: forkdb.ChatWakeupStatusPaused},
+		{name: "NothingPending", childStatus: database.ChatStatusRunning, wantStatus: forkdb.ChatWakeupStatusActive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			coordinator := f.createWakeupChat(t)
+			child := f.createChildAgent(t, coordinator, "child", tc.childStatus)
+			wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+				Kind:   forkdb.ChatWakeupKindEvents,
+				Events: childDoneEvents(child),
+			})
+			f.seedDeliveredRuns(t, wakeup, maxChatWakeupRunsPerDay, wakeupTestSlot.Add(-time.Hour))
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+			enqueuer := useFakeEnqueuer(worker)
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+			require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
+			require.NotContains(t, f.wakeupRunKeys(t, wakeup.ID), childDoneRunKey(child.ID))
+			got := f.wakeup(t, wakeup.ID)
+			require.Equal(t, tc.wantStatus, got.Status)
+			if tc.wantStatus == forkdb.ChatWakeupStatusPaused {
+				require.Equal(t, wakeupReasonDailyRunCap, got.StatusReason.String)
+				requireWakeupPausedNotification(t, enqueuer.Sent(), coordinator, wakeupReasonDailyRunCap)
+				return
+			}
+			require.Empty(t, enqueuer.Sent())
+		})
+	}
+}
+
 func (f *workerTestFixture) createChildAgent(t *testing.T, parent database.Chat, title string, status database.ChatStatus) database.Chat {
 	t.Helper()
 	child := f.createWakeupChat(t)

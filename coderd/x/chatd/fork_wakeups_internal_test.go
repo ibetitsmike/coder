@@ -235,6 +235,7 @@ func TestWakeupEndsSchedule(t *testing.T) {
 			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
 		})
 		worker := f.newArchiveWorker(t, nil, nil, nil)
+		enqueuer := useFakeEnqueuer(worker)
 		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
 			_, _ = rw.Write([]byte(`{"permission": {"decision": "deny", "reason": "blocked"}, "user_message": "not allowed"}`))
 		})
@@ -247,6 +248,7 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.Equal(t, "hook_denied", got.StatusReason.String)
 		require.False(t, got.NextRunAt.Valid)
 		require.Zero(t, got.RunCount)
+		requireWakeupPausedNotification(t, enqueuer.Sent(), chat, "hook_denied")
 	})
 
 	t.Run("Delay", func(t *testing.T) {

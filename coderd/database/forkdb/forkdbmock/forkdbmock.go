@@ -117,6 +117,21 @@ func (mr *MockStoreMockRecorder) CountActiveSubagentsForCapacity(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountActiveSubagentsForCapacity", reflect.TypeOf((*MockStore)(nil).CountActiveSubagentsForCapacity), ctx, arg)
 }
 
+// CountChatUserNotificationsSince mocks base method.
+func (m *MockStore) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountChatUserNotificationsSince", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountChatUserNotificationsSince indicates an expected call of CountChatUserNotificationsSince.
+func (mr *MockStoreMockRecorder) CountChatUserNotificationsSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountChatUserNotificationsSince", reflect.TypeOf((*MockStore)(nil).CountChatUserNotificationsSince), ctx, arg)
+}
+
 // CountChatWakeupRunsSince mocks base method.
 func (m *MockStore) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.CountChatWakeupRunsSinceParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -825,6 +840,36 @@ func (m *MockStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg 
 func (mr *MockStoreMockRecorder) SetPluginUserLinksActiveChatByUser(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinksActiveChatByUser", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinksActiveChatByUser), ctx, arg)
+}
+
+// SumChatCostMicrosSince mocks base method.
+func (m *MockStore) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SumChatCostMicrosSince", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SumChatCostMicrosSince indicates an expected call of SumChatCostMicrosSince.
+func (mr *MockStoreMockRecorder) SumChatCostMicrosSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SumChatCostMicrosSince", reflect.TypeOf((*MockStore)(nil).SumChatCostMicrosSince), ctx, arg)
+}
+
+// SumOrganizationWakeupChatCostMicrosSince mocks base method.
+func (m *MockStore) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg forkdb.SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SumOrganizationWakeupChatCostMicrosSince", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SumOrganizationWakeupChatCostMicrosSince indicates an expected call of SumOrganizationWakeupChatCostMicrosSince.
+func (mr *MockStoreMockRecorder) SumOrganizationWakeupChatCostMicrosSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SumOrganizationWakeupChatCostMicrosSince", reflect.TypeOf((*MockStore)(nil).SumOrganizationWakeupChatCostMicrosSince), ctx, arg)
 }
 
 // UpdateChatWakeupRunStatus mocks base method.

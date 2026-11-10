@@ -236,6 +236,23 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountOrganizationChatWakeupRunsSince(gomock.Any(), arg).Return(int64(9), nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(9))
 		},
+		"SumChatCostMicrosSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := testutil.Fake(t, faker, forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().SumChatCostMicrosSince(gomock.Any(), arg).Return(int64(1500), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(1500))
+		},
+		"SumOrganizationWakeupChatCostMicrosSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{})
+			fdb.EXPECT().SumOrganizationWakeupChatCostMicrosSince(gomock.Any(), arg).Return(int64(2500), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(2500))
+		},
+		"CountChatUserNotificationsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.CountChatUserNotificationsSinceParams{})
+			fdb.EXPECT().CountChatUserNotificationsSince(gomock.Any(), arg).Return(int64(3), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceNotificationMessage, policy.ActionRead).Returns(int64(3))
+		},
 		"InsertPlugin": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
 			arg := forkdb.InsertPluginParams{ID: plugin.ID, OrganizationID: plugin.OrganizationID, Name: plugin.Name}

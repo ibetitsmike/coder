@@ -250,7 +250,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			slog.F("wakeup_id", wakeup.ID),
 			slog.Error(err),
 		)
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
 	}
 	rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
 		ParentIds: []uuid.UUID{chat.ID},
@@ -289,7 +289,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		pending++
 	}
 	if next == nil {
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending))
+	}
+	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
+		return err
 	}
 	delivery := wakeupDelivery{
 		text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, next.Title, next.ID, next.Status),
@@ -299,7 +302,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	// A failed send keeps the child's own key free, so a later poll retries it.
 	failedRunKey := delivery.runKey + ":failed:" + now.UTC().Format(time.RFC3339Nano)
-	return p.finishWakeupSend(ctx, fdb, wakeup, now, failedRunKey, err)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched child still
