@@ -84,6 +84,7 @@ func (p *Server) SendMessage(
 	if err != nil {
 		return SendMessageResult{}, err
 	}
+	submittedParts := contentParts
 	contentParts, forkLoop, err := p.forkLoopCommand(contentParts)
 	if err != nil {
 		return SendMessageResult{}, err
@@ -117,7 +118,7 @@ func (p *Server) SendMessage(
 		if err := chatstate.CheckSendMessageQueueCapacity(chat, queue, queuedCount, busyBehaviorToChatState(busyBehavior), p.chatLimits.MaxQueuedMessagesPerChat); err != nil {
 			return SendMessageResult{}, err
 		}
-		promptMessage, err := chathooks.UserPromptMessage(contentParts)
+		promptMessage, err := chathooks.UserPromptMessage(submittedParts)
 		if err != nil {
 			return SendMessageResult{}, err
 		}
@@ -215,7 +216,7 @@ func (p *Server) SendMessage(
 		if err != nil {
 			return err
 		}
-		if err := forkLoop.schedule(ctx, store, lockedChat, p.clock.Now()); err != nil {
+		if err := forkLoop.schedule(ctx, store, lockedChat, messageCreatedBy, p.clock.Now()); err != nil {
 			return err
 		}
 		if opts.forkAdmit != nil {

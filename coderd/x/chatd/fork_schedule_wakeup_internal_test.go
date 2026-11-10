@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
 )
@@ -37,7 +38,7 @@ func TestScheduleWakeupTool(t *testing.T) {
 	}
 	schedule := func(args scheduleWakeupArgs, wantError bool) scheduleWakeupResult {
 		t.Helper()
-		content := runChatTodoTool(ctx, t, tools, scheduleWakeupToolName, args, wantError)
+		content := runChatTodoTool(workspacesdk.WithToolCallID(ctx, uuid.New()), t, tools, scheduleWakeupToolName, args, wantError)
 		var result scheduleWakeupResult
 		if !wantError {
 			require.NoError(t, json.Unmarshal([]byte(content), &result), content)
@@ -71,21 +72,31 @@ func TestScheduleWakeupTool(t *testing.T) {
 		"TwoKinds":        {Prompt: "x", DelaySeconds: new(60), IntervalSeconds: new(60)},
 		"ShortInterval":   {Prompt: "x", IntervalSeconds: new(30)},
 		"UnknownTimezone": {Prompt: "x", Cron: new("0 9 * * *"), Timezone: new("Mars/Olympus_Mons")},
+		"CronNeverRuns":   {Prompt: "x", Cron: new("0 0 31 2 *")},
 	} {
 		t.Logf("case %s", name)
 		schedule(args, true)
 	}
 	require.Len(t, wakeups(), 2, "refused calls create nothing")
 
-	// A replayed tool call returns the wake-up it created the first time.
 	tool := findToolByName(tools, scheduleWakeupToolName)
-	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","interval_seconds":60}`}
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"x","delay_seconds":60}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a call without an occurrence ID cannot be replayed safely")
+	require.Len(t, wakeups(), 2)
+
+	// A replayed tool call returns the wake-up it created the first time,
+	// even after its first run time has passed: at 12:45 the next 12:30 is
+	// tomorrow, past the expiry.
+	callCtx := workspacesdk.WithToolCallID(ctx, uuid.New())
+	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","cron":"30 12 * * *","expires_in_seconds":3600}`}
 	var replayed [2]scheduleWakeupResult
 	for i := range replayed {
-		resp, err := tool.Run(ctx, call)
+		resp, err := tool.Run(callCtx, call)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, resp.Content)
 		require.NoError(t, json.Unmarshal([]byte(resp.Content), &replayed[i]))
+		mClock.Set(wakeupTestSlot.Add(45 * time.Minute))
 	}
 	require.Equal(t, replayed[0].ID, replayed[1].ID)
 	require.Len(t, wakeups(), 3)

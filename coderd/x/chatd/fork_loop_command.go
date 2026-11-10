@@ -57,12 +57,13 @@ func (p *Server) forkLoopCommand(parts []codersdk.ChatMessagePart) ([]codersdk.C
 }
 
 // schedule creates the interval wake-up of the loop in store, the transaction
-// that stores its first message. It does nothing for a nil loop.
-func (l *forkLoop) schedule(ctx context.Context, store database.Store, chat database.Chat, now time.Time) error {
+// that stores its first message, attributed to createdBy, the sender of that
+// message. It does nothing for a nil loop.
+func (l *forkLoop) schedule(ctx context.Context, store database.Store, chat database.Chat, createdBy uuid.UUID, now time.Time) error {
 	if l == nil {
 		return nil
 	}
-	_, err := l.server.createChatWakeup(ctx, store, chat, uuid.New(), l.spec, now)
+	_, err := l.server.createChatWakeup(ctx, store, chat, uuid.New(), createdBy, l.spec, now)
 	return err
 }
 

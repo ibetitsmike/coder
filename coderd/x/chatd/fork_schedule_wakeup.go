@@ -19,6 +19,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const (
@@ -77,15 +78,19 @@ func (p *Server) scheduleWakeupTool(chat database.Chat) fantasy.AgentTool {
 			"Optionally stop after max_runs runs or after expires_in_seconds. "+
 			"A wake-up never interrupts a running turn: it waits until the "+
 			"chat is idle. Returns the wake-up ID and its first run time.",
-		func(ctx context.Context, args scheduleWakeupArgs, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, args scheduleWakeupArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			spec, err := scheduleWakeupSpec(args)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			// A tool call replayed after a worker restart must not create a
-			// second wake-up, so the ID derives from the call.
-			id := uuid.NewSHA1(chat.ID, []byte(call.ID))
-			wakeup, err := p.createChatWakeup(ctx, p.db, chat, id, spec, p.clock.Now())
+			// second wake-up, so the wake-up takes the ID of the call
+			// occurrence.
+			id, ok := workspacesdk.ToolCallIDFromContext(ctx)
+			if !ok {
+				return fantasy.NewTextErrorResponse("schedule_wakeup requires a deterministic tool-call ID"), nil
+			}
+			wakeup, err := p.createChatWakeup(ctx, p.db, chat, id, chat.OwnerID, spec, p.clock.Now())
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
@@ -190,10 +195,32 @@ func (spec wakeupSpec) validate() (wakeupSpec, error) {
 }
 
 // createChatWakeup validates spec and creates an active wake-up of chat with
-// id on behalf of its owner. It returns the existing wake-up when chat already
-// has one with id. store may be a transaction.
-func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat database.Chat, id uuid.UUID, spec wakeupSpec, now time.Time) (forkdb.ChatWakeup, error) {
-	spec, err := spec.validate()
+// id, attributed to createdBy. It returns the existing wake-up when chat
+// already has one with id, without validating spec again: a replay can come
+// after the first run time it would compute. store may be a transaction.
+func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat database.Chat, id, createdBy uuid.UUID, spec wakeupSpec, now time.Time) (forkdb.ChatWakeup, error) {
+	fdb, err := forkdb.From(store)
+	if err != nil {
+		return forkdb.ChatWakeup{}, xerrors.Errorf("fork queries: %w", err)
+	}
+	existing, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
+	if err != nil {
+		return forkdb.ChatWakeup{}, xerrors.Errorf("list chat wake-ups: %w", err)
+	}
+	pending := 0
+	for _, wakeup := range existing {
+		if wakeup.ID == id {
+			return wakeup, nil
+		}
+		if wakeup.Status == forkdb.ChatWakeupStatusActive || wakeup.Status == forkdb.ChatWakeupStatusPaused {
+			pending++
+		}
+	}
+	if pending >= maxChatWakeups {
+		return forkdb.ChatWakeup{}, xerrors.Errorf("a chat can have at most %d active or paused wake-ups", maxChatWakeups)
+	}
+
+	spec, err = spec.validate()
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
@@ -216,31 +243,10 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 		return forkdb.ChatWakeup{}, err
 	}
 
-	fdb, err := forkdb.From(store)
-	if err != nil {
-		return forkdb.ChatWakeup{}, xerrors.Errorf("fork queries: %w", err)
-	}
-	existing, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
-	if err != nil {
-		return forkdb.ChatWakeup{}, xerrors.Errorf("list chat wake-ups: %w", err)
-	}
-	pending := 0
-	for _, wakeup := range existing {
-		if wakeup.ID == id {
-			return wakeup, nil
-		}
-		if wakeup.Status == forkdb.ChatWakeupStatusActive || wakeup.Status == forkdb.ChatWakeupStatusPaused {
-			pending++
-		}
-	}
-	if pending >= maxChatWakeups {
-		return forkdb.ChatWakeup{}, xerrors.Errorf("a chat can have at most %d active or paused wake-ups", maxChatWakeups)
-	}
-
 	wakeup, err := fdb.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
 		ID:              id,
 		ChatID:          chat.ID,
-		CreatedBy:       chat.OwnerID,
+		CreatedBy:       createdBy,
 		Source:          spec.source,
 		Kind:            spec.kind,
 		Prompt:          spec.prompt,
@@ -276,6 +282,10 @@ func firstWakeupRun(draft forkdb.ChatWakeup, now time.Time, delay time.Duration)
 	draft.NextRunAt = sql.NullTime{Time: now, Valid: true}
 	finish := nextWakeupRun(draft, now, 0)
 	switch {
+	case finish.nextRunAt.Valid && finish.nextRunAt.Time.IsZero():
+		// robfig/cron returns the zero time for a schedule that never
+		// occurs, such as "0 0 31 2 *".
+		return time.Time{}, xerrors.Errorf("cron %q never runs", draft.Cron.String)
 	case finish.nextRunAt.Valid:
 		return finish.nextRunAt.Time, nil
 	case draft.Kind == forkdb.ChatWakeupKindCron && finish.reason == "invalid_cron":
