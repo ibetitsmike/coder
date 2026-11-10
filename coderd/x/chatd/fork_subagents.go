@@ -106,6 +106,10 @@ var ErrSecretQuestionPending = xerrors.New("the chat waits for a secret answer, 
 // answer another question without its value.
 var ErrSecretAnswerNotPending = xerrors.New("the question of the secret answer is not pending")
 
+// ErrSecretAnswerQueued means that a queued message already reports an
+// answer to the secret question that a decline would retire.
+var ErrSecretAnswerQueued = xerrors.New("a queued message already answers the secret question")
+
 type secretAnswerReportKey struct{}
 
 type secretAnswerReport struct {
@@ -180,10 +184,19 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 			if !inTx {
 				return nil
 			}
+			// A chat with a queued message cannot record a secret question,
+			// so a queued message here reports an answer to this one.
+			queued, err := store.CountChatQueuedMessages(ctx, target.ID)
+			if err != nil {
+				return xerrors.Errorf("count queued messages of chat %s: %w", target.ID, err)
+			}
+			if queued > 0 {
+				return ErrSecretAnswerQueued
+			}
 			// An answer can be stored whose report failed or was deleted
 			// from the queue. Placeholders must not resolve to the value
 			// of a question the user declined.
-			err := fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: target.ID, ToolCallID: report.toolCallID})
+			err = fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: target.ID, ToolCallID: report.toolCallID})
 			if err != nil {
 				return xerrors.Errorf("delete secret answer of chat %s: %w", target.ID, err)
 			}

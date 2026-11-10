@@ -248,6 +248,10 @@ func (api *API) declineSecretQuestion(ctx context.Context, rw http.ResponseWrite
 		})
 		return
 	}
+	if errors.Is(err, chatd.ErrSecretAnswerQueued) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+		return
+	}
 	if err != nil {
 		writeChatError(ctx, rw, err)
 		return
