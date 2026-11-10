@@ -133,7 +133,7 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 	switch {
 	case chat.Archived:
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"})
-	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) && !eventsFinalPoll(wakeup):
+	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) && !eventsFinalPoll(wakeup, now):
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
 	case chat.Status == database.ChatStatusRunning,
 		chat.Status == database.ChatStatusInterrupting,
@@ -313,12 +313,15 @@ func (p *Server) wakeupFailure(ctx context.Context, wakeup forkdb.ChatWakeup, no
 		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"}
 	default:
 		// Includes hook dispatch failures, which are transient: the next
-		// occurrence tries again.
+		// occurrence tries again, and a final events poll is retried.
 		p.logger.Warn(ctx, "chat wake-up send failed",
 			slog.F("wakeup_id", wakeup.ID),
 			slog.F("chat_id", wakeup.ChatID),
 			slog.Error(sendErr),
 		)
+		if retry, ok := eventsFinalRetry(wakeup, now, now.Add(pullRequestErrorRetry)); ok {
+			return forkdb.ChatWakeupRunStatusFailed, retry
+		}
 		return forkdb.ChatWakeupRunStatusFailed, nextWakeupRun(wakeup, now, 0)
 	}
 }
