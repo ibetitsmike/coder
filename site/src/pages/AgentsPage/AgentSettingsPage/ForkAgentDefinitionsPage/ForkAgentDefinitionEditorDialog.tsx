@@ -38,6 +38,10 @@ import {
 	parseAgentDefinitionMarkdown,
 } from "./agentDefinitionMarkdown";
 
+/**
+ * The open create or edit dialog. While isSubmitting, onClose should keep the
+ * dialog open, because a failed save is reported only as submitError here.
+ */
 export type ForkAgentDefinitionEditorState = {
 	mode: "create" | "edit";
 	/** Unset while an edited definition loads or after it fails to load. */
