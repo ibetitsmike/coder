@@ -15,6 +15,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/notifications"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -167,6 +168,15 @@ func TestChatWakeupRuns(t *testing.T) {
 	require.NoError(t, err)
 	_, err = insertRun("2026-01-02T00:00:00Z", forkdb.ChatWakeupRunStatusSkipped)
 	require.NoError(t, err)
+	_, err = insertRun("2026-01-03T00:00:00Z:failed", forkdb.ChatWakeupRunStatusFailed)
+	require.NoError(t, err)
+	other := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now)
+	keys, err := fdb.ListChatWakeupRunKeys(ctx, other.ID)
+	require.NoError(t, err)
+	require.Empty(t, keys, "run keys belong to their wake-up")
+	keys, err = fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"}, keys, "failed runs are left out")
 
 	require.NoError(t, fdb.DeleteChatWakeupByID(ctx, wakeup.ID))
 
@@ -177,6 +187,113 @@ func TestChatWakeupRuns(t *testing.T) {
 	count, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
+}
+
+func TestSumChatCostMicrosSince(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	now := dbtime.Now()
+	since := now.Add(-24 * time.Hour)
+
+	looping := wakeupTestChat(t, db)
+	insertDelayWakeup(ctx, t, fdb, looping, forkdb.ChatWakeupStatusCompleted, now)
+	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 300, Valid: true}, now.Add(-time.Hour), false)
+	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 200, Valid: true}, now.Add(-2*time.Hour), true)
+	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{}, now.Add(-time.Hour), false)
+	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 5000, Valid: true}, since.Add(-time.Minute), false)
+
+	// A chat of the same organization that only a human drives.
+	human := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    looping.OrganizationID,
+		OwnerID:           looping.OwnerID,
+		LastModelConfigID: looping.LastModelConfigID,
+	})
+	insertCostMessage(ctx, t, db, sqlDB, human, sql.NullInt64{Int64: 7000, Valid: true}, now.Add(-time.Hour), false)
+
+	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: looping.ID, Since: since})
+	require.NoError(t, err)
+	require.EqualValues(t, 500, spend, "deleted messages count, NULL costs and older messages do not")
+	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: looping.OrganizationID, Since: since})
+	require.NoError(t, err)
+	require.EqualValues(t, 500, spend, "only chats with a wake-up count")
+
+	empty := wakeupTestChat(t, db)
+	spend, err = fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: empty.ID, Since: since})
+	require.NoError(t, err)
+	require.Zero(t, spend)
+}
+
+func TestCountChatUserNotificationsSince(t *testing.T) {
+	t.Parallel()
+
+	db, _ := dbtestutil.NewDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	chat := wakeupTestChat(t, db)
+	now := dbtime.Now()
+
+	enqueue := func(templateID uuid.UUID, chatID uuid.UUID, message string, createdAt time.Time, methods ...database.NotificationMethod) {
+		payload, err := json.Marshal(map[string]any{
+			"labels": map[string]string{"custom_message": message},
+			"data":   map[string]any{"chat_id": chatID.String()},
+		})
+		require.NoError(t, err)
+		for i, method := range methods {
+			require.NoError(t, db.EnqueueNotificationMessage(ctx, database.EnqueueNotificationMessageParams{
+				ID:                     uuid.New(),
+				NotificationTemplateID: templateID,
+				UserID:                 chat.OwnerID,
+				Method:                 method,
+				Payload:                payload,
+				CreatedBy:              "test",
+				// The enqueuer stamps each method's row separately.
+				CreatedAt: createdAt.Add(time.Duration(i) * time.Microsecond),
+			}))
+		}
+	}
+	custom := notifications.TemplateCustomNotification
+	enqueue(custom, chat.ID, "one", now.Add(-10*time.Minute), database.NotificationMethodSmtp, database.NotificationMethodInbox)
+	enqueue(custom, chat.ID, "two", now.Add(-5*time.Minute), database.NotificationMethodInbox)
+	enqueue(custom, chat.ID, "old", now.Add(-2*time.Hour), database.NotificationMethodInbox)
+	enqueue(custom, uuid.New(), "other chat", now.Add(-time.Minute), database.NotificationMethodInbox)
+	enqueue(notifications.TemplateWorkspaceDeleted, chat.ID, "other template", now.Add(-time.Minute), database.NotificationMethodInbox)
+
+	count, err := fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
+		UserID:                 chat.OwnerID,
+		NotificationTemplateID: custom,
+		ChatID:                 chat.ID.String(),
+		Since:                  now.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count, "one enqueue counts once across its delivery methods")
+
+	// The dedupe resets each UTC day, so the same payload enqueued again
+	// after midnight is a second notification.
+	midnight := now.UTC().Truncate(24 * time.Hour)
+	otherChatID := uuid.New()
+	enqueue(custom, otherChatID, "same", midnight.Add(-time.Minute), database.NotificationMethodInbox)
+	enqueue(custom, otherChatID, "same", midnight.Add(time.Minute), database.NotificationMethodInbox)
+	count, err = fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
+		UserID:                 chat.OwnerID,
+		NotificationTemplateID: custom,
+		ChatID:                 otherChatID.String(),
+		Since:                  midnight.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count, "an identical payload on another UTC day counts again")
+}
+
+// insertCostMessage inserts a message of chat that cost costMicros at
+// createdAt.
+func insertCostMessage(ctx context.Context, t *testing.T, db database.Store, sqlDB *sql.DB, chat database.Chat, costMicros sql.NullInt64, createdAt time.Time, deleted bool) {
+	t.Helper()
+	msg := dbgen.ChatMessage(t, db, database.ChatMessage{ChatID: chat.ID, Role: database.ChatMessageRoleAssistant})
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_messages SET total_cost_micros = $1, created_at = $2, deleted = $3 WHERE id = $4",
+		costMicros, createdAt, deleted, msg.ID)
+	require.NoError(t, err)
 }
 
 func wakeupTestChat(t *testing.T, db database.Store) database.Chat {

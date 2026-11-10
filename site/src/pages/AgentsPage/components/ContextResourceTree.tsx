@@ -27,21 +27,39 @@ type ContextResourceTreeItemProps = {
 	children?: React.ReactNode;
 };
 
-/** Keeps nested resources aligned and optionally describes a row on hover. */
+/**
+ * Keeps nested resources aligned and optionally describes a row on hover or
+ * keyboard focus.
+ */
 export const ContextResourceTreeItem: React.FC<
 	ContextResourceTreeItemProps
 > = ({ icon: Icon, name, title, description, children, className }) => {
-	const row = (
-		<div
-			className={cn("flex min-w-0 items-center gap-1 py-px", className)}
-			title={title}
-		>
+	const content = (
+		<>
 			{Icon && (
 				<span className="flex size-4 shrink-0 items-center justify-center">
 					<Icon className="size-3" />
 				</span>
 			)}
 			<span className="truncate">{name}</span>
+		</>
+	);
+	const rowClassName = cn("flex min-w-0 items-center gap-1 py-px", className);
+	const row = description ? (
+		<button
+			type="button"
+			className={cn(
+				rowClassName,
+				"cursor-default rounded-sm border-0 bg-transparent px-0 text-left font-[inherit] text-[length:inherit]",
+				"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link",
+			)}
+			title={title}
+		>
+			{content}
+		</button>
+	) : (
+		<div className={rowClassName} title={title}>
+			{content}
 		</div>
 	);
 	return (

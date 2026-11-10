@@ -27,3 +27,6 @@ FROM chats
 LEFT JOIN chat_subagents ON chat_subagents.chat_id = chats.id
 WHERE chats.id = ANY(@chat_ids::uuid[])
 	AND chats.parent_chat_id IS NOT NULL;
+
+-- name: UpdateChatSubagentWorkspaceID :exec
+UPDATE chat_subagents SET workspace_id = @workspace_id WHERE chat_id = @chat_id;
