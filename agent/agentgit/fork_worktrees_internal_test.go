@@ -161,6 +161,9 @@ func TestForkWorktreeCreate(t *testing.T) {
 			assert.Equal(t, "feature", wtGit(t, wt.Path, "symbolic-ref", "--short", "HEAD"))
 			assert.Equal(t, wantBase, wtGit(t, wt.Path, "rev-parse", "HEAD"))
 			assert.Equal(t, before, wtRepoState(t, repo))
+			info, err := os.Stat(root)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 		})
 	}
 }
@@ -274,6 +277,19 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 			},
 			wantStatus:  http.StatusBadRequest,
 			wantMessage: "worktree parent",
+		},
+		{
+			name: "RootInsideRepo",
+			setup: func(t *testing.T, _, root string) workspacesdk.ForkCreateWorktreeRequest {
+				repoPath := filepath.Dir(root)
+				wtGit(t, repoPath, "init")
+				require.NoError(t, os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# Test\n"), 0o600))
+				wtGit(t, repoPath, "add", "README.md")
+				wtGit(t, repoPath, "commit", "-m", "initial commit")
+				return workspacesdk.ForkCreateWorktreeRequest{RepoPath: repoPath, Name: "child", Branch: "feature"}
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantMessage: "contains the worktree root",
 		},
 	}
 	for _, tt := range tests {
@@ -597,5 +613,23 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 
 		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 		assert.FileExists(t, filepath.Join(wt.Path, "sub", "scratch.txt"))
+	})
+
+	t.Run("SubmoduleLocalCommits", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t)
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		sub := filepath.Join(wt.Path, "sub")
+		r := wtGit(t, sub, "rev-parse", "HEAD")
+		wtGit(t, sub, "switch", "-c", "local")
+		wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
+		wtGit(t, sub, "checkout", "--detach", r)
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.DirExists(t, wt.Path)
 	})
 }

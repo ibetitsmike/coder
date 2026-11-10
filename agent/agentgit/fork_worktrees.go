@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -175,13 +176,17 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(a.root, 0o755); err != nil {
+	if err := os.MkdirAll(a.root, 0o700); err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to create the worktree root.", err)
 		return
 	}
 	root, err := filepath.EvalSymlinks(a.root)
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to resolve the worktree root.", err)
+		return
+	}
+	if rel, err := filepath.Rel(top, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("repository %s contains the worktree root %s; worktrees must live outside the repository", top, root), nil)
 		return
 	}
 	parent := filepath.Join(root, repoName)
@@ -342,6 +347,28 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 	// git refuses to remove a worktree with initialized submodules without
 	// --force; the status check above already proved the tree clean.
 	if _, err := os.Stat(filepath.Join(gitDir, "modules")); err == nil {
+		out, err := a.git(ctx, path, "submodule", "foreach", "--quiet", "--recursive", "git rev-list --count --all --not --remotes")
+		if err != nil {
+			writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
+			return
+		}
+		sum := 0
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			n, err := strconv.Atoi(line)
+			if err != nil {
+				writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
+				return
+			}
+			sum += n
+		}
+		if sum > 0 {
+			writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("worktree %s has %d submodule commits that are not on any remote; push them first", path, sum), nil)
+			return
+		}
 		args = append(args, "--force")
 	}
 	args = append(args, "--", path)
