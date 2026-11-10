@@ -800,6 +800,21 @@ func (mr *MockStoreMockRecorder) ListChatWakeupsByChatID(ctx, chatID any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).ListChatWakeupsByChatID), ctx, chatID)
 }
 
+// ListChildChatIDsWithActiveEventsWakeups mocks base method.
+func (m *MockStore) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChildChatIDsWithActiveEventsWakeups", ctx, parentChatID)
+	ret0, _ := ret[0].([]uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChildChatIDsWithActiveEventsWakeups indicates an expected call of ListChildChatIDsWithActiveEventsWakeups.
+func (mr *MockStoreMockRecorder) ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChildChatIDsWithActiveEventsWakeups", reflect.TypeOf((*MockStore)(nil).ListChildChatIDsWithActiveEventsWakeups), ctx, parentChatID)
+}
+
 // ListOrganizationAgentDefinitionMetadata mocks base method.
 func (m *MockStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	m.ctrl.T.Helper()
