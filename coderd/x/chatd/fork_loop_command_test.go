@@ -75,7 +75,7 @@ func TestLoopCommandCreateChat(t *testing.T) {
 			OwnerID:            user.ID,
 			ParentChatID:       parent,
 			RootChatID:         parent,
-			Title:              "loop",
+			Title:              text,
 			ModelConfigID:      model.ID,
 			InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText(text)},
 		})
@@ -88,6 +88,7 @@ func TestLoopCommandCreateChat(t *testing.T) {
 	require.Equal(t, "check CI", wakeups[0].Prompt)
 	require.EqualValues(t, 300, wakeups[0].IntervalSeconds.Int32)
 	require.Equal(t, user.ID, wakeups[0].CreatedBy)
+	require.Equal(t, "check CI", chat.Title, "the fallback title comes from the loop prompt")
 
 	_, err = create("/loop 30s check CI", uuid.NullUUID{})
 	require.Error(t, err, "an invalid loop refuses the chat")

@@ -679,6 +679,9 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		if err != nil {
 			return database.Chat{}, err
 		}
+		if loop != nil && opts.TitleSource == database.ChatTitleSourceFallback {
+			opts.Title = chatprompt.FallbackTitle(chatprompt.TitleText(contentParts, nil))
+		}
 	}
 	// The prompt-submit hook fires with the first SendMessage when the
 	// chat is created without an initial user message.
