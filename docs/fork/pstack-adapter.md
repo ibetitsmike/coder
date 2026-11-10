@@ -302,6 +302,13 @@ Its new branch starts at `base_branch`, a branch or a commit, or at the reposito
 The worktree is at `~/.coder/worktrees/<repository directory>/<child chat ID>`, on the branch `agent/<title>-<first 8 hex digits of the child chat ID>`, where `<title>` is a slug of the child's title.
 A worktree that comes from another worktree is at `~/.coder/worktrees/<chat ID of that worktree's owner>/<child chat ID>`.
 The `spawn_agent` result adds `isolation`, `worktree_path`, and `branch`.
+`wait_agent` on a worktree child adds the same three fields.
+Unless the wait times out, it also adds `diff_summary` with `commits`, `files_changed`, `insertions`, `deletions`, and `uncommitted_changes`.
+`commits` counts the commits on the child's `HEAD` that are on no other branch or remote.
+`files_changed`, `insertions`, and `deletions` cover the diff from the parent of the oldest of those commits to the working tree, so they include uncommitted edits to tracked files but not untracked files.
+`uncommitted_changes` counts the changed and untracked paths that `git status` reports.
+When Coder Agents can't read the worktree, for example because the child switched branches or the worktree is gone, the result has `diff_summary_error` instead.
+Check `diff_summary` before you merge a child's branch, and tell the child to commit when `uncommitted_changes` isn't 0, because uncommitted work isn't on the branch.
 
 The child works in its worktree.
 A system message before its prompt names the worktree and the branch, and tells the child to make and commit every change there.
@@ -406,7 +413,7 @@ Checked against fork `main` at `77b20734d2`:
   Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:270-287`, `:301-329`.
   Direct children only, `isSubagentTarget`, `fork_subagents.go:334-346`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
-  Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
+  Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:86-89`, 30-second wait, `:26`.
 - Every descendant embedded under its root, only with `fork-nested-subagents`: `coderd/fork_chat_tree.go:30-37`, `:52-71`, from `coderd/exp_chats.go:584` and `:1890`, grouped by `root_chat_id`, `coderd/database/db2sdk/db2sdk.go:2311-2318`.
@@ -417,7 +424,7 @@ Checked against fork `main` at `77b20734d2`:
   The definition's body becomes the child's system prompt, `fork_agent_definitions.go:382`.
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:353-364`, and the model match, `:389-412`.
   A model alias as the last match, preferring the parent chat's AI provider, `coderd/x/chatd/fork_model_aliases.go`, listed by `list_subagent_models`, `subagent.go:409-411`.
-  Aliases are set in a model config's `aliases`, `codersdk/chats.go:1952`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
+  Aliases are set in a model config's `aliases`, `codersdk/chats.go:1953`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:414-431`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1874-1875`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
   Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
@@ -429,10 +436,11 @@ Checked against fork `main` at `77b20734d2`:
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
-- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:47-52`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:100-110`, result fields, `:130-132`.
+- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:47-53`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:100-110`, result fields, `:130-132`.
   Worktree creation and its errors, `fork_isolation.go:163-211`, `:236-238`, from the worktree that the parent works in when `repo_path` is omitted, `:172-179`, removed only when the spawn fails, `:214-227`, called at spawn, `coderd/x/chatd/fork_subagents.go:179`, `:204-217`.
-  Removed after a root archive, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:41-111`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:337-395`, or is unreachable or older, `fork_isolation_cleanup.go:113-173`, with a notice in the root chat, `:175-197`.
-  Branch name, `fork_isolation.go:249-271`, path, `agent/agentgit/fork_worktrees.go:63`, `:177`, `:220-221`.
+  Removed after a root archive, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:41-111`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:113-173`, with a notice in the root chat, `:175-197`.
+  The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-102`, added with the experiment, `fork_tools.go:49`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
+  Branch name, `fork_isolation.go:249-271`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:180-190`, `:213-216`.
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
