@@ -1,24 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
-import type { ChatDescendantQuestion } from "#/api/typesGenerated";
-import { MOCK_TIMESTAMP, MockChat } from "#/testHelpers/chatEntities";
+import { MockChat } from "#/testHelpers/chatEntities";
+import { MockChatDescendantQuestion } from "#/testHelpers/forkChatQuestions";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
-
-const mockQuestion: ChatDescendantQuestion = {
-	chat_id: "grandchild-chat",
-	parent_chat_id: "child-chat",
-	chat_title: "Migrate the billing tables",
-	tool_call_id: "call-1",
-	created_at: MOCK_TIMESTAMP,
-	questions: [
-		{
-			header: "Backfill",
-			question: "Should the migration backfill rows written before 2024?",
-			options: [{ label: "Backfill every row" }, { label: "Skip old rows" }],
-		},
-	],
-};
 
 const meta: Meta<typeof ForkDescendantQuestionDock> = {
 	title: "pages/AgentsPage/ForkDescendantQuestionDock",
@@ -30,19 +15,22 @@ const meta: Meta<typeof ForkDescendantQuestionDock> = {
 	},
 	parameters: {
 		experiments: ["fork-nested-subagents"],
-		queries: [
-			{
-				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [mockQuestion],
-			},
-		],
 	},
 };
 
 export default meta;
 type Story = StoryObj<typeof ForkDescendantQuestionDock>;
 
-export const OnePending: Story = {};
+export const OnePending: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [MockChatDescendantQuestion],
+			},
+		],
+	},
+};
 
 export const SeveralPending: Story = {
 	parameters: {
@@ -50,9 +38,9 @@ export const SeveralPending: Story = {
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
 				data: [
-					mockQuestion,
+					MockChatDescendantQuestion,
 					{
-						...mockQuestion,
+						...MockChatDescendantQuestion,
 						chat_id: "other-child-chat",
 						chat_title: "",
 						tool_call_id: "call-2",
@@ -68,7 +56,7 @@ export const UntitledChat: Story = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [{ ...mockQuestion, chat_title: "" }],
+				data: [{ ...MockChatDescendantQuestion, chat_title: "" }],
 			},
 		],
 	},

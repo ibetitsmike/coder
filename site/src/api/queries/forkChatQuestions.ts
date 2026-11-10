@@ -1,6 +1,7 @@
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import { API } from "#/api/api";
 import { getChatDescendantQuestions } from "#/api/forkChatQuestions";
+import type { ChatDescendantQuestion } from "#/api/typesGenerated";
 
 /** Query key for the pending descendant questions of a root chat's family. */
 export const chatDescendantQuestionsKey = (rootChatId: string) =>
@@ -24,10 +25,32 @@ export const answerChatDescendantQuestion = (
 	rootChatId: string,
 ) =>
 	mutationOptions({
-		mutationFn: ({ chatId, text }: { chatId: string; text: string }) =>
-			API.experimental.createChatMessage(chatId, {
+		mutationFn: async ({
+			question,
+			text,
+		}: {
+			question: ChatDescendantQuestion;
+			text: string;
+		}) => {
+			// Any user message answers the chat's pending question, so an
+			// answer to a question that another tab already answered would
+			// retire the chat's next question.
+			const pending = await getChatDescendantQuestions(rootChatId);
+			const stillPending = pending.some(
+				(item) =>
+					item.chat_id === question.chat_id &&
+					item.tool_call_id === question.tool_call_id &&
+					item.created_at === question.created_at,
+			);
+			if (!stillPending) {
+				throw new Error(
+					"This question was already answered. The next one loads shortly.",
+				);
+			}
+			return API.experimental.createChatMessage(question.chat_id, {
 				content: [{ type: "text", text }],
-			}),
+			});
+		},
 		onSettled: () =>
 			queryClient.invalidateQueries({
 				queryKey: chatDescendantQuestionsKey(rootChatId),

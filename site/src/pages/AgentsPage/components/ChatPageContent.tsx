@@ -297,7 +297,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 						}
 					/>
 				)}
-				{!dockedQuestion && chat && (
+				{(!dockedQuestion || queuedAnswerText !== undefined) && chat && (
 					<ForkDescendantQuestionDock chat={chat} isReadOnly={isReadOnly} />
 				)}
 			</Profiler>

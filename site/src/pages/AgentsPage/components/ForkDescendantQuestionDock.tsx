@@ -8,11 +8,13 @@ import type React from "react";
 import { useId, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Link, useLocation } from "react-router";
+import { getErrorMessage } from "#/api/errors";
 import {
 	answerChatDescendantQuestion,
 	chatDescendantQuestions,
 } from "#/api/queries/forkChatQuestions";
 import type { Chat } from "#/api/typesGenerated";
+import { Alert, AlertDescription, AlertTitle } from "#/components/Alert/Alert";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
 import { AskUserQuestionForm } from "./ChatElements/tools/AskUserQuestionTool";
@@ -48,6 +50,7 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 	const [chatFullWidth] = useChatFullWidth();
 	const location = useLocation();
 	const scrollerRef = useRef<HTMLDivElement>(null);
+	const hadFocusRef = useRef(false);
 	const headingId = useId();
 	const queryClient = useQueryClient();
 	const questionsQuery = useQuery(chatDescendantQuestions(rootChatId));
@@ -55,7 +58,26 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 		answerChatDescendantQuestion(queryClient, rootChatId),
 	);
 
-	const pendingQuestions = questionsQuery.data ?? [];
+	// A failed poll keeps the questions of the last successful one.
+	if (questionsQuery.data === undefined) {
+		if (!questionsQuery.isError) {
+			return null;
+		}
+		return (
+			<div className="px-4">
+				<Alert
+					severity="error"
+					className={cn("mx-auto mb-2 w-full", chatWidthClass(chatFullWidth))}
+				>
+					<AlertTitle>Questions from subagents failed to load</AlertTitle>
+					<AlertDescription>
+						{getErrorMessage(questionsQuery.error, "Something went wrong.")}
+					</AlertDescription>
+				</Alert>
+			</div>
+		);
+	}
+	const pendingQuestions = questionsQuery.data;
 	const question = pendingQuestions.at(0);
 	if (!question) {
 		return null;
@@ -74,9 +96,20 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 			className="flex max-h-[60vh] min-h-0 scroll-pb-14 flex-col overflow-y-auto px-4 scrollbar-gutter-stable scrollbar-thin"
 		>
 			<section
+				// A section that replaces a focused one takes the focus, as in
+				// AskUserQuestionDock, so Tab reaches the next question's form.
+				ref={(section: HTMLElement) => {
+					if (hadFocusRef.current && document.activeElement === document.body) {
+						section.focus({ preventScroll: true });
+					}
+					return () => {
+						hadFocusRef.current = section.contains(document.activeElement);
+					};
+				}}
 				aria-labelledby={headingId}
+				tabIndex={-1}
 				className={cn(
-					"mx-auto mb-2 w-full shrink-0 rounded-lg border border-solid border-border bg-surface-primary shadow-sm",
+					"mx-auto mb-2 w-full shrink-0 rounded-lg border border-solid border-border bg-surface-primary shadow-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-content-link",
 					chatWidthClass(chatFullWidth),
 				)}
 			>
@@ -112,10 +145,7 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 						draftKey={questionKey}
 						showSubmittedAnswer
 						onSubmitAnswer={async (text) => {
-							await answerMutation.mutateAsync({
-								chatId: question.chat_id,
-								text,
-							});
+							await answerMutation.mutateAsync({ question, text });
 						}}
 						hasStickyActions
 						onStepChange={() => {

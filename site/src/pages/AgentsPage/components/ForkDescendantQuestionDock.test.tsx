@@ -11,13 +11,14 @@ import type {
 	Experiment,
 } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
-import { MOCK_TIMESTAMP, MockChat } from "#/testHelpers/chatEntities";
+import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockAppearanceConfig,
 	MockBuildInfo,
 	MockDefaultOrganization,
 	MockEntitlements,
 } from "#/testHelpers/entities";
+import { MockChatDescendantQuestion } from "#/testHelpers/forkChatQuestions";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -26,18 +27,8 @@ import { server } from "#/testHelpers/server";
 import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 
 const mockOldestQuestion: ChatDescendantQuestion = {
-	chat_id: "grandchild-chat",
-	parent_chat_id: "child-chat",
-	chat_title: "Migrate the billing tables",
+	...MockChatDescendantQuestion,
 	tool_call_id: "call-oldest",
-	created_at: MOCK_TIMESTAMP,
-	questions: [
-		{
-			header: "Backfill",
-			question: "Should the migration backfill old rows?",
-			options: [{ label: "Backfill every row" }, { label: "Skip old rows" }],
-		},
-	],
 };
 
 const mockNewerQuestion: ChatDescendantQuestion = {
@@ -95,8 +86,14 @@ const renderDock = ({
 	return { router, queryClient };
 };
 
-/** Serves the pending questions and records the chats each request names. */
-const serveQuestions = (questions: ChatDescendantQuestion[]) => {
+/**
+ * Serves the pending questions and records the chats each request names.
+ * Requests after the first get laterQuestions when it is set.
+ */
+const serveQuestions = (
+	questions: ChatDescendantQuestion[],
+	laterQuestions?: ChatDescendantQuestion[],
+) => {
 	const questionRequests: string[] = [];
 	const sentMessages: Array<{
 		chatId: string;
@@ -107,7 +104,11 @@ const serveQuestions = (questions: ChatDescendantQuestion[]) => {
 			"/api/v2/chats/fork/:chatId/questions",
 			({ params }) => {
 				questionRequests.push(params.chatId);
-				return HttpResponse.json(questions);
+				return HttpResponse.json(
+					questionRequests.length > 1 && laterQuestions
+						? laterQuestions
+						: questions,
+				);
 			},
 		),
 		http.post<{ chatId: string }, CreateChatMessageRequest>(
@@ -167,8 +168,45 @@ describe("ForkDescendantQuestionDock", () => {
 			]),
 		);
 		await waitFor(() =>
-			expect(questionRequests).toEqual([MockChat.id, MockChat.id]),
+			expect(questionRequests).toEqual([MockChat.id, MockChat.id, MockChat.id]),
 		);
+	});
+
+	it("does not send an answer to a question that is no longer pending", async () => {
+		const { sentMessages } = serveQuestions(
+			[mockOldestQuestion],
+			[mockNewerQuestion],
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		await user.click(
+			await screen.findByRole("radio", { name: /Skip old rows/ }),
+		);
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+
+		expect(
+			await screen.findByRole("link", { name: mockNewerQuestion.chat_title }),
+		).toBeInTheDocument();
+		expect(sentMessages).toEqual([]);
+	});
+
+	it("reports questions that fail to load", async () => {
+		server.use(
+			http.get("/api/v2/chats/fork/:chatId/questions", () =>
+				HttpResponse.json(
+					{ message: "Database unavailable." },
+					{ status: 500 },
+				),
+			),
+		);
+
+		renderDock();
+
+		expect(
+			await screen.findByText("Questions from subagents failed to load"),
+		).toBeInTheDocument();
 	});
 
 	it("links to the chat that asked the question", async () => {
