@@ -331,7 +331,6 @@ func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 	require.False(t, got.LeaseExpiresAt.Valid)
 }
 
-// createChildAgent creates a direct child of parent with title and status.
 // An events wake-up checks the caps only when a child is about to be sent.
 func TestWakeupEventsCap(t *testing.T) {
 	t.Parallel()
@@ -372,6 +371,7 @@ func TestWakeupEventsCap(t *testing.T) {
 	}
 }
 
+// createChildAgent creates a direct child of parent with title and status.
 func (f *workerTestFixture) createChildAgent(t *testing.T, parent database.Chat, title string, status database.ChatStatus) database.Chat {
 	t.Helper()
 	child := f.createWakeupChat(t)
