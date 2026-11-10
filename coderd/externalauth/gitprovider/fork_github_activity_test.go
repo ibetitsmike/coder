@@ -153,17 +153,17 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			want      gitprovider.CheckSummary
 		}{{
 			name:      "AllSucceeded",
-			checkRuns: `[{"status":"completed","conclusion":"success"},{"status":"completed","conclusion":"success"}]`,
+			checkRuns: `[{"id":1,"name":"c1","status":"completed","conclusion":"success"},{"id":2,"name":"c2","status":"completed","conclusion":"success"}]`,
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2},
 		}, {
 			name:      "OneInProgress",
-			checkRuns: `[{"status":"completed","conclusion":"success"},{"status":"in_progress","conclusion":null}]`,
+			checkRuns: `[{"id":3,"name":"c3","status":"completed","conclusion":"success"},{"id":4,"name":"c4","status":"in_progress","conclusion":null}]`,
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
 		}, {
 			name:      "OneFailed",
-			checkRuns: `[{"status":"completed","conclusion":"success"},{"status":"completed","conclusion":"failure"},{"status":"queued","conclusion":null}]`,
+			checkRuns: `[{"id":5,"name":"c5","status":"completed","conclusion":"success"},{"id":6,"name":"c6","status":"completed","conclusion":"failure"},{"id":7,"name":"c7","status":"queued","conclusion":null}]`,
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 3, Failed: 1},
 		}, {
@@ -178,12 +178,22 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 2, Failed: 1},
 		}, {
 			name:      "CommitStatusPending",
-			checkRuns: `[{"status":"completed","conclusion":"success"}]`,
+			checkRuns: `[{"id":8,"name":"c8","status":"completed","conclusion":"success"}]`,
 			status:    `{"state":"pending","total_count":1}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
 		}, {
+			name:      "RerunAfterCancel",
+			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success"}]`,
+			status:    `{"state":"pending","total_count":0}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2},
+		}, {
+			name:      "RerunInProgress",
+			checkRuns: `[{"id":21,"name":"test","status":"in_progress","conclusion":null},{"id":20,"name":"test","status":"completed","conclusion":"failure"}]`,
+			status:    `{"state":"pending","total_count":0}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 1},
+		}, {
 			name:      "NeutralAndSkipped",
-			checkRuns: `[{"status":"completed","conclusion":"neutral"},{"status":"completed","conclusion":"skipped"}]`,
+			checkRuns: `[{"id":9,"name":"c9","status":"completed","conclusion":"neutral"},{"id":10,"name":"c10","status":"completed","conclusion":"skipped"}]`,
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2},
 		}} {
