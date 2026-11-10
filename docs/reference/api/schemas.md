@@ -3168,6 +3168,40 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |------------------------|---------|----------|--------------|-------------|
 | `debug_retention_days` | integer | false    |              |             |
 
+## codersdk.ChatDescendantQuestion
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "chat_title": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "parent_chat_id": "c3609ee6-3b11-4a93-b9ae-e4fabcc99359",
+  "questions": [
+    {
+      "header": "string",
+      "options": [
+        {
+          "label": "string"
+        }
+      ],
+      "question": "string"
+    }
+  ],
+  "tool_call_id": "string"
+}
+```
+
+### Properties
+
+| Name             | Type                                                    | Required | Restrictions | Description |
+|------------------|---------------------------------------------------------|----------|--------------|-------------|
+| `chat_id`        | string                                                  | false    |              |             |
+| `chat_title`     | string                                                  | false    |              |             |
+| `created_at`     | string                                                  | false    |              |             |
+| `parent_chat_id` | string                                                  | false    |              |             |
+| `questions`      | array of [codersdk.ChatQuestion](#codersdkchatquestion) | false    |              |             |
+| `tool_call_id`   | string                                                  | false    |              |             |
+
 ## codersdk.ChatDiffContents
 
 ```json
@@ -5361,6 +5395,42 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name      | Type                                                | Required | Restrictions | Description |
 |-----------|-----------------------------------------------------|----------|--------------|-------------|
 | `prompts` | array of [codersdk.ChatPrompt](#codersdkchatprompt) | false    |              |             |
+
+## codersdk.ChatQuestion
+
+```json
+{
+  "header": "string",
+  "options": [
+    {
+      "label": "string"
+    }
+  ],
+  "question": "string"
+}
+```
+
+### Properties
+
+| Name       | Type                                                                | Required | Restrictions | Description |
+|------------|---------------------------------------------------------------------|----------|--------------|-------------|
+| `header`   | string                                                              | false    |              |             |
+| `options`  | array of [codersdk.ChatQuestionOption](#codersdkchatquestionoption) | false    |              |             |
+| `question` | string                                                              | false    |              |             |
+
+## codersdk.ChatQuestionOption
+
+```json
+{
+  "label": "string"
+}
+```
+
+### Properties
+
+| Name    | Type   | Required | Restrictions | Description |
+|---------|--------|----------|--------------|-------------|
+| `label` | string | false    |              |             |
 
 ## codersdk.ChatQueuedMessage
 
