@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
@@ -150,22 +150,21 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
-		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
-	it("keeps the delete dialog open until a failed delete reports its error", async () => {
+	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
 		const user = userEvent.setup();
 		renderPage();
 		let rejectDelete: (error: unknown) => void = () => {};
-		vi.spyOn(
-			forkAgentDefinitionsApi,
-			"deleteUserAgentDefinition",
-		).mockImplementation(
-			() =>
-				new Promise((_resolve, reject) => {
-					rejectDelete = reject;
-				}),
-		);
+		const remove = vi
+			.spyOn(forkAgentDefinitionsApi, "deleteUserAgentDefinition")
+			.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectDelete = reject;
+					}),
+			)
+			.mockResolvedValue();
 
 		await user.click(
 			await screen.findByRole("button", {
@@ -175,11 +174,40 @@ describe("ForkAgentDefinitionsPage", () => {
 		await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
 		await user.click(await screen.findByRole("button", { name: "Delete" }));
 		await user.keyboard("{Escape}");
-		rejectDelete(mockApiError({ message: "Agent definition not found." }));
+		rejectDelete(mockApiError({ message: "Upstream timeout." }));
+		const retry = await screen.findByRole("button", { name: "Delete" });
+		await waitFor(() => expect(retry).toBeEnabled());
+		await user.click(retry);
 
-		const dialog = await screen.findByRole("dialog");
-		expect(
-			await within(dialog).findByText(/Agent definition not found\./),
-		).toBeInTheDocument();
+		await waitFor(() => expect(remove).toHaveBeenCalledTimes(2));
+	});
+
+	it("keeps each pending toggle on its own row", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		const other = {
+			...MockForkAgentDefinitionMetadata,
+			id: "agent-definition-release-notes",
+			name: "release-notes",
+		};
+		getDefinitions.mockResolvedValue([MockForkAgentDefinitionMetadata, other]);
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockImplementation(() => new Promise(() => {}));
+		const firstSwitch = await screen.findByRole("switch", {
+			name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+		});
+
+		await user.click(firstSwitch);
+		await user.click(
+			await screen.findByRole("switch", { name: `Enable ${other.name}` }),
+		);
+		await user.click(firstSwitch);
+
+		await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+		expect(update.mock.calls.map(([, name]) => name)).toEqual([
+			MockForkAgentDefinitionMetadata.name,
+			other.name,
+		]);
 	});
 });

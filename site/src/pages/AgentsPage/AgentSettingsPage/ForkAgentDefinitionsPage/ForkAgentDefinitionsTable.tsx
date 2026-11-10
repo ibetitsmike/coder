@@ -28,29 +28,35 @@ export const ForkAgentDefinitionsTable: React.FC<
 		useState<ForkAgentDefinitionMetadata>();
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
 
+	// Each row tracks its own toggle, so a second toggle does not hide the
+	// first one's pending value while both requests run.
+	const [pendingToggles, setPendingToggles] = useState<
+		Readonly<Record<string, boolean>>
+	>({});
+	const updateOptions = updateUserAgentDefinition(queryClient, organizationId);
 	const toggleMutation = useMutation({
-		...updateUserAgentDefinition(queryClient, organizationId),
+		...updateOptions,
+		onMutate: ({ name, req }) => {
+			setPendingToggles((current) => ({
+				...current,
+				[name]: Boolean(req.enabled),
+			}));
+		},
 		onError: (error, { name }) => {
 			toast.error(getErrorMessage(error, `Failed to update ${name}.`), {
 				description: getErrorDetail(error),
 			});
 		},
-	});
-
-	const deleteMutationOptions = deleteUserAgentDefinition(
-		queryClient,
-		organizationId,
-	);
-	const deleteMutation = useMutation({
-		...deleteMutationOptions,
-		onSuccess: async (_data, name) => {
-			await deleteMutationOptions.onSuccess();
-			setDeleteTarget((current) =>
-				current?.name === name ? undefined : current,
-			);
-			toast.success("Agent definition deleted.");
+		onSettled: async (...args) => {
+			await updateOptions.onSettled?.(...args);
+			const { name } = args[2];
+			setPendingToggles(({ [name]: _settled, ...rest }) => rest);
 		},
 	});
+
+	const deleteMutation = useMutation(
+		deleteUserAgentDefinition(queryClient, organizationId),
+	);
 
 	let deleteState: ForkAgentDefinitionDeleteState | undefined;
 	if (deleteTarget) {
@@ -60,7 +66,13 @@ export const ForkAgentDefinitionsTable: React.FC<
 			definition: deleteTarget,
 			error: isTarget ? deleteMutation.error : undefined,
 			isDeleting,
-			onConfirm: () => deleteMutation.mutate(deleteTarget.name),
+			onConfirm: () =>
+				deleteMutation.mutate(deleteTarget.name, {
+					onSuccess: () => {
+						setDeleteTarget(undefined);
+						toast.success("Agent definition deleted.");
+					},
+				}),
 			// The dialog shows the delete error, so it stays open until the
 			// request settles.
 			onClose: () => {
@@ -81,14 +93,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onRetry={() => {
 				void definitionsQuery.refetch();
 			}}
-			pendingToggle={
-				toggleMutation.isPending
-					? {
-							name: toggleMutation.variables.name,
-							enabled: Boolean(toggleMutation.variables.req.enabled),
-						}
-					: undefined
-			}
+			pendingToggles={pendingToggles}
 			onToggleEnabled={(name, enabled) =>
 				toggleMutation.mutate({ name, req: { enabled } })
 			}

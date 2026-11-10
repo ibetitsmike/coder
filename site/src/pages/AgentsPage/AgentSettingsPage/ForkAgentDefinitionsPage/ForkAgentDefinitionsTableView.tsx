@@ -31,6 +31,10 @@ import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
 
 const title = "Agent definitions";
 
+/**
+ * The open delete confirmation. While isDeleting, onClose should keep the
+ * dialog open, because a failure is reported only as error in this dialog.
+ */
 export type ForkAgentDefinitionDeleteState = {
 	definition: ForkAgentDefinitionMetadata;
 	error?: unknown;
@@ -47,8 +51,8 @@ type ForkAgentDefinitionsTableViewProps = {
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
-	/** The toggle in flight, shown optimistically on its row. */
-	pendingToggle?: { name: string; enabled: boolean };
+	/** The enabled value each in-flight toggle sends, keyed by name. */
+	pendingToggles?: Readonly<Record<string, boolean>>;
 	onToggleEnabled: (name: string, enabled: boolean) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
 	deleteState?: ForkAgentDefinitionDeleteState;
@@ -63,12 +67,13 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	isLoading,
 	isRetrying,
 	onRetry,
-	pendingToggle,
+	pendingToggles = {},
 	onToggleEnabled,
 	onDelete,
 	deleteState,
 }) => {
-	const { rememberTrigger, restoreFocus } = useDialogFocusReturn();
+	const { rememberTrigger, restoreFocus, setPrimaryFallback } =
+		useDialogFocusReturn();
 	const deleteErrorDetail = deleteState?.error
 		? getErrorDetail(deleteState.error)
 		: undefined;
@@ -94,8 +99,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			<TableEmpty message="No personal agent definitions in this organization yet." />
 		);
 	} else {
-		tableBody = definitions.map((definition) => {
-			const isToggling = pendingToggle?.name === definition.name;
+		tableBody = definitions.map((definition, index) => {
+			const pendingEnabled = pendingToggles[definition.name];
 			return (
 				<TableRow key={definition.id}>
 					<TableCell className="max-w-48 truncate" title={definition.name}>
@@ -112,8 +117,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 					<TableCell>
 						<Switch
 							aria-label={`Enable ${definition.name}`}
-							checked={isToggling ? pendingToggle.enabled : definition.enabled}
-							disabled={isToggling}
+							checked={pendingEnabled ?? definition.enabled}
+							disabled={pendingEnabled !== undefined}
 							onCheckedChange={(enabled) =>
 								onToggleEnabled(definition.name, enabled)
 							}
@@ -129,6 +134,9 @@ export const ForkAgentDefinitionsTableView: React.FC<
 									size="icon"
 									variant="subtle"
 									aria-label={`More actions for ${definition.name}`}
+									// A deleted row takes its menu button with it, so focus
+									// returns to the first remaining row's button.
+									ref={index === 0 ? setPrimaryFallback : undefined}
 									onPointerDown={rememberTrigger}
 									onKeyDown={rememberTrigger}
 								>

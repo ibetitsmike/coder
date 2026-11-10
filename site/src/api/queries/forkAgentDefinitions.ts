@@ -1,6 +1,6 @@
 // This file is fork code: queries for the fork-agent-definitions experiment.
 
-import { type QueryClient, queryOptions } from "react-query";
+import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
 	deleteUserAgentDefinition as deleteUserAgentDefinitionRequest,
 	getUserAgentDefinitions,
@@ -28,26 +28,28 @@ type UpdateUserAgentDefinitionArgs = {
 export const updateUserAgentDefinition = (
 	queryClient: QueryClient,
 	organizationId: string,
-) => ({
-	mutationFn: ({ name, req }: UpdateUserAgentDefinitionArgs) =>
-		updateUserAgentDefinitionRequest(organizationId, name, req),
-	onSettled: () =>
-		queryClient.invalidateQueries({
-			queryKey: userAgentDefinitionsKey(organizationId),
-			exact: true,
-		}),
-});
+) =>
+	mutationOptions({
+		mutationFn: ({ name, req }: UpdateUserAgentDefinitionArgs) =>
+			updateUserAgentDefinitionRequest(organizationId, name, req),
+		onSettled: () =>
+			queryClient.invalidateQueries({
+				queryKey: userAgentDefinitionsKey(organizationId),
+				exact: true,
+			}),
+	});
 
 /** Mutation options that delete one of the current user's agent definitions. */
 export const deleteUserAgentDefinition = (
 	queryClient: QueryClient,
 	organizationId: string,
-) => ({
-	mutationFn: (name: string) =>
-		deleteUserAgentDefinitionRequest(organizationId, name),
-	onSuccess: () =>
-		queryClient.invalidateQueries({
-			queryKey: userAgentDefinitionsKey(organizationId),
-			exact: true,
-		}),
-});
+) =>
+	mutationOptions({
+		mutationFn: (name: string) =>
+			deleteUserAgentDefinitionRequest(organizationId, name),
+		onSuccess: () =>
+			queryClient.invalidateQueries({
+				queryKey: userAgentDefinitionsKey(organizationId),
+				exact: true,
+			}),
+	});

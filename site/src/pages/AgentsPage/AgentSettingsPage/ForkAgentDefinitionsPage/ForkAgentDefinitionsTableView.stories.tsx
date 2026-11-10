@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, screen, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { ForkAgentDefinitionsTableView } from "./ForkAgentDefinitionsTableView";
@@ -49,12 +49,24 @@ export const Empty: Story = {
 	args: { definitions: [] },
 };
 
-export const TogglePending: Story = {
+export const TogglesPending: Story = {
 	args: {
-		pendingToggle: {
-			name: MockForkAgentDefinitionMetadata.name,
-			enabled: !MockForkAgentDefinitionMetadata.enabled,
+		pendingToggles: {
+			[MockForkAgentDefinitionMetadata.name]:
+				!MockForkAgentDefinitionMetadata.enabled,
+			[MockReleaseNotesDefinition.name]: !MockReleaseNotesDefinition.enabled,
 		},
+	},
+};
+
+export const RowActionsOpen: Story = {
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: /Delete/ });
 	},
 };
 
@@ -63,6 +75,17 @@ export const DeleteConfirm: Story = {
 		deleteState: {
 			definition: MockForkAgentDefinitionMetadata,
 			isDeleting: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const DeletePending: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			isDeleting: true,
 			onConfirm: fn(),
 			onClose: fn(),
 		},
