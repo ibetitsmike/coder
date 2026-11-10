@@ -1,9 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { fn, userEvent, within } from "storybook/test";
+import type { ChatWakeup } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWakeupCompleted,
 	MockChatWakeupCron,
+	MockChatWakeupDelay,
 	MockChatWakeupEvents,
 	MockChatWakeupInterval,
 	MockChatWakeupPaused,
@@ -17,6 +20,7 @@ const meta: Meta<typeof ForkChatWakeupsPillView> = {
 		wakeups: [
 			MockChatWakeupInterval,
 			MockChatWakeupCron,
+			MockChatWakeupDelay,
 			MockChatWakeupEvents,
 			MockChatWakeupPaused,
 			MockChatWakeupCompleted,
@@ -31,15 +35,11 @@ type Story = StoryObj<typeof ForkChatWakeupsPillView>;
 
 export const Collapsed: Story = {};
 
-const expand = async (canvasElement: HTMLElement) => {
-	await userEvent.click(
-		within(canvasElement).getByRole("button", { name: /Wake-ups/ }),
-	);
-};
-
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
-		await expand(canvasElement);
+		await userEvent.click(
+			within(canvasElement).getByRole("button", { name: /Wake-ups/ }),
+		);
 	},
 };
 
@@ -73,4 +73,42 @@ export const UpdateError: Story = {
 		},
 	},
 	play: Expanded.play,
+};
+
+export const UpdatePending: Story = {
+	args: { pendingId: MockChatWakeupInterval.id },
+	play: Expanded.play,
+};
+
+export const RefreshError: Story = {
+	args: {
+		error: mockApiError({ message: "Could not reach the server." }),
+	},
+	play: Expanded.play,
+};
+
+export const CanceledLast: Story = {
+	args: { wakeups: [MockChatWakeupInterval] },
+	render: function Render(args) {
+		const [wakeups, setWakeups] = useState<readonly ChatWakeup[] | undefined>(
+			args.wakeups,
+		);
+		return (
+			<ForkChatWakeupsPillView
+				{...args}
+				wakeups={wakeups}
+				onUpdate={(wakeup, status) =>
+					setWakeups((old) =>
+						old?.map((w) => (w.id === wakeup.id ? { ...w, status } : w)),
+					)
+				}
+			/>
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: /Wake-ups/ }));
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(body.getByRole("button", { name: /^Cancel / }));
+	},
 };

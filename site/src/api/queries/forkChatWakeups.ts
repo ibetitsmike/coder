@@ -3,10 +3,10 @@ import {
 	getChatWakeups,
 	updateChatWakeup as updateChatWakeupApi,
 } from "#/api/forkChatWakeups";
-import type { ChatWakeup } from "#/api/typesGenerated";
+import type { ChatWakeup, ChatWakeupStatus } from "#/api/typesGenerated";
 
 /** Query key for a chat's wake-ups. */
-const chatWakeupsKey = (chatId: string) =>
+export const chatWakeupsKey = (chatId: string) =>
 	["chats", "fork-wakeups", chatId] as const;
 
 /** Query options for a chat's wake-ups, oldest first. */
@@ -20,7 +20,7 @@ export const chatWakeups = (chatId: string) =>
 
 type UpdateChatWakeupVariables = {
 	wakeupId: string;
-	status: ChatWakeup["status"];
+	status: ChatWakeupStatus;
 };
 
 /**

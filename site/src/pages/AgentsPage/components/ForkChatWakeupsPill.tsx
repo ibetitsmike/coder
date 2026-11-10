@@ -1,16 +1,17 @@
-import { AlarmClockIcon, TriangleAlertIcon } from "lucide-react";
+import { AlarmClockIcon } from "lucide-react";
 import type React from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorMessage } from "#/api/errors";
 import { chatWakeups, updateChatWakeup } from "#/api/queries/forkChatWakeups";
-import type { ChatWakeup, ChatWakeupStatus } from "#/api/typesGenerated";
+import type {
+	ChatWakeup,
+	ChatWakeupEvent,
+	ChatWakeupStatus,
+} from "#/api/typesGenerated";
 import { Button } from "#/components/Button/Button";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "#/components/Popover/Popover";
-import { relativeTime } from "#/utils/time";
+import { humanDurationShort, relativeTime } from "#/utils/time";
+import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 
 // This file is fork code: the composer pill for the fork-chat-wakeups
 // experiment lives here so upstream chat files stay unchanged.
@@ -19,10 +20,7 @@ type ForkChatWakeupsPillProps = {
 	chatId: string;
 };
 
-/**
- * Shows the chat's open wake-ups as a pill with a popover. It renders nothing
- * while the wake-ups load or none is open.
- */
+/** Shows the chat's open wake-ups as a pill with a popover. */
 export const ForkChatWakeupsPill: React.FC<ForkChatWakeupsPillProps> = ({
 	chatId,
 }) => {
@@ -53,89 +51,46 @@ export const ForkChatWakeupsPill: React.FC<ForkChatWakeupsPillProps> = ({
 const isOpenWakeup = (wakeup: ChatWakeup) =>
 	wakeup.status === "active" || wakeup.status === "paused";
 
+type WakeupUpdateError = { id: string; message: string };
+
 type ForkChatWakeupsPillViewProps = {
 	wakeups: readonly ChatWakeup[] | undefined;
 	error: unknown;
 	onUpdate: (wakeup: ChatWakeup, status: ChatWakeupStatus) => void;
 	pendingId?: string;
-	updateError?: { id: string; message: string };
+	updateError?: WakeupUpdateError;
 };
 
 /**
  * Renders the wake-ups pill. Renders nothing while the wake-ups load or no
- * open wake-up remains, and a warning pill when the fetch failed.
+ * open wake-up remains, and a warning pill when the first fetch failed.
  */
-export const ForkChatWakeupsPillView = ({
-	wakeups,
-	error,
-	onUpdate,
-	pendingId,
-	updateError,
-}: ForkChatWakeupsPillViewProps) => {
-	const open = wakeups?.filter(isOpenWakeup);
-	if (open) {
-		return open.length > 0 ? (
-			<ForkChatWakeupsListPill
-				open={open}
-				onUpdate={onUpdate}
-				pendingId={pendingId}
-				updateError={updateError}
+export const ForkChatWakeupsPillView: React.FC<
+	ForkChatWakeupsPillViewProps
+> = ({ wakeups, error, onUpdate, pendingId, updateError }) => {
+	const [isOpen, setIsOpen] = useState(false);
+	const openWakeups = wakeups?.filter(isOpenWakeup);
+	if (!openWakeups) {
+		return error ? (
+			<ComposerPillError
+				label="Wake-ups failed to load"
+				heading="Wake-ups"
+				message={getErrorMessage(error, "Failed to load the wake-ups.")}
 			/>
 		) : null;
 	}
-	return error ? <ForkChatWakeupsErrorPill error={error} /> : null;
-};
+	// Stay mounted while the popover is open, so canceling the last wake-up
+	// does not unmount the popover that holds keyboard focus.
+	if (openWakeups.length === 0 && !isOpen) {
+		return null;
+	}
 
-type ForkChatWakeupsPopoverProps = {
-	label: string;
-	trigger: React.ReactNode;
-	children: React.ReactNode;
-};
-
-const ForkChatWakeupsPopover: React.FC<ForkChatWakeupsPopoverProps> = ({
-	label,
-	trigger,
-	children,
-}) => {
 	return (
-		<Popover>
-			<PopoverTrigger asChild>
-				<button
-					type="button"
-					aria-label={label}
-					className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border-none bg-transparent px-1 text-xs outline-hidden transition-colors hover:bg-surface-secondary/60 focus-visible:ring-2 focus-visible:ring-content-link"
-				>
-					{trigger}
-				</button>
-			</PopoverTrigger>
-			<PopoverContent
-				side="top"
-				align="end"
-				className="mobile-full-width-dropdown w-76 p-3 text-xs font-normal text-content-primary"
-			>
-				<h3 className="m-0 text-sm font-semibold">Wake-ups</h3>
-				{children}
-			</PopoverContent>
-		</Popover>
-	);
-};
-
-type ForkChatWakeupsListPillProps = {
-	open: readonly ChatWakeup[];
-	onUpdate: (wakeup: ChatWakeup, status: ChatWakeupStatus) => void;
-	pendingId?: string;
-	updateError?: { id: string; message: string };
-};
-
-const ForkChatWakeupsListPill: React.FC<ForkChatWakeupsListPillProps> = ({
-	open,
-	onUpdate,
-	pendingId,
-	updateError,
-}) => {
-	return (
-		<ForkChatWakeupsPopover
-			label={`Wake-ups, ${open.length} open`}
+		<ComposerPillPopover
+			label={`Wake-ups, ${openWakeups.length} open`}
+			heading="Wake-ups"
+			open={isOpen}
+			onOpenChange={setIsOpen}
 			trigger={
 				<>
 					<AlarmClockIcon
@@ -143,58 +98,44 @@ const ForkChatWakeupsListPill: React.FC<ForkChatWakeupsListPillProps> = ({
 						className="size-3.5 shrink-0 text-content-secondary"
 					/>
 					<span className="text-content-secondary tabular-nums">
-						{open.length}
+						{openWakeups.length}
 					</span>
 				</>
 			}
 		>
-			<ul className="m-0 mt-2 flex list-none flex-col gap-3 p-0">
-				{open.map((wakeup) => (
-					<ForkChatWakeupRow
-						key={wakeup.id}
-						wakeup={wakeup}
-						onUpdate={onUpdate}
-						isPending={wakeup.id === pendingId}
-						errorMessage={
-							wakeup.id === updateError?.id ? updateError.message : undefined
-						}
-					/>
-				))}
-			</ul>
-		</ForkChatWakeupsPopover>
+			{Boolean(error) && (
+				<p className="mb-0 mt-2 text-content-warning">
+					{getErrorMessage(error, "Failed to refresh the wake-ups.")}
+				</p>
+			)}
+			{openWakeups.length === 0 ? (
+				<p className="mb-0 mt-2 text-content-secondary">No open wake-ups.</p>
+			) : (
+				<ul className="m-0 mt-2 flex list-none flex-col gap-3 p-0">
+					{openWakeups.map((wakeup) => (
+						<ForkChatWakeupRow
+							key={wakeup.id}
+							wakeup={wakeup}
+							onUpdate={onUpdate}
+							isPending={wakeup.id === pendingId}
+							errorMessage={
+								wakeup.id === updateError?.id ? updateError.message : undefined
+							}
+						/>
+					))}
+				</ul>
+			)}
+		</ComposerPillPopover>
 	);
-};
-
-/**
- * Formats an interval in seconds as a compact duration, like 45s, 5m,
- * 1h 30m or 2d.
- */
-const formatWakeupInterval = (seconds: number): string => {
-	const days = Math.floor(seconds / 86_400);
-	const hours = Math.floor((seconds % 86_400) / 3_600);
-	const minutes = Math.floor((seconds % 3_600) / 60);
-	const remainingSeconds = seconds % 60;
-	const parts: string[] = [];
-	if (days > 0) {
-		parts.push(`${days}d`);
-	}
-	if (hours > 0) {
-		parts.push(`${hours}h`);
-	}
-	if (minutes > 0) {
-		parts.push(`${minutes}m`);
-	}
-	if (remainingSeconds > 0) {
-		parts.push(`${remainingSeconds}s`);
-	}
-	return parts.length > 0 ? parts.join(" ") : "0s";
 };
 
 /** Describes what the wake-up waits for, like "Every 5m" or "Once". */
 const formatWakeupSchedule = (wakeup: ChatWakeup): string => {
 	switch (wakeup.kind) {
 		case "interval":
-			return `Every ${formatWakeupInterval(wakeup.interval_seconds ?? 0)}`;
+			return wakeup.interval_seconds === undefined
+				? "Every unknown interval"
+				: `Every ${humanDurationShort(wakeup.interval_seconds * 1000)}`;
 		case "cron":
 			return `Cron ${wakeup.cron ?? "Unknown"} (${wakeup.timezone})`;
 		case "delay":
@@ -206,7 +147,7 @@ const formatWakeupSchedule = (wakeup: ChatWakeup): string => {
 	}
 };
 
-const formatWakeupEvent = (event: ChatWakeup["events"][number]): string => {
+const formatWakeupEvent = (event: ChatWakeupEvent): string => {
 	if (event.chat_id) {
 		return `child agent ${event.chat_id.slice(0, 8)}`;
 	}
@@ -229,6 +170,8 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 	isPending,
 	errorMessage,
 }) => {
+	const schedule = formatWakeupSchedule(wakeup);
+	const toggleLabel = wakeup.status === "active" ? "Pause" : "Resume";
 	const statusParts: string[] = [];
 	if (wakeup.status === "active" && wakeup.next_run_at) {
 		statusParts.push(`Next run ${relativeTime(wakeup.next_run_at)}`);
@@ -245,7 +188,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 
 	return (
 		<li className="m-0 flex list-none flex-col gap-1.5 p-0">
-			<div>{formatWakeupSchedule(wakeup)}</div>
+			<div>{schedule}</div>
 			{wakeup.kind === "events" && wakeup.events.length > 0 && (
 				<ul className="m-0 flex list-none flex-col gap-0.5 p-0">
 					{wakeup.events.map((event, index) => (
@@ -260,7 +203,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 			)}
 			<span
 				title={wakeup.prompt}
-				className="min-w-0 wrap-break-word leading-5 line-clamp-2"
+				className="wrap-break-word leading-5 line-clamp-2"
 			>
 				{wakeup.prompt}
 			</span>
@@ -270,16 +213,18 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 					variant="outline"
 					size="sm"
 					disabled={isPending}
+					aria-label={`${toggleLabel} ${schedule}`}
 					onClick={() =>
 						onUpdate(wakeup, wakeup.status === "active" ? "paused" : "active")
 					}
 				>
-					{wakeup.status === "active" ? "Pause" : "Resume"}
+					{toggleLabel}
 				</Button>
 				<Button
 					variant="subtle"
 					size="sm"
 					disabled={isPending}
+					aria-label={`Cancel ${schedule}`}
 					onClick={() => onUpdate(wakeup, "canceled")}
 				>
 					Cancel
@@ -289,29 +234,5 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 				<p className="mb-0 mt-0 text-content-destructive">{errorMessage}</p>
 			)}
 		</li>
-	);
-};
-
-type ForkChatWakeupsErrorPillProps = {
-	error: unknown;
-};
-
-const ForkChatWakeupsErrorPill: React.FC<ForkChatWakeupsErrorPillProps> = ({
-	error,
-}) => {
-	return (
-		<ForkChatWakeupsPopover
-			label="Wake-ups failed to load"
-			trigger={
-				<TriangleAlertIcon
-					aria-hidden="true"
-					className="size-3.5 shrink-0 text-content-warning"
-				/>
-			}
-		>
-			<p className="mb-0 mt-2 text-content-secondary">
-				{getErrorMessage(error, "Failed to load the wake-ups.")}
-			</p>
-		</ForkChatWakeupsPopover>
 	);
 };
