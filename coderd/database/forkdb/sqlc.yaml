@@ -16,7 +16,9 @@ sql:
       - "../migrations/chatdmig/nodes/01a1c18d-027a-7d4a-a2ad-e823d1e3ca6c_agent_definitions.up.sql"
       - "../migrations/chatdmig/nodes/01a1c242-decb-7db2-b52e-38c2843c434c_agent_definition_acl_org_member_delete.up.sql"
       - "../migrations/chatdmig/nodes/01a1c246-5dca-70a7-a0f9-63c3d58c0a60_agent_definition_project_organization.up.sql"
+      - "../migrations/chatdmig/nodes/01a1c256-cefe-797e-8c6a-1c0558040659_chat_descendant_questions.up.sql"
       - "../migrations/chatdmig/nodes/01a1c28c-8c16-78c2-af7b-26d1d9f7986e_chat_wakeups.up.sql"
+      - "../migrations/chatdmig/nodes/01a1c445-c921-7a71-bdea-b2dc23c749b9_chat_secret_answers.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

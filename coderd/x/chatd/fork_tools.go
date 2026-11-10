@@ -6,6 +6,7 @@ package chatd
 
 import (
 	"context"
+	"slices"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
@@ -31,5 +32,24 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = append(tools, p.searchChatsTool(chat))
 		tools = p.withForkWaitAgent(tools, chat)
 	}
-	return p.withStoredSubagentTypes(tools, chat), nil
+	if p.experiments.Enabled(codersdk.ExperimentForkChatWakeups) {
+		tools = append(tools, p.scheduleWakeupTool(chat))
+	}
+	if p.descendantQuestionsEnabled(chat) && !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
+		return tool.Info().Name == askUserQuestionToolName
+	}) {
+		tools = append(tools, p.newDescendantQuestionTool(chat))
+	}
+	if p.nestedSubagentsEnabled() {
+		tools = p.withDescendantQuestionWait(tools, chat)
+	}
+	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
+	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		tools = p.withForkSpawnIsolation(tools, chat)
+		tools = p.withForkIsolationReport(tools, chat)
+		if tools, err = p.withForkWorktreeBinding(ctx, tools, chat); err != nil {
+			return nil, err
+		}
+	}
+	return tools, nil
 }

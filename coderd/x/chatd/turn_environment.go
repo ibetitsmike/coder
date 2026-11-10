@@ -465,6 +465,7 @@ func (p *Server) buildTurnEnvironment(
 		// pinned context is read below.
 		p.ensureChatContextPinnedOnFirstTurn(ctx, workspaceCtx.currentChatSnapshot())
 
+		agent = p.forkWorktreeAgent(ctx, chat, agent)
 		var resolveErr error
 		instruction, workspaceSkills, resolveErr = p.resolveTurnWorkspaceContext(ctx, chat, agent)
 		if resolveErr != nil {
@@ -1092,7 +1093,7 @@ func (p *Server) buildTurnEnvironment(
 		CallTemplate:         resolved.newCall(),
 		ContextLimitFallback: modelConfig.ContextLimit,
 		DynamicToolNames:     dynamicToolNames,
-		StopAfterTools:       stopAfterBehaviorTools(currentPlanMode, chat.Mode, chat.ParentChatID),
+		StopAfterTools:       p.forkStopAfterTools(stopAfterBehaviorTools(currentPlanMode, chat.Mode, chat.ParentChatID), chat),
 		ExclusiveToolNames:   exclusiveToolNames,
 		BuiltinToolNames:     builtinToolNames,
 		ToolNameToConfigID:   toolNameToConfigID,
