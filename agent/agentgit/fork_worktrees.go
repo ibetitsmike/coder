@@ -290,49 +290,11 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, "Invalid request body.", err)
 		return
 	}
-	if !filepath.IsAbs(req.Path) {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %q must be an absolute path.", req.Path), nil)
+	wt, ok := a.linkedWorktree(ctx, rw, req.Path, req.Branch)
+	if !ok {
 		return
 	}
-	path, err := filepath.EvalSymlinks(req.Path)
-	if errors.Is(err, fs.ErrNotExist) {
-		writeWorktreeError(ctx, rw, http.StatusNotFound, fmt.Sprintf("worktree %s does not exist.", req.Path), nil)
-		return
-	}
-	if err != nil {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("Failed to resolve path %s.", req.Path), err)
-		return
-	}
-	root, err := filepath.EvalSymlinks(a.root)
-	if err != nil || !insideRoot(root, path) {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is not a worktree directory under %s.", req.Path, a.root), nil)
-		return
-	}
-	if req.Branch == "" || strings.HasPrefix(req.Branch, "-") {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("branch %q must be non-empty and must not start with \"-\".", req.Branch), nil)
-		return
-	}
-
-	top, err := a.git(ctx, path, "rev-parse", "--show-toplevel")
-	if err == nil {
-		top, err = filepath.EvalSymlinks(filepath.FromSlash(top))
-	}
-	if err != nil || top != path {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is not the top of a git worktree.", path), err)
-		return
-	}
-	dirs, err := a.git(ctx, path, "rev-parse", "--git-dir", "--git-common-dir")
-	gitDir, commonDir, ok := strings.Cut(dirs, "\n")
-	if err != nil || !ok {
-		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree git directories.", err)
-		return
-	}
-	gitDir = absGitPath(path, gitDir)
-	commonDir = absGitPath(path, commonDir)
-	if gitDir == commonDir {
-		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is a main working tree, not a linked worktree.", path), nil)
-		return
-	}
+	path, gitDir, commonDir := wt.path, wt.gitDir, wt.commonDir
 
 	status, err := a.git(ctx, path, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
@@ -416,6 +378,63 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// linkedWorktree is a linked git worktree under the worktree root.
+type linkedWorktree struct {
+	path      string
+	gitDir    string
+	commonDir string
+}
+
+// linkedWorktree checks that reqPath is the top of a linked worktree under
+// the worktree root and that branch is a usable branch name. On failure it
+// writes the error response and returns false.
+func (a *worktreeAPI) linkedWorktree(ctx context.Context, rw http.ResponseWriter, reqPath, branch string) (linkedWorktree, bool) {
+	if !filepath.IsAbs(reqPath) {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %q must be an absolute path.", reqPath), nil)
+		return linkedWorktree{}, false
+	}
+	path, err := filepath.EvalSymlinks(reqPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		writeWorktreeError(ctx, rw, http.StatusNotFound, fmt.Sprintf("worktree %s does not exist.", reqPath), nil)
+		return linkedWorktree{}, false
+	}
+	if err != nil {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("Failed to resolve path %s.", reqPath), err)
+		return linkedWorktree{}, false
+	}
+	root, err := filepath.EvalSymlinks(a.root)
+	if err != nil || !insideRoot(root, path) {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is not a worktree directory under %s.", reqPath, a.root), nil)
+		return linkedWorktree{}, false
+	}
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("branch %q must be non-empty and must not start with \"-\".", branch), nil)
+		return linkedWorktree{}, false
+	}
+
+	top, err := a.git(ctx, path, "rev-parse", "--show-toplevel")
+	if err == nil {
+		top, err = filepath.EvalSymlinks(filepath.FromSlash(top))
+	}
+	if err != nil || top != path {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is not the top of a git worktree.", path), err)
+		return linkedWorktree{}, false
+	}
+	dirs, err := a.git(ctx, path, "rev-parse", "--git-dir", "--git-common-dir")
+	gitDir, commonDir, ok := strings.Cut(dirs, "\n")
+	if err != nil || !ok {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree git directories.", err)
+		return linkedWorktree{}, false
+	}
+	gitDir = absGitPath(path, gitDir)
+	commonDir = absGitPath(path, commonDir)
+	if gitDir == commonDir {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is a main working tree, not a linked worktree.", path), nil)
+		return linkedWorktree{}, false
+	}
+	return linkedWorktree{path: path, gitDir: gitDir, commonDir: commonDir}, true
 }
 
 // countModuleLocalCommits counts the commits on no remote in every
