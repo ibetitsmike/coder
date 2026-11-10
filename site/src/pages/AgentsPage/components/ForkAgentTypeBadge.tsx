@@ -16,9 +16,9 @@ export const ForkAgentTypeBadge: React.FC<ForkAgentTypeBadgeProps> = ({
 		return null;
 	}
 	return (
-		<Badge size="sm" className="shrink-0">
+		<Badge size="sm" className="max-w-32 shrink-0" title={chat.agent_type}>
 			<span className="sr-only">Agent type: </span>
-			{chat.agent_type}
+			<span className="truncate">{chat.agent_type}</span>
 		</Badge>
 	);
 };
