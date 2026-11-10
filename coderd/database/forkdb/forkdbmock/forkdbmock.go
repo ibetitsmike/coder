@@ -426,6 +426,21 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByID", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByID), ctx, id)
 }
 
+// GetChatWakeupByIDForUpdate mocks base method.
+func (m *MockStore) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatWakeupByIDForUpdate", ctx, id)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatWakeupByIDForUpdate indicates an expected call of GetChatWakeupByIDForUpdate.
+func (mr *MockStoreMockRecorder) GetChatWakeupByIDForUpdate(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByIDForUpdate", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByIDForUpdate), ctx, id)
+}
+
 // GetOrganizationAgentDefinitionByName mocks base method.
 func (m *MockStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	m.ctrl.T.Helper()

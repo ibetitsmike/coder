@@ -32,11 +32,11 @@ const (
 // It returns sql.ErrNoRows when chat has no wake-up wakeupID, and
 // ErrChatWakeupFinished when the wake-up already completed or was canceled.
 func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wakeupID uuid.UUID, status forkdb.ChatWakeupStatus) (before, after forkdb.ChatWakeup, err error) {
-	// Serializable isolation fails the update, and the store retries the
-	// transaction, when a worker changed the row after it was read, so a
-	// control never overwrites a run that finished in between.
+	// The row lock makes a worker that finishes its claim in between wait,
+	// and the update clears the lease, so the worker's finish then changes
+	// nothing and a control never overwrites a run.
 	err = forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
-		wakeup, err := ftx.GetChatWakeupByID(ctx, wakeupID)
+		wakeup, err := ftx.GetChatWakeupByIDForUpdate(ctx, wakeupID)
 		if err != nil {
 			return err
 		}
@@ -63,7 +63,7 @@ func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wa
 			UpdatedAt:    now,
 		})
 		return err
-	}, &database.TxOptions{Isolation: sql.LevelSerializable})
+	}, nil)
 	if err != nil {
 		return forkdb.ChatWakeup{}, forkdb.ChatWakeup{}, err
 	}

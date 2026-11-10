@@ -68,6 +68,9 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Locks the wake-up until the transaction ends, so a worker that finishes its
+	// claim in between waits and then finds its lease gone.
+	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)

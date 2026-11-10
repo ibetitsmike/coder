@@ -347,6 +347,41 @@ func (q *Queries) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWake
 	return i, err
 }
 
+const getChatWakeupByIDForUpdate = `-- name: GetChatWakeupByIDForUpdate :one
+SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1 FOR UPDATE
+`
+
+// Locks the wake-up until the transaction ends, so a worker that finishes its
+// claim in between waits and then finds its lease gone.
+func (q *Queries) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error) {
+	row := q.db.QueryRowContext(ctx, getChatWakeupByIDForUpdate, id)
+	var i ChatWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.ChatID,
+		&i.OrganizationID,
+		&i.CreatedBy,
+		&i.Source,
+		&i.Kind,
+		&i.Prompt,
+		&i.IntervalSeconds,
+		&i.Cron,
+		&i.Timezone,
+		&i.Events,
+		&i.Status,
+		&i.StatusReason,
+		&i.NextRunAt,
+		&i.LeaseExpiresAt,
+		&i.ExpiresAt,
+		&i.MaxRuns,
+		&i.RunCount,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertChatWakeup = `-- name: InsertChatWakeup :one
 INSERT INTO chat_wakeups (
     id,
