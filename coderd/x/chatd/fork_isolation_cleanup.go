@@ -54,8 +54,6 @@ func (p *Server) scheduleArchivedWorktreeCleanup(ctx context.Context, rootID uui
 }
 
 func (p *Server) cleanupArchivedWorktrees(ctx context.Context, rootID uuid.UUID, familyChats []database.Chat) {
-	ctx, cancel := context.WithTimeout(ctx, worktreeCleanupTimeout)
-	defer cancel()
 	logger := p.logger.With(slog.F("chat_id", rootID))
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -93,8 +91,12 @@ func (p *Server) cleanupArchivedWorktrees(ctx context.Context, rootID uuid.UUID,
 		}
 		byAgent[chat.AgentID.UUID] = append(byAgent[chat.AgentID.UUID], row)
 	}
+	// The notice is posted with ctx, so an agent that uses up this deadline
+	// still gets its worktrees listed.
+	agentCtx, cancel := context.WithTimeout(ctx, worktreeCleanupTimeout)
+	defer cancel()
 	for _, agentID := range agentIDs {
-		kept = append(kept, p.removeAgentWorktrees(ctx, agentID, byAgent[agentID])...)
+		kept = append(kept, p.removeAgentWorktrees(agentCtx, agentID, byAgent[agentID])...)
 	}
 	for _, wt := range kept {
 		logger.Warn(ctx, "kept subagent worktree after archive",
@@ -118,7 +120,10 @@ func (p *Server) removeAgentWorktrees(ctx context.Context, agentID uuid.UUID, ro
 		}
 		return kept
 	}
-	conn, release, err := p.agentConnFn(ctx, agentID)
+	// A dial to an offline agent waits until its context ends.
+	dialCtx, cancelDial := context.WithTimeout(ctx, p.dialTimeout)
+	defer cancelDial()
+	conn, release, err := p.agentConnFn(dialCtx, agentID)
 	if err != nil {
 		p.logger.Warn(ctx, "subagent worktree cleanup: connect to workspace agent",
 			slog.F("agent_id", agentID), slog.Error(err))

@@ -159,4 +159,24 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 		require.Contains(t, notices[0], "`/wt/"+child.ID.String()+"`")
 		require.Contains(t, notices[0], ": agent unreachable")
 	})
+
+	t.Run("AgentDialTimesOut", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
+		conn := &cleanupWorktreeConn{}
+		root := f.rootChat(t, conn)
+		child := f.spawnChild(t, root, map[string]any{"isolation": "worktree"})
+		// Like a dial to an offline agent, this one ends only with its context.
+		f.server.dialTimeout = testutil.IntervalFast
+		f.server.agentConnFn = func(ctx context.Context, _ uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+			<-ctx.Done()
+			return nil, nil, ctx.Err()
+		}
+
+		notices := f.archiveAndAwaitNotices(t, root, conn, 0)
+		require.Empty(t, conn.deleted())
+		require.Len(t, notices, 1)
+		require.Contains(t, notices[0], "`/wt/"+child.ID.String()+"`")
+		require.Contains(t, notices[0], ": agent unreachable")
+	})
 }
