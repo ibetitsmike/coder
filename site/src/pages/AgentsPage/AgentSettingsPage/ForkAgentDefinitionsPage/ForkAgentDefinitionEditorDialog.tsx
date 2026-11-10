@@ -60,6 +60,7 @@ type ForkAgentDefinitionEditorDialogProps = ForkAgentDefinitionEditorState & {
 	onCloseAutoFocus?: (event: Event) => void;
 };
 
+/** Creates or edits one agent definition as markdown with front-matter. */
 export const ForkAgentDefinitionEditorDialog: React.FC<
 	ForkAgentDefinitionEditorDialogProps
 > = ({

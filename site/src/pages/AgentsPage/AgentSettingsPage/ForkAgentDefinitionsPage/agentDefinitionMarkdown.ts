@@ -15,6 +15,7 @@ export type AgentDefinitionFormValues = {
 	extraFrontMatter: string;
 };
 
+/** The editor's fields for a new agent definition. */
 export const emptyAgentDefinitionFormValues: AgentDefinitionFormValues = {
 	name: "",
 	description: "",
