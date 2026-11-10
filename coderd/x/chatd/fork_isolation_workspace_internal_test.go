@@ -18,17 +18,20 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 // fakeWorkspaces stands in for coderd's workspace creation and stop. A
 // created workspace is bound to the chat and has an agent that conns
-// connects to. Its build fails with buildFails, it has no agent with noAgent,
+// connects to, through conn when it is set, until the workspace is stopped.
+// Its build fails with buildFails, it has no agent with noAgent,
 // its startup scripts fail with startupFails, and createErr fails the creation
 // itself.
 type fakeWorkspaces struct {
 	t            *testing.T
 	db           database.Store
 	conns        *sync.Map
+	conn         workspacesdk.AgentConn
 	createErr    error
 	buildFails   bool
 	noAgent      bool
@@ -37,6 +40,7 @@ type fakeWorkspaces struct {
 	mu      sync.Mutex
 	creates []codersdk.CreateWorkspaceRequest
 	created []database.WorkspaceTable
+	agents  map[uuid.UUID][]uuid.UUID
 	stops   []uuid.UUID
 }
 
@@ -75,7 +79,15 @@ func (w *fakeWorkspaces) create(ctx context.Context, ownerID, chatID uuid.UUID, 
 		}); err != nil {
 			return codersdk.Workspace{}, database.Chat{}, err
 		}
-		w.conns.Store(agent.ID, &fakeWorktreeConn{})
+		var conn workspacesdk.AgentConn = &fakeWorktreeConn{}
+		if w.conn != nil {
+			conn = w.conn
+		}
+		w.conns.Store(agent.ID, conn)
+		if w.agents == nil {
+			w.agents = map[uuid.UUID][]uuid.UUID{}
+		}
+		w.agents[built.Workspace.ID] = append(w.agents[built.Workspace.ID], agent.ID)
 	}
 	chat, err := w.db.UpdateChatWorkspaceBinding(ctx, database.UpdateChatWorkspaceBindingParams{
 		ID:          chatID,
@@ -97,6 +109,9 @@ func (w *fakeWorkspaces) stop(ctx context.Context, _ uuid.UUID, workspaceID uuid
 	defer w.mu.Unlock()
 	require.Equal(w.t, codersdk.WorkspaceTransitionStop, req.Transition)
 	w.stops = append(w.stops, workspaceID)
+	for _, agentID := range w.agents[workspaceID] {
+		w.conns.Delete(agentID)
+	}
 	workspace, err := w.db.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
 		return codersdk.WorkspaceBuild{}, err
