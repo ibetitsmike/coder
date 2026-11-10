@@ -55,3 +55,13 @@ export const RefreshError: Story = {
 		}),
 	},
 };
+
+export const RetryingRefresh: Story = {
+	args: {
+		isRetrying: true,
+		error: mockApiError({
+			message: "Failed to list agent definitions.",
+			detail: "connection reset",
+		}),
+	},
+};

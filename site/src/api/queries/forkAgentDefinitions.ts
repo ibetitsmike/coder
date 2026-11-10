@@ -3,7 +3,8 @@
 import { queryOptions } from "react-query";
 import { getUserAgentDefinitions } from "#/api/forkAgentDefinitions";
 
-const userAgentDefinitionsKey = (organizationId: string) =>
+/** Query key for the current user's agent definitions in an organization. */
+export const userAgentDefinitionsKey = (organizationId: string) =>
 	["chats", "fork-agent-definitions", "user", organizationId] as const;
 
 /** Query options for the current user's agent definitions in an organization. */
