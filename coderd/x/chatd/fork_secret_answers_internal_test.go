@@ -319,7 +319,7 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 
 	// A message would answer the secret question without the value.
 	callID := ask(`[{"header":"Token","question":"Paste the token.","secret":true}]`)
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "the token is x", SendMessageBusyBehaviorQueue)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "the token is x")
 	require.ErrorContains(t, err, "it waits for a secret answer")
 	// A chat API send checks before SendMessage, so SendMessage checks
 	// again under the chat lock, and only the report of the answer passes.
@@ -351,7 +351,7 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
 
 	ask(`[{"header":"DB","question":"Which one?","options":[{"label":"a"},{"label":"b"}]}]`)
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a", SendMessageBusyBehaviorQueue)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a")
 	require.NoError(t, err, "the parent may answer an ordinary question")
 }
 
