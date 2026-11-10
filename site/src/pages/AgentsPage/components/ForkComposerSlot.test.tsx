@@ -234,7 +234,7 @@ describe("ForkComposerSlot wake-ups", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
 		);
-		await user.click(screen.getByRole("button", { name: "Pause Every 5m" }));
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
 
 		await waitFor(() =>
 			expect(queryClient.getQueryData(chatWakeupsKey(MockChat.id))).toEqual([
@@ -257,7 +257,9 @@ describe("ForkComposerSlot wake-ups", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
 		);
-		await user.click(screen.getByRole("button", { name: "Cancel Every 5m" }));
+		await user.click(
+			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
+		);
 
 		await waitFor(() =>
 			expect(queryClient.getQueryData(chatWakeupsKey(MockChat.id))).toEqual([
@@ -286,7 +288,7 @@ describe("ForkComposerSlot wake-ups", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Wake-ups, 2 open" }),
 		);
-		await user.click(screen.getByRole("button", { name: "Pause Every 5m" }));
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
 
 		await waitFor(() =>
 			expect(
@@ -308,10 +310,10 @@ describe("ForkComposerSlot wake-ups", () => {
 			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
 		);
 		expect(
-			screen.getByRole("button", { name: "Pause Every 5m" }),
+			screen.getByRole("button", { name: /^Pause Every 5m: / }),
 		).toBeDisabled();
 		expect(
-			screen.getByRole("button", { name: "Cancel Every 5m" }),
+			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
 		).toBeDisabled();
 	});
 });

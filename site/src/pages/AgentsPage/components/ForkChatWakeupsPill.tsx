@@ -66,14 +66,17 @@ type ForkChatWakeupsPillViewProps = {
 
 /**
  * Renders the wake-ups pill. Renders nothing while the wake-ups load or no
- * open wake-up remains, and a warning pill when the first fetch failed.
+ * open wake-up remains, and a warning pill when a fetch failed with no open
+ * wake-up to show.
  */
 export const ForkChatWakeupsPillView: React.FC<
 	ForkChatWakeupsPillViewProps
 > = ({ wakeups, error, onUpdate, isDisabled = false, updateError }) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const openWakeups = wakeups?.filter(isOpenWakeup);
-	if (!openWakeups) {
+	// Stay mounted while the popover is open, so canceling the last wake-up
+	// does not unmount the popover that holds keyboard focus.
+	if (!openWakeups || (openWakeups.length === 0 && !isOpen)) {
 		return error ? (
 			<ComposerPillError
 				label="Wake-ups failed to load"
@@ -81,11 +84,6 @@ export const ForkChatWakeupsPillView: React.FC<
 				message={getErrorMessage(error, "Failed to load the wake-ups.")}
 			/>
 		) : null;
-	}
-	// Stay mounted while the popover is open, so canceling the last wake-up
-	// does not unmount the popover that holds keyboard focus.
-	if (openWakeups.length === 0 && !isOpen) {
-		return null;
 	}
 
 	return (
@@ -107,7 +105,7 @@ export const ForkChatWakeupsPillView: React.FC<
 			}
 		>
 			{Boolean(error) && (
-				<p className="mb-0 mt-2 text-content-warning">
+				<p role="status" className="mb-0 mt-2 text-content-warning">
 					{getErrorMessage(error, "Failed to refresh the wake-ups.")}
 				</p>
 			)}
@@ -230,7 +228,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 					variant="outline"
 					size="sm"
 					disabled={isDisabled}
-					aria-label={`${toggleLabel} ${schedule}`}
+					aria-label={`${toggleLabel} ${schedule}: ${wakeup.prompt}`}
 					onClick={() =>
 						onUpdate(wakeup, wakeup.status === "active" ? "paused" : "active")
 					}
@@ -241,7 +239,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 					variant="subtle"
 					size="sm"
 					disabled={isDisabled}
-					aria-label={`Cancel ${schedule}`}
+					aria-label={`Cancel ${schedule}: ${wakeup.prompt}`}
 					onClick={() => onUpdate(wakeup, "canceled")}
 				>
 					Cancel
