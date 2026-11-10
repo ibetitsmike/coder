@@ -732,22 +732,43 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 		assert.DirExists(t, wt.Path)
 	})
 
-	t.Run("SubmoduleNamedRefsLocalCommits", func(t *testing.T) {
+	for _, path := range []string{"refs", "libs/sub"} {
+		t.Run("LocalCommitsInSubmoduleAt_"+strings.ReplaceAll(path, "/", "_"), func(t *testing.T) {
+			t.Parallel()
+			h, _ := newTestWorktreeAPI(t)
+			repo := wtInitSubmoduleRepo(t, path)
+			wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+			wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+			sub := filepath.Join(wt.Path, path)
+			r := wtGit(t, sub, "rev-parse", "HEAD")
+			wtGit(t, sub, "switch", "-c", "local")
+			wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
+			wtGit(t, sub, "checkout", "--detach", r)
+
+			rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+			assert.DirExists(t, wt.Path)
+		})
+	}
+
+	// Only a git dir's modules directory holds nested submodules, so a
+	// repository elsewhere in its metadata, such as a cache, is not one.
+	t.Run("RepositoryInSubmoduleMetadata", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newTestWorktreeAPI(t)
-		repo := wtInitSubmoduleRepo(t, "refs")
+		repo := wtInitSubmoduleRepo(t, "sub")
 		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
 		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
-		sub := filepath.Join(wt.Path, "refs")
-		r := wtGit(t, sub, "rev-parse", "HEAD")
-		wtGit(t, sub, "switch", "-c", "local")
-		wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
-		wtGit(t, sub, "checkout", "--detach", r)
+		cache := filepath.Join(wtGit(t, filepath.Join(wt.Path, "sub"), "rev-parse", "--absolute-git-dir"), "cache", "repo")
+		require.NoError(t, os.MkdirAll(cache, 0o755))
+		wtGit(t, cache, "init", "--bare")
+		wtGit(t, repo, "push", cache, "HEAD:refs/heads/main")
 
 		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
 
-		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
-		assert.DirExists(t, wt.Path)
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		assert.NoDirExists(t, wt.Path)
 	})
 
 	t.Run("DeinitializedSubmoduleLocalCommits", func(t *testing.T) {

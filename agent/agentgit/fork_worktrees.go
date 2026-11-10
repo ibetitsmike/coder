@@ -258,7 +258,7 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 
 // discardWorktree undoes a worktree add whose result failed validation.
 func (a *worktreeAPI) discardWorktree(ctx context.Context, top, path, branch string) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), worktreeRequestTimeout)
 	defer cancel()
 	if _, err := a.git(cleanupCtx, top, "worktree", "remove", "--force", "--", path); err != nil {
 		a.logger.Warn(ctx, "failed to discard worktree", slog.F("path", path), slog.Error(err))
@@ -423,36 +423,44 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 // submodule foreach, which skips deinitialized submodules whose repositories
 // --force would still delete.
 func (a *worktreeAPI) countModuleLocalCommits(ctx context.Context, modules string) (int, error) {
+	entries, err := os.ReadDir(modules)
+	if err != nil {
+		return 0, xerrors.Errorf("read %s: %w", modules, err)
+	}
 	sum := 0
-	err := filepath.WalkDir(modules, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
-		if !d.IsDir() {
-			return nil
-		}
-		if !isGitDir(p) {
-			// A submodule named objects, refs or logs is a git dir itself
-			// and was counted above.
-			if (d.Name() == "objects" || d.Name() == "refs" || d.Name() == "logs") && isGitDir(filepath.Dir(p)) {
-				return fs.SkipDir
+		p := filepath.Join(modules, entry.Name())
+		// A directory that is not a git dir is a path segment of a
+		// submodule name with slashes. Inside a git dir only its own
+		// modules directory holds nested submodules.
+		next := p
+		if isGitDir(p) {
+			// --reflog keeps commits made on a detached HEAD that was then
+			// moved back to the recorded commit.
+			out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--reflog", "--not", "--remotes")
+			if err != nil {
+				return 0, err
 			}
-			return nil
+			n, err := strconv.Atoi(out)
+			if err != nil {
+				return 0, xerrors.Errorf("parse commit count of %s: %w", p, err)
+			}
+			sum += n
+			next = filepath.Join(p, "modules")
+			if !dirExists(next) {
+				continue
+			}
 		}
-		// --reflog keeps commits made on a detached HEAD that was then
-		// moved back to the recorded commit.
-		out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--reflog", "--not", "--remotes")
+		n, err := a.countModuleLocalCommits(ctx, next)
 		if err != nil {
-			return err
-		}
-		n, err := strconv.Atoi(out)
-		if err != nil {
-			return xerrors.Errorf("parse commit count of %s: %w", p, err)
+			return 0, err
 		}
 		sum += n
-		return nil
-	})
-	return sum, err
+	}
+	return sum, nil
 }
 
 func isGitDir(p string) bool {
