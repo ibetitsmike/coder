@@ -3460,6 +3460,9 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	contentBlocks, _, inputError := createChatInputFromParts(ctx, api.Database, chat.ID, chat.WorkspaceID, req.Content, "content")
 	if inputError != nil {
@@ -3800,6 +3803,9 @@ func (api *API) patchChatQueuedMessage(rw http.ResponseWriter, r *http.Request) 
 			Message: "model_config_id and reasoning_effort require content.",
 			Detail:  "The overrides apply to the content they are sent with.",
 		})
+		return
+	}
+	if req.Content != nil && maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
