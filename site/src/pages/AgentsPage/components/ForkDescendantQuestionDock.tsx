@@ -5,7 +5,7 @@
 import { cn } from "cn";
 import { MessageCircleQuestionIcon } from "lucide-react";
 import type React from "react";
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Link, useLocation } from "react-router";
 import {
@@ -48,14 +48,15 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 	const [chatFullWidth] = useChatFullWidth();
 	const location = useLocation();
 	const scrollerRef = useRef<HTMLDivElement>(null);
+	const headingId = useId();
 	const queryClient = useQueryClient();
 	const questionsQuery = useQuery(chatDescendantQuestions(rootChatId));
 	const answerMutation = useMutation(
 		answerChatDescendantQuestion(queryClient, rootChatId),
 	);
 
-	const pending = questionsQuery.data ?? [];
-	const question = pending.at(0);
+	const pendingQuestions = questionsQuery.data ?? [];
+	const question = pendingQuestions.at(0);
 	if (!question) {
 		return null;
 	}
@@ -73,7 +74,7 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 			className="flex max-h-[60vh] min-h-0 scroll-pb-14 flex-col overflow-y-auto px-4 scrollbar-gutter-stable scrollbar-thin"
 		>
 			<section
-				aria-label="Question from a subagent"
+				aria-labelledby={headingId}
 				className={cn(
 					"mx-auto mb-2 w-full shrink-0 rounded-lg border border-solid border-border bg-surface-primary shadow-sm",
 					chatWidthClass(chatFullWidth),
@@ -84,7 +85,7 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 						aria-hidden="true"
 						className="size-3.5 shrink-0"
 					/>
-					<span className="min-w-0 flex-1 truncate">
+					<span id={headingId} className="min-w-0 flex-1 truncate">
 						Question from{" "}
 						<Link
 							to={{
@@ -96,8 +97,8 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 							{question.chat_title || "a subagent"}
 						</Link>
 					</span>
-					{pending.length > 1 && (
-						<span className="shrink-0">1 of {pending.length}</span>
+					{pendingQuestions.length > 1 && (
+						<span className="shrink-0">1 of {pendingQuestions.length}</span>
 					)}
 				</div>
 				<div className="px-3 pb-3">

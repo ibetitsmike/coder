@@ -25,7 +25,7 @@ import {
 import { server } from "#/testHelpers/server";
 import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 
-const oldestQuestion: ChatDescendantQuestion = {
+const mockOldestQuestion: ChatDescendantQuestion = {
 	chat_id: "grandchild-chat",
 	parent_chat_id: "child-chat",
 	chat_title: "Migrate the billing tables",
@@ -40,8 +40,8 @@ const oldestQuestion: ChatDescendantQuestion = {
 	],
 };
 
-const newerQuestion: ChatDescendantQuestion = {
-	...oldestQuestion,
+const mockNewerQuestion: ChatDescendantQuestion = {
+	...mockOldestQuestion,
 	chat_id: "other-child-chat",
 	parent_chat_id: MockChat.id,
 	chat_title: "Review the API",
@@ -139,8 +139,8 @@ describe("ForkDescendantQuestionDock", () => {
 
 	it("sends the answer to the chat that asked the oldest question", async () => {
 		const { questionRequests, sentMessages } = serveQuestions([
-			oldestQuestion,
-			newerQuestion,
+			mockOldestQuestion,
+			mockNewerQuestion,
 		]);
 		const user = userEvent.setup();
 
@@ -154,7 +154,7 @@ describe("ForkDescendantQuestionDock", () => {
 		await waitFor(() =>
 			expect(sentMessages).toEqual([
 				{
-					chatId: oldestQuestion.chat_id,
+					chatId: mockOldestQuestion.chat_id,
 					body: {
 						content: [
 							{
@@ -172,17 +172,17 @@ describe("ForkDescendantQuestionDock", () => {
 	});
 
 	it("links to the chat that asked the question", async () => {
-		serveQuestions([oldestQuestion]);
+		serveQuestions([mockOldestQuestion]);
 		const user = userEvent.setup();
 
 		const { router } = renderDock();
 
 		await user.click(
-			await screen.findByRole("link", { name: oldestQuestion.chat_title }),
+			await screen.findByRole("link", { name: mockOldestQuestion.chat_title }),
 		);
 
 		expect(router.state.location.pathname).toBe(
-			`/agents/${oldestQuestion.chat_id}`,
+			`/agents/${mockOldestQuestion.chat_id}`,
 		);
 	});
 });

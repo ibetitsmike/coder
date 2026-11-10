@@ -5,7 +5,7 @@ import { MOCK_TIMESTAMP, MockChat } from "#/testHelpers/chatEntities";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 
-const pendingQuestion: ChatDescendantQuestion = {
+const mockQuestion: ChatDescendantQuestion = {
 	chat_id: "grandchild-chat",
 	parent_chat_id: "child-chat",
 	chat_title: "Migrate the billing tables",
@@ -33,7 +33,7 @@ const meta: Meta<typeof ForkDescendantQuestionDock> = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [pendingQuestion],
+				data: [mockQuestion],
 			},
 		],
 	},
@@ -50,9 +50,9 @@ export const SeveralPending: Story = {
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
 				data: [
-					pendingQuestion,
+					mockQuestion,
 					{
-						...pendingQuestion,
+						...mockQuestion,
 						chat_id: "other-child-chat",
 						chat_title: "",
 						tool_call_id: "call-2",
@@ -68,7 +68,7 @@ export const UntitledChat: Story = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [{ ...pendingQuestion, chat_title: "" }],
+				data: [{ ...mockQuestion, chat_title: "" }],
 			},
 		],
 	},
