@@ -23,6 +23,10 @@ const liveStatuses: ReadonlySet<ChatStatus> = new Set<ChatStatus>([
 	"paused",
 ]);
 
+/**
+ * The status that marks a subagent waiting for a free concurrency slot, in
+ * the sidebar row and in the chat top bar.
+ */
 export const waitingForSlotStatus = {
 	icon: HourglassIcon,
 	className: "text-content-warning",

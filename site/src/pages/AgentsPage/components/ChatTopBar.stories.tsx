@@ -322,6 +322,15 @@ const mobileDecorator: Story["decorators"] = [
 	),
 ];
 
+export const MobileWaitingForSubagentSlot: Story = {
+	...WaitingForSubagentSlot,
+	decorators: mobileDecorator,
+	parameters: {
+		...WaitingForSubagentSlot.parameters,
+		pixel: { matrix: { viewports: ["phone"] } },
+	},
+};
+
 export const MobileWithOpenPR: Story = {
 	decorators: mobileDecorator,
 	parameters: { pixel: { matrix: { viewports: ["phone"] } } },
