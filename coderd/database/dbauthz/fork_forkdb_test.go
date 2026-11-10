@@ -67,6 +67,14 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
 		},
+		"GetFamilySubagentsAwaitingWorker": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.GetFamilySubagentsAwaitingWorkerParams{RootChatID: chat.ID, OrganizationID: chat.OrganizationID, StaleSeconds: 30}
+			rows := []forkdb.GetFamilySubagentsAwaitingWorkerRow{{ChatID: uuid.New(), ActiveFamilyCount: 1}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetFamilySubagentsAwaitingWorker(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"GetChatAwaitingWorker": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.GetChatAwaitingWorkerParams{})
 			fdb.EXPECT().GetChatAwaitingWorker(gomock.Any(), arg).Return(true, nil).AnyTimes()
@@ -94,6 +102,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(sub, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(sub)
 		},
+		"GetChatSubagentTypesByChatIDs": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			rows := []forkdb.GetChatSubagentTypesByChatIDsRow{testutil.Fake(t, faker, forkdb.GetChatSubagentTypesByChatIDsRow{})}
+			ids := []uuid.UUID{rows[0].ChatID}
+			fdb.EXPECT().GetChatSubagentTypesByChatIDs(gomock.Any(), ids).Return(rows, nil).AnyTimes()
+			check.Args(ids).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(rows)
+		},
 		"GetChatSubagentsByParentChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			subs := []forkdb.ChatSubagent{testutil.Fake(t, faker, forkdb.ChatSubagent{})}
@@ -114,6 +128,28 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatTodosByChatID(gomock.Any(), chat.ID).Return(todos, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(todos)
+		},
+		"GetPendingChatDescendantQuestion": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			question := testutil.Fake(t, faker, forkdb.ChatDescendantQuestion{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetPendingChatDescendantQuestion(gomock.Any(), chat.ID).Return(question, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(question)
+		},
+		"ListPendingChatDescendantQuestionsByRoot": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			root := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.ListPendingChatDescendantQuestionsByRootRow{testutil.Fake(t, faker, forkdb.ListPendingChatDescendantQuestionsByRootRow{})}
+			db.EXPECT().GetChatByID(gomock.Any(), root.ID).Return(root, nil).AnyTimes()
+			fdb.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), root.ID).Return(rows, nil).AnyTimes()
+			check.Args(root.ID).Asserts(root, policy.ActionRead).Returns(rows)
+		},
+		"UpsertChatDescendantQuestion": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := testutil.Fake(t, faker, forkdb.UpsertChatDescendantQuestionParams{ChatID: chat.ID})
+			question := testutil.Fake(t, faker, forkdb.ChatDescendantQuestion{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().UpsertChatDescendantQuestion(gomock.Any(), arg).Return(question, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(question)
 		},
 		"LockChatForNoKeyUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
