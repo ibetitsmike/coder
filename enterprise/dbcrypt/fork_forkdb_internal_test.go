@@ -194,7 +194,7 @@ func TestChatSecretAnswers(t *testing.T) {
 	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: org.ID})
 	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: owner.ID, LastModelConfigID: model.ID})
 
-	_, err = fcrypt.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+	err = fcrypt.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID:     chat.ID,
 		ToolCallID: "call_1",
 		Value:      value,
