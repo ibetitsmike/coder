@@ -52,6 +52,7 @@ export const MockChatWakeupEvents: ChatWakeup = {
 		{
 			type: "pull_request",
 			url: "https://github.com/example/repo/pull/1",
+			on: ["review", "checks"],
 		},
 	],
 	status: "active",
@@ -90,7 +91,7 @@ export const MockChatWakeupPaused: ChatWakeup = {
 	timezone: "UTC",
 	events: [],
 	status: "paused",
-	status_reason: "Paused by the user",
+	status_reason: "daily_run_cap",
 	run_count: 1,
 	created_at: "2026-11-10T08:00:00Z",
 	updated_at: "2026-11-10T08:10:00Z",

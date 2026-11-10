@@ -1,5 +1,6 @@
 import { TriangleAlertIcon } from "lucide-react";
 import type React from "react";
+import { useId } from "react";
 import {
 	Popover,
 	PopoverContent,
@@ -24,6 +25,7 @@ export const ComposerPillPopover: React.FC<ComposerPillPopoverProps> = ({
 	open,
 	onOpenChange,
 }) => {
+	const headingId = useId();
 	return (
 		<Popover open={open} onOpenChange={onOpenChange}>
 			<PopoverTrigger asChild>
@@ -36,11 +38,14 @@ export const ComposerPillPopover: React.FC<ComposerPillPopoverProps> = ({
 				</button>
 			</PopoverTrigger>
 			<PopoverContent
+				aria-labelledby={headingId}
 				side="top"
 				align="end"
 				className="mobile-full-width-dropdown w-76 p-3 text-xs font-normal text-content-primary"
 			>
-				<h3 className="m-0 text-sm font-semibold">{heading}</h3>
+				<h3 id={headingId} className="m-0 text-sm font-semibold">
+					{heading}
+				</h3>
 				{children}
 			</PopoverContent>
 		</Popover>

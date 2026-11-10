@@ -65,6 +65,14 @@ export const LoadError: Story = {
 	},
 };
 
+export const RefreshErrorWithNoOpenWakeups: Story = {
+	args: {
+		wakeups: [MockChatWakeupCompleted],
+		error: mockApiError({ message: "The server is unavailable." }),
+	},
+	play: LoadError.play,
+};
+
 export const UpdateError: Story = {
 	args: {
 		updateError: {
@@ -75,8 +83,8 @@ export const UpdateError: Story = {
 	play: Expanded.play,
 };
 
-export const UpdatePending: Story = {
-	args: { pendingId: MockChatWakeupInterval.id },
+export const ActionsDisabled: Story = {
+	args: { isDisabled: true },
 	play: Expanded.play,
 };
 

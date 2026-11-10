@@ -18,6 +18,7 @@ type ForkComposerSlotProps = {
  */
 export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = ({
 	chatId,
+	isDisabled,
 }) => {
 	const { experiments } = useDashboard();
 	if (!chatId) {
@@ -29,7 +30,7 @@ export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = ({
 				<ChatTodoPill chatId={chatId} />
 			)}
 			{experiments.includes("fork-chat-wakeups") && (
-				<ForkChatWakeupsPill chatId={chatId} />
+				<ForkChatWakeupsPill chatId={chatId} isDisabled={isDisabled} />
 			)}
 		</>
 	);

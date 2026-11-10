@@ -10,7 +10,8 @@ import type {
 	ChatWakeupStatus,
 } from "#/api/typesGenerated";
 import { Button } from "#/components/Button/Button";
-import { humanDurationShort, relativeTime } from "#/utils/time";
+import { useTime } from "#/hooks/useTime";
+import { humanDurationShort, timeFrom } from "#/utils/time";
 import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 
 // This file is fork code: the composer pill for the fork-chat-wakeups
@@ -18,11 +19,13 @@ import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 
 type ForkChatWakeupsPillProps = {
 	chatId: string;
+	isDisabled: boolean;
 };
 
 /** Shows the chat's open wake-ups as a pill with a popover. */
 export const ForkChatWakeupsPill: React.FC<ForkChatWakeupsPillProps> = ({
 	chatId,
+	isDisabled,
 }) => {
 	const queryClient = useQueryClient();
 	const wakeupsQuery = useQuery(chatWakeups(chatId));
@@ -35,7 +38,7 @@ export const ForkChatWakeupsPill: React.FC<ForkChatWakeupsPillProps> = ({
 			wakeups={wakeupsQuery.data}
 			error={wakeupsQuery.error}
 			onUpdate={(wakeup, status) => mutate({ wakeupId: wakeup.id, status })}
-			pendingId={isPending ? variables?.wakeupId : undefined}
+			isDisabled={isDisabled || isPending}
 			updateError={
 				error && variables
 					? {
@@ -57,20 +60,24 @@ type ForkChatWakeupsPillViewProps = {
 	wakeups: readonly ChatWakeup[] | undefined;
 	error: unknown;
 	onUpdate: (wakeup: ChatWakeup, status: ChatWakeupStatus) => void;
-	pendingId?: string;
+	/** Disables every row's actions, so updates run one at a time. */
+	isDisabled?: boolean;
 	updateError?: WakeupUpdateError;
 };
 
 /**
  * Renders the wake-ups pill. Renders nothing while the wake-ups load or no
- * open wake-up remains, and a warning pill when the first fetch failed.
+ * open wake-up remains, and a warning pill when a fetch failed with no open
+ * wake-up to show.
  */
 export const ForkChatWakeupsPillView: React.FC<
 	ForkChatWakeupsPillViewProps
-> = ({ wakeups, error, onUpdate, pendingId, updateError }) => {
+> = ({ wakeups, error, onUpdate, isDisabled = false, updateError }) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const openWakeups = wakeups?.filter(isOpenWakeup);
-	if (!openWakeups) {
+	// Stay mounted while the popover is open, so canceling the last wake-up
+	// does not unmount the popover that holds keyboard focus.
+	if (!openWakeups || (openWakeups.length === 0 && !isOpen)) {
 		return error ? (
 			<ComposerPillError
 				label="Wake-ups failed to load"
@@ -78,11 +85,6 @@ export const ForkChatWakeupsPillView: React.FC<
 				message={getErrorMessage(error, "Failed to load the wake-ups.")}
 			/>
 		) : null;
-	}
-	// Stay mounted while the popover is open, so canceling the last wake-up
-	// does not unmount the popover that holds keyboard focus.
-	if (openWakeups.length === 0 && !isOpen) {
-		return null;
 	}
 
 	return (
@@ -104,7 +106,7 @@ export const ForkChatWakeupsPillView: React.FC<
 			}
 		>
 			{Boolean(error) && (
-				<p className="mb-0 mt-2 text-content-warning">
+				<p role="status" className="mb-0 mt-2 text-content-warning">
 					{getErrorMessage(error, "Failed to refresh the wake-ups.")}
 				</p>
 			)}
@@ -117,7 +119,7 @@ export const ForkChatWakeupsPillView: React.FC<
 							key={wakeup.id}
 							wakeup={wakeup}
 							onUpdate={onUpdate}
-							isPending={wakeup.id === pendingId}
+							isDisabled={isDisabled}
 							errorMessage={
 								wakeup.id === updateError?.id ? updateError.message : undefined
 							}
@@ -140,10 +142,10 @@ const formatWakeupSchedule = (wakeup: ChatWakeup): string => {
 			return `Cron ${wakeup.cron ?? "Unknown"} (${wakeup.timezone})`;
 		case "delay":
 			return "Once";
-		case "events": {
-			const count = wakeup.events.length;
-			return `Waiting for ${count} ${count === 1 ? "event" : "events"}`;
-		}
+		// The events list keeps entries that were already delivered, so it
+		// is not a count of what remains.
+		case "events":
+			return "Waiting for events";
 	}
 };
 
@@ -152,34 +154,55 @@ const formatWakeupEvent = (event: ChatWakeupEvent): string => {
 		return `child agent ${event.chat_id.slice(0, 8)}`;
 	}
 	if (event.url) {
-		return event.url;
+		return event.on?.length
+			? `${event.url} (${event.on.join(", ")})`
+			: event.url;
 	}
 	return event.type;
+};
+
+/** Explains the status_reason codes the server pauses a wake-up with. */
+const pauseReasonText: Record<string, string> = {
+	daily_run_cap: "daily run limit reached",
+	daily_spend_cap: "daily spend limit reached",
+	org_daily_run_cap: "organization daily run limit reached",
+	org_daily_spend_cap: "organization daily spend limit reached",
+	hook_denied: "a prompt hook denied the prompt",
+	invalid_cron: "invalid cron schedule",
+	invalid_events: "invalid events",
 };
 
 type ForkChatWakeupRowProps = {
 	wakeup: ChatWakeup;
 	onUpdate: (wakeup: ChatWakeup, status: ChatWakeupStatus) => void;
-	isPending: boolean;
+	isDisabled: boolean;
 	errorMessage?: string;
 };
 
 const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 	wakeup,
 	onUpdate,
-	isPending,
+	isDisabled,
 	errorMessage,
 }) => {
 	const schedule = formatWakeupSchedule(wakeup);
+	const now = useTime(() => Date.now(), {
+		disabled: !wakeup.next_run_at,
+		interval: 30_000,
+	});
 	const toggleLabel = wakeup.status === "active" ? "Pause" : "Resume";
 	const statusParts: string[] = [];
 	if (wakeup.status === "active" && wakeup.next_run_at) {
-		statusParts.push(`Next run ${relativeTime(wakeup.next_run_at)}`);
+		// An events wake-up polls at next_run_at; the agent runs only once
+		// an event arrives.
+		const label = wakeup.kind === "events" ? "Next check" : "Next run";
+		statusParts.push(`${label} ${timeFrom(wakeup.next_run_at, now)}`);
 	}
 	if (wakeup.status === "paused") {
-		statusParts.push(
-			wakeup.status_reason ? `Paused: ${wakeup.status_reason}` : "Paused",
-		);
+		const reason = wakeup.status_reason
+			? pauseReasonText[wakeup.status_reason]
+			: undefined;
+		statusParts.push(reason ? `Paused: ${reason}` : "Paused");
 	}
 	const runs = wakeup.run_count === 1 ? "1 run" : `${wakeup.run_count} runs`;
 	statusParts.push(
@@ -194,7 +217,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 					{wakeup.events.map((event, index) => (
 						<li
 							key={`${event.type}-${index}`}
-							className="text-content-secondary"
+							className="wrap-break-word text-content-secondary"
 						>
 							{formatWakeupEvent(event)}
 						</li>
@@ -212,8 +235,8 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={isPending}
-					aria-label={`${toggleLabel} ${schedule}`}
+					disabled={isDisabled}
+					aria-label={`${toggleLabel} ${schedule}: ${wakeup.prompt}`}
 					onClick={() =>
 						onUpdate(wakeup, wakeup.status === "active" ? "paused" : "active")
 					}
@@ -223,15 +246,17 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 				<Button
 					variant="subtle"
 					size="sm"
-					disabled={isPending}
-					aria-label={`Cancel ${schedule}`}
+					disabled={isDisabled}
+					aria-label={`Cancel ${schedule}: ${wakeup.prompt}`}
 					onClick={() => onUpdate(wakeup, "canceled")}
 				>
 					Cancel
 				</Button>
 			</div>
 			{errorMessage && (
-				<p className="mb-0 mt-0 text-content-destructive">{errorMessage}</p>
+				<p role="alert" className="mb-0 mt-0 text-content-destructive">
+					{errorMessage}
+				</p>
 			)}
 		</li>
 	);
