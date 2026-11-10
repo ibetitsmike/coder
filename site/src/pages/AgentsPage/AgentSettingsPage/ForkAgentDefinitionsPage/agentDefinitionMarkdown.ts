@@ -1,7 +1,14 @@
 // This file is fork code: converts agent definition markdown to and from the
 // editor's fields.
 
-import { type Document, isMap, parseDocument } from "yaml";
+import {
+	type Document,
+	isMap,
+	isScalar,
+	parseDocument,
+	Scalar,
+	visit,
+} from "yaml";
 
 /**
  * The editor's fields. frontMatter holds the definition's original YAML
@@ -78,11 +85,36 @@ export const parseAgentDefinitionMarkdown = (
 	};
 };
 
+// An owned value can be an anchor that other keys alias. Copy the value into
+// those aliases first, so changing or removing it leaves them as they were.
+const inlineOwnedAliases = (document: Document) => {
+	const owned = new Set(ownedKeys.map((key) => document.get(key, true)));
+	visit(document, {
+		Alias(_, alias) {
+			const target = alias.resolve(document);
+			if (!isScalar(target) || !owned.has(target)) {
+				return undefined;
+			}
+			const copy = new Scalar(target.value);
+			copy.type = target.type;
+			return copy;
+		},
+	});
+};
+
+// The server's YAML decoder still reads some YAML 1.1 forms, such as dates,
+// as other types, so a plain value must read back as the same string there.
+const readsBackAsString = (value: string) => {
+	const document = parseDocument(value, { version: "1.1" });
+	return document.errors.length === 0 && document.toJS() === value;
+};
+
 /** Builds agent definition markdown from the editor's fields. */
 export const buildAgentDefinitionMarkdown = (
 	values: AgentDefinitionFormValues,
 ): string => {
 	const document = parseFrontMatter(values.frontMatter);
+	inlineOwnedAliases(document);
 	let inserted = 0;
 	for (const key of ownedKeys) {
 		const value = values[key].trim();
@@ -97,12 +129,20 @@ export const buildAgentDefinitionMarkdown = (
 			contents.items.splice(inserted++, 0, document.createPair(key, value));
 		} else {
 			// Setting an existing scalar keeps its node, so its style and
-			// comments survive; YAML quotes the value when it needs to. On
-			// empty front-matter this creates the mapping with this key first.
+			// comments survive. On empty front-matter this creates the mapping
+			// with this key first.
 			document.set(key, value);
 			if (!isMap(contents)) {
 				inserted++;
 			}
+		}
+		const node = document.get(key, true);
+		if (
+			isScalar(node) &&
+			(node.type === undefined || node.type === Scalar.PLAIN) &&
+			!readsBackAsString(value)
+		) {
+			node.type = Scalar.QUOTE_DOUBLE;
 		}
 	}
 	// lineWidth 0 keeps long values on one line instead of folding them.
