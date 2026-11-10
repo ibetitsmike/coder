@@ -229,13 +229,19 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 			}
 		}
 	} else {
+		// One read covers every settled child, however many a long-lived
+		// coordinator has.
+		var waiting map[uuid.UUID]bool
 		for _, child := range children {
-			if child.Archived {
-				continue
-			}
-			done, err := p.childDone(ctx, child)
-			if err != nil {
-				return nil, err
+			done, ok := childStatusDone(child)
+			if !ok {
+				if waiting == nil {
+					waiting, err = p.waitingChildren(ctx, chat)
+					if err != nil {
+						return nil, err
+					}
+				}
+				done = !waiting[child.ID]
 			}
 			if !done {
 				watched = append(watched, child)
@@ -459,12 +465,8 @@ func childDoneRunKey(childID uuid.UUID) string {
 // rule of checkSubagentCompletion), does not wait for events of its own
 // children and does not wait for an answer.
 func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, error) {
-	if child.Archived {
-		return true, nil
-	}
-	switch child.Status {
-	case database.ChatStatusRunning, database.ChatStatusInterrupting, database.ChatStatusPaused:
-		return false, nil
+	if done, ok := childStatusDone(child); ok {
+		return done, nil
 	}
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -484,4 +486,50 @@ func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, erro
 		return false, xerrors.Errorf("check questions of child %s: %w", child.ID, err)
 	}
 	return question == nil, nil
+}
+
+// childStatusDone applies the part of the childDone rule that needs no read:
+// ok is false for a child that settled, which is done only when it has no
+// active events wake-up and no unanswered question.
+func childStatusDone(child database.Chat) (done bool, ok bool) {
+	if child.Archived {
+		return true, true
+	}
+	switch child.Status {
+	case database.ChatStatusRunning, database.ChatStatusInterrupting, database.ChatStatusPaused:
+		return false, true
+	}
+	return false, false
+}
+
+// waitingChildren returns the children of chat that have an active events
+// wake-up or an unanswered question, so they are not done by the rule of
+// childDone.
+func (p *Server) waitingChildren(ctx context.Context, chat database.Chat) (map[uuid.UUID]bool, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := fdb.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
+	if err != nil {
+		return nil, xerrors.Errorf("list wake-ups of child agents: %w", err)
+	}
+	root := chat.ID
+	if chat.RootChatID.Valid {
+		root = chat.RootChatID.UUID
+	}
+	questions, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, root)
+	if err != nil {
+		return nil, xerrors.Errorf("list questions of child agents: %w", err)
+	}
+	waiting := make(map[uuid.UUID]bool, len(ids)+len(questions))
+	for _, id := range ids {
+		waiting[id] = true
+	}
+	for _, question := range questions {
+		if question.ParentChatID.Valid && question.ParentChatID.UUID == chat.ID {
+			waiting[question.ChatID] = true
+		}
+	}
+	return waiting, nil
 }
