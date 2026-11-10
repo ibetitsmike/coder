@@ -59,7 +59,9 @@ export const useForkFamilyCapacity = (
 	const { data } = useQuery({
 		...forkChatFamilyCapacity(rootID),
 		enabled,
-		...(parentID ? { refetchInterval: false, refetchOnMount: false } : {}),
+		...(parentID
+			? { refetchInterval: false, refetchOnMount: false, retryOnMount: false }
+			: {}),
 	});
 	if (!enabled || !data) {
 		return {};
@@ -84,7 +86,7 @@ type ForkFamilyLiveLimitChipProps = {
 	liveLimit: ForkFamilyCapacity["liveLimit"];
 };
 
-/** Renders nothing unless `liveLimit` is set. */
+/** Tells the user why a family cannot spawn more subagents right now. */
 export const ForkFamilyLiveLimitChip: React.FC<
 	ForkFamilyLiveLimitChipProps
 > = ({ liveLimit }) => {
