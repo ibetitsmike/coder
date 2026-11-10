@@ -34,7 +34,9 @@ const (
 	subagentIsolationWorktree = "worktree"
 
 	maxWorktreeBranchSlugBytes = 40
-	worktreeCleanupTimeout     = 30 * time.Second
+	// worktreeCleanupTimeout matches the agent's worktree request timeout,
+	// since removing a large worktree can take minutes.
+	worktreeCleanupTimeout = 10 * time.Minute
 )
 
 type forkSpawnIsolationArgs struct {
