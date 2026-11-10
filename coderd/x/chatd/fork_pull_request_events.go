@@ -92,14 +92,15 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	if err != nil {
 		return wakeupEvent{}, xerrors.Errorf("read pull request %s: %w", url, err)
 	}
-	if activity.State != gitprovider.PRStateOpen {
-		return wakeupEvent{}, xerrors.Errorf("pull request %s is already %s", url, activity.State)
-	}
 	// The provider counts events in the same second as since, so this read
 	// can already list some. They may be just before or just after since,
 	// and count as the baseline, so a poll does not report them. Events of a
-	// later second happened during this read and are left to the poll.
+	// later second happened during this read and are left to the poll, and
+	// so is a closure.
 	start := since.Truncate(time.Second)
+	if activity.State != gitprovider.PRStateOpen && !activity.ClosedAt.After(start) {
+		return wakeupEvent{}, xerrors.Errorf("pull request %s is already %s", url, activity.State)
+	}
 	var seen []string
 	for _, e := range slices.Concat(activity.Reviews, activity.Comments) {
 		if !e.CreatedAt.After(start) {
