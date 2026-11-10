@@ -6,6 +6,7 @@ import { HourglassIcon } from "lucide-react";
 import { useQuery } from "react-query";
 import { forkChatFamilyCapacity } from "#/api/queries/forkChatFamily";
 import type { Chat, ChatStatus } from "#/api/typesGenerated";
+import { Badge } from "#/components/Badge/Badge";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { asNonEmptyString } from "../../ChatConversation/blockUtils";
 import {
@@ -94,12 +95,14 @@ export const ForkFamilyLiveLimitChip: React.FC<
 		return null;
 	}
 	return (
-		<span
+		<Badge
+			size="sm"
+			variant="warning"
+			className="shrink-0 tabular-nums"
 			title="This family is at its live subagent limit. It cannot spawn another subagent until enough subagents finish."
-			className="shrink-0 rounded-sm bg-surface-tertiary px-1 text-[11px] leading-4 tabular-nums text-content-warning"
 		>
 			live {liveLimit.live}/{liveLimit.max}
 			<span className="sr-only"> subagents at limit</span>
-		</span>
+		</Badge>
 	);
 };

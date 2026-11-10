@@ -1,14 +1,14 @@
 import { queryOptions } from "react-query";
 import { getForkChatFamilyCapacity } from "#/api/forkChatFamily";
 
-/** Query key for the subagent capacity of the family under a root chat. */
+/**
+ * Keyed by the family root, never a descendant, so every row of a family
+ * shares one cache entry.
+ */
 export const forkChatFamilyCapacityKey = (rootChatId: string) =>
 	["chats", "fork-family", rootChatId] as const;
 
-/**
- * Query options for the subagent capacity of the family under a root chat.
- * No event announces a capacity change, so the query polls.
- */
+/** No event announces a capacity change, so the query polls. */
 export const forkChatFamilyCapacity = (rootChatId: string) =>
 	queryOptions({
 		queryKey: forkChatFamilyCapacityKey(rootChatId),

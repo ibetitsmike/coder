@@ -4,7 +4,10 @@
 import { API } from "./api";
 import type { ForkChatFamilyCapacity } from "./typesGenerated";
 
-/** Fetches the subagent capacity of the family under a root chat. */
+/**
+ * Answers only for a root chat the caller owns: a child chat gets 400 and
+ * another user's root gets 404.
+ */
 export const getForkChatFamilyCapacity = async (
 	rootChatId: string,
 	signal?: AbortSignal,
