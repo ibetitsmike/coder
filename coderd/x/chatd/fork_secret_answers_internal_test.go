@@ -184,7 +184,7 @@ func TestSubstituteExecuteSecretAnswers(t *testing.T) {
 	}
 	// Every character here ends or escapes a shell word or runs code when
 	// the value is spliced into the command.
-	const value = "a'b\"c;d|echo INJECTED&e*\nf\\g"
+	const value = "a'b\"c$(echo INJECTED);d`echo INJECTED`|e&f*\ng\\h"
 	answers := []forkdb.ChatSecretAnswer{{ToolCallID: "call_other", Value: "unused-value"}, {ToolCallID: "call_s", Value: value}}
 	// The model writes the placeholder bare, in double quotes and in
 	// single quotes.
@@ -235,13 +235,14 @@ func TestSubstituteExecuteSecretAnswers(t *testing.T) {
 	require.NoError(t, err, decoded.Command)
 	require.Equal(t, self[0].Value, string(out))
 
-	// Bash evaluates a variable again in arithmetic, as in $(( )), and in
-	// array subscripts, so a value with $ or a backtick could run there.
-	for _, unsafe := range []string{"a[$(echo INJECTED)0]", "a`echo INJECTED`b"} {
-		_, err = substituteExecuteSecretAnswers(`{"command":"echo $(( {{secret:call_a}} ))"}`,
-			[]forkdb.ChatSecretAnswer{{ToolCallID: "call_a", Value: unsafe}})
-		require.ErrorContains(t, err, "the value of {{secret:call_a}} holds $ or a backtick")
-	}
+	// Bash runs the subscript of an array reference in a value that it
+	// evaluates as arithmetic, as in $(( )).
+	arithmetic := []forkdb.ChatSecretAnswer{{ToolCallID: "call_a", Value: "a[$(echo INJECTED)0]"}, {ToolCallID: "call_b", Value: "p[w]`d`"}}
+	_, err = substituteExecuteSecretAnswers(`{"command":"echo $(( {{secret:call_a}} ))"}`, arithmetic)
+	require.ErrorContains(t, err, "the value of {{secret:call_a}} holds [ and then $ or a backtick")
+	_, err = substituteExecuteSecretAnswers(`{"command":"echo {{secret:call_b}}"}`, arithmetic)
+	require.Error(t, err)
+	require.False(t, secretArithmeticUnsafe("p$w[d]"), "a $ before the subscript is not expanded")
 
 	unchanged := `{"command":"echo hi"}`
 	input, err = substituteExecuteSecretAnswers(unchanged, answers)
