@@ -3,6 +3,7 @@
 
 import { UploadIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Alert, AlertDescription, AlertTitle } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
@@ -50,7 +51,10 @@ type ForkAgentDefinitionEditorState = {
 	submitError?: SkillErrorDisplay;
 	isSubmitting: boolean;
 	/** Call onSettled when the request finishes so the form can submit again. */
-	onSubmit: (content: string, onSettled: () => void) => void;
+	onSubmit: (
+		submission: { name: string; content: string },
+		onSettled: () => void,
+	) => void;
 	onClose: () => void;
 };
 
@@ -172,7 +176,9 @@ const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 			buildContent={(values) =>
 				buildAgentDefinitionMarkdown({ ...values, model, extraFrontMatter })
 			}
-			onSubmit={(_values, content, onSettled) => onSubmit(content, onSettled)}
+			onSubmit={(values, content, onSettled) =>
+				onSubmit({ name: values.name, content }, onSettled)
+			}
 		>
 			<DialogHeader className="px-6 pt-6">
 				<DialogTitle>
@@ -210,7 +216,7 @@ const AgentDefinitionModelField: React.FC<AgentDefinitionModelFieldProps> = ({
 	model,
 	onModelChange,
 }) => {
-	const { isBusy } = useSkillEditorContext();
+	const { form, isBusy } = useSkillEditorContext();
 	const modelId = useId();
 	const hintId = useId();
 	return (
@@ -219,7 +225,12 @@ const AgentDefinitionModelField: React.FC<AgentDefinitionModelFieldProps> = ({
 			<Input
 				id={modelId}
 				value={model}
-				onChange={(event) => onModelChange(event.target.value)}
+				onChange={(event) => {
+					// The size limit counts the model, so validate again once
+					// the form renders with the new value.
+					flushSync(() => onModelChange(event.target.value));
+					void form.validateForm();
+				}}
 				placeholder="The chat's model"
 				disabled={isBusy}
 				aria-describedby={hintId}
@@ -285,22 +296,24 @@ const AgentDefinitionImport: React.FC<AgentDefinitionImportProps> = ({
 			return;
 		}
 		setIsReadingFile(true);
-		const imported = await readAgentDefinitionFile(file);
-		if (imported.values) {
-			onImport(imported.values);
+		const { values, error } = await readAgentDefinitionFile(file);
+		if (values) {
+			// Render the imported model first, so setValues validates the
+			// size with it.
+			flushSync(() => onImport(values));
 			// An edited definition keeps its name, which the API cannot change.
 			await form.setValues({
 				...form.values,
-				name: mode === "edit" ? form.values.name : imported.values.name,
-				description: imported.values.description,
-				body: imported.values.body,
+				name: mode === "edit" ? form.values.name : values.name,
+				description: values.description,
+				body: values.body,
 			});
 			await form.setTouched(
 				{ name: mode === "create", description: true, body: true },
 				false,
 			);
 		}
-		setImportError(imported.error);
+		setImportError(error);
 		setIsReadingFile(false);
 	};
 
