@@ -320,6 +320,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	pending := 0
 	// Whether one of them is a pull request, which is polled less often.
 	pullRequestPending := false
+	// A child's status has no time it became done, so a final poll that
+	// runs well after the expiry cannot tell whether the child was done by
+	// then and leaves children out.
+	childrenCutOff := eventsFinalPoll(wakeup) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
 	for _, event := range events {
 		switch event.Type {
 		case wakeupEventChildDone:
@@ -332,7 +336,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				continue
 			}
 			child := rows[index].Chat
-			if next == nil {
+			if next == nil && !childrenCutOff {
 				done, err := p.childDone(ctx, child)
 				if err != nil {
 					return err

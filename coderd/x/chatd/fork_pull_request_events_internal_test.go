@@ -187,6 +187,16 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.NoError(t, json.Unmarshal(f.wakeup(t, seen.ID).Events, &seenEvents))
 	require.Equal(t, []string{testPullRequestURL + "#pullrequestreview-1"}, seenEvents[0].Seen)
 
+	// CI that settled during the baseline read keeps the start of the read
+	// as its baseline time, so the first poll reports it.
+	settledDuringRead := openPullRequest(gitprovider.CheckStateSuccess)
+	settledDuringRead.Checks.UpdatedAt = wakeupTestSlot.Add(time.Second)
+	fake.set(settledDuringRead, nil)
+	settled, _ := waitCall(uuid.New(), waitForEventsArgs{PullRequestURL: testPullRequestURL}, false)
+	var settledEvents []wakeupEvent
+	require.NoError(t, json.Unmarshal(f.wakeup(t, settled.ID).Events, &settledEvents))
+	require.Equal(t, wakeupTestSlot, settledEvents[0].ChecksUpdatedAt)
+
 	// A replay returns the stored baseline without reading the pull request.
 	fake.set(merged, nil)
 	calls := fake.callCount()
@@ -198,7 +208,7 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, coordinator.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 4, "refused calls create nothing")
+	require.Len(t, rows, 5, "refused calls create nothing")
 }
 
 // pullRequestEvents returns the events of a wake-up that watches the test
@@ -572,6 +582,99 @@ func TestWakeupPullRequestPollsUntilExpiry(t *testing.T) {
 				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
 			}
 			got = f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+			require.Equal(t, tc.wantReason, got.StatusReason.String)
+		})
+	}
+}
+
+// A failed final poll is retried until pullRequestFinalRetryWindow after the
+// expiry, and the retry reports what happened until the expiry.
+func TestWakeupPullRequestFinalPollRetry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		retryAfter time.Duration
+		wantRetry  bool
+	}{
+		{name: "WithinWindow", retryAfter: 10 * time.Minute, wantRetry: true},
+		{name: "PastWindow", retryAfter: pullRequestFinalRetryWindow + time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			chat := f.createWakeupChat(t)
+			// insertWakeup schedules the run at wakeupTestSlot, so this is the
+			// final poll.
+			expiresAt := wakeupTestSlot
+			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				Events:    pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+				ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+			retryAt := expiresAt.Add(tc.retryAfter)
+			fake := &fakePullRequestActivity{err: &gitprovider.RateLimitError{RetryAfter: retryAt}}
+			worker.server.forkPullRequestActivity = fake.fetch
+
+			worker.wakeupOnce(ctx, expiresAt.Add(time.Second))
+			got := f.wakeup(t, wakeup.ID)
+			if !tc.wantRetry {
+				require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+				require.Equal(t, "expired", got.StatusReason.String)
+				return
+			}
+			require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+			require.True(t, retryAt.Equal(got.NextRunAt.Time), "next run %s", got.NextRunAt.Time)
+
+			merged := openPullRequest(gitprovider.CheckStatePending)
+			merged.State, merged.ClosedAt = gitprovider.PRStateMerged, expiresAt.Add(-time.Minute)
+			fake.set(merged, nil)
+			worker.wakeupOnce(ctx, retryAt.Add(time.Second))
+			require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+			got = f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+			require.Equal(t, "done", got.StatusReason.String)
+		})
+	}
+}
+
+// A done child counts at a final poll that runs on time, but not at one that
+// runs well after the expiry, when the child may have finished after it.
+func TestWakeupFinalPollChildren(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		late        time.Duration
+		wantMessage bool
+		wantReason  string
+	}{
+		{name: "OnTime", late: time.Second, wantMessage: true, wantReason: "done"},
+		{name: "Late", late: time.Minute, wantReason: "expired"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			chat := f.createWakeupChat(t)
+			child := f.createChildAgent(t, chat, "child", database.ChatStatusWaiting)
+			// insertWakeup schedules the run at wakeupTestSlot, so this is the
+			// final poll.
+			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				Events:    childDoneEvents(child),
+				ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(tc.late))
+			if tc.wantMessage {
+				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+			} else {
+				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+			}
+			got := f.wakeup(t, wakeup.ID)
 			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 			require.Equal(t, tc.wantReason, got.StatusReason.String)
 		})
