@@ -30,6 +30,10 @@ import (
 
 const maxWorktreeNameBytes = 128
 
+// worktreeRequestTimeout bounds a worktree request. Checking out or removing
+// a large tree can outlast the agent API server's 20 second WriteTimeout.
+const worktreeRequestTimeout = 10 * time.Minute
+
 // worktreeAPI creates and removes git worktrees under root, laid out as
 // <root>/<repo>/<name>.
 type worktreeAPI struct {
@@ -60,9 +64,21 @@ func newWorktreeAPI(logger slog.Logger, opts ...Option) *worktreeAPI {
 
 func (a *worktreeAPI) routes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(a.extendDeadline)
 	r.Post("/", a.handleCreate)
 	r.Delete("/", a.handleDelete)
 	return r
+}
+
+func (a *worktreeAPI) extendDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if err := http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(worktreeRequestTimeout)); err != nil {
+			a.logger.Warn(r.Context(), "extend worktree request write deadline", slog.Error(err))
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), worktreeRequestTimeout)
+		defer cancel()
+		next.ServeHTTP(rw, r.WithContext(ctx))
+	})
 }
 
 // gitError carries git's trimmed stderr so responses can explain failures.
@@ -187,6 +203,11 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 	}
 	if rel, err := filepath.Rel(top, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("repository %s contains the worktree root %s; worktrees must live outside the repository", top, root), nil)
+		return
+	}
+	// MkdirAll keeps the mode of an existing root.
+	if err := os.Chmod(root, 0o700); err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to restrict the worktree root permissions.", err)
 		return
 	}
 	parent := filepath.Join(root, repoName)
@@ -387,13 +408,17 @@ func (a *worktreeAPI) countModuleLocalCommits(ctx context.Context, modules strin
 		if !d.IsDir() {
 			return nil
 		}
-		if d.Name() == "objects" || d.Name() == "refs" || d.Name() == "logs" {
-			return fs.SkipDir
-		}
-		if _, err := os.Stat(filepath.Join(p, "HEAD")); err != nil || !dirExists(filepath.Join(p, "objects")) {
+		if !isGitDir(p) {
+			// A submodule named objects, refs or logs is a git dir itself
+			// and was counted above.
+			if (d.Name() == "objects" || d.Name() == "refs" || d.Name() == "logs") && isGitDir(filepath.Dir(p)) {
+				return fs.SkipDir
+			}
 			return nil
 		}
-		out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--not", "--remotes")
+		// --reflog keeps commits made on a detached HEAD that was then
+		// moved back to the recorded commit.
+		out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--reflog", "--not", "--remotes")
 		if err != nil {
 			return err
 		}
@@ -405,6 +430,11 @@ func (a *worktreeAPI) countModuleLocalCommits(ctx context.Context, modules strin
 		return nil
 	})
 	return sum, err
+}
+
+func isGitDir(p string) bool {
+	_, err := os.Stat(filepath.Join(p, "HEAD"))
+	return err == nil && dirExists(filepath.Join(p, "objects"))
 }
 
 func dirExists(p string) bool {
