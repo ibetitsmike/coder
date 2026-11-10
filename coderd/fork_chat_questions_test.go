@@ -269,6 +269,13 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, queued, 1, "the answer is reported again")
 
+	// An ID that the client escapes reaches the route as it is stored.
+	for _, callID := range []string{"call/a%41", "call a%41"} {
+		_, escaped, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+		ask(escaped, callID, `[{"header": "Token", "question": "Paste the API token.", "secret": true}]`)
+		require.NoError(t, client.AnswerChatSecretQuestion(ctx, escaped.ID, callID, codersdk.ChatSecretAnswerRequest{Value: secret}), callID)
+	}
+
 	// A normal question still takes a normal answer.
 	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
 	require.NoError(t, err)
