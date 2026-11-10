@@ -423,7 +423,7 @@ A relative `workdir` of `execute`, and a relative path of `read_file`, `write_fi
 An absolute path or an absolute `workdir` still reaches the rest of the workspace.
 With `fork-nested-subagents`, a `shared` child of the worktree child works in the same worktree, and its system message says so.
 
-`repo_path` or `base_branch` fails with `repo_path and base_branch need isolation worktree` unless the call sets `isolation: "worktree"`, or sets no `isolation` and the custom type's definition sets `isolation: worktree`.
+`repo_path` or `base_branch` fails with `create child chat: repo_path and base_branch need isolation worktree` unless the call sets `isolation: "worktree"`, or sets no `isolation` and the custom type's definition sets `isolation: worktree`.
 `isolation: "worktree"` fails for a `computer_use` child, in a chat without a workspace, and when you omit `repo_path`, the parent works in no worktree, and the workspace agent has no directory.
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
@@ -451,7 +451,7 @@ When Coder Agents can't read the workspace, the result has `workspace_error` ins
 While the experiment is on, the web UI shows **Workspace:** and the name on the `spawn_agent` and `wait_agent` cards of the child, or the `workspace_error` text.
 
 `isolation: "workspace"` fails for a `computer_use` child with `isolation workspace is not supported for computer use agents`, and in a chat without a workspace with `isolation workspace copies this chat's workspace, and this chat has none`.
-`repo_path` or `base_branch` with it fails with `repo_path and base_branch need isolation worktree`.
+`repo_path` or `base_branch` with it fails with `create child chat: repo_path and base_branch need isolation worktree`.
 When the build fails, or the agent or its startup scripts don't get ready, `spawn_agent` fails with `create the child's workspace: <result>`, where `<result>` is the `create_workspace` result.
 It fails the same way before any build when the parent workspace's template doesn't allow Coder Agents or has an externally managed agent, so spawn the child with `isolation: "shared"` or `isolation: "worktree"` in such a workspace.
 After a failed spawn, Coder Agents archives the child and tries once to stop the workspace, if it created one, but it doesn't retry a failed archive or stop and never deletes the workspace.
@@ -567,7 +567,7 @@ Checked against fork `main` at `50e9121c3b`:
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
-- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, result fields, `:152-158`.
+- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.
   An invalid definition refused by the API, `coderd/fork_agent_definitions.go:206`, `:229`, `:244-254`, and `invalid` in the workspace's context, `agent/agentcontext/fork_agents.go:122-130`.
   Worktree creation and its errors, `fork_isolation.go:189-237`, `:262-264`, from the worktree that the parent works in when `repo_path` is omitted, `:198-205`, removed only when the spawn fails, `:240-253`, called at spawn, `coderd/x/chatd/fork_subagents.go:294`, `:335-348`.
