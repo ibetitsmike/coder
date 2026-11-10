@@ -42,8 +42,9 @@ func TestReplaceUnreportedSecretAnswer(t *testing.T) {
 	}
 	require.NoError(t, fdb.InsertChatSecretAnswer(ctx, answer("first-value")))
 
-	require.NoError(t, replaceUnreportedSecretAnswer(ctx, db, answer("second-value")),
-		"no message reports the answer, so a new answer replaces it")
+	reportQueued, err := replaceUnreportedSecretAnswer(ctx, db, answer("second-value"))
+	require.NoError(t, err, "no message reports the answer, so a new answer replaces it")
+	require.False(t, reportQueued)
 	dbgen.ChatMessage(t, db, database.ChatMessage{
 		ChatID:        chat.ID,
 		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
@@ -54,8 +55,8 @@ func TestReplaceUnreportedSecretAnswer(t *testing.T) {
 			Valid:      true,
 		},
 	})
-	require.ErrorIs(t, replaceUnreportedSecretAnswer(ctx, db, answer("third-value")), errSecretAnswerReported,
-		"a delivered message reports the answer")
+	_, err = replaceUnreportedSecretAnswer(ctx, db, answer("third-value"))
+	require.ErrorIs(t, err, errSecretAnswerReported, "a delivered message reports the answer")
 	answers, err := fdb.GetChatSecretAnswersByChatID(ctx, chat.ID)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)

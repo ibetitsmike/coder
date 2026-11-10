@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -168,8 +169,9 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		Value:      req.Value,
 	}
 	err = fdb.InsertChatSecretAnswer(ctx, insert)
+	reportQueued := false
 	if database.IsUniqueViolation(err) {
-		err = replaceUnreportedSecretAnswer(ctx, api.Database, insert)
+		reportQueued, err = replaceUnreportedSecretAnswer(ctx, api.Database, insert)
 		if errors.Is(err, errSecretAnswerReported) || database.IsUniqueViolation(err) {
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
 			return
@@ -178,6 +180,10 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.Logger.Error(ctx, "insert secret answer", slog.F("chat_id", chat.ID))
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{Message: "Failed to store the answer."})
+		return
+	}
+	if reportQueued {
+		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -205,8 +211,10 @@ var errSecretAnswerReported = xerrors.New("the secret answer is reported")
 // queued message that reports an answer, and a failed send leaves none.
 // The chat row lock serializes it with the queue's promotion, so the
 // message cannot be delivered between the check and the replacement.
-func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg forkdb.InsertChatSecretAnswerParams) error {
-	return forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+// reportQueued is true when a queued message already reports the replaced
+// answer, so the caller must not queue another.
+func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg forkdb.InsertChatSecretAnswerParams) (reportQueued bool, err error) {
+	err = forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
 		if _, err := tx.GetChatByIDForUpdate(ctx, arg.ChatID); err != nil {
 			return err
 		}
@@ -223,13 +231,24 @@ func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg f
 			return err
 		}
 		if queued {
-			return errSecretAnswerReported
+			// Reads skip an answer past its TTL before dbpurge deletes
+			// it, so an expired answer is replaced like an unreported one,
+			// and the queued message reports the new answer.
+			live, err := secretAnswerLive(ctx, ftx, arg.ChatID, arg.ToolCallID)
+			if err != nil {
+				return err
+			}
+			if live {
+				return errSecretAnswerReported
+			}
 		}
 		if err := ftx.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: arg.ChatID, ToolCallID: arg.ToolCallID}); err != nil {
 			return err
 		}
+		reportQueued = queued
 		return ftx.InsertChatSecretAnswer(ctx, arg)
 	}, nil)
+	return reportQueued, err
 }
 
 // secretAnswerQueued reports whether a queued message of the chat reports
@@ -248,6 +267,18 @@ func secretAnswerQueued(ctx context.Context, db database.Store, chatID uuid.UUID
 		}
 	}
 	return false, nil
+}
+
+// secretAnswerLive reports whether the stored answer to the question of
+// toolCallID is within its TTL.
+func secretAnswerLive(ctx context.Context, fdb forkdb.Store, chatID uuid.UUID, toolCallID string) (bool, error) {
+	answers, err := fdb.GetChatSecretAnswersByChatID(ctx, chatID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(answers, func(answer forkdb.ChatSecretAnswer) bool {
+		return answer.ToolCallID == toolCallID
+	}), nil
 }
 
 // rejectSecretQuestionAnswer refuses every message, new or edited, to a chat
