@@ -338,6 +338,9 @@ func (*Watcher) collectDirs(roots []ScanRoot) map[string]struct{} {
 		}
 		out[root.Path] = struct{}{}
 		addAgentWatchDirs(root.Path, out)
+		// Watch pack roots and their declared containers so
+		// plugin pack changes re-resolve (fork_plugins.go).
+		addPackWatchDirs(root.Path, out)
 		for _, container := range skillContainersFor(root.Path) {
 			out[container] = struct{}{}
 			entries, err := os.ReadDir(container)

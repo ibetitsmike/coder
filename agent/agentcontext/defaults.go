@@ -11,6 +11,10 @@ func defaultBuiltinRoots() []string {
 		// User-level Coder config.
 		"~/.coder",
 		"~/.coder/skills",
+		// Installed plugin packs materialize here (fork
+		// plugin packs, PRD 6.7); fork_plugins.go reads their
+		// manifests.
+		"~/.coder/plugins",
 		// Claude Code plugin cache, picked up by the plugin
 		// RFC follow-up. v1 ignores plugin manifests, but
 		// watching the directory now prevents a surprise

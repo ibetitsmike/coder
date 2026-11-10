@@ -313,6 +313,7 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 		r.emitSkillsFromContainer(container, root, out, seenID)
 	}
 	r.emitAgents(root, out, seenID)
+	r.emitPacks(root, out, seenID)
 }
 
 // discoverTopLevelFiles classifies the instruction files and
