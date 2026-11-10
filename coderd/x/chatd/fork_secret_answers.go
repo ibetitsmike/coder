@@ -9,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -26,6 +28,10 @@ import (
 // pass their input to another model, such as spawn_agent and message_agent,
 // keep the placeholder.
 var secretInputTools = []string{chattool.ExecuteToolName, chattool.WriteFileToolName, chattool.EditFilesToolName}
+
+// secretMediaWithheldNote replaces the image or document of a tool result
+// while the chat holds secret answers.
+const secretMediaWithheldNote = "The media output of this tool is withheld while this chat holds secret answers."
 
 // secretPlaceholder is the text the model writes where a secret answer
 // belongs, and the text that replaces the value in tool output.
@@ -128,12 +134,26 @@ func (t secretAnswerTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	if len(answers) == 0 {
 		return t.AgentTool.Run(ctx, call)
 	}
-	if t.substitute {
+	switch {
+	case t.Info().Name == chattool.ExecuteToolName:
+		input, err := substituteExecuteSecretAnswers(call.Input, answers)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
+		call.Input = input
+	case t.substitute:
 		call.Input = substituteSecretAnswers(call.Input, answers)
 	}
 	resp, err := t.AgentTool.Run(ctx, call)
 	resp.Content = scrubSecretAnswers(resp.Content, answers)
 	resp.Metadata = scrubSecretAnswers(resp.Metadata, answers)
+	if len(resp.Data) > 0 {
+		// An image or a document can show a value that no scrub finds.
+		resp.Data = nil
+		resp.Type = "text"
+		resp.MediaType = ""
+		resp.Content = strings.TrimSpace(resp.Content + "\n" + secretMediaWithheldNote)
+	}
 	if err != nil {
 		if scrubbed := scrubSecretAnswers(err.Error(), answers); scrubbed != err.Error() {
 			err = errors.New(scrubbed)
@@ -160,9 +180,107 @@ func substituteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) st
 	return input
 }
 
-// scrubSecretAnswers replaces each value in text, as is and as escaped in a
-// JSON string, with its placeholder. Longer values go first, so a value that
-// contains another one is replaced whole.
+// substituteExecuteSecretAnswers rewrites the command of an execute input
+// so the shell never parses a value as code: the command starts with a
+// shell-quoted assignment of each value it uses, and each placeholder
+// becomes an expansion of that variable.
+func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) (string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(input), &args); err != nil {
+		return input, nil
+	}
+	command, ok := args["command"].(string)
+	if !ok {
+		return input, nil
+	}
+	var assignments strings.Builder
+	var vars []secretShellVariable
+	for i, answer := range answers {
+		placeholder := secretPlaceholder(answer.ToolCallID)
+		if !strings.Contains(command, placeholder) {
+			continue
+		}
+		name := fmt.Sprintf("CODER_SECRET_ANSWER_%d", i+1)
+		vars = append(vars, secretShellVariable{placeholder: placeholder, name: name})
+		_, _ = fmt.Fprintf(&assignments, "%s=%s; ", name, shellQuote(answer.Value))
+	}
+	if len(vars) == 0 {
+		return input, nil
+	}
+	args["command"] = assignments.String() + expandSecretShellVariables(command, vars)
+	data, err := json.Marshal(args)
+	if err != nil {
+		return "", xerrors.Errorf("encode the execute input: %w", err)
+	}
+	return string(data), nil
+}
+
+type secretShellVariable struct {
+	placeholder string
+	name        string
+}
+
+// expandSecretShellVariables replaces each placeholder in command with an
+// expansion of its variable that keeps the value one word in the quotes
+// around it. The quote scan skips backslash escapes but not command
+// substitutions or here-documents. A wrong guess there only splits the
+// value or keeps the expansion as text; the shell never runs the value.
+func expandSecretShellVariables(command string, vars []secretShellVariable) string {
+	var out strings.Builder
+	var quote byte
+	for i := 0; i < len(command); {
+		if v, ok := matchSecretShellVariable(command[i:], vars); ok {
+			switch quote {
+			case '"':
+				out.WriteString("${" + v.name + "}")
+			case '\'':
+				out.WriteString(`'"${` + v.name + `}"'`)
+			default:
+				out.WriteString(`"${` + v.name + `}"`)
+			}
+			i += len(v.placeholder)
+			continue
+		}
+		c := command[i]
+		switch {
+		case c == '\\' && quote != '\'' && i+1 < len(command):
+			out.WriteString(command[i : i+2])
+			i += 2
+			continue
+		case c == quote:
+			quote = 0
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote = c
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
+}
+
+func matchSecretShellVariable(text string, vars []secretShellVariable) (secretShellVariable, bool) {
+	for _, v := range vars {
+		if strings.HasPrefix(text, v.placeholder) {
+			return v, true
+		}
+	}
+	return secretShellVariable{}, false
+}
+
+// shellQuote returns value as one single-quoted POSIX shell word.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// secretFragmentMinBytes is the shortest prefix or suffix of a value that
+// scrubSecretAnswers replaces. Tools that cap their output can cut a value,
+// so the whole value no longer matches.
+const secretFragmentMinBytes = 8
+
+// scrubSecretAnswers replaces each value in text with its placeholder: as
+// is, shell-quoted, and as escaped in a JSON string, then each remaining
+// prefix or suffix of a form of at least secretFragmentMinBytes. Longer
+// values go first, so a value that contains another one is replaced whole.
 func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 	if text == "" {
 		return text
@@ -176,11 +294,64 @@ func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 			continue
 		}
 		placeholder := secretPlaceholder(answer.ToolCallID)
-		for _, form := range []string{answer.Value, jsonStringContent(answer.Value), jsonStringContentNoHTMLEscape(answer.Value)} {
+		var forms []string
+		for _, value := range []string{answer.Value, shellQuote(answer.Value)} {
+			forms = append(forms, value, jsonStringContent(value), jsonStringContentNoHTMLEscape(value))
+		}
+		for _, form := range forms {
 			text = strings.ReplaceAll(text, form, placeholder)
+		}
+		for _, form := range forms {
+			text = scrubSecretFragments(text, form, placeholder)
 		}
 	}
 	return text
+}
+
+// scrubSecretFragments replaces each run of text that starts like form, and
+// then each run that ends like it, for at least secretFragmentMinBytes, with
+// placeholder.
+func scrubSecretFragments(text, form, placeholder string) string {
+	if len(form) < secretFragmentMinBytes {
+		return text
+	}
+	head := form[:secretFragmentMinBytes]
+	var out strings.Builder
+	for {
+		i := strings.Index(text, head)
+		if i < 0 {
+			out.WriteString(text)
+			break
+		}
+		n := len(head)
+		for n < len(form) && i+n < len(text) && text[i+n] == form[n] {
+			n++
+		}
+		out.WriteString(text[:i])
+		out.WriteString(placeholder)
+		text = text[i+n:]
+	}
+
+	text = out.String()
+	tail := form[len(form)-secretFragmentMinBytes:]
+	out.Reset()
+	start := 0
+	for {
+		j := strings.Index(text[start:], tail)
+		if j < 0 {
+			out.WriteString(text[start:])
+			break
+		}
+		end := start + j + len(tail)
+		n := len(tail)
+		for n < len(form) && end-n-1 >= start && text[end-n-1] == form[len(form)-1-n] {
+			n++
+		}
+		out.WriteString(text[start : end-n])
+		out.WriteString(placeholder)
+		start = end
+	}
+	return out.String()
 }
 
 // jsonStringContent returns value as json.Marshal writes it inside a JSON

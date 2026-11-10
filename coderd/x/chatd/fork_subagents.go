@@ -102,15 +102,26 @@ func withSubagentResume(ctx context.Context) context.Context {
 // SendMessage runs the prompt hooks, and SendMessage calls it again with inTx
 // in the transaction that resumes target. That call takes the lock that
 // serializes the family's spawns, so a concurrent spawn cannot pass the same
-// count.
+// count. It also refuses any such send to a target whose pending question is
+// secret, because the message would answer the question without the value.
 func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
-	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
-		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
+	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid {
 		return nil
 	}
 	fdb, err := forkdb.From(store)
 	if err != nil {
 		return xerrors.Errorf("fork queries: %w", err)
+	}
+	question, err := fdb.GetPendingChatDescendantQuestion(ctx, target.ID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return xerrors.Errorf("get pending question of chat %s: %w", target.ID, err)
+	case question.Secret():
+		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat")
+	}
+	if target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError {
+		return nil
 	}
 	limits, err := p.subagentLimits(ctx, fdb, target.OrganizationID)
 	if err != nil {
