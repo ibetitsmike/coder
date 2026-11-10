@@ -818,7 +818,12 @@ describe("ForkAgentDefinitionsPage", () => {
 		const toggle = await screen.findByRole("switch", {
 			name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
 		});
+		const { content: _content, ...MockSavedMetadata } = MockSavedDefinition;
 		queryClient.setQueryData(detailKey, MockSavedDefinition);
+		queryClient.setQueryData(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			[MockSavedMetadata],
+		);
 		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
 		await user.click(toggle);
 
@@ -830,6 +835,11 @@ describe("ForkAgentDefinitionsPage", () => {
 			).toBe("error"),
 		);
 		expect(queryClient.getQueryData(detailKey)).toEqual(MockSavedDefinition);
+		expect(
+			queryClient.getQueryData(
+				userAgentDefinitionsKey(MockDefaultOrganization.id),
+			),
+		).toEqual([MockSavedMetadata]);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
