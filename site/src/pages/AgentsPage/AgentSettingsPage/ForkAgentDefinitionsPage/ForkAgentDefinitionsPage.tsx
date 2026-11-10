@@ -8,6 +8,7 @@ import {
 	getMemberOrganizations,
 	useDashboard,
 } from "#/modules/dashboard/useDashboard";
+import { SectionHeader } from "../../components/SectionHeader";
 import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
 
 const ForkAgentDefinitionsPage: React.FC = () => {
@@ -26,7 +27,12 @@ const ForkAgentDefinitionsPage: React.FC = () => {
 		memberOrganizations.find((org) => org.is_default) ??
 		memberOrganizations.at(0);
 	if (!organization) {
-		return null;
+		return (
+			<SectionHeader
+				label="Agent definitions"
+				description="Join an organization to store agent definitions."
+			/>
+		);
 	}
 
 	return (

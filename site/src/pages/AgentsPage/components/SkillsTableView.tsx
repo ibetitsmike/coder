@@ -112,7 +112,7 @@ export type SkillsTableViewProps = {
 	deleteState?: SkillDeleteState;
 };
 
-/** Formats an updated_at timestamp for a settings table cell. */
+/** Formats a timestamp as a short en-US date and time, or "Unknown" if it does not parse. */
 export const formatUpdatedAt = (value: string) => {
 	const date = new Date(value);
 	if (!Number.isFinite(date.getTime())) {
