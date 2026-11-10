@@ -76,6 +76,15 @@ type ContextMcpServerItem = {
 	readonly source: string;
 	readonly tools: readonly ChatContextTool[];
 };
+// The server reports an OK definition's non-fatal parse warnings in its
+// error field.
+type ContextAgentDefinitionItem = {
+	readonly source: string;
+	readonly name: string;
+	readonly description?: string;
+	readonly warnings: string;
+	readonly dir: string;
+};
 // A pinned resource the agent could not use, surfaced with its error so the
 // failure is visible instead of silent.
 type ContextIssueItem = {
@@ -228,6 +237,48 @@ const ContextHarnessSection: React.FC<{
 	</ContextResourceAccordion>
 );
 
+const ContextAgentDefinitionSection: React.FC<{
+	items: readonly ContextAgentDefinitionItem[];
+	issues: readonly ContextIssueItem[];
+}> = ({ items, issues }) => {
+	const warningCount = items.filter((item) => item.warnings !== "").length;
+	return (
+		<ContextResourceAccordion>
+			<ContextResourceAccordionTrigger detail={`${items.length} available`}>
+				Agent definitions
+				<ContextIssueIndicator count={issues.length + warningCount} />
+			</ContextResourceAccordionTrigger>
+			<ContextResourceAccordionContent>
+				{items.length > 0 && (
+					<ContextResourceTree>
+						{groupByDirectory(items).map((group) => (
+							<ContextResourceTreeDirectory key={group.dir} dir={group.dir}>
+								{group.items.map((definition) => (
+									<ContextResourceTreeItem
+										key={definition.source}
+										icon={group.dir === "" ? BotIcon : undefined}
+										name={definition.name}
+										title={definition.source}
+										description={definition.description}
+										className="text-content-primary"
+									>
+										{definition.warnings !== "" && (
+											<span className="break-words text-content-warning">
+												{definition.warnings}
+											</span>
+										)}
+									</ContextResourceTreeItem>
+								))}
+							</ContextResourceTreeDirectory>
+						))}
+					</ContextResourceTree>
+				)}
+				<ContextResourceIssues issues={issues} />
+			</ContextResourceAccordionContent>
+		</ContextResourceAccordion>
+	);
+};
+
 export const ContextUsageIndicator: React.FC<{
 	usage: AgentContextUsage;
 	onRefreshContext?: () => void;
@@ -339,6 +390,20 @@ export const ContextUsageIndicator: React.FC<{
 			dir: resource.source_path ?? "",
 		}))
 		.filter((harness) => harness.slug.trim().length > 0);
+	const agentDefinitionItems: readonly ContextAgentDefinitionItem[] = (
+		pinnedResources ?? []
+	)
+		.filter(
+			(resource) => resource.kind === "subagent" && resource.status === "ok",
+		)
+		.map((resource) => ({
+			source: resource.source,
+			name: resource.subagent_name ?? "",
+			description: resource.subagent_description,
+			warnings: resource.error ?? "",
+			dir: getPathDirname(resource.source),
+		}))
+		.filter((definition) => definition.name.trim().length > 0);
 	// Pinned resources the agent could not use (invalid skill, unreadable or
 	// oversize file) are surfaced as issues with their error so the failure is
 	// visible rather than a silent omission.
@@ -365,20 +430,31 @@ export const ContextUsageIndicator: React.FC<{
 	const harnessIssues = issueItems.filter(
 		(issue) => issue.kind === "acp_harness",
 	);
+	const agentDefinitionIssues = issueItems.filter(
+		(issue) => issue.kind === "subagent",
+	);
 
 	const hasContextList =
 		fileItems.length > 0 ||
 		skillItems.length > 0 ||
 		hasMcp ||
 		harnessItems.length > 0 ||
+		agentDefinitionItems.length > 0 ||
 		issueItems.length > 0;
 
 	const hasResourceIssues = issueItems.length > 0;
-	const needsAttention = isDirty || hasContextError || hasResourceIssues;
+	const hasAgentDefinitionWarnings = agentDefinitionItems.some(
+		(definition) => definition.warnings !== "",
+	);
+	const needsAttention =
+		isDirty ||
+		hasContextError ||
+		hasResourceIssues ||
+		hasAgentDefinitionWarnings;
 	const AttentionIcon = hasContextError ? CircleAlertIcon : TriangleAlertIcon;
 	const toneClassName = hasContextError
 		? "text-content-destructive"
-		: isDirty || hasResourceIssues
+		: isDirty || hasResourceIssues || hasAgentDefinitionWarnings
 			? "text-content-warning"
 			: getIndicatorToneClassName(percentUsed, compactionPercent);
 
@@ -391,6 +467,7 @@ export const ContextUsageIndicator: React.FC<{
 		hasContextError ? "Context error." : "",
 		isDirty ? "Context changed." : "",
 		hasResourceIssues ? "Some context resources failed to load." : "",
+		hasAgentDefinitionWarnings ? "Some agent definitions have warnings." : "",
 	].filter((note) => note !== "");
 	const statusNote = statusNotes.length > 0 ? ` ${statusNotes.join(" ")}` : "";
 	let ariaLabel = "Context usage";
@@ -639,6 +716,13 @@ export const ContextUsageIndicator: React.FC<{
 							<ContextHarnessSection
 								groups={groupByDirectory(harnessItems)}
 								issues={harnessIssues}
+							/>
+						)}
+						{(agentDefinitionItems.length > 0 ||
+							agentDefinitionIssues.length > 0) && (
+							<ContextAgentDefinitionSection
+								items={agentDefinitionItems}
+								issues={agentDefinitionIssues}
 							/>
 						)}
 					</div>

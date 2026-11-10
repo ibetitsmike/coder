@@ -97,6 +97,16 @@ func (f forkQueryMetricsStore) CountOrganizationChatWakeupRunsSince(ctx context.
 	return f.s.CountOrganizationChatWakeupRunsSince(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.DeleteChatSecretAnswerParams) error {
+	defer f.observe(ctx, "DeleteChatSecretAnswer", time.Now())
+	return f.s.DeleteChatSecretAnswer(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
+	defer f.observe(ctx, "DeleteChatSecretAnswersByChatID", time.Now())
+	return f.s.DeleteChatSecretAnswersByChatID(ctx, chatID)
+}
+
 func (f forkQueryMetricsStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	defer f.observe(ctx, "DeleteChatWakeupByID", time.Now())
 	return f.s.DeleteChatWakeupByID(ctx, id)
@@ -105,6 +115,11 @@ func (f forkQueryMetricsStore) DeleteChatWakeupByID(ctx context.Context, id uuid
 func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
 	return f.s.DeleteExpiredPluginLinkCodes(ctx)
+}
+
+func (f forkQueryMetricsStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
+	defer f.observe(ctx, "DeleteOldChatSecretAnswers", time.Now())
+	return f.s.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
 func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -187,6 +202,11 @@ func (f forkQueryMetricsStore) GetPendingChatDescendantQuestion(ctx context.Cont
 	return f.s.GetPendingChatDescendantQuestion(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
+	defer f.observe(ctx, "GetChatSecretAnswersByChatID", time.Now())
+	return f.s.GetChatSecretAnswersByChatID(ctx, chatID)
+}
+
 func (f forkQueryMetricsStore) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "GetChatWakeupByID", time.Now())
 	return f.s.GetChatWakeupByID(ctx, id)
@@ -250,6 +270,11 @@ func (f forkQueryMetricsStore) GetProjectAgentDefinitionByName(ctx context.Conte
 func (f forkQueryMetricsStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "GetUserAgentDefinitionByName", time.Now())
 	return f.s.GetUserAgentDefinitionByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+	defer f.observe(ctx, "InsertChatSecretAnswer", time.Now())
+	return f.s.InsertChatSecretAnswer(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
@@ -360,6 +385,11 @@ func (f forkQueryMetricsStore) SumChatCostMicrosSince(ctx context.Context, arg f
 func (f forkQueryMetricsStore) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg forkdb.SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {
 	defer f.observe(ctx, "SumOrganizationWakeupChatCostMicrosSince", time.Now())
 	return f.s.SumOrganizationWakeupChatCostMicrosSince(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
+	defer f.observe(ctx, "UpdateChatSubagentWorkspaceID", time.Now())
+	return f.s.UpdateChatSubagentWorkspaceID(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {

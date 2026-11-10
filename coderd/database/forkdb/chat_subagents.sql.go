@@ -158,3 +158,17 @@ func (q *Queries) InsertChatSubagent(ctx context.Context, arg InsertChatSubagent
 	)
 	return i, err
 }
+
+const updateChatSubagentWorkspaceID = `-- name: UpdateChatSubagentWorkspaceID :exec
+UPDATE chat_subagents SET workspace_id = $1 WHERE chat_id = $2
+`
+
+type UpdateChatSubagentWorkspaceIDParams struct {
+	WorkspaceID uuid.NullUUID `db:"workspace_id" json:"workspace_id"`
+	ChatID      uuid.UUID     `db:"chat_id" json:"chat_id"`
+}
+
+func (q *Queries) UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error {
+	_, err := q.db.ExecContext(ctx, updateChatSubagentWorkspaceID, arg.WorkspaceID, arg.ChatID)
+	return err
+}

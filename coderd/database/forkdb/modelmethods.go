@@ -1,6 +1,8 @@
 package forkdb
 
 import (
+	"encoding/json"
+
 	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -36,4 +38,22 @@ func organizationAgentDefinitionObject(id, organizationID uuid.UUID, groupACL, u
 		InOrg(organizationID).
 		WithGroupACL(groupACL.RBACACL()).
 		WithACLUserList(userACL.RBACACL())
+}
+
+// Secret reports whether any item of the question asks for a secret answer,
+// which only the secret-answer route accepts. Undecodable questions count as
+// secret, so a bad row never opens the normal answer path to a secret.
+func (q ChatDescendantQuestion) Secret() bool {
+	var items []struct {
+		Secret bool `json:"secret"`
+	}
+	if err := json.Unmarshal(q.Questions, &items); err != nil {
+		return true
+	}
+	for _, item := range items {
+		if item.Secret {
+			return true
+		}
+	}
+	return false
 }
