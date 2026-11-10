@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { chatDescendantQuestionsKey } from "#/api/forkChatQuestions";
+import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
 import type { ChatDescendantQuestion } from "#/api/typesGenerated";
 import { MOCK_TIMESTAMP, MockChat } from "#/testHelpers/chatEntities";
 import { withDashboardProvider } from "#/testHelpers/storybook";

@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it } from "vitest";
-import { chatDescendantQuestionsKey } from "#/api/forkChatQuestions";
+import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
 import type {
 	ChatDescendantQuestion,
 	CreateChatMessageRequest,

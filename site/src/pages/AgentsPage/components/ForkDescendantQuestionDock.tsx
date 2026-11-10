@@ -11,7 +11,7 @@ import { Link, useLocation } from "react-router";
 import {
 	answerChatDescendantQuestion,
 	chatDescendantQuestions,
-} from "#/api/forkChatQuestions";
+} from "#/api/queries/forkChatQuestions";
 import type { Chat } from "#/api/typesGenerated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
