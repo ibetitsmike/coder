@@ -28,7 +28,7 @@ func (p *Server) forkSetFamilyArchived(
 ) ([]database.Chat, error) {
 	familyChats, err := p.setFamilyArchivedInLockOrder(ctx, store, publisher, input)
 	if err == nil && input.Archived {
-		p.scheduleArchivedWorktreeCleanup(ctx, input.RootID, familyChats)
+		p.scheduleArchivedSubagentCleanup(ctx, input.RootID, familyChats)
 	}
 	return familyChats, err
 }
