@@ -20,7 +20,9 @@ import (
 func TestForkIsolationWaitAgentReport(t *testing.T) {
 	t.Parallel()
 
-	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
+	// With nested subagents on, a shared child also has a chat_subagents
+	// row, so the shared case proves the report checks its isolation.
+	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkNestedSubagents})
 	returned := workspacesdk.ForkWorktree{Path: "/home/coder/.coder/worktrees/repo/child", Branch: "agent/child"}
 	summary := workspacesdk.ForkWorktreeSummary{Commits: 2, FilesChanged: 3, Insertions: 4, Deletions: 1, UncommittedChanges: 2}
 
