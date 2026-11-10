@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"charm.land/fantasy"
@@ -55,6 +57,10 @@ type descendantQuestionTool struct {
 	fantasy.AgentTool
 	server *Server
 	chat   database.Chat
+	// secret offers secret questions, whose answers reach the chat's tools
+	// but never the model. It stays off until the root chat page can take
+	// a secret answer.
+	secret bool
 }
 
 func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestionTool {
@@ -72,10 +78,83 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 		"Ask only for decisions that depend on the user's context or preference; if one option is clearly best, proceed with it and state the assumption. " +
 		"Each question needs a short header, the question itself, and 2-4 options. " +
 		"Write each option as one short, complete answer the user could send as their reply."
+	if !t.secret {
+		return info
+	}
+	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
+		"The answer never reaches you: write " + secretPlaceholder("<this call's ID>") + " in execute, write_file or edit_files input where the value belongs. " +
+		"Those tools get the value, and tool output shows the placeholder instead of it."
+	if questions, ok := info.Parameters["questions"].(map[string]any); ok {
+		if items, ok := questions["items"].(map[string]any); ok {
+			if properties, ok := items["properties"].(map[string]any); ok {
+				properties["secret"] = map[string]any{
+					"type":        "boolean",
+					"description": "Ask for a secret value. A secret question is the only question of its call and has no options.",
+				}
+			}
+			items["required"] = []string{"header", "question"}
+		}
+	}
 	return info
 }
 
+// secretQuestionArgs is the input of an ask_user_question call that may hold
+// a secret question. The upstream tool would drop the secret flag.
+type secretQuestionArgs struct {
+	Questions []secretQuestionItem `json:"questions"`
+}
+
+type secretQuestionItem struct {
+	Header   string            `json:"header"`
+	Question string            `json:"question"`
+	Options  []json.RawMessage `json:"options"`
+	Secret   bool              `json:"secret"`
+}
+
+// runSecretQuestion records a call that holds a secret question. handled
+// is false when the call holds none, so the upstream tool runs it.
+func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fantasy.ToolCall) (resp fantasy.ToolResponse, handled bool) {
+	var args secretQuestionArgs
+	if err := json.Unmarshal([]byte(call.Input), &args); err != nil {
+		return fantasy.ToolResponse{}, false
+	}
+	if !slices.ContainsFunc(args.Questions, func(q secretQuestionItem) bool { return q.Secret }) {
+		return fantasy.ToolResponse{}, false
+	}
+	question := args.Questions[0]
+	switch {
+	case len(args.Questions) != 1:
+		return fantasy.NewTextErrorResponse("a secret question must be the only question of its call"), true
+	case strings.TrimSpace(question.Header) == "" || strings.TrimSpace(question.Question) == "":
+		return fantasy.NewTextErrorResponse("a secret question needs a header and a question"), true
+	case len(question.Options) > 0:
+		return fantasy.NewTextErrorResponse("a secret question takes no options"), true
+	}
+	questions, err := json.Marshal([]map[string]any{{
+		"header":   question.Header,
+		"question": question.Question,
+		"secret":   true,
+	}})
+	if err != nil {
+		return fantasy.NewTextErrorResponse("encode the question: " + err.Error()), true
+	}
+	if err := t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, questions); err != nil {
+		t.server.logger.Error(ctx, "record descendant question", slog.F("chat_id", t.chat.ID), slog.Error(err))
+		return fantasy.NewTextErrorResponse("failed to record the question; try again"), true
+	}
+	return toolJSONResponse(map[string]any{
+		"questions": json.RawMessage(questions),
+		"status": "The question is shown to the user. Your turn ends now; your next user message says when the user answered. " +
+			"Write " + secretPlaceholder(call.ID) + " where the value belongs in execute, write_file or edit_files input.",
+	}), true
+}
+
 func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	if t.secret {
+		if resp, handled := t.runSecretQuestion(ctx, call); handled {
+			return resp, nil
+		}
+	}
 	resp, err := t.AgentTool.Run(ctx, call)
 	if err != nil || resp.IsError {
 		return resp, err

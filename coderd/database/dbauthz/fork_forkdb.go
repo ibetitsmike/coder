@@ -511,6 +511,15 @@ func (f *forkQuerier) SumOrganizationWakeupChatCostMicrosSince(ctx context.Conte
 	return f.db.SumOrganizationWakeupChatCostMicrosSince(ctx, arg)
 }
 
+// UpdateChatSubagentWorkspaceID authorizes as an update of the owning chat,
+// like InsertChatSubagent.
+func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.UpdateChatSubagentWorkspaceID(ctx, arg)
+}
+
 // UpdateChatWakeupRunStatus is worker-only, so it needs site-wide chat access, like chatd's.
 func (f *forkQuerier) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {

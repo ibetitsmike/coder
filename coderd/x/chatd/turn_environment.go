@@ -996,6 +996,7 @@ func (p *Server) buildTurnEnvironment(
 		builtinToolNames[chattool.FindToolsName] = true
 	}
 
+	tools = p.withSecretAnswers(ctx, tools, chat)
 	toolDefinitions := chatloop.BuildToolDefinitions(tools, activeToolNames, providerTools)
 	toolNameToConfigID := make(map[string]uuid.UUID)
 	for _, t := range tools {
