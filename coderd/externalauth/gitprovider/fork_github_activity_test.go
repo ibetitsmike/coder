@@ -93,11 +93,15 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		t.Parallel()
 
 		routes := activityRoutes()
+		// GitHub lists reviews in creation order, so review 4, a draft
+		// submitted after review 5, comes first. Review 5 and comment 20
+		// are exactly at since.
 		routes["/repos/org/repo/pulls/7/reviews"] = jsonBody(`[
 			{"id":1,"state":"COMMENTED","html_url":"https://github.com/org/repo/pull/7#r1","submitted_at":"2026-11-10T05:00:00Z","user":{"login":"codex[bot]"}},
 			{"id":2,"state":"PENDING","html_url":"https://github.com/org/repo/pull/7#r2","submitted_at":"2026-11-10T06:10:00Z","user":{"login":"alice"}},
 			{"id":3,"state":"APPROVED","html_url":"https://github.com/org/repo/pull/7#r3","submitted_at":"2026-11-10T06:20:00Z","user":{"login":"agent"}},
-			{"id":4,"state":"CHANGES_REQUESTED","html_url":"https://github.com/org/repo/pull/7#r4","submitted_at":"2026-11-10T06:30:00Z","user":{"login":"codex[bot]"}}
+			{"id":4,"state":"APPROVED","html_url":"https://github.com/org/repo/pull/7#r4","submitted_at":"2026-11-10T06:45:00Z","user":{"login":"dave"}},
+			{"id":5,"state":"CHANGES_REQUESTED","html_url":"https://github.com/org/repo/pull/7#r5","submitted_at":"2026-11-10T06:00:00Z","user":{"login":"codex[bot]"}}
 		]`)
 		routes["/repos/org/repo/issues/7/comments"] = jsonBody(`[
 			{"id":10,"html_url":"https://github.com/org/repo/pull/7#c10","created_at":"2026-11-10T05:00:00Z","updated_at":"2026-11-10T06:10:00Z","user":{"login":"bob"}},
@@ -105,7 +109,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			{"id":12,"html_url":"https://github.com/org/repo/pull/7#c12","created_at":"2026-11-10T06:40:00Z","updated_at":"2026-11-10T06:40:00Z","user":{"login":"bob"}}
 		]`)
 		routes["/repos/org/repo/pulls/7/comments"] = jsonBody(`[
-			{"id":20,"html_url":"https://github.com/org/repo/pull/7#d20","created_at":"2026-11-10T06:15:00Z","updated_at":"2026-11-10T06:15:00Z","user":{"login":"codex[bot]"}}
+			{"id":20,"html_url":"https://github.com/org/repo/pull/7#d20","created_at":"2026-11-10T06:00:00Z","updated_at":"2026-11-10T06:00:00Z","user":{"login":"codex[bot]"}}
 		]`)
 		routes["/repos/org/repo/commits/abc123/check-runs"] = jsonBody(`{"total_count":1,"check_runs":[{"status":"completed","conclusion":"success"}]}`)
 		gp, fake := newFakeGitHubActivity(t, routes)
@@ -117,17 +121,23 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			State:   gitprovider.PRStateOpen,
 			HeadSHA: "abc123",
 			Reviews: []gitprovider.PullRequestEvent{{
-				ID:        4,
+				ID:        5,
 				Author:    "codex[bot]",
 				State:     "changes_requested",
+				URL:       "https://github.com/org/repo/pull/7#r5",
+				CreatedAt: at("06:00:00"),
+			}, {
+				ID:        4,
+				Author:    "dave",
+				State:     "approved",
 				URL:       "https://github.com/org/repo/pull/7#r4",
-				CreatedAt: at("06:30:00"),
+				CreatedAt: at("06:45:00"),
 			}},
 			Comments: []gitprovider.PullRequestEvent{{
 				ID:        20,
 				Author:    "codex[bot]",
 				URL:       "https://github.com/org/repo/pull/7#d20",
-				CreatedAt: at("06:15:00"),
+				CreatedAt: at("06:00:00"),
 			}, {
 				ID:        12,
 				Author:    "bob",
