@@ -21,15 +21,19 @@ import (
 type PullRequestActivity struct {
 	// State is open, closed or merged. A merged pull request is merged
 	// even though GitHub reports it as closed.
-	State   PRState
-	HeadSHA string
+	State PRState
+	// ClosedAt is when the pull request was closed or merged, and zero
+	// while it is open.
+	ClosedAt time.Time
+	HeadSHA  string
 	// Reviews are the reviews submitted at or after the time, oldest
 	// first.
 	Reviews []PullRequestEvent
 	// Comments are the issue comments and review comments created at or
 	// after the time, oldest first.
 	Comments []PullRequestEvent
-	// Checks summarizes the CI of HeadSHA.
+	// Checks summarizes the CI of HeadSHA. It is CheckStateNone when the
+	// checks were not read.
 	Checks CheckSummary
 }
 
@@ -71,6 +75,9 @@ type CheckSummary struct {
 	Total int
 	// Failed counts failed check runs and failed commit statuses.
 	Failed int
+	// UpdatedAt is the newest completion of a check run or update of a
+	// commit status, so a rerun that ends in the same state still moves it.
+	UpdatedAt time.Time
 }
 
 // ErrPullRequestActivityUnsupported is returned by FetchPullRequestActivity
@@ -79,14 +86,17 @@ var ErrPullRequestActivityUnsupported = xerrors.New("pull request activity is on
 
 // FetchPullRequestActivity reads the activity of the pull request ref since
 // since. Reviews and comments by the token's own user are left out, so an
-// agent that acts with the user's token does not see its own activity.
-// Only GitHub is supported. Rate limit errors are *RateLimitError.
+// agent that acts with the user's token does not see its own activity. CI is
+// only read when includeChecks is true, because reading it needs the Checks
+// permission. Only GitHub is supported. Rate limit errors are
+// *RateLimitError.
 func FetchPullRequestActivity(
 	ctx context.Context,
 	p Provider,
 	token string,
 	ref PRRef,
 	since time.Time,
+	includeChecks bool,
 ) (*PullRequestActivity, error) {
 	g, ok := p.(*githubProvider)
 	if !ok {
@@ -112,9 +122,10 @@ func FetchPullRequestActivity(
 	pullEndpoint := fmt.Sprintf("%s/pulls/%d", repoEndpoint, ref.Number)
 
 	var pull struct {
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
-		Head   struct {
+		State    string     `json:"state"`
+		Merged   bool       `json:"merged"`
+		ClosedAt *time.Time `json:"closed_at"`
+		Head     struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
@@ -138,6 +149,9 @@ func FetchPullRequestActivity(
 		State:   state,
 		HeadSHA: pull.Head.SHA,
 		Checks:  CheckSummary{State: CheckStateNone},
+	}
+	if pull.ClosedAt != nil && state != PRStateOpen {
+		activity.ClosedAt = *pull.ClosedAt
 	}
 	for _, r := range reviews {
 		reviewState := strings.ToLower(strings.TrimSpace(r.State))
@@ -185,7 +199,7 @@ func FetchPullRequestActivity(
 	}
 	sortPullRequestEvents(activity.Comments)
 
-	if pull.Head.SHA == "" {
+	if !includeChecks || pull.Head.SHA == "" {
 		return activity, nil
 	}
 	commitEndpoint := repoEndpoint + "/commits/" + url.PathEscape(pull.Head.SHA)
@@ -197,11 +211,12 @@ func FetchPullRequestActivity(
 	// the first 100 runs are read, a known limit.
 	var checkRuns struct {
 		CheckRuns []struct {
-			ID         int64  `json:"id"`
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			App        struct {
+			ID          int64     `json:"id"`
+			Name        string    `json:"name"`
+			Status      string    `json:"status"`
+			Conclusion  string    `json:"conclusion"`
+			CompletedAt time.Time `json:"completed_at"`
+			App         struct {
 				ID int64 `json:"id"`
 			} `json:"app"`
 		} `json:"check_runs"`
@@ -224,7 +239,8 @@ func FetchPullRequestActivity(
 		State      string `json:"state"`
 		TotalCount int    `json:"total_count"`
 		Statuses   []struct {
-			State string `json:"state"`
+			State     string    `json:"state"`
+			UpdatedAt time.Time `json:"updated_at"`
 		} `json:"statuses"`
 	}
 	if err := g.decodeJSON(ctx, commitEndpoint+"/status?per_page=100", token, &combined); err != nil {
@@ -235,6 +251,9 @@ func FetchPullRequestActivity(
 	pending := false
 	for _, i := range latest {
 		run := checkRuns.CheckRuns[i]
+		if run.CompletedAt.After(checks.UpdatedAt) {
+			checks.UpdatedAt = run.CompletedAt
+		}
 		if !strings.EqualFold(run.Status, "completed") {
 			pending = true
 			continue
@@ -242,6 +261,11 @@ func FetchPullRequestActivity(
 		switch strings.ToLower(run.Conclusion) {
 		case "failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale":
 			checks.Failed++
+		}
+	}
+	for _, status := range combined.Statuses {
+		if status.UpdatedAt.After(checks.UpdatedAt) {
+			checks.UpdatedAt = status.UpdatedAt
 		}
 	}
 	// The combined status is pending when the commit has no statuses at

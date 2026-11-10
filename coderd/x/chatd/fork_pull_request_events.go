@@ -51,8 +51,9 @@ const (
 var pullRequestEventKinds = []string{pullRequestEventReview, pullRequestEventComment, pullRequestEventChecks, pullRequestEventClosed}
 
 // ForkPullRequestActivityFunc reads the activity of a pull request since a
-// time with the external auth token of the chat owner ownerID.
-type ForkPullRequestActivityFunc func(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time) (*gitprovider.PullRequestActivity, error)
+// time, and its CI when includeChecks is true, with the external auth token
+// of the chat owner ownerID.
+type ForkPullRequestActivityFunc func(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool) (*gitprovider.PullRequestActivity, error)
 
 type waitForEventsPullRequest struct {
 	URL         string   `json:"url"`
@@ -81,7 +82,9 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	}
 	url := strings.TrimSpace(rawURL)
 	since := p.clock.Now().UTC()
-	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, url, since)
+	ctx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
+	defer cancel()
+	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, url, since, slices.Contains(on, pullRequestEventChecks))
 	if err != nil {
 		return wakeupEvent{}, xerrors.Errorf("read pull request %s: %w", url, err)
 	}
@@ -89,19 +92,24 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 		return wakeupEvent{}, xerrors.Errorf("pull request %s is already %s", url, activity.State)
 	}
 	// The provider counts events in the same second as since, so this read
-	// can already list some. Remember them so a poll does not report them.
+	// can already list some. They may be just before or just after since,
+	// and count as the baseline, so a poll does not report them. Events of a
+	// later second happened during this read and are left to the poll.
 	var seen []string
 	for _, e := range slices.Concat(activity.Reviews, activity.Comments) {
-		seen = append(seen, e.URL)
+		if !e.CreatedAt.After(since.Truncate(time.Second)) {
+			seen = append(seen, e.URL)
+		}
 	}
 	return wakeupEvent{
-		Type:        wakeupEventPullRequest,
-		URL:         url,
-		On:          on,
-		Since:       since,
-		HeadSHA:     activity.HeadSHA,
-		ChecksState: string(activity.Checks.State),
-		Seen:        seen,
+		Type:            wakeupEventPullRequest,
+		URL:             url,
+		On:              on,
+		Since:           since,
+		HeadSHA:         activity.HeadSHA,
+		ChecksState:     string(activity.Checks.State),
+		ChecksUpdatedAt: activity.Checks.UpdatedAt,
+		Seen:            seen,
 	}, nil
 }
 
@@ -112,21 +120,34 @@ func pullRequestRunKey(url string) string {
 }
 
 // pullRequestWakeupText reads the pull request of event as the owner of chat
-// and returns the summary of its activity, or "" when nothing event watches
-// for happened.
-func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent) (string, error) {
+// and returns the summary of its activity until until, or "" when nothing
+// event watches for happened. A zero until has no bound. The bound keeps a
+// final poll that runs late from reporting what happened after the expiry.
+func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, until time.Time) (string, error) {
 	if p.forkPullRequestActivity == nil {
 		return "", xerrors.New("pull request events are not available")
 	}
 	ctx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
 	defer cancel()
-	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, event.URL, event.Since)
+	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, event.URL, event.Since, slices.Contains(event.On, pullRequestEventChecks))
 	if err != nil {
 		return "", err
 	}
-	isSeen := func(e gitprovider.PullRequestEvent) bool { return slices.Contains(event.Seen, e.URL) }
-	activity.Reviews = slices.DeleteFunc(activity.Reviews, isSeen)
-	activity.Comments = slices.DeleteFunc(activity.Comments, isSeen)
+	afterUntil := func(at time.Time) bool { return !until.IsZero() && at.After(until) }
+	skip := func(e gitprovider.PullRequestEvent) bool {
+		return slices.Contains(event.Seen, e.URL) || afterUntil(e.CreatedAt)
+	}
+	activity.Reviews = slices.DeleteFunc(activity.Reviews, skip)
+	activity.Comments = slices.DeleteFunc(activity.Comments, skip)
+	if afterUntil(activity.ClosedAt) {
+		activity.State = gitprovider.PRStateOpen
+	}
+	// CI that changed after until may have had any state at until, so it
+	// does not count.
+	if afterUntil(activity.Checks.UpdatedAt) {
+		activity.Checks = gitprovider.CheckSummary{State: gitprovider.CheckState(event.ChecksState), UpdatedAt: event.ChecksUpdatedAt}
+		activity.HeadSHA = event.HeadSHA
+	}
 	if !pullRequestReady(event, activity) {
 		return "", nil
 	}
@@ -134,11 +155,12 @@ func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, 
 }
 
 // pullRequestReady reports whether activity has something event watches for.
-// Checks count once they settle on a state the baseline did not have, either
-// on a new head commit or with a new result.
+// Checks count once they settle after the baseline: on a new head commit,
+// with a new result, or after a rerun.
 func pullRequestReady(event wakeupEvent, activity *gitprovider.PullRequestActivity) bool {
 	settled := activity.Checks.State == gitprovider.CheckStateSuccess || activity.Checks.State == gitprovider.CheckStateFailure
-	changed := activity.HeadSHA != event.HeadSHA || string(activity.Checks.State) != event.ChecksState
+	changed := activity.HeadSHA != event.HeadSHA || string(activity.Checks.State) != event.ChecksState ||
+		activity.Checks.UpdatedAt.After(event.ChecksUpdatedAt)
 	closed := activity.State == gitprovider.PRStateClosed || activity.State == gitprovider.PRStateMerged
 	return (slices.Contains(event.On, pullRequestEventReview) && len(activity.Reviews) > 0) ||
 		(slices.Contains(event.On, pullRequestEventComment) && len(activity.Comments) > 0) ||
