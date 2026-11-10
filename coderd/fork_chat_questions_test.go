@@ -207,6 +207,8 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	requireStatus(t, http.StatusConflict, err)
 	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "  "})
 	requireStatus(t, http.StatusBadRequest, err)
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "before\x00after"})
+	requireStatus(t, http.StatusBadRequest, err)
 	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, "call-normal", codersdk.ChatSecretAnswerRequest{Value: secret})
 	requireStatus(t, http.StatusBadRequest, err)
 	other, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID)

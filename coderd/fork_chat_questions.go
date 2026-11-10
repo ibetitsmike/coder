@@ -126,6 +126,10 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not be empty."})
 		return
 	}
+	if strings.Contains(req.Value, "\x00") {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not contain null bytes."})
+		return
+	}
 	if len(req.Value) > maxSecretAnswerLength {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: fmt.Sprintf("The answer must be at most %d bytes.", maxSecretAnswerLength),
