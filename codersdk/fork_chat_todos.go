@@ -26,7 +26,7 @@ const (
 	ChatTodoStatusPending    ChatTodoStatus = "pending"
 	ChatTodoStatusInProgress ChatTodoStatus = "in_progress"
 	ChatTodoStatusDone       ChatTodoStatus = "done"
-	ChatTodoStatusCancelled  ChatTodoStatus = "cancelled"
+	ChatTodoStatusCancelled  ChatTodoStatus = "cancelled" //nolint:misspell // Stored and API value; changing it breaks existing todo lists.
 )
 
 // ChatTodoStatuses lists every valid ChatTodoStatus.

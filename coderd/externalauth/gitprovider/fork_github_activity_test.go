@@ -241,7 +241,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
 		}, {
 			name:      "RerunAfterCancel",
-			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success"}]`,
+			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success"}]`, //nolint:misspell // GitHub spells this conclusion "cancelled".
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2},
 		}, {

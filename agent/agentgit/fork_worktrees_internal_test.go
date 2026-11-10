@@ -331,7 +331,7 @@ func TestForkWorktreeCreateOutlastsWriteTimeout(t *testing.T) {
 	h, _ := newTestWorktreeAPI(t)
 	repo := wtInitRepo(t)
 	hook := filepath.Join(repo, ".git", "hooks", "post-checkout")
-	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nsleep 1\n"), 0o755))
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nsleep 1\n"), 0o755)) //nolint:gosec // Git runs only executable hooks.
 	srv := httptest.NewUnstartedServer(h)
 	srv.Config.WriteTimeout = 200 * time.Millisecond
 	srv.Start()
@@ -354,7 +354,7 @@ func TestForkWorktreeCreateFailedHookRollsBack(t *testing.T) {
 	repo := wtInitRepo(t)
 
 	hooks := filepath.Join(repo, ".git", "hooks", "post-checkout")
-	require.NoError(t, os.WriteFile(hooks, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	require.NoError(t, os.WriteFile(hooks, []byte("#!/bin/sh\nexit 1\n"), 0o755)) //nolint:gosec // Git runs only executable hooks.
 
 	req := workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"}
 	rec := doWorktreeRequest(t, h, http.MethodPost, req)

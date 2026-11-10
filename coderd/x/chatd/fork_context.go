@@ -63,7 +63,7 @@ func (s *taskStarter) syncForkContext(
 // commitForkContextMessage stores one model-only message in its own
 // transition, the way the memory index does, so a competing change to the chat
 // rolls it back instead of storing it against stale state.
-func (s *taskStarter) commitForkContextMessage(
+func (*taskStarter) commitForkContextMessage(
 	ctx context.Context,
 	machine *chatstate.ChatMachine,
 	input chatWorkerTaskStartInput,
@@ -260,9 +260,9 @@ func formatChatTodoSnapshot(todos []codersdk.ChatTodo, version int64, maxBytes i
 				return "", xerrors.Errorf("marshal todo item: %w", err)
 			}
 			if i > 0 {
-				sb.WriteString("\n")
+				_, _ = sb.WriteString("\n")
 			}
-			sb.Write(item)
+			_, _ = sb.Write(item)
 		}
 		items, _ = chatloop.TruncateToolResultText(sb.String(), maxBytes)
 	}

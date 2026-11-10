@@ -103,6 +103,8 @@ func withSubagentResume(ctx context.Context) context.Context {
 // in the transaction that resumes target. That call takes the lock that
 // serializes the family's spawns, so a concurrent spawn cannot pass the same
 // count.
+//
+//nolint:revive // inTx says whether store holds the transaction to lock.
 func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
 	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
 		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
@@ -298,7 +300,7 @@ func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool
 	if err != nil {
 		return false, err
 	}
-	return int(depth)+1 <= limits.maxDepth, nil
+	return int(depth) < limits.maxDepth, nil
 }
 
 func subagentModeCanSpawn(mode database.NullChatMode) bool {

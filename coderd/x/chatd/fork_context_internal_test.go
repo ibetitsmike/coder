@@ -68,7 +68,7 @@ func TestTodoSnapshotMessage(t *testing.T) {
 		payload := json.RawMessage(fmt.Sprintf(`{"todos":[],"version":%d}`, version))
 		return codersdk.ChatMessageToolResult(id, name, payload, isError, false)
 	}
-	text := func(s string) codersdk.ChatMessagePart { return codersdk.ChatMessageText(s) }
+	text := codersdk.ChatMessageText
 	// snapshotRow is a snapshot an earlier turn sent.
 	snapshotRow := func(version int64) row {
 		return modelOnly(database.ChatMessageRoleUser, text(wantSnapshot(version)))

@@ -23,6 +23,8 @@ import (
 // @Description Returns the live subagent count and limit of the family under
 // @Description a root chat, and the running subagents that wait for a
 // @Description concurrency slot.
+//
+//nolint:revive // HTTP handler writes to ResponseWriter.
 func (api *API) getForkChatFamilyCapacity(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)

@@ -191,7 +191,7 @@ func FetchPullRequestActivity(
 	}
 	commitEndpoint := repoEndpoint + "/commits/" + url.PathEscape(pull.Head.SHA)
 
-	// GitHub keeps every run of a commit, so a check that was cancelled and
+	// GitHub keeps every run of a commit, so a check that was canceled and
 	// then run again appears twice. Only the newest run of each check name
 	// and app counts, which matches GitHub's status rollup, but two
 	// workflows with a job of the same name also count as one check. Only
@@ -238,7 +238,7 @@ func FetchPullRequestActivity(
 			continue
 		}
 		switch strings.ToLower(run.Conclusion) {
-		case "failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale":
+		case "failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale": //nolint:misspell // GitHub spells this conclusion "cancelled".
 			checks.Failed++
 		}
 	}
