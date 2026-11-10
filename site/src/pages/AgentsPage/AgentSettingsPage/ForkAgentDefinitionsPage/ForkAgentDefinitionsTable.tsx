@@ -1,11 +1,13 @@
 // This file is fork code: wires the fork-agent-definitions table to the API.
 
+import { isAxiosError } from "axios";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage, isApiError } from "#/api/errors";
+import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
 	createUserAgentDefinition,
 	deleteUserAgentDefinition,
+	isNewer,
 	updateUserAgentDefinition,
 	userAgentDefinition,
 	userAgentDefinitions,
@@ -27,9 +29,20 @@ import {
 	ForkAgentDefinitionsTableView,
 } from "./ForkAgentDefinitionsTableView";
 
-type EditorTarget =
+// Targets keep the organization they were opened in, so a change of the
+// selected organization closes them instead of sending their input there.
+type EditorTarget = { organizationId: string } & (
 	| { mode: "create" }
-	| { mode: "edit"; name: string; values?: AgentDefinitionFormValues };
+	| { mode: "edit"; name: string; values?: AgentDefinitionFormValues }
+);
+
+// A request that got no response may still have been applied, so only the
+// refetched data can tell whether it failed.
+const isResponseLost = (error: unknown) =>
+	isAxiosError(error) && error.response === undefined;
+
+const isNotFound = (error: unknown) =>
+	isAxiosError(error) && error.response?.status === 404;
 
 const submitError = (
 	error: unknown,
@@ -67,13 +80,21 @@ export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
 > = ({ organizationId, action }) => {
 	const queryClient = useQueryClient();
-	const [deleteTarget, setDeleteTarget] =
+	const [selectedDeleteTarget, setDeleteTarget] =
 		useState<ForkAgentDefinitionMetadata>();
-	const [editorTarget, setEditorTarget] = useState<EditorTarget>();
+	const deleteTarget =
+		selectedDeleteTarget?.organization_id === organizationId
+			? selectedDeleteTarget
+			: undefined;
+	const [selectedEditorTarget, setEditorTarget] = useState<EditorTarget>();
+	const editorTarget =
+		selectedEditorTarget?.organizationId === organizationId
+			? selectedEditorTarget
+			: undefined;
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
 	const editName = editorTarget?.mode === "edit" ? editorTarget.name : "";
 	const definitionQuery = useQuery({
-		...userAgentDefinition(organizationId, editName),
+		...userAgentDefinition(queryClient, organizationId, editName),
 		enabled: Boolean(editName),
 	});
 
@@ -144,17 +165,30 @@ export const ForkAgentDefinitionsTable: React.FC<
 						.getQueryData(listKey)
 						?.some((definition) => definition.name === name);
 				// A lost response can hide a create that committed, which the
-				// refetched list then shows. A server error, a name listed before
-				// the request, or an unknown list means the failure is real.
+				// refetched list then shows with this content. A name listed
+				// before the request, or an unknown list, means it did not.
 				const existedBefore = isListed() ?? true;
+				const isCreated = async (error: unknown) => {
+					if (!error) {
+						return true;
+					}
+					if (!isResponseLost(error) || existedBefore || !isListed()) {
+						return false;
+					}
+					try {
+						const created = await queryClient.fetchQuery(
+							userAgentDefinition(queryClient, organizationId, name),
+						);
+						return created.content === content;
+					} catch {
+						return false;
+					}
+				};
 				createMutation.mutate(
 					{ organizationId, req: { content } },
 					{
-						onSettled: (_data, error) => {
-							if (
-								!error ||
-								(!isApiError(error) && !existedBefore && isListed())
-							) {
+						onSettled: async (_data, error) => {
+							if (await isCreated(error)) {
 								setEditorTarget(undefined);
 								toast.success("Agent definition created.");
 							}
@@ -170,17 +204,20 @@ export const ForkAgentDefinitionsTable: React.FC<
 		const listed = definitionsQuery.data?.find(
 			(definition) => definition.name === editorTarget.name,
 		);
+		const isGone = definitionsQuery.data !== undefined && !listed;
 		// Content, cached or just fetched, can predate a save, delete, or
 		// recreate that the list already shows, so it seeds the editor only
 		// when it is as new as the listed definition.
 		const isCurrent =
 			detail !== undefined &&
+			!isGone &&
 			(!listed ||
 				(detail.id === listed.id
-					? new Date(detail.updated_at) >= new Date(listed.updated_at)
-					: new Date(detail.updated_at) > new Date(listed.updated_at)));
+					? !isNewer(listed, detail)
+					: isNewer(detail, listed)));
 		const isOutdated =
 			detail !== undefined &&
+			!isGone &&
 			!isCurrent &&
 			definitionQuery.isSuccess &&
 			!definitionQuery.isFetching;
@@ -195,16 +232,19 @@ export const ForkAgentDefinitionsTable: React.FC<
 			? undefined
 			: (loaded?.error ??
 				definitionQuery.error ??
-				(isOutdated
-					? new Error("The agent definition changed while it loaded.")
-					: undefined));
+				(isGone
+					? new Error("This agent definition no longer exists.")
+					: isOutdated
+						? new Error("The agent definition changed while it loaded.")
+						: undefined));
 		editorState = {
 			mode: "edit",
 			initialValues: values,
 			isLoading: !values && !loadError,
 			loadError,
 			onRetry:
-				definitionQuery.error || isOutdated
+				(definitionQuery.error && !isNotFound(definitionQuery.error)) ||
+				isOutdated
 					? () => {
 							void definitionQuery.refetch();
 						}
@@ -223,11 +263,11 @@ export const ForkAgentDefinitionsTable: React.FC<
 						// refetched definition then shows.
 						onSettled: (_data, error) => {
 							const saved = queryClient.getQueryData(
-								userAgentDefinition(organizationId, name).queryKey,
+								userAgentDefinition(queryClient, organizationId, name).queryKey,
 							);
 							if (
 								!error ||
-								(!isApiError(error) && saved?.content === content)
+								(isResponseLost(error) && saved?.content === content)
 							) {
 								setEditorTarget(undefined);
 								toast.success("Agent definition saved.");
@@ -296,11 +336,15 @@ export const ForkAgentDefinitionsTable: React.FC<
 			}
 			onCreate={() => {
 				createMutation.reset();
-				setEditorTarget({ mode: "create" });
+				setEditorTarget({ mode: "create", organizationId });
 			}}
 			onEdit={(definition) => {
 				saveMutation.reset();
-				setEditorTarget({ mode: "edit", name: definition.name });
+				setEditorTarget({
+					mode: "edit",
+					organizationId,
+					name: definition.name,
+				});
 			}}
 			editorState={editorState}
 			onDelete={(definition) => {

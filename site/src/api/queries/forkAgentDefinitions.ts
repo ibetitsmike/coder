@@ -1,5 +1,6 @@
 // This file is fork code: queries for the fork-agent-definitions experiment.
 
+import { isAxiosError } from "axios";
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
 	createUserAgentDefinition as createUserAgentDefinitionRequest,
@@ -26,13 +27,50 @@ export const userAgentDefinitions = (organizationId: string) =>
 
 /**
  * One definition with its markdown content. The key extends the list key, so
- * invalidating the list refreshes an open editor's copy too.
+ * invalidating the list refreshes an open editor's copy too. A 404 also
+ * drops the definition from the cached list, so it is no longer offered.
  */
-export const userAgentDefinition = (organizationId: string, name: string) =>
+export const userAgentDefinition = (
+	queryClient: QueryClient,
+	organizationId: string,
+	name: string,
+) =>
 	queryOptions({
 		queryKey: [...userAgentDefinitionsKey(organizationId), name] as const,
-		queryFn: () => getUserAgentDefinition(organizationId, name),
+		queryFn: async () => {
+			try {
+				return await getUserAgentDefinition(organizationId, name);
+			} catch (error) {
+				if (isAxiosError(error) && error.response?.status === 404) {
+					queryClient.setQueryData(
+						userAgentDefinitions(organizationId).queryKey,
+						(definitions) =>
+							definitions?.filter((definition) => definition.name !== name),
+					);
+				}
+				throw error;
+			}
+		},
 	});
+
+type Timestamped = { updated_at: string };
+
+// API timestamps carry microseconds, which Date drops, so the fractional
+// seconds are compared as digits.
+const timestampParts = (value: string) => {
+	const fraction = /\.(\d+)/.exec(value)?.[1] ?? "";
+	return [
+		Math.floor(new Date(value).getTime() / 1000),
+		Number(fraction.padEnd(9, "0").slice(0, 9)),
+	] as const;
+};
+
+/** Whether a was updated after b, to the timestamps' full precision. */
+export const isNewer = (a: Timestamped, b: Timestamped) => {
+	const [aSeconds, aNanos] = timestampParts(a.updated_at);
+	const [bSeconds, bNanos] = timestampParts(b.updated_at);
+	return aSeconds === bSeconds ? aNanos > bNanos : aSeconds > bSeconds;
+};
 
 type CreateUserAgentDefinitionArgs = {
 	organizationId: string;
@@ -50,16 +88,25 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 		onSuccess: ({ content: _content, ...created }, { organizationId }) => {
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
-				// A refetch can list the definition before this response
-				// arrives, so replace that row instead of adding a second one.
-				(definitions) =>
-					definitions && [
-						...definitions.filter(
-							(listed) =>
-								listed.id !== created.id && listed.name !== created.name,
-						),
+				(definitions) => {
+					// A refetch can list the definition before this response
+					// arrives. Its row replaces that one unless it shows a later
+					// change or a recreated definition.
+					const listed = definitions?.find(
+						(definition) =>
+							definition.id === created.id || definition.name === created.name,
+					);
+					if (
+						!definitions ||
+						(listed && (listed.id !== created.id || isNewer(listed, created)))
+					) {
+						return definitions;
+					}
+					return [
+						...definitions.filter((definition) => definition !== listed),
 						created,
-					],
+					];
+				},
 			);
 		},
 		onSettled: (_data, _error, { organizationId }) =>
@@ -68,9 +115,6 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 				exact: true,
 			}),
 	});
-
-const isNewer = (a: { updated_at: string }, b: { updated_at: string }) =>
-	new Date(a.updated_at) > new Date(b.updated_at);
 
 type UpdateUserAgentDefinitionArgs = {
 	organizationId: string;
@@ -107,11 +151,9 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 					),
 			);
 			queryClient.setQueryData(
-				userAgentDefinition(organizationId, name).queryKey,
+				userAgentDefinition(queryClient, organizationId, name).queryKey,
 				(cached) =>
-					cached?.id === definition.id && isNewer(cached, definition)
-						? cached
-						: definition,
+					cached && isNewer(cached, definition) ? cached : definition,
 			);
 		},
 		// Not exact, so a reopened editor refetches the definition it saved.

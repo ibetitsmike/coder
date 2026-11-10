@@ -1,6 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AxiosError } from "axios";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
@@ -18,8 +19,9 @@ import {
 	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
-import { renderWithAuth } from "#/testHelpers/renderHelpers";
+import { render, renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
+import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
 
 const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -382,9 +384,15 @@ describe("ForkAgentDefinitionsPage", () => {
 		});
 	});
 
+	const releaseNotesContent =
+		"---\nname: release-notes\n---\nWrite release notes.\n";
+
 	// Submits a create that fails with error while the refetched list gains
-	// the name, from this create or from another tab's.
-	const failCreateWhileListed = async (error: unknown) => {
+	// the name with listedContent, from this create or from another tab's.
+	const failCreateWhileListed = async (
+		error: unknown,
+		listedContent = releaseNotesContent,
+	) => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();
 		const toastSuccess = vi.spyOn(toast, "success");
@@ -392,6 +400,15 @@ describe("ForkAgentDefinitionsPage", () => {
 			forkAgentDefinitionsApi,
 			"createUserAgentDefinition",
 		).mockRejectedValue(error);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			id: "agent-definition-release-notes",
+			name: "release-notes",
+			content: listedContent,
+		});
 
 		await user.click(
 			await screen.findByRole("button", { name: "New agent definition" }),
@@ -424,6 +441,16 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
 		);
+	});
+
+	it("keeps a lost create failed when the listed definition has other content", async () => {
+		const { createButton, toastSuccess } = await failCreateWhileListed(
+			networkError(),
+			"---\nname: release-notes\n---\nAnother tab's notes.\n",
+		);
+
+		await waitFor(() => expect(createButton).toBeEnabled());
+		expect(toastSuccess).not.toHaveBeenCalled();
 	});
 
 	it("keeps a create the server rejected failed when another tab lists the name", async () => {
@@ -789,6 +816,104 @@ describe("ForkAgentDefinitionsPage", () => {
 		await user.click(await screen.findByRole("button", { name: "Retry" }));
 
 		expect(await screen.findByLabelText("Description")).toHaveValue("Current.");
+	});
+
+	it("does not open a definition the refetched list no longer has", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		let resolveDetail: (definition: ForkAgentDefinition) => void = () => {};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition").mockReturnValue(
+			new Promise((resolve) => {
+				resolveDetail = resolve;
+			}),
+		);
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		getDefinitions.mockResolvedValue([]);
+		await queryClient.refetchQueries({
+			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			exact: true,
+		});
+		resolveDetail({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nDeleted body.\n",
+		});
+
+		await waitFor(() =>
+			expect(
+				screen.getByRole("dialog", { name: "Unable to load agent definition" }),
+			).toHaveTextContent("This agent definition no longer exists."),
+		);
+	});
+
+	it("drops a definition whose load returns 404 from the list", async () => {
+		const user = userEvent.setup();
+		const { queryClient } = renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockRejectedValue({
+			isAxiosError: true,
+			response: {
+				status: 404,
+				data: { message: "Agent definition not found." },
+			},
+		});
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryData(
+					userAgentDefinitionsKey(MockDefaultOrganization.id),
+				),
+			).toEqual([]),
+		);
+	});
+
+	it("closes the editor when the selected organization changes", async () => {
+		const user = userEvent.setup();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinitions",
+		).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+		let selectOrganization: (organizationId: string) => void = () => {};
+		const OrganizationSwitch: React.FC = () => {
+			const [organizationId, setOrganizationId] = useState(
+				MockDefaultOrganization.id,
+			);
+			selectOrganization = setOrganizationId;
+			return <ForkAgentDefinitionsTable organizationId={organizationId} />;
+		};
+		render(<OrganizationSwitch />);
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await screen.findByLabelText("Description");
+		act(() => selectOrganization(MockOrganization2.id));
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("keeps saved content when an older toggle response arrives later", async () => {
