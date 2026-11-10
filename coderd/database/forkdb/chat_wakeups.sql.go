@@ -166,6 +166,38 @@ func (q *Queries) ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeu
 	return items, nil
 }
 
+const countChatUserNotificationsSince = `-- name: CountChatUserNotificationsSince :one
+SELECT COUNT(DISTINCT (payload, DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')))
+FROM notification_messages
+WHERE user_id = $1::uuid
+    AND notification_template_id = $2::uuid
+    AND payload->'data'->>'chat_id' = $3::text
+    AND created_at >= $4::timestamptz
+`
+
+type CountChatUserNotificationsSinceParams struct {
+	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
+	NotificationTemplateID uuid.UUID `db:"notification_template_id" json:"notification_template_id"`
+	ChatID                 string    `db:"chat_id" json:"chat_id"`
+	Since                  time.Time `db:"since" json:"since"`
+}
+
+// Counts the notifications of one template that were enqueued for a user
+// about a chat. One enqueue stores a row per delivery method, all with the
+// same payload, and the enqueuer's dedupe rejects a second identical payload
+// on the same UTC day, so distinct payloads per UTC day count enqueues.
+func (q *Queries) CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countChatUserNotificationsSince,
+		arg.UserID,
+		arg.NotificationTemplateID,
+		arg.ChatID,
+		arg.Since,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countChatWakeupRunsSince = `-- name: CountChatWakeupRunsSince :one
 SELECT COUNT(*)
 FROM chat_wakeup_runs
@@ -603,6 +635,50 @@ func (q *Queries) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, p
 		return nil, err
 	}
 	return items, nil
+}
+
+const sumChatCostMicrosSince = `-- name: SumChatCostMicrosSince :one
+SELECT COALESCE(SUM(total_cost_micros), 0)::bigint
+FROM chat_messages
+WHERE chat_id = $1::uuid
+    AND created_at >= $2::timestamptz
+    AND total_cost_micros IS NOT NULL
+`
+
+type SumChatCostMicrosSinceParams struct {
+	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
+	Since  time.Time `db:"since" json:"since"`
+}
+
+// Deleted messages count too: they were paid for. Messages without a price
+// have a NULL cost and count as zero.
+func (q *Queries) SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, sumChatCostMicrosSince, arg.ChatID, arg.Since)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumOrganizationWakeupChatCostMicrosSince = `-- name: SumOrganizationWakeupChatCostMicrosSince :one
+SELECT COALESCE(SUM(cm.total_cost_micros), 0)::bigint
+FROM chat_messages cm
+WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organization_id = $1::uuid)
+    AND cm.created_at >= $2::timestamptz
+    AND cm.total_cost_micros IS NOT NULL
+`
+
+type SumOrganizationWakeupChatCostMicrosSinceParams struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Since          time.Time `db:"since" json:"since"`
+}
+
+// Sums the spend of the chats of the organization that have a wake-up, so
+// chats that only humans drive do not count.
+func (q *Queries) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, sumOrganizationWakeupChatCostMicrosSince, arg.OrganizationID, arg.Since)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const updateChatWakeupRunStatus = `-- name: UpdateChatWakeupRunStatus :one

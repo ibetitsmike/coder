@@ -259,7 +259,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			slog.F("wakeup_id", wakeup.ID),
 			slog.Error(err),
 		)
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
 	}
 	rows, waiting, err := p.childrenSnapshot(ctx, chat)
 	if err != nil {
@@ -290,7 +290,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		pending++
 	}
 	if next == nil {
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending))
+	}
+	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
+		return err
 	}
 	delivery := wakeupDelivery{
 		text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, next.Title, next.ID, next.Status),
@@ -301,7 +304,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// A failed send keeps the child's own key free, so a later poll retries
 	// it. Its failures share one run, which only the first one records.
 	failedRunKey := delivery.runKey + ":failed"
-	return p.finishWakeupSend(ctx, fdb, wakeup, now, failedRunKey, err)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched child still
