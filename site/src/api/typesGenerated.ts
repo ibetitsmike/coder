@@ -3220,6 +3220,7 @@ export interface ChatModelCallConfig {
 	readonly reasoning_effort?: ChatModelReasoningEffortConfig;
 	readonly openai_config?: ChatModelOpenAIConfig;
 	readonly provider_options?: ChatModelProviderOptions;
+	readonly aliases?: readonly string[];
 }
 
 // From codersdk/chats.go

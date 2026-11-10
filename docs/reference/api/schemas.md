@@ -3856,6 +3856,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
@@ -4143,6 +4146,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "aliases": [
+    "string"
+  ],
   "frequency_penalty": 0,
   "max_output_tokens": 0,
   "openai_config": {
@@ -4303,6 +4309,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name                | Type                                                                               | Required | Restrictions | Description |
 |---------------------|------------------------------------------------------------------------------------|----------|--------------|-------------|
+| `aliases`           | array of string                                                                    | false    |              |             |
 | `frequency_penalty` | number                                                                             | false    |              |             |
 | `max_output_tokens` | integer                                                                            | false    |              |             |
 | `openai_config`     | [codersdk.ChatModelOpenAIConfig](#codersdkchatmodelopenaiconfig)                   | false    |              |             |
@@ -6916,6 +6923,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
@@ -13042,6 +13052,9 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
       "is_default": true,
       "model": "string",
       "model_config": {
+        "aliases": [
+          "string"
+        ],
         "frequency_penalty": 0,
         "max_output_tokens": 0,
         "openai_config": {
@@ -17564,6 +17577,9 @@ Restarts will only happen on weekdays in this list on weeks which line up with W
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {

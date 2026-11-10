@@ -4990,6 +4990,9 @@ curl -X GET http://coder-server:8080/api/v2/organizations/{organization}/chats/m
       "is_default": true,
       "model": "string",
       "model_config": {
+        "aliases": [
+          "string"
+        ],
         "frequency_penalty": 0,
         "max_output_tokens": 0,
         "openai_config": {
@@ -5209,6 +5212,9 @@ curl -X POST http://coder-server:8080/api/v2/organizations/{organization}/chats/
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
@@ -5390,6 +5396,9 @@ curl -X POST http://coder-server:8080/api/v2/organizations/{organization}/chats/
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {

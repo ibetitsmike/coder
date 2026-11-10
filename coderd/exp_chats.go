@@ -8848,6 +8848,9 @@ func (api *API) createChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 		if err := validateChatModelConfigProviderModel(lockedAIProvider, insertParams.Model, req.ModelConfig); err != nil {
 			return err
 		}
+		if err := validateChatModelAliases(ctx, tx, insertParams.OrganizationID, inserted.ID, insertParams.AIProviderID, insertParams.Options); err != nil {
+			return err
+		}
 		providerType = lockedAIProvider.Type
 
 		transition, err := ensureDefaultChatModelConfig(ctx, tx, insertParams.OrganizationID)
@@ -9041,6 +9044,9 @@ func (api *API) updateChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 			if err := validateChatModelConfigProviderModel(aiProvider, updateParams.Model, unmarshalChatModelCallConfig(modelConfigRaw)); err != nil {
 				return err
 			}
+		}
+		if err := validateChatModelAliases(ctx, tx, lockedExisting.OrganizationID, lockedExisting.ID, updateParams.AIProviderID, updateParams.Options); err != nil {
+			return err
 		}
 
 		setAsDefault := updateParams.IsDefault && !lockedExisting.IsDefault
@@ -9424,7 +9430,8 @@ func isZeroChatModelCallConfig(config *codersdk.ChatModelCallConfig) bool {
 		config.FrequencyPenalty == nil &&
 		config.ReasoningEffort == nil &&
 		isZeroChatModelOpenAIConfig(config.OpenAIConfig) &&
-		isZeroChatModelProviderOptions(config.ProviderOptions)
+		isZeroChatModelProviderOptions(config.ProviderOptions) &&
+		len(config.Aliases) == 0
 }
 
 func isZeroChatModelOpenAIConfig(config *codersdk.ChatModelOpenAIConfig) bool {

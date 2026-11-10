@@ -385,7 +385,7 @@ func customSubagentDefinition(agentType customAgentType, description string) sub
 
 // resolveCustomAgentModel matches the definition's model against the models
 // the chat owner can spawn, by model config ID, then model, then display
-// name, ignoring case.
+// name, ignoring case, then alias.
 func (p *Server) resolveCustomAgentModel(ctx context.Context, parent database.Chat, def workspacesdk.AgentDefinition) (uuid.UUID, error) {
 	models, err := p.listSpawnableModelConfigs(ctx, parent.OwnerID, parent.OrganizationID)
 	if err != nil {
@@ -405,8 +405,5 @@ func (p *Server) resolveCustomAgentModel(ctx context.Context, parent database.Ch
 			return modelConfigID, nil
 		}
 	}
-	return uuid.Nil, xerrors.Errorf(
-		"agent %q sets model %q, which is not an available model; pass model_config_id from %s instead",
-		def.Name, def.Model, listSubagentModelsToolName,
-	)
+	return p.resolveCustomAgentModelAlias(ctx, parent, def, models)
 }
