@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -679,4 +681,78 @@ func TestWakeupFinalPollChildren(t *testing.T) {
 			require.Equal(t, tc.wantReason, got.StatusReason.String)
 		})
 	}
+}
+
+// A pull request wake-up that is claimed after its expiry because it missed
+// the poll before still reads what happened until the expiry.
+func TestWakeupPullRequestMissedTickBeforeExpiry(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	// insertWakeup schedules the run at wakeupTestSlot, before the expiry.
+	expiresAt := wakeupTestSlot.Add(time.Minute)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		Events:    pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+		ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	merged := openPullRequest(gitprovider.CheckStatePending)
+	merged.State, merged.ClosedAt = gitprovider.PRStateMerged, expiresAt.Add(-time.Second)
+	fake := &fakePullRequestActivity{}
+	fake.set(merged, nil)
+	worker.server.forkPullRequestActivity = fake.fetch
+
+	worker.wakeupOnce(ctx, expiresAt.Add(time.Second))
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+}
+
+// A final poll whose send fails transiently is retried, and the retry
+// delivers what the final poll found.
+func TestWakeupPullRequestFinalSendRetry(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	// insertWakeup schedules the run at wakeupTestSlot, so this is the
+	// final poll.
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		Events:    pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+		ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	merged := openPullRequest(gitprovider.CheckStatePending)
+	merged.State, merged.ClosedAt = gitprovider.PRStateMerged, wakeupTestSlot.Add(-time.Minute)
+	fake := &fakePullRequestActivity{}
+	fake.set(merged, nil)
+	worker.server.forkPullRequestActivity = fake.fetch
+	var hookDown atomic.Bool
+	hookDown.Store(true)
+	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+		if hookDown.Load() {
+			rw.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = rw.Write([]byte(`{}`))
+	})
+
+	failedAt := wakeupTestSlot.Add(time.Second)
+	worker.wakeupOnce(ctx, failedAt)
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+	// The worker adds the time it has taken since the claim.
+	require.WithinDuration(t, failedAt.Add(pullRequestErrorRetry), got.NextRunAt.Time, time.Minute)
+
+	hookDown.Store(false)
+	worker.wakeupOnce(ctx, got.NextRunAt.Time.Add(time.Second))
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+	got = f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -266,6 +267,56 @@ func TestFetchPullRequestActivity(t *testing.T) {
 				routes := activityRoutes()
 				routes["/repos/org/repo/commits/abc123/check-runs"] = jsonBody(`{"check_runs":` + tc.checkRuns + `}`)
 				routes["/repos/org/repo/commits/abc123/status"] = jsonBody(tc.status)
+				gp, _ := newFakeGitHubActivity(t, routes)
+
+				ctx := testutil.Context(t, testutil.WaitShort)
+				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, activity.Checks)
+			})
+		}
+	})
+
+	t.Run("ChecksPaginated", func(t *testing.T) {
+		t.Parallel()
+
+		// successPage returns 100 successful check runs with IDs from first.
+		successPage := func(first int) string {
+			runs := make([]string, 100)
+			for i := range runs {
+				runs[i] = fmt.Sprintf(`{"id":%d,"name":"c%d","status":"completed","conclusion":"success"}`, first+i, first+i)
+			}
+			return strings.Join(runs, ",")
+		}
+		for _, tc := range []struct {
+			name       string
+			totalCount int
+			page2      string
+			want       gitprovider.CheckSummary
+		}{{
+			// A failed run on the second page counts.
+			name:       "FailureOnSecondPage",
+			totalCount: 101,
+			page2:      `[{"id":1000,"name":"late","status":"completed","conclusion":"failure"}]`,
+			want:       gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 101, Failed: 1},
+		}, {
+			// Runs past the page cap keep CI pending.
+			name:       "PastPageCap",
+			totalCount: 1001,
+			want:       gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 1000},
+		}} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				routes := activityRoutes()
+				routes["/repos/org/repo/commits/abc123/check-runs"] = func(w http.ResponseWriter, r *http.Request) {
+					page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+					runs := "[" + successPage(page*100) + "]"
+					if page == 2 && tc.page2 != "" {
+						runs = tc.page2
+					}
+					jsonBody(fmt.Sprintf(`{"total_count":%d,"check_runs":%s}`, tc.totalCount, runs))(w, r)
+				}
 				gp, _ := newFakeGitHubActivity(t, routes)
 
 				ctx := testutil.Context(t, testutil.WaitShort)
