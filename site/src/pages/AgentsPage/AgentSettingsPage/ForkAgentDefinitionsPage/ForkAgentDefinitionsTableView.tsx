@@ -65,6 +65,13 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						<span className="text-content-disabled">No description</span>
 					)}
 				</TableCell>
+				<TableCell className="whitespace-nowrap">
+					{definition.enabled ? (
+						"Enabled"
+					) : (
+						<span className="text-content-disabled">Disabled</span>
+					)}
+				</TableCell>
 				<TableCell className="hidden whitespace-nowrap sm:table-cell">
 					{formatUpdatedAt(definition.updated_at)}
 				</TableCell>
@@ -80,13 +87,23 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				action={action}
 			/>
 
-			{Boolean(error) && <ErrorAlert error={error} />}
+			{Boolean(error) && (
+				<ErrorAlert
+					error={error}
+					actions={
+						definitions.length > 0 && (
+							<RetryButton isRetrying={isRetrying} onRetry={onRetry} />
+						)
+					}
+				/>
+			)}
 
 			<Table aria-label={title}>
 				<TableHeader>
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>
 						<TableHead className="w-full">Description</TableHead>
+						<TableHead className="whitespace-nowrap">Status</TableHead>
 						<TableHead className="hidden whitespace-nowrap sm:table-cell">
 							Updated
 						</TableHead>

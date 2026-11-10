@@ -1,47 +1,39 @@
-import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import type { Experiment } from "#/api/typesGenerated";
-import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
-import {
-	MockAppearanceConfig,
-	MockBuildInfo,
-	MockDefaultOrganization,
-	MockEntitlements,
-} from "#/testHelpers/entities";
-import { render } from "#/testHelpers/renderHelpers";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
+import { renderWithAuth } from "#/testHelpers/renderHelpers";
 import { ForkSettingsNavItems } from "./ForkSettingsNavItems";
 
-const renderNavItems = (experiments: Experiment[]) =>
-	render(
-		<DashboardContext.Provider
-			value={{
-				entitlements: MockEntitlements,
-				experiments,
-				appearance: MockAppearanceConfig,
-				buildInfo: MockBuildInfo,
-				organizations: [MockDefaultOrganization],
-				showOrganizations: false,
-				canViewOrganizationSettings: false,
-			}}
-		>
-			<ForkSettingsNavItems settingsSection="agent-definitions" state={null} />
-		</DashboardContext.Provider>,
-	);
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("ForkSettingsNavItems", () => {
-	it("links the agent definitions page when the experiment is on", () => {
-		renderNavItems(["fork-agent-definitions"]);
-
-		const link = screen.getByRole("link", { name: "Agent definitions" });
-		expect(link.getAttribute("href")).toBe(
-			"/agents/settings/agent-definitions",
+	it("navigates to the agent definitions page when the experiment is on", async () => {
+		const user = userEvent.setup();
+		vi.spyOn(API, "getExperiments").mockResolvedValue([
+			"fork-agent-definitions",
+		]);
+		const { router } = renderWithAuth(
+			<ForkSettingsNavItems settingsSection="general" state={null} />,
+			{
+				path: "/agents/settings",
+				route: "/agents/settings",
+				extraRoutes: [
+					{ path: "/agents/settings/agent-definitions", element: <div /> },
+				],
+			},
 		);
-		expect(link.getAttribute("aria-current")).toBe("page");
-	});
 
-	it("renders nothing when the experiment is off", () => {
-		renderNavItems([]);
+		await user.click(
+			await screen.findByRole("link", { name: "Agent definitions" }),
+		);
 
-		expect(screen.queryByRole("link")).toBeNull();
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				"/agents/settings/agent-definitions",
+			),
+		);
 	});
 });

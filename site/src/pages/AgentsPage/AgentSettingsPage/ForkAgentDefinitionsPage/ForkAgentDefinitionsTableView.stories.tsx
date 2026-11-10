@@ -9,6 +9,7 @@ const MockReleaseNotesDefinition = {
 	id: "agent-definition-release-notes",
 	name: "release-notes",
 	description: "",
+	enabled: false,
 };
 
 const meta = {
