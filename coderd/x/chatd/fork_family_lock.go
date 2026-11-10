@@ -1,9 +1,9 @@
 package chatd
 
 // This file is fork code: it orders the row locks of a family archive behind
-// the fork-nested-subagents experiment. Upstream's setChatFamilyArchived calls
-// forkSetFamilyArchived, which runs chatstate.SetFamilyArchived unchanged when
-// the experiment is off.
+// the fork-nested-subagents experiment. Upstream's setChatFamilyArchived and
+// the auto-archive worker call forkSetFamilyArchived, which runs
+// chatstate.SetFamilyArchived unchanged when the experiment is off.
 
 import (
 	"context"
@@ -33,18 +33,23 @@ import (
 // member is locked only after every transition of its descendants has
 // committed, so no transition waits for a parent that is locked here.
 // chatstate.SetFamilyArchived then finds every row locked.
-func (p *Server) forkSetFamilyArchived(ctx context.Context, input chatstate.SetFamilyArchivedInput) ([]database.Chat, error) {
+func (p *Server) forkSetFamilyArchived(
+	ctx context.Context,
+	store database.Store,
+	publisher chatstate.Publisher,
+	input chatstate.SetFamilyArchivedInput,
+) ([]database.Chat, error) {
 	if !p.nestedSubagentsEnabled() {
-		return chatstate.SetFamilyArchived(ctx, p.db, p.pubsub, input)
+		return chatstate.SetFamilyArchived(ctx, store, publisher, input)
 	}
 
 	// SetFamilyArchived publishes into this buffer when its nested
 	// transaction returns, so nothing reaches subscribers before the outer
 	// transaction commits.
-	buffer := chatstate.NewPublishBuffer(p.pubsub)
+	buffer := chatstate.NewPublishBuffer(publisher)
 	defer buffer.Discard()
 	var familyChats []database.Chat
-	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+	err := forkdb.InTx(store, func(tx database.Store, ftx forkdb.Store) error {
 		if _, err := ftx.LockChatForNoKeyUpdate(ctx, input.RootID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return chatstate.ErrChatNotFound
