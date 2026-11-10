@@ -3,8 +3,11 @@ package chatd
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -57,6 +60,23 @@ func TestNotifyUserTool(t *testing.T) {
 	require.NoError(t, err)
 	notify(chat, notifyUserArgs{Message: "an hour later"}, false)
 	require.Len(t, f.inboxNotifications(t, chat.OwnerID), maxChatUserNotificationsPerHour+2)
+
+	// A chat title may be longer than a notification title, so the default
+	// is cut to the limit on a rune boundary.
+	long := f.createWakeupChat(t)
+	long.Title = strings.Repeat("é", 100)
+	notify(long, notifyUserArgs{Message: "long title"}, false)
+	require.Contains(t, f.inboxNotifications(t, long.OwnerID),
+		inboxNotification{ChatID: long.ID.String(), Title: strings.Repeat("é", maxNotificationTitleBytes/2), Message: "long title"})
+
+	// Parallel calls in one step would all count the same notifications and
+	// could pass the limit together.
+	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+	require.NoError(t, err)
+	idx := slices.IndexFunc(tools, func(tool fantasy.AgentTool) bool { return tool.Info().Name == notifyUserToolName })
+	require.GreaterOrEqual(t, idx, 0)
+	serial, ok := tools[idx].(interface{ SerialToolCalls() bool })
+	require.True(t, ok && serial.SerialToolCalls(), "notify_user calls must run one at a time")
 
 	system, err := f.db.GetUserByID(ctx, database.PrebuildsSystemUserID)
 	require.NoError(t, err)

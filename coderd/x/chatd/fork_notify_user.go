@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/fantasy"
 	"golang.org/x/xerrors"
@@ -22,6 +23,9 @@ import (
 const (
 	notifyUserToolName              = "notify_user"
 	maxChatUserNotificationsPerHour = 10
+	// maxNotificationTitleBytes is the title limit of
+	// codersdk.CustomNotificationContent.Validate.
+	maxNotificationTitleBytes = 120
 )
 
 type notifyUserArgs struct {
@@ -36,7 +40,7 @@ type notifyUserResult struct {
 // notifyUserTool returns the notify_user tool, which sends a Coder
 // notification to the owner of chat.
 func (p *Server) notifyUserTool(chat database.Chat) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return serialNotifyUserTool{AgentTool: fantasy.NewAgentTool(
 		notifyUserToolName,
 		"Send a notification to the user who owns this chat through Coder "+
 			"notifications (inbox, and email, webhook or push where configured). "+
@@ -49,8 +53,17 @@ func (p *Server) notifyUserTool(chat database.Chat) fantasy.AgentTool {
 			}
 			return toolJSONResponse(notifyUserResult{Sent: true}), nil
 		},
-	)
+	)}
 }
+
+// serialNotifyUserTool runs the notify_user calls of a step one at a time, so
+// each call counts the notifications of the calls before it. A chat runs one
+// turn at a time, so this keeps the hourly limit.
+type serialNotifyUserTool struct {
+	fantasy.AgentTool
+}
+
+func (serialNotifyUserTool) SerialToolCalls() bool { return true }
 
 // notifyChatOwner sends a custom notification to the owner of chat, at most
 // maxChatUserNotificationsPerHour per chat in the rolling hour. The limit
@@ -65,7 +78,7 @@ func (p *Server) notifyChatOwner(ctx context.Context, chat database.Chat, args n
 		return xerrors.New("message is required")
 	}
 	if content.Title == "" {
-		content.Title = chat.Title
+		content.Title = truncateUTF8Bytes(chat.Title, maxNotificationTitleBytes)
 	}
 	if err := content.Validate(); err != nil {
 		return err
@@ -129,4 +142,13 @@ func (p *Server) notifyChatOwner(ctx context.Context, chat database.Chat, args n
 		return xerrors.Errorf("send notification: %w", err)
 	}
 	return nil
+}
+
+// truncateUTF8Bytes cuts s to at most maxBytes bytes without splitting a rune.
+func truncateUTF8Bytes(s string, maxBytes int) string {
+	for len(s) > maxBytes {
+		_, size := utf8.DecodeLastRuneInString(s)
+		s = s[:len(s)-size]
+	}
+	return s
 }
