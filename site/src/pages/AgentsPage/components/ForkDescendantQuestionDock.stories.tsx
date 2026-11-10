@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { spyOn } from "storybook/test";
+import { API } from "#/api/api";
 import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
 import { MockChat } from "#/testHelpers/chatEntities";
+import { mockApiError } from "#/testHelpers/entities";
 import { MockChatDescendantQuestion } from "#/testHelpers/forkChatQuestions";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
@@ -59,5 +62,13 @@ export const UntitledChat: Story = {
 				data: [{ ...MockChatDescendantQuestion, chat_title: "" }],
 			},
 		],
+	},
+};
+
+export const LoadError: Story = {
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockRejectedValue(
+			mockApiError({ message: "Database unavailable." }),
+		);
 	},
 };

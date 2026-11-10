@@ -58,29 +58,26 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 		answerChatDescendantQuestion(queryClient, rootChatId),
 	);
 
-	// A failed poll keeps the questions of the last successful one.
-	if (questionsQuery.data === undefined) {
-		if (!questionsQuery.isError) {
-			return null;
-		}
-		return (
-			<div className="px-4">
-				<Alert
-					severity="error"
-					className={cn("mx-auto mb-2 w-full", chatWidthClass(chatFullWidth))}
-				>
-					<AlertTitle>Questions from subagents failed to load</AlertTitle>
-					<AlertDescription>
-						{getErrorMessage(questionsQuery.error, "Something went wrong.")}
-					</AlertDescription>
-				</Alert>
-			</div>
-		);
-	}
-	const pendingQuestions = questionsQuery.data;
+	// A failed poll keeps the questions of the last successful one, so the
+	// alert shows above them: they may be stale.
+	const loadErrorAlert = questionsQuery.isError && (
+		<Alert
+			severity="error"
+			className={cn(
+				"mx-auto mb-2 w-full shrink-0",
+				chatWidthClass(chatFullWidth),
+			)}
+		>
+			<AlertTitle>Questions from subagents failed to load</AlertTitle>
+			<AlertDescription>
+				{getErrorMessage(questionsQuery.error, "Something went wrong.")}
+			</AlertDescription>
+		</Alert>
+	);
+	const pendingQuestions = questionsQuery.data ?? [];
 	const question = pendingQuestions.at(0);
 	if (!question) {
-		return null;
+		return loadErrorAlert ? <div className="px-4">{loadErrorAlert}</div> : null;
 	}
 	const questionKey = getQuestionCallKey(
 		question.tool_call_id,
@@ -95,6 +92,7 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 			ref={scrollerRef}
 			className="flex max-h-[60vh] min-h-0 scroll-pb-14 flex-col overflow-y-auto px-4 scrollbar-gutter-stable scrollbar-thin"
 		>
+			{loadErrorAlert}
 			<section
 				// A section that replaces a focused one takes the focus, as in
 				// AskUserQuestionDock, so Tab reaches the next question's form.

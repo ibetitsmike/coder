@@ -192,23 +192,6 @@ describe("ForkDescendantQuestionDock", () => {
 		expect(sentMessages).toEqual([]);
 	});
 
-	it("reports questions that fail to load", async () => {
-		server.use(
-			http.get("/api/v2/chats/fork/:chatId/questions", () =>
-				HttpResponse.json(
-					{ message: "Database unavailable." },
-					{ status: 500 },
-				),
-			),
-		);
-
-		renderDock();
-
-		expect(
-			await screen.findByText("Questions from subagents failed to load"),
-		).toBeInTheDocument();
-	});
-
 	it("links to the chat that asked the question", async () => {
 		serveQuestions([mockOldestQuestion]);
 		const user = userEvent.setup();
