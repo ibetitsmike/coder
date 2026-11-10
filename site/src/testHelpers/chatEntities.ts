@@ -182,6 +182,43 @@ export const MockChatContextACPHarnessIssue: ChatContext = {
 	],
 };
 
+export const MockChatContextAgentDefinitions: ChatContext = {
+	dirty: false,
+	resources: [
+		{
+			source: "/home/coder/.claude/agents/reviewer.md",
+			kind: "subagent",
+			size_bytes: 512,
+			status: "ok",
+			subagent_name: "reviewer",
+			subagent_description: "Reviews a diff for defects.",
+		},
+		{
+			source: "/home/coder/.claude/agents/sicko.md",
+			kind: "subagent",
+			size_bytes: 256,
+			status: "ok",
+			error:
+				'missing description; unknown front-matter field "temperature" ignored',
+			subagent_name: "sicko",
+		},
+		{
+			source: "/home/coder/.claude/agents/Broken.md",
+			kind: "subagent",
+			size_bytes: 128,
+			status: "invalid",
+			error: 'agent name "Broken" is not kebab-case',
+		},
+	],
+};
+
+export const MockChatContextAgentDefinitionWarnings: ChatContext = {
+	...MockChatContextAgentDefinitions,
+	resources: MockChatContextAgentDefinitions.resources?.filter(
+		(resource) => resource.status === "ok",
+	),
+};
+
 export const MockAdvisorConfig: AdvisorConfig = {
 	enabled: true,
 	max_uses_per_run: 5,
