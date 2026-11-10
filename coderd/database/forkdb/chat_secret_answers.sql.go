@@ -26,15 +26,6 @@ func (q *Queries) DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecr
 	return err
 }
 
-const deleteChatSecretAnswersByChatID = `-- name: DeleteChatSecretAnswersByChatID :exec
-DELETE FROM chat_secret_answers WHERE chat_id = $1
-`
-
-func (q *Queries) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteChatSecretAnswersByChatID, chatID)
-	return err
-}
-
 const deleteOldChatSecretAnswers = `-- name: DeleteOldChatSecretAnswers :execrows
 WITH expired AS (
     SELECT chat_id, tool_call_id

@@ -24,6 +24,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -105,13 +106,43 @@ var ErrSecretQuestionPending = xerrors.New("the chat waits for a secret answer, 
 // answer another question without its value.
 var ErrSecretAnswerNotPending = xerrors.New("the question of the secret answer is not pending")
 
+// ErrSecretAnswerQueued means that a queued message already reports an
+// answer to the secret question that a decline would retire.
+var ErrSecretAnswerQueued = xerrors.New("a queued message already answers the secret question")
+
 type secretAnswerReportKey struct{}
+
+type secretAnswerReport struct {
+	toolCallID string
+	declined   bool
+}
 
 // WithSecretAnswerReport marks ctx as the send of the message that reports
 // the stored secret answer to the question of toolCallID, the one message
 // that may answer a secret question.
 func WithSecretAnswerReport(ctx context.Context, toolCallID string) context.Context {
-	return context.WithValue(ctx, secretAnswerReportKey{}, toolCallID)
+	return context.WithValue(ctx, secretAnswerReportKey{}, secretAnswerReport{toolCallID: toolCallID})
+}
+
+// WithSecretAnswerDecline marks ctx as the send of the message that says the
+// user declined the secret question of toolCallID. Unlike a report, it needs
+// no stored answer, and the send deletes one that is stored.
+func WithSecretAnswerDecline(ctx context.Context, toolCallID string) context.Context {
+	return context.WithValue(ctx, secretAnswerReportKey{}, secretAnswerReport{toolCallID: toolCallID, declined: true})
+}
+
+// forkKeepSecretAnswerPrompt drops the prompt override of a
+// user_prompt_submit hook from the send of a secret answer report or decline.
+// The pending question rule finds that message by its text, which coderd
+// writes and which holds no user input, so an override would leave the
+// question pending after the send resumes the chat.
+func forkKeepSecretAnswerPrompt(ctx context.Context, result *chathooks.Result) *chathooks.Result {
+	if _, isReport := ctx.Value(secretAnswerReportKey{}).(secretAnswerReport); !isReport || result == nil {
+		return result
+	}
+	kept := *result
+	kept.InputOverride = nil
+	return &kept
 }
 
 // forkValidateSubagentResume returns an error when a message_agent send would
@@ -132,7 +163,7 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 		return nil
 	}
 	resume, _ := ctx.Value(subagentResumeKey{}).(bool)
-	reportCallID, report := ctx.Value(secretAnswerReportKey{}).(string)
+	report, isReport := ctx.Value(secretAnswerReportKey{}).(secretAnswerReport)
 	if !resume && !inTx {
 		return nil
 	}
@@ -145,16 +176,38 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return xerrors.Errorf("get pending question of chat %s: %w", target.ID, err)
 	}
-	if report {
-		if !pending || question.ToolCallID != reportCallID {
+	if isReport {
+		if !pending || question.ToolCallID != report.toolCallID {
 			return ErrSecretAnswerNotPending
+		}
+		if report.declined {
+			if !inTx {
+				return nil
+			}
+			// A chat with a queued message cannot record a secret question,
+			// so a queued message here reports an answer to this one.
+			queued, err := store.CountChatQueuedMessages(ctx, target.ID)
+			if err != nil {
+				return xerrors.Errorf("count queued messages of chat %s: %w", target.ID, err)
+			}
+			if queued > 0 {
+				return ErrSecretAnswerQueued
+			}
+			// An answer can be stored whose report failed or was deleted
+			// from the queue. Placeholders must not resolve to the value
+			// of a question the user declined.
+			err = fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: target.ID, ToolCallID: report.toolCallID})
+			if err != nil {
+				return xerrors.Errorf("delete secret answer of chat %s: %w", target.ID, err)
+			}
+			return nil
 		}
 		answers, err := fdb.GetChatSecretAnswersByChatID(ctx, target.ID)
 		if err != nil {
 			return xerrors.Errorf("get secret answers of chat %s: %w", target.ID, err)
 		}
 		if !slices.ContainsFunc(answers, func(answer forkdb.ChatSecretAnswer) bool {
-			return answer.ToolCallID == reportCallID
+			return answer.ToolCallID == report.toolCallID
 		}) {
 			return ErrSecretAnswerNotPending
 		}
