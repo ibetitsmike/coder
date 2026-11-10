@@ -96,13 +96,16 @@ API chats outside plan mode don't have it.
 
 With the `fork-nested-subagents` experiment, a child that isn't an `explore` child also has `ask_user_question`, except in plan-mode turns.
 The call ends the child's turn, and the answer arrives as the child's next user message.
-The root chat doesn't show the question.
+In the web UI, the root chat's page shows the oldest unanswered question from any descendant under "Question from" and the asking chat's title, with "1 of N" when more questions wait.
+An answer there goes to the chat that asked, not to the root chat.
+While the root chat has its own unanswered question, the page shows only that one, and a descendant's question appears after the user answers it.
 If the child asks while you wait on it, `wait_agent` returns `needs_input: true` with the questions when the child's turn ends.
 If you call `wait_agent` while the question is unanswered, it waits for the answer and then for the child's reply, and returns `needs_input: true` if its timeout comes first.
-After `needs_input: true`, show the user the questions and end your turn.
-When the user answers, send the answer to the child with `message_agent`, then call `wait_agent` on the child again.
+After `needs_input: true`, tell the user that the question waits on the root chat's page, then call `wait_agent` on the child again.
+If the user answers in your chat instead, send the answer to the child with `message_agent`, then call `wait_agent` on the child again.
 The user can also answer in the child's own chat, which the Agents sidebar lists under its parent.
-That answer resumes only the child, so your chat continues only when the user sends you a message, and then `wait_agent` returns the child's reply.
+An answer on the root chat's page or in the child's chat resumes only the child.
+If your turn has ended, your chat continues only when the user sends you a message, and then `wait_agent` returns the child's reply.
 Without the experiment, child chats don't have `ask_user_question`.
 
 ### Todo list
@@ -115,6 +118,7 @@ The list survives a compaction.
 The web UI shows a non-empty list in a pill in the composer.
 In the conversation, the web UI shows each `todo_write` and `todo_read` call as a card, such as **Updated todos (1/3 done)**.
 The card of a call that returns a non-empty list expands to the list, and the card of a failed call expands to its error.
+With the experiment, `list_agents` returns each child's list in `todos`, and its card shows the child's progress, such as **1/3 todos done**.
 
 ### Attachments
 
@@ -175,6 +179,7 @@ A bare name that more than one source defines fails with `type must be one of:` 
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
 `spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` report a custom child's definition name in `type`, not `general`.
 The chat list, `GET /api/v2/chats/{chat}`, and the `created` event of `GET /api/v2/chats/watch` report each child chat's type in `agent_type`, and the Agents page shows it as a badge next to the child's title, except for `general`.
+In the conversation, the `spawn_agent` card of a custom child shows **Agent type:** and the name.
 That name has no `workspace/`, `personal/`, `org/`, or `project/` prefix, so do not pass it back to `spawn_agent` when more than one source defines it.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
@@ -221,7 +226,8 @@ An Enterprise deployment doesn't have that cap while its Agent Runtime Hours ent
 A family is a root chat and all of its descendants.
 With the `fork-nested-subagents` experiment, an administrator can also limit running subagents with `--chat-max-concurrent-subagents` across the deployment and `--chat-max-concurrent-subagents-per-family` in one family.
 A child over one of these limits waits for a free slot, like a child over the default cap.
-While a `running` child waits for a slot, `list_agents` shows it with `waiting_for_capacity: true`.
+While a `running` child waits for a slot, `list_agents` shows it with `waiting_for_capacity: true`, and its card marks the child **waiting for capacity**.
+When you expand your root chat in the Agents sidebar, each of its waiting subagents shows an hourglass and **Waiting for a free subagent slot**.
 With the experiment, a child's own ancestors don't count against the default cap or these limits, so a coordinator that waits in `wait_agent` doesn't block its workers.
 Because of that, more than 10 subagent turns can run at once.
 
@@ -229,6 +235,10 @@ With the experiment, `--chat-max-live-subagents-per-family` limits how many suba
 A subagent is live while it isn't archived and its status is `running`, `interrupting`, `requires_action`, or `paused`.
 A child that finished doesn't count.
 At the limit, `spawn_agent` fails with `cannot create a child agent: this chat family has` and the count, instead of queueing the child.
+With the experiment, the card of a failed `spawn_agent` call shows its error.
+While the family is at the limit, the Agents sidebar shows a chip such as **live 2/2** next to the title of the expanded root chat.
+For a root chat, `GET /api/v2/chats/fork/{chat}/family` returns the family's `live_subagents`, its `max_live_subagents` limit, where 0 means no limit, and the IDs of its subagents that wait for a slot in `waiting_for_capacity`.
+For a child chat, it fails with status 400.
 `message_agent` to a finished child fails the same way with `cannot resume the child agent:`.
 After either error, call `list_agents`, and follow `has_more` with `offset` until you have every direct child.
 If no child is live, retry one time without waiting.
@@ -295,6 +305,7 @@ It shows each `read_chat_transcript` call as a card, such as **Read 4 messages f
 A card says **More chats available** or **More messages available** when the tool has another page, and the card of a failed call expands to its error.
 Plan-mode turns and `explore` children don't get either tool.
 With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds up to that many of the child's latest tool calls, oldest first, to its reply.
+Its card then shows them under a line such as **2 recent tool calls** that expands to each call's tool name and arguments, and shows the `tool_calls_error` text when Coder can't read them.
 Without the experiment, there is no transcript or chat search tool.
 Root chats in a project have `read_memory` and `save_memory`, but Setup creates no project.
 
@@ -321,7 +332,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `5decda1a92`:
+Checked against fork `main` at `a9438bd7af`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -349,30 +360,38 @@ Checked against fork `main` at `5decda1a92`:
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:474-479`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:643-675`.
-- Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:274-282`.
+- Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
   The organization settings section, only with `fork-nested-subagents` and for a user who can read the organization's chat model configs, `site/src/pages/AISettingsPage/CoderAgentsPage/ForkSubagentLimits.tsx:31-55`, read-only without edit permission, `components/ForkSubagentLimitsSettings.tsx:179-189`.
   Concurrency limits without the ancestors, `fork_capacity.go:75-117`, and `waiting_for_capacity` in `list_agents`, `coderd/x/chatd/fork_list_agents.go:34-40`, `:81-88`, from `fork_capacity.go:146-192`.
+  The `list_agents` card's **waiting for capacity**, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:16-27`, in each row, `ListAgentsTool.tsx:58`.
+  The family API, only with the experiment, `coderd/fork_chat_routes.go:45-48`, status 400 for a child chat, `coderd/fork_chat_family.go:29-34`, and its fields, `codersdk/fork_chat_family.go:16-28`, from `coderd/x/chatd/fork_family.go:22-67`.
+  The sidebar hourglass and subtitle for a waiting child, and the chip at the live limit for an expanded root chat with a live subagent, only with the experiment and for the chat owner, `site/src/pages/AgentsPage/components/ChatsSidebar/tree/ForkFamilyCapacity.tsx:26-30`, `:40-84`, `:91-108`, polled every 5&nbsp;seconds, `site/src/api/queries/forkChatFamily.ts:12-19`, in each row, `ChatTreeNode.tsx:142-159`, `:347-349`.
   `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:570-589`, and `wait_agent` on a `paused` child, `:479-487`.
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
-  `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:883`, `:893-895`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
+  `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:888`, `:898-900`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
+  The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:93-96`, `:104-106`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:541`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:184-308`, and for a project the owner owns or that is shared with them, `:261-265`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:216-219`.
   The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:233-236`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:43`.
-  A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:331`, and the top bar, `ChatTopBar.tsx:279`.
+  A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:279`.
+  **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:88-92`, `:99-103`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:34-36`, `fork_tools.go:35-39`, ending the turn, `fork_descendant_questions.go:40-50`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
   Unanswered until the child gets a user message after the question, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-23`.
   `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:214-224`, which first waits for the answer when the question is unanswered at the call, `:182-201`, `:230-251`, added with the experiment, `fork_tools.go:40-42`.
+  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:53`, `coderd/fork_chat_questions.go:29-72`.
+  The root chat page shows the oldest one only with the experiment and only on a root chat the viewer can act on, `site/src/pages/AgentsPage/components/ForkDescendantQuestionDock.tsx:38-46`, `:80-81`, `:123-136`, and posts the answer to the asking chat, `site/src/api/queries/forkChatQuestions.ts:55-57`.
+  The root chat's own open question hides it until that answer is queued, `site/src/pages/AgentsPage/components/ChatPageContent.tsx:222-227`, `:286-300`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
 - Skills one level deep, with `name` equal to the directory: `resolve.go:61-64`, `:632-647`.
-- No skill in a chat's first message: `coderd/x/chatd/chatd.go:659-667`, `coderd/x/chatd/skill_invocation.go:37`.
+- No skill in a chat's first message: `coderd/x/chatd/chatd.go:662-670`, `coderd/x/chatd/skill_invocation.go:37`.
 - Working directory: `coderd/x/chatd/context_prompt.go:195-198`, `agent/agentproc/process.go:400-413`.
 - `explore` tools: `turn_environment.go:2124-2133`.
 - Hidden skills: `coderd/x/chatd/chattool/skill.go:55-62`, `turn_environment.go:2185-2201`.
@@ -383,11 +402,13 @@ Checked against fork `main` at `5decda1a92`:
   Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
-  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:44-50`, with its labels, `ForkTodoTool.tsx:32-45`, `:62-72`, and its expandable list or error, `:73-94`, `:110-121`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:40-46`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
+  The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:28`, `:50`, `:70-74`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:29-34`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
-  `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:33`.
+  `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:33`.
+  The recent tool calls and `tool_calls_error` on the `wait_agent` card, only with the same experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:36-70`, `:111-121`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:32`, and run as the chat owner, `fork_search_chats.go:97-103`.
-  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:51-60`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
+  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:47-56`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
 - No wake-up, notification, or PR tool: no matches in `coderd/x/chatd` for `schedule_wakeup`, `notify_user`, or `pull_request`.
