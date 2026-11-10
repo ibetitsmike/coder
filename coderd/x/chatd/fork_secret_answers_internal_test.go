@@ -278,6 +278,19 @@ func TestScrubSecretAnswers(t *testing.T) {
 	slash := []forkdb.ChatSecretAnswer{{ToolCallID: "call_p", Value: "a/bcdefg"}}
 	require.Equal(t, `{"p":"{{secret:call_p}}"}`, scrubSecretAnswers(`{"p":"a\/bcdefg"}`, slash),
 		"a JSON encoder can escape /")
+	control := []forkdb.ChatSecretAnswer{{ToolCallID: "call_c", Value: "abc\x01def\tg'h\\i\x1bj-k\u00e4"}}
+	require.Equal(t, `$'{{secret:call_c}}' $'{{secret:call_c}}'`,
+		scrubSecretAnswers(`$'abc\001def\tg\'h\\i\Ej-kä' $'abc\001def\tg\'h\\i\Ej-k\303\244'`, control),
+		"Bash writes a word with a control character in $'...'")
+	if bash, err := exec.LookPath("bash"); err == nil {
+		//nolint:gosec // The test traces a fixed command.
+		trace, err := exec.CommandContext(chatdTestContext(t), bash, "-c", `set -x; : "$1"`, "_", control[0].Value).CombinedOutput()
+		require.NoError(t, err)
+		scrubbed := scrubSecretAnswers(string(trace), control)
+		require.Contains(t, scrubbed, "{{secret:call_c}}", string(trace))
+		require.NotContains(t, scrubbed, "abc", string(trace))
+		require.NotContains(t, scrubbed, "def", string(trace))
+	}
 	likePlaceholder := []forkdb.ChatSecretAnswer{{ToolCallID: "call_s", Value: "{{secret:my-token}}"}}
 	require.Equal(t, "x {{secret:call_s}} y", scrubSecretAnswers("x {{secret:my-token}} y", likePlaceholder),
 		"a value that starts like its placeholder leaves the placeholder whole")
@@ -301,6 +314,18 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	ask(`[{"header":"Token","question":"Paste the token.","secret":true}]`)
 	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "the token is x", SendMessageBusyBehaviorQueue)
 	require.ErrorContains(t, err, "it waits for a secret answer")
+	// A chat API send checks before SendMessage, so SendMessage checks
+	// again under the chat lock, and only the report of the answer passes.
+	send := func(ctx context.Context) error {
+		_, err := f.server.SendMessage(ctx, SendMessageOptions{
+			ChatID: child.ID, CreatedBy: child.OwnerID,
+			Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText("the token is x")},
+			BusyBehavior: SendMessageBusyBehaviorQueue,
+		})
+		return err
+	}
+	require.ErrorIs(t, send(ctx), ErrSecretQuestionPending)
+	require.NoError(t, send(WithSecretAnswerReport(ctx)))
 
 	ask(`[{"header":"DB","question":"Which one?","options":[{"label":"a"},{"label":"b"}]}]`)
 	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a", SendMessageBusyBehaviorQueue)
