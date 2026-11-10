@@ -134,7 +134,9 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	now := wakeupTestSlot
 	tick := func() {
 		t.Helper()
-		now = now.Add(wakeupPollInterval)
+		// The worker adds the time it spent since the claim to the next poll,
+		// so a tick of exactly the poll interval can come before it is due.
+		now = now.Add(wakeupPollInterval + time.Second)
 		worker.wakeupOnce(ctx, now)
 	}
 	doneText := func(child database.Chat) string {
@@ -146,7 +148,6 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
-	// The worker adds the time it spent since the claim to now.
 	require.WithinDuration(t, now.Add(wakeupPollInterval), got.NextRunAt.Time, time.Second, "polls again")
 	require.False(t, got.NextRunAt.Time.Before(now.Add(wakeupPollInterval)))
 
@@ -241,6 +242,39 @@ func TestWakeupEventsArchivedAndMissingChildren(t *testing.T) {
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
+}
+
+// Events of a type this worker does not know wake nothing and hold nothing
+// open, and events that are not a JSON array pause the wake-up.
+func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	unknownChat := f.createWakeupChat(t)
+	child := f.createChildAgent(t, unknownChat, "child", database.ChatStatusWaiting)
+	unknown := f.insertWakeup(t, unknownChat, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: json.RawMessage(fmt.Sprintf(`[{"type":"pr_merged","chat_id":%q}]`, child.ID)),
+	})
+	invalidChat := f.createWakeupChat(t)
+	invalid := f.insertWakeup(t, invalidChat, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: json.RawMessage(`{"type":"child_done"}`),
+	})
+
+	f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+
+	require.Empty(t, f.wakeMessages(t, unknownChat, unknown.Prompt))
+	require.Empty(t, f.wakeupRunKeys(t, unknown.ID))
+	got := f.wakeup(t, unknown.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+
+	require.Empty(t, f.wakeMessages(t, invalidChat, invalid.Prompt))
+	got = f.wakeup(t, invalid.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
+	require.Equal(t, "invalid_events", got.StatusReason.String)
+	require.False(t, got.LeaseExpiresAt.Valid)
 }
 
 // createChildAgent creates a direct child of parent with title and status.
