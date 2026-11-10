@@ -316,7 +316,9 @@ func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 		Events: json.RawMessage(`{"type":"child_done"}`),
 	})
 
-	f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	enqueuer := useFakeEnqueuer(worker)
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 
 	require.Empty(t, f.wakeMessages(t, unknownChat, unknown.Prompt))
 	require.Empty(t, f.wakeupRunKeys(t, unknown.ID))
@@ -329,6 +331,8 @@ func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
 	require.Equal(t, "invalid_events", got.StatusReason.String)
 	require.False(t, got.LeaseExpiresAt.Valid)
+	// Only the pause notifies; the completed wake-up does not.
+	requireWakeupPausedNotification(t, enqueuer.Sent(), invalidChat, "invalid_events")
 }
 
 // An events wake-up checks the caps only when a child is about to be sent.

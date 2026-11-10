@@ -251,6 +251,30 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		requireWakeupPausedNotification(t, enqueuer.Sent(), chat, "hook_denied")
 	})
 
+	// The send itself commits the invalid_cron pause, so the owner is
+	// notified after the delivered run.
+	t.Run("InvalidCron", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind: forkdb.ChatWakeupKindCron,
+			Cron: sql.NullString{String: "not a schedule", Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		enqueuer := useFakeEnqueuer(worker)
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
+		require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
+		require.Equal(t, "invalid_cron", got.StatusReason.String)
+		require.False(t, got.NextRunAt.Valid)
+		requireWakeupPausedNotification(t, enqueuer.Sent(), chat, "invalid_cron")
+	})
+
 	t.Run("Delay", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
