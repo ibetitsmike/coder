@@ -99,9 +99,10 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.True(t, resp.IsError)
 	_, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
 	require.ErrorIs(t, err, sql.ErrNoRows, "an invalid question is not recorded")
-	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+	_, err = f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: "call-0", Value: "earlier secret",
-	}))
+	})
+	require.NoError(t, err)
 
 	resp, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: descendantQuestionInput})
 	require.NoError(t, err)

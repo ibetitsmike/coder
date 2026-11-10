@@ -29,9 +29,10 @@ func insertChatSecretAnswers(t *testing.T, rawDB, store database.Store, value st
 	fdb, err := forkdb.From(store)
 	require.NoError(t, err)
 	for i := range n {
-		require.NoError(t, fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		_, err := fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 			ChatID: chat.ID, ToolCallID: fmt.Sprintf("call_%d", i), Value: value,
-		}))
+		})
+		require.NoError(t, err)
 	}
 	return chat.ID
 }

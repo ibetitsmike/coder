@@ -680,11 +680,12 @@ func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gom
 }
 
 // InsertChatSecretAnswer mocks base method.
-func (m *MockStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+func (m *MockStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "InsertChatSecretAnswer", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(time.Time)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // InsertChatSecretAnswer indicates an expected call of InsertChatSecretAnswer.
