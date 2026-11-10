@@ -290,12 +290,6 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	queued, err = db.GetChatQueuedMessages(sysCtx, busy.ID)
 	require.NoError(t, err)
 	require.Len(t, queued, 1, "the answer is reported again")
-	// A decline cannot delete the value that the queued message reports.
-	err = client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Declined: true})
-	requireStatus(t, http.StatusConflict, err)
-	answers, err = fdb.GetChatSecretAnswersByChatID(sysCtx, busy.ID)
-	require.NoError(t, err)
-	require.Len(t, answers, 1)
 
 	// The ID travels in the body, so an ID that a path would escape matches.
 	for _, callID := range []string{"call/a%41", "call a%41"} {

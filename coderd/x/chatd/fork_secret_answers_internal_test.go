@@ -364,6 +364,16 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: callID, Value: "a-secret-value",
 	}))
+	// A decline must not delete the value that a queued report delivers.
+	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call ` + callID + `:\nThe user gave a secret answer."}]`),
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, send(WithSecretAnswerDecline(ctx, callID)), ErrSecretAnswerQueued)
+	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.NoError(t, f.db.DeleteAllChatQueuedMessages(ctx, child.ID))
 	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
 	// A late report of the answer must not answer a newer question.
 	ask(`[{"header":"Key","question":"Paste the key.","secret":true}]`)
