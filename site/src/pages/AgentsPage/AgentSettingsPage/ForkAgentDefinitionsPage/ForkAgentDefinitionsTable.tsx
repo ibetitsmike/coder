@@ -137,24 +137,37 @@ export const ForkAgentDefinitionsTable: React.FC<
 				"Failed to create agent definition.",
 			),
 			isSubmitting: createMutation.isPending,
-			onSubmit: (content, onSettled) =>
+			onSubmit: ({ name, content }, onSettled) => {
+				const listKey = userAgentDefinitions(organizationId).queryKey;
+				const isListed = () =>
+					queryClient
+						.getQueryData(listKey)
+						?.some((definition) => definition.name === name);
+				// A lost response can hide a create that committed, which the
+				// refetched list then shows. A name listed before the request,
+				// or an unknown list, means the failure is real.
+				const existedBefore = isListed() ?? true;
 				createMutation.mutate(
 					{ organizationId, req: { content } },
 					{
-						onSuccess: () => {
-							setEditorTarget(undefined);
-							toast.success("Agent definition created.");
+						onSettled: (_data, error) => {
+							if (!error || (!existedBefore && isListed())) {
+								setEditorTarget(undefined);
+								toast.success("Agent definition created.");
+							}
+							onSettled();
 						},
-						onSettled,
 					},
-				),
+				);
+			},
 			onClose: () => closeEditor(createMutation.isPending),
 		};
 	} else if (editorTarget?.mode === "edit") {
-		const isFresh = definitionQuery.isSuccess && !definitionQuery.isFetching;
-		const loaded = isFresh ? editFormValues(definitionQuery.data) : undefined;
-		// The editor keeps the first fresh values, so a later refetch cannot
-		// reset the user's edits.
+		const loaded = definitionQuery.data
+			? editFormValues(definitionQuery.data)
+			: undefined;
+		// The editor keeps the first values it gets, cached or fetched, so a
+		// later refetch cannot reset the user's edits.
 		if (loaded?.values && !editorTarget.values) {
 			setEditorTarget({ ...editorTarget, values: loaded.values });
 		}
@@ -178,7 +191,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 				"Failed to save agent definition.",
 			),
 			isSubmitting: saveMutation.isPending,
-			onSubmit: (content, onSettled) =>
+			onSubmit: ({ content }, onSettled) =>
 				saveMutation.mutate(
 					{ organizationId, name, req: { content } },
 					{

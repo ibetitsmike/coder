@@ -29,7 +29,7 @@ export const getUserAgentDefinitions = async (
 	return response.data;
 };
 
-/** Gets one of a user's personal agent definitions with its content. */
+/** Gets one of a member's personal agent definitions with its content; `user` defaults to the signed-in member. */
 export const getUserAgentDefinition = async (
 	organizationId: string,
 	name: string,
@@ -41,7 +41,7 @@ export const getUserAgentDefinition = async (
 	return response.data;
 };
 
-/** Creates a personal agent definition for a user. */
+/** Creates a personal agent definition for a member; `user` defaults to the signed-in member. */
 export const createUserAgentDefinition = async (
 	organizationId: string,
 	req: CreateForkAgentDefinitionRequest,

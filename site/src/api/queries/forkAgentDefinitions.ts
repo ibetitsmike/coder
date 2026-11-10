@@ -24,7 +24,10 @@ export const userAgentDefinitions = (organizationId: string) =>
 		queryFn: () => getUserAgentDefinitions(organizationId),
 	});
 
-/** Query options for one of the current user's agent definitions. */
+/**
+ * One definition with its markdown content. The key extends the list key, so
+ * invalidating the list refreshes an open editor's copy too.
+ */
 export const userAgentDefinition = (organizationId: string, name: string) =>
 	queryOptions({
 		queryKey: [...userAgentDefinitionsKey(organizationId), name] as const,
@@ -37,9 +40,8 @@ type CreateUserAgentDefinitionArgs = {
 };
 
 /**
- * Mutation options that create an agent definition for the current user. The
- * list is invalidated after failures too, because a lost response can hide a
- * created definition.
+ * The list is invalidated after failures too, because a lost response can
+ * hide a created definition.
  */
 export const createUserAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
