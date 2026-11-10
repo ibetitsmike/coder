@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -59,6 +60,15 @@ func (c *cleanupWorktreeConn) deleted() []workspacesdk.ForkDeleteWorktreeRequest
 func (f *isolationFixture) archiveAndAwaitNotices(t *testing.T, root database.Chat, conn *cleanupWorktreeConn, wantDeletes int) []string {
 	t.Helper()
 	ctx := testutil.Context(t, testutil.WaitMedium)
+	// Archiving needs every family member at rest.
+	family := []uuid.UUID{root.ID}
+	for _, row := range f.children(t, root) {
+		family = append(family, row.Chat.ID)
+	}
+	for _, id := range family {
+		_, err := f.db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: id, Status: database.ChatStatusWaiting})
+		require.NoError(t, err)
+	}
 	require.NoError(t, f.server.ArchiveChat(ctx, root))
 	archived, err := f.db.GetChatByID(ctx, root.ID)
 	require.NoError(t, err)
