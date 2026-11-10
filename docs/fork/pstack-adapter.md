@@ -274,6 +274,9 @@ Pass a child's `chat_id` from `spawn_agent` or `list_agents` to read that child,
 With the same experiment, `search_chats` finds top-level chats with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
 By default it searches only the chats your user created, so add `source:created_by_me,shared_with_me` to include chats shared with your user.
 It returns no subagent chats, so get a child's ID from `list_agents` in its parent.
+In the conversation, the web UI shows each `search_chats` call as a card, such as **Found 3 chats**, that expands to the query and a link to each chat with its status.
+It shows each `read_chat_transcript` call as a card, such as **Read 4 messages from** and the chat's title, that expands to a link to the chat and one line per message with its role and a preview.
+A card says **More chats available** or **More messages available** when the tool has another page, and the card of a failed call expands to its error.
 Plan-mode turns and `explore` children don't get either tool.
 With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds up to that many of the child's latest tool calls, oldest first, to its reply.
 Without the experiment, there is no transcript or chat search tool.
@@ -302,7 +305,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `23d5021361`:
+Checked against fork `main` at `7fc04297b4`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -357,10 +360,11 @@ Checked against fork `main` at `23d5021361`:
   Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
-  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:20-35`, `:42-49`, with its labels, `ForkTodoTool.tsx:37-50`, `:67-77`, and its expandable list or error, `:78-99`, `:115-128`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:44-50`, with its labels, `ForkTodoTool.tsx:32-45`, `:62-72`, and its expandable list or error, `:73-94`, `:110-121`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-33`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:32`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:31`, and run as the chat owner, `fork_search_chats.go:97-103`.
+  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:51-60`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
 - No wake-up, notification, or PR tool: no matches in `coderd/x/chatd` for `schedule_wakeup`, `notify_user`, or `pull_request`.
