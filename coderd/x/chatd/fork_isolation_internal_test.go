@@ -266,7 +266,7 @@ func TestForkSpawnIsolationErrors(t *testing.T) {
 				})}
 			},
 			args:    worktree,
-			wantErr: "create worktree: Base ref does not exist.: fatal: invalid reference: nope",
+			wantErr: "create worktree: Base ref does not exist: fatal: invalid reference: nope",
 		},
 		{
 			name: "AgentUnreachable",

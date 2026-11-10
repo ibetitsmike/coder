@@ -228,10 +228,11 @@ func worktreeCreateError(err error) error {
 		return xerrors.New("this workspace's agent does not support worktree isolation (it is older than the Coder server); " +
 			"restart the workspace to update its agent, or spawn with isolation shared")
 	}
+	message := strings.TrimSuffix(sdkErr.Message, ".")
 	if sdkErr.Detail != "" {
-		return xerrors.Errorf("create worktree: %s: %s", sdkErr.Message, sdkErr.Detail)
+		return xerrors.Errorf("create worktree: %s: %s", message, sdkErr.Detail)
 	}
-	return xerrors.Errorf("create worktree: %s", sdkErr.Message)
+	return xerrors.Errorf("create worktree: %s", message)
 }
 
 // forkWorktreeBranch returns the branch of the worktree of child chatID:
