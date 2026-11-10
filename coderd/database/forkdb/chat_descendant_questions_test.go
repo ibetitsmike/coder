@@ -75,6 +75,16 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 	require.Equal(t, "call-2", got.ToolCallID)
 	require.JSONEq(t, `[{"header": "API"}]`, string(got.Questions))
 
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        chat.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Visibility:    database.ChatMessageVisibilityModel,
+		Compressed:    true,
+	})
+	_, ok = pending()
+	require.False(t, ok, "a context boundary, such as a clear, retires the question")
+
 	_, err := sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", chat.ID)
 	require.NoError(t, err)
 	var count int
@@ -118,6 +128,7 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	grandchild := chat(&child)
 	answered := chat(&root)
 	archived := chat(&root)
+	cleared := chat(&root)
 	otherRoot := chat(nil)
 	otherChild := chat(&otherRoot)
 	emptyRoot := chat(nil)
@@ -142,6 +153,14 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	ask(archived, "archived")
 	_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET archived = true WHERE id = $1", archived.ID)
 	require.NoError(t, err)
+	ask(cleared, "cleared")
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        cleared.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Visibility:    database.ChatMessageVisibilityModel,
+		Compressed:    true,
+	})
 	ask(otherChild, "other")
 
 	rows, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, root.ID)

@@ -217,11 +217,11 @@ type Chat struct {
 	// without headers. Only the single-chat GET sets it.
 	// Experimental.
 	InlineMCPServers []InlineMCPServer `json:"inline_mcp_servers,omitempty"`
-	// Children holds child (subagent) chats nested under this root
-	// chat. Always initialized to an empty slice so the JSON field
-	// is present as []. Child chats cannot create their own
-	// subagents, so nesting depth is capped at 1 and this slice is
-	// always empty for child chats.
+	// Children holds the descendant (subagent) chats of this root chat,
+	// flat: each entry's parent_chat_id gives its place in the tree.
+	// Without fork-nested-subagents descendants are only direct
+	// children. Always initialized to an empty slice so the JSON field
+	// is present as []. Always empty for child chats.
 	Children []Chat `json:"children"`
 }
 
@@ -386,6 +386,10 @@ type ChatContextResource struct {
 	// SkillName and SkillDescription are populated only for skill kinds.
 	SkillName        string `json:"skill_name,omitempty"`
 	SkillDescription string `json:"skill_description,omitempty"`
+	// SubagentName and SubagentDescription are populated only for OK
+	// subagent kinds.
+	SubagentName        string `json:"subagent_name,omitempty"`
+	SubagentDescription string `json:"subagent_description,omitempty"`
 	// Tools lists the tools exposed by an MCP server. Populated only for the
 	// mcp_server kind; nil otherwise.
 	Tools []ChatContextTool `json:"tools,omitempty"`

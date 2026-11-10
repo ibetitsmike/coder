@@ -22,7 +22,8 @@ WHERE q.chat_id = $1::uuid
         FROM chat_messages m
         WHERE m.chat_id = q.chat_id
             AND m.role = 'user'
-            AND m.visibility <> 'model'
+            -- A context boundary, such as a clear, retires the question.
+            AND (m.visibility <> 'model' OR m.compressed)
             AND NOT m.deleted
             AND m.created_at > q.created_at
     )
@@ -53,7 +54,7 @@ WHERE c.root_chat_id = $1::uuid
         FROM chat_messages m
         WHERE m.chat_id = q.chat_id
             AND m.role = 'user'
-            AND m.visibility <> 'model'
+            AND (m.visibility <> 'model' OR m.compressed)
             AND NOT m.deleted
             AND m.created_at > q.created_at
     )
@@ -70,8 +71,7 @@ type ListPendingChatDescendantQuestionsByRootRow struct {
 }
 
 // Lists the unanswered questions of the unarchived descendants of
-// @root_chat_id, oldest first. A question is pending until its chat gets a
-// non-deleted user message newer than the question, like
+// @root_chat_id, oldest first, with the pending rule of
 // GetPendingChatDescendantQuestion.
 func (q *Queries) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPendingChatDescendantQuestionsByRoot, rootChatID)

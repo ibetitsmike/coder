@@ -49,6 +49,7 @@ There is other data that is held in the database and is associated with a chat, 
 
 <!-- TODO(fork-chat-todos): classify the chat todo list in `chatd.chat_todos` (fork-chat-todos experiment) as execution state or metadata. -->
 <!-- TODO(ibetitsmike): classify the descendant question in `chatd.chat_descendant_questions` (fork-nested-subagents experiment) as execution state or metadata. -->
+<!-- TODO(ibetitsmike): classify chat wake-ups in `chatd.chat_wakeups` and their runs in `chatd.chat_wakeup_runs` (fork-chat-wakeups experiment) as execution state or metadata, and describe how a due wake-up sends its prompt to the chat. -->
 
 We call it **metadata**. The core state machine concerns itself with **execution state**. As a general guideline, a piece of data is execution state if the core state machine needs it to decide what the next state transition may be, or if it's directly modified by a state transition. For example, a queued message is part of the execution state because it impacts what the next action of the agent loop can be. If the agent loop finishes processing a user message and would otherwise stop, but there's a queued message, the agent loop will start processing the queued message instead. On the other hand, a chat's title does not impact the agent loop at all - it's just a label that helps the user identify the chat.
 
@@ -605,6 +606,8 @@ If the request sets `title`, the chat is created with a `user` title and automat
 When archiving or unarchiving a root chat, the operation applies `SetArchived(archived)` to the root and all descendants atomically. If any chat in the family cannot apply the requested archived-state transition, the whole operation fails without changing any chat. Unarchiving an individual child chat remains guarded: it must fail while its parent is archived
 
 The family update locks the root chat row first, and creating a child chat takes a shared lock on the same row. A concurrent child creation therefore either commits first and is included in the family update, or waits for it and fails if the root is now archived.
+
+<!-- TODO(ibetitsmike): describe the fork-nested-subagents lock order of a family archive: the root FOR NO KEY UPDATE, then each descendant leaves first, so a member transition whose second row update takes FOR KEY SHARE on its parent and the root cannot deadlock with the archive (issue 79). -->
 
 For `archived` updates, the supported input and output states are:
 

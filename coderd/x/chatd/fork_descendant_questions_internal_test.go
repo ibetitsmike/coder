@@ -256,4 +256,19 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, true, result["timed_out"])
 	require.Equal(t, true, result["needs_input"])
+
+	// A question that replaces the awaited one ends the wait at the next
+	// poll instead of at the timeout.
+	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusWaiting, "")
+	done = waitAsync(child.ID, 10)
+	awaitTrap.MustWait(ctx).MustRelease(ctx)
+	pollTrap.MustWait(ctx).MustRelease(ctx)
+	resp, err = f.server.newDescendantQuestionTool(child).Run(ctx,
+		fantasy.ToolCall{ID: uuid.NewString(), Name: askUserQuestionToolName, Input: descendantQuestionInput})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	mClock.Advance(descendantQuestionPollInterval).MustWait(ctx)
+	result = decode(testutil.RequireReceive(ctx, t, done))
+	require.Equal(t, true, result["needs_input"])
+	require.NotEmpty(t, result["questions"])
 }

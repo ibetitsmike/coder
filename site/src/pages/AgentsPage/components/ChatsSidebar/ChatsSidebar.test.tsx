@@ -1730,6 +1730,56 @@ describe("ChatsSidebar project drops", () => {
 	});
 });
 
+describe("ChatsSidebar nested subagents", () => {
+	it("opens a nested grandchild after expanding its ancestors", async () => {
+		const user = userEvent.setup();
+		server.use(
+			http.get("/api/experimental/chats/projects", () => HttpResponse.json([])),
+		);
+		const grandchild = buildChat({
+			id: "grandchild-1",
+			title: "Worker",
+			parent_chat_id: "child-1",
+			root_chat_id: "root-1",
+		});
+		const child = buildChat({
+			id: "child-1",
+			title: "Coordinator",
+			parent_chat_id: "root-1",
+			root_chat_id: "root-1",
+		});
+		render(
+			<Wrapper>
+				<ChatsSidebar
+					{...defaultProps}
+					// The list embeds every descendant flat under the
+					// root, and the grandchild can appear before its
+					// parent.
+					chats={[
+						buildChat({
+							id: "root-1",
+							title: "Root chat",
+							children: [grandchild, child],
+						}),
+					]}
+				/>
+				<ProjectLocationProbe />
+			</Wrapper>,
+		);
+
+		// Only the next level down is collapsed at each step, so each
+		// step has exactly one Expand button.
+		await user.click(await screen.findByRole("button", { name: "Expand" }));
+		await user.click(screen.getByRole("button", { name: "Expand" }));
+		await user.click(screen.getByRole("link", { name: /Worker/ }));
+		await waitFor(() =>
+			expect(screen.getByTestId("location-pathname")).toHaveTextContent(
+				"/agents/grandchild-1",
+			),
+		);
+	});
+});
+
 describe("ChatsSidebar pinned reordering", () => {
 	beforeEach(stubDragDom);
 

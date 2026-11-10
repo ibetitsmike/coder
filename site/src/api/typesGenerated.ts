@@ -2201,11 +2201,11 @@ export interface Chat {
 	 */
 	readonly inline_mcp_servers?: readonly InlineMCPServer[];
 	/**
-	 * Children holds child (subagent) chats nested under this root
-	 * chat. Always initialized to an empty slice so the JSON field
-	 * is present as []. Child chats cannot create their own
-	 * subagents, so nesting depth is capped at 1 and this slice is
-	 * always empty for child chats.
+	 * Children holds the descendant (subagent) chats of this root chat,
+	 * flat: each entry's parent_chat_id gives its place in the tree.
+	 * Without fork-nested-subagents descendants are only direct
+	 * children. Always initialized to an empty slice so the JSON field
+	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
 }
@@ -2475,6 +2475,12 @@ export interface ChatContextResource {
 	readonly skill_name?: string;
 	readonly skill_description?: string;
 	/**
+	 * SubagentName and SubagentDescription are populated only for OK
+	 * subagent kinds.
+	 */
+	readonly subagent_name?: string;
+	readonly subagent_description?: string;
+	/**
 	 * Tools lists the tools exposed by an MCP server. Populated only for the
 	 * mcp_server kind; nil otherwise.
 	 */
@@ -2499,7 +2505,8 @@ export type ChatContextResourceKind =
 	| "instruction_file"
 	| "mcp_config"
 	| "mcp_server"
-	| "skill";
+	| "skill"
+	| "subagent";
 
 export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"acp_harness",
@@ -2507,6 +2514,7 @@ export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"mcp_config",
 	"mcp_server",
 	"skill",
+	"subagent",
 ];
 
 // From codersdk/chats.go
@@ -5880,6 +5888,7 @@ export type Experiment =
 	| "example"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
+	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
@@ -5963,6 +5972,7 @@ export const Experiments: Experiment[] = [
 	"example",
 	"fork-agent-definitions",
 	"fork-chat-todos",
+	"fork-chat-wakeups",
 	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",

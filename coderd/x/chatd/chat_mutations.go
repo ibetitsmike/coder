@@ -528,7 +528,7 @@ func (p *Server) setChatFamilyArchived(ctx context.Context, chat database.Chat, 
 		}
 	}
 
-	familyChats, err := chatstate.SetFamilyArchived(ctx, p.db, p.pubsub, chatstate.SetFamilyArchivedInput{
+	familyChats, err := p.forkSetFamilyArchived(ctx, p.db, p.pubsub, chatstate.SetFamilyArchivedInput{
 		RootID:   chat.ID,
 		Archived: archived,
 	})
