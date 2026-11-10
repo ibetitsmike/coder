@@ -122,6 +122,11 @@ func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chat
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
+	defer f.observe(ctx, "GetChatSubagentsByParentChatID", time.Now())
+	return f.s.GetChatSubagentsByParentChatID(ctx, parentChatID)
+}
+
 func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
 	defer f.observe(ctx, "GetChatSubtreeIDs", time.Now())
 	return f.s.GetChatSubtreeIDs(ctx, rootID)

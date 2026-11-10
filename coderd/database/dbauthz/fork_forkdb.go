@@ -131,6 +131,14 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
 }
 
+// GetChatSubagentsByParentChatID authorizes through the parent chat.
+func (f *forkQuerier) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
+	if _, err := f.q.GetChatByID(ctx, parentChatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatSubagentsByParentChatID(ctx, parentChatID)
+}
+
 // GetChatSubtreeIDs authorizes through the subtree's root chat.
 func (f *forkQuerier) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
 	if _, err := f.q.GetChatByID(ctx, rootID); err != nil {

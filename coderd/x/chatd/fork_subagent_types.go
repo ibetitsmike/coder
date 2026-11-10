@@ -15,8 +15,10 @@ import (
 	"slices"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 
 	"cdr.dev/slog/v3"
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
@@ -24,22 +26,23 @@ var storedSubagentTypeToolNames = []string{
 	spawnAgentToolName, waitAgentToolName, "message_agent", "interrupt_agent", "list_agents",
 }
 
-// storedSubagentTypeTool is a subagent tool whose results report the stored
-// agent type of each child they name.
+// storedSubagentTypeTool is a subagent tool of chat whose results report the
+// stored agent type of each child they name.
 type storedSubagentTypeTool struct {
 	fantasy.AgentTool
 	server *Server
+	chatID uuid.UUID
 }
 
-// withStoredSubagentTypes wraps the subagent tools in tools with
+// withStoredSubagentTypes wraps the subagent tools of chat in tools with
 // storedSubagentTypeTool.
-func (p *Server) withStoredSubagentTypes(tools []fantasy.AgentTool) []fantasy.AgentTool {
+func (p *Server) withStoredSubagentTypes(tools []fantasy.AgentTool, chat database.Chat) []fantasy.AgentTool {
 	if !p.agentDefinitionsEnabled() {
 		return tools
 	}
 	for i, tool := range tools {
 		if slices.Contains(storedSubagentTypeToolNames, tool.Info().Name) {
-			tools[i] = storedSubagentTypeTool{AgentTool: tool, server: p}
+			tools[i] = storedSubagentTypeTool{AgentTool: tool, server: p, chatID: chat.ID}
 		}
 	}
 	return tools
@@ -58,22 +61,13 @@ func (t storedSubagentTypeTool) Run(ctx context.Context, call fantasy.ToolCall) 
 	if err != nil {
 		return resp, nil
 	}
-	changed := t.server.setStoredSubagentType(ctx, fdb, result)
-	if raw, ok := result["agents"]; ok {
-		var agents []map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &agents); err != nil {
+	var changed bool
+	if _, ok := result["agents"]; ok {
+		if changed, err = t.setListedAgentTypes(ctx, fdb, result); err != nil {
 			return resp, nil
 		}
-		agentsChanged := false
-		for _, agent := range agents {
-			agentsChanged = t.server.setStoredSubagentType(ctx, fdb, agent) || agentsChanged
-		}
-		if agentsChanged {
-			if result["agents"], err = json.Marshal(agents); err != nil {
-				return resp, nil
-			}
-			changed = true
-		}
+	} else {
+		changed = t.server.setStoredSubagentType(ctx, fdb, result)
 	}
 	if !changed {
 		return resp, nil
@@ -114,4 +108,47 @@ func (p *Server) setStoredSubagentType(ctx context.Context, fdb forkdb.Store, en
 	}
 	entry["type"] = agentType
 	return true
+}
+
+// setListedAgentTypes sets the type of each entry of a list_agents agents
+// list to its stored agent type, read for all children of the chat in one
+// query, and reports whether a type changed.
+func (t storedSubagentTypeTool) setListedAgentTypes(ctx context.Context, fdb forkdb.Store, result map[string]json.RawMessage) (bool, error) {
+	var agents []map[string]json.RawMessage
+	if err := json.Unmarshal(result["agents"], &agents); err != nil {
+		return false, err
+	}
+	rows, err := fdb.GetChatSubagentsByParentChatID(ctx, t.chatID)
+	if err != nil {
+		t.server.logger.Warn(ctx, "read stored subagent types", slog.F("chat_id", t.chatID), slog.Error(err))
+		return false, err
+	}
+	stored := make(map[string]string, len(rows))
+	for _, row := range rows {
+		stored[row.ChatID.String()] = row.AgentType
+	}
+	changed := false
+	for _, agent := range agents {
+		var chatID string
+		if _, ok := agent["type"]; !ok || json.Unmarshal(agent["chat_id"], &chatID) != nil {
+			continue
+		}
+		agentType, ok := stored[chatID]
+		if !ok {
+			continue
+		}
+		encoded, err := json.Marshal(agentType)
+		if err != nil || bytes.Equal(encoded, agent["type"]) {
+			continue
+		}
+		agent["type"] = encoded
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	if result["agents"], err = json.Marshal(agents); err != nil {
+		return false, err
+	}
+	return true, nil
 }

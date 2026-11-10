@@ -247,6 +247,21 @@ func (mr *MockStoreMockRecorder) GetChatSubagentByChatID(ctx, chatID any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentByChatID), ctx, chatID)
 }
 
+// GetChatSubagentsByParentChatID mocks base method.
+func (m *MockStore) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatSubagentsByParentChatID", ctx, parentChatID)
+	ret0, _ := ret[0].([]forkdb.ChatSubagent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatSubagentsByParentChatID indicates an expected call of GetChatSubagentsByParentChatID.
+func (mr *MockStoreMockRecorder) GetChatSubagentsByParentChatID(ctx, parentChatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentsByParentChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentsByParentChatID), ctx, parentChatID)
+}
+
 // GetChatSubtreeIDs mocks base method.
 func (m *MockStore) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
 	m.ctrl.T.Helper()
