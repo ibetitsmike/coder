@@ -137,6 +137,7 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 ### Wake-ups
 
 When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup`, `wait_for_events`, and [`notify_user`](#notifications), except in plan-mode turns and in `explore` children.
+A [custom agent tool policy](#custom-agent-tool-policy) can also remove them from a custom child.
 A wake-up sends its `prompt` to the chat later, as a new user message from the chat owner.
 Set exactly one of `delay_seconds`, `interval_seconds`, and `cron`, or the call fails with `set exactly one of delay_seconds, interval_seconds and cron`.
 `delay_seconds` runs the wake-up once.
@@ -197,10 +198,10 @@ The owner gets it in the Coder notifications inbox when the deployment keeps the
 Pass the text as `message`, up to 2000 bytes, and an optional `title`, up to 120 bytes.
 When you omit `title` or leave it blank, the notification uses the chat title, cut to its first 120 bytes.
 The result is `{"sent":true}`.
-A chat can send at most 10 notifications in any hour, and the next call fails with `notification limit reached: at most 10 per chat per hour`.
-The wake-up pause notifications of the chat also count toward that limit.
+When the chat has sent 10 notifications in the past hour, the next call fails with `notification limit reached: at most 10 per chat per hour`.
+The wake-up pause notifications of the chat count toward those 10, but Coder Agents still sends a pause notification when the chat is at the limit.
 An empty `message` fails with `message is required`, and a chat that a system user owns fails with `chats owned by a system user cannot send notifications`.
-The result is also `{"sent":true}` when Coder drops the notification, because the owner turned off the **Custom Notification** template or the chat sent the same title and message earlier in the same clock minute.
+The result is also `{"sent":true}` when Coder drops the notification, because the owner turned off the **Custom Notification** template, the chat sent the same title and message earlier in the same clock minute, or the deployment has the inbox off and sends no email or webhook notifications.
 
 ## Subagent fields
 
@@ -580,5 +581,5 @@ Checked against fork `main` at `bef9c59966`:
   The daily limits, `coderd/x/chatd/fork_wakeup_caps.go:22-38`, `:51-96`, checked before each send, `fork_wakeups.go:150-152`, `fork_wait_for_events.go:295-297`, over delivered runs and every message cost, `coderd/database/forkdb/queries/chat_wakeups.sql:186-219`.
   The other pauses, `fork_wakeups.go:307-310`, `:339-344`, `fork_wait_for_events.go:262`, and the notification after each pause, `fork_wakeups.go:205-207`, `:299-301`, `:378-380`, with its title, reasons, and the chat title in its text, once per chat, reason, and title a UTC day, `fork_wakeup_caps.go:36-49`, `:98-128`, by the dedupe hash, `coderd/database/migrations/000245_notifications_dedupe.up.sql:13-26`.
   No resume or removal of a paused wake-up: nothing in `coderd/x/chatd` calls `UpdateChatWakeupStatus` or `CancelChatWakeupsByChatID`, and the limit of 10 counts paused wake-ups, `fork_schedule_wakeup.go:213-228`.
-- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-158`, and the send with a dedupe bucket per minute, `:124-143`, counted in `chat_wakeups.sql:222-228`.
+- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-158`, and the send with a dedupe bucket per minute, `:124-143`, which enqueues nothing without a delivery method, `coderd/notifications/enqueuer.go:104-117`, removed by a custom agent tool policy, `fork_agent_tool_policy.go:208-229`, with pause notifications sent past the limit, `fork_wakeup_caps.go:102-128`, counted in `chat_wakeups.sql:222-228`.
   The title and message limits, `codersdk/notifications.go:299-321`, the inbox and the deployment's method, `coderd/notifications/enqueuer.go:104-116`, and the notifications that a turned-off template or the dedupe drops without an error, `:138-165`.
