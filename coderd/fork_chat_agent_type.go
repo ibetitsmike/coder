@@ -14,6 +14,18 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 )
 
+// fillForkWatchedChatAgentType sets AgentType on a created child chat in a
+// watch event. The Agents page adds a created child from the event alone,
+// so without it a new child shows no type until the next chat list fetch.
+func (api *API) fillForkWatchedChatAgentType(ctx context.Context, event *codersdk.ChatWatchEvent) {
+	if event.Kind != codersdk.ChatWatchEventKindCreated {
+		return
+	}
+	chats := []codersdk.Chat{event.Chat}
+	api.fillForkChatAgentTypes(ctx, chats)
+	event.Chat = chats[0]
+}
+
 // fillForkChatAgentTypes sets AgentType on every child chat in chats and
 // their embedded children. It is best effort: a failed lookup leaves the
 // field empty.

@@ -328,6 +328,7 @@ func (api *API) watchChats(rw http.ResponseWriter, r *http.Request) {
 				if encoder == nil {
 					return
 				}
+				api.fillForkWatchedChatAgentType(cbCtx, &payload)
 				// The encoder is only written from the pubsub delivery
 				// goroutine, which processes messages serially. Do not
 				// add a second write path without synchronization.

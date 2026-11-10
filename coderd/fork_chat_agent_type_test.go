@@ -1,6 +1,7 @@
 package coderd_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -28,7 +30,7 @@ func TestForkChatAgentType(t *testing.T) {
 			t.Parallel()
 
 			ctx := testutil.Context(t, testutil.WaitLong)
-			client, db := newChatClientWithDatabase(t, withChatWorkerDisabled, func(o *coderdtest.Options) {
+			client, db, api := newChatClientWithAPIAndDatabase(t, withChatWorkerDisabled, func(o *coderdtest.Options) {
 				if tc.enabled {
 					o.DeploymentValues.Experiments = append(o.DeploymentValues.Experiments, string(codersdk.ExperimentForkAgentDefinitions))
 				}
@@ -87,6 +89,18 @@ func TestForkChatAgentType(t *testing.T) {
 			got, err = client.GetChat(ctx, reviewer.ID)
 			require.NoError(t, err)
 			require.Equal(t, want[reviewer.ID], got.AgentType)
+
+			events, closer, err := client.WatchChats(ctx)
+			require.NoError(t, err)
+			defer closer.Close()
+			created, err := json.Marshal(codersdk.ChatWatchEvent{
+				Kind: codersdk.ChatWatchEventKindCreated,
+				Chat: codersdk.Chat{ID: reviewer.ID, ParentChatID: &root.ID},
+			})
+			require.NoError(t, err)
+			require.NoError(t, api.Pubsub.Publish(pubsub.ChatWatchEventChannel(user.UserID), created))
+			event := testutil.RequireReceive(ctx, t, events)
+			require.Equal(t, want[reviewer.ID], event.Chat.AgentType)
 		})
 	}
 }
