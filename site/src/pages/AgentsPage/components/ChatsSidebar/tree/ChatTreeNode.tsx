@@ -36,7 +36,7 @@ import { asNonEmptyString } from "../../ChatConversation/blockUtils";
 import { ChatDiffStats } from "../../ChatDiffStats";
 import { normalizeLocationSearch } from "../locationSearch";
 import { useChatTree } from "./ChatTreeContext";
-import { getParentChatID } from "./chatTree";
+import { collectDescendantChats, getParentChatID } from "./chatTree";
 import { getModelDisplayName } from "./modelDisplayName";
 import { getChatDisplayConfig } from "./statusConfig";
 
@@ -216,7 +216,13 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 		hasWorkspace: Boolean(workspaceId),
 		isArchiving: isArchivingThisChat,
 		isUpdatingReadState,
-		archiveBlockedReason: getArchiveBlockedReason(chat.status, chat.children),
+		// A node's own `children` field is empty for a non-root chat, so
+		// walk the tree instead: this equals `chat.children` for a root
+		// and reaches the descendants of mid-level nodes.
+		archiveBlockedReason: getArchiveBlockedReason(
+			chat.status,
+			collectDescendantChats(chatTree, chatID),
+		),
 		subagentCount: childIDs.length,
 		isSubagentsExpanded: isExpanded,
 		onToggleSubagents: () => toggleExpanded(chatID),

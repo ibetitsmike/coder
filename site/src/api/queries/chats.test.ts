@@ -3453,6 +3453,32 @@ describe("addChildToParentInCache", () => {
 		const result = readInfiniteChats(queryClient);
 		expect(result?.[0].children).toHaveLength(1);
 	});
+
+	it("adds a grandchild to the root's flat children list", () => {
+		const queryClient = createTestQueryClient();
+		const child = makeChat("child-1", {
+			parent_chat_id: "root-1",
+			root_chat_id: "root-1",
+		});
+		const root = makeChat("root-1", { children: [child] });
+		seedInfiniteChats(queryClient, [root]);
+
+		// A created event for a depth-2 chat keys the add on the
+		// family root (root_chat_id ?? parent_chat_id), because the
+		// root lists every descendant flat.
+		const grandchild = makeChat("grandchild-1", {
+			parent_chat_id: "child-1",
+			root_chat_id: "root-1",
+		});
+		addChildToParentInCache(queryClient, grandchild, "root-1");
+
+		const result = readInfiniteChats(queryClient);
+		expect(result).toHaveLength(1);
+		expect(result?.[0].children?.map((c) => c.id)).toEqual([
+			"grandchild-1",
+			"child-1",
+		]);
+	});
 });
 
 describe("updateChildInParentCache", () => {

@@ -1730,6 +1730,59 @@ describe("ChatsSidebar project drops", () => {
 	});
 });
 
+describe("ChatsSidebar nested subagents", () => {
+	it("opens a nested grandchild after expanding its ancestors", async () => {
+		const user = userEvent.setup();
+		server.use(
+			http.get("/api/experimental/chats/projects", () => HttpResponse.json([])),
+		);
+		const grandchild = buildChat({
+			id: "grandchild-1",
+			title: "Worker",
+			parent_chat_id: "child-1",
+			root_chat_id: "root-1",
+		});
+		const child = buildChat({
+			id: "child-1",
+			title: "Coordinator",
+			parent_chat_id: "root-1",
+			root_chat_id: "root-1",
+		});
+		render(
+			<Wrapper>
+				<ChatsSidebar
+					{...defaultProps}
+					// The list embeds every descendant flat under the
+					// root, and the grandchild can appear before its
+					// parent.
+					chats={[
+						buildChat({
+							id: "root-1",
+							title: "Root chat",
+							children: [grandchild, child],
+						}),
+					]}
+				/>
+				<ProjectLocationProbe />
+			</Wrapper>,
+		);
+
+		expect(screen.queryByText("Worker")).not.toBeInTheDocument();
+		await user.click(await screen.findByTestId("agents-tree-toggle-root-1"));
+		expect(screen.getByText("Coordinator")).toBeInTheDocument();
+		expect(screen.queryByText("Worker")).not.toBeInTheDocument();
+		await user.click(screen.getByTestId("agents-tree-toggle-child-1"));
+		expect(screen.getByText("Worker")).toBeInTheDocument();
+
+		await user.click(screen.getByText("Worker"));
+		await waitFor(() =>
+			expect(screen.getByTestId("location-pathname")).toHaveTextContent(
+				"/agents/grandchild-1",
+			),
+		);
+	});
+});
+
 describe("ChatsSidebar pinned reordering", () => {
 	beforeEach(stubDragDom);
 

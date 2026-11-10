@@ -708,6 +708,44 @@ export const MixedCacheDoesNotDuplicateChild: Story = {
 	},
 };
 
+export const NestedSubagentFamily: Story = {
+	// With fork-nested-subagents the root's children list carries every
+	// descendant flat, each entry linked by its own parent_chat_id, so
+	// the tree renders depth 2 and every descendant opens its own page.
+	args: {
+		chats: [
+			buildChat({
+				id: "nested-root",
+				title: "Nested root",
+				children: [
+					buildChat({
+						id: "nested-grandchild",
+						title: "Worker agent",
+						status: "running",
+						parent_chat_id: "nested-child",
+						root_chat_id: "nested-root",
+					}),
+					buildChat({
+						id: "nested-child",
+						title: "Coordinator agent",
+						parent_chat_id: "nested-root",
+						root_chat_id: "nested-root",
+					}),
+				],
+			}),
+		],
+	},
+	parameters: {
+		reactRouter: reactRouterParameters({
+			location: {
+				path: "/agents/nested-grandchild",
+				pathParams: { agentId: "nested-grandchild" },
+			},
+			routing: agentsRouting,
+		}),
+	},
+};
+
 // Use a fixed offset so the value always falls in the "Today" bucket
 // without embedding a literal date that drifts across calendar days.
 const recentTimestamp = new Date(Date.now() - 60_000).toISOString();
