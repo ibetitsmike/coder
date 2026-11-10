@@ -177,7 +177,7 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		ToolCallID: toolCallID,
 		Value:      req.Value,
 	}
-	err = fdb.InsertChatSecretAnswer(ctx, insert)
+	createdAt, err := fdb.InsertChatSecretAnswer(ctx, insert)
 	if database.IsUniqueViolation(err) {
 		// The owner can delete the queued message that reports an answer,
 		// so the question stays pending with an answer the chat never
@@ -192,7 +192,7 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 			err = fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: toolCallID})
 		}
 		if err == nil {
-			err = fdb.InsertChatSecretAnswer(ctx, insert)
+			createdAt, err = fdb.InsertChatSecretAnswer(ctx, insert)
 		}
 		if database.IsUniqueViolation(err) {
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
@@ -215,12 +215,14 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		// Without the message the chat never learns of the answer, so the
 		// question stays pending and the user can answer again. The delete
 		// outlives a canceled request, whose answer row would make every
-		// retry fail with a conflict.
+		// retry fail with a conflict. It matches created_at so that it
+		// keeps the answer of a concurrent request that replaced this one.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if delErr := fdb.DeleteChatSecretAnswer(cleanupCtx, forkdb.DeleteChatSecretAnswerParams{
 			ChatID:     chat.ID,
 			ToolCallID: toolCallID,
+			CreatedAt:  sql.NullTime{Time: createdAt, Valid: true},
 		}); delErr != nil {
 			api.Logger.Error(ctx, "delete undelivered secret answer", slog.F("chat_id", chat.ID), slog.Error(delErr))
 		}

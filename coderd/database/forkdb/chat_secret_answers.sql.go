@@ -8,21 +8,27 @@ package forkdb
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const deleteChatSecretAnswer = `-- name: DeleteChatSecretAnswer :exec
-DELETE FROM chat_secret_answers WHERE chat_id = $1 AND tool_call_id = $2
+DELETE FROM chat_secret_answers
+WHERE chat_id = $1 AND tool_call_id = $2
+    AND ($3::timestamptz IS NULL OR created_at = $3)
 `
 
 type DeleteChatSecretAnswerParams struct {
-	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
-	ToolCallID string    `db:"tool_call_id" json:"tool_call_id"`
+	ChatID     uuid.UUID    `db:"chat_id" json:"chat_id"`
+	ToolCallID string       `db:"tool_call_id" json:"tool_call_id"`
+	CreatedAt  sql.NullTime `db:"created_at" json:"created_at"`
 }
 
+// A non-null created_at deletes the answer only if it is still the one
+// created at that time, not a later answer that replaced it.
 func (q *Queries) DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error {
-	_, err := q.db.ExecContext(ctx, deleteChatSecretAnswer, arg.ChatID, arg.ToolCallID)
+	_, err := q.db.ExecContext(ctx, deleteChatSecretAnswer, arg.ChatID, arg.ToolCallID, arg.CreatedAt)
 	return err
 }
 
@@ -95,9 +101,10 @@ func (q *Queries) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.
 	return items, nil
 }
 
-const insertChatSecretAnswer = `-- name: InsertChatSecretAnswer :exec
+const insertChatSecretAnswer = `-- name: InsertChatSecretAnswer :one
 INSERT INTO chat_secret_answers (chat_id, tool_call_id, value, value_key_id)
 VALUES ($1, $2, $3, $4)
+RETURNING created_at
 `
 
 type InsertChatSecretAnswerParams struct {
@@ -107,12 +114,14 @@ type InsertChatSecretAnswerParams struct {
 	ValueKeyID sql.NullString `db:"value_key_id" json:"value_key_id"`
 }
 
-func (q *Queries) InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error {
-	_, err := q.db.ExecContext(ctx, insertChatSecretAnswer,
+func (q *Queries) InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, insertChatSecretAnswer,
 		arg.ChatID,
 		arg.ToolCallID,
 		arg.Value,
 		arg.ValueKeyID,
 	)
-	return err
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
 }
