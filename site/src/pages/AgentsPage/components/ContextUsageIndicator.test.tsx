@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
 	MockChatContextAgentDefinitions,
+	MockChatContextAgentDefinitionWarnings,
 	MockChatContextDirty,
 } from "#/testHelpers/chatEntities";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
@@ -55,12 +56,7 @@ describe("ContextUsageIndicator", () => {
 				usage={{
 					usedTokens: 12_000,
 					contextLimitTokens: 200_000,
-					context: {
-						...MockChatContextAgentDefinitions,
-						resources: MockChatContextAgentDefinitions.resources?.filter(
-							(resource) => resource.status === "ok",
-						),
-					},
+					context: MockChatContextAgentDefinitionWarnings,
 				}}
 			/>,
 		);

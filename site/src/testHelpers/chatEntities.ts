@@ -211,6 +211,13 @@ export const MockChatContextAgentDefinitions: ChatContext = {
 	],
 };
 
+export const MockChatContextAgentDefinitionWarnings: ChatContext = {
+	...MockChatContextAgentDefinitions,
+	resources: MockChatContextAgentDefinitions.resources?.filter(
+		(resource) => resource.status === "ok",
+	),
+};
+
 export const MockAdvisorConfig: AdvisorConfig = {
 	enabled: true,
 	max_uses_per_run: 5,
