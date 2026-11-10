@@ -357,6 +357,11 @@ func (f forkQueryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Co
 	return f.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
+	defer f.observe(ctx, "UpdateChatSubagentWorkspaceID", time.Now())
+	return f.s.UpdateChatSubagentWorkspaceID(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
 	defer f.observe(ctx, "UpdateChatWakeupRunStatus", time.Now())
 	return f.s.UpdateChatWakeupRunStatus(ctx, arg)

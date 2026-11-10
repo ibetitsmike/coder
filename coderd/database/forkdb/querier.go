@@ -121,6 +121,7 @@ type Querier interface {
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
+	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	UpdateChatWakeupRunStatus(ctx context.Context, arg UpdateChatWakeupRunStatusParams) (ChatWakeupRun, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.

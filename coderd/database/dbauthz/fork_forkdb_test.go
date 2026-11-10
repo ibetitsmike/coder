@@ -197,6 +197,13 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().InsertChatSubagent(gomock.Any(), arg).Return(sub, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(sub)
 		},
+		"UpdateChatSubagentWorkspaceID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := testutil.Fake(t, faker, forkdb.UpdateChatSubagentWorkspaceIDParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().UpdateChatSubagentWorkspaceID(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
 		"UpsertChatTodos": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.UpsertChatTodosParams{ChatID: chat.ID})
