@@ -18,7 +18,7 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-func TestReplaceUnreportedSecretAnswer(t *testing.T) {
+func TestStoreSecretAnswer(t *testing.T) {
 	t.Parallel()
 
 	db, _ := dbtestutil.NewDB(t)
@@ -40,9 +40,13 @@ func TestReplaceUnreportedSecretAnswer(t *testing.T) {
 	answer := func(value string) forkdb.InsertChatSecretAnswerParams {
 		return forkdb.InsertChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: "call-secret", Value: value}
 	}
-	require.NoError(t, fdb.InsertChatSecretAnswer(ctx, answer("first-value")))
+	_, err = storeSecretAnswer(ctx, db, forkdb.InsertChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: "call-old", Value: "stale-value"})
+	require.ErrorIs(t, err, errSecretQuestionNotPending, "an answer to an earlier question is not stored")
+	reportQueued, err := storeSecretAnswer(ctx, db, answer("first-value"))
+	require.NoError(t, err)
+	require.False(t, reportQueued)
 
-	reportQueued, err := replaceUnreportedSecretAnswer(ctx, db, answer("second-value"))
+	reportQueued, err = storeSecretAnswer(ctx, db, answer("second-value"))
 	require.NoError(t, err, "no message reports the answer, so a new answer replaces it")
 	require.False(t, reportQueued)
 	dbgen.ChatMessage(t, db, database.ChatMessage{
@@ -55,8 +59,8 @@ func TestReplaceUnreportedSecretAnswer(t *testing.T) {
 			Valid:      true,
 		},
 	})
-	_, err = replaceUnreportedSecretAnswer(ctx, db, answer("third-value"))
-	require.ErrorIs(t, err, errSecretAnswerReported, "a delivered message reports the answer")
+	_, err = storeSecretAnswer(ctx, db, answer("third-value"))
+	require.ErrorIs(t, err, errSecretQuestionNotPending, "a delivered message answers the question")
 	answers, err := fdb.GetChatSecretAnswersByChatID(ctx, chat.ID)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)

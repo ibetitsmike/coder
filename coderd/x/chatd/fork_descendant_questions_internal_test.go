@@ -189,6 +189,7 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	require.Equal(t, string(database.ChatStatusWaiting), result["status"])
 	require.NotEmpty(t, result["questions"])
 	require.Contains(t, result, "tool_calls")
+	require.Equal(t, descendantQuestionNote, result["note"])
 
 	// An answer during the wait lets the call wait on the child for the
 	// rest of the timeout, and the answered question is no longer reported.
@@ -278,4 +279,23 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, true, result["needs_input"])
 	require.NotEmpty(t, result["questions"])
+
+	// The note of a secret question leaves out message_agent, which would
+	// answer it without the value.
+	_, err = f.fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID: child.ID, ToolCallID: uuid.NewString(),
+		Questions: json.RawMessage(`[{"header":"Token","question":"Paste the token.","secret":true}]`),
+	})
+	require.NoError(t, err)
+	done = waitAsync(child.ID, 1)
+	awaitTrap.MustWait(ctx).MustRelease(ctx)
+	pollTrap.MustWait(ctx).MustRelease(ctx)
+	for elapsed := time.Duration(0); elapsed < time.Second; {
+		d, w := mClock.AdvanceNext()
+		w.MustWait(ctx)
+		elapsed += d
+	}
+	result = decode(testutil.RequireReceive(ctx, t, done))
+	require.Equal(t, true, result["needs_input"])
+	require.Equal(t, descendantSecretQuestionNote, result["note"])
 }

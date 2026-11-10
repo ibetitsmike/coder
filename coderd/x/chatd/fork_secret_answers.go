@@ -9,11 +9,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -26,6 +32,10 @@ import (
 // pass their input to another model, such as spawn_agent and message_agent,
 // keep the placeholder.
 var secretInputTools = []string{chattool.ExecuteToolName, chattool.WriteFileToolName, chattool.EditFilesToolName}
+
+// secretMediaWithheldNote replaces the image, document or attachments of a
+// tool result while the chat holds secret answers.
+const secretMediaWithheldNote = "The media output and attachments of this tool are withheld while this chat holds secret answers."
 
 // secretPlaceholder is the text the model writes where a secret answer
 // belongs, and the text that replaces the value in tool output.
@@ -128,12 +138,35 @@ func (t secretAnswerTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	if len(answers) == 0 {
 		return t.AgentTool.Run(ctx, call)
 	}
-	if t.substitute {
+	switch {
+	case t.Info().Name == chattool.ExecuteToolName:
+		input, err := substituteExecuteSecretAnswers(call.Input, answers)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
+		call.Input = input
+	case t.substitute:
 		call.Input = substituteSecretAnswers(call.Input, answers)
 	}
 	resp, err := t.AgentTool.Run(ctx, call)
 	resp.Content = scrubSecretAnswers(resp.Content, answers)
 	resp.Metadata = scrubSecretAnswers(resp.Metadata, answers)
+	// An image, a document or an attached file can show a value that no
+	// scrub finds. The prompt of the next step resolves attachments to
+	// their bytes.
+	withheld := len(resp.Data) > 0
+	if withheld {
+		resp.Data = nil
+		resp.Type = "text"
+		resp.MediaType = ""
+	}
+	if attachments, _ := chattool.AttachmentsFromMetadata(resp.Metadata); len(attachments) > 0 {
+		resp.Metadata = ""
+		withheld = true
+	}
+	if withheld {
+		resp.Content = strings.TrimSpace(resp.Content + "\n" + secretMediaWithheldNote)
+	}
 	if err != nil {
 		if scrubbed := scrubSecretAnswers(err.Error(), answers); scrubbed != err.Error() {
 			err = errors.New(scrubbed)
@@ -160,9 +193,218 @@ func substituteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) st
 	return input
 }
 
-// scrubSecretAnswers replaces each value in text, as is and as escaped in a
-// JSON string, with its placeholder. Longer values go first, so a value that
-// contains another one is replaced whole.
+// substituteExecuteSecretAnswers rewrites the command of an execute input
+// so the shell never parses a value as code: the command starts with a
+// shell-quoted assignment of each value it uses, and each placeholder
+// becomes an expansion of that variable. Placeholders in the other
+// parameters, such as workdir, get the value as substituteSecretAnswers
+// writes it.
+func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) (string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(input), &args); err != nil {
+		return input, nil
+	}
+	command, ok := args["command"].(string)
+	if !ok {
+		return input, nil
+	}
+	var assignments strings.Builder
+	var vars []secretShellVariable
+	for i, answer := range answers {
+		placeholder := secretPlaceholder(answer.ToolCallID)
+		if !strings.Contains(command, placeholder) {
+			continue
+		}
+		if secretArithmeticUnsafe(answer.Value) {
+			return "", xerrors.Errorf("the value of %s holds [ and then $ or a backtick, which Bash runs as code where it evaluates a variable as arithmetic, so execute does not take it; "+
+				"write it to a file with write_file and read it from there", placeholder)
+		}
+		name := secretShellVariableName(command, i+1)
+		vars = append(vars, secretShellVariable{placeholder: placeholder, name: name})
+		_, _ = fmt.Fprintf(&assignments, "%s=%s; ", name, shellQuote(answer.Value))
+	}
+	if len(vars) == 0 {
+		return substituteSecretAnswers(input, answers), nil
+	}
+	// The other parameters get their values before the command gets the
+	// assignments, because a value can hold a placeholder.
+	rest := maps.Clone(args)
+	delete(rest, "command")
+	data, err := json.Marshal(rest)
+	if err != nil {
+		return "", xerrors.Errorf("encode the execute input: %w", err)
+	}
+	if err := json.Unmarshal([]byte(substituteSecretAnswers(string(data), answers)), &args); err != nil {
+		return "", xerrors.Errorf("decode the execute input: %w", err)
+	}
+	args["command"] = assignments.String() + expandSecretShellVariables(command, vars)
+	data, err = json.Marshal(args)
+	if err != nil {
+		return "", xerrors.Errorf("encode the execute input: %w", err)
+	}
+	return string(data), nil
+}
+
+// secretArithmeticUnsafe reports whether Bash can run part of value as code
+// when it evaluates a variable that holds value as arithmetic, for example
+// in $(( )), (( )), let or [[ -eq ]]. Such an evaluation expands only the
+// subscripts of array references in value, so a value is safe unless a $
+// or a backtick follows a [. Other places where Bash evaluates a variable
+// again, such as an associative array subscript or indirect expansion, are
+// ones the command picks, outside the accidental exposure the scrub covers.
+func secretArithmeticUnsafe(value string) bool {
+	i := strings.IndexByte(value, '[')
+	return i >= 0 && strings.ContainsAny(value[i:], "$`")
+}
+
+// secretShellVariableName returns the variable for the nth answer, with
+// underscores added until command does not hold the name, so the command
+// cannot assign or unset it.
+func secretShellVariableName(command string, n int) string {
+	name := fmt.Sprintf("CODER_SECRET_ANSWER_%d", n)
+	for strings.Contains(command, name) {
+		name += "_"
+	}
+	return name
+}
+
+type secretShellVariable struct {
+	placeholder string
+	name        string
+}
+
+// expandSecretShellVariables replaces each placeholder in command with an
+// expansion of its variable that keeps the value one word in the quotes
+// around it. The quote scan skips backslash escapes but not command
+// substitutions or here-documents. A wrong guess there only splits the
+// value or keeps the expansion as text; the shell never runs the value.
+func expandSecretShellVariables(command string, vars []secretShellVariable) string {
+	var out strings.Builder
+	var quote byte
+	for i := 0; i < len(command); {
+		if v, ok := matchSecretShellVariable(command[i:], vars); ok {
+			switch quote {
+			case '"':
+				out.WriteString("${" + v.name + "}")
+			case '\'':
+				out.WriteString(`'"${` + v.name + `}"'`)
+			default:
+				out.WriteString(`"${` + v.name + `}"`)
+			}
+			i += len(v.placeholder)
+			continue
+		}
+		c := command[i]
+		switch {
+		case c == '\\' && quote != '\'' && i+1 < len(command):
+			out.WriteString(command[i : i+2])
+			i += 2
+			continue
+		case c == quote:
+			quote = 0
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote = c
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
+}
+
+func matchSecretShellVariable(text string, vars []secretShellVariable) (secretShellVariable, bool) {
+	for _, v := range vars {
+		if strings.HasPrefix(text, v.placeholder) {
+			return v, true
+		}
+	}
+	return secretShellVariable{}, false
+}
+
+// bashANSICContent returns value as Bash writes it between $' and ' when
+// it quotes a word with a control character, as set -x and ${v@Q} do. Bash
+// keeps a printable UTF-8 character in a UTF-8 locale and writes each
+// non-ASCII byte in octal in the C locale; octalNonASCII picks the latter.
+func bashANSICContent(value string, octalNonASCII bool) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch c {
+		case 0x1b:
+			out.WriteString(`\E`)
+		case '\a':
+			out.WriteString(`\a`)
+		case '\b':
+			out.WriteString(`\b`)
+		case '\f':
+			out.WriteString(`\f`)
+		case '\n':
+			out.WriteString(`\n`)
+		case '\r':
+			out.WriteString(`\r`)
+		case '\t':
+			out.WriteString(`\t`)
+		case '\v':
+			out.WriteString(`\v`)
+		case '\\', '\'':
+			out.WriteByte('\\')
+			out.WriteByte(c)
+		default:
+			if c < 0x20 || c == 0x7f || (c >= 0x80 && octalNonASCII) {
+				_, _ = fmt.Fprintf(&out, `\%03o`, c)
+				continue
+			}
+			out.WriteByte(c)
+		}
+	}
+	return out.String()
+}
+
+// shellQuote returns value as one single-quoted POSIX shell word.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// bashBackslashQuote returns value as Bash's printf %q writes a word with no
+// control character: each character that the shell would expand or split
+// on, with a backslash before it. Bash 3 leaves each ~ as is, and later
+// versions escape a ~ that starts a word or follows = or :, which
+// escapeTilde selects.
+func bashBackslashQuote(value string, escapeTilde bool) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if strings.IndexByte(" \t\n'\"\\|&;()<>!{}*[?]^$`,", c) >= 0 ||
+			(c == '~' && escapeTilde && (i == 0 || value[i-1] == '=' || value[i-1] == ':')) ||
+			(c == '#' && i == 0) {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+// bashDoubleQuoteContent returns value as Bash's declare -p writes it in
+// "...": with a backslash before each ", $, ` and \.
+func bashDoubleQuoteContent(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if strings.IndexByte("\"$`\\", value[i]) >= 0 {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(value[i])
+	}
+	return out.String()
+}
+
+// secretFragmentMinBytes is the shortest prefix or suffix of a value that
+// scrubSecretAnswers replaces. Tools that cap their output can cut a value,
+// so the whole value no longer matches.
+const secretFragmentMinBytes = 8
+
+// scrubSecretAnswers replaces each value in text with its placeholder: as
+// is, shell-quoted, and as escaped in a JSON string, then each remaining
+// prefix or suffix of a form of at least secretFragmentMinBytes. Longer
+// values go first, so a value that contains another one is replaced whole.
 func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 	if text == "" {
 		return text
@@ -171,16 +413,128 @@ func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 	slices.SortFunc(answers, func(a, b forkdb.ChatSecretAnswer) int {
 		return len(b.Value) - len(a.Value)
 	})
-	for _, answer := range answers {
+	// Each pass writes a marker with a null byte, which no form holds, so
+	// no later pass replaces part of an earlier replacement. The markers
+	// become placeholders at the end.
+	forms := make([][]string, len(answers))
+	for i, answer := range answers {
 		if answer.Value == "" {
 			continue
 		}
-		placeholder := secretPlaceholder(answer.ToolCallID)
-		for _, form := range []string{answer.Value, jsonStringContent(answer.Value), jsonStringContentNoHTMLEscape(answer.Value)} {
-			text = strings.ReplaceAll(text, form, placeholder)
+		forms[i] = secretAnswerForms(answer.Value)
+		for _, form := range forms[i] {
+			text = strings.ReplaceAll(text, form, secretScrubMarker(i))
 		}
 	}
+	for i := range answers {
+		for _, form := range forms[i] {
+			text = scrubSecretFragments(text, form, secretScrubMarker(i))
+		}
+	}
+	for i, answer := range answers {
+		text = strings.ReplaceAll(text, secretScrubMarker(i), secretPlaceholder(answer.ToolCallID))
+	}
 	return text
+}
+
+func secretScrubMarker(i int) string {
+	return fmt.Sprintf("\x00%d\x00", i)
+}
+
+// secretAnswerForms returns value as is, shell-quoted, as Bash's printf %q
+// escapes it with backslashes, as Bash writes it in "..." and in $'...', each
+// also as Go's %q and %+q write it in a string, and as JSON
+// encoders escape it in a string: with or without HTML escapes, with
+// non-ASCII characters as is or escaped, with lowercase or uppercase hex in
+// escapes, and with / as is and escaped.
+func secretAnswerForms(value string) []string {
+	var forms []string
+	for _, v := range []string{
+		value, shellQuote(value), bashBackslashQuote(value, false), bashBackslashQuote(value, true),
+		bashDoubleQuoteContent(value),
+		bashANSICContent(value, false), bashANSICContent(value, true),
+	} {
+		quoted, quotedASCII := strconv.Quote(v), strconv.QuoteToASCII(v)
+		forms = append(forms, v, quoted[1:len(quoted)-1], quotedASCII[1:len(quotedASCII)-1])
+		for _, content := range []string{jsonStringContent(v), jsonStringContentNoHTMLEscape(v)} {
+			upper := upperJSONEscapes(content)
+			for _, form := range []string{
+				content, upper,
+				jsonStringContentASCII(content, "\\u%04x"), jsonStringContentASCII(upper, "\\u%04X"),
+			} {
+				forms = append(forms, form, strings.ReplaceAll(form, "/", `\/`))
+			}
+		}
+	}
+	return forms
+}
+
+// upperJSONEscapes returns JSON string content with the hex digits of each
+// \u escape in uppercase.
+func upperJSONEscapes(content string) string {
+	b := []byte(content)
+	for i := 0; i < len(b)-1; i++ {
+		if b[i] != '\\' {
+			continue
+		}
+		i++
+		if b[i] != 'u' {
+			continue
+		}
+		for j := i + 1; j < len(b) && j <= i+4; j++ {
+			if b[j] >= 'a' && b[j] <= 'f' {
+				b[j] -= 'a' - 'A'
+			}
+		}
+		i += 4
+	}
+	return string(b)
+}
+
+// scrubSecretFragments replaces each run of text that starts like form, and
+// then each run that ends like it, for at least secretFragmentMinBytes, with
+// placeholder.
+func scrubSecretFragments(text, form, placeholder string) string {
+	if len(form) < secretFragmentMinBytes {
+		return text
+	}
+	head := form[:secretFragmentMinBytes]
+	var out strings.Builder
+	for {
+		i := strings.Index(text, head)
+		if i < 0 {
+			out.WriteString(text)
+			break
+		}
+		n := len(head)
+		for n < len(form) && i+n < len(text) && text[i+n] == form[n] {
+			n++
+		}
+		out.WriteString(text[:i])
+		out.WriteString(placeholder)
+		text = text[i+n:]
+	}
+
+	text = out.String()
+	tail := form[len(form)-secretFragmentMinBytes:]
+	out.Reset()
+	start := 0
+	for {
+		j := strings.Index(text[start:], tail)
+		if j < 0 {
+			out.WriteString(text[start:])
+			break
+		}
+		end := start + j + len(tail)
+		n := len(tail)
+		for n < len(form) && end-n-1 >= start && text[end-n-1] == form[len(form)-1-n] {
+			n++
+		}
+		out.WriteString(text[start : end-n])
+		out.WriteString(placeholder)
+		start = end
+	}
+	return out.String()
 }
 
 // jsonStringContent returns value as json.Marshal writes it inside a JSON
@@ -191,6 +545,26 @@ func jsonStringContent(value string) string {
 		return value
 	}
 	return string(data[1 : len(data)-1])
+}
+
+// jsonStringContentASCII rewrites JSON string content for an encoder that
+// writes every non-ASCII character as a \u escape in format, such as
+// Python's default json.dumps. A character outside the Basic Multilingual
+// Plane becomes a UTF-16 surrogate pair.
+func jsonStringContentASCII(content, format string) string {
+	var out strings.Builder
+	for _, r := range content {
+		if r < 0x7f {
+			out.WriteRune(r)
+			continue
+		}
+		if r1, r2 := utf16.EncodeRune(r); r1 != unicode.ReplacementChar {
+			_, _ = fmt.Fprintf(&out, format+format, r1, r2)
+			continue
+		}
+		_, _ = fmt.Fprintf(&out, format, r)
+	}
+	return out.String()
 }
 
 // jsonStringContentNoHTMLEscape is jsonStringContent for an encoder that

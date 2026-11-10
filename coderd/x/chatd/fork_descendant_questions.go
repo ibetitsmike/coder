@@ -17,6 +17,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -29,6 +30,10 @@ const (
 	descendantQuestionPollInterval = 2 * time.Second
 	descendantQuestionNote         = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
 		"Call wait_agent again to wait until the child resumes and finishes, or answer it yourself with message_agent."
+	// descendantSecretQuestionNote leaves out message_agent: a message
+	// would answer the question without the secret value.
+	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. Only the user can give it, in the root chat. " +
+		"Call wait_agent again to wait until the child resumes and finishes."
 )
 
 // descendantQuestionsEnabled reports whether chat gets the blocking
@@ -71,6 +76,13 @@ func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestio
 	}
 }
 
+// secretAllowed reports whether the tool offers secret questions. A
+// computer-use chat gets none, because its screenshots reach the model
+// without the secret answer scrub.
+func (t descendantQuestionTool) secretAllowed() bool {
+	return t.secret && (!t.chat.Mode.Valid || t.chat.Mode.ChatMode != database.ChatModeComputerUse)
+}
+
 func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
 	info.Description = "Ask the user one or more structured questions. The user sees them in the root chat of this chat's family. " +
@@ -78,7 +90,7 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 		"Ask only for decisions that depend on the user's context or preference; if one option is clearly best, proceed with it and state the assumption. " +
 		"Each question needs a short header, the question itself, and 2-4 options. " +
 		"Write each option as one short, complete answer the user could send as their reply."
-	if !t.secret {
+	if !t.secretAllowed() {
 		return info
 	}
 	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
@@ -123,6 +135,8 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 	}
 	question := args.Questions[0]
 	switch {
+	case !t.secretAllowed():
+		return fantasy.NewTextErrorResponse("a computer-use chat cannot ask secret questions"), true
 	case len(args.Questions) != 1:
 		return fantasy.NewTextErrorResponse("a secret question must be the only question of its call"), true
 	case strings.TrimSpace(question.Header) == "" || strings.TrimSpace(question.Question) == "":
@@ -138,7 +152,11 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 	if err != nil {
 		return fantasy.NewTextErrorResponse("encode the question: " + err.Error()), true
 	}
-	if err := t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, questions); err != nil {
+	err = t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, questions, true)
+	if errors.Is(err, errSecretQuestionQueued) {
+		return fantasy.NewTextErrorResponse(errSecretQuestionQueued.Error()), true
+	}
+	if err != nil {
 		t.server.logger.Error(ctx, "record descendant question", slog.F("chat_id", t.chat.ID), slog.Error(err))
 		return fantasy.NewTextErrorResponse("failed to record the question; try again"), true
 	}
@@ -165,7 +183,11 @@ func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) 
 	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
 		return fantasy.NewTextErrorResponse("decode questions: " + err.Error()), nil
 	}
-	if err := t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, result.Questions); err != nil {
+	err = t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, result.Questions, false)
+	if errors.Is(err, errSecretAnswerQueued) {
+		return fantasy.NewTextErrorResponse(errSecretAnswerQueued.Error()), nil
+	}
+	if err != nil {
 		t.server.logger.Error(ctx, "record descendant question", slog.F("chat_id", t.chat.ID), slog.Error(err))
 		return fantasy.NewTextErrorResponse("failed to record the question; try again"), nil
 	}
@@ -175,10 +197,45 @@ func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) 
 	}), nil
 }
 
+// errSecretQuestionQueued refuses a secret question while messages wait in
+// the queue of the chat. The end of the turn would deliver them after the
+// question, and the first one would answer it without the value.
+var errSecretQuestionQueued = xerrors.New("messages wait in the queue of this chat, and they would answer a secret question without the value; end your turn to read them, then ask again")
+
+// errSecretAnswerQueued refuses a question that would replace a pending
+// secret question while the report of its answer waits in the queue of the
+// chat. The end of the turn would deliver the report, which would answer the
+// new question.
+var errSecretAnswerQueued = xerrors.New("the user answered your secret question, and the message that says so waits in the queue of this chat; end your turn to read it, then ask again")
+
 // recordDescendantQuestion replaces the question of chatID and drops the
-// secret answers of its earlier questions.
-func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage) error {
-	return forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
+// secret answers of its earlier questions. It takes the row lock of the
+// chat, which SendMessage holds while it refuses messages to a chat with a
+// pending secret question, so no message can reach the queue between the
+// check of the queue and the question. Only the report of an answer can
+// reach the queue while a secret question is pending, so a queued message
+// then refuses any new question.
+func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage, secret bool) error {
+	return forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+		if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
+			return xerrors.Errorf("lock chat: %w", err)
+		}
+		queued, err := tx.CountChatQueuedMessages(ctx, chatID)
+		if err != nil {
+			return xerrors.Errorf("count queued messages: %w", err)
+		}
+		if queued > 0 && secret {
+			return errSecretQuestionQueued
+		}
+		if queued > 0 {
+			pending, err := ftx.GetPendingChatDescendantQuestion(ctx, chatID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return xerrors.Errorf("get pending question: %w", err)
+			}
+			if err == nil && pending.Secret() {
+				return errSecretAnswerQueued
+			}
+		}
 		if _, err := ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
 			ChatID:     chatID,
 			ToolCallID: callID,
@@ -292,16 +349,19 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
 		return resp, nil
 	}
-	questions, err = t.server.pendingDescendantQuestion(ctx, childID)
+	pending, err = t.server.pendingDescendantQuestionRow(ctx, childID)
 	if err != nil {
 		return fantasy.NewTextErrorResponse("read the child's question: " + err.Error()), nil
 	}
-	if questions == nil {
+	if pending == nil {
 		return resp, nil
 	}
 	result["needs_input"] = true
-	result["questions"] = questions
+	result["questions"] = pending.Questions
 	result["note"] = descendantQuestionNote
+	if pending.Secret() {
+		result["note"] = descendantSecretQuestionNote
+	}
 	return toolJSONResponse(result), nil
 }
 

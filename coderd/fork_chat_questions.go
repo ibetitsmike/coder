@@ -24,6 +24,7 @@ import (
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -148,47 +149,29 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fdb, err := forkdb.From(api.Database)
-	if err != nil {
-		httpapi.InternalServerError(rw, err)
-		return
-	}
-	question, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && question.ToolCallID != toolCallID) {
+	// Errors stay out of the responses below: a database error can quote
+	// the value.
+	reportQueued, err := storeSecretAnswer(ctx, api.Database, forkdb.InsertChatSecretAnswerParams{
+		ChatID:     chat.ID,
+		ToolCallID: toolCallID,
+		Value:      req.Value,
+	})
+	switch {
+	case errors.Is(err, errSecretQuestionNotPending):
 		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
 			Message: "The chat has no pending question with this tool call ID.",
 		})
 		return
-	}
-	if err != nil {
-		httpapi.InternalServerError(rw, err)
-		return
-	}
-	if !question.Secret() {
+	case errors.Is(err, errSecretQuestionNotSecret):
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: "The question takes a normal answer. Send it as a chat message.",
 		})
 		return
-	}
-
-	// Errors stay out of the responses below: a database error can quote
-	// the value.
-	insert := forkdb.InsertChatSecretAnswerParams{
-		ChatID:     chat.ID,
-		ToolCallID: toolCallID,
-		Value:      req.Value,
-	}
-	err = fdb.InsertChatSecretAnswer(ctx, insert)
-	reportQueued := false
-	if database.IsUniqueViolation(err) {
-		reportQueued, err = replaceUnreportedSecretAnswer(ctx, api.Database, insert)
-		if errors.Is(err, errSecretAnswerReported) || database.IsUniqueViolation(err) {
-			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
-			return
-		}
-	}
-	if err != nil {
-		api.Logger.Error(ctx, "insert secret answer", slog.F("chat_id", chat.ID))
+	case errors.Is(err, errSecretAnswerReported):
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+		return
+	case err != nil:
+		api.Logger.Error(ctx, "store secret answer", slog.F("chat_id", chat.ID))
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{Message: "Failed to store the answer."})
 		return
 	}
@@ -197,12 +180,18 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = api.sendChatMessage(ctx, apiKey.UserID, chat, codersdk.CreateChatMessageRequest{
+	_, err = api.sendChatMessage(chatd.WithSecretAnswerReport(ctx, toolCallID), apiKey.UserID, chat, codersdk.CreateChatMessageRequest{
 		Content: []codersdk.ChatInputPart{{
 			Type: codersdk.ChatInputPartTypeText,
 			Text: questionAnswerPrefix + toolCallID + ":\nThe user gave a secret answer. Write {{secret:" + toolCallID + "}} where the value belongs in execute, write_file or edit_files input.",
 		}},
 	})
+	if errors.Is(err, chatd.ErrSecretAnswerNotPending) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The chat has no pending question with this tool call ID.",
+		})
+		return
+	}
 	if err != nil {
 		// The answer stays stored. The question stays pending without the
 		// message, and the next answer replaces it as an unreported one.
@@ -212,18 +201,28 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusNoContent)
 }
 
-// errSecretAnswerReported means that a queued or delivered message
-// reports the stored answer.
+// errSecretQuestionNotPending means that the question of a secret answer
+// is not the pending question of the chat.
+var errSecretQuestionNotPending = xerrors.New("the question is not pending")
+
+// errSecretQuestionNotSecret means that the pending question of a secret
+// answer takes a normal answer.
+var errSecretQuestionNotSecret = xerrors.New("the question is not secret")
+
+// errSecretAnswerReported means that a queued message reports the stored
+// answer.
 var errSecretAnswerReported = xerrors.New("the secret answer is reported")
 
-// replaceUnreportedSecretAnswer replaces the stored answer to the question
-// of arg.ToolCallID when no message reports it: the owner can delete the
-// queued message that reports an answer, and a failed send leaves none.
-// The chat row lock serializes it with the queue's promotion, so the
-// message cannot be delivered between the check and the replacement.
-// reportQueued is true when a queued message already reports the replaced
-// answer, so the caller must not queue another.
-func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg forkdb.InsertChatSecretAnswerParams) (reportQueued bool, err error) {
+// storeSecretAnswer stores the answer to the pending secret question of
+// arg.ToolCallID. It replaces a stored answer that no message reports: the
+// owner can delete the queued message that reports an answer, and a failed
+// send leaves none. The chat row lock serializes it with the queue's
+// promotion and with the recording of a new question, so the question
+// cannot be answered or replaced between the check and the insert, which
+// would leave an answer that no question takes. reportQueued is true when a
+// queued message already reports the replaced answer, so the caller must
+// not queue another.
+func storeSecretAnswer(ctx context.Context, db database.Store, arg forkdb.InsertChatSecretAnswerParams) (reportQueued bool, err error) {
 	err = forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
 		if _, err := tx.GetChatByIDForUpdate(ctx, arg.ChatID); err != nil {
 			return err
@@ -231,10 +230,13 @@ func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg f
 		// A delivered message answers the question.
 		question, err := ftx.GetPendingChatDescendantQuestion(ctx, arg.ChatID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && question.ToolCallID != arg.ToolCallID) {
-			return errSecretAnswerReported
+			return errSecretQuestionNotPending
 		}
 		if err != nil {
 			return err
+		}
+		if !question.Secret() {
+			return errSecretQuestionNotSecret
 		}
 		queued, err := secretAnswerQueued(ctx, tx, arg.ChatID, arg.ToolCallID)
 		if err != nil {
@@ -321,7 +323,15 @@ func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Ch
 	if !question.Secret() {
 		return nil
 	}
-	return httperror.NewResponseError(http.StatusConflict, codersdk.Response{
+	return secretQuestionPendingError(nil)
+}
+
+// secretQuestionPendingError is the response to a message for a chat whose
+// pending question is secret. SendMessage and EditMessage return
+// chatd.ErrSecretQuestionPending when the question is recorded after
+// rejectSecretQuestionAnswer runs.
+func secretQuestionPendingError(err error) error {
+	return httperror.WrapResponseError(http.StatusConflict, codersdk.Response{
 		Message: "The chat's question takes a secret answer, which a chat message cannot carry.",
-	})
+	}, err)
 }
