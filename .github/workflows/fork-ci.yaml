@@ -170,9 +170,10 @@ jobs:
           key: fork-golangci-lint-${{ runner.os }}-${{ hashFiles('**/*.go') }}
           restore-keys: |
             fork-golangci-lint-${{ runner.os }}-
-      # Lints the packages that hold fork code and reports only issues on
-      # lines a pull request changes, so findings it did not introduce never
-      # block it. Other events compare HEAD with itself and report nothing.
+      # Lints the packages that hold fork code, including the plugin files in
+      # ./cli and ./enterprise/coderd, and reports only issues on lines a pull
+      # request changes, so findings it did not introduce never block it.
+      # Other events compare HEAD with itself and report nothing.
       - name: golangci-lint
         env:
           NEW_FROM: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
@@ -180,6 +181,8 @@ jobs:
           mapfile -t fork_pkgs < <(git ls-files -- '*fork_*.go' '*/fork.go' | xargs -n1 dirname | sort -u | sed 's|^|./|')
           golangci-lint run --fix=false --new-from-merge-base="$NEW_FROM" \
             "${fork_pkgs[@]}" \
+            ./cli \
+            ./enterprise/coderd \
             ./coderd/x/... \
             ./coderd/database/forkdb/... \
             ./coderd/database/migrations/chatdmig/... \

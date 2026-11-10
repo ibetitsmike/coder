@@ -21,12 +21,15 @@ import (
 // ChatTodoStatus is the state of one item in a chat todo list.
 type ChatTodoStatus string
 
-// The states of a chat todo list item.
+// The states of a chat todo list item. A trailing comment would become a
+// swagger enum description, so the directive covers the block.
+//
+//nolint:misspell // "cancelled" is a stored API value; changing it breaks existing todo lists.
 const (
 	ChatTodoStatusPending    ChatTodoStatus = "pending"
 	ChatTodoStatusInProgress ChatTodoStatus = "in_progress"
 	ChatTodoStatusDone       ChatTodoStatus = "done"
-	ChatTodoStatusCancelled  ChatTodoStatus = "cancelled" //nolint:misspell // Stored and API value; changing it breaks existing todo lists.
+	ChatTodoStatusCancelled  ChatTodoStatus = "cancelled"
 )
 
 // ChatTodoStatuses lists every valid ChatTodoStatus.
