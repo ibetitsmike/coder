@@ -9,14 +9,9 @@ import {
 } from "#/api/typesGenerated";
 import { ChatTodoChecklist, formatChatTodoProgress } from "../../ChatTodoPill";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
+import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
-import {
-	asRecord,
-	asString,
-	parseArgs,
-	parseArray,
-	type ToolStatus,
-} from "./utils";
+import { asRecord, parseArgs, parseArray, type ToolStatus } from "./utils";
 
 const isChatTodoStatus = (value: unknown): value is ChatTodoStatus =>
 	ChatTodoStatuses.some((status) => status === value);
@@ -113,9 +108,6 @@ export const ForkTodoToolRenderer: React.FC<ForkToolRendererProps> = ({
 	const action = props.name === "todo_write" ? "write" : "read";
 	const resultRecord = parseArgs(props.result);
 	if (props.isError) {
-		const errorMessage = resultRecord
-			? asString(resultRecord.error || resultRecord.message)
-			: asString(props.result);
 		return (
 			// A failed write stored nothing, so its requested list stays hidden.
 			<ForkTodoTool
@@ -123,7 +115,7 @@ export const ForkTodoToolRenderer: React.FC<ForkToolRendererProps> = ({
 				todos={[]}
 				status={props.status}
 				isError
-				errorMessage={errorMessage}
+				errorMessage={forkToolErrorMessage(props.result)}
 			/>
 		);
 	}

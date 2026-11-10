@@ -142,6 +142,24 @@ export const WithParentChat: Story = {
 	},
 };
 
+export const WithAgentType: Story = {
+	args: {
+		chat: {
+			...MockChat,
+			parent_chat_id: mockParentChat.id,
+			agent_type: "reviewer",
+		},
+	},
+	parameters: {
+		queries: [
+			{
+				key: chatEntityKey(mockParentChat.id),
+				data: mockParentChat,
+			},
+		],
+	},
+};
+
 export const SidebarCollapsed: Story = {
 	parameters: {
 		reactRouter: reactRouterParameters({
