@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { ForkAgentDefinitionsTableView } from "./ForkAgentDefinitionsTableView";
@@ -21,6 +21,8 @@ const meta = {
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
+		onToggleEnabled: fn(),
+		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkAgentDefinitionsTableView>;
 
@@ -45,6 +47,63 @@ export const LoadError: Story = {
 
 export const Empty: Story = {
 	args: { definitions: [] },
+};
+
+export const TogglesPending: Story = {
+	args: {
+		pendingToggles: {
+			[MockForkAgentDefinitionMetadata.name]:
+				!MockForkAgentDefinitionMetadata.enabled,
+			[MockReleaseNotesDefinition.name]: !MockReleaseNotesDefinition.enabled,
+		},
+	},
+};
+
+export const RowActionsOpen: Story = {
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+	},
+};
+
+export const DeleteConfirm: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			isDeleting: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const DeletePending: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			isDeleting: true,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const DeleteFailed: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			error: mockApiError({
+				message: "Agent definition not found.",
+				detail: "It may have been deleted in another tab.",
+			}),
+			isDeleting: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
 };
 
 export const RefreshError: Story = {

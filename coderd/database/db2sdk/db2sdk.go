@@ -1798,6 +1798,7 @@ func ChatQueuedMessage(message database.ChatQueuedMessage) codersdk.ChatQueuedMe
 		ChatID:        message.ChatID,
 		ModelConfigID: nullUUIDPtr(message.ModelConfigID),
 		Content:       parts,
+		BusyBehavior:  codersdk.ChatBusyBehavior(message.BusyBehavior),
 		CreatedAt:     message.CreatedAt,
 		EditingSince:  nullTimePtr(message.EditingSince),
 	}
@@ -2052,8 +2053,9 @@ func ChatWithDiffStatuses(
 	}
 	// Always initialize Children to an empty slice so the JSON
 	// field serializes as [] rather than null. Root chats may
-	// later have children populated; child chats remain empty
-	// because nesting depth is capped at 1.
+	// later have children populated; child chats stay empty
+	// because the root lists every descendant in its own flat
+	// children list.
 	chat.Children = []codersdk.Chat{}
 	switch {
 	case c.RootChatID.Valid:
@@ -2294,19 +2296,25 @@ func ChildChatRows(
 	return result
 }
 
-// ChatRowsWithChildren converts root chat rows and their child rows
-// into codersdk.Chat values with children embedded under each parent.
+// ChatRowsWithChildren converts root chat rows and their descendant rows
+// into codersdk.Chat values with children embedded under each root.
 // Both root and child diff statuses are resolved from the shared map.
 func ChatRowsWithChildren(
 	roots []database.GetChatsRow,
 	children []database.GetChildChatsByParentIDsRow,
 	diffStatuses map[uuid.UUID][]database.ChatDiffStatus,
 ) []codersdk.Chat {
-	// Group children by parent ID.
-	childrenByParent := make(map[uuid.UUID][]database.GetChildChatsByParentIDsRow, len(children))
+	// Group descendants by the root they hang off. A direct child's
+	// root is its parent, so depth-1 input is unchanged; deeper
+	// descendants carry their family's root_chat_id and land in the
+	// root's flat children list.
+	childrenByRoot := make(map[uuid.UUID][]database.GetChildChatsByParentIDsRow, len(children))
 	for _, row := range children {
-		parentID := row.Chat.ParentChatID.UUID
-		childrenByParent[parentID] = append(childrenByParent[parentID], row)
+		rootID := row.Chat.ParentChatID.UUID
+		if row.Chat.RootChatID.Valid {
+			rootID = row.Chat.RootChatID.UUID
+		}
+		childrenByRoot[rootID] = append(childrenByRoot[rootID], row)
 	}
 
 	result := make([]codersdk.Chat, len(roots))
@@ -2324,7 +2332,7 @@ func ChatRowsWithChildren(
 		result[i].HasUnread = row.HasUnread
 
 		// Embed child chats.
-		if childRows, ok := childrenByParent[row.Chat.ID]; ok {
+		if childRows, ok := childrenByRoot[row.Chat.ID]; ok {
 			result[i].Children = ChildChatRows(childRows, diffStatuses)
 		}
 	}

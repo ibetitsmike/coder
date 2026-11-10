@@ -258,7 +258,7 @@ func TestNestedSubagentLiveLimit(t *testing.T) {
 	_, err = f.spawn(t, f.root, childSubagentChatOptions{})
 	require.NoError(t, err)
 	// Resuming the finished child would make two live subagents.
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "continue", SendMessageBusyBehaviorQueue)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "continue")
 	require.ErrorContains(t, err, "cannot resume the child agent: this chat family has 1 live subagents and the maximum is 1")
 
 	// A concurrent message_agent resumed the child after this one loaded
@@ -311,7 +311,7 @@ func TestNestedSubagentLiveLimitSerializesResume(t *testing.T) {
 
 	resumeErr := make(chan error, 1)
 	go func() {
-		_, err := f.server.sendSubagentMessage(ctx, f.root.ID, first.ID, "continue", SendMessageBusyBehaviorQueue)
+		_, err := f.server.sendSubagentMessage(ctx, f.root.ID, first.ID, "continue")
 		resumeErr <- err
 	}()
 	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
@@ -510,7 +510,7 @@ func TestNestedSubagentTargets(t *testing.T) {
 	require.ErrorIs(t, err, ErrSubagentNotDescendant)
 	_, err = f.server.awaitSubagent(ctx, f.root, grandchild.ID, 0)
 	require.ErrorIs(t, err, ErrSubagentNotDescendant)
-	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, grandchild.ID, "hi", SendMessageBusyBehaviorQueue)
+	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, grandchild.ID, "hi")
 	require.ErrorIs(t, err, ErrSubagentNotDescendant)
 	_, _, err = f.server.interruptSubagent(ctx, f.root.ID, grandchild.ID)
 	require.ErrorIs(t, err, ErrSubagentNotDescendant)

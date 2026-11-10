@@ -65,6 +65,10 @@ import {
 	sidebarViewFromPath,
 } from "./components/ChatsSidebar/ChatsSidebar";
 import { ResizableChatsSidebarFrame } from "./components/ChatsSidebar/ResizableChatsSidebarFrame";
+import {
+	buildChatTree,
+	collectDescendantChats,
+} from "./components/ChatsSidebar/tree/chatTree";
 import { useAgentsPageKeybindings } from "./hooks/useAgentsPageKeybindings";
 import { useAgentsPWA } from "./hooks/useAgentsPWA";
 import { useOrganizationChatModels } from "./hooks/useOrganizationChatModels";
@@ -366,13 +370,13 @@ const AgentsPageLayout: React.FC = () => {
 
 					if (chatEvent.kind === "created") {
 						if (updatedChat.parent_chat_id) {
-							// Child chat: add to its parent's children
-							// array. If the parent is not in any loaded
-							// page, the child is silently dropped.
+							// Child chat: add to its root's flat
+							// children list. If the root is not in any
+							// loaded page, the child is silently dropped.
 							addChildToParentInCache(
 								queryClient,
 								updatedChat,
-								updatedChat.parent_chat_id,
+								updatedChat.root_chat_id ?? updatedChat.parent_chat_id,
 							);
 							// A family unarchive and a new sub-agent with a
 							// mounted initial fetch both need entity recovery.
@@ -487,7 +491,9 @@ const AgentsPageLayout: React.FC = () => {
 		setChatErrorReason,
 		clearChatErrorReason,
 		navigateAfterArchive,
-		activeChatChildren: chatList.find((c) => c.id === agentId)?.children,
+		activeChatChildren: agentId
+			? collectDescendantChats(buildChatTree(chatList), agentId)
+			: undefined,
 		onOpenRenameDialog: setChatPendingRename,
 		isSidebarCollapsed,
 		onToggleSidebarCollapsed: handleToggleSidebarCollapsed,
