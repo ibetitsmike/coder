@@ -319,7 +319,8 @@ func childDoneRunKey(childID uuid.UUID) string {
 
 // childDone reports whether a child agent finished its work: it is archived,
 // or it settled in a status other than running, interrupting or paused (the
-// rule of checkSubagentCompletion) and does not wait for an answer.
+// rule of checkSubagentCompletion), does not wait for events of its own
+// children and does not wait for an answer.
 func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, error) {
 	if child.Archived {
 		return true, nil
@@ -327,6 +328,19 @@ func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, erro
 	switch child.Status {
 	case database.ChatStatusRunning, database.ChatStatusInterrupting, database.ChatStatusPaused:
 		return false, nil
+	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return false, err
+	}
+	wakeups, err := fdb.ListChatWakeupsByChatID(ctx, child.ID)
+	if err != nil {
+		return false, xerrors.Errorf("list wake-ups of child %s: %w", child.ID, err)
+	}
+	for _, wakeup := range wakeups {
+		if wakeup.Kind == forkdb.ChatWakeupKindEvents && wakeup.Status == forkdb.ChatWakeupStatusActive {
+			return false, nil
+		}
 	}
 	awaits, err := p.childAwaitsAnswer(ctx, child.ID)
 	if err != nil {

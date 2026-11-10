@@ -1,6 +1,7 @@
 package chatd
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -296,6 +297,42 @@ func TestWakeupEventsArchivedAndMissingChildren(t *testing.T) {
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
+}
+
+// A waiting child that waits for events of its own children is not done.
+func TestWakeupEventsWaitsForNestedCoordinator(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	coordinator := f.createWakeupChat(t)
+	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
+	grandchild := f.createChildAgent(t, child, "grandchild", database.ChatStatusRunning)
+	nested := f.insertWakeup(t, child, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(grandchild),
+	})
+	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(child),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
+
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	_, err = fdb.UpdateChatWakeupStatus(ctx, forkdb.UpdateChatWakeupStatusParams{
+		ID:           nested.ID,
+		Status:       forkdb.ChatWakeupStatusCompleted,
+		StatusReason: sql.NullString{String: "done", Valid: true},
+		UpdatedAt:    wakeupTestSlot.Add(2 * time.Second),
+	})
+	require.NoError(t, err)
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second+wakeupPollInterval+time.Second))
+	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }
 
 // Events of a type this worker does not know wake nothing and hold nothing
