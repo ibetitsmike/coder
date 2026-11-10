@@ -21,6 +21,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 const (
@@ -67,11 +68,22 @@ func (p *Server) requireComputerUseModel(ctx context.Context, modelConfigID uuid
 	if err != nil {
 		return xerrors.Errorf("get AI provider for model %s: %w", config.ID, err)
 	}
-	if _, ok := chatprovider.ComputerUseProvider(aiProvider.Type, config.Model); !ok {
+	provider, ok := chatprovider.ComputerUseProvider(aiProvider.Type, config.Model)
+	if !ok {
 		return xerrors.Errorf(
 			`model_config_id model %s uses AI provider %q of type %q, which cannot run type %q; computer use requires %s`,
 			computerUseModelLabel(config), aiProvider.Name, aiProvider.Type, subagentTypeComputerUse, chatprovider.ComputerUseModelRequirement,
 		)
+	}
+	if provider == codersdk.ChatComputerUseProviderOpenAI {
+		// The child's first turn would fail in requireResponsesAPI otherwise.
+		callConfig, err := parseModelConfigOptions(config.Options)
+		if err != nil {
+			return xerrors.Errorf("parse options for model %s: %w", config.ID, err)
+		}
+		if _, err := requireResponsesAPI(callConfig.OpenAIConfig, config.Model); err != nil {
+			return xerrors.Errorf("model_config_id: %w", err)
+		}
 	}
 	return nil
 }

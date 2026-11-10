@@ -1,6 +1,7 @@
 package chatd
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,6 +28,9 @@ func TestForkComputerUseSpawnOverrides(t *testing.T) {
 	explicitModel := insertInternalChatModelConfigForProvider(t, db, org.ID, "anthropic", "claude-sonnet-5", true)
 	insertInternalAIProvider(t, db, database.AIProviderTypeGoogle, "test-key", true)
 	incapableModel := insertInternalChatModelConfigForProvider(t, db, org.ID, "google", "gemini-test", true)
+	insertInternalAIProvider(t, db, database.AIProviderTypeOpenai, "test-key", true)
+	chatCompletionsModel := insertInternalChatModelConfigWithOptions(t, db, org.ID, "openai", "gpt-5", true,
+		json.RawMessage(`{"openai_config":{"use_responses_api":false}}`))
 	workspace, build, agent := seedWorkspaceBinding(t, db, user.ID)
 
 	parent, err := server.CreateChat(ctx, CreateOptions{
@@ -87,6 +91,17 @@ func TestForkComputerUseSpawnOverrides(t *testing.T) {
 		require.True(t, resp.IsError, "expected tool error but got: %s", resp.Content)
 		require.Contains(t, resp.Content, `model_config_id model "gemini-test" uses AI provider`)
 		require.Contains(t, resp.Content, `which cannot run type "computer_use"`)
+	})
+
+	t.Run("RejectsOpenAIModelWithoutResponsesAPI", func(t *testing.T) {
+		t.Parallel()
+		resp := runSpawnAgentTool(ctx, t, server, parentChat, spawnAgentArgs{
+			Type:          subagentTypeComputerUse,
+			Prompt:        "take a screenshot",
+			ModelConfigID: chatCompletionsModel.ID.String(),
+		})
+		require.True(t, resp.IsError, "expected tool error but got: %s", resp.Content)
+		require.Contains(t, resp.Content, `model "gpt-5" disables the OpenAI Responses API, which computer use requires`)
 	})
 }
 
