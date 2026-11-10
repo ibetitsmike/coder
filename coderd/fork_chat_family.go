@@ -26,7 +26,7 @@ import (
 func (api *API) getForkChatFamilyCapacity(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
-	if chat.ParentChatID.Valid {
+	if chat.IsSubChat() {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: "Only a root chat has a family capacity.",
 		})

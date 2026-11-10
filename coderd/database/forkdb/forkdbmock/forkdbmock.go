@@ -412,10 +412,10 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByID(ctx, id any) *gomock.Call {
 }
 
 // GetFamilySubagentsAwaitingWorker mocks base method.
-func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error) {
+func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetFamilySubagentsAwaitingWorker", ctx, arg)
-	ret0, _ := ret[0].([]uuid.UUID)
+	ret0, _ := ret[0].([]forkdb.GetFamilySubagentsAwaitingWorkerRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

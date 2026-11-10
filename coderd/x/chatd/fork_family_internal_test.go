@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -24,10 +25,17 @@ func TestForkChatFamilyCapacity(t *testing.T) {
 		chatLimits:             Limits{Fork: ForkLimits{MaxLiveSubagentsPerFamily: 5}},
 	}
 
+	// The occupant is the grandchild's ancestor, so its slot does not block
+	// the grandchild.
+	_ = f.chat(t, database.Chat{
+		ParentChatID: uuid.NullUUID{UUID: f.occupant.ID, Valid: true},
+		RootChatID:   uuid.NullUUID{UUID: f.root.ID, Valid: true},
+	})
+
 	got, err := p.ForkChatFamilyCapacity(ctx, f.root)
 	require.NoError(t, err)
 	require.Equal(t, codersdk.ForkChatFamilyCapacity{
-		LiveSubagents:      2,
+		LiveSubagents:      3,
 		MaxLiveSubagents:   5,
 		WaitingForCapacity: []uuid.UUID{f.waiting.ID},
 	}, got)

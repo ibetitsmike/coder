@@ -69,11 +69,11 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"GetFamilySubagentsAwaitingWorker": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := forkdb.GetFamilySubagentsAwaitingWorkerParams{RootChatID: chat.ID, StaleSeconds: 30}
-			ids := []uuid.UUID{uuid.New()}
+			arg := forkdb.GetFamilySubagentsAwaitingWorkerParams{RootChatID: chat.ID, OrganizationID: chat.OrganizationID, StaleSeconds: 30}
+			rows := []forkdb.GetFamilySubagentsAwaitingWorkerRow{{ChatID: uuid.New(), ActiveFamilyCount: 1}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().GetFamilySubagentsAwaitingWorker(gomock.Any(), arg).Return(ids, nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(ids)
+			fdb.EXPECT().GetFamilySubagentsAwaitingWorker(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"GetChatAwaitingWorker": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.GetChatAwaitingWorkerParams{})

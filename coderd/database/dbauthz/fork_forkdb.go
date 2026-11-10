@@ -211,7 +211,7 @@ func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (fork
 }
 
 // GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
-func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error) {
+func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
 	if _, err := f.q.GetChatByID(ctx, arg.RootChatID); err != nil {
 		return nil, err
 	}

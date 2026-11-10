@@ -61,8 +61,10 @@ type Querier interface {
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
 	// worker with a fresh heartbeat owns, with the predicate of
-	// GetChatAwaitingWorker.
-	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error)
+	// GetChatAwaitingWorker. Each row carries the counts of
+	// CountActiveSubagentsForCapacity for that chat, so one query answers for the
+	// whole family.
+	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)

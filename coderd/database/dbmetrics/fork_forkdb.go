@@ -177,7 +177,7 @@ func (f forkQueryMetricsStore) GetChatWakeupByID(ctx context.Context, id uuid.UU
 	return f.s.GetChatWakeupByID(ctx, id)
 }
 
-func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error) {
+func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
 	defer f.observe(ctx, "GetFamilySubagentsAwaitingWorker", time.Now())
 	return f.s.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
