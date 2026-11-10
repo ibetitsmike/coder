@@ -12,6 +12,24 @@ type SkillEnabledSwitchProps = {
 	readOnly: boolean;
 };
 
+/** The read-only form of the enabled switch. */
+export const SkillEnabledStatus: React.FC<{ enabled: boolean }> = ({
+	enabled,
+}) =>
+	enabled ? (
+		<CheckIcon
+			role="img"
+			aria-label="Enabled"
+			className="size-icon-sm text-content-success"
+		/>
+	) : (
+		<XIcon
+			role="img"
+			aria-label="Disabled"
+			className="size-icon-sm text-content-secondary"
+		/>
+	);
+
 export const SkillEnabledSwitch: React.FC<SkillEnabledSwitchProps> = ({
 	scope,
 	skill,
@@ -28,19 +46,7 @@ export const SkillEnabledSwitch: React.FC<SkillEnabledSwitchProps> = ({
 	});
 
 	if (readOnly) {
-		return skill.enabled ? (
-			<CheckIcon
-				role="img"
-				aria-label="Enabled"
-				className="size-icon-sm text-content-success"
-			/>
-		) : (
-			<XIcon
-				role="img"
-				aria-label="Disabled"
-				className="size-icon-sm text-content-secondary"
-			/>
-		);
+		return <SkillEnabledStatus enabled={skill.enabled} />;
 	}
 
 	return (

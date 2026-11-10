@@ -1,6 +1,6 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
-import { CheckIcon, EllipsisVerticalIcon, PlusIcon, XIcon } from "lucide-react";
+import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { Alert, AlertDescription } from "#/components/Alert/Alert";
@@ -26,6 +26,7 @@ import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
+import { SkillEnabledStatus } from "../../components/SkillEnabledSwitch";
 import { formatUpdatedAt } from "../../components/SkillsTableView";
 import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
 import { fullSkillAccess, type SkillAccess } from "../../utils/skills";
@@ -88,19 +89,7 @@ const EnabledCell: React.FC<EnabledCellProps> = ({
 	onToggleEnabled,
 }) => {
 	if (!canUpdate) {
-		return definition.enabled ? (
-			<CheckIcon
-				role="img"
-				aria-label="Enabled"
-				className="size-icon-sm text-content-success"
-			/>
-		) : (
-			<XIcon
-				role="img"
-				aria-label="Disabled"
-				className="size-icon-sm text-content-secondary"
-			/>
-		);
+		return <SkillEnabledStatus enabled={definition.enabled} />;
 	}
 	return (
 		<Switch
