@@ -156,14 +156,7 @@ func TestDescendantSecretQuestion(t *testing.T) {
 		return properties
 	}
 
-	off := f.server.newDescendantQuestionTool(child)
-	require.NotContains(t, itemProperties(off.Info()), "secret", "the model cannot ask a secret question until the UI takes one")
-	resp, err := off.Run(ctx, fantasy.ToolCall{ID: "call_off", Input: secretInput})
-	require.NoError(t, err)
-	require.True(t, resp.IsError, "without options the call is an ordinary invalid question")
-
-	on := off
-	on.secret = true
+	on := f.server.newDescendantQuestionTool(child)
 	require.Contains(t, itemProperties(on.Info()), "secret")
 	for _, input := range []string{
 		`{"questions":[{"header":"Token","question":"Paste it.","secret":true,"options":[{"label":"a"},{"label":"b"}]}]}`,
@@ -173,7 +166,7 @@ func TestDescendantSecretQuestion(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, resp.IsError, input)
 	}
-	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_on", Input: secretInput})
+	resp, err := on.Run(ctx, fantasy.ToolCall{ID: "call_on", Input: secretInput})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
 	require.Contains(t, resp.Content, "{{secret:call_on}}")

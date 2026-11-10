@@ -57,10 +57,6 @@ type descendantQuestionTool struct {
 	fantasy.AgentTool
 	server *Server
 	chat   database.Chat
-	// secret offers secret questions, whose answers reach the chat's tools
-	// but never the model. It stays off until the root chat page can take
-	// a secret answer.
-	secret bool
 }
 
 func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestionTool {
@@ -77,11 +73,8 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 		"Your turn ends after the call, and the answer arrives as your next user message. " +
 		"Ask only for decisions that depend on the user's context or preference; if one option is clearly best, proceed with it and state the assumption. " +
 		"Each question needs a short header, the question itself, and 2-4 options. " +
-		"Write each option as one short, complete answer the user could send as their reply."
-	if !t.secret {
-		return info
-	}
-	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
+		"Write each option as one short, complete answer the user could send as their reply. " +
+		"To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
 		"The answer never reaches you: write " + secretPlaceholder("<this call's ID>") + " in execute, write_file or edit_files input where the value belongs. " +
 		"Those tools get the value, and tool output shows the placeholder instead of it."
 	if questions, ok := info.Parameters["questions"].(map[string]any); ok {
@@ -150,10 +143,8 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 }
 
 func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	if t.secret {
-		if resp, handled := t.runSecretQuestion(ctx, call); handled {
-			return resp, nil
-		}
+	if resp, handled := t.runSecretQuestion(ctx, call); handled {
+		return resp, nil
 	}
 	resp, err := t.AgentTool.Run(ctx, call)
 	if err != nil || resp.IsError {
