@@ -535,6 +535,64 @@ export const RunningDelegatedChat: Story = {
 	},
 };
 
+const MockReviewerChildChat = buildChat({
+	id: "child-reviewer",
+	title: "Review the diff",
+	parent_chat_id: "root-types",
+	root_chat_id: "root-types",
+	agent_type: "reviewer",
+});
+
+const MockExploreChildChat = buildChat({
+	id: "child-explore",
+	title: "Find the call sites",
+	parent_chat_id: "root-types",
+	root_chat_id: "root-types",
+	agent_type: "explore",
+});
+
+const MockGeneralChildChat = buildChat({
+	id: "child-general",
+	title: "General child has no badge",
+	parent_chat_id: "root-types",
+	root_chat_id: "root-types",
+	agent_type: "general",
+});
+
+const MockLongTypeChildChat = buildChat({
+	id: "child-long-type",
+	title: "Long agent type stays bounded",
+	parent_chat_id: "root-types",
+	root_chat_id: "root-types",
+	agent_type: "security-and-dependency-upgrade-reviewer-for-monorepos",
+});
+
+const MockTypedChildrenRootChat = buildChat({
+	id: "root-types",
+	title: "Root with typed children",
+	children: [
+		MockReviewerChildChat,
+		MockExploreChildChat,
+		MockGeneralChildChat,
+		MockLongTypeChildChat,
+	],
+});
+
+export const ChildAgentTypes: Story = {
+	args: {
+		chats: [MockTypedChildrenRootChat],
+	},
+	parameters: {
+		reactRouter: reactRouterParameters({
+			location: {
+				path: "/agents/child-reviewer",
+				pathParams: { agentId: "child-reviewer" },
+			},
+			routing: agentsRouting,
+		}),
+	},
+};
+
 export const ExpandCollapse: Story = {
 	args: {
 		chats: [
