@@ -85,23 +85,31 @@ func TestScheduleWakeupTool(t *testing.T) {
 	require.True(t, resp.IsError, "a call without an occurrence ID cannot be replayed safely")
 	require.Len(t, wakeups(), 2)
 
-	// A replayed tool call returns the wake-up it created the first time,
-	// even after its first run time has passed: at 12:45 the next 12:30 is
-	// tomorrow, past the expiry.
+	// A replayed tool call returns the wake-up it created the first time.
 	callCtx := workspacesdk.WithToolCallID(ctx, uuid.New())
-	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","cron":"30 12 * * *","expires_in_seconds":3600}`}
+	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","interval_seconds":60}`}
 	var replayed [2]scheduleWakeupResult
 	for i := range replayed {
 		resp, err := tool.Run(callCtx, call)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, resp.Content)
 		require.NoError(t, json.Unmarshal([]byte(resp.Content), &replayed[i]))
-		mClock.Set(wakeupTestSlot.Add(45 * time.Minute))
 	}
 	require.Equal(t, replayed[0].ID, replayed[1].ID)
 	require.Len(t, wakeups(), 3)
 
-	for i := range maxChatWakeups - 3 {
+	// That holds after the first run time has passed too: at 12:45 the next
+	// 12:30 is tomorrow, past the expiry.
+	spec := wakeupSpec{source: wakeupSourceTool, kind: forkdb.ChatWakeupKindCron, prompt: "daily", cron: "30 12 * * *", expiresInSeconds: 3600}
+	id := uuid.New()
+	created, err := server.createChatWakeup(ctx, f.db, chat, id, chat.OwnerID, spec, wakeupTestSlot)
+	require.NoError(t, err)
+	again, err := server.createChatWakeup(ctx, f.db, chat, id, chat.OwnerID, spec, wakeupTestSlot.Add(45*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, created.ID, again.ID)
+	require.Len(t, wakeups(), 4)
+
+	for i := range maxChatWakeups - 4 {
 		schedule(scheduleWakeupArgs{Prompt: fmt.Sprintf("poll %d", i), IntervalSeconds: new(60)}, false)
 	}
 	schedule(scheduleWakeupArgs{Prompt: "one too many", IntervalSeconds: new(60)}, true)
