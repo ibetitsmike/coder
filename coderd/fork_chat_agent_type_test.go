@@ -40,10 +40,10 @@ func TestForkChatAgentType(t *testing.T) {
 				OrganizationID: user.OrganizationID, OwnerID: user.UserID,
 				LastModelConfigID: modelConfig.ID, Title: "root",
 			})
-			newChild := func(title, agentType string) database.Chat {
+			newChild := func(title, agentType string, mode database.NullChatMode) database.Chat {
 				child := dbgen.Chat(t, db, database.Chat{
 					OrganizationID: user.OrganizationID, OwnerID: user.UserID,
-					LastModelConfigID: modelConfig.ID, Title: title,
+					LastModelConfigID: modelConfig.ID, Title: title, Mode: mode,
 					ParentChatID: uuid.NullUUID{UUID: root.ID, Valid: true},
 					RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
 				})
@@ -52,14 +52,18 @@ func TestForkChatAgentType(t *testing.T) {
 				}
 				return child
 			}
-			reviewer := newChild("reviewer child", "reviewer")
-			explorer := newChild("explore child", "explore")
-			untyped := newChild("untyped child", "")
+			exploreMode := database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}
+			reviewer := newChild("reviewer child", "reviewer", database.NullChatMode{})
+			// Children without a chat_subagents row take their type from
+			// their mode.
+			unstoredGeneral := newChild("unstored general child", "", database.NullChatMode{})
+			unstoredExplore := newChild("unstored explore child", "", exploreMode)
 
-			want := map[uuid.UUID]string{reviewer.ID: "", explorer.ID: "", untyped.ID: ""}
+			want := map[uuid.UUID]string{reviewer.ID: "", unstoredGeneral.ID: "", unstoredExplore.ID: ""}
 			if tc.enabled {
 				want[reviewer.ID] = "reviewer"
-				want[explorer.ID] = "explore"
+				want[unstoredGeneral.ID] = "general"
+				want[unstoredExplore.ID] = "explore"
 			}
 			requireChildTypes := func(t *testing.T, chat codersdk.Chat) {
 				t.Helper()

@@ -53,6 +53,9 @@ type Querier interface {
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	// Returns the agent type of each child chat in @chat_ids. A child spawned
+	// without a chat_subagents row gets its type from its mode, as
+	// subagentTypeFromChat in coderd/x/chatd derives it.
 	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.

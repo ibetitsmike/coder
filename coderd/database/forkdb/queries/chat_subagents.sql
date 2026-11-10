@@ -13,4 +13,17 @@ JOIN chats ON chats.id = chat_subagents.chat_id
 WHERE chats.parent_chat_id = @parent_chat_id::uuid;
 
 -- name: GetChatSubagentTypesByChatIDs :many
-SELECT chat_id, agent_type FROM chat_subagents WHERE chat_id = ANY(@chat_ids::uuid[]);
+-- Returns the agent type of each child chat in @chat_ids. A child spawned
+-- without a chat_subagents row gets its type from its mode, as
+-- subagentTypeFromChat in coderd/x/chatd derives it.
+SELECT
+	chats.id AS chat_id,
+	COALESCE(chat_subagents.agent_type, CASE chats.mode
+		WHEN 'explore' THEN 'explore'
+		WHEN 'computer_use' THEN 'computer_use'
+		ELSE 'general'
+	END)::text AS agent_type
+FROM chats
+LEFT JOIN chat_subagents ON chat_subagents.chat_id = chats.id
+WHERE chats.id = ANY(@chat_ids::uuid[])
+	AND chats.parent_chat_id IS NOT NULL;
