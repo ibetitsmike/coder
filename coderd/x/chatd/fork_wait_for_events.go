@@ -68,7 +68,8 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			"turn. This chat then receives one user message per watched child "+
 			"agent when that child is done, so you can read its result with "+
 			"wait_agent and continue. Watches child_chat_ids, or by default "+
-			"every child agent that is still working. A message never "+
+			"every child agent that is still working, except children that an "+
+			"earlier call still watches. A message never "+
 			"interrupts a running turn. Stops after expires_in_seconds "+
 			"(default 24 hours). Returns the wake-up ID and the watched children.",
 		func(ctx context.Context, args waitForEventsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -155,11 +156,9 @@ func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, 
 // waitForEventsChildren returns the children of chat to watch: the direct
 // children named by ids, or every unarchived child that is not done.
 func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, ids []string) ([]database.Chat, error) {
-	rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
-		ParentIds: []uuid.UUID{chat.ID},
-	})
+	rows, waiting, err := p.childrenSnapshot(ctx, chat)
 	if err != nil {
-		return nil, xerrors.Errorf("list child agents: %w", err)
+		return nil, err
 	}
 	children := make([]database.Chat, 0, len(rows))
 	for _, row := range rows {
@@ -185,24 +184,28 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 			}
 		}
 	} else {
-		// One read covers every settled child, however many a long-lived
-		// coordinator has.
-		var waiting map[uuid.UUID]bool
 		for _, child := range children {
-			done, ok := childStatusDone(child)
-			if !ok {
-				if waiting == nil {
-					waiting, err = p.waitingChildren(ctx, chat)
-					if err != nil {
-						return nil, err
-					}
-				}
-				done = !waiting[child.ID]
-			}
-			if !done {
+			if !childDone(child, waiting) {
 				watched = append(watched, child)
 			}
 		}
+	}
+	// A child that an active wake-up still watches would otherwise wake
+	// the chat once per wake-up.
+	watching, err := p.watchedRunKeys(ctx, chat)
+	if err != nil {
+		return nil, err
+	}
+	var watchedBy []string
+	watched = slices.DeleteFunc(watched, func(child database.Chat) bool {
+		wakeupID, ok := watching[childDoneRunKey(child.ID)]
+		if ok && !slices.Contains(watchedBy, wakeupID.String()) {
+			watchedBy = append(watchedBy, wakeupID.String())
+		}
+		return ok
+	})
+	if len(watched) == 0 && len(watchedBy) > 0 {
+		return nil, xerrors.Errorf("these child agents are already watched by wake-up %s: end your turn to wait for them", strings.Join(watchedBy, ", "))
 	}
 	if len(watched) == 0 {
 		return nil, xerrors.New("no running child agents to wait for")
@@ -258,11 +261,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		)
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
 	}
-	rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
-		ParentIds: []uuid.UUID{chat.ID},
-	})
+	rows, waiting, err := p.childrenSnapshot(ctx, chat)
 	if err != nil {
-		return xerrors.Errorf("list child agents: %w", err)
+		return err
 	}
 	keys, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
 	if err != nil {
@@ -282,15 +283,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			continue
 		}
 		child := rows[index].Chat
-		if next == nil {
-			done, err := p.childDone(ctx, child)
-			if err != nil {
-				return err
-			}
-			if done {
-				next = &child
-				continue
-			}
+		if next == nil && childDone(child, waiting) {
+			next = &child
+			continue
 		}
 		pending++
 	}
@@ -306,8 +301,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		finish: func(admittedAt time.Time) wakeupFinish { return eventsWakeupFinish(wakeup, admittedAt, 1, pending) },
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	// A failed send keeps the child's own key free, so a later poll retries it.
-	failedRunKey := delivery.runKey + ":failed:" + now.UTC().Format(time.RFC3339Nano)
+	// A failed send keeps the child's own key free, so a later poll retries
+	// it. Its failures share one run, which only the first one records.
+	failedRunKey := delivery.runKey + ":failed"
 	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey, err)
 }
 
@@ -328,74 +324,98 @@ func childDoneRunKey(childID uuid.UUID) string {
 
 // childDone reports whether a child agent finished its work: it is archived,
 // or it settled in a status other than running, interrupting or paused (the
-// rule of checkSubagentCompletion), does not wait for events of its own
-// children and does not wait for an answer.
-func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, error) {
-	if done, ok := childStatusDone(child); ok {
-		return done, nil
-	}
-	fdb, err := forkdb.From(p.db)
-	if err != nil {
-		return false, err
-	}
-	wakeups, err := fdb.ListChatWakeupsByChatID(ctx, child.ID)
-	if err != nil {
-		return false, xerrors.Errorf("list wake-ups of child %s: %w", child.ID, err)
-	}
-	for _, wakeup := range wakeups {
-		if wakeup.Kind == forkdb.ChatWakeupKindEvents && wakeup.Status == forkdb.ChatWakeupStatusActive {
-			return false, nil
-		}
-	}
-	question, err := p.pendingDescendantQuestion(ctx, child.ID)
-	if err != nil {
-		return false, xerrors.Errorf("check questions of child %s: %w", child.ID, err)
-	}
-	return question == nil, nil
-}
-
-// childStatusDone applies the part of the childDone rule that needs no read:
-// ok is false for a child that settled, which is done only when it has no
-// active events wake-up and no unanswered question.
-func childStatusDone(child database.Chat) (done bool, ok bool) {
+// rule of checkSubagentCompletion) and is not in waiting, the children that
+// wait for events of their own children or for an answer.
+func childDone(child database.Chat, waiting map[uuid.UUID]bool) bool {
 	if child.Archived {
-		return true, true
+		return true
 	}
 	switch child.Status {
 	case database.ChatStatusRunning, database.ChatStatusInterrupting, database.ChatStatusPaused:
-		return false, true
+		return false
 	}
-	return false, false
+	return !waiting[child.ID]
 }
 
-// waitingChildren returns the children of chat that have an active events
-// wake-up or an unanswered question, so they are not done by the rule of
-// childDone.
-func (p *Server) waitingChildren(ctx context.Context, chat database.Chat) (map[uuid.UUID]bool, error) {
+// childrenSnapshot returns the children of chat and the ones of them that
+// wait for events of their own children or for an answer. It reads both from
+// one snapshot: with separate reads, a child that resumes or starts waiting
+// in between could pass for done.
+func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]database.GetChildChatsByParentIDsRow, map[uuid.UUID]bool, error) {
+	var (
+		rows    []database.GetChildChatsByParentIDsRow
+		waiting map[uuid.UUID]bool
+	)
+	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+		var err error
+		rows, err = tx.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
+			ParentIds: []uuid.UUID{chat.ID},
+		})
+		if err != nil {
+			return xerrors.Errorf("list child agents: %w", err)
+		}
+		ids, err := ftx.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
+		if err != nil {
+			return xerrors.Errorf("list wake-ups of child agents: %w", err)
+		}
+		root := chat.ID
+		if chat.RootChatID.Valid {
+			root = chat.RootChatID.UUID
+		}
+		questions, err := ftx.ListPendingChatDescendantQuestionsByRoot(ctx, root)
+		if err != nil {
+			return xerrors.Errorf("list questions of child agents: %w", err)
+		}
+		waiting = make(map[uuid.UUID]bool, len(ids)+len(questions))
+		for _, id := range ids {
+			waiting[id] = true
+		}
+		for _, question := range questions {
+			if question.ParentChatID.Valid && question.ParentChatID.UUID == chat.ID {
+				waiting[question.ChatID] = true
+			}
+		}
+		return nil
+	}, &database.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	return rows, waiting, nil
+}
+
+// watchedRunKeys maps the run key of each entry that an active events
+// wake-up of chat watches and has not delivered yet to the ID of that
+// wake-up.
+func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[string]uuid.UUID, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("fork queries: %w", err)
 	}
-	ids, err := fdb.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
+	wakeups, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
 	if err != nil {
-		return nil, xerrors.Errorf("list wake-ups of child agents: %w", err)
+		return nil, xerrors.Errorf("list chat wake-ups: %w", err)
 	}
-	root := chat.ID
-	if chat.RootChatID.Valid {
-		root = chat.RootChatID.UUID
-	}
-	questions, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, root)
-	if err != nil {
-		return nil, xerrors.Errorf("list questions of child agents: %w", err)
-	}
-	waiting := make(map[uuid.UUID]bool, len(ids)+len(questions))
-	for _, id := range ids {
-		waiting[id] = true
-	}
-	for _, question := range questions {
-		if question.ParentChatID.Valid && question.ParentChatID.UUID == chat.ID {
-			waiting[question.ChatID] = true
+	watching := make(map[string]uuid.UUID)
+	for _, wakeup := range wakeups {
+		if wakeup.Kind != forkdb.ChatWakeupKindEvents || wakeup.Status != forkdb.ChatWakeupStatusActive {
+			continue
+		}
+		var events []wakeupEvent
+		if err := json.Unmarshal(wakeup.Events, &events); err != nil {
+			continue
+		}
+		keys, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
+		if err != nil {
+			return nil, xerrors.Errorf("list wake-up runs: %w", err)
+		}
+		for _, event := range events {
+			if event.Type != wakeupEventChildDone {
+				continue
+			}
+			if key := childDoneRunKey(event.ChatID); !slices.Contains(keys, key) {
+				watching[key] = wakeup.ID
+			}
 		}
 	}
-	return waiting, nil
+	return watching, nil
 }
