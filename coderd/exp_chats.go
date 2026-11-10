@@ -1799,6 +1799,9 @@ func (api *API) createChatError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
+	}
 	if xerrors.Is(err, chatd.ErrInvalidModelConfigID) || database.IsForeignKeyViolation(
 		err,
 		database.ForeignKeyChatsLastModelConfigID,
@@ -3363,6 +3366,9 @@ func (api *API) sendChatMessageError(err error) error {
 	}
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
+	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
 	}
 	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
 		return secretQuestionPendingError(err)
