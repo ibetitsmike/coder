@@ -1,7 +1,9 @@
-import { act, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
+import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import type { ChatTodoList, Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
@@ -11,8 +13,13 @@ import {
 	MockBuildInfo,
 	MockDefaultOrganization,
 	MockEntitlements,
+	mockApiError,
 } from "#/testHelpers/entities";
 import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
+import {
+	MockChatWakeupCompleted,
+	MockChatWakeupInterval,
+} from "#/testHelpers/forkChatWakeups";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -161,5 +168,133 @@ describe("ForkComposerSlot todo list", () => {
 			),
 		);
 		expect(watch).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("ForkComposerSlot wake-ups", () => {
+	it("does not request wake-ups while fork-chat-wakeups is off", () => {
+		const getWakeups = vi
+			.spyOn(forkChatWakeupsApi, "getChatWakeups")
+			.mockResolvedValue([]);
+
+		renderSlot([]);
+
+		expect(getWakeups).not.toHaveBeenCalled();
+		expect(screen.queryByRole("button", { name: /Wake-ups/ })).toBeNull();
+	});
+
+	it("counts open wake-ups and omits finished ones", async () => {
+		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockResolvedValue([
+			MockChatWakeupInterval,
+			MockChatWakeupCompleted,
+		]);
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		expect(screen.getByText(MockChatWakeupInterval.prompt)).toBeTruthy();
+		expect(screen.queryByText(MockChatWakeupCompleted.prompt)).toBeNull();
+	});
+
+	it("pauses an active wake-up", async () => {
+		let wakeups = [MockChatWakeupInterval];
+		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
+			async () => wakeups,
+		);
+		const updateWakeup = vi
+			.spyOn(forkChatWakeupsApi, "updateChatWakeup")
+			.mockImplementation(async (_chatId, wakeupId, req) => {
+				wakeups = wakeups.map((wakeup) =>
+					wakeup.id === wakeupId
+						? { ...wakeup, status: req.status }
+						: wakeup,
+				);
+				const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
+				if (!updated) {
+					throw new Error(`Unknown wake-up: ${wakeupId}`);
+				}
+				return updated;
+			});
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Pause" }));
+
+		await waitFor(() =>
+			expect(updateWakeup).toHaveBeenCalledWith(
+				MockChat.id,
+				MockChatWakeupInterval.id,
+				{ status: "paused" },
+			),
+		);
+		await screen.findByRole("button", { name: "Resume" });
+	});
+
+	it("cancels a wake-up", async () => {
+		let wakeups = [MockChatWakeupInterval];
+		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
+			async () => wakeups,
+		);
+		const updateWakeup = vi
+			.spyOn(forkChatWakeupsApi, "updateChatWakeup")
+			.mockImplementation(async (_chatId, wakeupId, req) => {
+				wakeups = wakeups.map((wakeup) =>
+					wakeup.id === wakeupId
+						? { ...wakeup, status: req.status }
+						: wakeup,
+				);
+				const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
+				if (!updated) {
+					throw new Error(`Unknown wake-up: ${wakeupId}`);
+				}
+				return updated;
+			});
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await waitFor(() =>
+			expect(updateWakeup).toHaveBeenCalledWith(
+				MockChat.id,
+				MockChatWakeupInterval.id,
+				{ status: "canceled" },
+			),
+		);
+		await waitFor(() =>
+			expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull(),
+		);
+	});
+
+	it("shows the update error under the row", async () => {
+		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockResolvedValue([
+			MockChatWakeupInterval,
+		]);
+		vi.spyOn(forkChatWakeupsApi, "updateChatWakeup").mockRejectedValue(
+			mockApiError({ message: "This wake-up has already finished." }),
+		);
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Pause" }));
+
+		expect(
+			await screen.findByText("This wake-up has already finished."),
+		).toBeTruthy();
 	});
 });
