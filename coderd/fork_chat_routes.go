@@ -63,6 +63,8 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		orgAgentDefinitions.Get(orgAgentDefinitionsPath+"/{agentDefinition}", api.forkOrganizationAgentDefinition)
 		orgAgentDefinitions.Patch(orgAgentDefinitionsPath+"/{agentDefinition}", api.patchForkOrganizationAgentDefinition)
 		orgAgentDefinitions.Delete(orgAgentDefinitionsPath+"/{agentDefinition}", api.deleteForkOrganizationAgentDefinition)
+		orgAgentDefinitions.Get(orgAgentDefinitionsPath+"/{agentDefinition}/acl", api.forkOrganizationAgentDefinitionACL)
+		orgAgentDefinitions.Patch(orgAgentDefinitionsPath+"/{agentDefinition}/acl", api.patchForkOrganizationAgentDefinitionACL)
 
 		userAgentDefinitions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
