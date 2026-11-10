@@ -155,8 +155,9 @@ func TestForkQuerier(t *testing.T) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.InsertChatSecretAnswerParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().InsertChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+			createdAt := dbtime.Now()
+			fdb.EXPECT().InsertChatSecretAnswer(gomock.Any(), arg).Return(createdAt, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(createdAt)
 		},
 		"GetChatSecretAnswersByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})

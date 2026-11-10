@@ -36,6 +36,8 @@ type Querier interface {
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
+	// A non-null created_at deletes the answer only if it is still the one
+	// created at that time, not a later answer that replaced it.
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error
@@ -93,7 +95,7 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
-	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
+	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) (time.Time, error)
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	// The organization comes from the chat.
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)

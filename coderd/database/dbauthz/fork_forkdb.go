@@ -337,9 +337,9 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 }
 
 // InsertChatSecretAnswer authorizes as an update of the owning chat.
-func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	return f.db.InsertChatSecretAnswer(ctx, arg)
 }
