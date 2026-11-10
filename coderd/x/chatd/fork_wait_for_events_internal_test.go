@@ -129,6 +129,25 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.Equal(t, database.ChatStatusWaiting, replayed.Children[0].Status)
 	require.Len(t, wakeups(coordinator), 2)
 
+	// A settled child is still watched while it waits for events of its own
+	// children or for an answer.
+	family := f.createWakeupChat(t)
+	nested := f.createChildAgent(t, family, "nested", database.ChatStatusWaiting)
+	f.insertWakeup(t, nested, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(f.createChildAgent(t, nested, "grandchild", database.ChatStatusRunning)),
+	})
+	asking := f.createChildAgent(t, family, "asking", database.ChatStatusWaiting)
+	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     asking.ID,
+		ToolCallID: "call-1",
+		Questions:  json.RawMessage(`[{"question":"Which one?"}]`),
+	})
+	require.NoError(t, err)
+	f.createChildAgent(t, family, "finished", database.ChatStatusWaiting)
+	busy, _ := wait(family, waitForEventsArgs{}, false)
+	require.Equal(t, []uuid.UUID{nested.ID, asking.ID}, childIDs(busy))
+
 	// A watch set over the limit is refused, not cut short.
 	crowded := f.createWakeupChat(t)
 	for i := range maxWaitForEventsChildren + 1 {

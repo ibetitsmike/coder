@@ -379,6 +379,13 @@ func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.U
 	return f.db.ListChatWakeupsByChatID(ctx, chatID)
 }
 
+func (f *forkQuerier) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, parentChatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
+}
+
 func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
 }
