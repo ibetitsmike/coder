@@ -12,7 +12,6 @@ package forkdbmock
 import (
 	context "context"
 	reflect "reflect"
-	time "time"
 
 	forkdb "github.com/coder/coder/v2/coderd/database/forkdb"
 	uuid "github.com/google/uuid"
@@ -220,18 +219,18 @@ func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.C
 }
 
 // DeleteOldChatSecretAnswers mocks base method.
-func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error) {
+func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteOldChatSecretAnswers", ctx, beforeTime)
+	ret := m.ctrl.Call(m, "DeleteOldChatSecretAnswers", ctx, limitCount)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DeleteOldChatSecretAnswers indicates an expected call of DeleteOldChatSecretAnswers.
-func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, beforeTime any) *gomock.Call {
+func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, limitCount any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatSecretAnswers", reflect.TypeOf((*MockStore)(nil).DeleteOldChatSecretAnswers), ctx, beforeTime)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatSecretAnswers", reflect.TypeOf((*MockStore)(nil).DeleteOldChatSecretAnswers), ctx, limitCount)
 }
 
 // DeleteOrganizationAgentDefinitionByName mocks base method.
