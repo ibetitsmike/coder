@@ -186,6 +186,25 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.False(t, got.NextRunAt.Valid)
 	})
 
+	t.Run("ArchivedErroredChatWithQueue", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		forceExecutionState(t, f, chat.ID, database.ChatStatusError, true)
+		_, err := f.sqlDB.ExecContext(ctx, "INSERT INTO chat_queued_messages (chat_id, content, created_by) VALUES ($1, '[]'::jsonb, $2)", chat.ID, chat.OwnerID)
+		require.NoError(t, err)
+
+		f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusCanceled, got.Status)
+		require.Equal(t, "archived", got.StatusReason.String)
+	})
+
 	t.Run("Expired", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
