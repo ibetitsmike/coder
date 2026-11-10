@@ -232,8 +232,8 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		}, {
 			name:      "CommitStatusFailed",
 			checkRuns: `[]`,
-			status:    `{"state":"failure","total_count":2}`,
-			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 2, Failed: 1},
+			status:    `{"state":"failure","total_count":3,"statuses":[{"state":"failure"},{"state":"error"},{"state":"success"}]}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 3, Failed: 2},
 		}, {
 			name:      "CommitStatusPending",
 			checkRuns: `[{"id":8,"name":"c8","status":"completed","conclusion":"success"}]`,

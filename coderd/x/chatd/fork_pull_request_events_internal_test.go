@@ -2,6 +2,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -158,6 +159,16 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	}
 	server.forkPullRequestActivity = fake.fetch
 
+	// Reviews and comments that the baseline read already lists are stored
+	// as seen.
+	withReview := openPullRequest(gitprovider.CheckStatePending)
+	withReview.Reviews = []gitprovider.PullRequestEvent{{ID: 1, Author: "alice", State: "approved", URL: testPullRequestURL + "#pullrequestreview-1", CreatedAt: wakeupTestSlot}}
+	fake.set(withReview, nil)
+	seen, _ := waitCall(uuid.New(), waitForEventsArgs{PullRequestURL: testPullRequestURL}, false)
+	var seenEvents []wakeupEvent
+	require.NoError(t, json.Unmarshal(f.wakeup(t, seen.ID).Events, &seenEvents))
+	require.Equal(t, []string{testPullRequestURL + "#pullrequestreview-1"}, seenEvents[0].Seen)
+
 	// A replay returns the stored baseline without reading the pull request.
 	fake.set(merged, nil)
 	calls := fake.callCount()
@@ -169,13 +180,13 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, coordinator.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 2, "refused calls create nothing")
+	require.Len(t, rows, 3, "refused calls create nothing")
 }
 
 // pullRequestEvents returns the events of a wake-up that watches the test
 // pull request for on since an hour before wakeupTestSlot, from a baseline of
-// head and checks.
-func pullRequestEvents(on []string, head string, checks gitprovider.CheckState) json.RawMessage {
+// head and checks that already listed the events at the seen URLs.
+func pullRequestEvents(on []string, head string, checks gitprovider.CheckState, seen ...string) json.RawMessage {
 	raw, err := json.Marshal(wakeupEvent{
 		Type:        wakeupEventPullRequest,
 		URL:         testPullRequestURL,
@@ -183,6 +194,7 @@ func pullRequestEvents(on []string, head string, checks gitprovider.CheckState) 
 		Since:       wakeupTestSlot.Add(-time.Hour),
 		HeadSHA:     head,
 		ChecksState: string(checks),
+		Seen:        seen,
 	})
 	if err != nil {
 		panic(err)
@@ -210,6 +222,7 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 		on           []string
 		baselineHead string
 		baseline     gitprovider.CheckState
+		seen         []string
 		activity     gitprovider.PullRequestActivity
 		// wantLines is the summary, or nil when no message is due.
 		wantLines []string
@@ -228,6 +241,26 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 				header,
 				"- comment by bob (" + comment.URL + ")",
 				"- review by alice: approved (" + review.URL + ")",
+				"- checks: pending, 0 of 3 failed, on 0123456789ab",
+			},
+		},
+		{
+			name: "BaselineEventsIgnored", on: all, baselineHead: testHeadSHA, baseline: gitprovider.CheckStatePending,
+			seen: []string{review.URL},
+			activity: withActivity(openPullRequest(gitprovider.CheckStatePending), func(a *gitprovider.PullRequestActivity) {
+				a.Reviews = []gitprovider.PullRequestEvent{review}
+			}),
+		},
+		{
+			name: "NewCommentAfterBaselineEvents", on: all, baselineHead: testHeadSHA, baseline: gitprovider.CheckStatePending,
+			seen: []string{review.URL},
+			activity: withActivity(openPullRequest(gitprovider.CheckStatePending), func(a *gitprovider.PullRequestActivity) {
+				a.Reviews = []gitprovider.PullRequestEvent{review}
+				a.Comments = []gitprovider.PullRequestEvent{comment}
+			}),
+			wantLines: []string{
+				header,
+				"- comment by bob (" + comment.URL + ")",
 				"- checks: pending, 0 of 3 failed, on 0123456789ab",
 			},
 		},
@@ -288,7 +321,7 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 			chat := f.createWakeupChat(t)
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:   forkdb.ChatWakeupKindEvents,
-				Events: pullRequestEvents(tc.on, tc.baselineHead, tc.baseline),
+				Events: pullRequestEvents(tc.on, tc.baselineHead, tc.baseline, tc.seen...),
 			})
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			fake := &fakePullRequestActivity{activity: tc.activity}
@@ -315,16 +348,19 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 }
 
 // A failed read never pauses or completes the wake-up: it polls again later,
-// after the rate limit resets for a rate limit.
+// after the rate limit resets for a rate limit, but no later than
+// pullRequestErrorRetry while a watched child is still running.
 func TestWakeupPullRequestReadFailures(t *testing.T) {
 	t.Parallel()
 	now := wakeupTestSlot.Add(time.Second)
 	for _, tc := range []struct {
-		name     string
-		err      error
-		wantNext time.Time
+		name      string
+		err       error
+		withChild bool
+		wantNext  time.Time
 	}{
 		{name: "RateLimit", err: &gitprovider.RateLimitError{RetryAfter: now.Add(10 * time.Minute)}, wantNext: now.Add(10 * time.Minute)},
+		{name: "RateLimitWithRunningChild", err: &gitprovider.RateLimitError{RetryAfter: now.Add(10 * time.Minute)}, withChild: true, wantNext: now.Add(pullRequestErrorRetry)},
 		{name: "RateLimitResetsSooner", err: &gitprovider.RateLimitError{RetryAfter: now.Add(10 * time.Second)}, wantNext: now.Add(pullRequestPollInterval)},
 		{name: "OtherError", err: xerrors.New("github is down"), wantNext: now.Add(pullRequestErrorRetry)},
 	} {
@@ -333,9 +369,14 @@ func TestWakeupPullRequestReadFailures(t *testing.T) {
 			f := newWorkerTestFixture(t)
 			ctx := testutil.Context(t, testutil.WaitLong)
 			chat := f.createWakeupChat(t)
+			events := pullRequestEvents(pullRequestEventKinds, testHeadSHA, gitprovider.CheckStatePending)
+			if tc.withChild {
+				child := f.createChildAgent(t, chat, "child", database.ChatStatusRunning)
+				events = json.RawMessage(strings.TrimSuffix(string(childDoneEvents(child)), "]") + "," + strings.TrimPrefix(string(events), "["))
+			}
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:   forkdb.ChatWakeupKindEvents,
-				Events: pullRequestEvents(pullRequestEventKinds, testHeadSHA, gitprovider.CheckStatePending),
+				Events: events,
 			})
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			fake := &fakePullRequestActivity{err: tc.err}
@@ -414,4 +455,80 @@ func TestWakeupPullRequestCap(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
 	require.Equal(t, wakeupReasonDailyRunCap, got.StatusReason.String)
 	requireWakeupPausedNotification(t, enqueuer.Sent(), chat, wakeupReasonDailyRunCap)
+}
+
+// The worker bounds each read, so a provider that never answers cannot block
+// the worker loop.
+func TestWakeupPullRequestReadDeadline(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: pullRequestEvents(pullRequestEventKinds, testHeadSHA, gitprovider.CheckStatePending),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	var deadline time.Time
+	var hasDeadline bool
+	worker.server.forkPullRequestActivity = func(ctx context.Context, _ uuid.UUID, _ string, _ time.Time) (*gitprovider.PullRequestActivity, error) {
+		deadline, hasDeadline = ctx.Deadline()
+		return nil, xerrors.New("github is down")
+	}
+
+	start := time.Now()
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.True(t, hasDeadline, "the read has a deadline")
+	require.False(t, deadline.After(start.Add(pullRequestReadTimeout).Add(testutil.WaitShort)), "deadline %s", deadline)
+	require.Less(t, pullRequestReadTimeout, wakeupLease)
+}
+
+// A watch whose next poll would land after its expiry polls once more at the
+// expiry, then completes.
+func TestWakeupPullRequestPollsUntilExpiry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		finalState  gitprovider.PRState
+		wantMessage bool
+		wantReason  string
+	}{
+		{name: "ActivityAtLastPoll", finalState: gitprovider.PRStateMerged, wantMessage: true, wantReason: "done"},
+		{name: "NothingAtLastPoll", finalState: gitprovider.PRStateOpen, wantReason: "expired"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			chat := f.createWakeupChat(t)
+			expiresAt := wakeupTestSlot.Add(30 * time.Second)
+			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				Events:    pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+				ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+			fake := &fakePullRequestActivity{activity: openPullRequest(gitprovider.CheckStatePending)}
+			worker.server.forkPullRequestActivity = fake.fetch
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+			got := f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+			require.True(t, expiresAt.Equal(got.NextRunAt.Time), "next run %s", got.NextRunAt.Time)
+
+			final := openPullRequest(gitprovider.CheckStatePending)
+			final.State = tc.finalState
+			fake.set(final, nil)
+			worker.wakeupOnce(ctx, expiresAt.Add(time.Second))
+			require.Equal(t, 2, fake.callCount())
+			if tc.wantMessage {
+				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+			} else {
+				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+			}
+			got = f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+			require.Equal(t, tc.wantReason, got.StatusReason.String)
+		})
+	}
 }

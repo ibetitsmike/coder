@@ -69,8 +69,7 @@ type CheckSummary struct {
 	State CheckState
 	// Total counts check runs and commit statuses.
 	Total int
-	// Failed counts failed check runs, plus one when the combined commit
-	// status failed.
+	// Failed counts failed check runs and failed commit statuses.
 	Failed int
 }
 
@@ -224,8 +223,11 @@ func FetchPullRequestActivity(
 	var combined struct {
 		State      string `json:"state"`
 		TotalCount int    `json:"total_count"`
+		Statuses   []struct {
+			State string `json:"state"`
+		} `json:"statuses"`
 	}
-	if err := g.decodeJSON(ctx, commitEndpoint+"/status", token, &combined); err != nil {
+	if err := g.decodeJSON(ctx, commitEndpoint+"/status?per_page=100", token, &combined); err != nil {
 		return nil, xerrors.Errorf("fetch commit status: %w", err)
 	}
 
@@ -247,7 +249,15 @@ func FetchPullRequestActivity(
 	if combined.TotalCount > 0 {
 		switch strings.ToLower(combined.State) {
 		case "failure", "error":
-			checks.Failed++
+			failed := 0
+			for _, status := range combined.Statuses {
+				switch strings.ToLower(status.State) {
+				case "failure", "error":
+					failed++
+				}
+			}
+			// The failed statuses may be past the first page.
+			checks.Failed += max(failed, 1)
 		case "pending":
 			pending = true
 		}
