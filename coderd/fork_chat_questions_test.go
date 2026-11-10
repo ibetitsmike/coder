@@ -306,3 +306,56 @@ func TestForkChatSecretQuestionExperimentOff(t *testing.T) {
 	}}})
 	require.NoError(t, err)
 }
+
+// A message that the user queued before the child asked a secret question
+// does not answer the question when the end of the turn promotes it.
+func TestForkChatSecretQuestionQueuedMessage(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db, api := newChatClientWithAPIAndDatabase(t, withChatWorkerDisabled, func(opts *coderdtest.Options) {
+		opts.DeploymentValues.Experiments = append(
+			opts.DeploymentValues.Experiments,
+			string(codersdk.ExperimentForkNestedSubagents),
+		)
+	})
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	root, child, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	sysCtx := dbauthz.AsSystemRestricted(ctx)
+	_, err := db.UpdateChatStatus(sysCtx, database.UpdateChatStatusParams{
+		ID:          child.ID,
+		Status:      database.ChatStatusRunning,
+		WorkerID:    uuid.NullUUID{UUID: uuid.New(), Valid: true},
+		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
+		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	require.NoError(t, err)
+	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText,
+		Text: "Also check the staging database.",
+	}}})
+	require.NoError(t, err)
+	queued, err := db.GetChatQueuedMessages(sysCtx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1)
+
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatDescendantQuestion(sysCtx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     child.ID,
+		ToolCallID: "call-secret",
+		Questions:  json.RawMessage(`[{"header": "Token", "question": "Paste the API token.", "secret": true}]`),
+	})
+	require.NoError(t, err)
+	// FinishTurn promotes the queue head into the chat's messages.
+	driveChatToWaiting(ctx, t, api, child.ID)
+	queued, err = db.GetChatQueuedMessages(sysCtx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, queued, "the end of the turn delivers the queued message")
+
+	listed, err := client.ChatDescendantQuestions(ctx, root.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the secret question stays pending")
+	require.Equal(t, "call-secret", listed[0].ToolCallID)
+}
