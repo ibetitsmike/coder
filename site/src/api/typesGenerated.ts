@@ -2475,6 +2475,12 @@ export interface ChatContextResource {
 	readonly skill_name?: string;
 	readonly skill_description?: string;
 	/**
+	 * SubagentName and SubagentDescription are populated only for OK
+	 * subagent kinds.
+	 */
+	readonly subagent_name?: string;
+	readonly subagent_description?: string;
+	/**
 	 * Tools lists the tools exposed by an MCP server. Populated only for the
 	 * mcp_server kind; nil otherwise.
 	 */
@@ -2499,7 +2505,8 @@ export type ChatContextResourceKind =
 	| "instruction_file"
 	| "mcp_config"
 	| "mcp_server"
-	| "skill";
+	| "skill"
+	| "subagent";
 
 export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"acp_harness",
@@ -2507,6 +2514,7 @@ export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"mcp_config",
 	"mcp_server",
 	"skill",
+	"subagent",
 ];
 
 // From codersdk/chats.go
@@ -5848,6 +5856,7 @@ export type Experiment =
 	| "example"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
+	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
 	| "fork-subagent-isolation"
 	| "mcp-server-http"
@@ -5932,6 +5941,7 @@ export const Experiments: Experiment[] = [
 	"example",
 	"fork-agent-definitions",
 	"fork-chat-todos",
+	"fork-chat-wakeups",
 	"fork-nested-subagents",
 	"fork-subagent-isolation",
 	"mcp-server-http",
@@ -6326,6 +6336,54 @@ export interface ForkOrganizationSubagentLimits {
 	 * one is waiting or error and does not count.
 	 */
 	readonly max_live_per_family?: number;
+}
+
+// From codersdk/fork_subagent_limits.go
+/**
+ * ForkOrganizationSubagentLimitsResponse holds the subagent limits of an
+ * organization with the deployment limits and the limits in force, where the
+ * lower of the deployment and organization values wins.
+ */
+export interface ForkOrganizationSubagentLimitsResponse {
+	/**
+	 * Organization holds the stored organization limits. A nil limit is
+	 * unset.
+	 */
+	readonly organization: ForkOrganizationSubagentLimits;
+	/**
+	 * Deployment holds the deployment limits.
+	 */
+	readonly deployment: ForkSubagentLimitValues;
+	/**
+	 * Effective holds the limits in force in the organization.
+	 */
+	readonly effective: ForkSubagentLimitValues;
+}
+
+// From codersdk/fork_subagent_limits.go
+/**
+ * ForkSubagentLimitValues are subagent limits in force. A capacity limit of
+ * 0 means no limit, and the depth is always set.
+ */
+export interface ForkSubagentLimitValues {
+	/**
+	 * MaxDepth is the maximum depth of nested subagent chats.
+	 */
+	readonly max_depth: number;
+	/**
+	 * MaxConcurrent is the maximum number of running subagent chats.
+	 */
+	readonly max_concurrent: number;
+	/**
+	 * MaxConcurrentPerFamily is the maximum number of running subagent chats
+	 * under one root chat.
+	 */
+	readonly max_concurrent_per_family: number;
+	/**
+	 * MaxLivePerFamily is the maximum number of live subagent chats under one
+	 * root chat.
+	 */
+	readonly max_live_per_family: number;
 }
 
 // From codersdk/files.go

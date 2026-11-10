@@ -32,6 +32,45 @@ func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID)
 	return i, err
 }
 
+const getChatSubagentsByParentChatID = `-- name: GetChatSubagentsByParentChatID :many
+SELECT chat_subagents.chat_id, chat_subagents.agent_type, chat_subagents.depth, chat_subagents.isolation, chat_subagents.worktree_path, chat_subagents.branch, chat_subagents.workspace_id, chat_subagents.tool_policy
+FROM chat_subagents
+JOIN chats ON chats.id = chat_subagents.chat_id
+WHERE chats.parent_chat_id = $1::uuid
+`
+
+func (q *Queries) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error) {
+	rows, err := q.db.QueryContext(ctx, getChatSubagentsByParentChatID, parentChatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ChatSubagent
+	for rows.Next() {
+		var i ChatSubagent
+		if err := rows.Scan(
+			&i.ChatID,
+			&i.AgentType,
+			&i.Depth,
+			&i.Isolation,
+			&i.WorktreePath,
+			&i.Branch,
+			&i.WorkspaceID,
+			&i.ToolPolicy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertChatSubagent = `-- name: InsertChatSubagent :one
 INSERT INTO chat_subagents (chat_id, agent_type, depth, isolation, worktree_path, branch, workspace_id, tool_policy)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

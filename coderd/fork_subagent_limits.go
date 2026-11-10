@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -14,6 +15,7 @@ import (
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
+	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -23,7 +25,7 @@ import (
 // @Tags Chats
 // @Produce json
 // @Param organization path string true "Organization ID" format(uuid)
-// @Success 200 {object} codersdk.ForkOrganizationSubagentLimits
+// @Success 200 {object} codersdk.ForkOrganizationSubagentLimitsResponse
 // @Router /api/v2/chats/fork/organizations/{organization}/subagent-limits [get]
 func (api *API) forkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -45,7 +47,7 @@ func (api *API) forkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.R
 		})
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusOK, convertForkOrganizationSubagentLimits(row))
+	httpapi.Write(ctx, rw, http.StatusOK, api.forkOrganizationSubagentLimitsResponse(row))
 }
 
 // @Summary Update organization subagent limits
@@ -56,7 +58,7 @@ func (api *API) forkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.R
 // @Produce json
 // @Param organization path string true "Organization ID" format(uuid)
 // @Param request body codersdk.ForkOrganizationSubagentLimits true "Request body"
-// @Success 200 {object} codersdk.ForkOrganizationSubagentLimits
+// @Success 200 {object} codersdk.ForkOrganizationSubagentLimitsResponse
 // @Router /api/v2/chats/fork/organizations/{organization}/subagent-limits [put]
 func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -102,7 +104,7 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 		})
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusOK, convertForkOrganizationSubagentLimits(row))
+	httpapi.Write(ctx, rw, http.StatusOK, api.forkOrganizationSubagentLimitsResponse(row))
 }
 
 func validateForkOrganizationSubagentLimits(req codersdk.ForkOrganizationSubagentLimits) []codersdk.ValidationError {
@@ -126,6 +128,30 @@ func validateForkOrganizationSubagentLimits(req codersdk.ForkOrganizationSubagen
 		}
 	}
 	return validations
+}
+
+func (api *API) forkOrganizationSubagentLimitsResponse(row forkdb.ChatOrganizationSubagentLimit) codersdk.ForkOrganizationSubagentLimitsResponse {
+	deployment := api.chatLimits.Fork.WithDefaults()
+	return codersdk.ForkOrganizationSubagentLimitsResponse{
+		Organization: convertForkOrganizationSubagentLimits(row),
+		Deployment:   convertForkSubagentLimitValues(deployment),
+		Effective:    convertForkSubagentLimitValues(chatd.EffectiveSubagentLimits(deployment, row)),
+	}
+}
+
+func convertForkSubagentLimitValues(limits chatd.ForkLimits) codersdk.ForkSubagentLimitValues {
+	return codersdk.ForkSubagentLimitValues{
+		MaxDepth:               forkClampInt32(limits.MaxSubagentDepth),
+		MaxConcurrent:          forkClampInt32(limits.MaxConcurrentSubagents),
+		MaxConcurrentPerFamily: forkClampInt32(limits.MaxConcurrentSubagentsPerFamily),
+		MaxLivePerFamily:       forkClampInt32(limits.MaxLiveSubagentsPerFamily),
+	}
+}
+
+// forkClampInt32 caps a deployment limit, which is validated to be 0 or
+// greater but has no upper bound, at the largest int32.
+func forkClampInt32(v int) int32 {
+	return int32(min(v, math.MaxInt32)) //nolint:gosec // Capped above and validated non-negative.
 }
 
 func convertForkOrganizationSubagentLimits(row forkdb.ChatOrganizationSubagentLimit) codersdk.ForkOrganizationSubagentLimits {

@@ -6,13 +6,207 @@ package forkdb
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 )
+
+type ChatWakeupKind string
+
+const (
+	ChatWakeupKindDelay    ChatWakeupKind = "delay"
+	ChatWakeupKindInterval ChatWakeupKind = "interval"
+	ChatWakeupKindCron     ChatWakeupKind = "cron"
+	ChatWakeupKindEvents   ChatWakeupKind = "events"
+)
+
+func (e *ChatWakeupKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChatWakeupKind(s)
+	case string:
+		*e = ChatWakeupKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChatWakeupKind: %T", src)
+	}
+	return nil
+}
+
+type NullChatWakeupKind struct {
+	ChatWakeupKind ChatWakeupKind `json:"chat_wakeup_kind"`
+	Valid          bool           `json:"valid"` // Valid is true if ChatWakeupKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChatWakeupKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChatWakeupKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChatWakeupKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChatWakeupKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChatWakeupKind), nil
+}
+
+func (e ChatWakeupKind) Valid() bool {
+	switch e {
+	case ChatWakeupKindDelay,
+		ChatWakeupKindInterval,
+		ChatWakeupKindCron,
+		ChatWakeupKindEvents:
+		return true
+	}
+	return false
+}
+
+func AllChatWakeupKindValues() []ChatWakeupKind {
+	return []ChatWakeupKind{
+		ChatWakeupKindDelay,
+		ChatWakeupKindInterval,
+		ChatWakeupKindCron,
+		ChatWakeupKindEvents,
+	}
+}
+
+type ChatWakeupRunStatus string
+
+const (
+	ChatWakeupRunStatusPending   ChatWakeupRunStatus = "pending"
+	ChatWakeupRunStatusDelivered ChatWakeupRunStatus = "delivered"
+	ChatWakeupRunStatusSkipped   ChatWakeupRunStatus = "skipped"
+	ChatWakeupRunStatusFailed    ChatWakeupRunStatus = "failed"
+)
+
+func (e *ChatWakeupRunStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChatWakeupRunStatus(s)
+	case string:
+		*e = ChatWakeupRunStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChatWakeupRunStatus: %T", src)
+	}
+	return nil
+}
+
+type NullChatWakeupRunStatus struct {
+	ChatWakeupRunStatus ChatWakeupRunStatus `json:"chat_wakeup_run_status"`
+	Valid               bool                `json:"valid"` // Valid is true if ChatWakeupRunStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChatWakeupRunStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChatWakeupRunStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChatWakeupRunStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChatWakeupRunStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChatWakeupRunStatus), nil
+}
+
+func (e ChatWakeupRunStatus) Valid() bool {
+	switch e {
+	case ChatWakeupRunStatusPending,
+		ChatWakeupRunStatusDelivered,
+		ChatWakeupRunStatusSkipped,
+		ChatWakeupRunStatusFailed:
+		return true
+	}
+	return false
+}
+
+func AllChatWakeupRunStatusValues() []ChatWakeupRunStatus {
+	return []ChatWakeupRunStatus{
+		ChatWakeupRunStatusPending,
+		ChatWakeupRunStatusDelivered,
+		ChatWakeupRunStatusSkipped,
+		ChatWakeupRunStatusFailed,
+	}
+}
+
+type ChatWakeupStatus string
+
+const (
+	ChatWakeupStatusActive    ChatWakeupStatus = "active"
+	ChatWakeupStatusPaused    ChatWakeupStatus = "paused"
+	ChatWakeupStatusCompleted ChatWakeupStatus = "completed"
+	ChatWakeupStatusCanceled  ChatWakeupStatus = "canceled"
+)
+
+func (e *ChatWakeupStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChatWakeupStatus(s)
+	case string:
+		*e = ChatWakeupStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChatWakeupStatus: %T", src)
+	}
+	return nil
+}
+
+type NullChatWakeupStatus struct {
+	ChatWakeupStatus ChatWakeupStatus `json:"chat_wakeup_status"`
+	Valid            bool             `json:"valid"` // Valid is true if ChatWakeupStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChatWakeupStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChatWakeupStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChatWakeupStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChatWakeupStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChatWakeupStatus), nil
+}
+
+func (e ChatWakeupStatus) Valid() bool {
+	switch e {
+	case ChatWakeupStatusActive,
+		ChatWakeupStatusPaused,
+		ChatWakeupStatusCompleted,
+		ChatWakeupStatusCanceled:
+		return true
+	}
+	return false
+}
+
+func AllChatWakeupStatusValues() []ChatWakeupStatus {
+	return []ChatWakeupStatus{
+		ChatWakeupStatusActive,
+		ChatWakeupStatusPaused,
+		ChatWakeupStatusCompleted,
+		ChatWakeupStatusCanceled,
+	}
+}
 
 // Stored custom agent definitions. A row is in the organization tier when user_id and project_id are NULL, in the user tier when user_id is set, and in the project tier when project_id is set.
 type AgentDefinition struct {
@@ -61,6 +255,42 @@ type ChatTodo struct {
 	Items     json.RawMessage `db:"items" json:"items"`
 	Version   int64           `db:"version" json:"version"`
 	UpdatedAt time.Time       `db:"updated_at" json:"updated_at"`
+}
+
+type ChatWakeup struct {
+	ID              uuid.UUID        `db:"id" json:"id"`
+	ChatID          uuid.UUID        `db:"chat_id" json:"chat_id"`
+	OrganizationID  uuid.UUID        `db:"organization_id" json:"organization_id"`
+	CreatedBy       uuid.UUID        `db:"created_by" json:"created_by"`
+	Source          string           `db:"source" json:"source"`
+	Kind            ChatWakeupKind   `db:"kind" json:"kind"`
+	Prompt          string           `db:"prompt" json:"prompt"`
+	IntervalSeconds sql.NullInt32    `db:"interval_seconds" json:"interval_seconds"`
+	Cron            sql.NullString   `db:"cron" json:"cron"`
+	Timezone        string           `db:"timezone" json:"timezone"`
+	Events          json.RawMessage  `db:"events" json:"events"`
+	Status          ChatWakeupStatus `db:"status" json:"status"`
+	StatusReason    sql.NullString   `db:"status_reason" json:"status_reason"`
+	NextRunAt       sql.NullTime     `db:"next_run_at" json:"next_run_at"`
+	LeaseExpiresAt  sql.NullTime     `db:"lease_expires_at" json:"lease_expires_at"`
+	ExpiresAt       sql.NullTime     `db:"expires_at" json:"expires_at"`
+	MaxRuns         sql.NullInt32    `db:"max_runs" json:"max_runs"`
+	RunCount        int32            `db:"run_count" json:"run_count"`
+	LastRunAt       sql.NullTime     `db:"last_run_at" json:"last_run_at"`
+	CreatedAt       time.Time        `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time        `db:"updated_at" json:"updated_at"`
+}
+
+type ChatWakeupRun struct {
+	ID             uuid.UUID           `db:"id" json:"id"`
+	WakeupID       uuid.NullUUID       `db:"wakeup_id" json:"wakeup_id"`
+	ChatID         uuid.UUID           `db:"chat_id" json:"chat_id"`
+	OrganizationID uuid.UUID           `db:"organization_id" json:"organization_id"`
+	RunKey         string              `db:"run_key" json:"run_key"`
+	Status         ChatWakeupRunStatus `db:"status" json:"status"`
+	Error          sql.NullString      `db:"error" json:"error"`
+	CreatedAt      time.Time           `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time           `db:"updated_at" json:"updated_at"`
 }
 
 type Plugin struct {

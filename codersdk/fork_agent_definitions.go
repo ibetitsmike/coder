@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// ChatContextResourceKindSubagent is a custom agent definition file found in
+// the workspace.
+const ChatContextResourceKindSubagent ChatContextResourceKind = "subagent"
+
 // ForkAgentDefinitionMetadata describes a stored custom agent definition
 // without its content.
 type ForkAgentDefinitionMetadata struct {
@@ -82,4 +86,88 @@ func (c *Client) UpdateForkUserAgentDefinition(ctx context.Context, organization
 // DeleteForkUserAgentDefinition deletes a user's agent definition.
 func (c *Client) DeleteForkUserAgentDefinition(ctx context.Context, organizationID uuid.UUID, user, name string) error {
 	return requestNoContent(ctx, c, http.MethodDelete, forkUserAgentDefinitionPath(organizationID, user, name), nil)
+}
+
+func forkOrganizationAgentDefinitionsPath(organizationID uuid.UUID) string {
+	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/agent-definitions", organizationID)
+}
+
+func forkOrganizationAgentDefinitionPath(organizationID uuid.UUID, name string) string {
+	return forkOrganizationAgentDefinitionsPath(organizationID) + "/" + url.PathEscape(name)
+}
+
+// ForkOrganizationAgentDefinitions lists the organization agent definitions
+// the caller can read.
+func (c *Client) ForkOrganizationAgentDefinitions(ctx context.Context, organizationID uuid.UUID) ([]ForkAgentDefinitionMetadata, error) {
+	return requestJSON[[]ForkAgentDefinitionMetadata](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionsPath(organizationID), http.StatusOK, nil)
+}
+
+// ForkOrganizationAgentDefinition returns an organization agent definition by
+// name.
+func (c *Client) ForkOrganizationAgentDefinition(ctx context.Context, organizationID uuid.UUID, name string) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionPath(organizationID, name), http.StatusOK, nil)
+}
+
+// CreateForkOrganizationAgentDefinition stores an agent definition for an
+// organization. Every member can read it until its ACL is narrowed.
+func (c *Client) CreateForkOrganizationAgentDefinition(ctx context.Context, organizationID uuid.UUID, req CreateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPost, forkOrganizationAgentDefinitionsPath(organizationID), http.StatusCreated, req)
+}
+
+// UpdateForkOrganizationAgentDefinition updates an organization agent
+// definition.
+func (c *Client) UpdateForkOrganizationAgentDefinition(ctx context.Context, organizationID uuid.UUID, name string, req UpdateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPatch, forkOrganizationAgentDefinitionPath(organizationID, name), http.StatusOK, req)
+}
+
+// DeleteForkOrganizationAgentDefinition deletes an organization agent
+// definition.
+func (c *Client) DeleteForkOrganizationAgentDefinition(ctx context.Context, organizationID uuid.UUID, name string) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkOrganizationAgentDefinitionPath(organizationID, name), nil)
+}
+
+// ForkOrganizationAgentDefinitionACL returns the users and groups that an
+// organization agent definition is shared with.
+func (c *Client) ForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string) (OrganizationSkillACL, error) {
+	return requestJSON[OrganizationSkillACL](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", http.StatusOK, nil)
+}
+
+// UpdateForkOrganizationAgentDefinitionACL grants or revokes read access to
+// an organization agent definition for organization members and groups.
+func (c *Client) UpdateForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string, req UpdateOrganizationSkillACLRequest) error {
+	return requestNoContent(ctx, c, http.MethodPatch, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", req)
+}
+
+func forkProjectAgentDefinitionsPath(organizationID, projectID uuid.UUID) string {
+	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/projects/%s/agent-definitions", organizationID, projectID)
+}
+
+func forkProjectAgentDefinitionPath(organizationID, projectID uuid.UUID, name string) string {
+	return forkProjectAgentDefinitionsPath(organizationID, projectID) + "/" + url.PathEscape(name)
+}
+
+// ForkProjectAgentDefinitions lists the agent definitions of a chat project.
+func (c *Client) ForkProjectAgentDefinitions(ctx context.Context, organizationID, projectID uuid.UUID) ([]ForkAgentDefinitionMetadata, error) {
+	return requestJSON[[]ForkAgentDefinitionMetadata](ctx, c, http.MethodGet, forkProjectAgentDefinitionsPath(organizationID, projectID), http.StatusOK, nil)
+}
+
+// ForkProjectAgentDefinition returns a chat project agent definition by name.
+func (c *Client) ForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodGet, forkProjectAgentDefinitionPath(organizationID, projectID, name), http.StatusOK, nil)
+}
+
+// CreateForkProjectAgentDefinition stores an agent definition for a chat
+// project.
+func (c *Client) CreateForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, req CreateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPost, forkProjectAgentDefinitionsPath(organizationID, projectID), http.StatusCreated, req)
+}
+
+// UpdateForkProjectAgentDefinition updates a chat project agent definition.
+func (c *Client) UpdateForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string, req UpdateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPatch, forkProjectAgentDefinitionPath(organizationID, projectID, name), http.StatusOK, req)
+}
+
+// DeleteForkProjectAgentDefinition deletes a chat project agent definition.
+func (c *Client) DeleteForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkProjectAgentDefinitionPath(organizationID, projectID, name), nil)
 }
