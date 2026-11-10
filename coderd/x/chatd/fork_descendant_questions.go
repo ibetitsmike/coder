@@ -89,18 +89,37 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 	if !t.secretAllowed() {
 		return info
 	}
-	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and an empty options list. " +
+	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
 		"The answer never reaches you: write " + secretPlaceholder("<this call's ID>") + " in execute, write_file or edit_files input where the value belongs. " +
 		"Those tools get the value, and tool output shows the placeholder instead of it."
-	if questions, ok := info.Parameters["questions"].(map[string]any); ok {
-		if items, ok := questions["items"].(map[string]any); ok {
-			if properties, ok := items["properties"].(map[string]any); ok {
-				properties["secret"] = map[string]any{
-					"type":        "boolean",
-					"description": "Ask for a secret value. A secret question is the only question of its call, and its options list is empty.",
-				}
-			}
-		}
+	questions, _ := info.Parameters["questions"].(map[string]any)
+	items, _ := questions["items"].(map[string]any)
+	properties, _ := items["properties"].(map[string]any)
+	options, _ := properties["options"].(map[string]any)
+	if options == nil {
+		return info
+	}
+	properties["secret"] = map[string]any{
+		"type":        "boolean",
+		"description": "Ask for a secret value. A secret question is the only question of its call and has no options.",
+	}
+	// Calls are validated against this schema before Run, so only the
+	// secret variant may leave out the 2-4 options.
+	minOptions := options["minItems"]
+	delete(options, "minItems")
+	items["required"] = []string{"header", "question"}
+	items["anyOf"] = []any{
+		map[string]any{
+			"required":   []string{"options"},
+			"properties": map[string]any{"options": map[string]any{"minItems": minOptions}},
+		},
+		map[string]any{
+			"required": []string{"secret"},
+			"properties": map[string]any{
+				"secret":  map[string]any{"const": true},
+				"options": map[string]any{"maxItems": 0},
+			},
+		},
 	}
 	return info
 }
