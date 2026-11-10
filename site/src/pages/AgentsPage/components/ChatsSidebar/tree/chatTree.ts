@@ -21,7 +21,11 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 	// are embedded in each root's `children` field.
 	for (const chat of chats) {
 		chatById.set(chat.id, chat);
-		childrenById.set(chat.id, []);
+		// A stale flat entry for an embedded coordinator can follow its
+		// root, so keep the child list the root already linked.
+		if (!childrenById.has(chat.id)) {
+			childrenById.set(chat.id, []);
+		}
 		// Guard against stale cache entries: if a flat child
 		// entry appears in `chats` after its embedded parent has
 		// already set its parent link, do not overwrite the link
@@ -33,14 +37,27 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 		}
 
 		if (chat.children) {
+			// Register every embedded descendant first, then link, so
+			// a grandchild that appears before its parent in the flat
+			// list still finds its parent in `embedded`.
+			const embedded = new Set<string>();
 			for (const child of chat.children) {
 				chatById.set(child.id, child);
-				parentById.set(child.id, chat.id);
-				childrenById.get(chat.id)?.push(child.id);
-				// Children cannot have their own children (depth
-				// capped at 1), but initialize the map entry for
-				// uniform lookup.
-				childrenById.set(child.id, []);
+				if (!childrenById.has(child.id)) {
+					childrenById.set(child.id, []);
+				}
+				embedded.add(child.id);
+			}
+			for (const child of chat.children) {
+				// Fall back to the root when the parent is not in
+				// this family, so stale cached data still renders.
+				const ownParentID = getParentChatID(child);
+				const parentID =
+					ownParentID && ownParentID !== child.id && embedded.has(ownParentID)
+						? ownParentID
+						: chat.id;
+				parentById.set(child.id, parentID);
+				childrenById.get(parentID)?.push(child.id);
 			}
 		}
 	}
@@ -72,6 +89,34 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 		childrenById,
 		parentById,
 	};
+};
+
+/**
+ * Returns every descendant chat of chatID in the tree, in no particular
+ * order. For a root this is the same set as its embedded `children`.
+ */
+export const collectDescendantChats = (
+	tree: ChatTree,
+	chatID: string,
+): Chat[] => {
+	const descendants: Chat[] = [];
+	const stack = [...(tree.childrenById.get(chatID) ?? [])];
+	const seen = new Set<string>([chatID]);
+	while (stack.length > 0) {
+		const currentID = stack.pop();
+		if (!currentID || seen.has(currentID)) {
+			continue;
+		}
+		seen.add(currentID);
+		const chat = tree.chatById.get(currentID);
+		if (chat) {
+			descendants.push(chat);
+		}
+		for (const childID of tree.childrenById.get(currentID) ?? []) {
+			stack.push(childID);
+		}
+	}
+	return descendants;
 };
 
 export const collectVisibleChatIDs = ({
