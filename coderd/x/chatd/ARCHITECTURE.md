@@ -645,6 +645,8 @@ Setting `title` writes a `user` title. The write happens even when the text is u
 
 `busy_behavior` must be `steer` or `queue`. If the request omits it, the endpoint uses `steer`. The endpoint rejects `busy_behavior=interrupt` with a 400 error.
 
+<!-- TODO(ibetitsmike): describe the fork-chat-wakeups `/loop [interval] <prompt>` command: SendMessage stores only the prompt and creates an interval wake-up (source `loop`) in the same transaction, so a refused send creates none. -->
+
 For `busy_behavior=queue`, `SendMessage(m, queue)` supports:
 
 - `W -> SendMessage(m, queue) -> R0`

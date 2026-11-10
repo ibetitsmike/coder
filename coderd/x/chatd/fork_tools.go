@@ -32,6 +32,9 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = append(tools, p.searchChatsTool(chat))
 		tools = p.withForkWaitAgent(tools, chat)
 	}
+	if p.experiments.Enabled(codersdk.ExperimentForkChatWakeups) {
+		tools = append(tools, p.scheduleWakeupTool(chat))
+	}
 	if p.descendantQuestionsEnabled(chat) && !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
 		return tool.Info().Name == askUserQuestionToolName
 	}) {
