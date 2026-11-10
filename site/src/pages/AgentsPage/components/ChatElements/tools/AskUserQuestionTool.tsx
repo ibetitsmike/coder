@@ -60,6 +60,8 @@ type AskUserQuestionToolProps = {
 	/** Set for async questions; their answer names this call. */
 	asyncToolCallId?: string;
 	isDocked?: boolean;
+	/** Replaces the form of an open, unanswered question that this view cannot answer. */
+	answerElsewhereNotice?: string;
 	onSubmitAnswer?: (message: string) => Promise<void> | void;
 };
 
@@ -607,6 +609,7 @@ export const AskUserQuestionTool: React.FC<AskUserQuestionToolProps> = ({
 	startedAt,
 	asyncToolCallId,
 	isDocked = false,
+	answerElsewhereNotice,
 	onSubmitAnswer,
 }) => {
 	const isAsync = asyncToolCallId !== undefined;
@@ -615,11 +618,9 @@ export const AskUserQuestionTool: React.FC<AskUserQuestionToolProps> = ({
 
 	const isAnswered =
 		getAnswerBody(previousResponseText, asyncToolCallId) !== undefined;
-	const isAnswerable =
-		(isAsync || isChatCompleted) &&
-		isCompleted &&
-		isLatestAskUserQuestion &&
-		Boolean(onSubmitAnswer);
+	const isOpen =
+		(isAsync || isChatCompleted) && isCompleted && isLatestAskUserQuestion;
+	const isAnswerable = isOpen && Boolean(onSubmitAnswer);
 	const isClosed =
 		isAsync && isCompleted && !isLatestAskUserQuestion && !isAnswered;
 	const draftKey =
@@ -695,6 +696,8 @@ export const AskUserQuestionTool: React.FC<AskUserQuestionToolProps> = ({
 		notice = "Answer in the question panel above the chat input.";
 	} else if (isClosed) {
 		notice = "This question is closed.";
+	} else if (answerElsewhereNotice !== undefined && isOpen && !isAnswered) {
+		notice = answerElsewhereNotice;
 	}
 
 	return (
