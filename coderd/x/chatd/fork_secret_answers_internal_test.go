@@ -233,6 +233,10 @@ func TestScrubSecretAnswers(t *testing.T) {
 	quoted := []forkdb.ChatSecretAnswer{{ToolCallID: "call_q", Value: "it's-a-secret"}}
 	require.Equal(t, "X={{secret:call_q}}; run", scrubSecretAnswers(`X='it'\''s-a-secret'; run`, quoted),
 		"the shell-quoted form is replaced whole")
+	unicodeValue := []forkdb.ChatSecretAnswer{{ToolCallID: "call_u", Value: "p\u00e4ss-\U0001F511-word"}}
+	require.Equal(t, "{{secret:call_u}} {{secret:call_u}}",
+		scrubSecretAnswers(`p\u00e4ss-\ud83d\udd11-word p\u00E4ss-\uD83D\uDD11-word`, unicodeValue),
+		"an ASCII-only JSON encoder escapes each non-ASCII character")
 }
 
 func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {

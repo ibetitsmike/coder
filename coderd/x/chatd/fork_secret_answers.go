@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
@@ -305,7 +307,8 @@ func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 		placeholder := secretPlaceholder(answer.ToolCallID)
 		var forms []string
 		for _, value := range []string{answer.Value, shellQuote(answer.Value)} {
-			forms = append(forms, value, jsonStringContent(value), jsonStringContentNoHTMLEscape(value))
+			forms = append(forms, value, jsonStringContent(value), jsonStringContentNoHTMLEscape(value),
+				jsonStringContentASCII(value, "\\u%04x"), jsonStringContentASCII(value, "\\u%04X"))
 		}
 		for _, form := range forms {
 			text = strings.ReplaceAll(text, form, placeholder)
@@ -371,6 +374,26 @@ func jsonStringContent(value string) string {
 		return value
 	}
 	return string(data[1 : len(data)-1])
+}
+
+// jsonStringContentASCII is jsonStringContentNoHTMLEscape for an encoder
+// that writes every non-ASCII character as a \u escape in format, such as
+// Python's default json.dumps. A character outside the Basic Multilingual
+// Plane becomes a UTF-16 surrogate pair.
+func jsonStringContentASCII(value, format string) string {
+	var out strings.Builder
+	for _, r := range jsonStringContentNoHTMLEscape(value) {
+		if r < 0x7f {
+			out.WriteRune(r)
+			continue
+		}
+		if r1, r2 := utf16.EncodeRune(r); r1 != unicode.ReplacementChar {
+			_, _ = fmt.Fprintf(&out, format+format, r1, r2)
+			continue
+		}
+		_, _ = fmt.Fprintf(&out, format, r)
+	}
+	return out.String()
 }
 
 // jsonStringContentNoHTMLEscape is jsonStringContent for an encoder that
