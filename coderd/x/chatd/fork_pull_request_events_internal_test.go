@@ -247,6 +247,12 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 			activity: openPullRequest(gitprovider.CheckStateSuccess),
 		},
 		{
+			name: "NewHeadPending", on: []string{"checks"}, baselineHead: testHeadSHA, baseline: gitprovider.CheckStateSuccess,
+			activity: withActivity(openPullRequest(gitprovider.CheckStatePending), func(a *gitprovider.PullRequestActivity) {
+				a.HeadSHA = testNewHeadSHA
+			}),
+		},
+		{
 			name: "NewHeadFailure", on: []string{"checks"}, baselineHead: testHeadSHA, baseline: gitprovider.CheckStateFailure,
 			activity: withActivity(openPullRequest(gitprovider.CheckStateFailure), func(a *gitprovider.PullRequestActivity) {
 				a.HeadSHA = testNewHeadSHA
@@ -319,6 +325,7 @@ func TestWakeupPullRequestReadFailures(t *testing.T) {
 		wantNext time.Time
 	}{
 		{name: "RateLimit", err: &gitprovider.RateLimitError{RetryAfter: now.Add(10 * time.Minute)}, wantNext: now.Add(10 * time.Minute)},
+		{name: "RateLimitResetsSooner", err: &gitprovider.RateLimitError{RetryAfter: now.Add(10 * time.Second)}, wantNext: now.Add(pullRequestPollInterval)},
 		{name: "OtherError", err: xerrors.New("github is down"), wantNext: now.Add(pullRequestErrorRetry)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
