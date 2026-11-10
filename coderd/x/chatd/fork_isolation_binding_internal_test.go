@@ -119,25 +119,6 @@ func TestForkWorktreeBindingTools(t *testing.T) {
 		})
 	}
 
-	t.Run("WindowsWorktree", func(t *testing.T) {
-		t.Parallel()
-		const winDir = `C:\Users\coder\.coder\worktrees\repo\child`
-		for _, tc := range []struct{ input, want string }{
-			{input: `{"path":"src\\main.go"}`, want: `{"path":"C:\\Users\\coder\\.coder\\worktrees\\repo\\child\\src\\main.go"}`},
-			{input: `{"path":"C:\\Users\\coder\\main.go"}`, want: `{"path":"C:\\Users\\coder\\main.go"}`},
-			{input: `{"path":"d:/x/y.go"}`, want: `{"path":"d:/x/y.go"}`},
-			{input: `{"path":"\\\\server\\share\\a.txt"}`, want: `{"path":"\\\\server\\share\\a.txt"}`},
-			{input: `{"path":"/x/y.go"}`, want: `{"path":"/x/y.go"}`},
-		} {
-			var inputs []string
-			tool := worktreeBoundTool{AgentTool: recordingTool{name: "read_file", inputs: &inputs}, dir: winDir}
-			_, err := tool.Run(chatdTestContext(t), fantasy.ToolCall{Name: "read_file", Input: tc.input})
-			require.NoError(t, err)
-			require.Len(t, inputs, 1)
-			require.JSONEq(t, tc.want, inputs[0], tc.input)
-		}
-	})
-
 	t.Run("WorkspaceContextDirectory", func(t *testing.T) {
 		t.Parallel()
 		agent := database.WorkspaceAgent{OperatingSystem: "linux", Directory: "/repo", ExpandedDirectory: "/repo"}
@@ -156,6 +137,26 @@ func TestForkWorktreeBindingTools(t *testing.T) {
 			require.Equal(t, []string{`{"command":"ls"}`}, *inputs)
 		}
 	})
+}
+
+func TestForkWorktreeBoundToolWindowsPaths(t *testing.T) {
+	t.Parallel()
+
+	const winDir = `C:\Users\coder\.coder\worktrees\repo\child`
+	for _, tc := range []struct{ input, want string }{
+		{input: `{"path":"src\\main.go"}`, want: `{"path":"C:\\Users\\coder\\.coder\\worktrees\\repo\\child\\src\\main.go"}`},
+		{input: `{"path":"C:\\Users\\coder\\main.go"}`, want: `{"path":"C:\\Users\\coder\\main.go"}`},
+		{input: `{"path":"d:/x/y.go"}`, want: `{"path":"d:/x/y.go"}`},
+		{input: `{"path":"\\\\server\\share\\a.txt"}`, want: `{"path":"\\\\server\\share\\a.txt"}`},
+		{input: `{"path":"/x/y.go"}`, want: `{"path":"/x/y.go"}`},
+	} {
+		var inputs []string
+		tool := worktreeBoundTool{AgentTool: recordingTool{name: "read_file", inputs: &inputs}, dir: winDir}
+		_, err := tool.Run(chatdTestContext(t), fantasy.ToolCall{Name: "read_file", Input: tc.input})
+		require.NoError(t, err)
+		require.Len(t, inputs, 1)
+		require.JSONEq(t, tc.want, inputs[0], tc.input)
+	}
 }
 
 func TestForkWorktreeBindingPrompt(t *testing.T) {
