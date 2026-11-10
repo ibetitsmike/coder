@@ -97,6 +97,11 @@ func (f forkQueryMetricsStore) DeletePluginUserLink(ctx context.Context, arg for
 	return f.s.DeletePluginUserLink(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) DeleteProjectAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "DeleteProjectAgentDefinitionByName", time.Now())
+	return f.s.DeleteProjectAgentDefinitionByName(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeleteUserAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "DeleteUserAgentDefinitionByName", time.Now())
 	return f.s.DeleteUserAgentDefinitionByName(ctx, arg)
@@ -172,6 +177,11 @@ func (f forkQueryMetricsStore) GetPluginsByOrganizationID(ctx context.Context, o
 	return f.s.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
+func (f forkQueryMetricsStore) GetProjectAgentDefinitionByName(ctx context.Context, arg forkdb.GetProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "GetProjectAgentDefinitionByName", time.Now())
+	return f.s.GetProjectAgentDefinitionByName(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "GetUserAgentDefinitionByName", time.Now())
 	return f.s.GetUserAgentDefinitionByName(ctx, arg)
@@ -197,6 +207,11 @@ func (f forkQueryMetricsStore) InsertPluginLinkCode(ctx context.Context, arg for
 	return f.s.InsertPluginLinkCode(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) InsertProjectAgentDefinition(ctx context.Context, arg forkdb.InsertProjectAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "InsertProjectAgentDefinition", time.Now())
+	return f.s.InsertProjectAgentDefinition(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertUserAgentDefinition", time.Now())
 	return f.s.InsertUserAgentDefinition(ctx, arg)
@@ -210,6 +225,11 @@ func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByNameForUpdate(ctx
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	defer f.observe(ctx, "ListOrganizationAgentDefinitionMetadata", time.Now())
 	return f.s.ListOrganizationAgentDefinitionMetadata(ctx, organizationID)
+}
+
+func (f forkQueryMetricsStore) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
+	defer f.observe(ctx, "ListProjectAgentDefinitionMetadata", time.Now())
+	return f.s.ListProjectAgentDefinitionMetadata(ctx, projectID)
 }
 
 func (f forkQueryMetricsStore) ListUserAgentDefinitionMetadata(ctx context.Context, arg forkdb.ListUserAgentDefinitionMetadataParams) ([]forkdb.ListUserAgentDefinitionMetadataRow, error) {
@@ -265,6 +285,11 @@ func (f forkQueryMetricsStore) UpdatePluginEnabled(ctx context.Context, arg fork
 func (f forkQueryMetricsStore) UpdatePluginLastError(ctx context.Context, arg forkdb.UpdatePluginLastErrorParams) error {
 	defer f.observe(ctx, "UpdatePluginLastError", time.Now())
 	return f.s.UpdatePluginLastError(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateProjectAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "UpdateProjectAgentDefinitionByName", time.Now())
+	return f.s.UpdateProjectAgentDefinitionByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateUserAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
