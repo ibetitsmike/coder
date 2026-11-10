@@ -261,6 +261,15 @@ func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Contex
 	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
 }
 
+// ListPendingChatDescendantQuestionsByRoot authorizes through the family's
+// root chat.
+func (f *forkQuerier) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID)
+}
+
 func (f *forkQuerier) ListUserAgentDefinitionMetadata(ctx context.Context, arg forkdb.ListUserAgentDefinitionMetadataParams) ([]forkdb.ListUserAgentDefinitionMetadataRow, error) {
 	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
 		return nil, err

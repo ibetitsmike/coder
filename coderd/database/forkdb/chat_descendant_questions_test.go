@@ -79,3 +79,72 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, count, "deleting the chat deletes its question")
 }
+
+func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	orgID := dbgen.Organization(t, db, database.Organization{}).ID
+	ownerID := dbgen.User(t, db, database.User{}).ID
+	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
+	chat := func(parent *database.Chat) database.Chat {
+		seed := database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: model.ID}
+		if parent != nil {
+			seed.ParentChatID = uuid.NullUUID{UUID: parent.ID, Valid: true}
+			seed.RootChatID = parent.RootChatID
+			if !parent.RootChatID.Valid {
+				seed.RootChatID = seed.ParentChatID
+			}
+		}
+		return dbgen.Chat(t, db, seed)
+	}
+	ask := func(c database.Chat, callID string) {
+		_, err := fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+			ChatID:     c.ID,
+			ToolCallID: callID,
+			Questions:  json.RawMessage(`[{"header": "DB"}]`),
+		})
+		require.NoError(t, err)
+	}
+
+	root := chat(nil)
+	child := chat(&root)
+	grandchild := chat(&child)
+	answered := chat(&root)
+	archived := chat(&root)
+	otherRoot := chat(nil)
+	otherChild := chat(&otherRoot)
+	emptyRoot := chat(nil)
+	_ = chat(&emptyRoot)
+
+	ask(root, "root")
+	ask(grandchild, "grandchild")
+	ask(child, "child")
+	ask(answered, "answered")
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        answered.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+	})
+	ask(archived, "archived")
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET archived = true WHERE id = $1", archived.ID)
+	require.NoError(t, err)
+	ask(otherChild, "other")
+
+	rows, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, root.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "grandchild", rows[0].ToolCallID, "oldest question first")
+	require.Equal(t, grandchild.Title, rows[0].ChatTitle)
+	require.Equal(t, child.ID, rows[0].ParentChatID.UUID)
+	require.Equal(t, "child", rows[1].ToolCallID)
+	require.Equal(t, root.ID, rows[1].ParentChatID.UUID)
+	require.JSONEq(t, `[{"header": "DB"}]`, string(rows[1].Questions))
+
+	rows, err = fdb.ListPendingChatDescendantQuestionsByRoot(ctx, emptyRoot.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}
