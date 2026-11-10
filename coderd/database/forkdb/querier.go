@@ -88,8 +88,7 @@ type Querier interface {
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
-	// @root_chat_id, oldest first. A question is pending until its chat gets a
-	// non-deleted user message newer than the question, like
+	// @root_chat_id, oldest first, with the pending rule of
 	// GetPendingChatDescendantQuestion.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)

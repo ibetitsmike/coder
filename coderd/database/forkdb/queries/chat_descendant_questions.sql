@@ -24,8 +24,7 @@ WHERE q.chat_id = @chat_id::uuid
 
 -- name: ListPendingChatDescendantQuestionsByRoot :many
 -- Lists the unanswered questions of the unarchived descendants of
--- @root_chat_id, oldest first. A question is pending until its chat gets a
--- non-deleted user message newer than the question, like
+-- @root_chat_id, oldest first, with the pending rule of
 -- GetPendingChatDescendantQuestion.
 SELECT q.chat_id, q.tool_call_id, q.questions, q.created_at,
     c.title AS chat_title, c.parent_chat_id
@@ -39,7 +38,7 @@ WHERE c.root_chat_id = @root_chat_id::uuid
         FROM chat_messages m
         WHERE m.chat_id = q.chat_id
             AND m.role = 'user'
-            AND m.visibility <> 'model'
+            AND (m.visibility <> 'model' OR m.compressed)
             AND NOT m.deleted
             AND m.created_at > q.created_at
     )
