@@ -41,7 +41,7 @@ const (
 
 type forkSpawnIsolationArgs struct {
 	Isolation  string `json:"isolation,omitempty" enum:"shared,worktree" description:"Where the child works: shared (default) uses this chat's workspace and checkout; worktree gives the child its own git worktree on a new branch in this chat's workspace, so parallel children can edit the same files without conflicts."`
-	RepoPath   string `json:"repo_path,omitempty" description:"With isolation worktree: absolute path of the git repository to branch from. Defaults to the workspace agent's directory."`
+	RepoPath   string `json:"repo_path,omitempty" description:"With isolation worktree: absolute path of the git repository to branch from. Defaults to this chat's checkout: its worktree if it has one, else the workspace agent's directory."`
 	BaseBranch string `json:"base_branch,omitempty" description:"With isolation worktree: branch or commit the child's branch starts from. Defaults to the repository's current HEAD."`
 }
 
@@ -170,6 +170,13 @@ func (p *Server) createSubagentWorktree(
 		return workspacesdk.ForkWorktree{}, nil, xerrors.New("isolation worktree needs workspace agent connections, which are not configured")
 	}
 	repoPath := req.repoPath
+	if repoPath == "" {
+		parentWorktree, _, err := p.chatWorktree(ctx, parent)
+		if err != nil {
+			return workspacesdk.ForkWorktree{}, nil, xerrors.Errorf("resolve parent worktree: %w", err)
+		}
+		repoPath = parentWorktree.path
+	}
 	if repoPath == "" {
 		agent, err := p.db.GetWorkspaceAgentByID(ctx, parent.AgentID.UUID)
 		if err != nil {

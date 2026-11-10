@@ -177,6 +177,17 @@ func (p *Server) createSubagentChatWithID(
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
 	isolation, isolated := subagentIsolationFromContext(ctx)
+	if !isolated && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		worktree, bound, err := p.chatWorktree(ctx, parent)
+		if err != nil {
+			return chatstate.CreateChatResult{}, xerrors.Errorf("resolve parent worktree: %w", err)
+		}
+		if bound {
+			if input.InitialMessages, err = withSubagentWorktreePrompt(input, worktree, true); err != nil {
+				return chatstate.CreateChatResult{}, err
+			}
+		}
+	}
 	if !nested && customAgent == nil && !isolated {
 		return chatstate.CreateChatWithID(ctx, p.db, publisher, chatID, input)
 	}
@@ -199,6 +210,10 @@ func (p *Server) createSubagentChatWithID(
 		subagent.Isolation = subagentIsolationWorktree
 		subagent.WorktreePath = worktree.Path
 		subagent.Branch = worktree.Branch
+		input.InitialMessages, err = withSubagentWorktreePrompt(input, subagentWorktree{path: worktree.Path, branch: worktree.Branch}, false)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
 	}
 	// CreateChatWithID publishes into this buffer when its nested
 	// transaction returns, so nothing reaches subscribers before the outer

@@ -435,7 +435,7 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 		t.Parallel()
 		conn := &fakeWorktreeConn{worktree: workspacesdk.ForkWorktree{Path: "/wt/child", Branch: "agent/child"}}
 		root := f.rootChat(t, conn)
-		// No initial messages makes the chat insert fail inside the
+		// The missing client type makes the chat insert fail inside the
 		// transaction, after the worktree exists.
 		_, err := f.server.createSubagentChatWithID(isolatedContext(t), f.server.pubsub, uuid.New(), root, nil, chatstate.CreateChatInput{
 			OrganizationID:    root.OrganizationID,
@@ -447,7 +447,7 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 			LastModelConfigID: root.LastModelConfigID,
 			Title:             "child",
 		})
-		require.ErrorContains(t, err, "initial messages")
+		require.ErrorContains(t, err, "chat_client_type")
 		creates, deletes := conn.calls()
 		require.Len(t, creates, 1)
 		require.Equal(t, []workspacesdk.ForkDeleteWorktreeRequest{{Path: "/wt/child", Branch: "agent/child"}}, deletes)
