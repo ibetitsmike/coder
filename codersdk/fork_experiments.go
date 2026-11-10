@@ -13,6 +13,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkChatTodos,
 	ExperimentForkNestedSubagents,
 	ExperimentForkAgentDefinitions,
+	ExperimentForkChatWakeups,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -26,6 +27,10 @@ const ExperimentForkNestedSubagents Experiment = "fork-nested-subagents"
 // ExperimentForkAgentDefinitions lets spawn_agent use the custom agent types
 // that workspace agent definition files declare.
 const ExperimentForkAgentDefinitions Experiment = "fork-agent-definitions"
+
+// ExperimentForkChatWakeups lets chats schedule their own wake-ups: the
+// schedule_wakeup and wait_for_events tools, /loop, and the wake-up worker.
+const ExperimentForkChatWakeups Experiment = "fork-chat-wakeups"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

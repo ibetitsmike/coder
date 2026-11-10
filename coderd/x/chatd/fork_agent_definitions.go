@@ -413,3 +413,22 @@ func (p *Server) resolveCustomAgentModel(ctx context.Context, parent database.Ch
 		def.Name, def.Model, listSubagentModelsToolName,
 	)
 }
+
+// subagentContextResource reports an OK pinned agent definition file on the
+// chat, keeping its parse warnings in Error. ok is false when the body has no
+// name, like an OK skill without one.
+func subagentContextResource(r database.ChatContextResource) (codersdk.ChatContextResource, bool) {
+	var body agentproto.SubagentBody
+	if err := contextBodyUnmarshalOptions.Unmarshal(r.Body, &body); err != nil || body.GetName() == "" {
+		return codersdk.ChatContextResource{}, false
+	}
+	return codersdk.ChatContextResource{
+		Source:              r.Source,
+		Kind:                codersdk.ChatContextResourceKindSubagent,
+		SizeBytes:           r.SizeBytes,
+		Status:              codersdk.ChatContextResourceStatusOK,
+		Error:               r.Error,
+		SubagentName:        body.GetName(),
+		SubagentDescription: body.GetDescription(),
+	}, true
+}

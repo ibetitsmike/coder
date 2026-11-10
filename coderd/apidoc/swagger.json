@@ -21277,6 +21277,13 @@
 						}
 					]
 				},
+				"subagent_description": {
+					"type": "string"
+				},
+				"subagent_name": {
+					"description": "SubagentName and SubagentDescription are populated only for OK\nsubagent kinds.",
+					"type": "string"
+				},
 				"tools": {
 					"description": "Tools lists the tools exposed by an MCP server. Populated only for the\nmcp_server kind; nil otherwise.",
 					"type": "array",
@@ -21289,6 +21296,7 @@
 		"codersdk.ChatContextResourceKind": {
 			"type": "string",
 			"enum": [
+				"subagent",
 				"instruction_file",
 				"skill",
 				"mcp_config",
@@ -21296,6 +21304,7 @@
 				"acp_harness"
 			],
 			"x-enum-varnames": [
+				"ChatContextResourceKindSubagent",
 				"ChatContextResourceKindInstructionFile",
 				"ChatContextResourceKindSkill",
 				"ChatContextResourceKindMCPConfig",
@@ -25445,6 +25454,7 @@
 				"fork-chat-todos",
 				"fork-nested-subagents",
 				"fork-agent-definitions",
+				"fork-chat-wakeups",
 				"example",
 				"notifications",
 				"workspace-usage",
@@ -25486,6 +25496,7 @@
 				"",
 				"",
 				"",
+				"",
 				"This isn't used for anything.",
 				"Sends notifications via SMTP and webhooks following certain events.",
 				"Enables the new workspace usage tracking.",
@@ -25508,6 +25519,7 @@
 				"ExperimentForkChatTodos",
 				"ExperimentForkNestedSubagents",
 				"ExperimentForkAgentDefinitions",
+				"ExperimentForkChatWakeups",
 				"ExperimentExample",
 				"ExperimentNotifications",
 				"ExperimentWorkspaceUsage",

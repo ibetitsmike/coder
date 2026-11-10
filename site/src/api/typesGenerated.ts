@@ -2475,6 +2475,12 @@ export interface ChatContextResource {
 	readonly skill_name?: string;
 	readonly skill_description?: string;
 	/**
+	 * SubagentName and SubagentDescription are populated only for OK
+	 * subagent kinds.
+	 */
+	readonly subagent_name?: string;
+	readonly subagent_description?: string;
+	/**
 	 * Tools lists the tools exposed by an MCP server. Populated only for the
 	 * mcp_server kind; nil otherwise.
 	 */
@@ -2499,7 +2505,8 @@ export type ChatContextResourceKind =
 	| "instruction_file"
 	| "mcp_config"
 	| "mcp_server"
-	| "skill";
+	| "skill"
+	| "subagent";
 
 export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"acp_harness",
@@ -2507,6 +2514,7 @@ export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"mcp_config",
 	"mcp_server",
 	"skill",
+	"subagent",
 ];
 
 // From codersdk/chats.go
@@ -5848,6 +5856,7 @@ export type Experiment =
 	| "example"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
+	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
@@ -5931,6 +5940,7 @@ export const Experiments: Experiment[] = [
 	"example",
 	"fork-agent-definitions",
 	"fork-chat-todos",
+	"fork-chat-wakeups",
 	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",

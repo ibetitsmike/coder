@@ -19,7 +19,7 @@ import { DiffFileHeader } from "./DiffFileHeader";
 import { EditFilesTool } from "./EditFilesTool";
 import { ExecuteTool as ExecuteToolComponent } from "./ExecuteTool";
 import { type FindToolsMatch, FindToolsTool } from "./FindToolsTool";
-import { forkToolRenderers } from "./forkToolRenderers";
+import { createForkToolRenderers } from "./forkToolRenderers";
 import { ListAgentsTool } from "./ListAgentsTool";
 import { ListSubagentModelsTool } from "./ListSubagentModelsTool";
 import { ListTemplatesTool } from "./ListTemplatesTool";
@@ -1188,7 +1188,7 @@ export const toolRenderers: Record<string, React.FC<ToolRendererProps>> = {
 	advisor: AdvisorRenderer,
 	computer: ComputerRenderer,
 	web_search: WebSearchRenderer,
-	...forkToolRenderers,
+	...createForkToolRenderers(GenericToolRenderer),
 };
 
 // Exported so tests can assert cross-cutting affordances across every
