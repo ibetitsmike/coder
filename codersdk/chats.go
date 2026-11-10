@@ -217,11 +217,11 @@ type Chat struct {
 	// without headers. Only the single-chat GET sets it.
 	// Experimental.
 	InlineMCPServers []InlineMCPServer `json:"inline_mcp_servers,omitempty"`
-	// Children holds child (subagent) chats nested under this root
-	// chat. Always initialized to an empty slice so the JSON field
-	// is present as []. Child chats cannot create their own
-	// subagents, so nesting depth is capped at 1 and this slice is
-	// always empty for child chats.
+	// Children holds the descendant (subagent) chats of this root chat,
+	// flat: each entry's parent_chat_id gives its place in the tree.
+	// Without fork-nested-subagents descendants are only direct
+	// children. Always initialized to an empty slice so the JSON field
+	// is present as []. Always empty for child chats.
 	Children []Chat `json:"children"`
 }
 
