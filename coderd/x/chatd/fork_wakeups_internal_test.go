@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
@@ -213,23 +214,10 @@ func TestWakeupEndsSchedule(t *testing.T) {
 			Kind:            forkdb.ChatWakeupKindInterval,
 			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
 		})
-		consumer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-			rw.Header().Set("Content-Type", "application/json")
-			_, _ = rw.Write([]byte(`{"permission": {"decision": "deny", "reason": "blocked"}, "user_message": "not allowed"}`))
-		}))
-		t.Cleanup(consumer.Close)
 		worker := f.newArchiveWorker(t, nil, nil, nil)
-		worker.server.hooks = chathooks.NewTrigger(dispatch.New(
-			slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
-			consumer.Client(),
-			consumer.URL,
-			false,
-			"test-hook-secret-32-bytes-minimum!!",
-			time.Second,
-			"test-deployment",
-			"test-version",
-			prometheus.NewRegistry(),
-		))
+		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+			_, _ = rw.Write([]byte(`{"permission": {"decision": "deny", "reason": "blocked"}, "user_message": "not allowed"}`))
+		})
 
 		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
@@ -280,6 +268,88 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.Equal(t, "max_runs", got.StatusReason.String)
 		require.EqualValues(t, 2, got.RunCount)
 		require.False(t, got.NextRunAt.Valid)
+	})
+}
+
+// The user prompt hook runs after the worker saw an idle chat and before the
+// send takes the chat lock, so it can change the world in between.
+func TestWakeupAdmissionRaces(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ChatTurnedBusy", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chats SET status = 'running' WHERE id = $1", chat.ID)
+			assert.NoError(t, err)
+			_, _ = rw.Write([]byte(`{}`))
+		})
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+		queued, err := f.db.GetChatQueuedMessages(ctx, chat.ID)
+		require.NoError(t, err)
+		require.Empty(t, queued, "a wake-up never queues behind a busy chat")
+		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
+		require.False(t, got.LeaseExpiresAt.Valid)
+	})
+
+	t.Run("ClaimCanceled", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+			// What UpdateChatWakeupStatus does when the user pauses it.
+			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'paused', next_run_at = NULL, lease_expires_at = NULL WHERE id = $1", wakeup.ID)
+			assert.NoError(t, err)
+			_, _ = rw.Write([]byte(`{}`))
+		})
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt), "a canceled claim delivers nothing")
+		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
+		require.Zero(t, got.RunCount)
+	})
+
+	t.Run("HookDispatchFailed", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+			rw.WriteHeader(http.StatusInternalServerError)
+		})
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+		require.Equal(t, []string{"failed"}, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status, "a hook outage must not pause the schedule")
+		require.True(t, wakeupTestSlot.Add(time.Minute).Equal(got.NextRunAt.Time), "next slot: %s", got.NextRunAt.Time)
+		require.Zero(t, got.RunCount)
 	})
 }
 
@@ -411,6 +481,27 @@ func TestNextWakeupRun(t *testing.T) {
 			require.True(t, tc.wantNext.Equal(got.nextRunAt.Time), "next run %s, want %s", got.nextRunAt.Time, tc.wantNext)
 		})
 	}
+}
+
+// useUserPromptHook routes the worker's user prompt hook to respond.
+func useUserPromptHook(t *testing.T, worker *chatWorker, respond func(rw http.ResponseWriter)) {
+	t.Helper()
+	consumer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		respond(rw)
+	}))
+	t.Cleanup(consumer.Close)
+	worker.server.hooks = chathooks.NewTrigger(dispatch.New(
+		slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+		consumer.Client(),
+		consumer.URL,
+		false,
+		"test-hook-secret-32-bytes-minimum!!",
+		time.Second,
+		"test-deployment",
+		"test-version",
+		prometheus.NewRegistry(),
+	))
 }
 
 func (f *workerTestFixture) createWakeupChat(t *testing.T) database.Chat {
