@@ -182,6 +182,15 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
 }
 
+// GetChatSubagentTypesByChatIDs is system-only: it reads many chats at once,
+// so callers must already have read the chats they pass.
+func (f *forkQuerier) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatSubagentTypesByChatIDs(ctx, chatIDs)
+}
+
 // GetChatSubagentsByParentChatID authorizes through the parent chat.
 func (f *forkQuerier) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
 	if _, err := f.q.GetChatByID(ctx, parentChatID); err != nil {

@@ -2208,6 +2208,12 @@ export interface Chat {
 	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
+	/**
+	 * AgentType is the subagent type of a child chat, such as explore or a
+	 * custom agent definition name. Only set with the
+	 * fork-agent-definitions experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/chats.go

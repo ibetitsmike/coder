@@ -69,6 +69,7 @@ curl -X GET http://coder-server:8080/api/v2/chats \
 [
   {
     "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+    "agent_type": "string",
     "archived": true,
     "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
     "children": [
@@ -237,6 +238,7 @@ Status Code **200**
 |----------------------------|------------------------------------------------------------------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `[array item]`             | array                                                                              | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `» agent_id`               | string(uuid)                                                                       | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `» agent_type`             | string                                                                             | false    |              | Agent type is the subagent type of a child chat, such as explore or a custom agent definition name. Only set with the fork-agent-definitions experiment.                                                                                                                                                    |
 | `» archived`               | boolean                                                                            | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `» build_id`               | string(uuid)                                                                       | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `» children`               | [codersdk.Chat](schemas.md#codersdkchat)                                           | false    |              | Children holds the descendant (subagent) chats of this root chat, flat: each entry's parent_chat_id gives its place in the tree. Without fork-nested-subagents descendants are only direct children. Always initialized to an empty slice so the JSON field is present as []. Always empty for child chats. |
@@ -464,11 +466,13 @@ curl -X POST http://coder-server:8080/api/v2/chats \
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -1742,6 +1746,7 @@ curl -X GET http://coder-server:8080/api/v2/chats/watch \
   },
   "chat": {
     "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+    "agent_type": "string",
     "archived": true,
     "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
     "children": [
@@ -1938,11 +1943,13 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat} \
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -2380,11 +2387,13 @@ curl -X PUT http://coder-server:8080/api/v2/chats/{chat}/context \
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -2811,11 +2820,13 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/interrupt \
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -4026,11 +4037,13 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/reconcile-invalid \
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],

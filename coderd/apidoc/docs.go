@@ -23247,6 +23247,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "agent_type": {
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "type": "string"
+                },
                 "archived": {
                     "type": "boolean"
                 },

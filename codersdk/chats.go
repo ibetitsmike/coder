@@ -223,6 +223,10 @@ type Chat struct {
 	// children. Always initialized to an empty slice so the JSON field
 	// is present as []. Always empty for child chats.
 	Children []Chat `json:"children"`
+	// AgentType is the subagent type of a child chat, such as explore or a
+	// custom agent definition name. Only set with the
+	// fork-agent-definitions experiment.
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // ChatProject groups related chats in an organization.
