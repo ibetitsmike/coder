@@ -7,6 +7,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -33,6 +34,10 @@ const (
 	// a rate limit, and the longest wait after a rate limit while child
 	// entries of the same wake-up still need a run.
 	pullRequestErrorRetry = 5 * time.Minute
+	// pullRequestFinalRetryWindow is how long after the expiry a failed
+	// final poll is retried, so a rate limit at the expiry does not lose the
+	// activity since the poll before. It covers GitHub's hourly reset.
+	pullRequestFinalRetryWindow = time.Hour
 	// pullRequestReadTimeout bounds one read by the worker, well within
 	// wakeupLease, so a stalled provider cannot block the worker loop.
 	pullRequestReadTimeout = 30 * time.Second
@@ -95,11 +100,18 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	// can already list some. They may be just before or just after since,
 	// and count as the baseline, so a poll does not report them. Events of a
 	// later second happened during this read and are left to the poll.
+	start := since.Truncate(time.Second)
 	var seen []string
 	for _, e := range slices.Concat(activity.Reviews, activity.Comments) {
-		if !e.CreatedAt.After(since.Truncate(time.Second)) {
+		if !e.CreatedAt.After(start) {
 			seen = append(seen, e.URL)
 		}
+	}
+	// CI that changed during this read keeps an earlier baseline time, so
+	// the first poll reports a result it settled on then.
+	checksUpdatedAt := activity.Checks.UpdatedAt
+	if checksUpdatedAt.After(start) {
+		checksUpdatedAt = start
 	}
 	return wakeupEvent{
 		Type:            wakeupEventPullRequest,
@@ -108,7 +120,7 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 		Since:           since,
 		HeadSHA:         activity.HeadSHA,
 		ChecksState:     string(activity.Checks.State),
-		ChecksUpdatedAt: activity.Checks.UpdatedAt,
+		ChecksUpdatedAt: checksUpdatedAt,
 		Seen:            seen,
 	}, nil
 }
@@ -213,23 +225,28 @@ func pullRequestSummary(event wakeupEvent, activity *gitprovider.PullRequestActi
 // pullRequestReadFailed ends the claim of wakeup after its pull request could
 // not be read: it polls again later and never pauses or completes early. A
 // rate limit waits until the limit resets, or at most pullRequestErrorRetry
-// while childrenPending, so the children are still polled.
+// while childrenPending, so the children are still polled. A failed final
+// poll is retried until pullRequestFinalRetryWindow after the expiry.
 func (p *Server) pullRequestReadFailed(ctx context.Context, wakeup forkdb.ChatWakeup, now time.Time, url string, childrenPending bool, err error) wakeupFinish {
+	next := now.Add(pullRequestErrorRetry)
 	if rateLimit, ok := errors.AsType[*gitprovider.RateLimitError](err); ok {
-		next := now.Add(pullRequestPollInterval)
+		next = now.Add(pullRequestPollInterval)
 		if rateLimit.RetryAfter.After(next) {
 			next = rateLimit.RetryAfter
 		}
 		if latest := now.Add(pullRequestErrorRetry); childrenPending && next.After(latest) {
 			next = latest
 		}
-		return eventsWakeupRunAt(wakeup, now, 0, next)
+	} else {
+		p.logger.Warn(ctx, "chat wake-up could not read its pull request",
+			slog.F("wakeup_id", wakeup.ID),
+			slog.F("chat_id", wakeup.ChatID),
+			slog.F("pull_request_url", url),
+			slog.Error(err),
+		)
 	}
-	p.logger.Warn(ctx, "chat wake-up could not read its pull request",
-		slog.F("wakeup_id", wakeup.ID),
-		slog.F("chat_id", wakeup.ChatID),
-		slog.F("pull_request_url", url),
-		slog.Error(err),
-	)
-	return eventsWakeupRunAt(wakeup, now, 0, now.Add(pullRequestErrorRetry))
+	if eventsFinalPoll(wakeup) && !next.After(wakeup.ExpiresAt.Time.Add(pullRequestFinalRetryWindow)) {
+		return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}}
+	}
+	return eventsWakeupRunAt(wakeup, now, 0, next)
 }
