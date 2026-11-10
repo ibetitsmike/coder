@@ -377,6 +377,47 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionDelete).Returns(def)
 		},
+		"InsertProjectAgentDefinition": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.InsertProjectAgentDefinitionParams{OrganizationID: project.OrganizationID, ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().InsertProjectAgentDefinition(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
+		},
+		"GetProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.GetProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().GetProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionRead).Returns(def)
+		},
+		"ListProjectAgentDefinitionMetadata": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			rows := []forkdb.ListProjectAgentDefinitionMetadataRow{
+				testutil.Fake(t, faker, forkdb.ListProjectAgentDefinitionMetadataRow{ProjectID: uuid.NullUUID{UUID: project.ID, Valid: true}}),
+			}
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().ListProjectAgentDefinitionMetadata(gomock.Any(), project.ID).Return(rows, nil).AnyTimes()
+			check.Args(project.ID).Asserts(project, policy.ActionRead).Returns(rows)
+		},
+		"UpdateProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.UpdateProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().UpdateProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
+		},
+		"DeleteProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.DeleteProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().DeleteProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
+		},
 	}
 
 	// Every fork query needs a case, like MethodTestSuite's accounting of
@@ -479,6 +520,17 @@ func organizationAgentDefinition(organizationID uuid.UUID, name string) forkdb.A
 		Enabled:        true,
 		GroupAcl:       database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead}}},
 		UserAcl:        database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead, policy.ActionUpdate}}},
+	}
+}
+
+func projectAgentDefinition(project database.ChatProject, name string) forkdb.AgentDefinition {
+	return forkdb.AgentDefinition{
+		ID:             uuid.New(),
+		OrganizationID: project.OrganizationID,
+		ProjectID:      uuid.NullUUID{UUID: project.ID, Valid: true},
+		Name:           name,
+		Content:        "---\nname: " + name + "\n---\nReview the change.",
+		Enabled:        true,
 	}
 }
 
