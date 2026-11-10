@@ -21,7 +21,11 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 	// are embedded in each root's `children` field.
 	for (const chat of chats) {
 		chatById.set(chat.id, chat);
-		childrenById.set(chat.id, []);
+		// A stale flat entry for an embedded coordinator can follow its
+		// root, so keep the child list the root already linked.
+		if (!childrenById.has(chat.id)) {
+			childrenById.set(chat.id, []);
+		}
 		// Guard against stale cache entries: if a flat child
 		// entry appears in `chats` after its embedded parent has
 		// already set its parent link, do not overwrite the link
@@ -39,7 +43,9 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 			const embedded = new Set<string>();
 			for (const child of chat.children) {
 				chatById.set(child.id, child);
-				childrenById.set(child.id, []);
+				if (!childrenById.has(child.id)) {
+					childrenById.set(child.id, []);
+				}
 				embedded.add(child.id);
 			}
 			for (const child of chat.children) {

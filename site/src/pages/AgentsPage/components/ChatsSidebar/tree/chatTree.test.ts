@@ -51,6 +51,27 @@ describe("buildChatTree", () => {
 		expect(tree.childrenById.get("child-1")).toEqual([]);
 	});
 
+	it("keeps a nested child list when a stale flat parent entry follows its root", () => {
+		const root = chatWith({ id: "root-1", title: "Root" });
+		const child = chatWith({
+			id: "child-1",
+			parent_chat_id: "root-1",
+			root_chat_id: "root-1",
+		});
+		const grandchild = chatWith({
+			id: "grandchild-1",
+			parent_chat_id: "child-1",
+			root_chat_id: "root-1",
+		});
+		const tree = buildChatTree([
+			{ ...root, children: [grandchild, child] },
+			child,
+		]);
+
+		expect(tree.rootIds).toEqual(["root-1"]);
+		expect(tree.childrenById.get("child-1")).toEqual(["grandchild-1"]);
+	});
+
 	it("falls back to the root when an embedded child's parent is missing", () => {
 		const root = chatWith({ id: "root-1", title: "Root" });
 		const staleChild = chatWith({

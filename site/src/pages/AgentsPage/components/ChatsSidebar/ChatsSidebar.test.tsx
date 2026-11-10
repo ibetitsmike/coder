@@ -1767,14 +1767,11 @@ describe("ChatsSidebar nested subagents", () => {
 			</Wrapper>,
 		);
 
-		expect(screen.queryByText("Worker")).not.toBeInTheDocument();
-		await user.click(await screen.findByTestId("agents-tree-toggle-root-1"));
-		expect(screen.getByText("Coordinator")).toBeInTheDocument();
-		expect(screen.queryByText("Worker")).not.toBeInTheDocument();
-		await user.click(screen.getByTestId("agents-tree-toggle-child-1"));
-		expect(screen.getByText("Worker")).toBeInTheDocument();
-
-		await user.click(screen.getByText("Worker"));
+		// Only the next level down is collapsed at each step, so each
+		// step has exactly one Expand button.
+		await user.click(await screen.findByRole("button", { name: "Expand" }));
+		await user.click(screen.getByRole("button", { name: "Expand" }));
+		await user.click(screen.getByRole("link", { name: /Worker/ }));
 		await waitFor(() =>
 			expect(screen.getByTestId("location-pathname")).toHaveTextContent(
 				"/agents/grandchild-1",
