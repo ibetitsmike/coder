@@ -87,7 +87,7 @@ export const AnswersDisabled: Story = {
 	},
 };
 
-const SecretQuestion = {
+const mockSecretQuestion = {
 	...MockChatDescendantQuestion,
 	tool_call_id: "call-secret",
 	questions: [
@@ -105,7 +105,7 @@ export const SecretPending: Story = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [SecretQuestion],
+				data: [mockSecretQuestion],
 			},
 		],
 	},
@@ -113,11 +113,45 @@ export const SecretPending: Story = {
 
 export const SecretAnswersDisabled: Story = {
 	args: { canAnswer: false },
-	parameters: SecretPending.parameters,
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+};
+
+export const SecretAnswerSent: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({ data: undefined });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(canvas.getByLabelText(/API token/), "staging-token-value");
+		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
+		await canvas.findByRole("status");
+	},
 };
 
 export const SecretAnswerFailed: Story = {
-	parameters: SecretPending.parameters,
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "post").mockRejectedValue(
 			mockApiError({ message: "The secret answer is too short." }),

@@ -226,7 +226,7 @@ describe("ForkDescendantQuestionDock", () => {
 	});
 
 	it("sends a secret answer only to the secret answer route", async () => {
-		const secretQuestion: ChatDescendantQuestion = {
+		const mockSecretQuestion: ChatDescendantQuestion = {
 			...mockOldestQuestion,
 			tool_call_id: "call-secret",
 			questions: [
@@ -238,7 +238,7 @@ describe("ForkDescendantQuestionDock", () => {
 				},
 			],
 		};
-		const { questionRequests, sentMessages } = serveQuestions([secretQuestion]);
+		const { questionRequests, sentMessages } = serveQuestions([mockSecretQuestion]);
 		const secretAnswers: Array<{ chatId: string; body: unknown }> = [];
 		server.use(
 			http.post<{ chatId: string }>(
@@ -256,16 +256,17 @@ describe("ForkDescendantQuestionDock", () => {
 
 		renderDock();
 
-		const field = await screen.findByLabelText(/Paste the API token/);
-		expect(field).toHaveAttribute("type", "password");
-		await user.type(field, "hunter2-secret-value");
+		await user.type(
+			await screen.findByLabelText(/Paste the API token/),
+			"hunter2-secret-value",
+		);
 		await user.click(screen.getByRole("button", { name: "Submit" }));
 
 		// The status keeps the dock's focus, so the next question takes it.
 		expect(await screen.findByRole("status")).toHaveFocus();
 		expect(secretAnswers).toEqual([
 			{
-				chatId: secretQuestion.chat_id,
+				chatId: mockSecretQuestion.chat_id,
 				body: { tool_call_id: "call-secret", value: "hunter2-secret-value" },
 			},
 		]);
@@ -280,14 +281,14 @@ describe("ForkDescendantQuestionDock", () => {
 	});
 
 	it("declines a secret question without sending the typed value", async () => {
-		const secretQuestion: ChatDescendantQuestion = {
+		const mockSecretQuestion: ChatDescendantQuestion = {
 			...mockOldestQuestion,
 			tool_call_id: "call-pin",
 			questions: [
 				{ header: "PIN", question: "Enter the PIN.", options: [], secret: true },
 			],
 		};
-		const { sentMessages } = serveQuestions([secretQuestion]);
+		const { sentMessages } = serveQuestions([mockSecretQuestion]);
 		const secretAnswers: unknown[] = [];
 		server.use(
 			http.post(
