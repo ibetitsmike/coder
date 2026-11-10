@@ -292,6 +292,11 @@ A definition whose effort isn't a valid reasoning effort fails every spawn.
 The experiment also lets `type: "computer_use"` take `model_config_id` and `reasoning_effort`.
 That config must support computer use, and it replaces the organization's computer use model and its reasoning effort.
 A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
+With the `fork-subagent-isolation` experiment, a definition can also set `isolation` to `shared`, `worktree`, or `workspace`, and a spawn of its type that sets no `isolation` uses that value, as [Worktree isolation](#worktree-isolation) and [Workspace isolation](#workspace-isolation) describe.
+An `isolation` in the `spawn_agent` call, `shared` included, wins over the definition.
+Without the experiment, a spawn ignores the definition's `isolation`.
+Any other `isolation` value makes the definition invalid, even without the experiment.
+A workspace file with one gets the status `invalid` and adds no custom type, and the API refuses to create or update a stored definition with one with status 400, `Invalid agent definition content.`
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
 With the experiment, the API also stores definitions for one user in an organization, for a whole organization, and for a chat project.
@@ -390,7 +395,8 @@ An organization admin can also change the organization values in the **Subagent 
 ### Worktree isolation
 
 When the deployment enables the `fork-subagent-isolation` experiment, `spawn_agent` also takes `isolation`, `repo_path`, and `base_branch`.
-With `isolation: "shared"`, the default, the child works in its parent's workspace and working directory.
+A custom type's definition can set the `isolation` of a spawn that sets none, as [Custom agent types](#custom-agent-types) describes.
+With `isolation: "shared"`, the default without such a definition, the child works in its parent's workspace and working directory.
 With `isolation: "worktree"`, `spawn_agent` creates a git worktree for the child in its parent's workspace before the child starts.
 The worktree comes from the git repository at `repo_path`, an absolute path.
 When you omit `repo_path`, it comes from the worktree that the parent works in, if any, else from the workspace agent's directory.
@@ -417,7 +423,7 @@ A relative `workdir` of `execute`, and a relative path of `read_file`, `write_fi
 An absolute path or an absolute `workdir` still reaches the rest of the workspace.
 With `fork-nested-subagents`, a `shared` child of the worktree child works in the same worktree, and its system message says so.
 
-`repo_path` or `base_branch` without `isolation: "worktree"` fails with `repo_path and base_branch need isolation worktree`.
+`repo_path` or `base_branch` fails with `repo_path and base_branch need isolation worktree` unless the call sets `isolation: "worktree"`, or sets no `isolation` and the custom type's definition sets `isolation: worktree`.
 `isolation: "worktree"` fails for a `computer_use` child, in a chat without a workspace, and when you omit `repo_path`, the parent works in no worktree, and the workspace agent has no directory.
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
@@ -535,8 +541,8 @@ Checked against fork `main` at `50e9121c3b`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:423-440`, `:454-482`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:487-499`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:425-442`, `:456-484`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:489-501`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
@@ -544,7 +550,7 @@ Checked against fork `main` at `50e9121c3b`:
 - Every descendant embedded under its root, only with `fork-nested-subagents`: `coderd/fork_chat_tree.go:30-37`, `:52-71`, from `coderd/exp_chats.go:584` and `:1893`, grouped by `root_chat_id`, `coderd/database/db2sdk/db2sdk.go:2311-2318`.
   Each descendant placed in the sidebar under its own parent, `site/src/pages/AgentsPage/components/ChatsSidebar/tree/chatTree.ts:51-60`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
-  Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
+  Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:67-81`, `:108-112`, `:180-190`.
   Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-57`, `:108-118`, called from `subagent_catalog.go:185` and `:233`.
   The definition's body becomes the child's system prompt, `fork_agent_definitions.go:382`.
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:353-364`, and the model match, `:389-412`.
@@ -553,25 +559,27 @@ Checked against fork `main` at `50e9121c3b`:
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:414-431`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1877-1878`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
   Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
-- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:309-317`, `:398`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:754-757`, `:946-948`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:312-320`, `:400`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:754-757`, `:946-948`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
-  Orchestration guidance dropped, `fork_subagents.go:514-516`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:758-760`.
+  Orchestration guidance dropped, `fork_subagents.go:516-518`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:758-760`.
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:710-713`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
-- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:101-115`, result fields, `:135-141`.
-  Worktree creation and its errors, `fork_isolation.go:172-220`, `:245-247`, from the worktree that the parent works in when `repo_path` is omitted, `:181-188`, removed only when the spawn fails, `:223-236`, called at spawn, `coderd/x/chatd/fork_subagents.go:294`, `:333-346`.
+- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, result fields, `:152-158`.
+  The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.
+  An invalid definition refused by the API, `coderd/fork_agent_definitions.go:206`, `:229`, `:244-254`, and `invalid` in the workspace's context, `agent/agentcontext/fork_agents.go:122-130`.
+  Worktree creation and its errors, `fork_isolation.go:189-237`, `:262-264`, from the worktree that the parent works in when `repo_path` is omitted, `:198-205`, removed only when the spawn fails, `:240-253`, called at spawn, `coderd/x/chatd/fork_subagents.go:294`, `:335-348`.
   Removed after a root archive with the experiment on, `coderd/x/chatd/fork_family_lock.go:28-40`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
   The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:51`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
   The **Branch:** and **Worktree:** lines and the diff summary on the cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:72-120`, `:151`, `:171`, `:179-202`.
-  Branch name, `fork_isolation.go:258-280`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
-  The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:295-305`, `:342-345`.
+  Branch name, `fork_isolation.go:275-297`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
+  The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:298-308`, `:344-347`.
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
-- Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-89`, checks, `:108-111`, result fields, `:135-141`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
+- Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-101`, checks, `:117-118`, `:72-74`, result fields, `:152-158`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
   **Workspace:** or the error on the cards, only with the experiment, `ForkSubagentFields.tsx:121-134`, `:151`, `:171`, `:194`.
-  The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:322-332`, `:411-416`.
+  The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:325-334`, `:413-418`.
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
   Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:28-40`, `auto_archive.go:148-152`, after the worktree cleanup, whatever it keeps, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
@@ -595,7 +603,7 @@ Checked against fork `main` at `50e9121c3b`:
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:219-222`.
-  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:376-379`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
+  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:378-381`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1937`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:155-159`, `:166-170`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
