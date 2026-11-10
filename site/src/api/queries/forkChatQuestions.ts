@@ -76,8 +76,8 @@ export const answerChatDescendantQuestion = (
 	});
 
 /**
- * Sends the value of a secret question to the descendant chat that asked it,
- * then reloads the root chat's pending questions.
+ * Sends the value of a secret question, or declines it, to the descendant
+ * chat that asked it, then reloads the root chat's pending questions.
  */
 export const answerChatDescendantSecretQuestion = (
 	queryClient: QueryClient,
@@ -87,13 +87,16 @@ export const answerChatDescendantSecretQuestion = (
 		mutationFn: ({
 			question,
 			value,
+			declined,
 		}: {
 			question: ChatDescendantQuestion;
 			value: string;
+			declined?: boolean;
 		}) =>
 			answerChatSecretQuestion(question.chat_id, {
 				tool_call_id: question.tool_call_id,
 				value,
+				declined,
 			}),
 		onSuccess: (_, { question }) =>
 			invalidateDescendantChat(queryClient, question.chat_id),

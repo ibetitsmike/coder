@@ -220,13 +220,14 @@ var errSecretQuestionQueued = xerrors.New("messages wait in the queue of this ch
 // new question.
 var errSecretAnswerQueued = xerrors.New("the user answered your secret question, and the message that says so waits in the queue of this chat; end your turn to read it, then ask again")
 
-// recordDescendantQuestion replaces the question of chatID and drops the
-// secret answers of its earlier questions. It takes the row lock of the
-// chat, which SendMessage holds while it refuses messages to a chat with a
-// pending secret question, so no message can reach the queue between the
-// check of the queue and the question. Only the report of an answer can
-// reach the queue while a secret question is pending, so a queued message
-// then refuses any new question.
+// recordDescendantQuestion replaces the question of chatID. The secret
+// answers of earlier questions stay until their TTL, so tool output that
+// shows a value a tool persisted, such as a file read back, stays scrubbed.
+// It takes the row lock of the chat, which SendMessage holds while it refuses
+// messages to a chat with a pending secret question, so no message can reach
+// the queue between the check of the queue and the question. Only the report
+// of an answer can reach the queue while a secret question is pending, so a
+// queued message then refuses any new question.
 func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage, secret bool) error {
 	return forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
 		if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
@@ -248,14 +249,12 @@ func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID,
 				return errSecretAnswerQueued
 			}
 		}
-		if _, err := ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		_, err = ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
 			ChatID:     chatID,
 			ToolCallID: callID,
 			Questions:  questions,
-		}); err != nil {
-			return err
-		}
-		return ftx.DeleteChatSecretAnswersByChatID(ctx, chatID)
+		})
+		return err
 	}, nil)
 }
 

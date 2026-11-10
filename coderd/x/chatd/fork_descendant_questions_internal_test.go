@@ -154,7 +154,8 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.JSONEq(t, string(result["questions"]), string(row.Questions))
 	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
 	require.NoError(t, err)
-	require.Empty(t, answers, "a new question drops the secret answers of earlier ones")
+	require.Len(t, answers, 1, "a new question keeps the secret answers of earlier ones, which still scrub tool output")
+	require.Equal(t, "call-0", answers[0].ToolCallID)
 }
 
 func TestDescendantQuestionWaitAgent(t *testing.T) {

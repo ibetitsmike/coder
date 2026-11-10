@@ -278,4 +278,39 @@ describe("ForkDescendantQuestionDock", () => {
 			expect(questionRequests).toEqual([MockChat.id, MockChat.id]),
 		);
 	});
+
+	it("declines a secret question without sending the typed value", async () => {
+		const secretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-pin",
+			questions: [
+				{ header: "PIN", question: "Enter the PIN.", options: [], secret: true },
+			],
+		};
+		const { sentMessages } = serveQuestions([secretQuestion]);
+		const secretAnswers: unknown[] = [];
+		server.use(
+			http.post(
+				"/api/v2/chats/fork/:chatId/questions/secret-answer",
+				async ({ request }) => {
+					secretAnswers.push(await request.json());
+					return new HttpResponse(null, { status: 204 });
+				},
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		await user.type(await screen.findByLabelText(/Enter the PIN/), "1234");
+		await user.click(screen.getByRole("button", { name: "Decline" }));
+
+		expect(await screen.findByRole("status")).toHaveTextContent(
+			"Secret question declined.",
+		);
+		expect(secretAnswers).toEqual([
+			{ tool_call_id: "call-pin", value: "", declined: true },
+		]);
+		expect(sentMessages).toEqual([]);
+	});
 });

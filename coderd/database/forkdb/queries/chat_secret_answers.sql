@@ -11,9 +11,6 @@ ORDER BY created_at;
 -- name: DeleteChatSecretAnswer :exec
 DELETE FROM chat_secret_answers WHERE chat_id = @chat_id AND tool_call_id = @tool_call_id;
 
--- name: DeleteChatSecretAnswersByChatID :exec
-DELETE FROM chat_secret_answers WHERE chat_id = @chat_id;
-
 -- name: DeleteOldChatSecretAnswers :execrows
 -- Deletes a batch of answers past the 24 hour TTL of
 -- GetChatSecretAnswersByChatID, on the same clock.

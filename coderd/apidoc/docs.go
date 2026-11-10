@@ -25550,6 +25550,10 @@ const docTemplate = `{
         "codersdk.ChatSecretAnswerRequest": {
             "type": "object",
             "properties": {
+                "declined": {
+                    "description": "Declined answers without a value, for a value the user cannot or\nwill not give as a secret, such as one too short to hide. Value must\nbe empty.",
+                    "type": "boolean"
+                },
                 "tool_call_id": {
                     "type": "string"
                 },

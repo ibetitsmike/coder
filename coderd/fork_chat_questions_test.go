@@ -296,6 +296,27 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		require.NoError(t, client.AnswerChatSecretQuestion(ctx, escaped.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: callID, Value: secret}), callID)
 	}
 
+	// The user can decline a secret question, such as for a value too
+	// short to hide, which answers it without a value.
+	_, declined, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	ask(declined, "call-decline", `[{"header": "PIN", "question": "Enter the PIN.", "secret": true}]`)
+	err = client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-decline", Value: secret, Declined: true})
+	requireStatus(t, http.StatusBadRequest, err)
+	err = client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-other", Declined: true})
+	requireStatus(t, http.StatusConflict, err)
+	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-normal", Declined: true})
+	requireStatus(t, http.StatusBadRequest, err)
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-decline", Declined: true}))
+	_, err = fdb.GetPendingChatDescendantQuestion(sysCtx, declined.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows, "declining answers the secret question")
+	answers, err = fdb.GetChatSecretAnswersByChatID(sysCtx, declined.ID)
+	require.NoError(t, err)
+	require.Empty(t, answers)
+	_, err = client.CreateChatMessage(ctx, declined.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText, Text: "The PIN is 1234.",
+	}}})
+	require.NoError(t, err, "a declined secret question no longer refuses messages")
+
 	// A normal question still takes a normal answer.
 	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
 	require.NoError(t, err)

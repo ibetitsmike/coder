@@ -208,6 +208,7 @@ const SecretQuestionForm: React.FC<{
 		answerChatDescendantSecretQuestion(queryClient, rootChatId),
 	);
 	const isSubmitting = answerMutation.isPending;
+	const isSendingValue = isSubmitting && !answerMutation.variables.declined;
 
 	// The question stays in the dock until the questions reload. The status
 	// takes the focus of the submit button it replaces, so the section still
@@ -224,7 +225,9 @@ const SecretQuestionForm: React.FC<{
 				tabIndex={-1}
 				className="text-[13px] text-content-secondary focus:outline-hidden"
 			>
-				Secret answer sent.
+				{answerMutation.variables.declined
+					? "Secret question declined."
+					: "Secret answer sent."}
 			</p>
 		);
 	}
@@ -279,18 +282,33 @@ const SecretQuestionForm: React.FC<{
 					</span>
 				</div>
 			)}
-			<Button
-				type="submit"
-				size="sm"
-				variant="outline"
-				className="mt-3"
-				disabled={!canAnswer || isSubmitting || value === ""}
-			>
-				{isSubmitting && (
-					<LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-				)}
-				{isSubmitting ? "Submitting..." : "Submit"}
-			</Button>
+			<div className="mt-3 flex items-center gap-2">
+				<Button
+					type="submit"
+					size="sm"
+					variant="outline"
+					disabled={!canAnswer || isSubmitting || value === ""}
+				>
+					{isSendingValue && (
+						<LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+					)}
+					{isSendingValue ? "Submitting..." : "Submit"}
+				</Button>
+				<Button
+					type="button"
+					size="sm"
+					variant="subtle"
+					disabled={!canAnswer || isSubmitting}
+					onClick={() =>
+						answerMutation.mutate(
+							{ question, value: "", declined: true },
+							{ onSuccess: () => setValue("") },
+						)
+					}
+				>
+					Decline
+				</Button>
+			</div>
 		</form>
 	);
 };

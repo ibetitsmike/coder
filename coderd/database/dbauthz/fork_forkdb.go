@@ -101,14 +101,6 @@ func (f *forkQuerier) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.Del
 	return f.db.DeleteChatSecretAnswer(ctx, arg)
 }
 
-// DeleteChatSecretAnswersByChatID authorizes as an update of the owning chat.
-func (f *forkQuerier) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
-	if err := f.authorizeChat(ctx, policy.ActionUpdate, chatID); err != nil {
-		return err
-	}
-	return f.db.DeleteChatSecretAnswersByChatID(ctx, chatID)
-}
-
 func (f *forkQuerier) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
 		return err

@@ -107,11 +107,23 @@ var ErrSecretAnswerNotPending = xerrors.New("the question of the secret answer i
 
 type secretAnswerReportKey struct{}
 
+type secretAnswerReport struct {
+	toolCallID string
+	declined   bool
+}
+
 // WithSecretAnswerReport marks ctx as the send of the message that reports
 // the stored secret answer to the question of toolCallID, the one message
 // that may answer a secret question.
 func WithSecretAnswerReport(ctx context.Context, toolCallID string) context.Context {
-	return context.WithValue(ctx, secretAnswerReportKey{}, toolCallID)
+	return context.WithValue(ctx, secretAnswerReportKey{}, secretAnswerReport{toolCallID: toolCallID})
+}
+
+// WithSecretAnswerDecline marks ctx as the send of the message that says the
+// user declined the secret question of toolCallID. Unlike a report, it needs
+// no stored answer.
+func WithSecretAnswerDecline(ctx context.Context, toolCallID string) context.Context {
+	return context.WithValue(ctx, secretAnswerReportKey{}, secretAnswerReport{toolCallID: toolCallID, declined: true})
 }
 
 // forkValidateSubagentResume returns an error when a message_agent send would
@@ -132,7 +144,7 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 		return nil
 	}
 	resume, _ := ctx.Value(subagentResumeKey{}).(bool)
-	reportCallID, report := ctx.Value(secretAnswerReportKey{}).(string)
+	report, isReport := ctx.Value(secretAnswerReportKey{}).(secretAnswerReport)
 	if !resume && !inTx {
 		return nil
 	}
@@ -145,16 +157,19 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return xerrors.Errorf("get pending question of chat %s: %w", target.ID, err)
 	}
-	if report {
-		if !pending || question.ToolCallID != reportCallID {
+	if isReport {
+		if !pending || question.ToolCallID != report.toolCallID {
 			return ErrSecretAnswerNotPending
+		}
+		if report.declined {
+			return nil
 		}
 		answers, err := fdb.GetChatSecretAnswersByChatID(ctx, target.ID)
 		if err != nil {
 			return xerrors.Errorf("get secret answers of chat %s: %w", target.ID, err)
 		}
 		if !slices.ContainsFunc(answers, func(answer forkdb.ChatSecretAnswer) bool {
-			return answer.ToolCallID == reportCallID
+			return answer.ToolCallID == report.toolCallID
 		}) {
 			return ErrSecretAnswerNotPending
 		}
