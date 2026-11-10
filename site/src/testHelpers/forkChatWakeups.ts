@@ -116,3 +116,44 @@ export const MockChatWakeupCompleted: ChatWakeup = {
 	created_at: "2026-11-10T06:00:00Z",
 	updated_at: "2026-11-10T07:00:00Z",
 };
+
+export const MockScheduleWakeupArgs = {
+	prompt: MockChatWakeupInterval.prompt,
+	interval_seconds: 300,
+	max_runs: 10,
+};
+
+export const MockScheduleWakeupResult = {
+	id: MockChatWakeupInterval.id,
+	kind: "interval",
+	next_run_at: "2099-01-01T09:00:00Z",
+	max_runs: 10,
+};
+
+export const MockWaitForEventsResult = {
+	id: MockChatWakeupEvents.id,
+	expires_at: "2099-01-02T08:00:00Z",
+	children: [
+		{
+			chat_id: "12345678-abcd-4123-8123-123456789abc",
+			title: "Fix the flaky test",
+			status: "running",
+		},
+		{
+			chat_id: "23456789-bcde-4234-8234-23456789abcd",
+			title: "Update the docs",
+			status: "pending",
+		},
+	],
+	pull_request: {
+		url: "https://github.com/example/repo/pull/1",
+		on: ["review", "comment", "checks", "closed"],
+		head_sha: "0123456789abcdef0123456789abcdef01234567",
+		checks_state: "pending",
+	},
+};
+
+export const MockNotifyUserArgs = {
+	title: "Deploy finished",
+	message: "The staging deploy passed all checks.",
+};

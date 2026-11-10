@@ -4,8 +4,11 @@
 import type React from "react";
 import type { Experiment } from "#/api/typesGenerated";
 import { ForkChatTranscriptToolRenderer } from "./ForkChatTranscriptTool";
+import { ForkNotifyUserToolRenderer } from "./ForkNotifyUserTool";
+import { ForkScheduleWakeupToolRenderer } from "./ForkScheduleWakeupTool";
 import { ForkSearchChatsToolRenderer } from "./ForkSearchChatsTool";
 import { ForkTodoToolRenderer } from "./ForkTodoTool";
+import { ForkWaitForEventsToolRenderer } from "./ForkWaitForEventsTool";
 import { useForkExperiment } from "./forkToolUtils";
 import type { toolRenderers } from "./Tool";
 
@@ -52,6 +55,21 @@ export const createForkToolRenderers = (
 		read_chat_transcript: gate(
 			"fork-chat-todos",
 			ForkChatTranscriptToolRenderer,
+			fallback,
+		),
+		schedule_wakeup: gate(
+			"fork-chat-wakeups",
+			ForkScheduleWakeupToolRenderer,
+			fallback,
+		),
+		wait_for_events: gate(
+			"fork-chat-wakeups",
+			ForkWaitForEventsToolRenderer,
+			fallback,
+		),
+		notify_user: gate(
+			"fork-chat-wakeups",
+			ForkNotifyUserToolRenderer,
 			fallback,
 		),
 	};
