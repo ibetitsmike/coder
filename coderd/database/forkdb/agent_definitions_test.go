@@ -161,4 +161,55 @@ func TestAgentDefinitions(t *testing.T) {
 		_, err = getOtherOrg()
 		require.NoError(t, err, "the delete stays in its organization")
 	})
+
+	t.Run("ProjectTier", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitShort)
+		user := dbgen.User(t, db, database.User{})
+		project := dbgen.ChatProject(t, db, database.ChatProject{OrganizationID: org.ID, OwnerID: user.ID})
+		insertProject := func(orgID uuid.UUID, name string) (forkdb.AgentDefinition, error) {
+			return fdb.InsertProjectAgentDefinition(ctx, forkdb.InsertProjectAgentDefinitionParams{
+				OrganizationID: orgID,
+				ProjectID:      project.ID,
+				Name:           name,
+				Content:        "Review the change.",
+			})
+		}
+
+		// The organization of a project-tier row must own the project.
+		_, err := insertProject(otherOrg.ID, "reviewer")
+		require.True(t, database.IsCheckViolation(err, "agent_definitions_project_organization"), "insert into another organization: %v", err)
+		inserted, err := insertProject(org.ID, "reviewer")
+		require.NoError(t, err)
+		_, err = sqlDB.ExecContext(ctx, `UPDATE agent_definitions SET organization_id = $1 WHERE id = $2`, otherOrg.ID, inserted.ID)
+		require.True(t, database.IsCheckViolation(err, "agent_definitions_project_organization"), "move to another organization: %v", err)
+
+		_, err = insertProject(org.ID, "writer")
+		require.NoError(t, err)
+		_, err = insertProject(org.ID, "reviewer")
+		require.True(t, database.IsUniqueViolation(err), "a project has one definition per name: %v", err)
+		_, err = fdb.InsertOrganizationAgentDefinition(ctx, forkdb.InsertOrganizationAgentDefinitionParams{OrganizationID: org.ID, Name: "project-shadow", Content: "Review the change."})
+		require.NoError(t, err)
+
+		updated, err := fdb.UpdateProjectAgentDefinitionByName(ctx, forkdb.UpdateProjectAgentDefinitionByNameParams{
+			ProjectID: project.ID,
+			Name:      "reviewer",
+			Enabled:   sql.NullBool{Bool: false, Valid: true},
+		})
+		require.NoError(t, err)
+		require.False(t, updated.Enabled)
+		got, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"})
+		require.NoError(t, err)
+		require.Equal(t, updated, got)
+		rows, err := fdb.ListProjectAgentDefinitionMetadata(ctx, project.ID)
+		require.NoError(t, err)
+		require.Len(t, rows, 2, "the list holds only the project's rows")
+		require.Equal(t, "reviewer", rows[0].Name)
+		require.Equal(t, "writer", rows[1].Name)
+
+		_, err = fdb.DeleteProjectAgentDefinitionByName(ctx, forkdb.DeleteProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"})
+		require.NoError(t, err)
+		_, err = fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"})
+		require.ErrorIs(t, err, sql.ErrNoRows)
+	})
 }

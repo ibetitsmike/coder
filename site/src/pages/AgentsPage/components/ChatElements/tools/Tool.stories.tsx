@@ -27,6 +27,7 @@ import { withWebSocket } from "#/testHelpers/storybook";
 import { ChatWorkspaceContext } from "../../../context/ChatWorkspaceContext";
 import { BlockList } from "../../ChatConversation/MessageBlocks";
 import { DESKTOP_SCREENSHOT_BASE64 } from "./__fixtures__/desktopScreenshot";
+import { forkToolShowcaseItems } from "./__fixtures__/forkToolShowcaseItems";
 import { ACPToolNames } from "./acpToolNames";
 import { DesktopPanelContext } from "./DesktopPanelContext";
 import { Tool, toolRendererNames } from "./Tool";
@@ -337,6 +338,7 @@ const allToolShowcaseItems: ToolShowcaseItem[] = [
 		args: { example: true },
 		result: { ok: true },
 	},
+	...forkToolShowcaseItems,
 ];
 
 // ---------------------------------------------------------------------------

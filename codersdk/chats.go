@@ -386,6 +386,10 @@ type ChatContextResource struct {
 	// SkillName and SkillDescription are populated only for skill kinds.
 	SkillName        string `json:"skill_name,omitempty"`
 	SkillDescription string `json:"skill_description,omitempty"`
+	// SubagentName and SubagentDescription are populated only for OK
+	// subagent kinds.
+	SubagentName        string `json:"subagent_name,omitempty"`
+	SubagentDescription string `json:"subagent_description,omitempty"`
 	// Tools lists the tools exposed by an MCP server. Populated only for the
 	// mcp_server kind; nil otherwise.
 	Tools []ChatContextTool `json:"tools,omitempty"`

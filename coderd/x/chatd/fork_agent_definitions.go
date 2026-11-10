@@ -1,14 +1,14 @@
 package chatd
 
 // This file is fork code: it resolves custom agent types for spawn_agent from
-// the chat's pinned subagent context resources behind the
+// the chat's pinned subagent context resources and the stored personal,
+// organization and project agent definitions behind the
 // fork-agent-definitions experiment. Upstream's subagent_catalog.go calls
 // forkSubagentDefinitions and forkLookupSubagentDefinition, which return only
 // the built-in types when the experiment is off.
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -18,7 +18,10 @@ import (
 	"cdr.dev/slog/v3"
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
+	skillspkg "github.com/coder/coder/v2/coderd/x/skills"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -42,26 +45,105 @@ func forkSubagentDefinitions(ctx context.Context, p *Server, chat database.Chat)
 }
 
 // forkLookupSubagentDefinition returns the subagent type with the given id.
-// Built-in types win over custom types with the same name.
+// Built-in types win over custom types with the same name. A custom type
+// matches its bare name when only one tier defines it, and always matches
+// its tier-qualified name, such as personal/reviewer.
 func forkLookupSubagentDefinition(ctx context.Context, p *Server, chat database.Chat, id string) (subagentDefinition, bool) {
 	if def, ok := lookupSubagentDefinition(id); ok {
 		return def, true
 	}
-	for _, def := range customSubagentDefinitions(ctx, p, chat) {
-		if def.id == id {
-			return def, true
+	types := customAgentTypes(ctx, p, chat)
+	resolved := make([]skillspkg.ResolvedSkill, 0, len(types))
+	for _, agentType := range types {
+		resolved = append(resolved, agentType.ResolvedSkill)
+	}
+	match, err := skillspkg.Lookup(resolved, id)
+	if err != nil {
+		return subagentDefinition{}, false
+	}
+	for _, agentType := range types {
+		if agentType.ResolvedSkill == match {
+			return customSubagentDefinition(agentType, agentType.Description), true
 		}
 	}
 	return subagentDefinition{}, false
 }
 
-// customSubagentDefinitions returns the custom agent types pinned to chat,
-// sorted by name. Custom types are optional, so read and parse failures
-// drop types instead of failing the turn.
+// customAgentType is a custom agent type from one tier. load reads and
+// parses its definition; stored tiers read it only when the type spawns.
+type customAgentType struct {
+	skillspkg.ResolvedSkill
+	load func(context.Context) (workspacesdk.AgentDefinition, error)
+}
+
+// customSubagentDefinitions returns the chat's custom agent types sorted by
+// name, with the description budget applied.
 func customSubagentDefinitions(ctx context.Context, p *Server, chat database.Chat) []subagentDefinition {
+	types := customAgentTypes(ctx, p, chat)
+	descriptions := make([]string, 0, len(types))
+	for _, agentType := range types {
+		descriptions = append(descriptions, agentType.Description)
+	}
+	descriptions = budgetCustomAgentDescriptions(descriptions)
+	out := make([]subagentDefinition, 0, len(types))
+	for i, agentType := range types {
+		out = append(out, customSubagentDefinition(agentType, descriptions[i]))
+	}
+	return out
+}
+
+// customAgentTypes merges the custom agent types pinned to the chat's
+// workspace with the chat owner's personal types, the organization types
+// shared with the owner and the types of the chat's project, using the skill
+// alias rules: a name defined in several tiers is only reachable by its
+// tier-qualified name. Built-in type names are reserved in every tier. Custom
+// types are optional, so read and parse failures drop types instead of
+// failing the turn.
+func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []customAgentType {
 	if !p.agentDefinitionsEnabled() || chat.ID == uuid.Nil {
 		return nil
 	}
+	tiers := map[skillspkg.Source][]skillspkg.Skill{}
+	loaders := map[string]func(context.Context) (workspacesdk.AgentDefinition, error){}
+	add := func(agentType tierAgentType) {
+		alias := skillspkg.QualifiedAlias(agentType.source, agentType.name)
+		if _, builtin := lookupSubagentDefinition(agentType.name); builtin || loaders[alias] != nil {
+			return
+		}
+		loaders[alias] = agentType.load
+		tiers[agentType.source] = append(tiers[agentType.source], skillspkg.Skill{Name: agentType.name, Description: agentType.description})
+	}
+	for _, def := range workspaceAgentDefinitions(ctx, p, chat) {
+		add(tierAgentType{
+			source:      skillspkg.SourceWorkspace,
+			name:        def.Name,
+			description: def.Description,
+			load:        func(context.Context) (workspacesdk.AgentDefinition, error) { return def, nil },
+		})
+	}
+	for _, agentType := range p.storedAgentTypes(ctx, chat) {
+		add(agentType)
+	}
+
+	merged := skillspkg.MergeSkills(
+		skillspkg.SourceSkills{Source: skillspkg.SourcePersonal, Skills: tiers[skillspkg.SourcePersonal]},
+		skillspkg.SourceSkills{Source: skillspkg.SourceOrganization, Skills: tiers[skillspkg.SourceOrganization]},
+		skillspkg.SourceSkills{Source: skillspkg.SourceProject, Skills: tiers[skillspkg.SourceProject]},
+		skillspkg.SourceSkills{Source: skillspkg.SourceWorkspace, Skills: tiers[skillspkg.SourceWorkspace]},
+	)
+	out := make([]customAgentType, 0, len(merged))
+	for _, resolved := range merged {
+		out = append(out, customAgentType{
+			ResolvedSkill: resolved,
+			load:          loaders[skillspkg.QualifiedAlias(resolved.Source, resolved.Name)],
+		})
+	}
+	return out
+}
+
+// workspaceAgentDefinitions parses the agent definitions pinned to chat
+// from its workspace.
+func workspaceAgentDefinitions(ctx context.Context, p *Server, chat database.Chat) []workspacesdk.AgentDefinition {
 	resources, err := p.db.ListChatContextResourcesByChatID(ctx, chat.ID)
 	if err != nil {
 		p.logger.Warn(ctx, "failed to list chat context resources for custom agent types",
@@ -69,7 +151,6 @@ func customSubagentDefinitions(ctx context.Context, p *Server, chat database.Cha
 		return nil
 	}
 	var defs []workspacesdk.AgentDefinition
-	seen := map[string]bool{}
 	for _, resource := range resources {
 		if resource.BodyKind != database.WorkspaceAgentContextBodyKindSubagent ||
 			resource.Status != database.WorkspaceAgentContextResourceStatusOk {
@@ -83,26 +164,144 @@ func customSubagentDefinitions(ctx context.Context, p *Server, chat database.Cha
 		if err != nil {
 			continue
 		}
-		if _, builtin := lookupSubagentDefinition(def.Name); builtin || seen[def.Name] {
-			continue
-		}
-		seen[def.Name] = true
 		defs = append(defs, def)
 	}
-	slices.SortFunc(defs, func(a, b workspacesdk.AgentDefinition) int {
-		return strings.Compare(a.Name, b.Name)
-	})
+	return defs
+}
 
-	descriptions := make([]string, 0, len(defs))
-	for _, def := range defs {
-		descriptions = append(descriptions, def.Description)
+// tierAgentType is a custom agent type from one tier, before the tiers
+// are merged.
+type tierAgentType struct {
+	source      skillspkg.Source
+	name        string
+	description string
+	load        func(context.Context) (workspacesdk.AgentDefinition, error)
+}
+
+// storedAgentTypes returns the chat owner's enabled personal agent
+// definitions in the chat's organization, the enabled organization agent
+// definitions shared with the owner, and the enabled agent definitions of
+// the chat's project. Personal and organization reads run as the owner, so
+// dbauthz applies organization membership and the definitions' ACLs.
+// Project reads run as chatd once the owner passes the usable-project check,
+// like project skills, so role grants do not expose a project's types.
+func (p *Server) storedAgentTypes(ctx context.Context, chat database.Chat) []tierAgentType {
+	logger := p.logger.With(slog.F("chat_id", chat.ID))
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		logger.Warn(ctx, "fork queries unavailable for stored agent definitions", slog.Error(err))
+		return nil
 	}
-	descriptions = budgetCustomAgentDescriptions(descriptions)
-	out := make([]subagentDefinition, 0, len(defs))
-	for i, def := range defs {
-		out = append(out, customSubagentDefinition(def, descriptions[i]))
+	owner, err := p.chatOwnerSubject(ctx, chat.OwnerID)
+	if err != nil {
+		logger.Warn(ctx, "failed to load chat owner for stored agent definitions", slog.Error(err))
+		return nil
+	}
+	asOwner := func(ctx context.Context) context.Context {
+		//nolint:gocritic // Stored agent definition ACLs are evaluated against the chat owner.
+		return dbauthz.As(ctx, owner)
+	}
+
+	var out []tierAgentType
+	personal, err := fdb.ListUserAgentDefinitionMetadata(asOwner(ctx), forkdb.ListUserAgentDefinitionMetadataParams{
+		OrganizationID: chat.OrganizationID,
+		UserID:         chat.OwnerID,
+	})
+	if err != nil {
+		logger.Warn(ctx, "failed to list personal agent definitions", slog.Error(err))
+	}
+	for _, row := range personal {
+		if !row.Enabled {
+			continue
+		}
+		out = append(out, tierAgentType{
+			source:      skillspkg.SourcePersonal,
+			name:        row.Name,
+			description: row.Description,
+			load: func(ctx context.Context) (workspacesdk.AgentDefinition, error) {
+				stored, err := fdb.GetUserAgentDefinitionByName(asOwner(ctx), forkdb.GetUserAgentDefinitionByNameParams{
+					OrganizationID: chat.OrganizationID,
+					UserID:         chat.OwnerID,
+					Name:           row.Name,
+				})
+				if err != nil {
+					return workspacesdk.AgentDefinition{}, xerrors.Errorf("load agent %q: %w", row.Name, err)
+				}
+				return parseStoredAgentDefinition(stored)
+			},
+		})
+	}
+	organization, err := fdb.ListOrganizationAgentDefinitionMetadata(asOwner(ctx), chat.OrganizationID)
+	if err != nil {
+		logger.Warn(ctx, "failed to list organization agent definitions", slog.Error(err))
+	}
+	for _, row := range organization {
+		if !row.Enabled {
+			continue
+		}
+		out = append(out, tierAgentType{
+			source:      skillspkg.SourceOrganization,
+			name:        row.Name,
+			description: row.Description,
+			load: func(ctx context.Context) (workspacesdk.AgentDefinition, error) {
+				stored, err := fdb.GetOrganizationAgentDefinitionByName(asOwner(ctx), forkdb.GetOrganizationAgentDefinitionByNameParams{
+					OrganizationID: chat.OrganizationID,
+					Name:           row.Name,
+				})
+				if err != nil {
+					return workspacesdk.AgentDefinition{}, xerrors.Errorf("load agent %q: %w", row.Name, err)
+				}
+				return parseStoredAgentDefinition(stored)
+			},
+		})
+	}
+	projectID := p.resolveUsableChatProjectID(ctx, logger, chat)
+	if !projectID.Valid {
+		return out
+	}
+	project, err := fdb.ListProjectAgentDefinitionMetadata(ctx, projectID.UUID)
+	if err != nil {
+		logger.Warn(ctx, "failed to list project agent definitions", slog.F("project_id", projectID.UUID), slog.Error(err))
+	}
+	for _, row := range project {
+		if !row.Enabled {
+			continue
+		}
+		out = append(out, tierAgentType{
+			source:      skillspkg.SourceProject,
+			name:        row.Name,
+			description: row.Description,
+			load: func(ctx context.Context) (workspacesdk.AgentDefinition, error) {
+				stored, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{
+					ProjectID: projectID.UUID,
+					Name:      row.Name,
+				})
+				if err != nil {
+					return workspacesdk.AgentDefinition{}, xerrors.Errorf("load agent %q: %w", row.Name, err)
+				}
+				return parseStoredAgentDefinition(stored)
+			},
+		})
 	}
 	return out
+}
+
+// parseStoredAgentDefinition parses a stored agent definition read at spawn
+// time. The row may have been disabled since the catalog listed it, and its
+// content must keep the row's name, which the catalog checked against the
+// built-in types.
+func parseStoredAgentDefinition(row forkdb.AgentDefinition) (workspacesdk.AgentDefinition, error) {
+	if !row.Enabled {
+		return workspacesdk.AgentDefinition{}, xerrors.Errorf("agent %q is disabled", row.Name)
+	}
+	def, err := workspacesdk.ParseAgentDefinition(row.Content, row.Name)
+	if err != nil {
+		return workspacesdk.AgentDefinition{}, xerrors.Errorf("parse agent %q: %w", row.Name, err)
+	}
+	if def.Name != row.Name {
+		return workspacesdk.AgentDefinition{}, xerrors.Errorf("agent %q content names %q", row.Name, def.Name)
+	}
+	return def, nil
 }
 
 // budgetCustomAgentDescriptions collapses whitespace in each description,
@@ -135,11 +334,15 @@ func budgetCustomAgentDescriptions(descriptions []string) []string {
 	return out
 }
 
-func customSubagentDefinition(def workspacesdk.AgentDefinition, description string) subagentDefinition {
+func customSubagentDefinition(agentType customAgentType, description string) subagentDefinition {
 	return subagentDefinition{
-		id:          def.Name,
+		id:          agentType.Alias,
 		description: description,
 		buildOptions: func(ctx context.Context, p *Server, parent database.Chat, turnParent database.Chat, currentModelConfigID uuid.UUID, explicitModelConfigID *uuid.UUID, prompt string) (childSubagentChatOptions, error) {
+			def, err := agentType.load(ctx)
+			if err != nil {
+				return childSubagentChatOptions{}, err
+			}
 			base, ok := lookupSubagentDefinition(def.BaseType)
 			if !ok {
 				return childSubagentChatOptions{}, xerrors.Errorf("agent %q has unknown base type %q", def.Name, def.BaseType)
@@ -149,7 +352,6 @@ func customSubagentDefinition(def workspacesdk.AgentDefinition, description stri
 			if explicitModelConfigID == nil {
 				modelConfigID := currentModelConfigID
 				if def.Model != "" {
-					var err error
 					modelConfigID, err = p.resolveCustomAgentModel(ctx, parent, def)
 					if err != nil {
 						return childSubagentChatOptions{}, err
@@ -207,4 +409,23 @@ func (p *Server) resolveCustomAgentModel(ctx context.Context, parent database.Ch
 		"agent %q sets model %q, which is not an available model; pass model_config_id from %s instead",
 		def.Name, def.Model, listSubagentModelsToolName,
 	)
+}
+
+// subagentContextResource reports an OK pinned agent definition file on the
+// chat, keeping its parse warnings in Error. ok is false when the body has no
+// name, like an OK skill without one.
+func subagentContextResource(r database.ChatContextResource) (codersdk.ChatContextResource, bool) {
+	var body agentproto.SubagentBody
+	if err := contextBodyUnmarshalOptions.Unmarshal(r.Body, &body); err != nil || body.GetName() == "" {
+		return codersdk.ChatContextResource{}, false
+	}
+	return codersdk.ChatContextResource{
+		Source:              r.Source,
+		Kind:                codersdk.ChatContextResourceKindSubagent,
+		SizeBytes:           r.SizeBytes,
+		Status:              codersdk.ChatContextResourceStatusOK,
+		Error:               r.Error,
+		SubagentName:        body.GetName(),
+		SubagentDescription: body.GetDescription(),
+	}, true
 }
