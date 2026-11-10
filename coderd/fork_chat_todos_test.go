@@ -30,6 +30,8 @@ import (
 // newForkChatTodosAPI starts coderd with the fork-chat-todos experiment
 // enabled. It returns the unwrapped store and pubsub so a test can write a
 // todo list the way the chat daemon does.
+//
+//nolint:revive // enabled toggles the experiment under test.
 func newForkChatTodosAPI(t *testing.T, enabled bool, clock quartz.Clock) (*codersdk.Client, database.Store, dbpubsub.Pubsub) {
 	t.Helper()
 

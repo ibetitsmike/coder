@@ -242,7 +242,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
 		}, {
 			name:      "RerunAfterCancel",
-			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled","completed_at":"2026-11-10T06:30:00Z"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:20:00Z"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:10:00Z"}]`,
+			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled","completed_at":"2026-11-10T06:30:00Z"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:20:00Z"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:10:00Z"}]`, //nolint:misspell // GitHub spells this conclusion "cancelled".
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2, UpdatedAt: at("06:20:00")},
 		}, {

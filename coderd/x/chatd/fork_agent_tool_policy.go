@@ -174,7 +174,7 @@ func (policy customAgentToolPolicy) filter(
 // turn instead of running it unrestricted.
 func (p *Server) customAgentToolPolicyOfChat(ctx context.Context, chat database.Chat) (*customAgentToolPolicy, error) {
 	if !p.agentDefinitionsEnabled() || !chat.ParentChatID.Valid {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil policy keeps every tool.
 	}
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -182,13 +182,13 @@ func (p *Server) customAgentToolPolicyOfChat(ctx context.Context, chat database.
 	}
 	row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil policy keeps every tool.
 	}
 	if err != nil {
 		return nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
 	}
 	if !row.ToolPolicy.Valid {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil policy keeps every tool.
 	}
 	var policy customAgentToolPolicy
 	if err := json.Unmarshal(row.ToolPolicy.RawMessage, &policy); err != nil {
@@ -251,7 +251,7 @@ func (p *Server) customAgentMCPServerSlugs(
 		addID(candidate.tool)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // No MCP tools need a slug.
 	}
 	slugs := make(map[uuid.UUID]string, len(ids))
 	for _, internal := range p.internalMCPServers {

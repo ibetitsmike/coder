@@ -137,6 +137,64 @@ jobs:
       - name: Build coder
         run: go build -o /dev/null ./enterprise/cmd/coder
 
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Pull requests check out the merge commit; its first parent is the
+          # base branch tip that the lint step compares against.
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # mise.toml pins the golangci-lint version that upstream lints with.
+      - name: Install golangci-lint
+        run: |
+          version=$(sed -n 's/^"go:github\.com\/golangci\/golangci-lint\/v2\/cmd\/golangci-lint" = "\(.*\)"$/\1/p' mise.toml)
+          test -n "$version"
+          go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${version}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          dir=$("$(go env GOPATH)/bin/golangci-lint" cache status | awk '/Dir/ { print $2 }')
+          echo "LINT_CACHE_DIR=$dir" >> "$GITHUB_ENV"
+      # Only pushes to main save the cache, so pull requests cannot poison it.
+      - name: Restore golangci-lint cache
+        id: golangci-lint-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LINT_CACHE_DIR }}
+          key: fork-golangci-lint-${{ runner.os }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            fork-golangci-lint-${{ runner.os }}-
+      # Lints the packages that hold fork code, including the plugin files in
+      # ./cli and ./enterprise/coderd, and reports only issues on lines a pull
+      # request changes, so findings it did not introduce never block it.
+      # Other events compare HEAD with itself and report nothing.
+      - name: golangci-lint
+        env:
+          NEW_FROM: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
+        run: |
+          mapfile -t fork_pkgs < <(git ls-files -- '*fork_*.go' '*/fork.go' | xargs -n1 dirname | sort -u | sed 's|^|./|')
+          golangci-lint run --fix=false --new-from-merge-base="$NEW_FROM" \
+            "${fork_pkgs[@]}" \
+            ./cli \
+            ./enterprise/coderd \
+            ./coderd/x/... \
+            ./coderd/database/forkdb/... \
+            ./coderd/database/migrations/chatdmig/... \
+            ./codersdk/x/... \
+            ./examples/plugins/...
+      - name: Save golangci-lint cache
+        if: github.ref == 'refs/heads/main' && steps.golangci-lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LINT_CACHE_DIR }}
+          key: ${{ steps.golangci-lint-cache.outputs.cache-primary-key }}
+
   forkdb:
     runs-on: ubuntu-latest
     permissions:

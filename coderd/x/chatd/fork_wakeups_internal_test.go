@@ -890,7 +890,7 @@ func (f *workerTestFixture) countPromptMessages(t *testing.T, chat database.Chat
 		require.NoError(t, err)
 		var text strings.Builder
 		for _, part := range parts {
-			text.WriteString(part.Text)
+			_, _ = text.WriteString(part.Text)
 		}
 		if text.String() == prompt {
 			count++

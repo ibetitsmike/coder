@@ -275,7 +275,7 @@ func (p *Server) pendingDescendantQuestionRow(ctx context.Context, chatID uuid.U
 	}
 	question, err := fdb.GetPendingChatDescendantQuestion(ctx, chatID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil means the chat has no pending question.
 	}
 	if err != nil {
 		return nil, err

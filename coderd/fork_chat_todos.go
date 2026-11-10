@@ -57,6 +57,8 @@ func readForkChatTodos(ctx context.Context, db database.Store, chatID uuid.UUID)
 // @x-apidocgen {"skip": true}
 // @Description Returns the todo list that the todo_write tool keeps for this
 // @Description chat, or an empty list at version 0 when the chat has none.
+//
+//nolint:revive // HTTP handler writes to ResponseWriter.
 func (api *API) getChatTodos(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)

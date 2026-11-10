@@ -20,6 +20,8 @@ const maxAncestorWalk = 64
 // Coder-Ancestor-Chat-Ids header. With nested subagents off it matches
 // upstream: the parent alone, with no database reads. A failed lookup keeps
 // the ancestors found so far.
+//
+//nolint:revive // nested is the experiment flag; callers in upstream files pass it.
 func AncestorChatIDs(ctx context.Context, db database.Store, log slog.Logger, nested bool, chat database.Chat) []string {
 	if !chat.ParentChatID.Valid {
 		return nil

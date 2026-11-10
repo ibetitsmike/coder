@@ -319,7 +319,7 @@ func TestNestedSubagentLiveLimitSerializesResume(t *testing.T) {
 		err := f.sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
 			WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
 			AND classid::bigint = $1 AND objid::bigint = $2`,
-			int64(uint32(lockID>>32)), int64(uint32(lockID))).Scan(&waiting)
+			int64(uint32(lockID>>32)), int64(uint32(lockID))).Scan(&waiting) //nolint:gosec // pg_locks splits the 64-bit key into two 32-bit halves.
 		return err == nil && waiting == 1
 	}, testutil.IntervalFast, "the resume waits for the family admission lock")
 	releaseLock()

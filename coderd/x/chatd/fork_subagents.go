@@ -158,6 +158,8 @@ func forkKeepSecretAnswerPrompt(ctx context.Context, result *chathooks.Result) *
 // caller's own check. The report passes only while its question is pending
 // and its answer is stored, because a concurrent answer can resume the
 // chat, which then asks a new question.
+//
+//nolint:revive // inTx says whether store holds the transaction to lock.
 func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
 	if !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid {
 		return nil
@@ -436,7 +438,7 @@ func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool
 	if err != nil {
 		return false, err
 	}
-	return int(depth)+1 <= limits.maxDepth, nil
+	return int(depth) < limits.maxDepth, nil
 }
 
 func subagentModeCanSpawn(mode database.NullChatMode) bool {

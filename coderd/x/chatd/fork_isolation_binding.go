@@ -92,6 +92,8 @@ func (p *Server) forkWorktreeAgent(ctx context.Context, chat database.Chat, agen
 // withSubagentWorktreePrompt returns the child's initial messages with a
 // system message naming its worktree before the child's prompt, which is the
 // last message.
+//
+//nolint:revive // inherited picks the sentence that names whose worktree it is.
 func withSubagentWorktreePrompt(input chatstate.CreateChatInput, worktree subagentWorktree, inherited bool) ([]chatstate.Message, error) {
 	text := fmt.Sprintf("This chat works in its own git worktree at %s, on branch %s.", worktree.path, worktree.branch)
 	if inherited {
@@ -181,6 +183,8 @@ func (t worktreeBoundTool) Run(ctx context.Context, call fantasy.ToolCall) (fant
 // resolveRawPath resolves raw, a JSON path value, against dir. An empty or
 // null path becomes dir when emptyIsDir and stays as it is otherwise. A value
 // that is not a string is returned unchanged for the tool to reject.
+//
+//nolint:revive // An empty execute workdir means dir; an empty file path stays empty.
 func (t worktreeBoundTool) resolveRawPath(raw json.RawMessage, emptyIsDir bool) json.RawMessage {
 	var p string
 	if err := json.Unmarshal(raw, &p); err != nil {

@@ -261,10 +261,10 @@ func forkWorktreeBranch(title string, chatID uuid.UUID) string {
 	for _, r := range strings.ToLower(title) {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			if dash && slug.Len() > 0 {
-				slug.WriteByte('-')
+				_ = slug.WriteByte('-')
 			}
 			dash = false
-			slug.WriteRune(r)
+			_, _ = slug.WriteRune(r)
 			continue
 		}
 		dash = true

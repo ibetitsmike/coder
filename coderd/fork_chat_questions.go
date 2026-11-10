@@ -50,6 +50,8 @@ const (
 // @Description Returns the unanswered ask_user_question calls of the
 // @Description unarchived descendants in the family of the chat, oldest first.
 // @Description A child chat lists the same family as its root.
+//
+//nolint:revive // HTTP handler writes to ResponseWriter.
 func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
