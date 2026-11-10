@@ -868,7 +868,10 @@ func translateToolResultValidationError(err error) error {
 // Returns the post-transition chat, whether the call interrupted
 // anything, and an error so callers can map state conflicts
 // deliberately. A chat with nothing to interrupt, such as an idle
-// chat, is returned unchanged without an error.
+// chat, is returned unchanged without an error. The result counts the
+// active descendants the fork cascade stops first: an errored or
+// already-owned-interrupting target transitions nothing itself, yet
+// its running descendants really stop.
 func (p *Server) InterruptChat(
 	ctx context.Context,
 	chat database.Chat,
@@ -876,7 +879,7 @@ func (p *Server) InterruptChat(
 	if chat.ID == uuid.Nil {
 		return chat, false, xerrors.New("chat_id is required")
 	}
-	p.forkInterruptDescendants(ctx, chat)
+	cascadeInterrupted := p.forkInterruptDescendants(ctx, chat)
 
 	var result chatstate.InterruptResult
 	refreshed, err := p.updateChat(ctx, chat.ID, "interrupt", func(tx *chatstate.Tx, _ database.Store, _ *database.Chat) error {
@@ -894,7 +897,7 @@ func (p *Server) InterruptChat(
 	if result.FinishedInterruption {
 		p.afterInlineInterruption(ctx, refreshed)
 	}
-	return refreshed, result.Interrupted, nil
+	return refreshed, result.Interrupted || cascadeInterrupted, nil
 }
 
 // afterInlineInterruption applies the side effects a worker applies
