@@ -93,6 +93,9 @@ func FetchPullRequestActivity(
 	if !ok {
 		return nil, ErrPullRequestActivityUnsupported
 	}
+	// GitHub timestamps have whole seconds, so an event in the same second
+	// as since counts as at or after it.
+	since = since.UTC().Truncate(time.Second)
 
 	var viewer struct {
 		Login string `json:"login"`
@@ -128,19 +131,8 @@ func FetchPullRequestActivity(
 		return viewer.Login != "" && strings.EqualFold(login, viewer.Login)
 	}
 
-	var reviews []struct {
-		ID          int64     `json:"id"`
-		State       string    `json:"state"`
-		HTMLURL     string    `json:"html_url"`
-		SubmittedAt time.Time `json:"submitted_at"`
-		User        struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	}
-	// Only the first 100 reviews are read, like FetchPullRequestStatus.
-	// GitHub lists reviews oldest first, so on a pull request with more
-	// than 100 reviews the newest ones are missed.
-	if err := g.decodeJSON(ctx, pullEndpoint+"/reviews?per_page=100", token, &reviews); err != nil {
+	reviews, err := fetchAllPages[githubActivityReview](ctx, g, pullEndpoint+"/reviews?", token)
+	if err != nil {
 		return nil, xerrors.Errorf("fetch pull request reviews: %w", err)
 	}
 	activity := &PullRequestActivity{
@@ -165,7 +157,8 @@ func FetchPullRequestActivity(
 	}
 	sortPullRequestEvents(activity.Reviews)
 
-	commentsQuery := "?since=" + url.QueryEscape(since.UTC().Format(time.RFC3339)) + "&per_page=100"
+	// GitHub's since is exclusive, so ask for one second earlier.
+	commentsQuery := "?since=" + url.QueryEscape(since.Add(-time.Second).Format(time.RFC3339)) + "&"
 	for _, endpoint := range []struct {
 		name string
 		url  string
@@ -173,15 +166,8 @@ func FetchPullRequestActivity(
 		{name: "issue comments", url: fmt.Sprintf("%s/issues/%d/comments", repoEndpoint, ref.Number)},
 		{name: "review comments", url: pullEndpoint + "/comments"},
 	} {
-		var comments []struct {
-			ID        int64     `json:"id"`
-			HTMLURL   string    `json:"html_url"`
-			CreatedAt time.Time `json:"created_at"`
-			User      struct {
-				Login string `json:"login"`
-			} `json:"user"`
-		}
-		if err := g.decodeJSON(ctx, endpoint.url+commentsQuery, token, &comments); err != nil {
+		comments, err := fetchAllPages[githubActivityComment](ctx, g, endpoint.url+commentsQuery, token)
+		if err != nil {
 			return nil, xerrors.Errorf("fetch pull request %s: %w", endpoint.name, err)
 		}
 		for _, c := range comments {
@@ -209,7 +195,7 @@ func FetchPullRequestActivity(
 	// then run again appears twice. Only the newest run of each check name
 	// and app counts, which matches GitHub's status rollup, but two
 	// workflows with a job of the same name also count as one check. Only
-	// the first 100 runs are read, a known limit like the reviews.
+	// the first 100 runs are read, a known limit.
 	var checkRuns struct {
 		CheckRuns []struct {
 			ID         int64  `json:"id"`
@@ -252,7 +238,7 @@ func FetchPullRequestActivity(
 			continue
 		}
 		switch strings.ToLower(run.Conclusion) {
-		case "failure", "timed_out", "cancelled", "action_required", "startup_failure":
+		case "failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale":
 			checks.Failed++
 		}
 	}
@@ -278,6 +264,46 @@ func FetchPullRequestActivity(
 	}
 	activity.Checks = checks
 	return activity, nil
+}
+
+type githubActivityReview struct {
+	ID          int64     `json:"id"`
+	State       string    `json:"state"`
+	HTMLURL     string    `json:"html_url"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+type githubActivityComment struct {
+	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
+	CreatedAt time.Time `json:"created_at"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+// maxActivityPages bounds how many pages of 100 one list reads, so a pull
+// request with a huge history cannot use up the rate limit.
+const maxActivityPages = 10
+
+// fetchAllPages reads up to maxActivityPages pages of a GitHub list.
+// endpoint must end in "?" or "&".
+func fetchAllPages[T any](ctx context.Context, g *githubProvider, endpoint, token string) ([]T, error) {
+	var all []T
+	for page := 1; page <= maxActivityPages; page++ {
+		var items []T
+		if err := g.decodeJSON(ctx, fmt.Sprintf("%sper_page=100&page=%d", endpoint, page), token, &items); err != nil {
+			return nil, err
+		}
+		all = append(all, items...)
+		if len(items) < 100 {
+			break
+		}
+	}
+	return all, nil
 }
 
 func sortPullRequestEvents(events []PullRequestEvent) {

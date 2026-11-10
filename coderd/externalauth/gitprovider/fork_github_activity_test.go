@@ -149,8 +149,56 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		for _, path := range []string{"/repos/org/repo/issues/7/comments", "/repos/org/repo/pulls/7/comments"} {
 			query, err := url.ParseQuery(fake.query(path))
 			require.NoError(t, err)
-			assert.Equal(t, "2026-11-10T06:00:00Z", query.Get("since"), path)
+			assert.Equal(t, "2026-11-10T05:59:59Z", query.Get("since"), path)
 		}
+	})
+
+	t.Run("FractionalSince", func(t *testing.T) {
+		t.Parallel()
+
+		routes := activityRoutes()
+		routes["/repos/org/repo/pulls/7/reviews"] = jsonBody(`[
+			{"id":1,"state":"APPROVED","html_url":"https://github.com/org/repo/pull/7#r1","submitted_at":"2026-11-10T06:00:00Z","user":{"login":"alice"}}
+		]`)
+		routes["/repos/org/repo/issues/7/comments"] = jsonBody(`[
+			{"id":10,"html_url":"https://github.com/org/repo/pull/7#c10","created_at":"2026-11-10T06:00:00Z","user":{"login":"bob"}}
+		]`)
+		gp, fake := newFakeGitHubActivity(t, routes)
+
+		ctx := testutil.Context(t, testutil.WaitShort)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, at("06:00:00.5"))
+		require.NoError(t, err)
+		require.Len(t, activity.Reviews, 1)
+		assert.EqualValues(t, 1, activity.Reviews[0].ID)
+		require.Len(t, activity.Comments, 1)
+		assert.EqualValues(t, 10, activity.Comments[0].ID)
+		query, err := url.ParseQuery(fake.query("/repos/org/repo/issues/7/comments"))
+		require.NoError(t, err)
+		assert.Equal(t, "2026-11-10T05:59:59Z", query.Get("since"))
+	})
+
+	t.Run("Paginated", func(t *testing.T) {
+		t.Parallel()
+
+		ownComments := make([]string, 100)
+		for i := range ownComments {
+			ownComments[i] = fmt.Sprintf(`{"id":%d,"created_at":"2026-11-10T06:10:00Z","user":{"login":"agent"}}`, 100+i)
+		}
+		routes := activityRoutes()
+		routes["/repos/org/repo/issues/7/comments"] = func(w http.ResponseWriter, r *http.Request) {
+			body := "[" + strings.Join(ownComments, ",") + "]"
+			if r.URL.Query().Get("page") == "2" {
+				body = `[{"id":300,"created_at":"2026-11-10T06:20:00Z","user":{"login":"bob"}}]`
+			}
+			jsonBody(body)(w, r)
+		}
+		gp, _ := newFakeGitHubActivity(t, routes)
+
+		ctx := testutil.Context(t, testutil.WaitShort)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		require.NoError(t, err)
+		require.Len(t, activity.Comments, 1)
+		assert.EqualValues(t, 300, activity.Comments[0].ID)
 	})
 
 	t.Run("Checks", func(t *testing.T) {
@@ -201,6 +249,11 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			checkRuns: `[{"id":21,"name":"test","status":"in_progress","conclusion":null},{"id":20,"name":"test","status":"completed","conclusion":"failure"}]`,
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 1},
+		}, {
+			name:      "Stale",
+			checkRuns: `[{"id":30,"name":"c30","status":"completed","conclusion":"stale"}]`,
+			status:    `{"state":"pending","total_count":0}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 1, Failed: 1},
 		}, {
 			name:      "NeutralAndSkipped",
 			checkRuns: `[{"id":9,"name":"c9","status":"completed","conclusion":"neutral"},{"id":10,"name":"c10","status":"completed","conclusion":"skipped"}]`,
