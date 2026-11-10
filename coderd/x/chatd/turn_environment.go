@@ -465,6 +465,7 @@ func (p *Server) buildTurnEnvironment(
 		// pinned context is read below.
 		p.ensureChatContextPinnedOnFirstTurn(ctx, workspaceCtx.currentChatSnapshot())
 
+		agent = p.forkWorktreeAgent(ctx, chat, agent)
 		var resolveErr error
 		instruction, workspaceSkills, resolveErr = p.resolveTurnWorkspaceContext(ctx, chat, agent)
 		if resolveErr != nil {

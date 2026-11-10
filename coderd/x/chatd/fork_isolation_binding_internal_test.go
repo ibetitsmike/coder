@@ -119,6 +119,14 @@ func TestForkWorktreeBindingTools(t *testing.T) {
 		})
 	}
 
+	t.Run("WorkspaceContextDirectory", func(t *testing.T) {
+		t.Parallel()
+		agent := database.WorkspaceAgent{OperatingSystem: "linux", Directory: "/repo", ExpandedDirectory: "/repo"}
+		require.Equal(t, database.WorkspaceAgent{OperatingSystem: "linux", Directory: dir, ExpandedDirectory: dir},
+			f.server.forkWorktreeAgent(chatdTestContext(t), worktreeChild, agent))
+		require.Equal(t, agent, f.server.forkWorktreeAgent(chatdTestContext(t), root, agent))
+	})
+
 	t.Run("SharedChildOfRoot", func(t *testing.T) {
 		t.Parallel()
 		sharedChild := f.spawnChild(t, root, map[string]any{})

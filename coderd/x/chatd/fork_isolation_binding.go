@@ -3,7 +3,7 @@ package chatd
 // This file is fork code: it binds a subagent spawned with isolation worktree,
 // and every shared subagent below it, to that worktree. appendForkTools wraps
 // the child's file and execute tools, and createSubagentChatWithID names the
-// worktree in the child's prompt.
+// worktree in the child's prompt and its workspace context.
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"charm.land/fantasy"
 	"golang.org/x/xerrors"
 
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
@@ -66,6 +67,26 @@ func (p *Server) chatWorktree(ctx context.Context, chat database.Chat) (subagent
 		}
 	}
 	return subagentWorktree{}, false, nil
+}
+
+// forkWorktreeAgent returns agent with its directory set to the worktree chat
+// works in, if any, so the turn's workspace context names the worktree as the
+// working directory. The directory only decorates that context, so a failed
+// lookup keeps agent as it is.
+func (p *Server) forkWorktreeAgent(ctx context.Context, chat database.Chat, agent database.WorkspaceAgent) database.WorkspaceAgent {
+	if !p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		return agent
+	}
+	worktree, ok, err := p.chatWorktree(ctx, chat)
+	if err != nil {
+		p.logger.Warn(ctx, "resolve chat worktree for workspace context", slog.F("chat_id", chat.ID), slog.Error(err))
+		return agent
+	}
+	if ok {
+		agent.Directory = worktree.path
+		agent.ExpandedDirectory = worktree.path
+	}
+	return agent
 }
 
 // withSubagentWorktreePrompt returns the child's initial messages with a
