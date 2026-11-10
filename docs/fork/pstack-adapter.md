@@ -352,6 +352,10 @@ Unless the wait times out, it also adds `diff_summary` with `commits`, `files_ch
 `uncommitted_changes` counts the changed and untracked paths that `git status` reports.
 When Coder Agents can't read the worktree, for example because the child switched branches or the worktree is gone, the result has `diff_summary_error` instead.
 Check `diff_summary` before you merge a child's branch, and tell the child to commit when `uncommitted_changes` isn't 0, because uncommitted work isn't on the branch.
+While the experiment is on, the web UI shows **Branch:** and **Worktree:** lines on the `spawn_agent` and `wait_agent` cards of a worktree child.
+It cuts a long path to fit and shows the full path when you hover over it.
+The `wait_agent` card also shows `diff_summary` in a line such as **2 commits, 3 files changed, +40 -12, 1 uncommitted change**, or the `diff_summary_error` text.
+The line leaves out the uncommitted changes when `uncommitted_changes` is 0.
 
 The child works in its worktree.
 A system message before its prompt names the worktree and the branch, and tells the child to make and commit every change there.
@@ -385,6 +389,7 @@ The new workspace starts from the template, so it has none of the parent's files
 Tell the child where to get the code, such as a branch to clone, and to push its work, because you can't read the child's files.
 The `spawn_agent` result adds `isolation` and `workspace_name`, and `wait_agent` on the child adds the same fields without a `diff_summary`.
 When Coder Agents can't read the workspace, the result has `workspace_error` instead of `workspace_name`.
+While the experiment is on, the web UI shows **Workspace:** and the name on the `spawn_agent` and `wait_agent` cards of the child, or the `workspace_error` text.
 
 `isolation: "workspace"` fails for a `computer_use` child with `isolation workspace is not supported for computer use agents`, and in a chat without a workspace with `isolation workspace copies this chat's workspace, and this chat has none`.
 `repo_path` or `base_branch` with it fails with `repo_path and base_branch need isolation worktree`.
@@ -473,7 +478,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `bef9c59966`:
+Checked against fork `main` at `5654571bb0`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -507,10 +512,12 @@ Checked against fork `main` at `bef9c59966`:
   Worktree creation and its errors, `fork_isolation.go:172-220`, `:245-247`, from the worktree that the parent works in when `repo_path` is omitted, `:181-188`, removed only when the spawn fails, `:223-236`, called at spawn, `coderd/x/chatd/fork_subagents.go:241`, `:280-293`.
   Removed after a root archive with the experiment on, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
   The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:51`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
+  The **Branch:** and **Worktree:** lines and the diff summary on the cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:72-120`, `:151`, `:171`, `:179-202`.
   Branch name, `fork_isolation.go:258-280`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:242-252`, `:289-292`.
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
 - Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-89`, checks, `:108-111`, result fields, `:135-141`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
+  **Workspace:** or the error on the cards, only with the experiment, `ForkSubagentFields.tsx:121-134`, `:151`, `:171`, `:194`.
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:269-279`, `:358-363`.
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
@@ -529,7 +536,7 @@ Checked against fork `main` at `bef9c59966`:
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:621-632`, and `interrupt_agent` moves it to `running`, `:159-169`.
   `interrupt_agent` interrupts the active descendants first, for any status, `:159-162`, `coderd/x/chatd/chat_mutations.go:901`, `:919`, `coderd/x/chatd/fork_cascade.go:32-39`, `:60-80`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:130-199`, and its error, `:210-222`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
-  The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:93-96`, `:104-106`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:541`.
+  The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:160-163`, `:172-174`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:541`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:187-311`, and for a project the owner owns or that is shared with them, `:264-268`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
@@ -537,7 +544,7 @@ Checked against fork `main` at `bef9c59966`:
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:219-222`.
   The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:323-326`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
-  **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:88-92`, `:99-103`.
+  **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:155-159`, `:166-170`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:725-731`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:41-43`, `fork_tools.go:40-44`, ending the turn, `fork_descendant_questions.go:47-57`, `coderd/x/chatd/turn_environment.go:1096`, and not in plan-mode child turns, `:2053-2062`.
@@ -565,7 +572,7 @@ Checked against fork `main` at `bef9c59966`:
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:29-34`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:33`.
-  The recent tool calls and `tool_calls_error` on the `wait_agent` card, only with the same experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:36-70`, `:111-121`.
+  The recent tool calls and `tool_calls_error` on the `wait_agent` card, only with the same experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:36-70`, `:186-191`, `:203-206`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:32`, and run as the chat owner, `fork_search_chats.go:97-103`.
   Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:47-56`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.

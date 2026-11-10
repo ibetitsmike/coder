@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
@@ -85,6 +86,43 @@ func TestDescendantQuestionTurnTools(t *testing.T) {
 	require.Equal(t, upstreamStop(offChild), env.StopAfterTools)
 }
 
+// Calls are validated against the tool schema before Run, so the schema has to
+// admit a secret question without options and still require them otherwise.
+func TestDescendantQuestionSchema(t *testing.T) {
+	t.Parallel()
+
+	tool := descendantQuestionTool{AgentTool: chattool.NewAskUserQuestionTool(chattool.AskUserQuestionOptions{})}
+	prepared := turnEnvironment{
+		Tools:            []fantasy.AgentTool{tool},
+		BuiltinToolNames: map[string]bool{askUserQuestionToolName: true},
+	}
+	for _, tt := range []struct {
+		name  string
+		input string
+		valid bool
+	}{
+		{name: "OrdinaryWithOptions", input: descendantQuestionInput, valid: true},
+		{name: "SecretWithoutOptions", input: `{"questions":[{"header":"Token","question":"Paste the token.","secret":true}]}`, valid: true},
+		{name: "SecretWithEmptyOptions", input: `{"questions":[{"header":"Token","question":"Paste the token.","secret":true,"options":[]}]}`, valid: true},
+		{name: "OrdinaryWithoutOptions", input: `{"questions":[{"header":"DB","question":"Which database?"}]}`},
+		{name: "NotSecretWithoutOptions", input: `{"questions":[{"header":"DB","question":"Which database?","secret":false}]}`},
+		{name: "OrdinaryWithOneOption", input: `{"questions":[{"header":"DB","question":"Which database?","options":[{"label":"Use Postgres"}]}]}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			call := fantasy.ToolCallContent{ToolName: askUserQuestionToolName, Input: tt.input}
+			allowed, _, rejected := partitionInvalidToolCalls(prepared, []fantasy.ToolCallContent{call})
+			if tt.valid {
+				require.Len(t, allowed, 1)
+				require.Empty(t, rejected)
+				return
+			}
+			require.Empty(t, allowed)
+			require.Len(t, rejected, 1)
+		})
+	}
+}
+
 func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	t.Parallel()
 
@@ -116,7 +154,8 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.JSONEq(t, string(result["questions"]), string(row.Questions))
 	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
 	require.NoError(t, err)
-	require.Empty(t, answers, "a new question drops the secret answers of earlier ones")
+	require.Len(t, answers, 1, "a new question keeps the secret answers of earlier ones, which still scrub tool output")
+	require.Equal(t, "call-0", answers[0].ToolCallID)
 }
 
 func TestDescendantQuestionWaitAgent(t *testing.T) {

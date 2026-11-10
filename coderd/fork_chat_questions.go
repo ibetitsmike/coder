@@ -113,7 +113,8 @@ func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Reque
 // @x-apidocgen {"skip": true}
 // @Description Stores the answer to the pending secret question of the chat
 // @Description outside its messages, and sends the chat a user message that
-// @Description says only that the user answered.
+// @Description says only that the user answered. A declined answer stores
+// @Description nothing and says that the user declined.
 func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	apiKey := httpmw.APIKey(r)
@@ -127,6 +128,10 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toolCallID := req.ToolCallID
+	if req.Declined {
+		api.declineSecretQuestion(ctx, rw, apiKey.UserID, chat, req)
+		return
+	}
 	if strings.TrimSpace(req.Value) == "" {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not be empty."})
 		return
@@ -134,7 +139,7 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	if len(req.Value) < minSecretAnswerLength {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: fmt.Sprintf("Secret answers must be at least %d bytes so they can be hidden from tool output. "+
-				"Answer without the secret option if the value isn't sensitive.", minSecretAnswerLength),
+				"Decline the question instead, and the subagent can ask again without the secret option.", minSecretAnswerLength),
 		})
 		return
 	}
@@ -195,6 +200,59 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The answer stays stored. The question stays pending without the
 		// message, and the next answer replaces it as an unreported one.
+		writeChatError(ctx, rw, err)
+		return
+	}
+	rw.WriteHeader(http.StatusNoContent)
+}
+
+// declineSecretQuestion sends the chat a user message that says the user
+// declined its pending secret question, which retires the question without
+// a value.
+func (api *API) declineSecretQuestion(ctx context.Context, rw http.ResponseWriter, userID uuid.UUID, chat database.Chat, req codersdk.ChatSecretAnswerRequest) {
+	if req.Value != "" {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "A declined answer must not have a value."})
+		return
+	}
+	fdb, err := forkdb.From(api.Database)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	question, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && question.ToolCallID != req.ToolCallID) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The chat has no pending question with this tool call ID.",
+		})
+		return
+	}
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	if !question.Secret() {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "The question takes a normal answer. Send it as a chat message.",
+		})
+		return
+	}
+	_, err = api.sendChatMessage(chatd.WithSecretAnswerDecline(ctx, req.ToolCallID), userID, chat, codersdk.CreateChatMessageRequest{
+		Content: []codersdk.ChatInputPart{{
+			Type: codersdk.ChatInputPartTypeText,
+			Text: questionAnswerPrefix + req.ToolCallID + ":\nThe user declined to give a secret answer. Ask again without the secret option if the value is not sensitive, or continue without it.",
+		}},
+	})
+	if errors.Is(err, chatd.ErrSecretAnswerNotPending) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The chat has no pending question with this tool call ID.",
+		})
+		return
+	}
+	if errors.Is(err, chatd.ErrSecretAnswerQueued) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+		return
+	}
+	if err != nil {
 		writeChatError(ctx, rw, err)
 		return
 	}

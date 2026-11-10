@@ -102,11 +102,6 @@ func (f forkQueryMetricsStore) DeleteChatSecretAnswer(ctx context.Context, arg f
 	return f.s.DeleteChatSecretAnswer(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
-	defer f.observe(ctx, "DeleteChatSecretAnswersByChatID", time.Now())
-	return f.s.DeleteChatSecretAnswersByChatID(ctx, chatID)
-}
-
 func (f forkQueryMetricsStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	defer f.observe(ctx, "DeleteChatWakeupByID", time.Now())
 	return f.s.DeleteChatWakeupByID(ctx, id)
