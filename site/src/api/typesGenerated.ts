@@ -2201,11 +2201,11 @@ export interface Chat {
 	 */
 	readonly inline_mcp_servers?: readonly InlineMCPServer[];
 	/**
-	 * Children holds child (subagent) chats nested under this root
-	 * chat. Always initialized to an empty slice so the JSON field
-	 * is present as []. Child chats cannot create their own
-	 * subagents, so nesting depth is capped at 1 and this slice is
-	 * always empty for child chats.
+	 * Children holds the descendant (subagent) chats of this root chat,
+	 * flat: each entry's parent_chat_id gives its place in the tree.
+	 * Without fork-nested-subagents descendants are only direct
+	 * children. Always initialized to an empty slice so the JSON field
+	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
 }
@@ -6302,6 +6302,31 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+}
+
+// From codersdk/fork_chat_family.go
+/**
+ * ForkChatFamilyCapacity is the subagent capacity of the family under a root
+ * chat. It is computed without a lock, so it may be stale when read.
+ */
+export interface ForkChatFamilyCapacity {
+	/**
+	 * LiveSubagents counts the unarchived subagents that have not finished:
+	 * status running, interrupting, requires_action or paused.
+	 */
+	readonly live_subagents: number;
+	/**
+	 * MaxLiveSubagents is the family's live subagent limit in force. 0 means
+	 * no limit. A spawn, or a message_agent that resumes a finished
+	 * subagent, fails while LiveSubagents is at the limit.
+	 */
+	readonly max_live_subagents: number;
+	/**
+	 * WaitingForCapacity lists the running subagents that no worker owns
+	 * because a deployment, organization or family concurrency limit is
+	 * full.
+	 */
+	readonly waiting_for_capacity: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go

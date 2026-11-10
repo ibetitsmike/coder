@@ -5525,6 +5525,45 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/family": {
+            "get": {
+                "description": "Returns the live subagent count and limit of the family under\na root chat, and the running subagents that wait for a\nconcurrency slot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the subagent capacity of a chat family",
+                "operationId": "get-the-subagent-capacity-of-a-chat-family",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Root chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkChatFamilyCapacity"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -23174,7 +23213,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "children": {
-                    "description": "Children holds child (subagent) chats nested under this root\nchat. Always initialized to an empty slice so the JSON field\nis present as []. Child chats cannot create their own\nsubagents, so nesting depth is capped at 1 and this slice is\nalways empty for child chats.",
+                    "description": "Children holds the descendant (subagent) chats of this root chat,\nflat: each entry's parent_chat_id gives its place in the tree.\nWithout fork-nested-subagents descendants are only direct\nchildren. Always initialized to an empty slice so the JSON field\nis present as []. Always empty for child chats.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.Chat"
@@ -28427,6 +28466,29 @@ const docTemplate = `{
                 "max_subagent_depth": {
                     "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ForkChatFamilyCapacity": {
+            "type": "object",
+            "properties": {
+                "live_subagents": {
+                    "description": "LiveSubagents counts the unarchived subagents that have not finished:\nstatus running, interrupting, requires_action or paused.",
+                    "type": "integer",
+                    "example": 3
+                },
+                "max_live_subagents": {
+                    "description": "MaxLiveSubagents is the family's live subagent limit in force. 0 means\nno limit. A spawn, or a message_agent that resumes a finished\nsubagent, fails while LiveSubagents is at the limit.",
+                    "type": "integer",
+                    "example": 6
+                },
+                "waiting_for_capacity": {
+                    "description": "WaitingForCapacity lists the running subagents that no worker owns\nbecause a deployment, organization or family concurrency limit is\nfull.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
                 }
             }
         },

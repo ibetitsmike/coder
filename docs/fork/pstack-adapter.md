@@ -150,6 +150,10 @@ A custom type starts with the tools of its base type, which is `general` unless 
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
 With the experiment, the API also stores definitions for one user in an organization, for a whole organization, and for a chat project.
+To manage your personal definitions, select **Settings** in the Agents sidebar, then **Agent definitions**, and pick the organization if you belong to more than one.
+The page lists each definition's name and description, and its **Enabled** switch stops `spawn_agent` from offering a definition without deleting it.
+**Delete** in a row's menu removes your personal definition and leaves workspace, organization, and project definitions with the same name alone.
+The page doesn't list the workspace's definition files, such as the pstack agents that Setup copies to `~/.coder/agents/`.
 `spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
 It offers project definitions only when the chat owner owns the project or the project is shared with them, and a child chat uses its root chat's project.
 A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
@@ -270,6 +274,9 @@ Pass a child's `chat_id` from `spawn_agent` or `list_agents` to read that child,
 With the same experiment, `search_chats` finds top-level chats with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
 By default it searches only the chats your user created, so add `source:created_by_me,shared_with_me` to include chats shared with your user.
 It returns no subagent chats, so get a child's ID from `list_agents` in its parent.
+In the conversation, the web UI shows each `search_chats` call as a card, such as **Found 3 chats**, that expands to the query and a link to each chat with its status.
+It shows each `read_chat_transcript` call as a card, such as **Read 4 messages from** and the chat's title, that expands to a link to the chat and one line per message with its role and a preview.
+A card says **More chats available** or **More messages available** when the tool has another page, and the card of a failed call expands to its error.
 Plan-mode turns and `explore` children don't get either tool.
 With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds up to that many of the child's latest tool calls, oldest first, to its reply.
 Without the experiment, there is no transcript or chat search tool.
@@ -298,7 +305,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `0298da5976`:
+Checked against fork `main` at `7fc04297b4`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -333,6 +340,9 @@ Checked against fork `main` at `0298da5976`:
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:181-305`, and for a project the owner owns or that is shared with them, `:258-262`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
+  The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
+  Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
+  Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:213-216`.
   The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:233-236`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:34`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-142`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
@@ -350,10 +360,11 @@ Checked against fork `main` at `0298da5976`:
   Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
-  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:20-35`, `:42-49`, with its labels, `ForkTodoTool.tsx:37-50`, `:67-77`, and its expandable list or error, `:78-99`, `:115-128`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:44-50`, with its labels, `ForkTodoTool.tsx:32-45`, `:62-72`, and its expandable list or error, `:73-94`, `:110-121`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-33`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:32`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:31`, and run as the chat owner, `fork_search_chats.go:97-103`.
+  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:22-37`, `:51-60`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
 - No wake-up, notification, or PR tool: no matches in `coderd/x/chatd` for `schedule_wakeup`, `notify_user`, or `pull_request`.

@@ -36,7 +36,7 @@ import { asNonEmptyString } from "../../ChatConversation/blockUtils";
 import { ChatDiffStats } from "../../ChatDiffStats";
 import { normalizeLocationSearch } from "../locationSearch";
 import { useChatTree } from "./ChatTreeContext";
-import { getParentChatID } from "./chatTree";
+import { collectDescendantChats, getParentChatID } from "./chatTree";
 import { getModelDisplayName } from "./modelDisplayName";
 import { getChatDisplayConfig } from "./statusConfig";
 
@@ -216,7 +216,11 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 		hasWorkspace: Boolean(workspaceId),
 		isArchiving: isArchivingThisChat,
 		isUpdatingReadState,
-		archiveBlockedReason: getArchiveBlockedReason(chat.status, chat.children),
+		// `chat.children` is empty below the root, so walk the tree.
+		archiveBlockedReason: getArchiveBlockedReason(
+			chat.status,
+			collectDescendantChats(chatTree, chatID),
+		),
 		subagentCount: childIDs.length,
 		isSubagentsExpanded: isExpanded,
 		onToggleSubagents: () => toggleExpanded(chatID),
