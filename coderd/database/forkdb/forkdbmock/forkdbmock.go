@@ -12,7 +12,6 @@ package forkdbmock
 import (
 	context "context"
 	reflect "reflect"
-	time "time"
 
 	forkdb "github.com/coder/coder/v2/coderd/database/forkdb"
 	uuid "github.com/google/uuid"
