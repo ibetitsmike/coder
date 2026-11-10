@@ -66,13 +66,16 @@ func (p *Server) forkInterruptDescendants(ctx context.Context, chat database.Cha
 		if !isActiveChatStatus(descendant.Status) {
 			continue
 		}
-		if _, _, err := p.InterruptChat(cascadeCtx, descendant); err != nil {
+		_, descendantInterrupted, err := p.InterruptChat(cascadeCtx, descendant)
+		if err != nil {
 			if !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
 				logger.Warn(ctx, "interrupt cascade: interrupt descendant", slog.F("descendant_id", row.ID), slog.Error(err))
 			}
 			continue
 		}
-		interrupted = true
+		// Interrupt succeeds unchanged for a descendant its worker is
+		// already interrupting, so only a real transition counts.
+		interrupted = interrupted || descendantInterrupted
 	}
 	return interrupted
 }
