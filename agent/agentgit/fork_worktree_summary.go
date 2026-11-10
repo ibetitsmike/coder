@@ -68,7 +68,7 @@ func (a *worktreeAPI) handleSummary(rw http.ResponseWriter, r *http.Request) {
 	// numstat stays parseable where shortstat is localized. Without a second
 	// revision the diff runs against the working tree, so it includes
 	// uncommitted edits to tracked files.
-	numstat, err := a.git(ctx, wt.path, "diff", "--numstat", base, "--")
+	numstat, err := a.git(ctx, wt.path, "diff", "--numstat", "--ignore-submodules=none", base, "--")
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to diff the branch.", err)
 		return

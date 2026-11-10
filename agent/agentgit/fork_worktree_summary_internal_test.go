@@ -99,6 +99,26 @@ func TestForkWorktreeSummary(t *testing.T) {
 	}
 }
 
+func TestForkWorktreeSummarySubmoduleIgnoredByConfig(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitSubmoduleRepo(t, "sub")
+	wtGit(t, repo, "config", "submodule.sub.ignore", "all")
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+	subDir := filepath.Join(wt.Path, "sub")
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "lib.txt"), []byte("lib v2\n"), 0o600))
+	wtGit(t, subDir, "commit", "-am", "bump lib")
+	wtGit(t, wt.Path, "update-index", "--cacheinfo", "160000,"+wtGit(t, subDir, "rev-parse", "HEAD")+",sub")
+	wtGit(t, wt.Path, "commit", "-m", "bump submodule")
+
+	rec := doSummaryRequest(t, h, wt)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got workspacesdk.ForkWorktreeSummary
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, workspacesdk.ForkWorktreeSummary{Commits: 1, FilesChanged: 1, Insertions: 1, Deletions: 1}, got)
+}
+
 func TestForkWorktreeSummaryRejects(t *testing.T) {
 	t.Parallel()
 
