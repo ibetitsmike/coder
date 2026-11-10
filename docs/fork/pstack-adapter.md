@@ -361,7 +361,7 @@ With `fork-nested-subagents`, a `shared` child of the worktree child works in th
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
 Otherwise Coder Agents keeps both until you archive the root chat or the deployment archives it as inactive.
-After the archive, Coder Agents removes each child's worktree and branch in the background.
+If the experiment is still on at the archive, Coder Agents then removes each child's worktree and branch in the background.
 It keeps a worktree that has uncommitted or untracked files, is no longer on its branch, or has submodule commits that are on no remote.
 It also keeps a worktree when its branch, or the `HEAD` or branch reflog, reaches a commit that is on no other branch or remote, such as a commit that a reset moved the branch away from.
 It keeps them all when it can't reach the workspace agent or the agent is older than the server.
@@ -390,7 +390,7 @@ After a failed spawn, Coder Agents archives the child and tries once to stop the
 So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
 When the spawn succeeds, Coder Agents doesn't stop the child's workspace until you archive the root chat or the deployment archives it as inactive.
 The workspace can still stop earlier on its own schedule, such as the deployment's chat workspace TTL or the template's default autostop.
-After the archive, Coder Agents stops each child's workspace in the background, once it has removed the family's worktrees, but it never deletes the workspace.
+If the experiment is still on at the archive, Coder Agents then stops each child's workspace in the background, once it has removed the family's worktrees, but it never deletes the workspace.
 It doesn't retry a failed stop, and it skips a child that is bound to another workspace by then.
 Delete the workspace on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
 
@@ -500,7 +500,7 @@ Checked against fork `main` at `bef9c59966`:
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:101-115`, result fields, `:135-141`.
   Worktree creation and its errors, `fork_isolation.go:172-220`, `:245-247`, from the worktree that the parent works in when `repo_path` is omitted, `:181-188`, removed only when the spawn fails, `:223-236`, called at spawn, `coderd/x/chatd/fork_subagents.go:241`, `:280-293`.
-  Removed after a root archive, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
+  Removed after a root archive with the experiment on, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
   The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:51`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
   Branch name, `fork_isolation.go:258-280`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:242-252`, `:289-292`.
@@ -509,7 +509,7 @@ Checked against fork `main` at `bef9c59966`:
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:269-279`, `:358-363`.
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
-  Stopped after a root archive, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktrees are removed, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
+  Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktrees are removed, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
   No delete: nothing in `coderd/x/chatd` deletes a workspace, and the workspace tools are root-only, `coderd/x/chatd/turn_environment.go:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
