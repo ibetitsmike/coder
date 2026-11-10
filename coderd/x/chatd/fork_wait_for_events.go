@@ -35,9 +35,11 @@ const (
 )
 
 type waitForEventsArgs struct {
-	ChildChatIDs     []string `json:"child_chat_ids,omitempty" description:"IDs of the direct child agents of this chat to wait for. Defaults to every child agent that is still working. At most 50."`
-	Prompt           string   `json:"prompt,omitempty" description:"Text that starts every wake-up message. Defaults to a request to read the child's result with wait_agent."`
-	ExpiresInSeconds *int     `json:"expires_in_seconds,omitempty" description:"Stop waiting this many seconds from now, at least 60. Defaults to 86400 (24 hours)."`
+	ChildChatIDs      []string `json:"child_chat_ids,omitempty" description:"IDs of the direct child agents of this chat to wait for. Defaults to every child agent that is still working. At most 50."`
+	Prompt            string   `json:"prompt,omitempty" description:"Text that starts every wake-up message. Defaults to a request to read the child's result with wait_agent."`
+	ExpiresInSeconds  *int     `json:"expires_in_seconds,omitempty" description:"Stop waiting this many seconds from now, at least 60. Defaults to 86400 (24 hours)."`
+	PullRequestURL    string   `json:"pull_request_url,omitempty" description:"A GitHub pull request URL, e.g. https://github.com/org/repo/pull/7, to watch. The chat gets one message when it has new activity by someone other than the chat owner. Without child_chat_ids, only the pull request is watched."`
+	PullRequestEvents []string `json:"pull_request_events,omitempty" description:"Which pull request activity wakes the chat: any of review, comment, checks (CI settled on a new result) and closed (closed or merged). Defaults to all four. Requires pull_request_url."`
 }
 
 type waitForEventsChild struct {
@@ -47,16 +49,24 @@ type waitForEventsChild struct {
 }
 
 type waitForEventsResult struct {
-	ID        uuid.UUID            `json:"id"`
-	ExpiresAt time.Time            `json:"expires_at"`
-	Children  []waitForEventsChild `json:"children"`
+	ID          uuid.UUID                 `json:"id"`
+	ExpiresAt   time.Time                 `json:"expires_at"`
+	Children    []waitForEventsChild      `json:"children"`
+	PullRequest *waitForEventsPullRequest `json:"pull_request,omitempty"`
 }
 
 // wakeupEvent is one entry of the events of an events wake-up. Type names
-// what the worker waits for; entries of other types are ignored.
+// what the worker waits for; entries of other types are ignored. A child_done
+// entry sets ChatID, a pull_request entry the other fields: Since is when the
+// watch started, and HeadSHA and ChecksState are the baseline at that time.
 type wakeupEvent struct {
-	Type   string    `json:"type"`
-	ChatID uuid.UUID `json:"chat_id"`
+	Type        string    `json:"type"`
+	ChatID      uuid.UUID `json:"chat_id,omitzero"`
+	URL         string    `json:"url,omitempty"`
+	On          []string  `json:"on,omitempty"`
+	Since       time.Time `json:"since,omitzero"`
+	HeadSHA     string    `json:"head_sha,omitempty"`
+	ChecksState string    `json:"checks_state,omitempty"`
 }
 
 // waitForEventsTool returns the wait_for_events tool, which creates an events
@@ -70,7 +80,10 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			"wait_agent and continue. Watches child_chat_ids, or by default "+
 			"every child agent that is still working. A message never "+
 			"interrupts a running turn. Stops after expires_in_seconds "+
-			"(default 24 hours). Returns the wake-up ID and the watched children.",
+			"(default 24 hours). Returns the wake-up ID and the watched children. "+
+			"With pull_request_url, it also watches that GitHub pull request "+
+			"and sends one message when someone else reviews or comments, CI "+
+			"settles, or it closes.",
 		func(ctx context.Context, args waitForEventsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			id, ok := workspacesdk.ToolCallIDFromContext(ctx)
 			if !ok {
@@ -83,11 +96,7 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			if wakeup == nil {
-				children, err := p.waitForEventsChildren(ctx, chat, args.ChildChatIDs)
-				if err != nil {
-					return fantasy.NewTextErrorResponse(err.Error()), nil
-				}
-				spec, err := waitForEventsSpec(args, children)
+				spec, err := p.newWaitForEventsSpec(ctx, chat, args)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
@@ -123,8 +132,34 @@ func (p *Server) chatWakeupByID(ctx context.Context, chat database.Chat, id uuid
 	return &wakeup, nil
 }
 
+// newWaitForEventsSpec resolves what a new wait_for_events call watches: its
+// pull request, its children, or both, and maps it to a wake-up spec.
+func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, args waitForEventsArgs) (wakeupSpec, error) {
+	var pullRequest *wakeupEvent
+	switch {
+	case strings.TrimSpace(args.PullRequestURL) != "":
+		event, err := p.pullRequestWaitEvent(ctx, chat, args.PullRequestURL, args.PullRequestEvents)
+		if err != nil {
+			return wakeupSpec{}, err
+		}
+		pullRequest = &event
+	case len(args.PullRequestEvents) > 0:
+		return wakeupSpec{}, xerrors.New("pull_request_events requires pull_request_url")
+	}
+	var children []database.Chat
+	// A call that names only a pull request waits for no children.
+	if pullRequest == nil || len(args.ChildChatIDs) > 0 {
+		var err error
+		children, err = p.waitForEventsChildren(ctx, chat, args.ChildChatIDs)
+		if err != nil {
+			return wakeupSpec{}, err
+		}
+	}
+	return waitForEventsSpec(args, children, pullRequest)
+}
+
 // waitForEventsResponse describes wakeup with the current state of the
-// children its events watch.
+// children its events watch and the baseline of its pull request.
 func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup) (waitForEventsResult, error) {
 	var events []wakeupEvent
 	if err := json.Unmarshal(wakeup.Events, &events); err != nil {
@@ -142,6 +177,10 @@ func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, 
 		Children:  make([]waitForEventsChild, 0, len(events)),
 	}
 	for _, event := range events {
+		if event.Type == wakeupEventPullRequest {
+			result.PullRequest = &waitForEventsPullRequest{URL: event.URL, On: event.On, HeadSHA: event.HeadSHA, ChecksState: event.ChecksState}
+			continue
+		}
 		index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
 		if event.Type != wakeupEventChildDone || index < 0 {
 			continue
@@ -208,8 +247,8 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 }
 
 // waitForEventsSpec maps wait_for_events arguments to the spec of an events
-// wake-up with one child_done event per child.
-func waitForEventsSpec(args waitForEventsArgs, children []database.Chat) (wakeupSpec, error) {
+// wake-up with one child_done event per child, then pullRequest if set.
+func waitForEventsSpec(args waitForEventsArgs, children []database.Chat, pullRequest *wakeupEvent) (wakeupSpec, error) {
 	spec := wakeupSpec{
 		source:           wakeupSourceEvents,
 		kind:             forkdb.ChatWakeupKindEvents,
@@ -218,6 +257,9 @@ func waitForEventsSpec(args waitForEventsArgs, children []database.Chat) (wakeup
 	}
 	if strings.TrimSpace(spec.prompt) == "" {
 		spec.prompt = defaultWaitForEventsPrompt
+		if pullRequest != nil {
+			spec.prompt = defaultPullRequestWaitPrompt
+		}
 	}
 	if args.ExpiresInSeconds != nil {
 		maxSeconds := int(maxWakeupPeriod / time.Second)
@@ -231,6 +273,9 @@ func waitForEventsSpec(args waitForEventsArgs, children []database.Chat) (wakeup
 	for _, child := range children {
 		events = append(events, wakeupEvent{Type: wakeupEventChildDone, ChatID: child.ID})
 	}
+	if pullRequest != nil {
+		events = append(events, *pullRequest)
+	}
 	raw, err := json.Marshal(events)
 	if err != nil {
 		return wakeupSpec{}, xerrors.Errorf("encode events: %w", err)
@@ -240,9 +285,10 @@ func waitForEventsSpec(args waitForEventsArgs, children []database.Chat) (wakeup
 }
 
 // deliverEventsWakeup sends one message for the first watched child that is
-// done and has no run yet, and completes the wake-up once every watched child
-// has a run or is gone. deliverWakeup calls it only for an idle chat, so the
-// next child is delivered on a later tick, after the turn this one starts.
+// done, or pull request with new activity, that has no run yet, and completes
+// the wake-up once every watched entry has a run or is gone. deliverWakeup
+// calls it only for an idle chat, so the next entry is delivered on a later
+// tick, after the turn this one starts.
 func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) error {
 	var events []wakeupEvent
 	if err := json.Unmarshal(wakeup.Events, &events); err != nil {
@@ -263,55 +309,104 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		return xerrors.Errorf("list wake-up runs: %w", err)
 	}
 
-	var next *database.Chat
-	// Watched children, other than next, that still need a run.
+	// The entry this tick delivers.
+	var next *wakeupDelivery
+	// Watched entries, other than next, that still need a run.
 	pending := 0
+	// Whether one of them is a pull request, which is polled less often.
+	pullRequestPending := false
 	for _, event := range events {
-		if event.Type != wakeupEventChildDone || slices.Contains(keys, childDoneRunKey(event.ChatID)) {
-			continue
-		}
-		index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
-		if index < 0 {
-			// A child that is gone has nothing to report.
-			continue
-		}
-		child := rows[index].Chat
-		if next == nil {
-			done, err := p.childDone(ctx, child)
-			if err != nil {
-				return err
-			}
-			if done {
-				next = &child
+		switch event.Type {
+		case wakeupEventChildDone:
+			if slices.Contains(keys, childDoneRunKey(event.ChatID)) {
 				continue
 			}
+			index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
+			if index < 0 {
+				// A child that is gone has nothing to report.
+				continue
+			}
+			child := rows[index].Chat
+			if next == nil {
+				done, err := p.childDone(ctx, child)
+				if err != nil {
+					return err
+				}
+				if done {
+					next = &wakeupDelivery{
+						text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, child.Title, child.ID, child.Status),
+						runKey: childDoneRunKey(child.ID),
+					}
+					continue
+				}
+			}
+			pending++
+		case wakeupEventPullRequest:
+			if slices.Contains(keys, pullRequestRunKey(event.URL)) {
+				continue
+			}
+			// At most one read per tick: a later entry waits until next
+			// is delivered.
+			if next == nil {
+				summary, err := p.pullRequestWakeupText(ctx, chat, event)
+				if err != nil {
+					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, err))
+				}
+				if summary != "" {
+					next = &wakeupDelivery{
+						text:   wakeup.Prompt + "\n\n" + summary,
+						runKey: pullRequestRunKey(event.URL),
+					}
+					continue
+				}
+			}
+			pending++
+			pullRequestPending = true
 		}
-		pending++
+	}
+	interval := wakeupPollInterval
+	if pullRequestPending {
+		interval = pullRequestPollInterval
 	}
 	if next == nil {
-		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, interval))
 	}
 	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
 		return err
 	}
-	delivery := wakeupDelivery{
-		text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, next.Title, next.ID, next.Status),
-		runKey: childDoneRunKey(next.ID),
-		finish: func(admittedAt time.Time) wakeupFinish { return eventsWakeupFinish(wakeup, admittedAt, 1, pending) },
+	delivery := *next
+	delivery.finish = func(admittedAt time.Time) wakeupFinish {
+		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, interval)
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	// A failed send keeps the child's own key free, so a later poll retries it.
+	// A failed send keeps the entry's own key free, so a later poll retries
+	// it.
 	failedRunKey := delivery.runKey + ":failed:" + now.UTC().Format(time.RFC3339Nano)
 	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey, err)
 }
 
-// eventsWakeupFinish completes an events wake-up when no watched child still
-// needs a run, and otherwise polls again.
-func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, pending int) wakeupFinish {
+// eventsWakeupFinish completes an events wake-up when no watched entry still
+// needs a run, and otherwise polls again after interval.
+func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, pending int, interval time.Duration) wakeupFinish {
 	if pending == 0 {
 		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "done", runDelta: runDelta}
 	}
-	return nextWakeupRun(wakeup, now, runDelta)
+	return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(interval))
+}
+
+// eventsWakeupRunAt is nextWakeupRun of an events wake-up whose next poll is
+// at next instead of one wakeupPollInterval from now, with the same max_runs
+// and expiry rules.
+func eventsWakeupRunAt(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, next time.Time) wakeupFinish {
+	finish := nextWakeupRun(wakeup, now, runDelta)
+	if finish.status != forkdb.ChatWakeupStatusActive {
+		return finish
+	}
+	if wakeup.ExpiresAt.Valid && !next.Before(wakeup.ExpiresAt.Time) {
+		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired", runDelta: runDelta}
+	}
+	finish.nextRunAt.Time = next
+	return finish
 }
 
 // childDoneRunKey names the run of a child_done event, so each child wakes
