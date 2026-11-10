@@ -6,10 +6,12 @@ import {
 	isAlias,
 	isMap,
 	isScalar,
+	type Node,
 	parseDocument,
 	Scalar,
 	visit,
 } from "yaml";
+import { isValidSkillDescription } from "../../utils/skills";
 
 /**
  * The editor's fields. frontMatter holds the definition's original YAML
@@ -36,7 +38,8 @@ export const emptyAgentDefinitionFormValues: AgentDefinitionFormValues = {
 const ownedKeys = ["name", "description", "model"] as const;
 
 const parseFrontMatter = (text: string): Document => {
-	const document = parseDocument(text);
+	// The server's decoder applies << merge keys.
+	const document = parseDocument(text, { merge: true });
 	const [error] = document.errors;
 	if (error) {
 		throw new Error(`The front-matter is not valid YAML: ${error.message}`);
@@ -47,27 +50,53 @@ const parseFrontMatter = (text: string): Document => {
 	return document;
 };
 
-// An owned field set through an alias reads as the value it aliases, as the
-// server's decoder reads it. The editor's fields are single-line inputs, so
-// line breaks in a value, such as a block scalar description, read as spaces.
-const stringField = (document: Document, key: string) => {
-	const node = document.get(key, true);
-	const resolved = isAlias(node) ? node.resolve(document) : node;
-	const value = isScalar(resolved) ? resolved.value : resolved;
-	if (value === undefined || value === null) {
-		return "";
+// Fields are read from the document's values, so an owned field set through
+// an alias or a merge key reads as the server's decoder reads it. The
+// editor's fields are single-line inputs, so line breaks in a value, such as
+// a block scalar description, read as spaces.
+const stringFields = (document: Document) => {
+	let data: unknown;
+	try {
+		data = document.toJS();
+	} catch (error) {
+		throw new Error(
+			`The front-matter is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
-	if (typeof value !== "string") {
-		throw new Error(`Front-matter field "${key}" must be a string.`);
+	const fields = new Map<string, unknown>(
+		data && typeof data === "object" ? Object.entries(data) : [],
+	);
+	const read = (key: string) => {
+		const value = fields.get(key);
+		if (value === undefined || value === null) {
+			return "";
+		}
+		if (typeof value !== "string") {
+			throw new Error(`Front-matter field "${key}" must be a string.`);
+		}
+		return value.trim();
+	};
+	// An unchanged description is saved as written, so its full value must
+	// fit, not only the one-line form the editor shows.
+	const description = read("description");
+	if (!isValidSkillDescription(description)) {
+		throw new Error("The description must be 4096 bytes or smaller.");
 	}
-	return value.trim().replace(/\s*\n\s*/g, " ");
+	return {
+		name: read("name").replace(/\s*\n\s*/g, " "),
+		description: description.replace(/\s*\n\s*/g, " "),
+		model: read("model").replace(/\s*\n\s*/g, " "),
+	};
 };
 
-const stringFields = (document: Document) => ({
-	name: stringField(document, "name"),
-	description: stringField(document, "description"),
-	model: stringField(document, "model"),
-});
+// A replacement for an alias keeps the alias's comments.
+const scalarFor = (value: unknown, replaced: Node) => {
+	const scalar = new Scalar(value);
+	scalar.comment = replaced.comment;
+	scalar.commentBefore = replaced.commentBefore;
+	scalar.spaceBefore = replaced.spaceBefore;
+	return scalar;
+};
 
 /** Splits agent definition markdown into the editor's fields. */
 export const parseAgentDefinitionMarkdown = (
@@ -105,11 +134,9 @@ const inlineOwnedAliases = (document: Document) => {
 			if (!isScalar(target) || !owned.has(target)) {
 				return undefined;
 			}
-			const copy = new Scalar(target.value);
+			const copy = scalarFor(target.value, alias);
 			copy.type = target.type;
-			copy.comment = alias.comment;
-			copy.commentBefore = alias.commentBefore;
-			copy.spaceBefore = alias.spaceBefore;
+			copy.tag = target.tag;
 			return copy;
 		},
 	});
@@ -154,7 +181,8 @@ export const buildAgentDefinitionMarkdown = (
 				// Setting an existing scalar keeps its node, so its style and
 				// comments survive. On empty front-matter this creates the
 				// mapping with this key first.
-				document.set(key, value);
+				const current = document.get(key, true);
+				document.set(key, isAlias(current) ? scalarFor(value, current) : value);
 				if (!isMap(contents)) {
 					inserted++;
 				}

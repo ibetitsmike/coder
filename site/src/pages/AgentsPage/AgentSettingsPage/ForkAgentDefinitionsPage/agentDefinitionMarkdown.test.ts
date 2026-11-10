@@ -197,6 +197,74 @@ describe("agent definition markdown", () => {
 		);
 	});
 
+	it("reads and keeps an owned field set through a merge key", () => {
+		const content = [
+			"---",
+			"defaults: &agent",
+			"  name: reviewer",
+			"<<: *agent",
+			"description: Reviews diffs.",
+			"---",
+			"Review the diff.",
+			"",
+		].join("\n");
+		const parsed = parseAgentDefinitionMarkdown(content);
+		expect(parsed.name).toBe("reviewer");
+		expect(
+			buildAgentDefinitionMarkdown({ ...parsed, description: "Finds bugs." }),
+		).toBe(content.replace("Reviews diffs.", "Finds bugs."));
+	});
+
+	it("keeps the tag and comments of aliases it replaces", () => {
+		const parsed = parseAgentDefinitionMarkdown(
+			[
+				"---",
+				"name: reviewer",
+				"description: &summary !!str 2026-11-10",
+				"default_model: &default sonnet",
+				"model: *default # deployment choice",
+				"summary: *summary",
+				"---",
+				"Review the diff.",
+			].join("\n"),
+		);
+		expect(
+			buildAgentDefinitionMarkdown({
+				...parsed,
+				description: "Finds bugs.",
+				model: "opus",
+			}),
+		).toBe(
+			[
+				"---",
+				"name: reviewer",
+				"description: &summary !!str Finds bugs.",
+				"default_model: &default sonnet",
+				"model: opus # deployment choice",
+				"summary: !!str 2026-11-10",
+				"---",
+				"Review the diff.",
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("rejects a description over the size limit before it is shown on one line", () => {
+		// Each line keeps ten spaces of its own indentation, which the
+		// one-line form drops.
+		const lines = [
+			"  a",
+			...Array.from({ length: 400 }, () => `  ${" ".repeat(10)}a`),
+		];
+		expect(() =>
+			parseAgentDefinitionMarkdown(
+				["---", "name: reviewer", "description: |", ...lines, "---", ""].join(
+					"\n",
+				),
+			),
+		).toThrow("The description must be 4096 bytes or smaller.");
+	});
+
 	it("rejects front-matter that is not a YAML mapping", () => {
 		expect(() =>
 			parseAgentDefinitionMarkdown("---\nname: [reviewer\n---\nbody"),
