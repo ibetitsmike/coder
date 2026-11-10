@@ -171,6 +171,12 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
+	earlier := dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        child.ID,
+		ModelConfigID: uuid.NullUUID{UUID: modelConfig.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Visibility:    database.ChatMessageVisibilityBoth,
+	})
 	ask(child, "call-secret", `[{"header": "Token", "question": "Paste the API token.", "secret": true}]`)
 	ask(grandchild, "call-normal", `[{"header": "DB", "question": "Which database?", "options": [{"label": "Postgres"}]}]`)
 	answerText := func(callID, answer string) codersdk.CreateChatMessageRequest {
@@ -185,6 +191,14 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		require.ErrorAs(t, err, &sdkErr)
 		require.Equal(t, want, sdkErr.StatusCode())
 	}
+	requireSecretRefusal := func(t *testing.T, err error) {
+		t.Helper()
+		var sdkErr *codersdk.Error
+		require.ErrorAs(t, err, &sdkErr)
+		require.Equal(t, http.StatusConflict, sdkErr.StatusCode())
+		require.Contains(t, sdkErr.Message, "takes a secret answer")
+	}
+	secretText := []codersdk.ChatInputPart{{Type: codersdk.ChatInputPartTypeText, Text: secret}}
 
 	listed, err := client.ChatDescendantQuestions(ctx, root.ID)
 	require.NoError(t, err)
@@ -199,11 +213,11 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	// with or without the answer prefix.
 	_, err = client.CreateChatMessage(ctx, child.ID, answerText("call-secret", secret))
 	requireStatus(t, http.StatusConflict, err)
-	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
-		Type: codersdk.ChatInputPartTypeText,
-		Text: secret,
-	}}})
-	requireStatus(t, http.StatusConflict, err)
+	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: secretText})
+	requireSecretRefusal(t, err)
+	// Neither can an edit of an earlier message.
+	_, err = client.EditChatMessage(ctx, child.ID, earlier.ID, codersdk.EditChatMessageRequest{Content: secretText})
+	requireSecretRefusal(t, err)
 
 	err = client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-other", Value: secret})
 	requireStatus(t, http.StatusConflict, err)
@@ -256,7 +270,13 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	queued, err := db.GetChatQueuedMessages(sysCtx, busy.ID)
 	require.NoError(t, err)
 	require.Len(t, queued, 1)
-	res, err := client.Request(ctx, http.MethodDelete, fmt.Sprintf("/api/v2/chats/%s/queue/%d", busy.ID, queued[0].ID), nil)
+	// Nor an edit of a queued message.
+	res, err := client.Request(ctx, http.MethodPatch, fmt.Sprintf("/api/v2/chats/%s/queue/%d", busy.ID, queued[0].ID),
+		codersdk.EditChatQueuedMessageRequest{Content: secretText})
+	require.NoError(t, err)
+	requireSecretRefusal(t, codersdk.ReadBodyAsError(res))
+	_ = res.Body.Close()
+	res, err = client.Request(ctx, http.MethodDelete, fmt.Sprintf("/api/v2/chats/%s/queue/%d", busy.ID, queued[0].ID), nil)
 	require.NoError(t, err)
 	_ = res.Body.Close()
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
