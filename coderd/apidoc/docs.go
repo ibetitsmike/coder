@@ -5603,6 +5603,125 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/{chat}/wakeups": {
+            "get": {
+                "description": "Returns every wake-up of the chat, oldest first, including\ncompleted and canceled ones.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List chat wake-ups",
+                "operationId": "list-chat-wake-ups",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatWakeup"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/wakeups/{wakeup}": {
+            "patch": {
+                "description": "Pauses (paused), resumes (active) or cancels (canceled) a\nwake-up of the chat. Setting the status the wake-up already\nhas changes nothing. A resumed wake-up keeps a run time that\nis still ahead, and completes when it has no run left.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update a chat wake-up",
+                "operationId": "update-a-chat-wake-up",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Wake-up ID",
+                        "name": "wakeup",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update chat wake-up request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateChatWakeupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatWakeup"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/watch": {
             "get": {
                 "produces": [
@@ -25641,6 +25760,142 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatWakeup": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "created_by": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "cron": {
+                    "description": "Cron is set for a cron wake-up, which runs in Timezone.",
+                    "type": "string"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatWakeupEvent"
+                    }
+                },
+                "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "interval_seconds": {
+                    "description": "IntervalSeconds is set for an interval wake-up.",
+                    "type": "integer"
+                },
+                "kind": {
+                    "$ref": "#/definitions/codersdk.ChatWakeupKind"
+                },
+                "last_run_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "max_runs": {
+                    "type": "integer"
+                },
+                "next_run_at": {
+                    "description": "NextRunAt is when an active wake-up runs next. A paused wake-up keeps\nthe run time it had, unless the worker paused it.",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "organization_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "run_count": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/codersdk.ChatWakeupStatus"
+                },
+                "status_reason": {
+                    "description": "StatusReason tells why the wake-up paused, completed or was canceled.",
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "codersdk.ChatWakeupEvent": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "description": "ChatID is the child chat of a child_done event.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "on": {
+                    "description": "On lists the pull request activity that wakes the chat.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "type": {
+                    "description": "Type is child_done for a child chat that finishes, or pull_request for\nactivity on a pull request.",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the pull request of a pull_request event.",
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ChatWakeupKind": {
+            "type": "string",
+            "enum": [
+                "delay",
+                "interval",
+                "cron",
+                "events"
+            ],
+            "x-enum-varnames": [
+                "ChatWakeupKindDelay",
+                "ChatWakeupKindInterval",
+                "ChatWakeupKindCron",
+                "ChatWakeupKindEvents"
+            ]
+        },
+        "codersdk.ChatWakeupStatus": {
+            "type": "string",
+            "enum": [
+                "active",
+                "paused",
+                "completed",
+                "canceled"
+            ],
+            "x-enum-varnames": [
+                "ChatWakeupStatusActive",
+                "ChatWakeupStatusPaused",
+                "ChatWakeupStatusCompleted",
+                "ChatWakeupStatusCanceled"
+            ]
+        },
         "codersdk.ChatWatchEvent": {
             "type": "object",
             "properties": {
@@ -35016,6 +35271,23 @@ const docTemplate = `{
                 },
                 "system_prompt": {
                     "type": "string"
+                }
+            }
+        },
+        "codersdk.UpdateChatWakeupRequest": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "enum": [
+                        "active",
+                        "paused",
+                        "canceled"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ChatWakeupStatus"
+                        }
+                    ]
                 }
             }
         },
