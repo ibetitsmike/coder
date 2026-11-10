@@ -1828,11 +1828,13 @@ describe("ChatsSidebar nested subagent capacity", () => {
 		expect(familyRequests).toBe(0);
 		await user.click(expand);
 		expect(
-			await screen.findByRole("img", { name: "Waiting for slot" }),
+			await screen.findByRole("img", {
+				name: "Waiting for a free subagent slot",
+			}),
 		).toBeInTheDocument();
 		expect(screen.getByText("live 2/2")).toBeInTheDocument();
 		expect(
-			screen.getAllByRole("img", { name: "Waiting for slot" }),
+			screen.getAllByRole("img", { name: "Waiting for a free subagent slot" }),
 		).toHaveLength(1);
 	});
 });
