@@ -46,6 +46,11 @@ RETURNING *;
 -- name: GetChatWakeupByID :one
 SELECT * FROM chat_wakeups WHERE id = @id;
 
+-- Locks the wake-up until the transaction ends, so a worker that finishes its
+-- claim in between waits and then finds its lease gone.
+-- name: GetChatWakeupByIDForUpdate :one
+SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
+
 -- name: ListChatWakeupsByChatID :many
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
 

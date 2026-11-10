@@ -621,6 +621,8 @@ The family update locks the root chat row first, and creating a child chat takes
 <!-- TODO(ibetitsmike): describe the fork-subagent-isolation archive cleanup: after the family archive commits, a background task asks each worktree subagent's workspace agent to remove its worktree and branch, and posts a user-visible system notice on the root (chatstate `ForkAppendNotice`, which changes no execution state) listing each worktree it kept and why. -->
 <!-- TODO(ibetitsmike): describe how the same background task, after it removes the worktrees, stops the workspace of each workspace subagent (isolation workspace) as the chat owner with the stop_workspace tool, which waits for an active build and does nothing when the workspace is already stopped. It skips a subagent whose chat is now bound to another workspace. Unarchiving the family does not start the workspace again. -->
 
+<!-- TODO(ibetitsmike): describe how, with fork-chat-wakeups on, a family archive cancels the active and paused wake-ups of every member (reason `archived`) in the archive transaction, and that unarchiving does not resume them. -->
+
 For `archived` updates, the supported input and output states are:
 
 - `W -> SetArchived(true) -> XW`
@@ -886,6 +888,7 @@ The chat worker is responsible for:
 - cleaning up runners when a chat is no longer owned by the runner, which it detects by inspecting `chat:update:{chat_id}` notifications and database sync results.
 
 <!-- TODO(ibetitsmike): describe the fork-chat-wakeups loop (fork_wakeups.go): it claims due chatd.chat_wakeups rows with a lease, skips busy chats until the next tick, and sends the prompt through SendMessage as the owner. -->
+<!-- TODO(ibetitsmike): describe the fork-chat-wakeups owner controls (fork_wakeup_controls.go): PATCH /chats/fork/{chat}/wakeups/{wakeup} pauses, resumes or cancels a wake-up under a row lock (`GetChatWakeupByIDForUpdate`) and clears any worker lease, so a worker that finishes its claim afterwards changes nothing. -->
 
 A chat worker is identified by a **worker ID**, which is regenerated on worker startup.
 
