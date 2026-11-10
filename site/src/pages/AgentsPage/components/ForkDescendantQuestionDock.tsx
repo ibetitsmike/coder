@@ -202,6 +202,7 @@ const SecretQuestionForm: React.FC<{
 	const headerId = `${idPrefix}-header`;
 	const textId = `${idPrefix}-text`;
 	const helperId = `${idPrefix}-helper`;
+	const errorId = `${idPrefix}-error`;
 	const queryClient = useQueryClient();
 	const [value, setValue] = useState("");
 	const answerMutation = useMutation(
@@ -258,7 +259,10 @@ const SecretQuestionForm: React.FC<{
 				type="password"
 				{...passwordManagerIgnoreProps}
 				aria-labelledby={`${headerId} ${textId}`}
-				aria-describedby={helperId}
+				aria-describedby={
+					answerMutation.isError ? `${helperId} ${errorId}` : helperId
+				}
+				aria-invalid={answerMutation.isError}
 				spellCheck={false}
 				className="mt-2"
 				value={value}
@@ -276,6 +280,7 @@ const SecretQuestionForm: React.FC<{
 			</p>
 			{answerMutation.isError && (
 				<div
+					id={errorId}
 					role="alert"
 					className="mt-3 flex items-center gap-1.5 text-[13px] text-content-destructive"
 				>

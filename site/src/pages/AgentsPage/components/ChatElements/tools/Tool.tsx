@@ -694,6 +694,7 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 		(resultRecord
 			? asString(resultRecord.error || resultRecord.message)
 			: "") || (typeof result === "string" && isError ? result : "");
+	const isSecret = hasSecretQuestion(args, result);
 
 	return (
 		<AskUserQuestionTool
@@ -701,10 +702,11 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 			status={status}
 			isError={isError}
 			errorMessage={errorMessage || undefined}
-			onSubmitAnswer={
-				hasSecretQuestion(args, result)
-					? undefined
-					: onSendAskUserQuestionResponse
+			onSubmitAnswer={isSecret ? undefined : onSendAskUserQuestionResponse}
+			answerElsewhereNotice={
+				isSecret
+					? "Answer this secret question in the question panel of the root chat."
+					: undefined
 			}
 			isChatCompleted={isChatCompleted}
 			isLatestAskUserQuestion={isLatestAskUserQuestion}

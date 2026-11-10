@@ -166,6 +166,39 @@ export const InteractiveSingleQuestion: Story = {
 	},
 };
 
+// A descendant chat shows its secret question without a form, because
+// only the root chat's question panel takes the answer.
+export const SecretQuestion: Story = {
+	args: {
+		status: "completed",
+		result: JSON.stringify({
+			questions: [
+				{
+					header: "Token",
+					question: "Paste the API token.",
+					options: [],
+					secret: true,
+				},
+			],
+		}),
+		isChatCompleted: true,
+		isLatestAskUserQuestion: true,
+		onSendAskUserQuestionResponse: fn(),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByText(
+				"Answer this secret question in the question panel of the root chat.",
+			),
+		).toBeInTheDocument();
+		expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
+		expect(
+			canvas.queryByRole("button", { name: "Submit" }),
+		).not.toBeInTheDocument();
+	},
+};
+
 export const InteractiveMarkdownQuestion: Story = {
 	args: {
 		status: "completed",

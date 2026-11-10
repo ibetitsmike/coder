@@ -354,9 +354,16 @@ describe("ForkDescendantQuestionDock", () => {
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"The answer must be at least 8 bytes.",
 		);
+		expect(field).toHaveAttribute("aria-invalid", "true");
+		expect(field).toHaveAccessibleDescription(
+			expect.stringContaining("The answer must be at least 8 bytes."),
+		);
 
 		await user.type(field, "5678");
 
-		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(field).toHaveAttribute("aria-invalid", "false");
+		expect(field).not.toHaveAccessibleDescription(
+			expect.stringContaining("The answer must be at least 8 bytes."),
+		);
 	});
 });
