@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
@@ -37,9 +38,10 @@ type fakeWorktreeConn struct {
 	worktree  workspacesdk.ForkWorktree
 	createErr error
 
-	mu      sync.Mutex
-	creates []workspacesdk.ForkCreateWorktreeRequest
-	deletes []workspacesdk.ForkDeleteWorktreeRequest
+	mu              sync.Mutex
+	creates         []workspacesdk.ForkCreateWorktreeRequest
+	deletes         []workspacesdk.ForkDeleteWorktreeRequest
+	deleteDeadlines []time.Time
 }
 
 func (c *fakeWorktreeConn) ForkCreateWorktree(_ context.Context, req workspacesdk.ForkCreateWorktreeRequest) (workspacesdk.ForkWorktree, error) {
@@ -52,10 +54,12 @@ func (c *fakeWorktreeConn) ForkCreateWorktree(_ context.Context, req workspacesd
 	return c.worktree, nil
 }
 
-func (c *fakeWorktreeConn) ForkDeleteWorktree(_ context.Context, req workspacesdk.ForkDeleteWorktreeRequest) error {
+func (c *fakeWorktreeConn) ForkDeleteWorktree(ctx context.Context, req workspacesdk.ForkDeleteWorktreeRequest) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.deletes = append(c.deletes, req)
+	deadline, _ := ctx.Deadline()
+	c.deleteDeadlines = append(c.deleteDeadlines, deadline)
 	return nil
 }
 
@@ -440,6 +444,9 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 		creates, deletes := conn.calls()
 		require.Len(t, creates, 1)
 		require.Equal(t, []workspacesdk.ForkDeleteWorktreeRequest{{Path: "/wt/child", Branch: "agent/child"}}, deletes)
+		conn.mu.Lock()
+		require.Greater(t, time.Until(conn.deleteDeadlines[0]), 5*time.Minute)
+		conn.mu.Unlock()
 		require.Empty(t, f.children(t, root))
 	})
 
