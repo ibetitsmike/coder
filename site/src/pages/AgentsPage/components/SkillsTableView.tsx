@@ -112,7 +112,8 @@ export type SkillsTableViewProps = {
 	deleteState?: SkillDeleteState;
 };
 
-const formatUpdatedAt = (value: string) => {
+/** Formats a timestamp as a short en-US date and time, or "Unknown" if it does not parse. */
+export const formatUpdatedAt = (value: string) => {
 	const date = new Date(value);
 	if (!Number.isFinite(date.getTime())) {
 		return "Unknown";

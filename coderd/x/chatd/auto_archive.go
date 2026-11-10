@@ -145,7 +145,7 @@ func (w *chatWorker) archiveCandidate(
 	archiveCutoff time.Time,
 ) ([]autoArchivedChat, error) {
 	lastActivityAt := row.LastActivityAt
-	familyChats, err := chatstate.SetFamilyArchived(ctx, w.opts.Store, w.opts.Pubsub, chatstate.SetFamilyArchivedInput{
+	familyChats, err := w.server.forkSetFamilyArchived(ctx, w.opts.Store, w.opts.Pubsub, chatstate.SetFamilyArchivedInput{
 		RootID:   row.ID,
 		Archived: true,
 		// The candidate list is read without locks, so recheck the

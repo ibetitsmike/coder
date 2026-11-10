@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// ChatContextResourceKindSubagent is a custom agent definition file found in
+// the workspace.
+const ChatContextResourceKindSubagent ChatContextResourceKind = "subagent"
+
 // ForkAgentDefinitionMetadata describes a stored custom agent definition
 // without its content.
 type ForkAgentDefinitionMetadata struct {
@@ -132,4 +136,38 @@ func (c *Client) ForkOrganizationAgentDefinitionACL(ctx context.Context, organiz
 // an organization agent definition for organization members and groups.
 func (c *Client) UpdateForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string, req UpdateOrganizationSkillACLRequest) error {
 	return requestNoContent(ctx, c, http.MethodPatch, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", req)
+}
+
+func forkProjectAgentDefinitionsPath(organizationID, projectID uuid.UUID) string {
+	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/projects/%s/agent-definitions", organizationID, projectID)
+}
+
+func forkProjectAgentDefinitionPath(organizationID, projectID uuid.UUID, name string) string {
+	return forkProjectAgentDefinitionsPath(organizationID, projectID) + "/" + url.PathEscape(name)
+}
+
+// ForkProjectAgentDefinitions lists the agent definitions of a chat project.
+func (c *Client) ForkProjectAgentDefinitions(ctx context.Context, organizationID, projectID uuid.UUID) ([]ForkAgentDefinitionMetadata, error) {
+	return requestJSON[[]ForkAgentDefinitionMetadata](ctx, c, http.MethodGet, forkProjectAgentDefinitionsPath(organizationID, projectID), http.StatusOK, nil)
+}
+
+// ForkProjectAgentDefinition returns a chat project agent definition by name.
+func (c *Client) ForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodGet, forkProjectAgentDefinitionPath(organizationID, projectID, name), http.StatusOK, nil)
+}
+
+// CreateForkProjectAgentDefinition stores an agent definition for a chat
+// project.
+func (c *Client) CreateForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, req CreateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPost, forkProjectAgentDefinitionsPath(organizationID, projectID), http.StatusCreated, req)
+}
+
+// UpdateForkProjectAgentDefinition updates a chat project agent definition.
+func (c *Client) UpdateForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string, req UpdateForkAgentDefinitionRequest) (ForkAgentDefinition, error) {
+	return requestJSON[ForkAgentDefinition](ctx, c, http.MethodPatch, forkProjectAgentDefinitionPath(organizationID, projectID, name), http.StatusOK, req)
+}
+
+// DeleteForkProjectAgentDefinition deletes a chat project agent definition.
+func (c *Client) DeleteForkProjectAgentDefinition(ctx context.Context, organizationID, projectID uuid.UUID, name string) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkProjectAgentDefinitionPath(organizationID, projectID, name), nil)
 }

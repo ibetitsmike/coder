@@ -269,15 +269,15 @@ func writeForkAgentDefinitionWriteError(ctx context.Context, rw http.ResponseWri
 		})
 	case httpapi.Is404Error(err):
 		httpapi.ResourceNotFound(rw)
-	case database.IsUniqueViolation(err, "agent_definitions_user_name_idx", "agent_definitions_organization_name_idx"):
+	case database.IsUniqueViolation(err, "agent_definitions_user_name_idx", "agent_definitions_organization_name_idx", "agent_definitions_project_name_idx"):
 		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
 			Message: "An agent definition with this name already exists.",
 		})
 	// The limit trigger raises these names with USING CONSTRAINT.
-	case database.IsCheckViolation(err, "agent_definitions_per_user_limit", "agent_definitions_per_organization_limit"):
+	case database.IsCheckViolation(err, "agent_definitions_per_user_limit", "agent_definitions_per_organization_limit", "agent_definitions_per_project_limit"):
 		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
 			Message: "Agent definition limit reached.",
-			Detail:  "A user or an organization can have at most 100 agent definitions.",
+			Detail:  "A user, an organization or a project can have at most 100 agent definitions.",
 		})
 	case database.IsCheckViolation(err, "agent_definitions_name_size", "agent_definitions_description_size", "agent_definitions_content_size"):
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
