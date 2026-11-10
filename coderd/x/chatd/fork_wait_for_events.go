@@ -380,9 +380,10 @@ func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]da
 	return rows, waiting, nil
 }
 
-// watchedRunKeys maps the run key of each entry that an active events
-// wake-up of chat watches and has not delivered yet to the ID of that
-// wake-up.
+// watchedRunKeys maps the run key of each entry that an active, unexpired
+// events wake-up of chat watches and has not delivered yet to the ID of that
+// wake-up. An expired wake-up stays active while its chat is busy, but the
+// worker then finishes it without a delivery, so it watches nothing.
 func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[string]uuid.UUID, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -392,9 +393,13 @@ func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[st
 	if err != nil {
 		return nil, xerrors.Errorf("list chat wake-ups: %w", err)
 	}
+	now := p.clock.Now()
 	watching := make(map[string]uuid.UUID)
 	for _, wakeup := range wakeups {
 		if wakeup.Kind != forkdb.ChatWakeupKindEvents || wakeup.Status != forkdb.ChatWakeupStatusActive {
+			continue
+		}
+		if wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) {
 			continue
 		}
 		var events []wakeupEvent
