@@ -7,6 +7,7 @@ import {
 describe("agent definition markdown", () => {
 	it("rewrites the owned fields and keeps every other key byte for byte", () => {
 		const unownedLines = [
+			"# The tools it may use.",
 			"tools:",
 			"- Read",
 			"- Grep",

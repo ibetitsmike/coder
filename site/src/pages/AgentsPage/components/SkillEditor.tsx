@@ -55,10 +55,15 @@ type SkillEditorContextValue = {
 	isBusy: boolean;
 	isReadingFile: boolean;
 	setIsReadingFile: (isReadingFile: boolean) => void;
+	buildContent: (values: SkillFormValues) => string;
 };
 
 const SkillEditorContext = createContext<SkillEditorContextValue | null>(null);
 
+/**
+ * Reads the enclosing SkillEditorForm's form, mode, and busy state for a
+ * custom editor part. Throws when rendered outside SkillEditorForm.
+ */
 export const useSkillEditorContext = (): SkillEditorContextValue => {
 	const context = use(SkillEditorContext);
 	if (!context) {
@@ -88,6 +93,11 @@ type SkillEditorFormProps = {
 	existingNames: readonly string[];
 	isSubmitting: boolean;
 	onSubmit: SkillSubmitHandler;
+	/**
+	 * Builds the saved file from the values, for the size limit and the
+	 * submitted content. Defaults to SKILL.md.
+	 */
+	buildContent?: (values: SkillFormValues) => string;
 	children: React.ReactNode;
 };
 
@@ -102,6 +112,7 @@ export const SkillEditorForm: React.FC<SkillEditorFormProps> = ({
 	existingNames,
 	isSubmitting,
 	onSubmit,
+	buildContent = buildSkillMarkdown,
 	children,
 }) => {
 	const isCreate = mode === "create";
@@ -135,13 +146,12 @@ export const SkillEditorForm: React.FC<SkillEditorFormProps> = ({
 
 	const validate = (values: SkillFormValues): FormikErrors<SkillFormValues> => {
 		if (
-			getSkillContentSizeBytes(buildSkillMarkdown(values)) <=
-			SKILL_MAX_SIZE_BYTES
+			getSkillContentSizeBytes(buildContent(values)) <= SKILL_MAX_SIZE_BYTES
 		) {
 			return {};
 		}
 		return {
-			body: `Skill content must be ${formatKiB(SKILL_MAX_SIZE_BYTES)} or smaller.`,
+			body: `Content must be ${formatKiB(SKILL_MAX_SIZE_BYTES)} or smaller.`,
 		};
 	};
 
@@ -160,7 +170,7 @@ export const SkillEditorForm: React.FC<SkillEditorFormProps> = ({
 				description: values.description.trim(),
 				body: values.body.trim(),
 			};
-			onSubmit(normalizedValues, buildSkillMarkdown(normalizedValues), () =>
+			onSubmit(normalizedValues, buildContent(normalizedValues), () =>
 				setSubmitting(false),
 			);
 		},
@@ -179,6 +189,7 @@ export const SkillEditorForm: React.FC<SkillEditorFormProps> = ({
 				isBusy,
 				isReadingFile,
 				setIsReadingFile,
+				buildContent,
 			}}
 		>
 			<form
@@ -485,8 +496,14 @@ export const SkillEditorNameField: React.FC<SkillEditorNameFieldProps> = ({
 	);
 };
 
+type SkillEditorDescriptionFieldProps = {
+	placeholder?: string;
+};
+
 /** The skill description, which tells agents when to use the skill. */
-export const SkillEditorDescriptionField: React.FC = () => {
+export const SkillEditorDescriptionField: React.FC<
+	SkillEditorDescriptionFieldProps
+> = ({ placeholder = "When to use this skill" }) => {
 	const { form, readOnly, isBusy } = useSkillEditorContext();
 	const descriptionId = useId();
 	const descriptionErrorId = useId();
@@ -503,7 +520,7 @@ export const SkillEditorDescriptionField: React.FC = () => {
 				value={form.values.description}
 				onChange={form.handleChange}
 				onBlur={form.handleBlur}
-				placeholder="When to use this skill"
+				placeholder={placeholder}
 				readOnly={readOnly}
 				disabled={isBusy}
 				aria-invalid={Boolean(descriptionError)}
@@ -526,15 +543,15 @@ type SkillEditorBodyFieldProps = {
 	placeholder?: string;
 };
 
-/** The skill body, with a meter for the size of the whole SKILL.md. */
+/** The skill body, with a meter for the size of the whole saved file. */
 export const SkillEditorBodyField: React.FC<SkillEditorBodyFieldProps> = ({
 	placeholder = "Describe when and how agents should use this skill.",
 }) => {
-	const { form, readOnly, isBusy } = useSkillEditorContext();
+	const { form, readOnly, isBusy, buildContent } = useSkillEditorContext();
 	const bodyId = useId();
 	const bodyErrorId = useId();
 	const bodyError = form.touched.body ? form.errors.body : undefined;
-	const sizeBytes = getSkillContentSizeBytes(buildSkillMarkdown(form.values));
+	const sizeBytes = getSkillContentSizeBytes(buildContent(form.values));
 	const isTooLarge = sizeBytes > SKILL_MAX_SIZE_BYTES;
 	const isNearLimit = sizeBytes > SKILL_MAX_SIZE_BYTES * 0.9;
 

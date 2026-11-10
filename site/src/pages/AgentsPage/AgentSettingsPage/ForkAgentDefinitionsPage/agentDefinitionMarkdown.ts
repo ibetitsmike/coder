@@ -27,7 +27,7 @@ export const emptyAgentDefinitionFormValues: AgentDefinitionFormValues = {
 const ownedKeys = new Set(["name", "description", "model"]);
 
 // A line that starts a top-level key, as opposed to a nested value, a list
-// item, a comment, or a blank line that continues the previous key.
+// item, a comment, or a blank line.
 const topLevelKeyPattern = /^([^\s#-][^:]*):(?:\s|$)/;
 
 const stringField = (attributes: Record<string, unknown>, key: string) => {
@@ -72,7 +72,9 @@ export const parseAgentDefinitionMarkdown = (
 		if (key !== undefined) {
 			keepLine = !ownedKeys.has(key);
 		}
-		if (keepLine) {
+		// An unindented comment stands alone rather than continuing the
+		// previous key, so it is kept even after an owned key.
+		if (keepLine || line.startsWith("#")) {
 			extraLines.push(line);
 		}
 	}

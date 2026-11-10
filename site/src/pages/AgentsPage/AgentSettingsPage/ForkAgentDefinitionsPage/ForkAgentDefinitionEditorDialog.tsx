@@ -26,11 +26,9 @@ import {
 	SkillEditorFields,
 	SkillEditorForm,
 	SkillEditorNameField,
-	SkillEditorSubmitButton,
 	SkillEditorSubmitError,
 	type SkillErrorDisplay,
 	useSkillEditorContext,
-	useSkillEditorFormState,
 } from "../../components/SkillEditor";
 import { readAgentAttachmentText } from "../../utils/fileAttachmentLimits";
 import { SKILL_MAX_SIZE_BYTES } from "../../utils/skills";
@@ -76,8 +74,10 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 	onClose,
 	onCloseAutoFocus,
 }) => {
+	// Escape and outside clicks wait for a save, whose failure the form
+	// shows, just like the disabled Cancel button.
 	const handleOpenChange = (open: boolean) => {
-		if (!open) {
+		if (!open && !isSubmitting) {
 			onClose();
 		}
 	};
@@ -117,48 +117,100 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 				className="flex max-h-[90vh] max-w-2xl flex-col gap-0 overflow-hidden p-0"
 				onCloseAutoFocus={onCloseAutoFocus}
 			>
-				<SkillEditorForm
+				<AgentDefinitionEditorForm
 					mode={mode}
 					initialValues={initialValues}
-					// The server rejects a duplicate name with a 409, which is
-					// shown with the other submit errors.
-					existingNames={[]}
+					submitError={submitError}
 					isSubmitting={isSubmitting}
-					// The form keeps every value it is given, so the submitted
-					// values still carry the model and the extra front-matter.
-					onSubmit={(values, _skillContent, onSettled) =>
-						onSubmit(
-							buildAgentDefinitionMarkdown(values as AgentDefinitionFormValues),
-							onSettled,
-						)
-					}
-				>
-					<DialogHeader className="px-6 pt-6">
-						<DialogTitle>
-							{mode === "create" ? "Create" : "Edit"} agent definition
-						</DialogTitle>
-						<DialogDescription>
-							Saved as a Claude Code agent markdown file that chats can spawn
-							with spawn_agent.
-						</DialogDescription>
-					</DialogHeader>
-					<SkillEditorFields>
-						<SkillEditorSubmitError error={submitError} />
-						<AgentDefinitionImport />
-						<SkillEditorNameField />
-						<SkillEditorDescriptionField />
-						<AgentDefinitionModelField />
-						<SkillEditorBodyField placeholder="Instructions the agent follows when a chat spawns it." />
-					</SkillEditorFields>
-					<EditorFooter onClose={onClose} />
-				</SkillEditorForm>
+					onSubmit={onSubmit}
+					onClose={onClose}
+				/>
 			</DialogContent>
 		</Dialog>
 	);
 };
 
-const AgentDefinitionModelField: React.FC = () => {
-	const { form, isBusy } = useSkillEditorContext();
+type AgentDefinitionEditorFormProps = Pick<
+	ForkAgentDefinitionEditorState,
+	"mode" | "submitError" | "isSubmitting" | "onSubmit" | "onClose"
+> & {
+	initialValues: AgentDefinitionFormValues;
+};
+
+/**
+ * The skill form owns the name, description, and body. The model and the
+ * other front-matter live here and join them in the saved markdown.
+ */
+const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
+	mode,
+	initialValues,
+	submitError,
+	isSubmitting,
+	onSubmit,
+	onClose,
+}) => {
+	const [model, setModel] = useState(initialValues.model);
+	const [extraFrontMatter, setExtraFrontMatter] = useState(
+		initialValues.extraFrontMatter,
+	);
+	const isAgentDirty =
+		model !== initialValues.model ||
+		extraFrontMatter !== initialValues.extraFrontMatter;
+
+	return (
+		<SkillEditorForm
+			mode={mode}
+			initialValues={{
+				name: initialValues.name,
+				description: initialValues.description,
+				body: initialValues.body,
+			}}
+			// The server rejects a duplicate name with a 409, which is
+			// shown with the other submit errors.
+			existingNames={[]}
+			isSubmitting={isSubmitting}
+			buildContent={(values) =>
+				buildAgentDefinitionMarkdown({ ...values, model, extraFrontMatter })
+			}
+			onSubmit={(_values, content, onSettled) => onSubmit(content, onSettled)}
+		>
+			<DialogHeader className="px-6 pt-6">
+				<DialogTitle>
+					{mode === "create" ? "Create" : "Edit"} agent definition
+				</DialogTitle>
+				<DialogDescription>
+					Saved as a Claude Code agent markdown file that chats can spawn with
+					spawn_agent.
+				</DialogDescription>
+			</DialogHeader>
+			<SkillEditorFields>
+				<SkillEditorSubmitError error={submitError} />
+				<AgentDefinitionImport
+					onImport={(values) => {
+						setModel(values.model);
+						setExtraFrontMatter(values.extraFrontMatter);
+					}}
+				/>
+				<SkillEditorNameField />
+				<SkillEditorDescriptionField placeholder="When chats should spawn this agent" />
+				<AgentDefinitionModelField model={model} onModelChange={setModel} />
+				<SkillEditorBodyField placeholder="Instructions the agent follows when a chat spawns it." />
+			</SkillEditorFields>
+			<EditorFooter isAgentDirty={isAgentDirty} onClose={onClose} />
+		</SkillEditorForm>
+	);
+};
+
+type AgentDefinitionModelFieldProps = {
+	model: string;
+	onModelChange: (model: string) => void;
+};
+
+const AgentDefinitionModelField: React.FC<AgentDefinitionModelFieldProps> = ({
+	model,
+	onModelChange,
+}) => {
+	const { isBusy } = useSkillEditorContext();
 	const modelId = useId();
 	const hintId = useId();
 	return (
@@ -166,7 +218,8 @@ const AgentDefinitionModelField: React.FC = () => {
 			<Label htmlFor={modelId}>Model</Label>
 			<Input
 				id={modelId}
-				{...form.getFieldProps("model")}
+				value={model}
+				onChange={(event) => onModelChange(event.target.value)}
 				placeholder="The chat's model"
 				disabled={isBusy}
 				aria-describedby={hintId}
@@ -202,8 +255,15 @@ const readAgentDefinitionFile = async (
 	}
 };
 
+type AgentDefinitionImportProps = {
+	/** Receives the imported model and other front-matter. */
+	onImport: (values: AgentDefinitionFormValues) => void;
+};
+
 /** Fills the form from an agent markdown file, front-matter included. */
-const AgentDefinitionImport: React.FC = () => {
+const AgentDefinitionImport: React.FC<AgentDefinitionImportProps> = ({
+	onImport,
+}) => {
 	const { form, mode, isBusy, isReadingFile, setIsReadingFile } =
 		useSkillEditorContext();
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -227,12 +287,14 @@ const AgentDefinitionImport: React.FC = () => {
 		setIsReadingFile(true);
 		const imported = await readAgentDefinitionFile(file);
 		if (imported.values) {
+			onImport(imported.values);
 			// An edited definition keeps its name, which the API cannot change.
-			const values: AgentDefinitionFormValues = {
-				...imported.values,
+			await form.setValues({
+				...form.values,
 				name: mode === "edit" ? form.values.name : imported.values.name,
-			};
-			await form.setValues(values);
+				description: imported.values.description,
+				body: imported.values.body,
+			});
 			await form.setTouched(
 				{ name: mode === "create", description: true, body: true },
 				false,
@@ -280,18 +342,29 @@ const AgentDefinitionImport: React.FC = () => {
 	);
 };
 
-const EditorFooter: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-	const { mode, isBusy } = useSkillEditorFormState();
+type EditorFooterProps = {
+	/** Whether the model or the other front-matter changed. */
+	isAgentDirty: boolean;
+	onClose: () => void;
+};
+
+const EditorFooter: React.FC<EditorFooterProps> = ({
+	isAgentDirty,
+	onClose,
+}) => {
+	const { form, mode, isBusy, isSubmitting } = useSkillEditorContext();
+	const canSubmit = !isBusy && form.isValid && (form.dirty || isAgentDirty);
 	return (
 		<DialogFooter className="border-t border-border px-6 py-4">
 			<Button variant="outline" disabled={isBusy} onClick={onClose}>
 				Cancel
 			</Button>
-			<SkillEditorSubmitButton>
+			<Button type="submit" disabled={!canSubmit}>
+				<Spinner loading={isSubmitting} />
 				{mode === "create"
 					? "Create agent definition"
 					: "Save agent definition"}
-			</SkillEditorSubmitButton>
+			</Button>
 		</DialogFooter>
 	);
 };
