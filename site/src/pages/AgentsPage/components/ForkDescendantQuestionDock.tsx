@@ -3,18 +3,29 @@
 // renders it once, next to AskUserQuestionDock.
 
 import { cn } from "cn";
-import { MessageCircleQuestionIcon } from "lucide-react";
+import {
+	LoaderIcon,
+	MessageCircleQuestionIcon,
+	TriangleAlertIcon,
+} from "lucide-react";
 import type React from "react";
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Link, useLocation } from "react-router";
 import { getErrorMessage } from "#/api/errors";
 import {
 	answerChatDescendantQuestion,
+	answerChatDescendantSecretQuestion,
 	chatDescendantQuestions,
 } from "#/api/queries/forkChatQuestions";
-import type { Chat } from "#/api/typesGenerated";
+import type {
+	Chat,
+	ChatDescendantQuestion,
+	ChatQuestion,
+} from "#/api/typesGenerated";
 import { Alert, AlertDescription, AlertTitle } from "#/components/Alert/Alert";
+import { Button } from "#/components/Button/Button";
+import { Input } from "#/components/Input/Input";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
 import { AskUserQuestionForm } from "./ChatElements/tools/AskUserQuestionTool";
@@ -86,6 +97,7 @@ const DescendantQuestionDock: React.FC<{
 		question.tool_call_id,
 		question.created_at,
 	);
+	const secretQuestion = question.questions.find((item) => item.secret);
 
 	return (
 		<div
@@ -136,31 +148,131 @@ const DescendantQuestionDock: React.FC<{
 					)}
 				</div>
 				<div className="px-3 pb-3">
-					<AskUserQuestionForm
-						questions={question.questions.map((item) => ({
-							header: item.header,
-							question: item.question,
-							options: [...item.options],
-						}))}
-						asyncToolCallId={question.tool_call_id}
-						draftKey={questionKey}
-						showSubmittedAnswer
-						onSubmitAnswer={
-							canAnswer
-								? async (text) => {
-										await answerMutation.mutateAsync({ question, text });
-									}
-								: undefined
-						}
-						hasStickyActions
-						onStepChange={() => {
-							if (scrollerRef.current) {
-								scrollerRef.current.scrollTop = 0;
+					{secretQuestion ? (
+						<SecretQuestionForm
+							rootChatId={rootChatId}
+							question={question}
+							secretQuestion={secretQuestion}
+							canAnswer={canAnswer}
+						/>
+					) : (
+						<AskUserQuestionForm
+							questions={question.questions.map((item) => ({
+								header: item.header,
+								question: item.question,
+								options: [...item.options],
+							}))}
+							asyncToolCallId={question.tool_call_id}
+							draftKey={questionKey}
+							showSubmittedAnswer
+							onSubmitAnswer={
+								canAnswer
+									? async (text) => {
+											await answerMutation.mutateAsync({ question, text });
+										}
+									: undefined
 							}
-						}}
-					/>
+							hasStickyActions
+							onStepChange={() => {
+								if (scrollerRef.current) {
+									scrollerRef.current.scrollTop = 0;
+								}
+							}}
+						/>
+					)}
 				</div>
 			</section>
 		</div>
+	);
+};
+
+/**
+ * Takes the value of a secret question in a masked field. The value never
+ * reaches a draft, local storage or a chat message.
+ */
+const SecretQuestionForm: React.FC<{
+	rootChatId: string;
+	question: ChatDescendantQuestion;
+	secretQuestion: ChatQuestion;
+	canAnswer: boolean;
+}> = ({ rootChatId, question, secretQuestion, canAnswer }) => {
+	const inputId = useId();
+	const queryClient = useQueryClient();
+	const [value, setValue] = useState("");
+	const answerMutation = useMutation(
+		answerChatDescendantSecretQuestion(queryClient, rootChatId),
+	);
+	const isSubmitting = answerMutation.isPending;
+
+	// The question stays in the dock until the questions reload.
+	if (answerMutation.isSuccess) {
+		return (
+			<p role="status" className="text-[13px] text-content-secondary">
+				Secret answer sent.
+			</p>
+		);
+	}
+
+	return (
+		<form
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (!canAnswer || isSubmitting || value === "") {
+					return;
+				}
+				answerMutation.mutate(
+					{ question, value },
+					{ onSuccess: () => setValue("") },
+				);
+			}}
+		>
+			<label htmlFor={inputId} className="block text-[13px]">
+				<span className="block font-medium text-content-primary">
+					{secretQuestion.header}
+				</span>
+				<span className="mt-1 block text-content-secondary">
+					{secretQuestion.question}
+				</span>
+			</label>
+			<Input
+				id={inputId}
+				type="password"
+				autoComplete="off"
+				spellCheck={false}
+				className="mt-2"
+				value={value}
+				onChange={(event) => setValue(event.target.value)}
+				disabled={!canAnswer || isSubmitting}
+			/>
+			<p className="mt-1 text-xs text-content-secondary">
+				The subagent's tools get this value, but the model never sees it.
+			</p>
+			{answerMutation.isError && (
+				<div
+					role="alert"
+					className="mt-3 flex items-center gap-1.5 text-[13px] text-content-destructive"
+				>
+					<TriangleAlertIcon className="size-3.5 shrink-0" />
+					<span>
+						{getErrorMessage(
+							answerMutation.error,
+							"The answer failed to send.",
+						)}
+					</span>
+				</div>
+			)}
+			<Button
+				type="submit"
+				size="sm"
+				variant="outline"
+				className="mt-3"
+				disabled={!canAnswer || isSubmitting || value === ""}
+			>
+				{isSubmitting && (
+					<LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+				)}
+				{isSubmitting ? "Submitting..." : "Submit"}
+			</Button>
+		</form>
 	);
 };

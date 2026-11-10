@@ -224,4 +224,63 @@ describe("ForkDescendantQuestionDock", () => {
 			`/agents/${mockOldestQuestion.chat_id}`,
 		);
 	});
+
+	it("sends a secret answer only to the secret answer route", async () => {
+		const secretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-secret",
+			questions: [
+				{
+					header: "Token",
+					question: "Paste the API token.",
+					options: [],
+					secret: true,
+				},
+			],
+		};
+		const { questionRequests, sentMessages } = serveQuestions([secretQuestion]);
+		const secretAnswers: Array<{
+			chatId: string;
+			toolCallId: string;
+			body: unknown;
+		}> = [];
+		server.use(
+			http.post<{ chatId: string; toolCallId: string }>(
+				"/api/v2/chats/fork/:chatId/questions/:toolCallId/secret-answer",
+				async ({ params, request }) => {
+					secretAnswers.push({
+						chatId: params.chatId,
+						toolCallId: params.toolCallId,
+						body: await request.json(),
+					});
+					return new HttpResponse(null, { status: 204 });
+				},
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		const field = await screen.findByLabelText(/Paste the API token/);
+		expect(field).toHaveAttribute("type", "password");
+		await user.type(field, "hunter2-secret-value");
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+
+		await screen.findByText("Secret answer sent.");
+		expect(secretAnswers).toEqual([
+			{
+				chatId: secretQuestion.chat_id,
+				toolCallId: "call-secret",
+				body: { value: "hunter2-secret-value" },
+			},
+		]);
+		expect(sentMessages).toEqual([]);
+		const stored = Object.keys(localStorage).map((key) =>
+			localStorage.getItem(key),
+		);
+		expect(JSON.stringify(stored)).not.toContain("hunter2");
+		await waitFor(() =>
+			expect(questionRequests).toEqual([MockChat.id, MockChat.id]),
+		);
+	});
 });

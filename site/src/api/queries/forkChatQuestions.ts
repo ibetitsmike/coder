@@ -1,6 +1,9 @@
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import { API } from "#/api/api";
-import { getChatDescendantQuestions } from "#/api/forkChatQuestions";
+import {
+	answerChatSecretQuestion,
+	getChatDescendantQuestions,
+} from "#/api/forkChatQuestions";
 import type { ChatDescendantQuestion } from "#/api/typesGenerated";
 import {
 	invalidateChatDebugRuns,
@@ -20,6 +23,14 @@ export const chatDescendantQuestions = (rootChatId: string) =>
 		// A descendant's question raises no event on the root chat's stream.
 		refetchInterval: 5_000,
 	});
+
+// The root page does not watch the descendant's stream, so it refreshes the
+// descendant's caches as createChatMessage does.
+const invalidateDescendantChat = (queryClient: QueryClient, chatId: string) => {
+	void invalidateChatDebugRuns(queryClient, chatId);
+	void invalidateChatEntity(queryClient, chatId);
+	void invalidateChatPrompts(queryClient, chatId);
+};
 
 /**
  * Sends an answer to the descendant chat that asked the question, then
@@ -56,13 +67,35 @@ export const answerChatDescendantQuestion = (
 				content: [{ type: "text", text }],
 			});
 		},
-		// The root page does not watch the descendant's stream, so it
-		// refreshes the descendant's caches as createChatMessage does.
-		onSuccess: (_, { question }) => {
-			void invalidateChatDebugRuns(queryClient, question.chat_id);
-			void invalidateChatEntity(queryClient, question.chat_id);
-			void invalidateChatPrompts(queryClient, question.chat_id);
-		},
+		onSuccess: (_, { question }) =>
+			invalidateDescendantChat(queryClient, question.chat_id),
+		onSettled: () =>
+			queryClient.invalidateQueries({
+				queryKey: chatDescendantQuestionsKey(rootChatId),
+			}),
+	});
+
+/**
+ * Sends the value of a secret question to the descendant chat that asked it,
+ * then reloads the root chat's pending questions.
+ */
+export const answerChatDescendantSecretQuestion = (
+	queryClient: QueryClient,
+	rootChatId: string,
+) =>
+	mutationOptions({
+		mutationFn: ({
+			question,
+			value,
+		}: {
+			question: ChatDescendantQuestion;
+			value: string;
+		}) =>
+			answerChatSecretQuestion(question.chat_id, question.tool_call_id, {
+				value,
+			}),
+		onSuccess: (_, { question }) =>
+			invalidateDescendantChat(queryClient, question.chat_id),
 		onSettled: () =>
 			queryClient.invalidateQueries({
 				queryKey: chatDescendantQuestionsKey(rootChatId),

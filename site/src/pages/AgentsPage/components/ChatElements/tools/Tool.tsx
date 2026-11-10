@@ -19,6 +19,7 @@ import { DiffFileHeader } from "./DiffFileHeader";
 import { EditFilesTool } from "./EditFilesTool";
 import { ExecuteTool as ExecuteToolComponent } from "./ExecuteTool";
 import { type FindToolsMatch, FindToolsTool } from "./FindToolsTool";
+import { hasSecretQuestion } from "./forkSecretQuestions";
 import { createForkToolRenderers } from "./forkToolRenderers";
 import { ListAgentsTool } from "./ListAgentsTool";
 import { ListSubagentModelsTool } from "./ListSubagentModelsTool";
@@ -699,7 +700,9 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 			status={status}
 			isError={isError}
 			errorMessage={errorMessage || undefined}
-			onSubmitAnswer={onSendAskUserQuestionResponse}
+			onSubmitAnswer={
+				hasSecretQuestion(args) ? undefined : onSendAskUserQuestionResponse
+			}
 			isChatCompleted={isChatCompleted}
 			isLatestAskUserQuestion={isLatestAskUserQuestion}
 			isDocked={isDockedAskUserQuestion}
