@@ -1,8 +1,8 @@
 package dbcrypt_test
 
 // This file is fork code: it checks that the key commands handle
-// chat_secret_answers, whose key reference would otherwise block revoking
-// the key.
+// chat_secret_answers and plugins, whose key references would otherwise
+// block revoking the key.
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
@@ -89,5 +90,108 @@ func TestChatSecretAnswersKeyCommands(t *testing.T) {
 
 		require.Empty(t, rawChatSecretAnswers(t, f.rawDB, encryptedChatID))
 		require.Len(t, rawChatSecretAnswers(t, f.rawDB, plainChatID), 1)
+	})
+}
+
+// insertPlugins stores n plugins with config through store, so their configs
+// are encrypted when store is a dbcrypt store, and returns their
+// organization's ID.
+func insertPlugins(t *testing.T, rawDB, store database.Store, config string, n int) uuid.UUID {
+	t.Helper()
+	ctx := t.Context()
+	org := dbgen.Organization(t, rawDB, database.Organization{})
+	owner := dbgen.User(t, rawDB, database.User{})
+	file := dbgen.File(t, rawDB, database.File{CreatedBy: owner.ID})
+	fdb, err := forkdb.From(store)
+	require.NoError(t, err)
+	for i := range n {
+		_, err := fdb.InsertPlugin(ctx, forkdb.InsertPluginParams{
+			ID:             uuid.New(),
+			OrganizationID: org.ID,
+			Name:           fmt.Sprintf("plugin-%d", i),
+			FileID:         file.ID,
+			Manifest:       []byte("{}"),
+			Grants:         []byte("{}"),
+			Config:         config,
+			Enabled:        true,
+			CreatedBy:      owner.ID,
+			CreatedAt:      dbtime.Now(),
+			UpdatedAt:      dbtime.Now(),
+		})
+		require.NoError(t, err)
+	}
+	return org.ID
+}
+
+func rawPlugins(t *testing.T, rawDB database.Store, orgID uuid.UUID) []forkdb.Plugin {
+	t.Helper()
+	fdb, err := forkdb.From(rawDB)
+	require.NoError(t, err)
+	plugins, err := fdb.GetPluginsByOrganizationID(t.Context(), orgID)
+	require.NoError(t, err)
+	return plugins
+}
+
+func TestPluginConfigsKeyCommands(t *testing.T) {
+	t.Parallel()
+	const config = `{"token":"plugin-secret"}`
+
+	t.Run("Rotate", func(t *testing.T) {
+		t.Parallel()
+		f := newRotateFixture(t)
+		// More plugins than one page of the key commands.
+		const count = 101
+		orgID := insertPlugins(t, f.rawDB, f.cryptDBA, config, count)
+		blankOrgID := insertPlugins(t, f.rawDB, f.cryptDBA, "", 1)
+		before := rawPlugins(t, f.rawDB, orgID)
+
+		f.rotate(t)
+
+		plugins := rawPlugins(t, f.rawDB, orgID)
+		require.Len(t, plugins, count)
+		for i, plugin := range plugins {
+			require.Equal(t, f.cipherB.HexDigest(), plugin.ConfigKeyID.String)
+			require.Equal(t, config, decryptRawString(t, f.cipherB, plugin.Config))
+			// An unchanged config must not restart the plugin.
+			require.True(t, before[i].UpdatedAt.Equal(plugin.UpdatedAt))
+		}
+		blank := rawPlugins(t, f.rawDB, blankOrgID)
+		require.Len(t, blank, 1)
+		require.False(t, blank[0].ConfigKeyID.Valid)
+		require.Empty(t, blank[0].Config)
+	})
+
+	t.Run("Decrypt", func(t *testing.T) {
+		t.Parallel()
+		f := newDecryptFixture(t)
+		orgID := insertPlugins(t, f.rawDB, f.cryptDBA, config, 1)
+
+		f.decrypt(t)
+
+		plugins := rawPlugins(t, f.rawDB, orgID)
+		require.Len(t, plugins, 1)
+		require.False(t, plugins[0].ConfigKeyID.Valid)
+		require.Equal(t, config, plugins[0].Config)
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		t.Parallel()
+		f := newDeleteFixture(t)
+		encryptedOrgID := insertPlugins(t, f.rawDB, f.cryptDBA, config, 1)
+		plainOrgID := insertPlugins(t, f.rawDB, f.rawDB, config, 1)
+		before := rawPlugins(t, f.rawDB, encryptedOrgID)
+
+		f.delete(t)
+
+		requireAllKeysRevoked(f.ctx, t, f.rawDB)
+		encrypted := rawPlugins(t, f.rawDB, encryptedOrgID)
+		require.Len(t, encrypted, 1)
+		require.False(t, encrypted[0].ConfigKeyID.Valid)
+		require.Empty(t, encrypted[0].Config)
+		// A changed config restarts the plugin.
+		require.True(t, encrypted[0].UpdatedAt.After(before[0].UpdatedAt))
+		plain := rawPlugins(t, f.rawDB, plainOrgID)
+		require.Len(t, plain, 1)
+		require.Equal(t, config, plain[0].Config)
 	})
 }

@@ -1,13 +1,14 @@
 package dbcrypt
 
 // This file is fork code: Rotate, Decrypt and Delete call these functions
-// for chat_secret_answers, which references dbcrypt_keys too, so revoking a
-// key never fails on an answer that the key still encrypts.
+// for chat_secret_answers and plugins, which reference dbcrypt_keys too, so
+// revoking a key never fails on a row that the key still encrypts.
 
 import (
 	"context"
 	"database/sql"
 
+	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
@@ -19,14 +20,25 @@ import (
 // key command holds in memory at once.
 const chatSecretAnswersPageSize = 100
 
-// forkRecryptChatSecretAnswers decrypts every chat secret answer and
-// encrypts it again with the primary cipher of cryptDB, or leaves it
-// decrypted when cryptDB has no primary cipher.
-func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *sql.DB, cryptStore database.Store) error {
+// pluginConfigsPageSize bounds how many plugin configs a key command holds
+// in memory at once.
+const pluginConfigsPageSize = 100
+
+// forkRecryptSecrets decrypts the fork's encrypted columns and encrypts them
+// again with the primary cipher of cryptStore, or leaves them decrypted when
+// cryptStore has no primary cipher.
+func forkRecryptSecrets(ctx context.Context, log slog.Logger, sqlDB *sql.DB, cryptStore database.Store) error {
 	cryptDB, ok := cryptStore.(*dbCrypt)
 	if !ok {
 		return xerrors.Errorf("developer error: dbcrypt.New did not return *dbCrypt")
 	}
+	if err := forkRecryptChatSecretAnswers(ctx, log, sqlDB, cryptDB); err != nil {
+		return err
+	}
+	return forkRecryptPluginConfigs(ctx, log, sqlDB, cryptDB)
+}
+
+func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *sql.DB, cryptDB *dbCrypt) error {
 	target := sql.NullString{String: cryptDB.primaryCipherDigest, Valid: cryptDB.primaryCipherDigest != ""}
 	log.Info(ctx, "re-encrypting chat secret answers")
 	var (
@@ -95,11 +107,90 @@ func chatSecretAnswersNotEncryptedWith(ctx context.Context, sqlDB *sql.DB, keyID
 	return answers, nil
 }
 
-// forkDeleteEncryptedSecrets deletes the encrypted chat secret answers. An
-// answer is only usable for a day, so the user answers again.
+func forkRecryptPluginConfigs(ctx context.Context, log slog.Logger, sqlDB *sql.DB, cryptDB *dbCrypt) error {
+	target := sql.NullString{String: cryptDB.primaryCipherDigest, Valid: cryptDB.primaryCipherDigest != ""}
+	log.Info(ctx, "re-encrypting plugin configs")
+	var (
+		count int
+		after uuid.UUID
+	)
+	for {
+		plugins, err := pluginConfigsNotEncryptedWith(ctx, sqlDB, target, after)
+		if err != nil {
+			return err
+		}
+		for _, plugin := range plugins {
+			readConfig, readKeyID := plugin.Config, plugin.ConfigKeyID
+			if err := cryptDB.decryptField(&plugin.Config, plugin.ConfigKeyID); err != nil {
+				return xerrors.Errorf("decrypt plugin config id=%s: %w", plugin.ID, err)
+			}
+			keyID := sql.NullString{}
+			if err := cryptDB.encryptPluginConfig(&plugin.Config, &keyID); err != nil {
+				return xerrors.Errorf("encrypt plugin config id=%s: %w", plugin.ID, err)
+			}
+			// A blank config stays plaintext, so there is nothing to write.
+			if plugin.Config == readConfig && keyID == readKeyID {
+				continue
+			}
+			// A config that was updated meanwhile updates no row, so the new
+			// config is never replaced by the old one. updated_at stays, so
+			// running plugins do not restart for an unchanged config.
+			if _, err := sqlDB.ExecContext(ctx,
+				`UPDATE plugins SET config = $1, config_key_id = $2
+				WHERE id = $3 AND config = $4 AND config_key_id IS NOT DISTINCT FROM $5`,
+				plugin.Config, keyID, plugin.ID, readConfig, readKeyID); err != nil {
+				return xerrors.Errorf("update plugin config id=%s: %w", plugin.ID, err)
+			}
+		}
+		count += len(plugins)
+		if len(plugins) < pluginConfigsPageSize {
+			break
+		}
+		after = plugins[len(plugins)-1].ID
+	}
+	log.Info(ctx, "re-encrypted plugin configs", slog.F("plugin_count", count))
+	return nil
+}
+
+// pluginConfigsNotEncryptedWith returns up to pluginConfigsPageSize plugins,
+// with only their ID, config and key set, whose key is not keyID, in ID order
+// after the plugin with ID after.
+func pluginConfigsNotEncryptedWith(ctx context.Context, sqlDB *sql.DB, keyID sql.NullString, after uuid.UUID) ([]forkdb.Plugin, error) {
+	rows, err := sqlDB.QueryContext(ctx,
+		`SELECT id, config, config_key_id FROM plugins
+		WHERE config_key_id IS DISTINCT FROM $1 AND id > $3
+		ORDER BY id LIMIT $2`,
+		keyID, pluginConfigsPageSize, after)
+	if err != nil {
+		return nil, xerrors.Errorf("get plugin configs: %w", err)
+	}
+	defer rows.Close()
+	var plugins []forkdb.Plugin
+	for rows.Next() {
+		var plugin forkdb.Plugin
+		if err := rows.Scan(&plugin.ID, &plugin.Config, &plugin.ConfigKeyID); err != nil {
+			return nil, xerrors.Errorf("scan plugin config: %w", err)
+		}
+		plugins = append(plugins, plugin)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, xerrors.Errorf("get plugin configs: %w", err)
+	}
+	return plugins, nil
+}
+
+// forkDeleteEncryptedSecrets deletes the encrypted chat secret answers, since
+// an answer is only usable for a day and the user answers again. It clears
+// encrypted plugin configs instead of deleting the plugins, like upstream
+// clears ai_providers.settings, so an admin sets the config again. Bumping
+// updated_at restarts running plugins with the cleared config.
 func forkDeleteEncryptedSecrets(ctx context.Context, sqlDB *sql.DB) error {
 	if _, err := sqlDB.ExecContext(ctx, `DELETE FROM chat_secret_answers WHERE value_key_id IS NOT NULL`); err != nil {
 		return xerrors.Errorf("delete encrypted chat secret answers: %w", err)
+	}
+	if _, err := sqlDB.ExecContext(ctx,
+		`UPDATE plugins SET config = '', config_key_id = NULL, updated_at = now() WHERE config_key_id IS NOT NULL`); err != nil {
+		return xerrors.Errorf("clear encrypted plugin configs: %w", err)
 	}
 	return nil
 }
