@@ -34,6 +34,11 @@ const (
 // in fork_plugin_gate.go must stay in sync.
 const packManifestBaseName = "plugin.json"
 
+// maxManifestBytes bounds a plugin manifest read. It mirrors the resolver's
+// per-resource payload cap: a manifest needs only a name and optional
+// directory declarations.
+const maxManifestBytes = 64 * 1024
+
 // Default containers when the manifest declares none, matching the Cursor
 // defaults and what pstack ships.
 const (
@@ -73,11 +78,17 @@ func findPackManifest(dir string) string {
 }
 
 // readPluginManifest parses the manifest of a pack directory. ok is false
-// when the directory holds no manifest or its JSON does not parse; such a
-// directory is not treated as a pack at all.
+// when the directory holds no manifest, its JSON does not parse, or the
+// manifest exceeds the per-resource payload cap; such a directory is not
+// treated as a pack at all. The stat guard keeps a multi-gigabyte
+// plugin.json from being read into memory during resolve and watcher
+// synchronization.
 func readPluginManifest(packDir string) (packRoot, bool) {
 	manifestPath := findPackManifest(packDir)
 	if manifestPath == "" {
+		return packRoot{}, false
+	}
+	if info, err := os.Stat(manifestPath); err != nil || info.Size() > maxManifestBytes {
 		return packRoot{}, false
 	}
 	data, err := os.ReadFile(manifestPath)
@@ -201,12 +212,14 @@ func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource,
 			meta := filepath.Join(container, e.Name(), skillMetaFileName)
 			// Lstat (not Stat) so a symlinked SKILL.md is
 			// detected and routed through resolveReadTarget,
-			// which enforces the scan-root boundary.
+			// which enforces the pack-root boundary: a pack
+			// must not import skills from outside itself even
+			// when the target stays inside the scan root.
 			info, err := os.Lstat(meta)
 			if err != nil {
 				continue
 			}
-			res, ok := r.readSkillMeta(root.Path, meta, info, root.UserSource)
+			res, ok := r.readSkillMeta(pack.Dir, meta, info, root.UserSource)
 			if !ok {
 				continue
 			}
@@ -236,7 +249,11 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 			if err != nil {
 				continue
 			}
-			res, ok := r.readAgentDefinition(root, path, info)
+			// The pack directory is the read boundary: a
+			// definition may symlink only within the pack, even
+			// when the target stays inside the enclosing scan
+			// root.
+			res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
 			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
 				continue
 			}

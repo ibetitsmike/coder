@@ -290,6 +290,18 @@ func deduplicateSkills(resources []Resource) []Resource {
 	return out
 }
 
+// isPackContribution reports whether a resolver resource was contributed by
+// a plugin pack: the resolver stamps pack contributions with the manifest
+// path (fork_plugins.go), which is what the chatd fork-plugin gate matches
+// on. Keep the marker in sync with packManifestBaseName.
+func isPackContribution(resource Resource) bool {
+	base := strings.TrimSpace(resource.SourcePath)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return base == packManifestBaseName
+}
+
 // discoverIn inspects a single scan root. A root that points at a
 // file is classified directly. A directory root contributes its
 // top-level instruction files and .mcp.json plus skills from the
@@ -701,11 +713,20 @@ func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out 
 // append additional resources (e.g. MCP server tool lists) can
 // apply the same byte cap to the appended slice.
 func (r *Resolver) applyCaps(resources []Resource) ([]Resource, uint64) {
-	// Stable sort by (Kind asc, Source asc) so excluded
-	// resources are deterministic.
+	// Stable sort by (Kind asc, pack last, Source asc) so excluded
+	// resources are deterministic: when the cap cuts, it cuts pack
+	// contributions before ordinary workspace resources, so chatd's
+	// fork-plugin filter never leaves ordinary resources excluded on
+	// behalf of a hidden pack.
 	slices.SortStableFunc(resources, func(a, b Resource) int {
 		if a.Kind != b.Kind {
 			return int(a.Kind) - int(b.Kind)
+		}
+		if ap, bp := isPackContribution(a), isPackContribution(b); ap != bp {
+			if ap {
+				return 1
+			}
+			return -1
 		}
 		return strings.Compare(a.Source, b.Source)
 	})

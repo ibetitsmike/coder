@@ -6,7 +6,9 @@ package agentcontext_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -194,4 +196,97 @@ func TestResolver_PluginPacksDirectChildrenOnly(t *testing.T) {
 	}
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
 	require.Equal(t, agentcontext.StatusOK, skill.Status)
+}
+
+func TestResolver_PluginPacksSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	// A symlinked SKILL.md inside a pack may target only files inside
+	// the pack, even when the target stays inside the enclosing scan
+	// root: the pack, not the scan root, is the read boundary.
+	root := t.TempDir()
+	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "")
+	mustWriteFile(t, filepath.Join(root, "outside.md"), skillName("outside"))
+	if err := os.Symlink(
+		filepath.Join(root, "outside.md"),
+		filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"),
+	); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	for _, res := range snap.Resources {
+		if res.Kind == agentcontext.KindSkill && res.Name == "outside" {
+			t.Fatalf("a pack skill symlinked outside the pack was discovered: %+v", res)
+		}
+	}
+}
+
+func TestResolver_PluginPacksManifestTooLarge(t *testing.T) {
+	t.Parallel()
+
+	// A manifest larger than the per-resource payload cap is not a pack;
+	// probing it must not read an unbounded file.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "pstack", "plugin.json"),
+		`{"name": "pstack", "pad": "`+strings.Repeat("x", 70*1024)+`"}`)
+	mustWriteFile(t, filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	for _, res := range snap.Resources {
+		require.NotEqual(t, agentcontext.StatusOK, res.Status,
+			"an oversized manifest must not contribute resources")
+	}
+}
+
+func TestResolver_PluginPacksSortedLastAtCaps(t *testing.T) {
+	t.Parallel()
+
+	// Pack contributions lose cap competitions to ordinary resources, so
+	// the chatd fork-plugin filter can never leave an ordinary resource
+	// excluded on behalf of a hidden pack.
+	root := t.TempDir()
+	manifest := `{"name": "pstack"}`
+	writePack(t, root, "plugin.json", manifest, "skills", "agents")
+	var names []string
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("user-skill-%02d", i)
+		names = append(names, name)
+		mustWriteFile(t, filepath.Join(root, "user", "skills", name, "SKILL.md"), skillName(name))
+	}
+
+	r := &agentcontext.Resolver{MaxResources: len(names) + 1}
+	snap := r.Resolve([]agentcontext.ScanRoot{
+		{Path: filepath.Join(root, "user")},
+		{Path: filepath.Join(root, "pstack")},
+	})
+
+	byName := map[string]agentcontext.Resource{}
+	for _, res := range snap.Resources {
+		byName[res.Name] = res
+	}
+	for _, name := range names {
+		require.Equal(t, agentcontext.StatusOK, byName[name].Status,
+			"an ordinary user skill must keep its cap slot")
+	}
+	cappedPack := 0
+	for _, res := range snap.Resources {
+		// The manifest base name in SourcePath is what marks a pack
+		// contribution (the chatd gate matches on it too), and the cut
+		// must land on one of those, never on an ordinary skill.
+		if res.SourcePath != "" && filepath.Base(res.SourcePath) == "plugin.json" && res.Status != agentcontext.StatusOK {
+			cappedPack++
+		}
+	}
+	if cappedPack < 1 {
+		for _, res := range snap.Resources {
+			t.Logf("snapshot row kind=%v name=%q status=%v source=%q sourcePath=%q",
+				res.Kind, res.Name, res.Status, res.Source, res.SourcePath)
+		}
+	}
+	require.GreaterOrEqual(t, cappedPack, 1, "a pack contribution must be the capped resource")
 }
