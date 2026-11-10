@@ -28,11 +28,12 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 		OwnerID:           dbgen.User(t, db, database.User{}).ID,
 		LastModelConfigID: model.ID,
 	})
-	message := func(role database.ChatMessageRole) {
+	message := func(role database.ChatMessageRole, visibility database.ChatMessageVisibility) {
 		dbgen.ChatMessage(t, db, database.ChatMessage{
 			ChatID:        chat.ID,
 			ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
 			Role:          role,
+			Visibility:    visibility,
 		})
 	}
 	ask := func(callID, questions string) {
@@ -52,17 +53,19 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 		return q, false
 	}
 
-	message(database.ChatMessageRoleUser)
+	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityBoth)
 	_, ok := pending()
 	require.False(t, ok, "a chat starts without a question")
 
 	ask("call-1", `[{"header": "DB"}]`)
-	message(database.ChatMessageRoleAssistant)
+	message(database.ChatMessageRoleAssistant, database.ChatMessageVisibilityBoth)
+	// Lifecycle hooks add model-only user rows, which the user never wrote.
+	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityModel)
 	got, ok := pending()
-	require.True(t, ok, "only a user message answers the question")
+	require.True(t, ok, "only a user message the user sees answers the question")
 	require.Equal(t, "call-1", got.ToolCallID)
 
-	message(database.ChatMessageRoleUser)
+	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityBoth)
 	_, ok = pending()
 	require.False(t, ok, "a later user message answers the question")
 
