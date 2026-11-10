@@ -49,9 +49,12 @@ func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime tim
 }
 
 const getChatSecretAnswersByChatID = `-- name: GetChatSecretAnswersByChatID :many
-SELECT chat_id, tool_call_id, value, value_key_id, created_at FROM chat_secret_answers WHERE chat_id = $1 ORDER BY created_at
+SELECT chat_id, tool_call_id, value, value_key_id, created_at FROM chat_secret_answers
+WHERE chat_id = $1 AND created_at > now() - interval '24 hours'
+ORDER BY created_at
 `
 
+// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 func (q *Queries) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error) {
 	rows, err := q.db.QueryContext(ctx, getChatSecretAnswersByChatID, chatID)
 	if err != nil {

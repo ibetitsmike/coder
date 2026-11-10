@@ -338,6 +338,9 @@ func (i *instance) purgeTick(ctx context.Context, db database.Store, start time.
 				return xerrors.Errorf("failed to delete old chat debug runs: %w", err)
 			}
 		}
+		if err := i.purgeForkInTx(ctx, tx, start); err != nil {
+			return err
+		}
 
 		// Backfill search_tsv tsvector on chat_messages in batches. Doing this here because it's
 		// potentially too much for a regular migration, especially on larger deployments:
