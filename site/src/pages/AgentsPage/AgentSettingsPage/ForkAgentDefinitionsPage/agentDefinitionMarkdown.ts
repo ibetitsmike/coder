@@ -83,14 +83,26 @@ export const buildAgentDefinitionMarkdown = (
 	values: AgentDefinitionFormValues,
 ): string => {
 	const document = parseFrontMatter(values.frontMatter);
+	let inserted = 0;
 	for (const key of ownedKeys) {
 		const value = values[key].trim();
-		if (value) {
+		const contents = document.contents;
+		if (!value) {
+			if (isMap(contents)) {
+				contents.delete(key);
+			}
+		} else if (isMap(contents) && !contents.has(key)) {
+			// A key the file lacks goes first, in the editor's order, as in a
+			// new file.
+			contents.items.splice(inserted++, 0, document.createPair(key, value));
+		} else {
 			// Setting an existing scalar keeps its node, so its style and
-			// comments survive; YAML quotes the value when it needs to.
+			// comments survive; YAML quotes the value when it needs to. On
+			// empty front-matter this creates the mapping with this key first.
 			document.set(key, value);
-		} else if (isMap(document.contents)) {
-			document.contents.delete(key);
+			if (!isMap(contents)) {
+				inserted++;
+			}
 		}
 	}
 	// lineWidth 0 keeps long values on one line instead of folding them.
