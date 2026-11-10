@@ -65,8 +65,9 @@ const editFormValues = (
 };
 
 /**
- * Creates and edits the current user's agent definitions in an organization.
- * editorState is set while the editor is open.
+ * Each editor stays bound to the organization it opened in and closes when
+ * the selection changes. A request whose response is lost counts as
+ * successful when the refetched definition shows the submitted content.
  */
 export const useForkAgentDefinitionEditor = (organizationId: string) => {
 	const queryClient = useQueryClient();
@@ -113,7 +114,7 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 			isSubmitting: createMutation.isPending,
 			onSubmit: ({ name, content }, onSettled) => {
 				const listKey = userAgentDefinitions(organizationId).queryKey;
-				const isListed = () =>
+				const getListedStatus = (): boolean | undefined =>
 					queryClient
 						.getQueryData(listKey)
 						?.some((definition) => definition.name === name);
@@ -122,12 +123,12 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 				// before the request means it did not. With the list unknown,
 				// the content match decides: a definition that already had
 				// this content holds what the user submitted.
-				const existedBefore = isListed() ?? false;
+				const existedBefore = getListedStatus() ?? false;
 				const isCreated = async (error: unknown) => {
 					if (!error) {
 						return true;
 					}
-					if (!isResponseLost(error) || existedBefore || !isListed()) {
+					if (!isResponseLost(error) || existedBefore || !getListedStatus()) {
 						return false;
 					}
 					try {
