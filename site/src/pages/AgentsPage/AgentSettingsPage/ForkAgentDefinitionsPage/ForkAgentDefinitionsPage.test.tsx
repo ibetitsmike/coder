@@ -1,11 +1,14 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { AxiosError } from "axios";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
-import { userAgentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
+import {
+	userAgentDefinition,
+	userAgentDefinitionsKey,
+} from "#/api/queries/forkAgentDefinitions";
 import type {
 	Experiment,
 	ForkAgentDefinition,
@@ -46,6 +49,33 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 
 // A request whose response never arrived, so the server's outcome is unknown.
 const networkError = () => new AxiosError("Network Error", "ERR_NETWORK");
+
+const openEditor = async (user: UserEvent) => {
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+};
+
+const codeReviewerContent = (description: string) =>
+	`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
+
+// Renders the table in a parent that the returned function switches to
+// another organization.
+const renderTableWithOrganizationSwitch = () => {
+	let setOrganization: (organizationId: string) => void = () => {};
+	const OrganizationSwitch: React.FC = () => {
+		const [organizationId, setOrganizationId] = useState(
+			MockDefaultOrganization.id,
+		);
+		setOrganization = setOrganizationId;
+		return <ForkAgentDefinitionsTable organizationId={organizationId} />;
+	};
+	render(<OrganizationSwitch />);
+	return (organizationId: string) => setOrganization(organizationId);
+};
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -537,19 +567,11 @@ describe("ForkAgentDefinitionsPage", () => {
 		const update = vi
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
 			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
-		const openEditor = async () => {
-			await user.click(
-				await screen.findByRole("button", {
-					name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-				}),
-			);
-			await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-		};
 
-		await openEditor();
+		await openEditor(user);
 		await screen.findByLabelText("Description");
 		await user.keyboard("{Escape}");
-		await openEditor();
+		await openEditor(user);
 		await waitFor(() => expect(getDefinition).toHaveBeenCalledTimes(2));
 		const description = await screen.findByLabelText("Description");
 		await user.clear(description);
@@ -577,8 +599,6 @@ describe("ForkAgentDefinitionsPage", () => {
 			userAgentDefinitionsKey(MockDefaultOrganization.id),
 			{ gcTime: Number.POSITIVE_INFINITY },
 		);
-		const content = (description: string) =>
-			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
 		const MockSavedDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			updated_at: "2030-01-01T00:00:00Z",
@@ -586,7 +606,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
 			.mockResolvedValueOnce({
 				...MockForkAgentDefinitionMetadata,
-				content: content("Reviews diffs."),
+				content: codeReviewerContent("Reviews diffs."),
 			})
 			.mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
 		vi.spyOn(
@@ -594,19 +614,11 @@ describe("ForkAgentDefinitionsPage", () => {
 			"updateUserAgentDefinition",
 		).mockResolvedValue({
 			...MockSavedDefinition,
-			content: content("Reviews diffs for bugs."),
+			content: codeReviewerContent("Reviews diffs for bugs."),
 		});
 		const toastSuccess = vi.spyOn(toast, "success");
-		const openEditor = async () => {
-			await user.click(
-				await screen.findByRole("button", {
-					name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-				}),
-			);
-			await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-		};
 
-		await openEditor();
+		await openEditor(user);
 		const description = await screen.findByLabelText("Description");
 		await user.clear(description);
 		await user.type(description, "Reviews diffs for bugs.");
@@ -617,7 +629,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
 		);
-		await openEditor();
+		await openEditor(user);
 
 		expect(await screen.findByLabelText("Description")).toHaveValue(
 			"Reviews diffs for bugs.",
@@ -657,21 +669,13 @@ describe("ForkAgentDefinitionsPage", () => {
 					content:
 						"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
 				});
-			const openEditor = async () => {
-				await user.click(
-					await screen.findByRole("button", {
-						name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-					}),
-				);
-				await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-			};
 
-			await openEditor();
+			await openEditor(user);
 			await screen.findByLabelText("Description");
 			getDefinitions.mockResolvedValue([MockListedDefinition]);
 			await queryClient.refetchQueries({ queryKey: listKey, exact: true });
 			await user.keyboard("{Escape}");
-			await openEditor();
+			await openEditor(user);
 
 			expect(await screen.findByLabelText("Description")).toHaveValue(
 				"Current.",
@@ -694,12 +698,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
 			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		const description = await screen.findByLabelText("Description");
 		expect(getDefinition).toHaveBeenCalledWith(
 			MockDefaultOrganization.id,
@@ -729,30 +728,23 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("retries a failed load and keeps edits when a failed save refetches", async () => {
 		const user = userEvent.setup();
 		renderPage();
-		const content = (description: string) =>
-			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
 		const getDefinition = vi
 			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
 			.mockRejectedValueOnce(mockApiError({ message: "Upstream timeout." }))
 			.mockResolvedValueOnce({
 				...MockForkAgentDefinitionMetadata,
-				content: content("Reviews diffs."),
+				content: codeReviewerContent("Reviews diffs."),
 			})
 			.mockResolvedValue({
 				...MockForkAgentDefinitionMetadata,
-				content: content("Changed in another tab."),
+				content: codeReviewerContent("Changed in another tab."),
 			});
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"updateUserAgentDefinition",
 		).mockRejectedValue(mockApiError({ message: "Permission denied." }));
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		await user.click(await screen.findByRole("button", { name: "Retry" }));
 		const description = await screen.findByLabelText("Description");
 		await user.clear(description);
@@ -771,28 +763,21 @@ describe("ForkAgentDefinitionsPage", () => {
 		const user = userEvent.setup();
 		renderPage();
 		const toastSuccess = vi.spyOn(toast, "success");
-		const content = (description: string) =>
-			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
 		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
 			.mockResolvedValueOnce({
 				...MockForkAgentDefinitionMetadata,
-				content: content("Reviews diffs."),
+				content: codeReviewerContent("Reviews diffs."),
 			})
 			.mockResolvedValue({
 				...MockForkAgentDefinitionMetadata,
-				content: content("Reviews diffs for bugs."),
+				content: codeReviewerContent("Reviews diffs for bugs."),
 			});
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"updateUserAgentDefinition",
 		).mockRejectedValue(networkError());
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		const description = await screen.findByLabelText("Description");
 		await user.clear(description);
 		await user.type(description, "Reviews diffs for bugs.");
@@ -820,12 +805,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			"updateUserAgentDefinition",
 		);
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		const description = await screen.findByLabelText("Description");
 		getDefinitions.mockResolvedValue([
 			{
@@ -862,12 +842,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			"updateUserAgentDefinition",
 		);
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		const description = await screen.findByLabelText("Description");
 		getDefinitions.mockResolvedValue([]);
 		await queryClient.refetchQueries({
@@ -899,12 +874,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
 			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		await user.type(await screen.findByLabelText("Description"), "Mine.");
 		await user.click(
 			screen.getByRole("button", { name: "Save agent definition" }),
@@ -959,12 +929,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			}),
 		);
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		getDefinitions.mockResolvedValue([]);
 		await queryClient.refetchQueries({
 			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
@@ -995,12 +960,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			},
 		});
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 
 		await waitFor(() =>
 			expect(
@@ -1024,22 +984,9 @@ describe("ForkAgentDefinitionsPage", () => {
 			...MockForkAgentDefinitionMetadata,
 			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
 		});
-		let selectOrganization: (organizationId: string) => void = () => {};
-		const OrganizationSwitch: React.FC = () => {
-			const [organizationId, setOrganizationId] = useState(
-				MockDefaultOrganization.id,
-			);
-			selectOrganization = setOrganizationId;
-			return <ForkAgentDefinitionsTable organizationId={organizationId} />;
-		};
-		render(<OrganizationSwitch />);
+		const selectOrganization = renderTableWithOrganizationSwitch();
 
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		await screen.findByLabelText("Description");
 		act(() => selectOrganization(MockOrganization2.id));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1072,15 +1019,7 @@ describe("ForkAgentDefinitionsPage", () => {
 					resolveCreate = resolve;
 				}),
 		);
-		let selectOrganization: (organizationId: string) => void = () => {};
-		const OrganizationSwitch: React.FC = () => {
-			const [organizationId, setOrganizationId] = useState(
-				MockDefaultOrganization.id,
-			);
-			selectOrganization = setOrganizationId;
-			return <ForkAgentDefinitionsTable organizationId={organizationId} />;
-		};
-		render(<OrganizationSwitch />);
+		const selectOrganization = renderTableWithOrganizationSwitch();
 
 		await user.click(
 			await screen.findByRole("button", { name: "New agent definition" }),
@@ -1094,12 +1033,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			}),
 		);
 		act(() => selectOrganization(MockOrganization2.id));
-		await user.click(
-			await screen.findByRole("button", {
-				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
-			}),
-		);
-		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await openEditor(user);
 		await screen.findByLabelText("Description");
 		resolveCreate({ ...MockForkAgentDefinitionMetadata, content: "" });
 
@@ -1126,10 +1060,11 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps saved content when an older toggle response arrives later", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const detailKey = [
-			...userAgentDefinitionsKey(MockDefaultOrganization.id),
+		const detailKey = userAgentDefinition(
+			queryClient,
+			MockDefaultOrganization.id,
 			MockForkAgentDefinitionMetadata.name,
-		];
+		).queryKey;
 		queryClient.setQueryDefaults(detailKey, {
 			gcTime: Number.POSITIVE_INFINITY,
 		});
@@ -1209,12 +1144,15 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps each pending toggle on its own row", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();
-		const other = {
+		const MockReleaseNotesDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			id: "agent-definition-release-notes",
 			name: "release-notes",
 		};
-		getDefinitions.mockResolvedValue([MockForkAgentDefinitionMetadata, other]);
+		getDefinitions.mockResolvedValue([
+			MockForkAgentDefinitionMetadata,
+			MockReleaseNotesDefinition,
+		]);
 		const update = vi
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
 			.mockImplementation(() => new Promise(() => {}));
@@ -1224,14 +1162,16 @@ describe("ForkAgentDefinitionsPage", () => {
 
 		await user.click(firstSwitch);
 		await user.click(
-			await screen.findByRole("switch", { name: `Enable ${other.name}` }),
+			await screen.findByRole("switch", {
+				name: `Enable ${MockReleaseNotesDefinition.name}`,
+			}),
 		);
 		await user.click(firstSwitch);
 
 		await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
 		expect(update.mock.calls.map(([, name]) => name)).toEqual([
 			MockForkAgentDefinitionMetadata.name,
-			other.name,
+			MockReleaseNotesDefinition.name,
 		]);
 	});
 

@@ -26,10 +26,9 @@ export const userAgentDefinitions = (organizationId: string) =>
 	});
 
 /**
- * One definition with its markdown content. The key extends the list key, so
- * invalidating the list refreshes an open editor's copy too. A 404 also
- * drops the listed row it was requested for from the cached list, so it is no
- * longer offered, unless a refetch has replaced that row since.
+ * The key extends the list key, so invalidating the list refetches this too.
+ * A 404 drops the requested row from the cached list unless a refetch has
+ * replaced that row since.
  */
 export const userAgentDefinition = (
 	queryClient: QueryClient,
@@ -157,8 +156,8 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			req,
 		}: UpdateUserAgentDefinitionArgs) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
-		// Writing the result keeps an accepted change visible, in the list and
-		// in a reopened editor, even if the reconciling refetch below fails.
+		// Writing the result keeps an accepted change visible even if the
+		// reconciling refetch below fails.
 		// Rows match by name, as the request does, so a stale row of a
 		// recreated definition takes the response. A response older than a
 		// cached change does not replace it.

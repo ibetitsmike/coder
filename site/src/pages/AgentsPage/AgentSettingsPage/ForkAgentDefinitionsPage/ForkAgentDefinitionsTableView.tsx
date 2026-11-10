@@ -191,7 +191,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 								onCreate();
 							}}
 						>
-							<PlusIcon />
+							<PlusIcon aria-hidden="true" />
 							New agent definition
 						</Button>
 					</div>
