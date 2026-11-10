@@ -290,18 +290,14 @@ describe("ForkComposerSlot wake-ups", () => {
 		);
 		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
 
-		await waitFor(() =>
-			expect(
-				screen.getByRole("button", { name: /^Cancel Cron/ }),
-			).toBeDisabled(),
-		);
+		const cancelCron = screen.getByRole("button", { name: /^Cancel Cron/ });
+		await waitFor(() => expect(cancelCron).toBeDisabled());
+		await user.click(cancelCron);
 		expect(updateWakeup).toHaveBeenCalledTimes(1);
 	});
 
 	it("disables wake-up actions while the composer is disabled", async () => {
-		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockResolvedValue([
-			MockChatWakeupInterval,
-		]);
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
 		const user = userEvent.setup();
 
 		renderSlot(["fork-chat-wakeups"], createTestQueryClient(), true);
@@ -309,11 +305,10 @@ describe("ForkComposerSlot wake-ups", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
 		);
-		expect(
-			screen.getByRole("button", { name: /^Pause Every 5m: / }),
-		).toBeDisabled();
-		expect(
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
+		await user.click(
 			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
-		).toBeDisabled();
+		);
+		expect(updateWakeup).not.toHaveBeenCalled();
 	});
 });
