@@ -356,7 +356,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `643ba9ab2c`:
+Checked against fork `main` at `32bbba5265`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -383,7 +383,7 @@ Checked against fork `main` at `643ba9ab2c`:
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
-- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:44-46`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:100-110`, result fields, `:130-132`.
+- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:47-49`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:100-110`, result fields, `:130-132`.
   Worktree creation and its errors, `fork_isolation.go:163-200`, `:229-231`, removed only when the spawn fails, `:207-220`, called at spawn, `coderd/x/chatd/fork_subagents.go:179`, `:193-202`.
   Branch name, `fork_isolation.go:242-264`, path, `agent/agentgit/fork_worktrees.go:63`, `:177`, `:220-221`.
   Busy `message_agent` steers, `subagent_operations.go:132`, delivered before the next model call, `coderd/x/chatd/chatd.go:448-450`.
@@ -398,7 +398,7 @@ Checked against fork `main` at `643ba9ab2c`:
   The same hourglass and label in the top bar of a `running` subagent's chat that waits, only with the experiment and for the chat owner, `site/src/pages/AgentsPage/components/ForkSubagentSlotBadge.tsx:26-51`, `ChatTopBar.tsx:281-286`.
   `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:562-581`, and `wait_agent` on a `paused` child, `:478-486`.
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:621-632`, and `interrupt_agent` moves it to `running`, `:159-169`.
-  `interrupt_agent` interrupts the active descendants first, for any status, `:159-162`, `coderd/x/chatd/chat_mutations.go:887`, `:905`, `coderd/x/chatd/fork_cascade.go:32-39`, `:60-80`.
+  `interrupt_agent` interrupts the active descendants first, for any status, `:159-162`, `coderd/x/chatd/chat_mutations.go:898`, `:916`, `coderd/x/chatd/fork_cascade.go:32-39`, `:60-80`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
   The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:93-96`, `:104-106`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:541`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
@@ -406,14 +406,14 @@ Checked against fork `main` at `643ba9ab2c`:
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:216-219`.
-  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:247-250`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:43`.
+  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:247-250`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:46`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:88-92`, `:99-103`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
-  For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:34-36`, `fork_tools.go:35-39`, ending the turn, `fork_descendant_questions.go:40-50`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
+  For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:34-36`, `fork_tools.go:38-42`, ending the turn, `fork_descendant_questions.go:40-50`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
   Unanswered until the child gets a user message after the question, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-23`.
-  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:214-224`, which first waits for the answer when the question is unanswered at the call, `:182-201`, `:230-251`, added with the experiment, `fork_tools.go:40-42`.
+  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:214-224`, which first waits for the answer when the question is unanswered at the call, `:182-201`, `:230-251`, added with the experiment, `fork_tools.go:43-45`.
   The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:53`, `coderd/fork_chat_questions.go:29-72`.
   The root chat page shows the oldest one only with the experiment and only on a root chat the viewer can act on, `site/src/pages/AgentsPage/components/ForkDescendantQuestionDock.tsx:38-46`, `:80-81`, `:123-136`, and posts the answer to the asking chat, `site/src/api/queries/forkChatQuestions.ts:55-57`.
   The root chat's own open question hides it until that answer is queued, `site/src/pages/AgentsPage/components/ChatPageContent.tsx:224-229`, `:288-302`.
@@ -440,4 +440,5 @@ Checked against fork `main` at `643ba9ab2c`:
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:32`, and run as the chat owner, `fork_search_chats.go:97-103`.
   Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:47-56`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
-- No wake-up, notification, or PR tool: no matches in `coderd/x/chatd` for `schedule_wakeup`, `notify_user`, or `pull_request`.
+- No notification or PR tool: no matches in `coderd/x/chatd` for `notify_user` or `pull_request`.
+  No wake-up tool without the `fork-chat-wakeups` experiment, which adds `schedule_wakeup`, `coderd/x/chatd/fork_tools.go:35-37`.
