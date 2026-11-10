@@ -6,7 +6,6 @@ package forkdb
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -36,7 +35,9 @@ type Querier interface {
 	DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredPluginLinkCodes(ctx context.Context) error
-	DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error)
+	// Deletes a batch of answers past the 24 hour TTL of
+	// GetChatSecretAnswersByChatID, on the same clock.
+	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
+	"github.com/coder/coder/v2/coderd/coderdtest/promhelp"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbpurge"
@@ -28,7 +29,8 @@ func TestDeleteOldChatSecretAnswers(t *testing.T) {
 	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t, dbtestutil.WithDumpOnFailure())
 	logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
 	clk := quartz.NewMock(t)
-	now := clk.Now().UTC()
+	// The TTL runs on the database clock, not on the purge's clock.
+	now := time.Now()
 
 	org := dbgen.Organization(t, db, database.Organization{})
 	owner := dbgen.User(t, db, database.User{})
@@ -50,7 +52,8 @@ func TestDeleteOldChatSecretAnswers(t *testing.T) {
 	}
 
 	done := awaitDoTick(ctx, t, clk)
-	closer := dbpurge.New(ctx, logger, db, &codersdk.DeploymentValues{}, prometheus.NewRegistry(), dbpurge.WithClock(clk))
+	reg := prometheus.NewRegistry()
+	closer := dbpurge.New(ctx, logger, db, &codersdk.DeploymentValues{}, reg, dbpurge.WithClock(clk))
 	defer closer.Close()
 	<-done
 
@@ -73,4 +76,7 @@ func TestDeleteOldChatSecretAnswers(t *testing.T) {
 		}
 		return len(callIDs) == 1 && callIDs[0] == "call_recent"
 	}, testutil.WaitShort, testutil.IntervalFast, "the purge deletes only the answer older than the TTL")
+	require.Equal(t, 1, promhelp.CounterValue(t, reg, "coderd_dbpurge_records_purged_total", prometheus.Labels{
+		"record_type": "chat_secret_answers",
+	}))
 }

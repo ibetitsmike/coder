@@ -179,9 +179,8 @@ func TestForkQuerier(t *testing.T) {
 			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"DeleteOldChatSecretAnswers": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			before := dbtime.Now()
-			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), before).Return(int64(1), nil).AnyTimes()
-			check.Args(before).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(1))
+			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), int32(1000)).Return(int64(1), nil).AnyTimes()
+			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(1))
 		},
 		"LockChatForNoKeyUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})

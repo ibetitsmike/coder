@@ -5,7 +5,6 @@ package dbpurge
 
 import (
 	"context"
-	"time"
 
 	"golang.org/x/xerrors"
 
@@ -14,24 +13,24 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
-// chatSecretAnswerTTL matches the TTL that GetChatSecretAnswersByChatID
-// applies when it reads the answers.
-const chatSecretAnswerTTL = 24 * time.Hour
+// chatSecretAnswersBatchSize bounds how many expired answers one tick
+// deletes.
+const chatSecretAnswersBatchSize = 1000
 
-// purgeForkInTx MUST BE CALLED WITH A TRANSACTION.
-func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store, start time.Time) error {
+// purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
+// chat secret answers it purged.
+func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64, error) {
 	ftx, err := forkdb.From(tx)
 	if err != nil {
 		// Only the mock stores of upstream's purge tests lack fork queries.
 		// Reads of secret answers apply the TTL too, so a skipped purge
 		// leaves no answer usable past it.
 		i.logger.Warn(ctx, "skip fork purge", slog.Error(err))
-		return nil
+		return 0, nil
 	}
-	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, start.Add(-chatSecretAnswerTTL))
+	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, chatSecretAnswersBatchSize)
 	if err != nil {
-		return xerrors.Errorf("failed to delete old chat secret answers: %w", err)
+		return 0, xerrors.Errorf("failed to delete old chat secret answers: %w", err)
 	}
-	i.logger.Debug(ctx, "purged old fork database entries", slog.F("chat_secret_answers", purged))
-	return nil
+	return purged, nil
 }

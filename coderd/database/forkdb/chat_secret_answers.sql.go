@@ -8,7 +8,6 @@ package forkdb
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,11 +36,23 @@ func (q *Queries) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uu
 }
 
 const deleteOldChatSecretAnswers = `-- name: DeleteOldChatSecretAnswers :execrows
-DELETE FROM chat_secret_answers WHERE created_at < $1::timestamptz
+WITH expired AS (
+    SELECT chat_id, tool_call_id
+    FROM chat_secret_answers
+    WHERE created_at <= now() - interval '24 hours'
+    ORDER BY created_at
+    LIMIT $1::int
+)
+DELETE FROM chat_secret_answers
+USING expired
+WHERE chat_secret_answers.chat_id = expired.chat_id
+    AND chat_secret_answers.tool_call_id = expired.tool_call_id
 `
 
-func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteOldChatSecretAnswers, beforeTime)
+// Deletes a batch of answers past the 24 hour TTL of
+// GetChatSecretAnswersByChatID, on the same clock.
+func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldChatSecretAnswers, limitCount)
 	if err != nil {
 		return 0, err
 	}

@@ -338,7 +338,8 @@ func (i *instance) purgeTick(ctx context.Context, db database.Store, start time.
 				return xerrors.Errorf("failed to delete old chat debug runs: %w", err)
 			}
 		}
-		if err := i.purgeForkInTx(ctx, tx, start); err != nil {
+		purgedChatSecretAnswers, err := i.purgeForkInTx(ctx, tx)
+		if err != nil {
 			return err
 		}
 
@@ -395,6 +396,7 @@ func (i *instance) purgeTick(ctx context.Context, db database.Store, start time.
 			slog.F("chats", purgedChats),
 			slog.F("chat_files", purgedChatFiles),
 			slog.F("chat_debug_runs", purgedChatDebugRuns),
+			slog.F("chat_secret_answers", purgedChatSecretAnswers),
 			slog.F("chat_search_rows_backfilled", backfilledChatSearchRows),
 			slog.F("duration", i.clk.Since(start)),
 		)
@@ -410,6 +412,7 @@ func (i *instance) purgeTick(ctx context.Context, db database.Store, start time.
 			i.recordsPurged.WithLabelValues("workspace_build_orchestrations").Add(float64(purgedWorkspaceBuildOrchestrations))
 			i.recordsPurged.WithLabelValues("chats").Add(float64(purgedChats))
 			i.recordsPurged.WithLabelValues("chat_debug_runs").Add(float64(purgedChatDebugRuns))
+			i.recordsPurged.WithLabelValues("chat_secret_answers").Add(float64(purgedChatSecretAnswers))
 			i.recordsPurged.WithLabelValues("chat_files").Add(float64(purgedChatFiles))
 		}
 		if i.chatSearchRowsBackfilled != nil {
