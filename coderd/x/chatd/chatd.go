@@ -462,6 +462,9 @@ type SendMessageOptions struct {
 	MCPServerIDs    *[]uuid.UUID
 	// InlineMCPServers replaces the inline MCP servers. nil: no change.
 	InlineMCPServers *[]codersdk.InlineMCPServerRequest
+	// forkAdmit runs in the send's transaction after chatstate admitted
+	// the message; an error rolls the whole send back.
+	forkAdmit func(ctx context.Context, store database.Store, sent chatstate.SendMessageResult) error
 }
 
 // SendMessageResult contains the outcome of user message processing.

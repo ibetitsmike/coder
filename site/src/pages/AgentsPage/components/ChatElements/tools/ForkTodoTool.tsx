@@ -2,32 +2,12 @@
 // the fork-chat-todos experiment.
 
 import type React from "react";
-import {
-	type ChatTodo,
-	type ChatTodoStatus,
-	ChatTodoStatuses,
-} from "#/api/typesGenerated";
+import type { ChatTodo } from "#/api/typesGenerated";
 import { ChatTodoChecklist, formatChatTodoProgress } from "../../ChatTodoPill";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
-import { forkToolErrorMessage } from "./forkToolUtils";
+import { forkToolErrorMessage, parseChatTodo } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
-import { asRecord, parseArgs, parseArray, type ToolStatus } from "./utils";
-
-const isChatTodoStatus = (value: unknown): value is ChatTodoStatus =>
-	ChatTodoStatuses.some((status) => status === value);
-
-const parseChatTodo = (item: unknown): ChatTodo | null => {
-	const record = asRecord(item);
-	if (
-		!record ||
-		typeof record.id !== "string" ||
-		typeof record.content !== "string" ||
-		!isChatTodoStatus(record.status)
-	) {
-		return null;
-	}
-	return { id: record.id, content: record.content, status: record.status };
-};
+import { parseArgs, parseArray, type ToolStatus } from "./utils";
 
 const actionLabels = {
 	write: {

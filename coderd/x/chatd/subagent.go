@@ -612,7 +612,7 @@ func (p *Server) spawnAgent(
 	if err != nil {
 		return database.Chat{}, err
 	}
-	if definition.id == subagentTypeComputerUse && (strings.TrimSpace(args.ModelConfigID) != "" || strings.TrimSpace(args.ReasoningEffort) != "") {
+	if !p.agentDefinitionsEnabled() && definition.id == subagentTypeComputerUse && (strings.TrimSpace(args.ModelConfigID) != "" || strings.TrimSpace(args.ReasoningEffort) != "") {
 		return database.Chat{}, xerrors.New("model_config_id and reasoning_effort are not supported for type \"" + subagentTypeComputerUse + "\"")
 	}
 	explicitModelConfigID, explicitReasoningEffort, err := p.resolveExplicitSpawnOverrides(ctx, parent.OwnerID, parent.OrganizationID, args)

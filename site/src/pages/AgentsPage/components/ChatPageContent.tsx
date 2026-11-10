@@ -86,6 +86,7 @@ import {
 import { isAsyncAnswerPrompt } from "./ChatElements/tools/asyncAnswer";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ChatMessageScroller } from "./ChatMessageScroller";
+import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 import { getWorkspaceOptionsWithLinkedWorkspace } from "./workspaceOptions";
 
 type ChatStoreHandle = ReturnType<typeof useChatStore>["store"];
@@ -137,6 +138,8 @@ type ChatPageTimelineProps = {
 	urlTransform: UrlTransform;
 	mcpServers: readonly TypesGen.MCPServerConfig[];
 	footer?: React.ReactNode;
+	/** Fork: the chat whose descendant questions ForkDescendantQuestionDock shows. */
+	chat?: Pick<TypesGen.Chat, "id" | "parent_chat_id">;
 };
 
 export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
@@ -158,6 +161,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 	urlTransform,
 	mcpServers,
 	footer,
+	chat,
 }) => {
 	const [chatFullWidth] = useChatFullWidth();
 	const messagesByID = useChatSelector(store, selectMessagesByID);
@@ -293,6 +297,15 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 								? onSendAskUserQuestionResponse
 								: undefined
 						}
+					/>
+				)}
+				{(!dockedQuestion || queuedAnswerText !== undefined) && chat && (
+					<ForkDescendantQuestionDock
+						chat={chat}
+						isReadOnly={isReadOnly}
+						// The page withholds the root answer handler while the chat
+						// cannot take a turn, for example without the AI Gateway.
+						canAnswer={onSendAskUserQuestionResponse !== undefined}
 					/>
 				)}
 			</Profiler>

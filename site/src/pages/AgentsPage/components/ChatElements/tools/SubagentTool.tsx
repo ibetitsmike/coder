@@ -13,6 +13,10 @@ import { chatModel } from "#/api/queries/chats";
 import { safeBuildAgentChatPath } from "../../../utils/navigation";
 import { Response } from "../Response";
 import { useDesktopPanel } from "./DesktopPanelContext";
+import {
+	type ForkSubagentCall,
+	ForkSubagentFields,
+} from "./ForkSubagentFields";
 import { InlineDesktopPreview } from "./InlineDesktopPreview";
 import { RecordingPreview } from "./RecordingPreview";
 import {
@@ -148,6 +152,7 @@ export const SubagentTool: React.FC<{
 	recordingFileId?: string;
 	/** File ID for the JPEG thumbnail of a completed recording. */
 	thumbnailFileId?: string;
+	forkCall: ForkSubagentCall;
 }> = ({
 	organizationId,
 	descriptor,
@@ -163,6 +168,7 @@ export const SubagentTool: React.FC<{
 	showDesktopPreview,
 	recordingFileId,
 	thumbnailFileId,
+	forkCall,
 }) => {
 	const location = useLocation();
 	const [expanded, setExpanded] = useState(false);
@@ -251,6 +257,11 @@ export const SubagentTool: React.FC<{
 					/>
 				</div>
 			)}
+			<ForkSubagentFields
+				descriptor={descriptor}
+				isError={isError}
+				call={forkCall}
+			/>
 			<ToolCall.Content>
 				{hasPrompt && (
 					<ToolCall.Scrollable
