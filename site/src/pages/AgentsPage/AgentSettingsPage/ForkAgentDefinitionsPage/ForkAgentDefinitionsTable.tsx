@@ -8,6 +8,7 @@ import {
 	createUserAgentDefinition,
 	deleteUserAgentDefinition,
 	isNewer,
+	isResponseLost,
 	updateUserAgentDefinition,
 	userAgentDefinition,
 	userAgentDefinitions,
@@ -40,11 +41,6 @@ type EditorTarget = { organizationId: string } & (
 			loadedFrom?: Pick<ForkAgentDefinition, "id" | "updated_at">;
 	  }
 );
-
-// A request that got no response may still have been applied, so only the
-// refetched data can tell whether it failed.
-const isResponseLost = (error: unknown) =>
-	isAxiosError(error) && error.response === undefined;
 
 const isNotFound = (error: unknown) =>
 	isAxiosError(error) && error.response?.status === 404;

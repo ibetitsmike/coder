@@ -5,9 +5,11 @@ import type {
 	ForkAgentDefinition,
 	ForkAgentDefinitionMetadata,
 } from "#/api/typesGenerated";
+import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import {
 	createUserAgentDefinition,
+	deleteUserAgentDefinition,
 	isNewer,
 	updateUserAgentDefinition,
 	userAgentDefinition,
@@ -86,6 +88,80 @@ describe("createUserAgentDefinition", () => {
 
 		expect(queryClient.getQueryData(listKey)).toEqual([metadataOf(listed)]);
 	});
+
+	it("does not add a definition a list fetched during the request no longer has", async () => {
+		const queryClient = createQueryClient();
+		const listKey = userAgentDefinitions(org).queryKey;
+		queryClient.setQueryData(listKey, []);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockImplementation(async () => {
+			queryClient.setQueryData(listKey, [], { updatedAt: Date.now() + 1 });
+			return definitionAt("2030-01-01T00:00:00Z");
+		});
+
+		await new MutationObserver(
+			queryClient,
+			createUserAgentDefinition(queryClient),
+		).mutate({ organizationId: org, req: { content: "" } });
+
+		expect(queryClient.getQueryData(listKey)).toEqual([]);
+	});
+});
+
+describe("agent definition mutations", () => {
+	it.each([
+		[
+			"create",
+			(queryClient: QueryClient) => {
+				vi.spyOn(
+					forkAgentDefinitionsApi,
+					"createUserAgentDefinition",
+				).mockRejectedValue(mockApiError({ message: "Name taken." }));
+				return new MutationObserver(
+					queryClient,
+					createUserAgentDefinition(queryClient),
+				).mutate({ organizationId: org, req: { content: "" } });
+			},
+		],
+		[
+			"update",
+			(queryClient: QueryClient) => {
+				vi.spyOn(
+					forkAgentDefinitionsApi,
+					"updateUserAgentDefinition",
+				).mockRejectedValue(mockApiError({ message: "Invalid." }));
+				return new MutationObserver(
+					queryClient,
+					updateUserAgentDefinition(queryClient),
+				).mutate({ organizationId: org, name, req: { content: "" } });
+			},
+		],
+		[
+			"delete",
+			(queryClient: QueryClient) => {
+				vi.spyOn(
+					forkAgentDefinitionsApi,
+					"deleteUserAgentDefinition",
+				).mockRejectedValue(mockApiError({ message: "Forbidden." }));
+				return new MutationObserver(
+					queryClient,
+					deleteUserAgentDefinition(queryClient),
+				).mutate({ organizationId: org, name });
+			},
+		],
+	])(
+		"settles a rejected %s without waiting for the list refetch",
+		async (_case, mutate) => {
+			const queryClient = createQueryClient();
+			vi.mocked(queryClient.invalidateQueries).mockReturnValue(
+				new Promise(() => {}),
+			);
+
+			await expect(mutate(queryClient)).rejects.toBeDefined();
+		},
+	);
 });
 
 describe("updateUserAgentDefinition", () => {

@@ -223,9 +223,13 @@ describe("ForkAgentDefinitionsPage", () => {
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"deleteUserAgentDefinition",
-		).mockRejectedValue(
-			mockApiError({ message: "Agent definition not found." }),
-		);
+		).mockRejectedValue({
+			isAxiosError: true,
+			response: {
+				status: 404,
+				data: { message: "Agent definition not found." },
+			},
+		});
 
 		await user.click(
 			await screen.findByRole("button", {
@@ -1017,7 +1021,21 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
 		);
-		expect(screen.getByLabelText("Description")).toBeInTheDocument();
+		const updateDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+		await user.type(screen.getByLabelText("Description"), "Lints.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(updateDefinition).toHaveBeenCalledWith(
+				MockOrganization2.id,
+				MockForkAgentDefinitionMetadata.name,
+				{ content: expect.stringContaining("Lints.") },
+			),
+		);
 	});
 
 	it("keeps saved content when an older toggle response arrives later", async () => {
