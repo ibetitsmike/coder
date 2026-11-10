@@ -185,6 +185,8 @@ A chat pins the definitions when it starts, like `AGENTS.md` and the skills, so 
 `GET /api/v2/chats/{chat}` lists each definition file that the chat pinned in `context.resources`, with kind `subagent` and its `status`.
 An `ok` file also reports `subagent_name`, `subagent_description`, and any parse warnings in `error`.
 A file with any other status, such as `invalid`, reports the reason in `error` and adds no custom type, so check there when a type is missing from `spawn_agent`.
+The context usage indicator in the chat composer lists the same files under **Agent definitions**, with each `ok` definition's warnings under its name and the other files as issues.
+A definition with warnings turns the indicator to its warning color.
 The `spawn_agent` description lists the custom types after the built-in ones.
 The child gets the definition's body as a system message, so do not paste the body into `prompt`.
 A definition without `model` runs on your model, and pstack's agents set none.
@@ -312,7 +314,14 @@ With `fork-nested-subagents`, a `shared` child of the worktree child works in th
 `isolation: "worktree"` fails for a `computer_use` child, in a chat without a workspace, and when you omit `repo_path`, the parent works in no worktree, and the workspace agent has no directory.
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
-Otherwise Coder Agents keeps both, so after you merge the child's work, run `git worktree remove <worktree_path>` and `git branch -D <branch>` in the repository.
+Otherwise Coder Agents keeps both until you archive the root chat or the deployment archives it as inactive.
+After the archive, Coder Agents removes each child's worktree and branch in the background.
+It keeps a worktree that has uncommitted or untracked files, is no longer on its branch, or has submodule commits that are on no remote.
+It also keeps a worktree when its branch, or the `HEAD` or branch reflog, reaches a commit that is on no other branch or remote, such as a commit that a reset moved the branch away from.
+It keeps them all when it can't reach the workspace agent or the agent is older than the server.
+Then it posts one notice in the root chat that lists the path, branch, and reason of each worktree it kept.
+So merge or push each child's branch, push its submodule commits, and put any commit that a reset dropped on another branch before you archive the root chat.
+To remove a kept worktree yourself, run `git worktree remove <worktree_path>` and `git branch -D <branch>` in the repository.
 Add `--force` to `git worktree remove` when the worktree still has uncommitted or untracked files.
 Without the experiment, `spawn_agent` has no `isolation`, `repo_path`, or `base_branch` field.
 
@@ -390,7 +399,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `5a47dc7bed`:
+Checked against fork `main` at `77b20734d2`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -410,6 +419,7 @@ Checked against fork `main` at `5a47dc7bed`:
   A model alias as the last match, preferring the parent chat's AI provider, `coderd/x/chatd/fork_model_aliases.go`, listed by `list_subagent_models`, `subagent.go:409-411`.
   Aliases are set in a model config's `aliases`, `codersdk/chats.go:1952`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:414-431`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1874-1875`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
+  Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:183-191`, `:254`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
@@ -421,6 +431,7 @@ Checked against fork `main` at `5a47dc7bed`:
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:47-52`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:100-110`, result fields, `:130-132`.
   Worktree creation and its errors, `fork_isolation.go:163-211`, `:236-238`, from the worktree that the parent works in when `repo_path` is omitted, `:172-179`, removed only when the spawn fails, `:214-227`, called at spawn, `coderd/x/chatd/fork_subagents.go:179`, `:204-217`.
+  Removed after a root archive, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:41-111`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:337-395`, or is unreachable or older, `fork_isolation_cleanup.go:113-173`, with a notice in the root chat, `:175-197`.
   Branch name, `fork_isolation.go:249-271`, path, `agent/agentgit/fork_worktrees.go:63`, `:177`, `:220-221`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:180-190`, `:213-216`.
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
@@ -450,8 +461,8 @@ Checked against fork `main` at `5a47dc7bed`:
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:34-36`, `fork_tools.go:38-42`, ending the turn, `fork_descendant_questions.go:40-50`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
   Unanswered until the child gets a user message after the question, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-23`.
-  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:214-224`, which first waits for the answer when the question is unanswered at the call, `:182-201`, `:230-251`, added with the experiment, `fork_tools.go:43-45`.
-  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:53`, `coderd/fork_chat_questions.go:29-72`.
+  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:216-226`, which first waits for the answer when the question is unanswered at the call, `:184-203`, `:232-253`, added with the experiment, `fork_tools.go:43-45`.
+  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:54`, `coderd/fork_chat_questions.go:49-98`.
   The root chat page shows the oldest one only with the experiment and only on a root chat the viewer can act on, `site/src/pages/AgentsPage/components/ForkDescendantQuestionDock.tsx:38-46`, `:80-81`, `:123-136`, and posts the answer to the asking chat, `site/src/api/queries/forkChatQuestions.ts:55-57`.
   The root chat's own open question hides it until that answer is queued, `site/src/pages/AgentsPage/components/ChatPageContent.tsx:224-229`, `:288-302`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.

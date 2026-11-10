@@ -80,7 +80,10 @@ func (p *Server) cleanupArchivedSubagents(ctx context.Context, rootID uuid.UUID,
 			continue
 		}
 		if row.Isolation == subagentIsolationWorkspace && row.WorkspaceID.Valid {
-			if err := p.stopSubagentWorkspace(ctx, chat.OwnerID, row.WorkspaceID.UUID); err != nil {
+			if p.stopWorkspaceFn == nil {
+				continue
+			}
+			if err := p.stopSubagentWorkspace(ctx, chat); err != nil {
 				logger.Warn(ctx, "stop workspace of archived subagent",
 					slog.F("subagent_id", chat.ID), slog.F("workspace_id", row.WorkspaceID.UUID), slog.Error(err))
 			}
