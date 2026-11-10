@@ -214,8 +214,8 @@ func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAns
 		if !strings.Contains(command, placeholder) {
 			continue
 		}
-		if strings.ContainsAny(answer.Value, "$`") {
-			return "", xerrors.Errorf("the value of %s holds $ or a backtick, which Bash can run as code where it evaluates a variable again, so execute does not take it; "+
+		if secretArithmeticUnsafe(answer.Value) {
+			return "", xerrors.Errorf("the value of %s holds [ and then $ or a backtick, which Bash runs as code where it evaluates a variable as arithmetic, so execute does not take it; "+
 				"write it to a file with write_file and read it from there", placeholder)
 		}
 		name := secretShellVariableName(command, i+1)
@@ -242,6 +242,18 @@ func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAns
 		return "", xerrors.Errorf("encode the execute input: %w", err)
 	}
 	return string(data), nil
+}
+
+// secretArithmeticUnsafe reports whether Bash can run part of value as code
+// when it evaluates a variable that holds value as arithmetic, for example
+// in $(( )), (( )), let or [[ -eq ]]. Such an evaluation expands only the
+// subscripts of array references in value, so a value is safe unless a $
+// or a backtick follows a [. Other places where Bash evaluates a variable
+// again, such as an associative array subscript or indirect expansion, are
+// ones the command picks, outside the accidental exposure the scrub covers.
+func secretArithmeticUnsafe(value string) bool {
+	i := strings.IndexByte(value, '[')
+	return i >= 0 && strings.ContainsAny(value[i:], "$`")
 }
 
 // secretShellVariableName returns the variable for the nth answer, with
