@@ -88,7 +88,10 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 	if manifestPath == "" {
 		return packRoot{}, false
 	}
-	if info, err := os.Stat(manifestPath); err != nil || info.Size() > maxManifestBytes {
+	// Lstat (not Stat) so a symlinked or special manifest is never
+	// followed: a checked-in plugin.json -> /dev/zero or a FIFO must
+	// not be read at all, whatever its apparent size.
+	if info, err := os.Lstat(manifestPath); err != nil || !info.Mode().IsRegular() || info.Size() > maxManifestBytes {
 		return packRoot{}, false
 	}
 	data, err := os.ReadFile(manifestPath)
@@ -97,6 +100,13 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 	}
 	var manifest pluginManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
+		return packRoot{}, false
+	}
+	if strings.TrimSpace(manifest.Name) == "" {
+		// A file that parses but declares no name is not a plugin
+		// manifest: accepting it would stamp the directory's ordinary
+		// context sources with the pack marker the fork-plugin gate
+		// then filters.
 		return packRoot{}, false
 	}
 	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest}, true

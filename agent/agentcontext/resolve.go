@@ -1059,6 +1059,13 @@ func driftResources(resources []Resource) []Resource {
 		case KindMCPConfig, KindMCPServer, KindACPHarness:
 			continue
 		default:
+			// Pack rows are dropped by chatd while fork-plugins is
+			// off, so they must not read as prompt drift either:
+			// installing or editing a pack cannot look like a prompt
+			// change to hash-comparing subscribers.
+			if isPackContribution(r) {
+				continue
+			}
 			out = append(out, r)
 		}
 	}
