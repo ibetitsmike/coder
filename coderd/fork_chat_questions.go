@@ -30,7 +30,10 @@ import (
 const (
 	// questionAnswerPrefix starts the user message that answers an
 	// ask_user_question call; the tool tells the model to expect it.
-	questionAnswerPrefix  = "Answer to ask_user_question call "
+	questionAnswerPrefix = "Answer to ask_user_question call "
+	// minSecretAnswerLength keeps the scrub of tool output, which replaces
+	// every occurrence of the value, from hitting ordinary text.
+	minSecretAnswerLength = 8
 	maxSecretAnswerLength = 16 << 10
 )
 
@@ -126,6 +129,13 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Value) == "" {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not be empty."})
+		return
+	}
+	if len(req.Value) < minSecretAnswerLength {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: fmt.Sprintf("Secret answers must be at least %d bytes so they can be hidden from tool output. "+
+				"Answer without the secret option if the value isn't sensitive.", minSecretAnswerLength),
+		})
 		return
 	}
 	if strings.Contains(req.Value, "\x00") {

@@ -34,18 +34,30 @@ func secretPlaceholder(toolCallID string) string {
 }
 
 // withSecretAnswers wraps every tool of a chat that asks descendant
-// questions, so the tool input gets the chat's secret answers and no tool
-// output returns them to the model.
-func (p *Server) withSecretAnswers(tools []fantasy.AgentTool, chat database.Chat) []fantasy.AgentTool {
+// questions and holds secret answers, so the tool input gets the answers
+// and no tool output returns them to the model. An answer arrives as the
+// user message that starts a turn, so the answers read here hold for the
+// whole turn.
+func (p *Server) withSecretAnswers(ctx context.Context, tools []fantasy.AgentTool, chat database.Chat) []fantasy.AgentTool {
 	if !p.descendantQuestionsEnabled(chat) {
+		return tools
+	}
+	answers, err := p.secretAnswers(ctx, chat.ID)
+	if err != nil {
+		// Each call then reads the answers itself and fails if it cannot,
+		// so no value reaches the model unscrubbed.
+		p.logger.Warn(ctx, "read secret answers for turn", slog.F("chat_id", chat.ID), slog.Error(err))
+	} else if len(answers) == 0 {
 		return tools
 	}
 	for i, tool := range tools {
 		wrapped := secretAnswerTool{
-			AgentTool:  tool,
-			server:     p,
-			chatID:     chat.ID,
-			substitute: slices.Contains(secretInputTools, tool.Info().Name),
+			AgentTool:   tool,
+			server:      p,
+			chatID:      chat.ID,
+			answers:     answers,
+			readPerCall: err != nil,
+			substitute:  slices.Contains(secretInputTools, tool.Info().Name),
 		}
 		// Turn setup reads the MCP server of a tool through this interface.
 		if mcp, ok := tool.(mcpclient.MCPToolIdentifier); ok {
@@ -59,9 +71,39 @@ func (p *Server) withSecretAnswers(tools []fantasy.AgentTool, chat database.Chat
 
 type secretAnswerTool struct {
 	fantasy.AgentTool
-	server     *Server
-	chatID     uuid.UUID
-	substitute bool
+	server      *Server
+	chatID      uuid.UUID
+	answers     []forkdb.ChatSecretAnswer
+	readPerCall bool
+	substitute  bool
+}
+
+// The chat loop finds these optional methods by type assertion, so the
+// wrapper forwards them and returns what an unimplemented one means.
+
+func (t secretAnswerTool) SerialToolCalls() bool {
+	serial, ok := t.AgentTool.(interface{ SerialToolCalls() bool })
+	return ok && serial.SerialToolCalls()
+}
+
+func (t secretAnswerTool) HaltedToolCallError() (string, bool) {
+	halting, ok := t.AgentTool.(interface{ HaltedToolCallError() (string, bool) })
+	if !ok {
+		return "", false
+	}
+	return halting.HaltedToolCallError()
+}
+
+func (t secretAnswerTool) ObserveStepToolCalls(names []string) {
+	if observer, ok := t.AgentTool.(interface{ ObserveStepToolCalls([]string) }); ok {
+		observer.ObserveStepToolCalls(names)
+	}
+}
+
+func (t secretAnswerTool) ObserveStepToolResults(names []string, errored []bool) {
+	if observer, ok := t.AgentTool.(interface{ ObserveStepToolResults([]string, []bool) }); ok {
+		observer.ObserveStepToolResults(names, errored)
+	}
 }
 
 type secretAnswerMCPTool struct {
@@ -74,10 +116,14 @@ func (t secretAnswerMCPTool) MCPServerConfigID() uuid.UUID {
 }
 
 func (t secretAnswerTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	answers, err := t.server.secretAnswers(ctx, t.chatID)
-	if err != nil {
-		t.server.logger.Error(ctx, "read secret answers", slog.F("chat_id", t.chatID), slog.Error(err))
-		return fantasy.NewTextErrorResponse("failed to read the secret answers of this chat; try again"), nil
+	answers := t.answers
+	if t.readPerCall {
+		var err error
+		answers, err = t.server.secretAnswers(ctx, t.chatID)
+		if err != nil {
+			t.server.logger.Error(ctx, "read secret answers", slog.F("chat_id", t.chatID), slog.Error(err))
+			return fantasy.NewTextErrorResponse("failed to read the secret answers of this chat; try again"), nil
+		}
 	}
 	if len(answers) == 0 {
 		return t.AgentTool.Run(ctx, call)

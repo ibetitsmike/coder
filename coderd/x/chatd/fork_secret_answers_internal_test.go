@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/mcpclient"
 	"github.com/coder/coder/v2/codersdk"
@@ -41,6 +42,19 @@ type echoMCPTool struct {
 
 func (t echoMCPTool) MCPServerConfigID() uuid.UUID { return t.id }
 
+// stepTool implements the optional methods the chat loop asserts on tools.
+type stepTool struct {
+	echoTool
+	observed *[]string
+}
+
+func (stepTool) SerialToolCalls() bool                { return true }
+func (stepTool) HaltedToolCallError() (string, bool)  { return "halted", true }
+func (t stepTool) ObserveStepToolCalls(names []string) { *t.observed = names }
+func (t stepTool) ObserveStepToolResults(names []string, _ []bool) {
+	*t.observed = append(*t.observed, names...)
+}
+
 func TestSecretAnswerTools(t *testing.T) {
 	t.Parallel()
 
@@ -54,10 +68,12 @@ func TestSecretAnswerTools(t *testing.T) {
 	}))
 
 	var spawnInput, mcpInput string
+	var observed []string
 	mcpID := uuid.New()
-	tools := f.server.withSecretAnswers([]fantasy.AgentTool{
+	tools := f.server.withSecretAnswers(ctx, []fantasy.AgentTool{
 		echoTool{name: spawnAgentToolName, input: &spawnInput, output: "echo " + value, err: xerrors.New("failed with " + value)},
 		echoMCPTool{echoTool: echoTool{name: "mcp_lookup", input: &mcpInput, output: "{}"}, id: mcpID},
+		stepTool{echoTool: echoTool{name: "computer", input: new(string)}, observed: &observed},
 	}, child)
 
 	// A tool that passes its input to another model keeps the placeholder,
@@ -71,10 +87,33 @@ func TestSecretAnswerTools(t *testing.T) {
 	require.True(t, ok, "turn setup still finds the MCP server of a wrapped tool")
 	require.Equal(t, mcpID, mcp.MCPServerConfigID())
 
-	// The root chat asks no descendant questions, so its tools stay as
-	// they are.
-	rootTools := []fantasy.AgentTool{echoTool{name: "execute", input: new(string)}}
-	require.IsType(t, echoTool{}, f.server.withSecretAnswers(rootTools, f.root)[0])
+	// The chat loop still finds the optional methods of a wrapped tool.
+	step, ok := tools[2].(interface {
+		SerialToolCalls() bool
+		HaltedToolCallError() (string, bool)
+		ObserveStepToolCalls([]string)
+		ObserveStepToolResults([]string, []bool)
+	})
+	require.True(t, ok)
+	require.True(t, step.SerialToolCalls())
+	text, halts := step.HaltedToolCallError()
+	require.True(t, halts)
+	require.Equal(t, "halted", text)
+	step.ObserveStepToolCalls([]string{"a"})
+	step.ObserveStepToolResults([]string{"b"}, []bool{false})
+	require.Equal(t, []string{"a", "b"}, observed)
+	plain, ok := tools[0].(interface{ SerialToolCalls() bool })
+	require.True(t, ok)
+	require.False(t, plain.SerialToolCalls(), "a tool without the method keeps its default")
+
+	// A chat without secret answers, and the root chat, which asks no
+	// descendant questions, keep their tools as they are.
+	unanswered, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	for _, chat := range []database.Chat{unanswered, f.root} {
+		plainTools := []fantasy.AgentTool{echoTool{name: "execute", input: new(string)}}
+		require.IsType(t, echoTool{}, f.server.withSecretAnswers(ctx, plainTools, chat)[0])
+	}
 }
 
 func TestSubstituteSecretAnswers(t *testing.T) {
