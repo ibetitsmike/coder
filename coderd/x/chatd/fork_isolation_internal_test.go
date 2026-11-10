@@ -245,9 +245,10 @@ func TestForkSpawnIsolationWorktree(t *testing.T) {
 }
 
 // TestForkSpawnIsolationStoredAgentType checks that, with agent definitions
-// on, the isolation wrapper composes with the stored agent type wrapper: a
-// custom type spawned into a worktree gets its definition, its worktree, and
-// a result that reports both.
+// on, the isolation wrapper composes with the computer use overrides and
+// stored agent type wrappers: the schema keeps both rewrites, and a custom
+// type spawned into a worktree gets its definition, its worktree, and a
+// result that reports both.
 func TestForkSpawnIsolationStoredAgentType(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +265,10 @@ func TestForkSpawnIsolationStoredAgentType(t *testing.T) {
 		Content:        agentDefinitionMarkdown("name: planner", "PLANNER-MARKER"),
 	})
 	require.NoError(t, err)
+
+	info := f.spawnTool(t, root).Info()
+	require.Contains(t, info.Parameters, "isolation")
+	require.Contains(t, info.Description, "both apply to every type")
 
 	resp := f.spawn(t, root, map[string]any{"type": "personal/planner", "isolation": "worktree", "title": "Plan"})
 	require.False(t, resp.IsError, resp.Content)
