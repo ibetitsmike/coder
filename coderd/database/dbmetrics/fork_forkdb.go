@@ -202,6 +202,11 @@ func (f forkQueryMetricsStore) InsertUserAgentDefinition(ctx context.Context, ar
 	return f.s.InsertUserAgentDefinition(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "GetOrganizationAgentDefinitionByNameForUpdate", time.Now())
+	return f.s.GetOrganizationAgentDefinitionByNameForUpdate(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	defer f.observe(ctx, "ListOrganizationAgentDefinitionMetadata", time.Now())
 	return f.s.ListOrganizationAgentDefinitionMetadata(ctx, organizationID)
@@ -225,6 +230,11 @@ func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, 
 func (f forkQueryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
 	defer f.observe(ctx, "SetPluginUserLinksActiveChatByUser", time.Now())
 	return f.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+	defer f.observe(ctx, "UpdateOrganizationAgentDefinitionACLByName", time.Now())
+	return f.s.UpdateOrganizationAgentDefinitionACLByName(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
