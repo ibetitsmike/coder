@@ -1,0 +1,229 @@
+// This file is fork code: the fork-nested-subagents experiment's organization
+// subagent limits form on the Coder Agents settings page.
+
+import { useFormik } from "formik";
+import isEqual from "lodash/isEqual";
+import { useState } from "react";
+import { getErrorMessage } from "#/api/errors";
+import {
+	type ForkOrganizationSubagentLimits,
+	type ForkOrganizationSubagentLimitsResponse,
+	type ForkSubagentLimitValues,
+	MaxChatMaxSubagentDepth,
+} from "#/api/typesGenerated";
+import { ErrorAlert } from "#/components/Alert/ErrorAlert";
+import { FormField } from "#/components/FormField/FormField";
+import { Loader } from "#/components/Loader/Loader";
+import { useTemporarySavedState } from "#/components/TemporarySavedState/TemporarySavedState";
+import { getFormHelpers } from "#/utils/formUtils";
+import { AgentSettingLayout } from "./AgentSettingLayout";
+import type { MutationCallbacks } from "./SubagentModelOverrideSettings";
+
+type LimitField = keyof ForkSubagentLimitValues;
+
+type FormValues = Record<LimitField, string>;
+
+type LimitConfig = {
+	field: LimitField;
+	label: string;
+	description: string;
+	max?: number;
+};
+
+const limitConfigs: readonly LimitConfig[] = [
+	{
+		field: "max_depth",
+		label: "Max depth",
+		description: "How deep subagents can nest. A root chat is at depth 0.",
+		max: MaxChatMaxSubagentDepth,
+	},
+	{
+		field: "max_concurrent",
+		label: "Running subagents in this organization",
+		description:
+			"Counts only this organization's subagents. The deployment value counts every organization's.",
+	},
+	{
+		field: "max_concurrent_per_family",
+		label: "Running subagents per chat family",
+		description: "A family is a root chat and all of its subagents.",
+	},
+	{
+		field: "max_live_per_family",
+		label: "Live subagents per chat family",
+		description:
+			"Live subagents have not finished and are not archived. Spawning or resuming a subagent fails at the limit.",
+	},
+];
+
+const toFormValues = (limits: ForkOrganizationSubagentLimits): FormValues => ({
+	max_depth: limits.max_depth?.toString() ?? "",
+	max_concurrent: limits.max_concurrent?.toString() ?? "",
+	max_concurrent_per_family: limits.max_concurrent_per_family?.toString() ?? "",
+	max_live_per_family: limits.max_live_per_family?.toString() ?? "",
+});
+
+const toRequest = (values: FormValues): ForkOrganizationSubagentLimits => {
+	const request: Partial<Record<LimitField, number>> = {};
+	for (const { field } of limitConfigs) {
+		const value = values[field].trim();
+		if (value !== "") {
+			request[field] = Number(value);
+		}
+	}
+	return request;
+};
+
+const validate = (values: FormValues) => {
+	const errors: Partial<Record<LimitField, string>> = {};
+	for (const { field, max } of limitConfigs) {
+		const value = values[field].trim();
+		if (value === "") {
+			continue;
+		}
+		const parsed = Number(value);
+		if (
+			!/^\d+$/.test(value) ||
+			parsed < 1 ||
+			(max !== undefined && parsed > max)
+		) {
+			errors[field] =
+				max !== undefined
+					? `Enter a whole number from 1 to ${max}.`
+					: "Enter a whole number of 1 or more.";
+		}
+	}
+	return errors;
+};
+
+const formatLimit = (field: LimitField, value: number) =>
+	field !== "max_depth" && value === 0 ? "No limit" : value.toString();
+
+type ForkSubagentLimitsSettingsProps = {
+	limits: ForkOrganizationSubagentLimitsResponse | undefined;
+	isLoading: boolean;
+	loadError: unknown;
+	canEdit: boolean;
+	onSave: (
+		req: ForkOrganizationSubagentLimits,
+		options: MutationCallbacks,
+	) => void;
+	isSaving: boolean;
+	saveError: unknown;
+};
+
+/**
+ * Shows an organization's subagent limits next to the deployment and effective
+ * values, and lets editors lower them.
+ */
+export const ForkSubagentLimitsSettings: React.FC<
+	ForkSubagentLimitsSettingsProps
+> = ({ limits, isLoading, loadError, ...formProps }) => {
+	if (isLoading) {
+		return <Loader label="Loading subagent limits" />;
+	}
+	if (!limits) {
+		return <ErrorAlert error={loadError} />;
+	}
+	return (
+		<div className="flex flex-col gap-4">
+			{loadError != null && <ErrorAlert error={loadError} />}
+			<SubagentLimitsForm limits={limits} {...formProps} />
+		</div>
+	);
+};
+
+type SubagentLimitsFormProps = Omit<
+	ForkSubagentLimitsSettingsProps,
+	"limits" | "isLoading" | "loadError"
+> & {
+	limits: ForkOrganizationSubagentLimitsResponse;
+};
+
+const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
+	limits,
+	canEdit,
+	onSave,
+	isSaving,
+	saveError,
+}) => {
+	const { isSavedVisible, showSavedState } = useTemporarySavedState();
+	const [hasDraft, setHasDraft] = useState(false);
+	const form = useFormik<FormValues>({
+		// A refetch updates an unedited form but must not discard a draft.
+		enableReinitialize: !hasDraft,
+		validateOnMount: true,
+		initialValues: toFormValues(limits.organization),
+		validate,
+		onSubmit: (values, { resetForm }) => {
+			const request = toRequest(values);
+			onSave(request, {
+				onSuccess: () => {
+					showSavedState();
+					resetForm({ values: toFormValues(request) });
+					setHasDraft(false);
+				},
+			});
+		},
+	});
+	const getFieldHelpers = getFormHelpers(form, saveError);
+	const changeValue = (field: LimitField, value: string) => {
+		setHasDraft(
+			!isEqual({ ...form.values, [field]: value }, form.initialValues),
+		);
+		void form.setFieldValue(field, value);
+	};
+
+	return (
+		<AgentSettingLayout
+			title="Subagent limits"
+			description={
+				<>
+					An organization value can only lower the deployment value. Subagents
+					also share the deployment's subagent pool.{" "}
+					{canEdit
+						? "Leave a field empty to use the deployment value."
+						: "You can view these limits but not change them."}
+				</>
+			}
+			showSave={canEdit && form.dirty}
+			isSaving={isSaving}
+			isSavedVisible={isSavedVisible}
+			saveDisabled={isSaving || !form.isValid}
+			onSubmit={form.handleSubmit}
+			error={
+				saveError ? (
+					<p className="m-0">
+						{getErrorMessage(saveError, "Failed to save subagent limits.")}
+					</p>
+				) : undefined
+			}
+		>
+			<div className="grid w-full gap-6 sm:grid-cols-2">
+				{limitConfigs.map(({ field, label, description }) => (
+					<FormField
+						key={field}
+						field={getFieldHelpers(field)}
+						onChange={(event) => changeValue(field, event.target.value)}
+						label={label}
+						description={
+							<>
+								<p className="m-0">{description}</p>
+								<p className="m-0">
+									Deployment: {formatLimit(field, limits.deployment[field])}.
+									Effective: {formatLimit(field, limits.effective[field])}.
+								</p>
+							</>
+						}
+						// A text input keeps what was typed: a number input reports
+						// unparsable text as empty, which would silently unset the limit.
+						type="text"
+						inputMode="numeric"
+						placeholder="Deployment value"
+						disabled={!canEdit || isSaving}
+					/>
+				))}
+			</div>
+		</AgentSettingLayout>
+	);
+};

@@ -1,8 +1,11 @@
-import { screen, waitFor } from "@testing-library/react";
+import { render as renderRTL, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { render } from "#/testHelpers/renderHelpers";
-import { emptyAgentDefinitionFormValues } from "./agentDefinitionMarkdown";
+import {
+	type AgentDefinitionFormValues,
+	emptyAgentDefinitionFormValues,
+} from "./agentDefinitionMarkdown";
 import { ForkAgentDefinitionEditorDialog } from "./ForkAgentDefinitionEditorDialog";
 
 const importedFile = new File(
@@ -22,6 +25,14 @@ const importedFile = new File(
 	"imported.md",
 	{ type: "text/markdown" },
 );
+
+const editedValues: AgentDefinitionFormValues = {
+	name: "reviewer",
+	description: "Reviews diffs.",
+	model: "sonnet",
+	body: "Review the diff.",
+	extraFrontMatter: "tools: Read",
+};
 
 const renderDialog = (
 	props: Partial<React.ComponentProps<typeof ForkAgentDefinitionEditorDialog>>,
@@ -164,5 +175,66 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 		await user.keyboard("{Escape}");
 
 		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("ignores Escape from the moment Save is clicked", async () => {
+		const user = userEvent.setup();
+		const { onSubmit, onClose } = renderDialog({
+			mode: "edit",
+			initialValues: editedValues,
+		});
+
+		await user.keyboard("{Escape}");
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await user.type(screen.getByLabelText("Model"), "-v2");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+		await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+		await user.keyboard("{Escape}");
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps every field's opening values when initialValues refresh", async () => {
+		const user = userEvent.setup();
+		const onSubmit = vi.fn();
+		const dialog = (initialValues: AgentDefinitionFormValues) => (
+			<ForkAgentDefinitionEditorDialog
+				mode="edit"
+				initialValues={initialValues}
+				isSubmitting={false}
+				onSubmit={onSubmit}
+				onClose={() => {}}
+			/>
+		);
+		const { rerender } = renderRTL(dialog(editedValues));
+
+		await user.type(screen.getByLabelText("Body"), " Then report.");
+		rerender(
+			dialog({
+				...editedValues,
+				description: "Changed in another tab.",
+				model: "opus",
+				extraFrontMatter: "tools: Grep",
+			}),
+		);
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+		expect(onSubmit.mock.calls[0][0].content).toBe(
+			[
+				"---",
+				'name: "reviewer"',
+				'description: "Reviews diffs."',
+				'model: "sonnet"',
+				"tools: Read",
+				"---",
+				"Review the diff. Then report.",
+				"",
+			].join("\n"),
+		);
 	});
 });

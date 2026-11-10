@@ -30,6 +30,34 @@ const ownedKeys = new Set(["name", "description", "model"]);
 // item, a comment, or a blank line.
 const topLevelKeyPattern = /^([^\s#-][^:]*):(?:\s|$)/;
 
+// A block scalar, or a quoted scalar that a later line closes. Inside one, a
+// "#" line is text, not a comment.
+type OpenScalar = "block" | '"' | "'" | undefined;
+
+const closesQuote = (text: string, quote: '"' | "'"): boolean => {
+	for (let index = 0; index < text.length; index++) {
+		if (quote === '"' && text[index] === "\\") {
+			index++;
+		} else if (quote === "'" && text.startsWith("''", index)) {
+			index++;
+		} else if (text[index] === quote) {
+			return true;
+		}
+	}
+	return false;
+};
+
+const openScalar = (value: string): OpenScalar => {
+	if (/^[|>]/.test(value)) {
+		return "block";
+	}
+	const quote = value[0];
+	if ((quote === '"' || quote === "'") && !closesQuote(value.slice(1), quote)) {
+		return quote;
+	}
+	return undefined;
+};
+
 const stringField = (attributes: Record<string, unknown>, key: string) => {
 	const value = attributes[key];
 	if (value === undefined || value === null) {
@@ -64,18 +92,30 @@ export const parseAgentDefinitionMarkdown = (
 
 	const extraLines: string[] = [];
 	let keepLine = true;
+	let ownedScalar: OpenScalar;
 	for (const line of frontMatterLines) {
-		const key = topLevelKeyPattern
-			.exec(line)?.[1]
-			?.trim()
-			.replace(/^(["'])(.*)\1$/, "$2");
-		if (key !== undefined) {
+		const match = topLevelKeyPattern.exec(line);
+		const key = match?.[1]?.trim().replace(/^(["'])(.*)\1$/, "$2");
+		if (match && key !== undefined) {
 			keepLine = !ownedKeys.has(key);
+			ownedScalar = keepLine
+				? undefined
+				: openScalar(line.slice(match[0].length).trim());
 		}
-		// An unindented comment stands alone rather than continuing the
-		// previous key, so it is kept even after an owned key.
-		if (keepLine || line.startsWith("#")) {
+		// A comment after an owned key stands alone unless it is inside that
+		// key's block or quoted text. An unindented comment always does.
+		const isComment =
+			line.startsWith("#") ||
+			(!match && !ownedScalar && line.trimStart().startsWith("#"));
+		if (keepLine || isComment) {
 			extraLines.push(line);
+		}
+		if (
+			!match &&
+			(ownedScalar === '"' || ownedScalar === "'") &&
+			closesQuote(line, ownedScalar)
+		) {
+			ownedScalar = undefined;
 		}
 	}
 
