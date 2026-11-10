@@ -23,7 +23,7 @@ const liveStatuses: ReadonlySet<ChatStatus> = new Set<ChatStatus>([
 	"paused",
 ]);
 
-const waitingForSlotStatus = {
+export const waitingForSlotStatus = {
 	icon: HourglassIcon,
 	className: "text-content-warning",
 	label: "Waiting for a free subagent slot",
