@@ -36,6 +36,10 @@ type ForkFamilyCapacity = {
 	readonly liveLimit?: { readonly live: number; readonly max: number };
 };
 
+/** The family endpoint rejects a descendant, so the root keys the query. */
+export const getForkFamilyRootID = (chat: Chat): string =>
+	asNonEmptyString(chat.root_chat_id) ?? getParentChatID(chat) ?? chat.id;
+
 /** Every row of a family shares one query keyed by the family root. */
 export const useForkFamilyCapacity = (
 	chat: Chat,
@@ -45,7 +49,6 @@ export const useForkFamilyCapacity = (
 ): ForkFamilyCapacity => {
 	const { experiments } = useDashboard();
 	const parentID = getParentChatID(chat);
-	const rootID = asNonEmptyString(chat.root_chat_id) ?? parentID ?? chat.id;
 	const enabled =
 		experiments.includes("fork-nested-subagents") &&
 		chat.owner_id === currentUserId &&
@@ -58,7 +61,7 @@ export const useForkFamilyCapacity = (
 	// Only the root row polls. Subagent rows read the shared cache, so rows
 	// mounted later add no fetches of their own.
 	const { data } = useQuery({
-		...forkChatFamilyCapacity(rootID),
+		...forkChatFamilyCapacity(getForkFamilyRootID(chat)),
 		enabled,
 		...(parentID
 			? { refetchInterval: false, refetchOnMount: false, retryOnMount: false }

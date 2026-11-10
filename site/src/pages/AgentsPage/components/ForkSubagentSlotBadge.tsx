@@ -1,6 +1,6 @@
 // This file is fork code: it shows in the chat top bar that a
 // fork-nested-subagents subagent waits for a free concurrency slot.
-// ChatTopBar.tsx renders it in one line, so upstream syncs stay small.
+// ChatTopBar.tsx renders it as one element, so upstream syncs stay small.
 
 import { useQuery } from "react-query";
 import { forkChatFamilyCapacity } from "#/api/queries/forkChatFamily";
@@ -8,9 +8,11 @@ import type { Chat, ChatStatus } from "#/api/typesGenerated";
 import { Badge } from "#/components/Badge/Badge";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
-import { asNonEmptyString } from "./ChatConversation/blockUtils";
 import { getParentChatID } from "./ChatConversation/chatHelpers";
-import { waitingForSlotStatus } from "./ChatsSidebar/tree/ForkFamilyCapacity";
+import {
+	getForkFamilyRootID,
+	waitingForSlotStatus,
+} from "./ChatsSidebar/tree/ForkFamilyCapacity";
 
 type ForkSubagentSlotBadgeProps = {
 	readonly chat: Chat;
@@ -27,16 +29,13 @@ export const ForkSubagentSlotBadge: React.FC<ForkSubagentSlotBadgeProps> = ({
 }) => {
 	const { experiments } = useDashboard();
 	const { user } = useAuthenticated();
-	const parentID = getParentChatID(chat);
 	const enabled =
 		experiments.includes("fork-nested-subagents") &&
 		chat.owner_id === user.id &&
-		parentID !== undefined &&
+		getParentChatID(chat) !== undefined &&
 		status === "running";
 	const { data } = useQuery({
-		...forkChatFamilyCapacity(
-			asNonEmptyString(chat.root_chat_id) ?? parentID ?? chat.id,
-		),
+		...forkChatFamilyCapacity(getForkFamilyRootID(chat)),
 		enabled,
 	});
 	if (!enabled || !data?.waiting_for_capacity.includes(chat.id)) {
