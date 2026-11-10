@@ -386,6 +386,9 @@ func (p *Server) EditMessage(
 		if lockedChat.Archived {
 			return ErrChatArchived
 		}
+		if err := p.forkValidateSubagentResume(ctx, store, lockedChat, true); err != nil {
+			return err
+		}
 		// The target feeds the post-commit debug cleanup below; the
 		// transition itself revalidates ownership and role.
 		target, err := validateEditTarget(ctx, store, opts.ChatID, opts.EditedMessageID)

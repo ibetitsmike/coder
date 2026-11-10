@@ -409,20 +409,46 @@ func secretScrubMarker(i int) string {
 }
 
 // secretAnswerForms returns value as is, shell-quoted and as Bash writes it
-// in $'...', each also as JSON encoders escape it in a string, with / as is
-// and escaped.
+// in $'...', each also as JSON encoders escape it in a string: with or
+// without HTML escapes, with non-ASCII characters as is or escaped, with
+// lowercase or uppercase hex in escapes, and with / as is and escaped.
 func secretAnswerForms(value string) []string {
 	var forms []string
 	for _, v := range []string{value, shellQuote(value), bashANSICContent(value, false), bashANSICContent(value, true)} {
 		forms = append(forms, v)
-		for _, form := range []string{
-			jsonStringContent(v), jsonStringContentNoHTMLEscape(v),
-			jsonStringContentASCII(v, "\\u%04x"), jsonStringContentASCII(v, "\\u%04X"),
-		} {
-			forms = append(forms, form, strings.ReplaceAll(form, "/", `\/`))
+		for _, content := range []string{jsonStringContent(v), jsonStringContentNoHTMLEscape(v)} {
+			upper := upperJSONEscapes(content)
+			for _, form := range []string{
+				content, upper,
+				jsonStringContentASCII(content, "\\u%04x"), jsonStringContentASCII(upper, "\\u%04X"),
+			} {
+				forms = append(forms, form, strings.ReplaceAll(form, "/", `\/`))
+			}
 		}
 	}
 	return forms
+}
+
+// upperJSONEscapes returns JSON string content with the hex digits of each
+// \u escape in uppercase.
+func upperJSONEscapes(content string) string {
+	b := []byte(content)
+	for i := 0; i < len(b)-1; i++ {
+		if b[i] != '\\' {
+			continue
+		}
+		i++
+		if b[i] != 'u' {
+			continue
+		}
+		for j := i + 1; j < len(b) && j <= i+4; j++ {
+			if b[j] >= 'a' && b[j] <= 'f' {
+				b[j] -= 'a' - 'A'
+			}
+		}
+		i += 4
+	}
+	return string(b)
 }
 
 // scrubSecretFragments replaces each run of text that starts like form, and
@@ -481,13 +507,13 @@ func jsonStringContent(value string) string {
 	return string(data[1 : len(data)-1])
 }
 
-// jsonStringContentASCII is jsonStringContentNoHTMLEscape for an encoder
-// that writes every non-ASCII character as a \u escape in format, such as
+// jsonStringContentASCII rewrites JSON string content for an encoder that
+// writes every non-ASCII character as a \u escape in format, such as
 // Python's default json.dumps. A character outside the Basic Multilingual
 // Plane becomes a UTF-16 surrogate pair.
-func jsonStringContentASCII(value, format string) string {
+func jsonStringContentASCII(content, format string) string {
 	var out strings.Builder
-	for _, r := range jsonStringContentNoHTMLEscape(value) {
+	for _, r := range content {
 		if r < 0x7f {
 			out.WriteRune(r)
 			continue

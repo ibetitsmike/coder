@@ -3519,6 +3519,8 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		switch {
+		case xerrors.Is(editErr, chatd.ErrSecretQuestionPending):
+			writeChatError(ctx, rw, secretQuestionPendingError(editErr))
 		case xerrors.Is(editErr, chatd.ErrChatArchived):
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: "Cannot edit messages in an archived chat.",
