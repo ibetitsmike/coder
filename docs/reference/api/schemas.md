@@ -2390,13 +2390,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "instruction_file",
+            "kind": "subagent",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
             "source": "string",
             "source_path": "string",
             "status": "ok",
+            "subagent_description": "string",
+            "subagent_name": "string",
             "tools": [
               {
                 "description": "string",
@@ -2535,13 +2537,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "instruction_file",
+        "kind": "subagent",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
         "source": "string",
         "source_path": "string",
         "status": "ok",
+        "subagent_description": "string",
+        "subagent_name": "string",
         "tools": [
           {
             "description": "string",
@@ -2999,13 +3003,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "instruction_file",
+      "kind": "subagent",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
       "source": "string",
       "source_path": "string",
       "status": "ok",
+      "subagent_description": "string",
+      "subagent_name": "string",
       "tools": [
         {
           "description": "string",
@@ -3031,13 +3037,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "instruction_file",
+  "kind": "subagent",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
   "source": "string",
   "source_path": "string",
   "status": "ok",
+  "subagent_description": "string",
+  "subagent_name": "string",
   "tools": [
     {
       "description": "string",
@@ -3049,31 +3057,33 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                | Type                                                                     | Required | Restrictions | Description                                                                                                                                                                                                                                                                |
-|---------------------|--------------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `error`             | string                                                                   | false    |              | Error explains a non-ok Status; empty when healthy. May also carry a non-fatal warning when Status is ok.                                                                                                                                                                  |
-| `kind`              | [codersdk.ChatContextResourceKind](#codersdkchatcontextresourcekind)     | false    |              |                                                                                                                                                                                                                                                                            |
-| `size_bytes`        | integer                                                                  | false    |              | Size bytes is the original payload size in bytes.                                                                                                                                                                                                                          |
-| `skill_description` | string                                                                   | false    |              |                                                                                                                                                                                                                                                                            |
-| `skill_name`        | string                                                                   | false    |              | Skill name and SkillDescription are populated only for skill kinds.                                                                                                                                                                                                        |
-| `source`            | string                                                                   | false    |              | Source is the resource locator: the canonical file path for an instruction file, the skill directory for a skill, the file path for an MCP config, the server name for an MCP server, or an ACP harness slug.                                                              |
-| `source_path`       | string                                                                   | false    |              | Source path is the configuration directory for an ACP harness.                                                                                                                                                                                                             |
-| `status`            | [codersdk.ChatContextResourceStatus](#codersdkchatcontextresourcestatus) | false    |              | Status is the resource's health. Non-ok resources (invalid, unreadable, oversize, excluded) are still reported so the UI can surface why a resource was dropped from the prompt instead of silently omitting it; their body-specific fields (skill name, tools) are empty. |
-| `tools`             | array of [codersdk.ChatContextTool](#codersdkchatcontexttool)            | false    |              | Tools lists the tools exposed by an MCP server. Populated only for the mcp_server kind; nil otherwise.                                                                                                                                                                     |
+| Name                   | Type                                                                     | Required | Restrictions | Description                                                                                                                                                                                                                                                                |
+|------------------------|--------------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `error`                | string                                                                   | false    |              | Error explains a non-ok Status; empty when healthy. May also carry a non-fatal warning when Status is ok.                                                                                                                                                                  |
+| `kind`                 | [codersdk.ChatContextResourceKind](#codersdkchatcontextresourcekind)     | false    |              |                                                                                                                                                                                                                                                                            |
+| `size_bytes`           | integer                                                                  | false    |              | Size bytes is the original payload size in bytes.                                                                                                                                                                                                                          |
+| `skill_description`    | string                                                                   | false    |              |                                                                                                                                                                                                                                                                            |
+| `skill_name`           | string                                                                   | false    |              | Skill name and SkillDescription are populated only for skill kinds.                                                                                                                                                                                                        |
+| `source`               | string                                                                   | false    |              | Source is the resource locator: the canonical file path for an instruction file, the skill directory for a skill, the file path for an MCP config, the server name for an MCP server, or an ACP harness slug.                                                              |
+| `source_path`          | string                                                                   | false    |              | Source path is the configuration directory for an ACP harness.                                                                                                                                                                                                             |
+| `status`               | [codersdk.ChatContextResourceStatus](#codersdkchatcontextresourcestatus) | false    |              | Status is the resource's health. Non-ok resources (invalid, unreadable, oversize, excluded) are still reported so the UI can surface why a resource was dropped from the prompt instead of silently omitting it; their body-specific fields (skill name, tools) are empty. |
+| `subagent_description` | string                                                                   | false    |              |                                                                                                                                                                                                                                                                            |
+| `subagent_name`        | string                                                                   | false    |              | Subagent name and SubagentDescription are populated only for OK subagent kinds.                                                                                                                                                                                            |
+| `tools`                | array of [codersdk.ChatContextTool](#codersdkchatcontexttool)            | false    |              | Tools lists the tools exposed by an MCP server. Populated only for the mcp_server kind; nil otherwise.                                                                                                                                                                     |
 
 ## codersdk.ChatContextResourceKind
 
 ```json
-"instruction_file"
+"subagent"
 ```
 
 ### Properties
 
 #### Enumerated Values
 
-| Value(s)                                                               |
-|------------------------------------------------------------------------|
-| `acp_harness`, `instruction_file`, `mcp_config`, `mcp_server`, `skill` |
+| Value(s)                                                                           |
+|------------------------------------------------------------------------------------|
+| `acp_harness`, `instruction_file`, `mcp_config`, `mcp_server`, `skill`, `subagent` |
 
 ## codersdk.ChatContextResourceStatus
 
@@ -6073,13 +6083,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "instruction_file",
+          "kind": "subagent",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
           "source": "string",
           "source_path": "string",
           "status": "ok",
+          "subagent_description": "string",
+          "subagent_name": "string",
           "tools": [
             {
               "description": "string",
@@ -10121,9 +10133,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -10525,6 +10537,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat, not counting a subagent's own ancestors. 0 means no limit.                                |
 | `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. 0 means no limit. |
 | `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0.                                                  |
+
+## codersdk.ForkChatFamilyCapacity
+
+```json
+{
+  "live_subagents": 3,
+  "max_live_subagents": 6,
+  "waiting_for_capacity": [
+    "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+  ]
+}
+```
+
+### Properties
+
+| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                 |
+|------------------------|-----------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
+| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
+| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
 
 ## codersdk.ForkOrganizationSubagentLimits
 

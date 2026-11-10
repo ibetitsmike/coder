@@ -38,6 +38,7 @@ func NewAPI(logger slog.Logger, pathStore *PathStore, opts ...Option) *API {
 func (a *API) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/watch", a.handleWatch)
+	r.Mount("/worktrees", newWorktreeAPI(a.logger, a.opts...).routes())
 	return r
 }
 

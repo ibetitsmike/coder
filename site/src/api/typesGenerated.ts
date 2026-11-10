@@ -2475,6 +2475,12 @@ export interface ChatContextResource {
 	readonly skill_name?: string;
 	readonly skill_description?: string;
 	/**
+	 * SubagentName and SubagentDescription are populated only for OK
+	 * subagent kinds.
+	 */
+	readonly subagent_name?: string;
+	readonly subagent_description?: string;
+	/**
 	 * Tools lists the tools exposed by an MCP server. Populated only for the
 	 * mcp_server kind; nil otherwise.
 	 */
@@ -2499,7 +2505,8 @@ export type ChatContextResourceKind =
 	| "instruction_file"
 	| "mcp_config"
 	| "mcp_server"
-	| "skill";
+	| "skill"
+	| "subagent";
 
 export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"acp_harness",
@@ -2507,6 +2514,7 @@ export const ChatContextResourceKinds: ChatContextResourceKind[] = [
 	"mcp_config",
 	"mcp_server",
 	"skill",
+	"subagent",
 ];
 
 // From codersdk/chats.go
@@ -5848,6 +5856,7 @@ export type Experiment =
 	| "example"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
+	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
@@ -5931,6 +5940,7 @@ export const Experiments: Experiment[] = [
 	"example",
 	"fork-agent-definitions",
 	"fork-chat-todos",
+	"fork-chat-wakeups",
 	"fork-nested-subagents",
 	"mcp-server-http",
 	"no_nats_pubsub",
@@ -6292,6 +6302,31 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+}
+
+// From codersdk/fork_chat_family.go
+/**
+ * ForkChatFamilyCapacity is the subagent capacity of the family under a root
+ * chat. It is computed without a lock, so it may be stale when read.
+ */
+export interface ForkChatFamilyCapacity {
+	/**
+	 * LiveSubagents counts the unarchived subagents that have not finished:
+	 * status running, interrupting, requires_action or paused.
+	 */
+	readonly live_subagents: number;
+	/**
+	 * MaxLiveSubagents is the family's live subagent limit in force. 0 means
+	 * no limit. A spawn, or a message_agent that resumes a finished
+	 * subagent, fails while LiveSubagents is at the limit.
+	 */
+	readonly max_live_subagents: number;
+	/**
+	 * WaitingForCapacity lists the running subagents that no worker owns
+	 * because a deployment, organization or family concurrency limit is
+	 * full.
+	 */
+	readonly waiting_for_capacity: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go

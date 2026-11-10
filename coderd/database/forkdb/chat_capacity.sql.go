@@ -112,3 +112,54 @@ func (q *Queries) GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaiting
 	err := row.Scan(&awaiting_worker)
 	return awaiting_worker, err
 }
+
+const getFamilySubagentsAwaitingWorker = `-- name: GetFamilySubagentsAwaitingWorker :many
+SELECT c.id
+FROM chats c
+WHERE c.root_chat_id = $1::uuid
+	AND c.archived = false
+	AND c.status = 'running'::chat_status
+	AND (
+		c.worker_id IS NULL
+		OR c.runner_id IS NULL
+		OR NOT EXISTS (
+			SELECT 1
+			FROM chat_heartbeats hb
+			WHERE hb.chat_id = c.id
+				AND hb.runner_id = c.runner_id
+				AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $2::int)
+		)
+	)
+ORDER BY c.id
+`
+
+type GetFamilySubagentsAwaitingWorkerParams struct {
+	RootChatID   uuid.UUID `db:"root_chat_id" json:"root_chat_id"`
+	StaleSeconds int32     `db:"stale_seconds" json:"stale_seconds"`
+}
+
+// Returns the unarchived running subagent chats under @root_chat_id that no
+// worker with a fresh heartbeat owns, with the predicate of
+// GetChatAwaitingWorker.
+func (q *Queries) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, getFamilySubagentsAwaitingWorker, arg.RootChatID, arg.StaleSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
