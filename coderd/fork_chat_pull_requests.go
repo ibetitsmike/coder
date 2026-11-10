@@ -22,9 +22,9 @@ import (
 )
 
 // forkChatPullRequestActivity reads the activity of the pull request at
-// pullRequestURL since since, with the external auth token that the chat
-// owner ownerID linked for its provider.
-func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time) (*gitprovider.PullRequestActivity, error) {
+// pullRequestURL since since, and its CI when includeChecks is true, with the
+// external auth token that the chat owner ownerID linked for its provider.
+func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool) (*gitprovider.PullRequestActivity, error) {
 	config, gp := api.forkPullRequestProvider(ctx, pullRequestURL)
 	if gp == nil {
 		return nil, xerrors.Errorf("no git provider is configured for %s", pullRequestURL)
@@ -57,7 +57,7 @@ func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UU
 		}
 		return nil, xerrors.Errorf("the chat owner has no linked account for %s", host)
 	}
-	return gitprovider.FetchPullRequestActivity(ctx, gp, token, ref, since)
+	return gitprovider.FetchPullRequestActivity(ctx, gp, token, ref, since, includeChecks)
 }
 
 // forkPullRequestProvider returns the first external auth config whose regex

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/externalauth/gitprovider"
 	"github.com/coder/coder/v2/codersdk"
@@ -39,15 +41,21 @@ type fakePullRequestActivity struct {
 }
 
 type fakePullRequestCall struct {
-	ownerID uuid.UUID
-	url     string
-	since   time.Time
+	ownerID       uuid.UUID
+	url           string
+	since         time.Time
+	includeChecks bool
+	// boundedRead is whether the read's deadline is at most
+	// pullRequestReadTimeout away.
+	boundedRead bool
 }
 
-func (f *fakePullRequestActivity) fetch(_ context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time) (*gitprovider.PullRequestActivity, error) {
+func (f *fakePullRequestActivity) fetch(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool) (*gitprovider.PullRequestActivity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, fakePullRequestCall{ownerID: ownerID, url: pullRequestURL, since: since})
+	deadline, ok := ctx.Deadline()
+	boundedRead := ok && time.Until(deadline) <= pullRequestReadTimeout
+	f.calls = append(f.calls, fakePullRequestCall{ownerID: ownerID, url: pullRequestURL, since: since, includeChecks: includeChecks, boundedRead: boundedRead})
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -78,7 +86,9 @@ func openPullRequest(checks gitprovider.CheckState) gitprovider.PullRequestActiv
 func TestWaitForEventsPullRequestTool(t *testing.T) {
 	t.Parallel()
 	f := newWorkerTestFixture(t)
-	ctx := chatdTestContext(t)
+	// Longer than pullRequestReadTimeout, so the fake can tell that the
+	// tool bounds its read.
+	ctx := dbauthz.AsChatd(testutil.Context(t, testutil.WaitSuperLong))
 	coordinator := f.createWakeupChat(t)
 	running := f.createChildAgent(t, coordinator, "running", database.ChatStatusRunning)
 
@@ -115,7 +125,7 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.Equal(t, defaultPullRequestWaitPrompt, row.Prompt)
 	require.JSONEq(t, fmt.Sprintf(`[{"type":"pull_request","url":%q,"on":["review","comment","checks","closed"],"since":%q,"head_sha":%q,"checks_state":"pending"}]`,
 		testPullRequestURL, wakeupTestSlot.Format(time.RFC3339), testHeadSHA), string(row.Events))
-	require.Equal(t, []fakePullRequestCall{{ownerID: coordinator.OwnerID, url: testPullRequestURL, since: wakeupTestSlot}}, fake.calls)
+	require.Equal(t, []fakePullRequestCall{{ownerID: coordinator.OwnerID, url: testPullRequestURL, since: wakeupTestSlot, includeChecks: true, boundedRead: true}}, fake.calls)
 
 	// With children too, both are watched, and the events keep their order.
 	both, _ := waitCall(uuid.New(), waitForEventsArgs{
@@ -128,6 +138,11 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.JSONEq(t, fmt.Sprintf(`[{"type":"child_done","chat_id":%q},{"type":"pull_request","url":%q,"on":["review","checks"],"since":%q,"head_sha":%q,"checks_state":"pending"}]`,
 		running.ID, testPullRequestURL, wakeupTestSlot.Format(time.RFC3339), testHeadSHA), string(f.wakeup(t, both.ID).Events))
 	require.Equal(t, defaultPullRequestWaitPrompt, f.wakeup(t, both.ID).Prompt)
+
+	// A watch without checks does not read CI, which needs a permission that
+	// the other events do not.
+	waitCall(uuid.New(), waitForEventsArgs{PullRequestURL: testPullRequestURL, PullRequestEvents: []string{"review"}}, false)
+	require.False(t, fake.calls[len(fake.calls)-1].includeChecks)
 
 	closed := openPullRequest(gitprovider.CheckStateSuccess)
 	closed.State = gitprovider.PRStateClosed
@@ -159,10 +174,13 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	}
 	server.forkPullRequestActivity = fake.fetch
 
-	// Reviews and comments that the baseline read already lists are stored
-	// as seen.
+	// Reviews and comments of the second of the baseline read are stored as
+	// seen. A later one was created during the read and is left to the poll.
 	withReview := openPullRequest(gitprovider.CheckStatePending)
-	withReview.Reviews = []gitprovider.PullRequestEvent{{ID: 1, Author: "alice", State: "approved", URL: testPullRequestURL + "#pullrequestreview-1", CreatedAt: wakeupTestSlot}}
+	withReview.Reviews = []gitprovider.PullRequestEvent{
+		{ID: 1, Author: "alice", State: "approved", URL: testPullRequestURL + "#pullrequestreview-1", CreatedAt: wakeupTestSlot},
+		{ID: 2, Author: "alice", State: "approved", URL: testPullRequestURL + "#pullrequestreview-2", CreatedAt: wakeupTestSlot.Add(time.Second)},
+	}
 	fake.set(withReview, nil)
 	seen, _ := waitCall(uuid.New(), waitForEventsArgs{PullRequestURL: testPullRequestURL}, false)
 	var seenEvents []wakeupEvent
@@ -180,7 +198,7 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, coordinator.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 3, "refused calls create nothing")
+	require.Len(t, rows, 4, "refused calls create nothing")
 }
 
 // pullRequestEvents returns the events of a wake-up that watches the test
@@ -280,6 +298,13 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 			activity: openPullRequest(gitprovider.CheckStateSuccess),
 		},
 		{
+			name: "ChecksRerunSameState", on: []string{"checks"}, baselineHead: testHeadSHA, baseline: gitprovider.CheckStateSuccess,
+			activity: withActivity(openPullRequest(gitprovider.CheckStateSuccess), func(a *gitprovider.PullRequestActivity) {
+				a.Checks.UpdatedAt = wakeupTestSlot.Add(-time.Minute)
+			}),
+			wantLines: []string{header, "- checks: success, 0 of 3 failed, on 0123456789ab"},
+		},
+		{
 			name: "NewHeadPending", on: []string{"checks"}, baselineHead: testHeadSHA, baseline: gitprovider.CheckStateSuccess,
 			activity: withActivity(openPullRequest(gitprovider.CheckStatePending), func(a *gitprovider.PullRequestActivity) {
 				a.HeadSHA = testNewHeadSHA
@@ -329,7 +354,13 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 			now := wakeupTestSlot.Add(time.Second)
 
 			worker.wakeupOnce(ctx, now)
-			require.Equal(t, []fakePullRequestCall{{ownerID: chat.OwnerID, url: testPullRequestURL, since: wakeupTestSlot.Add(-time.Hour)}}, fake.calls)
+			require.Equal(t, []fakePullRequestCall{{
+				ownerID:       chat.OwnerID,
+				url:           testPullRequestURL,
+				since:         wakeupTestSlot.Add(-time.Hour),
+				includeChecks: slices.Contains(tc.on, pullRequestEventChecks),
+				boundedRead:   true,
+			}}, fake.calls)
 			got := f.wakeup(t, wakeup.ID)
 			if tc.wantLines == nil {
 				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
@@ -462,7 +493,9 @@ func TestWakeupPullRequestCap(t *testing.T) {
 func TestWakeupPullRequestReadDeadline(t *testing.T) {
 	t.Parallel()
 	f := newWorkerTestFixture(t)
-	ctx := testutil.Context(t, testutil.WaitLong)
+	// Longer than pullRequestReadTimeout, so only the worker's own bound
+	// passes the deadline check.
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
 	chat := f.createWakeupChat(t)
 	f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 		Kind:   forkdb.ChatWakeupKindEvents,
@@ -471,7 +504,7 @@ func TestWakeupPullRequestReadDeadline(t *testing.T) {
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	var deadline time.Time
 	var hasDeadline bool
-	worker.server.forkPullRequestActivity = func(ctx context.Context, _ uuid.UUID, _ string, _ time.Time) (*gitprovider.PullRequestActivity, error) {
+	worker.server.forkPullRequestActivity = func(ctx context.Context, _ uuid.UUID, _ string, _ time.Time, _ bool) (*gitprovider.PullRequestActivity, error) {
 		deadline, hasDeadline = ctx.Deadline()
 		return nil, xerrors.New("github is down")
 	}
@@ -484,27 +517,39 @@ func TestWakeupPullRequestReadDeadline(t *testing.T) {
 }
 
 // A watch whose next poll would land after its expiry polls once more at the
-// expiry, then completes.
+// expiry, then completes. That poll runs late here, and reports only what
+// happened until the expiry.
 func TestWakeupPullRequestPollsUntilExpiry(t *testing.T) {
 	t.Parallel()
+	expiresAt := wakeupTestSlot.Add(30 * time.Second)
+	merged := func(at time.Time) func(*gitprovider.PullRequestActivity) {
+		return func(a *gitprovider.PullRequestActivity) { a.State, a.ClosedAt = gitprovider.PRStateMerged, at }
+	}
 	for _, tc := range []struct {
 		name        string
-		finalState  gitprovider.PRState
+		on          []string
+		final       func(*gitprovider.PullRequestActivity)
 		wantMessage bool
 		wantReason  string
 	}{
-		{name: "ActivityAtLastPoll", finalState: gitprovider.PRStateMerged, wantMessage: true, wantReason: "done"},
-		{name: "NothingAtLastPoll", finalState: gitprovider.PRStateOpen, wantReason: "expired"},
+		{name: "ActivityAtLastPoll", on: []string{"closed"}, final: merged(expiresAt.Add(-5 * time.Second)), wantMessage: true, wantReason: "done"},
+		{name: "NothingAtLastPoll", on: []string{"closed"}, final: func(*gitprovider.PullRequestActivity) {}, wantReason: "expired"},
+		{name: "MergedAfterExpiry", on: []string{"closed"}, final: merged(expiresAt.Add(30 * time.Second)), wantReason: "expired"},
+		{name: "ReviewAfterExpiry", on: []string{"review"}, final: func(a *gitprovider.PullRequestActivity) {
+			a.Reviews = []gitprovider.PullRequestEvent{{ID: 1, Author: "alice", State: "approved", URL: testPullRequestURL + "#pullrequestreview-1", CreatedAt: expiresAt.Add(30 * time.Second)}}
+		}, wantReason: "expired"},
+		{name: "ChecksSettleAfterExpiry", on: []string{"checks"}, final: func(a *gitprovider.PullRequestActivity) {
+			a.Checks = gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 3, UpdatedAt: expiresAt.Add(30 * time.Second)}
+		}, wantReason: "expired"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newWorkerTestFixture(t)
 			ctx := testutil.Context(t, testutil.WaitLong)
 			chat := f.createWakeupChat(t)
-			expiresAt := wakeupTestSlot.Add(30 * time.Second)
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:      forkdb.ChatWakeupKindEvents,
-				Events:    pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+				Events:    pullRequestEvents(tc.on, testHeadSHA, gitprovider.CheckStatePending),
 				ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
 			})
 			worker := f.newArchiveWorker(t, nil, nil, nil)
@@ -517,9 +562,9 @@ func TestWakeupPullRequestPollsUntilExpiry(t *testing.T) {
 			require.True(t, expiresAt.Equal(got.NextRunAt.Time), "next run %s", got.NextRunAt.Time)
 
 			final := openPullRequest(gitprovider.CheckStatePending)
-			final.State = tc.finalState
+			tc.final(&final)
 			fake.set(final, nil)
-			worker.wakeupOnce(ctx, expiresAt.Add(time.Second))
+			worker.wakeupOnce(ctx, expiresAt.Add(time.Minute))
 			require.Equal(t, 2, fake.callCount())
 			if tc.wantMessage {
 				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)

@@ -115,7 +115,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, fake := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 		require.NoError(t, err)
 		assert.Equal(t, &gitprovider.PullRequestActivity{
 			State:   gitprovider.PRStateOpen,
@@ -166,7 +166,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, fake := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, at("06:00:00.5"))
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, at("06:00:00.5"), true)
 		require.NoError(t, err)
 		require.Len(t, activity.Reviews, 1)
 		assert.EqualValues(t, 1, activity.Reviews[0].ID)
@@ -195,7 +195,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 		require.NoError(t, err)
 		require.Len(t, activity.Comments, 1)
 		assert.EqualValues(t, 300, activity.Comments[0].ID)
@@ -232,8 +232,8 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		}, {
 			name:      "CommitStatusFailed",
 			checkRuns: `[]`,
-			status:    `{"state":"failure","total_count":3,"statuses":[{"state":"failure"},{"state":"error"},{"state":"success"}]}`,
-			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 3, Failed: 2},
+			status:    `{"state":"failure","total_count":3,"statuses":[{"state":"failure","updated_at":"2026-11-10T06:10:00Z"},{"state":"error","updated_at":"2026-11-10T06:30:00Z"},{"state":"success","updated_at":"2026-11-10T06:20:00Z"}]}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateFailure, Total: 3, Failed: 2, UpdatedAt: at("06:30:00")},
 		}, {
 			name:      "CommitStatusPending",
 			checkRuns: `[{"id":8,"name":"c8","status":"completed","conclusion":"success"}]`,
@@ -241,9 +241,9 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
 		}, {
 			name:      "RerunAfterCancel",
-			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success"}]`,
+			checkRuns: `[{"id":10,"name":"test","app":{"id":1},"status":"completed","conclusion":"cancelled","completed_at":"2026-11-10T06:30:00Z"},{"id":11,"name":"test","app":{"id":1},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:20:00Z"},{"id":12,"name":"test","app":{"id":2},"status":"completed","conclusion":"success","completed_at":"2026-11-10T06:10:00Z"}]`,
 			status:    `{"state":"pending","total_count":0}`,
-			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2},
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2, UpdatedAt: at("06:20:00")},
 		}, {
 			name:      "RerunInProgress",
 			checkRuns: `[{"id":21,"name":"test","status":"in_progress","conclusion":null},{"id":20,"name":"test","status":"completed","conclusion":"failure"}]`,
@@ -269,7 +269,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 				gp, _ := newFakeGitHubActivity(t, routes)
 
 				ctx := testutil.Context(t, testutil.WaitShort)
-				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, activity.Checks)
 			})
@@ -280,13 +280,35 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		t.Parallel()
 
 		routes := activityRoutes()
-		routes["/repos/org/repo/pulls/7"] = jsonBody(`{"state":"closed","merged":true,"head":{"sha":"abc123"}}`)
+		routes["/repos/org/repo/pulls/7"] = jsonBody(`{"state":"closed","merged":true,"closed_at":"2026-11-10T06:50:00Z","head":{"sha":"abc123"}}`)
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 		require.NoError(t, err)
 		assert.Equal(t, gitprovider.PRStateMerged, activity.State)
+		assert.Equal(t, at("06:50:00"), activity.ClosedAt)
+	})
+
+	t.Run("ChecksNotRequested", func(t *testing.T) {
+		t.Parallel()
+
+		// A GitHub App without the Checks permission gets 403 for CI.
+		forbidden := func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
+		}
+		routes := activityRoutes()
+		routes["/repos/org/repo/commits/abc123/check-runs"] = forbidden
+		routes["/repos/org/repo/commits/abc123/status"] = forbidden
+		gp, _ := newFakeGitHubActivity(t, routes)
+
+		ctx := testutil.Context(t, testutil.WaitShort)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, false)
+		require.NoError(t, err)
+		assert.Equal(t, gitprovider.CheckSummary{State: gitprovider.CheckStateNone}, activity.Checks)
+		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		require.Error(t, err)
 	})
 
 	t.Run("RateLimited", func(t *testing.T) {
@@ -303,7 +325,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		_, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		_, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 		var rlErr *gitprovider.RateLimitError
 		require.True(t, errors.As(err, &rlErr), "error should wrap *RateLimitError, got: %v", err)
 		assert.WithinDuration(t, resetTime.Add(gitprovider.RateLimitPadding), rlErr.RetryAfter, 2*time.Second)
@@ -316,7 +338,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since)
+		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
 		require.ErrorIs(t, err, gitprovider.ErrPullRequestActivityUnsupported)
 	})
 }
