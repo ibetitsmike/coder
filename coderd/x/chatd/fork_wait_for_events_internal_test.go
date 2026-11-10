@@ -135,11 +135,17 @@ func TestWaitForEventsTool(t *testing.T) {
 	again, _ := wait(coordinator, waitForEventsArgs{ChildChatIDs: []string{running.ID.String(), paused.ID.String()}}, false)
 	require.Equal(t, []uuid.UUID{running.ID}, childIDs(again))
 
-	// named has expired, but the worker does not finish it while the chat
-	// is busy, so its children can be watched again meanwhile.
-	mClock.Set(wakeupTestSlot.Add(10 * time.Minute))
-	renewed, _ := wait(coordinator, waitForEventsArgs{ChildChatIDs: []string{waiting.ID.String()}}, false)
-	require.Equal(t, []uuid.UUID{waiting.ID}, childIDs(renewed))
+	// The worker does not finish an expired wake-up while its chat is busy,
+	// so the row stays active, but its children can be watched again.
+	lapsed := f.createWakeupChat(t)
+	lapsedChild := f.createChildAgent(t, lapsed, "lapsed", database.ChatStatusRunning)
+	f.insertWakeup(t, lapsed, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		Events:    childDoneEvents(lapsedChild),
+		ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
+	})
+	renewed, _ := wait(lapsed, waitForEventsArgs{}, false)
+	require.Equal(t, []uuid.UUID{lapsedChild.ID}, childIDs(renewed))
 
 	// Only children that are done: nothing to wait for.
 	forceExecutionState(t, f, running.ID, database.ChatStatusWaiting, false)
@@ -152,7 +158,7 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.Equal(t, def.ID, replayed.ID)
 	require.Equal(t, []uuid.UUID{running.ID, paused.ID}, childIDs(replayed))
 	require.Equal(t, database.ChatStatusWaiting, replayed.Children[0].Status)
-	require.Len(t, wakeups(coordinator), 4)
+	require.Len(t, wakeups(coordinator), 3)
 
 	// A settled child is still watched while it waits for events of its own
 	// children or for an answer.
