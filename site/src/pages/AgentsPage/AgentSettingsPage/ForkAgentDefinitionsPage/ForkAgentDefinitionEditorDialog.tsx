@@ -172,12 +172,9 @@ const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 }) => {
 	const [initialValues] = useState(refreshedInitialValues);
 	const [model, setModel] = useState(initialValues.model);
-	const [extraFrontMatter, setExtraFrontMatter] = useState(
-		initialValues.extraFrontMatter,
-	);
+	const [frontMatter, setFrontMatter] = useState(initialValues.frontMatter);
 	const isAgentDirty =
-		model !== initialValues.model ||
-		extraFrontMatter !== initialValues.extraFrontMatter;
+		model !== initialValues.model || frontMatter !== initialValues.frontMatter;
 
 	return (
 		<SkillEditorForm
@@ -192,7 +189,7 @@ const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 			existingNames={[]}
 			isSubmitting={isSubmitting}
 			buildContent={(values) =>
-				buildAgentDefinitionMarkdown({ ...values, model, extraFrontMatter })
+				buildAgentDefinitionMarkdown({ ...values, model, frontMatter })
 			}
 			onSubmit={(values, content, onSettled) =>
 				onSubmit({ name: values.name, content }, onSettled)
@@ -212,7 +209,7 @@ const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 				<AgentDefinitionImport
 					onImport={(values) => {
 						setModel(values.model);
-						setExtraFrontMatter(values.extraFrontMatter);
+						setFrontMatter(values.frontMatter);
 					}}
 				/>
 				<SkillEditorNameField />

@@ -1,18 +1,19 @@
 // This file is fork code: converts agent definition markdown to and from the
 // editor's fields.
 
-import frontMatter from "front-matter";
+import { type Document, isMap, parseDocument } from "yaml";
 
 /**
- * The editor's fields. extraFrontMatter holds the raw front-matter lines of
- * the keys the editor does not own, such as tools or mcp.
+ * The editor's fields. frontMatter holds the definition's original YAML
+ * front-matter, so saving rewrites only the owned keys and keeps every
+ * other key and comment.
  */
 export type AgentDefinitionFormValues = {
 	name: string;
 	description: string;
 	model: string;
 	body: string;
-	extraFrontMatter: string;
+	frontMatter: string;
 };
 
 /** The editor's fields for a new agent definition. */
@@ -21,45 +22,25 @@ export const emptyAgentDefinitionFormValues: AgentDefinitionFormValues = {
 	description: "",
 	model: "",
 	body: "",
-	extraFrontMatter: "",
+	frontMatter: "",
 };
 
-const ownedKeys = new Set(["name", "description", "model"]);
+const ownedKeys = ["name", "description", "model"] as const;
 
-// A line that starts a top-level key, as opposed to a nested value, a list
-// item, a comment, or a blank line.
-const topLevelKeyPattern = /^([^\s#-][^:]*):(?:\s|$)/;
-
-// A block scalar, or a quoted scalar that a later line closes. Inside one, a
-// "#" line is text, not a comment.
-type OpenScalar = "block" | '"' | "'" | undefined;
-
-const closesQuote = (text: string, quote: '"' | "'"): boolean => {
-	for (let index = 0; index < text.length; index++) {
-		if (quote === '"' && text[index] === "\\") {
-			index++;
-		} else if (quote === "'" && text.startsWith("''", index)) {
-			index++;
-		} else if (text[index] === quote) {
-			return true;
-		}
+const parseFrontMatter = (text: string): Document => {
+	const document = parseDocument(text);
+	const [error] = document.errors;
+	if (error) {
+		throw new Error(`The front-matter is not valid YAML: ${error.message}`);
 	}
-	return false;
+	if (document.contents !== null && !isMap(document.contents)) {
+		throw new Error("The front-matter must be a list of key: value fields.");
+	}
+	return document;
 };
 
-const openScalar = (value: string): OpenScalar => {
-	if (/^[|>]/.test(value)) {
-		return "block";
-	}
-	const quote = value[0];
-	if ((quote === '"' || quote === "'") && !closesQuote(value.slice(1), quote)) {
-		return quote;
-	}
-	return undefined;
-};
-
-const stringField = (attributes: Record<string, unknown>, key: string) => {
-	const value = attributes[key];
+const stringField = (document: Document, key: string) => {
+	const value = document.get(key);
 	if (value === undefined || value === null) {
 		return "";
 	}
@@ -83,48 +64,17 @@ export const parseAgentDefinitionMarkdown = (
 	if (closingIndex < 0) {
 		throw new Error("The front-matter has no closing ---.");
 	}
-	const frontMatterLines = lines.slice(1, closingIndex);
-	const parsed = frontMatter<Record<string, unknown>>(
-		["---", ...frontMatterLines, "---", ...lines.slice(closingIndex + 1)].join(
-			"\n",
-		),
-	);
-
-	const extraLines: string[] = [];
-	let keepLine = true;
-	let ownedScalar: OpenScalar;
-	for (const line of frontMatterLines) {
-		const match = topLevelKeyPattern.exec(line);
-		const key = match?.[1]?.trim().replace(/^(["'])(.*)\1$/, "$2");
-		if (match && key !== undefined) {
-			keepLine = !ownedKeys.has(key);
-			ownedScalar = keepLine
-				? undefined
-				: openScalar(line.slice(match[0].length).trim());
-		}
-		// A comment after an owned key stands alone unless it is inside that
-		// key's block or quoted text. An unindented comment always does.
-		const isComment =
-			line.startsWith("#") ||
-			(!match && !ownedScalar && line.trimStart().startsWith("#"));
-		if (keepLine || isComment) {
-			extraLines.push(line);
-		}
-		if (
-			!match &&
-			(ownedScalar === '"' || ownedScalar === "'") &&
-			closesQuote(line, ownedScalar)
-		) {
-			ownedScalar = undefined;
-		}
-	}
-
+	const frontMatter = lines.slice(1, closingIndex).join("\n");
+	const document = parseFrontMatter(frontMatter);
 	return {
-		name: stringField(parsed.attributes, "name"),
-		description: stringField(parsed.attributes, "description"),
-		model: stringField(parsed.attributes, "model"),
-		body: parsed.body.trim(),
-		extraFrontMatter: extraLines.join("\n").trimEnd(),
+		name: stringField(document, "name"),
+		description: stringField(document, "description"),
+		model: stringField(document, "model"),
+		body: lines
+			.slice(closingIndex + 1)
+			.join("\n")
+			.trim(),
+		frontMatter,
 	};
 };
 
@@ -132,20 +82,17 @@ export const parseAgentDefinitionMarkdown = (
 export const buildAgentDefinitionMarkdown = (
 	values: AgentDefinitionFormValues,
 ): string => {
-	// A JSON string is a valid YAML double-quoted scalar, so this escapes
-	// quotes, backslashes, and values YAML would read as other types.
-	const lines = ["---", `name: ${JSON.stringify(values.name.trim())}`];
-	const description = values.description.trim();
-	if (description) {
-		lines.push(`description: ${JSON.stringify(description)}`);
+	const document = parseFrontMatter(values.frontMatter);
+	for (const key of ownedKeys) {
+		const value = values[key].trim();
+		if (value) {
+			// Setting an existing scalar keeps its node, so its style and
+			// comments survive; YAML quotes the value when it needs to.
+			document.set(key, value);
+		} else if (isMap(document.contents)) {
+			document.contents.delete(key);
+		}
 	}
-	const model = values.model.trim();
-	if (model) {
-		lines.push(`model: ${JSON.stringify(model)}`);
-	}
-	if (values.extraFrontMatter) {
-		lines.push(values.extraFrontMatter);
-	}
-	lines.push("---");
-	return `${lines.join("\n")}\n${values.body.trim()}\n`;
+	// lineWidth 0 keeps long values on one line instead of folding them.
+	return `---\n${document.toString({ lineWidth: 0 })}---\n${values.body.trim()}\n`;
 };
