@@ -9,6 +9,7 @@ import {
 	getUserAgentDefinitions,
 	updateUserAgentDefinition as updateUserAgentDefinitionRequest,
 } from "#/api/forkAgentDefinitions";
+import { compareUpdatedAtInstants } from "#/api/queries/chats";
 import type {
 	CreateForkAgentDefinitionRequest,
 	UpdateForkAgentDefinitionRequest,
@@ -57,22 +58,9 @@ export const userAgentDefinition = (
 
 type Timestamped = { updated_at: string };
 
-// API timestamps carry microseconds, which Date drops, so the fractional
-// seconds are compared as digits.
-const timestampParts = (value: string) => {
-	const fraction = /\.(\d+)/.exec(value)?.[1] ?? "";
-	return [
-		Math.floor(new Date(value).getTime() / 1000),
-		Number(fraction.padEnd(9, "0").slice(0, 9)),
-	] as const;
-};
-
 /** Whether a was updated after b, to the timestamps' full precision. */
-export const isNewer = (a: Timestamped, b: Timestamped) => {
-	const [aSeconds, aNanos] = timestampParts(a.updated_at);
-	const [bSeconds, bNanos] = timestampParts(b.updated_at);
-	return aSeconds === bSeconds ? aNanos > bNanos : aSeconds > bSeconds;
-};
+export const isNewer = (a: Timestamped, b: Timestamped) =>
+	compareUpdatedAtInstants(a.updated_at, b.updated_at) > 0;
 
 /** Whether a request failed with no response, so it may still have applied. */
 export const isResponseLost = (error: unknown) =>
