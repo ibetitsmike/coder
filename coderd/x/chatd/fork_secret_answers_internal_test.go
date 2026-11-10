@@ -48,8 +48,8 @@ type stepTool struct {
 	observed *[]string
 }
 
-func (stepTool) SerialToolCalls() bool                { return true }
-func (stepTool) HaltedToolCallError() (string, bool)  { return "halted", true }
+func (stepTool) SerialToolCalls() bool                 { return true }
+func (stepTool) HaltedToolCallError() (string, bool)   { return "halted", true }
 func (t stepTool) ObserveStepToolCalls(names []string) { *t.observed = names }
 func (t stepTool) ObserveStepToolResults(names []string, _ []bool) {
 	*t.observed = append(*t.observed, names...)
