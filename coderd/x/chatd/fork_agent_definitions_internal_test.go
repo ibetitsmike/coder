@@ -655,3 +655,26 @@ func TestForkAgentDefinitionModelAlias(t *testing.T) {
 		require.Nil(t, aliasesByID[f.otherModel.ID])
 	})
 }
+
+func TestForkModelAliasesHiddenWithoutExperiment(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t, nil, func(database.ChatModelConfig) map[string]string { return nil })
+	raw, err := json.Marshal(codersdk.ChatModelCallConfig{Aliases: []string{"fast"}})
+	require.NoError(t, err)
+	aliased := insertInternalChatModelConfigWithOptions(t, f.db, f.root.OrganizationID, "openai", "gpt-fast", true, raw)
+
+	ctx := chatdTestContext(t)
+	resp := runSubagentTool(ctx, t, f.server, f.root, f.root.LastModelConfigID, listSubagentModelsToolName, struct{}{})
+	require.False(t, resp.IsError, "expected success but got: %s", resp.Content)
+	var result struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+	var found bool
+	for _, model := range result.Models {
+		require.NotContains(t, model, "aliases")
+		found = found || model["model_config_id"] == aliased.ID.String()
+	}
+	require.True(t, found, "the aliased model is listed")
+}
