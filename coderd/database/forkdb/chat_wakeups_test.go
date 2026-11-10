@@ -176,7 +176,7 @@ func TestChatWakeupRuns(t *testing.T) {
 	require.Empty(t, keys, "run keys belong to their wake-up")
 	keys, err = fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"}, keys, "failed runs are left out")
+	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z:failed"}, keys)
 
 	require.NoError(t, fdb.DeleteChatWakeupByID(ctx, wakeup.ID))
 

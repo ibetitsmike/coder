@@ -678,7 +678,7 @@ func TestNextWakeupRun(t *testing.T) {
 			wantNext:   slot.Add(10*time.Second + wakeupPollInterval),
 		},
 		{
-			name: "EventsExpired",
+			name: "EventsLastPollAtExpiry",
 			wakeup: forkdb.ChatWakeup{
 				Kind:      forkdb.ChatWakeupKindEvents,
 				NextRunAt: sql.NullTime{Time: slot, Valid: true},
@@ -686,6 +686,18 @@ func TestNextWakeupRun(t *testing.T) {
 				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
 			},
 			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusActive,
+			wantNext:   slot.Add(20 * time.Second),
+		},
+		{
+			name: "EventsExpired",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+				Timezone:  "UTC",
+				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+			},
+			now:        slot.Add(20 * time.Second),
 			wantStatus: forkdb.ChatWakeupStatusCompleted,
 			wantReason: "expired",
 		},
