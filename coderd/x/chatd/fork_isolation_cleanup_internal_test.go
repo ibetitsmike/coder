@@ -185,36 +185,94 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 
 func TestForkArchiveStopsSubagentWorkspaces(t *testing.T) {
 	t.Parallel()
-	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
-	ctx := chatdTestContext(t)
-	workspaces := &fakeWorkspaces{t: t, db: f.db}
-	root, _ := f.workspaceRoot(t, workspaces)
 	isolated := map[string]any{"isolation": "workspace"}
-	f.spawnChild(t, root, isolated)
-	f.spawnChild(t, root, isolated)
-	f.spawnChild(t, root, map[string]any{})
-	require.NoError(t, WaitUntilIdleForTest(ctx, f.server))
 
-	workspaces.mu.Lock()
-	running, stopped := workspaces.created[0], workspaces.created[1]
-	workspaces.mu.Unlock()
-	dbfake.WorkspaceBuild(t, f.db, stopped).
-		Seed(database.WorkspaceBuild{BuildNumber: 2, Transition: database.WorkspaceTransitionStop}).
-		Do()
-
-	family := []uuid.UUID{root.ID}
-	for _, row := range f.children(t, root) {
-		family = append(family, row.Chat.ID)
+	// archive archives the family of root once its members are at rest, and
+	// waits for the cleanup that follows.
+	archive := func(t *testing.T, f *isolationFixture, root database.Chat, members ...database.Chat) {
+		t.Helper()
+		ctx := chatdTestContext(t)
+		require.NoError(t, WaitUntilIdleForTest(ctx, f.server))
+		for _, chat := range append([]database.Chat{root}, members...) {
+			_, err := f.db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: chat.ID, Status: database.ChatStatusWaiting})
+			require.NoError(t, err)
+		}
+		require.NoError(t, f.server.ArchiveChat(ctx, root))
+		// The cleanup runs in the background after the archive commits.
+		f.server.drainInflight()
 	}
-	for _, id := range family {
-		_, err := f.db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: id, Status: database.ChatStatusWaiting})
+
+	t.Run("StopsRunningWorkspaces", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
+		workspaces := &fakeWorkspaces{t: t, db: f.db}
+		root, _ := f.workspaceRoot(t, workspaces)
+		running := f.spawnChild(t, root, isolated)
+		stopped := f.spawnChild(t, root, isolated)
+		shared := f.spawnChild(t, root, map[string]any{})
+		workspace, err := f.db.GetWorkspaceByID(chatdTestContext(t), stopped.WorkspaceID.UUID)
 		require.NoError(t, err)
-	}
-	require.NoError(t, f.server.ArchiveChat(ctx, root))
-	// The cleanup runs in the background after the archive commits.
-	f.server.drainInflight()
+		dbfake.WorkspaceBuild(t, f.db, workspace.WorkspaceTable()).
+			Seed(database.WorkspaceBuild{BuildNumber: 2, Transition: database.WorkspaceTransitionStop}).
+			Do()
 
-	workspaces.mu.Lock()
-	defer workspaces.mu.Unlock()
-	require.Equal(t, []uuid.UUID{running.ID}, workspaces.stops)
+		archive(t, f, root, running, stopped, shared)
+
+		workspaces.mu.Lock()
+		defer workspaces.mu.Unlock()
+		require.Equal(t, []uuid.UUID{running.WorkspaceID.UUID}, workspaces.stops)
+	})
+
+	t.Run("AfterWorktreeRemoval", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkNestedSubagents})
+		ctx := chatdTestContext(t)
+		conn := &cleanupWorktreeConn{}
+		workspaces := &fakeWorkspaces{t: t, db: f.db, conn: conn}
+		root, _ := f.workspaceRoot(t, workspaces)
+		child := f.spawnChild(t, root, isolated)
+		// The child's first turn binds it to the agent of its workspace.
+		workspaces.mu.Lock()
+		agentID := workspaces.agents[child.WorkspaceID.UUID][0]
+		workspaces.mu.Unlock()
+		child, err := f.db.UpdateChatWorkspaceBinding(ctx, database.UpdateChatWorkspaceBindingParams{
+			ID:          child.ID,
+			WorkspaceID: child.WorkspaceID,
+			BuildID:     child.BuildID,
+			AgentID:     uuid.NullUUID{UUID: agentID, Valid: true},
+		})
+		require.NoError(t, err)
+		grandchild := f.spawnChild(t, child, map[string]any{"isolation": "worktree", "repo_path": "/repo"})
+
+		archive(t, f, root, child, grandchild)
+
+		deleted := conn.deleted()
+		require.Len(t, deleted, 1)
+		require.Equal(t, "/wt/"+grandchild.ID.String(), deleted[0].Path)
+		workspaces.mu.Lock()
+		defer workspaces.mu.Unlock()
+		require.Equal(t, []uuid.UUID{child.WorkspaceID.UUID}, workspaces.stops)
+	})
+
+	t.Run("SkipsReboundChild", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation})
+		ctx := chatdTestContext(t)
+		workspaces := &fakeWorkspaces{t: t, db: f.db}
+		root, _ := f.workspaceRoot(t, workspaces)
+		child := f.spawnChild(t, root, isolated)
+		child, err := f.db.UpdateChatWorkspaceBinding(ctx, database.UpdateChatWorkspaceBindingParams{
+			ID:          child.ID,
+			WorkspaceID: root.WorkspaceID,
+			BuildID:     root.BuildID,
+			AgentID:     root.AgentID,
+		})
+		require.NoError(t, err)
+
+		archive(t, f, root, child)
+
+		workspaces.mu.Lock()
+		defer workspaces.mu.Unlock()
+		require.Empty(t, workspaces.stops)
+	})
 }
