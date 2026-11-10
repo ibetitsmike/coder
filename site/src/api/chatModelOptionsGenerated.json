@@ -88,6 +88,15 @@
 				"required": false,
 				"input_type": "select",
 				"visible_for_providers": ["openai", "bedrock"]
+			},
+			{
+				"json_name": "aliases",
+				"go_name": "Aliases",
+				"type": "array",
+				"description": "Names, such as fast, that custom agent definitions can set as their model to run on this model. Lowercase letters, digits and hyphens, at most 32 characters. Each name can belong to one model per AI provider.",
+				"label": "Aliases",
+				"required": false,
+				"input_type": "json"
 			}
 		]
 	},
