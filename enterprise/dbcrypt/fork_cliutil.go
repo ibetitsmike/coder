@@ -15,6 +15,10 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
+// chatSecretAnswersPageSize bounds how many answers, each up to 16 KiB, a
+// key command holds in memory at once.
+const chatSecretAnswersPageSize = 100
+
 // forkRecryptChatSecretAnswers decrypts every chat secret answer and
 // encrypts it again with the primary cipher of cryptDB, or leaves it
 // decrypted when cryptDB has no primary cipher.
@@ -24,44 +28,61 @@ func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *s
 		return xerrors.Errorf("developer error: dbcrypt.New did not return *dbCrypt")
 	}
 	target := sql.NullString{String: cryptDB.primaryCipherDigest, Valid: cryptDB.primaryCipherDigest != ""}
-	rows, err := sqlDB.QueryContext(ctx,
-		`SELECT chat_id, tool_call_id, value, value_key_id FROM chat_secret_answers WHERE value_key_id IS DISTINCT FROM $1`,
-		target)
-	if err != nil {
-		return xerrors.Errorf("get chat secret answers: %w", err)
+	log.Info(ctx, "re-encrypting chat secret answers")
+	var count int
+	// A recrypted answer leaves the filter, so each page starts at the
+	// first answer that is left.
+	for {
+		answers, err := chatSecretAnswersNotEncryptedWith(ctx, sqlDB, target)
+		if err != nil {
+			return err
+		}
+		for _, answer := range answers {
+			if err := cryptDB.decryptField(&answer.Value, answer.ValueKeyID); err != nil {
+				return xerrors.Errorf("decrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
+			}
+			keyID := sql.NullString{}
+			if err := cryptDB.encryptField(&answer.Value, &keyID); err != nil {
+				return xerrors.Errorf("encrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
+			}
+			// An answer that was deleted meanwhile updates no row.
+			if _, err := sqlDB.ExecContext(ctx,
+				`UPDATE chat_secret_answers SET value = $1, value_key_id = $2 WHERE chat_id = $3 AND tool_call_id = $4`,
+				answer.Value, keyID, answer.ChatID, answer.ToolCallID); err != nil {
+				return xerrors.Errorf("update chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
+			}
+		}
+		count += len(answers)
+		if len(answers) < chatSecretAnswersPageSize {
+			break
+		}
 	}
+	log.Info(ctx, "re-encrypted chat secret answers", slog.F("answer_count", count))
+	return nil
+}
+
+// chatSecretAnswersNotEncryptedWith returns up to chatSecretAnswersPageSize
+// answers whose key is not keyID.
+func chatSecretAnswersNotEncryptedWith(ctx context.Context, sqlDB *sql.DB, keyID sql.NullString) ([]forkdb.ChatSecretAnswer, error) {
+	rows, err := sqlDB.QueryContext(ctx,
+		`SELECT chat_id, tool_call_id, value, value_key_id FROM chat_secret_answers WHERE value_key_id IS DISTINCT FROM $1 ORDER BY chat_id, tool_call_id LIMIT $2`,
+		keyID, chatSecretAnswersPageSize)
+	if err != nil {
+		return nil, xerrors.Errorf("get chat secret answers: %w", err)
+	}
+	defer rows.Close()
 	var answers []forkdb.ChatSecretAnswer
 	for rows.Next() {
 		var answer forkdb.ChatSecretAnswer
 		if err := rows.Scan(&answer.ChatID, &answer.ToolCallID, &answer.Value, &answer.ValueKeyID); err != nil {
-			_ = rows.Close()
-			return xerrors.Errorf("scan chat secret answer: %w", err)
+			return nil, xerrors.Errorf("scan chat secret answer: %w", err)
 		}
 		answers = append(answers, answer)
 	}
-	if err := rows.Close(); err != nil {
-		return xerrors.Errorf("close chat secret answers: %w", err)
-	}
 	if err := rows.Err(); err != nil {
-		return xerrors.Errorf("get chat secret answers: %w", err)
+		return nil, xerrors.Errorf("get chat secret answers: %w", err)
 	}
-	log.Info(ctx, "re-encrypting chat secret answers", slog.F("answer_count", len(answers)))
-	for _, answer := range answers {
-		if err := cryptDB.decryptField(&answer.Value, answer.ValueKeyID); err != nil {
-			return xerrors.Errorf("decrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
-		}
-		keyID := sql.NullString{}
-		if err := cryptDB.encryptField(&answer.Value, &keyID); err != nil {
-			return xerrors.Errorf("encrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
-		}
-		// An answer that was deleted meanwhile updates no row.
-		if _, err := sqlDB.ExecContext(ctx,
-			`UPDATE chat_secret_answers SET value = $1, value_key_id = $2 WHERE chat_id = $3 AND tool_call_id = $4`,
-			answer.Value, keyID, answer.ChatID, answer.ToolCallID); err != nil {
-			return xerrors.Errorf("update chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
-		}
-	}
-	return nil
+	return answers, nil
 }
 
 // forkDeleteEncryptedSecrets deletes the encrypted chat secret answers. An

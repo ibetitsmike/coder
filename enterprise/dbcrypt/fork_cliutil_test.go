@@ -5,6 +5,7 @@ package dbcrypt_test
 // the key.
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,9 +16,9 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
-// insertChatSecretAnswer stores value through store, so it is encrypted
-// when store is a dbcrypt store, and returns the chat's ID.
-func insertChatSecretAnswer(t *testing.T, rawDB, store database.Store, value string) uuid.UUID {
+// insertChatSecretAnswers stores n answers with value through store, so they
+// are encrypted when store is a dbcrypt store, and returns the chat's ID.
+func insertChatSecretAnswers(t *testing.T, rawDB, store database.Store, value string, n int) uuid.UUID {
 	t.Helper()
 	ctx := t.Context()
 	org, err := rawDB.GetDefaultOrganization(ctx)
@@ -27,9 +28,11 @@ func insertChatSecretAnswer(t *testing.T, rawDB, store database.Store, value str
 	chat := dbgen.Chat(t, rawDB, database.Chat{OrganizationID: org.ID, OwnerID: owner.ID, LastModelConfigID: model.ID})
 	fdb, err := forkdb.From(store)
 	require.NoError(t, err)
-	require.NoError(t, fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
-		ChatID: chat.ID, ToolCallID: "call_1", Value: value,
-	}))
+	for i := range n {
+		require.NoError(t, fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+			ChatID: chat.ID, ToolCallID: fmt.Sprintf("call_%d", i), Value: value,
+		}))
+	}
 	return chat.ID
 }
 
@@ -49,20 +52,24 @@ func TestChatSecretAnswersKeyCommands(t *testing.T) {
 	t.Run("Rotate", func(t *testing.T) {
 		t.Parallel()
 		f := newRotateFixture(t)
-		chatID := insertChatSecretAnswer(t, f.rawDB, f.cryptDBA, value)
+		// More answers than one page of the key commands.
+		const count = 101
+		chatID := insertChatSecretAnswers(t, f.rawDB, f.cryptDBA, value, count)
 
 		f.rotate(t)
 
 		answers := rawChatSecretAnswers(t, f.rawDB, chatID)
-		require.Len(t, answers, 1)
-		require.Equal(t, f.cipherB.HexDigest(), answers[0].ValueKeyID.String)
-		require.Equal(t, value, decryptRawString(t, f.cipherB, answers[0].Value))
+		require.Len(t, answers, count)
+		for _, answer := range answers {
+			require.Equal(t, f.cipherB.HexDigest(), answer.ValueKeyID.String)
+			require.Equal(t, value, decryptRawString(t, f.cipherB, answer.Value))
+		}
 	})
 
 	t.Run("Decrypt", func(t *testing.T) {
 		t.Parallel()
 		f := newDecryptFixture(t)
-		chatID := insertChatSecretAnswer(t, f.rawDB, f.cryptDBA, value)
+		chatID := insertChatSecretAnswers(t, f.rawDB, f.cryptDBA, value, 1)
 
 		f.decrypt(t)
 
@@ -75,8 +82,8 @@ func TestChatSecretAnswersKeyCommands(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) {
 		t.Parallel()
 		f := newDeleteFixture(t)
-		encryptedChatID := insertChatSecretAnswer(t, f.rawDB, f.cryptDBA, value)
-		plainChatID := insertChatSecretAnswer(t, f.rawDB, f.rawDB, value)
+		encryptedChatID := insertChatSecretAnswers(t, f.rawDB, f.cryptDBA, value, 1)
+		plainChatID := insertChatSecretAnswers(t, f.rawDB, f.rawDB, value, 1)
 
 		f.delete(t)
 
