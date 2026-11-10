@@ -96,10 +96,13 @@ API chats outside plan mode don't have it.
 
 With the `fork-nested-subagents` experiment, a child that isn't an `explore` child also has `ask_user_question`, except in plan-mode turns.
 The call ends the child's turn, and the answer arrives as the child's next user message.
-The root chat doesn't show the question, so the user answers in the child's own chat, which the Agents sidebar lists under its parent.
+The root chat doesn't show the question.
 If the child asks while you wait on it, `wait_agent` returns `needs_input: true` with the questions when the child's turn ends.
 If you call `wait_agent` while the question is unanswered, it waits for the answer and then for the child's reply, and returns `needs_input: true` if its timeout comes first.
-Show the user the questions and end your turn, then send the user's answer to the child with `message_agent`.
+After `needs_input: true`, show the user the questions and end your turn.
+When the user answers, send the answer to the child with `message_agent`, then call `wait_agent` on the child again.
+The user can also answer in the child's own chat, which the Agents sidebar lists under its parent.
+That answer resumes only the child, so your chat continues only when the user sends you a message, and then `wait_agent` returns the child's reply.
 Without the experiment, child chats don't have `ask_user_question`.
 
 ### Todo list
