@@ -182,6 +182,35 @@ export const MockChatContextACPHarnessIssue: ChatContext = {
 	],
 };
 
+export const MockChatContextAgentDefinitions: ChatContext = {
+	dirty: false,
+	resources: [
+		{
+			source: "/home/coder/.claude/agents/reviewer.md",
+			kind: "subagent",
+			size_bytes: 512,
+			status: "ok",
+			subagent_name: "reviewer",
+			subagent_description: "Reviews a diff for defects.",
+		},
+		{
+			source: "/home/coder/.claude/agents/sicko.md",
+			kind: "subagent",
+			size_bytes: 256,
+			status: "ok",
+			error: 'unknown front-matter field "color" ignored; missing description',
+			subagent_name: "sicko",
+		},
+		{
+			source: "/home/coder/.claude/agents/Broken.md",
+			kind: "subagent",
+			size_bytes: 128,
+			status: "invalid",
+			error: 'agent name "Broken" is not kebab-case',
+		},
+	],
+};
+
 export const MockAdvisorConfig: AdvisorConfig = {
 	enabled: true,
 	max_uses_per_run: 5,
