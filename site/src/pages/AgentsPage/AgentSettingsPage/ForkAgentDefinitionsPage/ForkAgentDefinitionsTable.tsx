@@ -50,7 +50,11 @@ export const ForkAgentDefinitionsTable: React.FC<
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
 			const { name } = args[2];
-			setPendingToggles(({ [name]: _settled, ...rest }) => rest);
+			setPendingToggles((current) =>
+				Object.fromEntries(
+					Object.entries(current).filter(([key]) => key !== name),
+				),
+			);
 		},
 	});
 
