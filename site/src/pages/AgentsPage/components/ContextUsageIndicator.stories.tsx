@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, screen, userEvent, within } from "storybook/test";
+import { expect, fn, screen, userEvent, within } from "storybook/test";
 import type { ChatContext, ChatContextResource } from "#/api/typesGenerated";
 import {
 	MockAgentDefinitionResource,
@@ -325,7 +325,18 @@ export const ResourceIssue: Story = {
 	},
 };
 
-const agentDefinitionStory = (resources: ChatContextResource[]): Story => ({
+const openAgentDefinitions = async (
+	canvasElement: HTMLElement,
+	triggerName: RegExp = /Agent definitions/,
+) => {
+	await userEvent.click(within(canvasElement).getByRole("button"));
+	await userEvent.click(screen.getByRole("button", { name: triggerName }));
+};
+
+const agentDefinitionStory = (
+	resources: ChatContextResource[],
+	triggerName?: RegExp,
+): Story => ({
 	args: {
 		usage: {
 			usedTokens: 12_000,
@@ -333,27 +344,44 @@ const agentDefinitionStory = (resources: ChatContextResource[]): Story => ({
 			context: { dirty: false, resources },
 		},
 	},
-	play: async ({ canvasElement }) => {
-		await userEvent.click(within(canvasElement).getByRole("button"));
-		await userEvent.click(
-			screen.getByRole("button", { name: /Agent definitions/ }),
-		);
-	},
+	play: ({ canvasElement }) => openAgentDefinitions(canvasElement, triggerName),
 });
 
 // Loaded agent definitions are listed with their parse warnings, and a
 // definition that failed to load appears as an issue in the same section.
-export const AgentDefinitions = agentDefinitionStory([
-	MockAgentDefinitionResource,
-	MockAgentDefinitionResourceWarning,
-	MockAgentDefinitionResourceInvalid,
-]);
+export const AgentDefinitions = agentDefinitionStory(
+	[
+		MockAgentDefinitionResource,
+		MockAgentDefinitionResourceWarning,
+		MockAgentDefinitionResourceInvalid,
+	],
+	/^Agent definitions 1 issue, 1 warning /,
+);
 
 // Parse warnings alone keep the trigger's normal tone.
-export const AgentDefinitionWarningsOnly = agentDefinitionStory([
-	MockAgentDefinitionResource,
-	MockAgentDefinitionResourceWarning,
-]);
+export const AgentDefinitionWarningsOnly = agentDefinitionStory(
+	[MockAgentDefinitionResource, MockAgentDefinitionResourceWarning],
+	/^Agent definitions 1 warning /,
+);
+
+export const AgentDefinitionKeyboardFocus: Story = {
+	...agentDefinitionStory([MockAgentDefinitionResource]),
+	play: async ({ canvasElement }) => {
+		await openAgentDefinitions(canvasElement);
+		for (
+			let i = 0;
+			i < 10 &&
+			document.activeElement?.textContent !==
+				MockAgentDefinitionResource.subagent_name;
+			i++
+		) {
+			await userEvent.tab();
+		}
+		await expect(await screen.findByRole("tooltip")).toHaveTextContent(
+			"Reviews diffs for correctness.",
+		);
+	},
+};
 
 export const AgentDefinitionFailuresOnly = agentDefinitionStory([
 	MockAgentDefinitionResourceInvalid,

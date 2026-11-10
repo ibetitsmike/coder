@@ -191,12 +191,21 @@ const ContextResourceIssues: React.FC<{
 		</ContextAlert>
 	) : null;
 
-const ContextIssueIndicator: React.FC<{ count: number }> = ({ count }) =>
-	count > 0 ? (
+const countLabel = (count: number, noun: string) =>
+	count > 0 ? [`${count} ${noun}${count === 1 ? "" : "s"}`] : [];
+
+const ContextIssueIndicator: React.FC<{
+	count: number;
+	warningCount?: number;
+}> = ({ count, warningCount = 0 }) =>
+	count + warningCount > 0 ? (
 		<span className="ml-1 inline-flex align-middle text-content-warning">
 			<TriangleAlertIcon aria-hidden="true" className="size-3" />
 			<span className="sr-only">
-				{count} {count === 1 ? "issue" : "issues"}
+				{[
+					...countLabel(count, "issue"),
+					...countLabel(warningCount, "warning"),
+				].join(", ")}
 			</span>
 		</span>
 	) : null;
@@ -244,7 +253,10 @@ const ContextNamedResourceSection: React.FC<{
 		<ContextResourceAccordion>
 			<ContextResourceAccordionTrigger detail={`${items.length} available`}>
 				{label}
-				<ContextIssueIndicator count={issues.length + warnings.length} />
+				<ContextIssueIndicator
+					count={issues.length}
+					warningCount={warnings.length}
+				/>
 			</ContextResourceAccordionTrigger>
 			<ContextResourceAccordionContent>
 				{groups.length > 0 && (

@@ -45,8 +45,6 @@ export const ContextResourceTreeItem: React.FC<
 		</>
 	);
 	const rowClassName = cn("flex min-w-0 items-center gap-1 py-px", className);
-	// A described row is a button so keyboard users can focus it to read the
-	// description.
 	const row = description ? (
 		<button
 			type="button"
