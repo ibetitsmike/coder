@@ -11,11 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"cdr.dev/slog/v3"
@@ -104,10 +102,9 @@ func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Reque
 // @Accept json
 // @Tags Chats
 // @Param chat path string true "Chat ID" format(uuid)
-// @Param tool_call_id path string true "Tool call ID of the question"
 // @Param request body codersdk.ChatSecretAnswerRequest true "Secret answer"
 // @Success 204
-// @Router /api/v2/chats/fork/{chat}/questions/{tool_call_id}/secret-answer [post]
+// @Router /api/v2/chats/fork/{chat}/questions/secret-answer [post]
 // @x-apidocgen {"skip": true}
 // @Description Stores the answer to the pending secret question of the chat
 // @Description outside its messages, and sends the chat a user message that
@@ -116,17 +113,6 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	apiKey := httpmw.APIKey(r)
 	chat := httpmw.ChatParam(r)
-	toolCallID := chi.URLParam(r, "tool_call_id")
-	// chi routes on the escaped path when the ID has a character such as
-	// "/" that the client escapes, and then returns the segment escaped.
-	if r.URL.RawPath != "" {
-		unescaped, err := url.PathUnescape(toolCallID)
-		if err != nil {
-			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "Invalid tool call ID."})
-			return
-		}
-		toolCallID = unescaped
-	}
 
 	if maybeWriteChatError(ctx, rw, api.checkSendChatMessage(ctx, apiKey.UserID, chat)) {
 		return
@@ -135,6 +121,7 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	toolCallID := req.ToolCallID
 	if strings.TrimSpace(req.Value) == "" {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not be empty."})
 		return

@@ -5606,7 +5606,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v2/chats/fork/{chat}/questions/{tool_call_id}/secret-answer": {
+        "/api/v2/chats/fork/{chat}/questions/secret-answer": {
             "post": {
                 "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered.",
                 "consumes": [
@@ -5623,13 +5623,6 @@ const docTemplate = `{
                         "format": "uuid",
                         "description": "Chat ID",
                         "name": "chat",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tool call ID of the question",
-                        "name": "tool_call_id",
                         "in": "path",
                         "required": true
                     },
@@ -25537,6 +25530,9 @@ const docTemplate = `{
         "codersdk.ChatSecretAnswerRequest": {
             "type": "object",
             "properties": {
+                "tool_call_id": {
+                    "type": "string"
+                },
                 "value": {
                     "type": "string"
                 }

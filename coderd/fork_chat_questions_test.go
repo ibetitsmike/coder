@@ -205,19 +205,19 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	}}})
 	requireStatus(t, http.StatusConflict, err)
 
-	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-other", codersdk.ChatSecretAnswerRequest{Value: secret})
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-other", Value: secret})
 	requireStatus(t, http.StatusConflict, err)
-	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "  "})
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-secret", Value: "  "})
 	requireStatus(t, http.StatusBadRequest, err)
-	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "before\x00after"})
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-secret", Value: "before\x00after"})
 	requireStatus(t, http.StatusBadRequest, err)
-	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, "call-normal", codersdk.ChatSecretAnswerRequest{Value: secret})
+	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-normal", Value: secret})
 	requireStatus(t, http.StatusBadRequest, err)
 	other, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID)
-	err = codersdk.NewExperimentalClient(other).AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret})
+	err = codersdk.NewExperimentalClient(other).AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-secret", Value: secret})
 	requireStatus(t, http.StatusNotFound, err)
 
-	require.NoError(t, client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret}))
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-secret", Value: secret}))
 	answers, err := fdb.GetChatSecretAnswersByChatID(sysCtx, child.ID)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)
@@ -233,7 +233,7 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		}
 	}
 	require.True(t, answered, "the chat gets a user message without the value")
-	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret})
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-secret", Value: secret})
 	requireStatus(t, http.StatusConflict, err)
 
 	// A busy chat queues the message that reports the answer. Once the
@@ -248,8 +248,8 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
 	})
 	require.NoError(t, err)
-	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "first"}))
-	err = client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "second"})
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Value: "first"}))
+	err = client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Value: "second"})
 	requireStatus(t, http.StatusConflict, err)
 	queued, err := db.GetChatQueuedMessages(sysCtx, busy.ID)
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	require.NoError(t, err)
 	_ = res.Body.Close()
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
-	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "second"}))
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Value: "second"}))
 	answers, err = fdb.GetChatSecretAnswersByChatID(sysCtx, busy.ID)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)
@@ -267,11 +267,11 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, queued, 1, "the answer is reported again")
 
-	// An ID that the client escapes reaches the route as it is stored.
+	// The ID travels in the body, so an ID that a path would escape matches.
 	for _, callID := range []string{"call/a%41", "call a%41"} {
 		_, escaped, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
 		ask(escaped, callID, `[{"header": "Token", "question": "Paste the API token.", "secret": true}]`)
-		require.NoError(t, client.AnswerChatSecretQuestion(ctx, escaped.ID, callID, codersdk.ChatSecretAnswerRequest{Value: secret}), callID)
+		require.NoError(t, client.AnswerChatSecretQuestion(ctx, escaped.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: callID, Value: secret}), callID)
 	}
 
 	// A normal question still takes a normal answer.
