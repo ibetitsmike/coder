@@ -363,6 +363,13 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			// At most one read per tick: a later entry waits until next
 			// is delivered.
 			if next == nil {
+				// The worker delivers its claimed batch one by one under
+				// one lease, so a read that may stall starts only while
+				// half the lease is left for the rest of the batch. Later
+				// rows end their claim and stay due for the next tick.
+				if wakeup.LeaseExpiresAt.Valid && now.Add(2*pullRequestReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
+					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
+				}
 				summary, err := p.pullRequestWakeupText(ctx, chat, event, wakeup.ExpiresAt.Time)
 				if err != nil {
 					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
