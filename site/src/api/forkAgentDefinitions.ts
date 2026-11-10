@@ -2,7 +2,14 @@
 // live here so api.ts, an upstream file, stays unchanged.
 
 import { API } from "./api";
-import type { ForkAgentDefinitionMetadata } from "./typesGenerated";
+import type {
+	ForkAgentDefinition,
+	ForkAgentDefinitionMetadata,
+	UpdateForkAgentDefinitionRequest,
+} from "./typesGenerated";
+
+const userAgentDefinitionsPath = (organizationId: string, user: string) =>
+	`/api/v2/chats/fork/organizations/${organizationId}/members/${user}/agent-definitions`;
 
 /** Lists a member's personal agent definitions; `user` defaults to the signed-in member. */
 export const getUserAgentDefinitions = async (
@@ -11,8 +18,31 @@ export const getUserAgentDefinitions = async (
 ): Promise<ForkAgentDefinitionMetadata[]> => {
 	const response = await API.getAxiosInstance().get<
 		ForkAgentDefinitionMetadata[]
-	>(
-		`/api/v2/chats/fork/organizations/${organizationId}/members/${user}/agent-definitions`,
+	>(userAgentDefinitionsPath(organizationId, user));
+	return response.data;
+};
+
+/** Updates one of a user's personal agent definitions. */
+export const updateUserAgentDefinition = async (
+	organizationId: string,
+	name: string,
+	req: UpdateForkAgentDefinitionRequest,
+	user = "me",
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().patch<ForkAgentDefinition>(
+		`${userAgentDefinitionsPath(organizationId, user)}/${encodeURIComponent(name)}`,
+		req,
 	);
 	return response.data;
+};
+
+/** Deletes one of a user's personal agent definitions. */
+export const deleteUserAgentDefinition = async (
+	organizationId: string,
+	name: string,
+	user = "me",
+): Promise<void> => {
+	await API.getAxiosInstance().delete(
+		`${userAgentDefinitionsPath(organizationId, user)}/${encodeURIComponent(name)}`,
+	);
 };
