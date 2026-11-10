@@ -162,10 +162,11 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 }
 
 // createSubagentChatWithID creates the child chat of parent. With nested
-// subagents enabled, or for a customAgent, it also records the child's
-// chat_subagents row in the same transaction, with the custom agent's tool
-// policy. Nested subagents also recheck the depth and live subagent limits
-// there.
+// subagents enabled, for a customAgent, or for a spawn that asks for
+// isolation, it also records the child's chat_subagents row in the same
+// transaction, with the custom agent's tool policy and the child's worktree.
+// Nested subagents also recheck the depth and live subagent limits there. A
+// worktree is created before the transaction and removed if it fails.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -175,7 +176,19 @@ func (p *Server) createSubagentChatWithID(
 	input chatstate.CreateChatInput,
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
-	if !nested && customAgent == nil {
+	isolation, isolated := subagentIsolationFromContext(ctx)
+	if !isolated && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		worktree, bound, err := p.chatWorktree(ctx, parent)
+		if err != nil {
+			return chatstate.CreateChatResult{}, xerrors.Errorf("resolve parent worktree: %w", err)
+		}
+		if bound {
+			if input.InitialMessages, err = withSubagentWorktreePrompt(input, worktree, true); err != nil {
+				return chatstate.CreateChatResult{}, err
+			}
+		}
+	}
+	if !nested && customAgent == nil && !isolated {
 		return chatstate.CreateChatWithID(ctx, p.db, publisher, chatID, input)
 	}
 	var toolPolicy pqtype.NullRawMessage
@@ -185,6 +198,22 @@ func (p *Server) createSubagentChatWithID(
 			return chatstate.CreateChatResult{}, xerrors.Errorf("marshal tool policy of agent %q: %w", customAgent.Name, err)
 		}
 		toolPolicy = pqtype.NullRawMessage{RawMessage: raw, Valid: true}
+	}
+	subagent := forkdb.InsertChatSubagentParams{Isolation: subagentIsolationShared, ToolPolicy: toolPolicy}
+	committed := false
+	if isolated {
+		worktree, done, err := p.createSubagentWorktree(ctx, chatID, parent, input, isolation)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+		defer func() { done(committed) }()
+		subagent.Isolation = subagentIsolationWorktree
+		subagent.WorktreePath = worktree.Path
+		subagent.Branch = worktree.Branch
+		input.InitialMessages, err = withSubagentWorktreePrompt(input, subagentWorktree{path: worktree.Path, branch: worktree.Branch}, false)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
 	}
 	// CreateChatWithID publishes into this buffer when its nested
 	// transaction returns, so nothing reaches subscribers before the outer
@@ -234,13 +263,10 @@ func (p *Server) createSubagentChatWithID(
 		if customAgent != nil {
 			agentType = customAgent.Name
 		}
-		_, err = ftx.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{
-			ChatID:     result.Chat.ID,
-			AgentType:  agentType,
-			Depth:      depth + 1,
-			Isolation:  "shared",
-			ToolPolicy: toolPolicy,
-		})
+		subagent.ChatID = result.Chat.ID
+		subagent.AgentType = agentType
+		subagent.Depth = depth + 1
+		_, err = ftx.InsertChatSubagent(ctx, subagent)
 		if err != nil {
 			return xerrors.Errorf("insert chat subagent: %w", err)
 		}
@@ -249,6 +275,7 @@ func (p *Server) createSubagentChatWithID(
 	if err != nil {
 		return chatstate.CreateChatResult{}, err
 	}
+	committed = true
 	return result, buffer.Flush()
 }
 
