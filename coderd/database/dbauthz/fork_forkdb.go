@@ -151,6 +151,10 @@ func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, 
 	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByName)(ctx, arg)
 }
 
+func (f *forkQuerier) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams) (forkdb.AgentDefinition, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByNameForUpdate)(ctx, arg)
+}
+
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginByID)(ctx, id)
 }
@@ -275,6 +279,16 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionShare, fetch, f.db.UpdateOrganizationAgentDefinitionACLByName)(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
