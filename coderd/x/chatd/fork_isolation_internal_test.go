@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -145,6 +146,7 @@ func (f *isolationFixture) spawnTool(t *testing.T, root database.Chat) fantasy.A
 
 func (f *isolationFixture) spawn(t *testing.T, root database.Chat, args map[string]any) fantasy.ToolResponse {
 	t.Helper()
+	args = maps.Clone(args)
 	args["prompt"] = "do the work"
 	if _, ok := args["type"]; !ok {
 		args["type"] = subagentTypeGeneral
