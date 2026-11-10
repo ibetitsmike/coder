@@ -139,8 +139,9 @@ export const SkillEditorForm: React.FC<SkillEditorFormProps> = ({
 			"Description must be 4096 bytes or smaller.",
 			(value) => isValidSkillDescription(value ?? ""),
 		),
+		// The server strips HTML comments before it checks for a body.
 		body: Yup.string().test("body-required", "Body is required.", (value) =>
-			Boolean(value?.trim()),
+			Boolean(value?.replace(/<!--[\s\S]*?-->/g, "").trim()),
 		),
 	});
 
