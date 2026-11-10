@@ -242,9 +242,14 @@ const AgentDefinitionModelField: React.FC<AgentDefinitionModelFieldProps> = ({
 				value={model}
 				onChange={(event) => {
 					// The size limit counts the model, so validate again once
-					// the form renders with the new value.
+					// the form renders with the new value, and show a size error
+					// on the body even if the body was not edited.
 					flushSync(() => onModelChange(event.target.value));
-					void form.validateForm();
+					void form.validateForm().then((errors) => {
+						if (errors.body && form.values.body.trim()) {
+							void form.setFieldTouched("body", true, false);
+						}
+					});
 				}}
 				placeholder="The chat's model"
 				disabled={isBusy}

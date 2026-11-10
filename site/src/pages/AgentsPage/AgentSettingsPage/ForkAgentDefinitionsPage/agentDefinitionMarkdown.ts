@@ -3,6 +3,7 @@
 
 import {
 	type Document,
+	isAlias,
 	isMap,
 	isScalar,
 	parseDocument,
@@ -46,16 +47,27 @@ const parseFrontMatter = (text: string): Document => {
 	return document;
 };
 
+// An owned field set through an alias reads as the value it aliases, as the
+// server's decoder reads it. The editor's fields are single-line inputs, so
+// line breaks in a value, such as a block scalar description, read as spaces.
 const stringField = (document: Document, key: string) => {
-	const value = document.get(key);
+	const node = document.get(key, true);
+	const resolved = isAlias(node) ? node.resolve(document) : node;
+	const value = isScalar(resolved) ? resolved.value : resolved;
 	if (value === undefined || value === null) {
 		return "";
 	}
 	if (typeof value !== "string") {
 		throw new Error(`Front-matter field "${key}" must be a string.`);
 	}
-	return value.trim();
+	return value.trim().replace(/\s*\n\s*/g, " ");
 };
+
+const stringFields = (document: Document) => ({
+	name: stringField(document, "name"),
+	description: stringField(document, "description"),
+	model: stringField(document, "model"),
+});
 
 /** Splits agent definition markdown into the editor's fields. */
 export const parseAgentDefinitionMarkdown = (
@@ -74,9 +86,7 @@ export const parseAgentDefinitionMarkdown = (
 	const frontMatter = lines.slice(1, closingIndex).join("\n");
 	const document = parseFrontMatter(frontMatter);
 	return {
-		name: stringField(document, "name"),
-		description: stringField(document, "description"),
-		model: stringField(document, "model"),
+		...stringFields(document),
 		body: lines
 			.slice(closingIndex + 1)
 			.join("\n")
@@ -97,6 +107,9 @@ const inlineOwnedAliases = (document: Document) => {
 			}
 			const copy = new Scalar(target.value);
 			copy.type = target.type;
+			copy.comment = alias.comment;
+			copy.commentBefore = alias.commentBefore;
+			copy.spaceBefore = alias.spaceBefore;
 			return copy;
 		},
 	});
@@ -104,9 +117,15 @@ const inlineOwnedAliases = (document: Document) => {
 
 // The server's YAML decoder still reads some YAML 1.1 forms, such as dates,
 // as other types, so a plain value must read back as the same string there.
+// A value that does not convert at all, such as an unknown alias, needs
+// quotes too.
 const readsBackAsString = (value: string) => {
 	const document = parseDocument(value, { version: "1.1" });
-	return document.errors.length === 0 && document.toJS() === value;
+	try {
+		return document.errors.length === 0 && document.toJS() === value;
+	} catch {
+		return false;
+	}
 };
 
 /** Builds agent definition markdown from the editor's fields. */
@@ -114,33 +133,39 @@ export const buildAgentDefinitionMarkdown = (
 	values: AgentDefinitionFormValues,
 ): string => {
 	const document = parseFrontMatter(values.frontMatter);
+	const original = stringFields(document);
 	inlineOwnedAliases(document);
 	let inserted = 0;
 	for (const key of ownedKeys) {
 		const value = values[key].trim();
 		const contents = document.contents;
-		if (!value) {
-			if (isMap(contents)) {
-				contents.delete(key);
-			}
-		} else if (isMap(contents) && !contents.has(key)) {
-			// A key the file lacks goes first, in the editor's order, as in a
-			// new file.
-			contents.items.splice(inserted++, 0, document.createPair(key, value));
-		} else {
-			// Setting an existing scalar keeps its node, so its style and
-			// comments survive. On empty front-matter this creates the mapping
-			// with this key first.
-			document.set(key, value);
-			if (!isMap(contents)) {
-				inserted++;
+		// An unchanged field keeps its node as written, such as a multiline
+		// description the editor shows on one line.
+		if (value !== original[key]) {
+			if (!value) {
+				if (isMap(contents)) {
+					contents.delete(key);
+				}
+			} else if (isMap(contents) && !contents.has(key)) {
+				// A key the file lacks goes first, in the editor's order, as in
+				// a new file.
+				contents.items.splice(inserted++, 0, document.createPair(key, value));
+			} else {
+				// Setting an existing scalar keeps its node, so its style and
+				// comments survive. On empty front-matter this creates the
+				// mapping with this key first.
+				document.set(key, value);
+				if (!isMap(contents)) {
+					inserted++;
+				}
 			}
 		}
 		const node = document.get(key, true);
 		if (
 			isScalar(node) &&
+			typeof node.value === "string" &&
 			(node.type === undefined || node.type === Scalar.PLAIN) &&
-			!readsBackAsString(value)
+			!readsBackAsString(node.value)
 		) {
 			node.type = Scalar.QUOTE_DOUBLE;
 		}
