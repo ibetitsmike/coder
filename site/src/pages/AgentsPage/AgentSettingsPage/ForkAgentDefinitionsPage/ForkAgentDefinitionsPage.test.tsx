@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
-import type { Experiment } from "#/api/typesGenerated";
+import type {
+	Experiment,
+	ForkAgentDefinition,
+	Organization,
+} from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
@@ -126,7 +130,7 @@ describe("ForkAgentDefinitionsPage", () => {
 
 	it("deletes a definition only after confirmation", async () => {
 		const user = userEvent.setup();
-		renderPage();
+		const { getDefinitions } = renderPage();
 		const toastSuccess = vi.spyOn(toast, "success");
 		const remove = vi
 			.spyOn(forkAgentDefinitionsApi, "deleteUserAgentDefinition")
@@ -139,6 +143,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 		await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
 		expect(remove).not.toHaveBeenCalled();
+		getDefinitions.mockResolvedValue([]);
 		await user.click(await screen.findByRole("button", { name: "Delete" }));
 
 		await waitFor(() =>
@@ -150,11 +155,17 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
+		// The deleted row was the only button left to take focus back.
+		await waitFor(() =>
+			expect(
+				screen.getByRole("table", { name: "Agent definitions" }),
+			).toHaveFocus(),
+		);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
 		const user = userEvent.setup();
-		renderPage();
+		const { getDefinitions } = renderPage();
 		let rejectDelete: (error: unknown) => void = () => {};
 		const remove = vi
 			.spyOn(forkAgentDefinitionsApi, "deleteUserAgentDefinition")
@@ -175,6 +186,8 @@ describe("ForkAgentDefinitionsPage", () => {
 		await user.click(await screen.findByRole("button", { name: "Delete" }));
 		await user.keyboard("{Escape}");
 		rejectDelete(mockApiError({ message: "Upstream timeout." }));
+		// A failed delete may still have removed the definition.
+		await waitFor(() => expect(getDefinitions).toHaveBeenCalledTimes(2));
 		const retry = await screen.findByRole("button", { name: "Delete" });
 		await waitFor(() => expect(retry).toBeEnabled());
 		await user.click(retry);
@@ -214,33 +227,60 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps a pending toggle in its own organization", async () => {
 		const user = userEvent.setup();
 		renderPage();
+		let resolveFirst: (definition: ForkAgentDefinition) => void = () => {};
 		const update = vi
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveFirst = resolve;
+					}),
+			)
 			.mockImplementation(() => new Promise(() => {}));
 		const switchName = `Enable ${MockForkAgentDefinitionMetadata.name}`;
-
-		await user.click(await screen.findByRole("switch", { name: switchName }));
-		await user.click(
+		const selectOrganization = async (from: Organization, to: Organization) => {
+			await user.click(
+				await screen.findByRole("combobox", {
+					name: `Organization ${from.display_name}`,
+				}),
+			);
+			// Option names start with the avatar's initials.
+			await user.click(
+				screen.getByRole("option", { name: new RegExp(`${to.display_name}$`) }),
+			);
 			await screen.findByRole("combobox", {
-				name: `Organization ${MockDefaultOrganization.display_name}`,
-			}),
-		);
-		await user.click(
-			screen.getByRole("option", {
-				name: new RegExp(MockOrganization2.display_name),
-			}),
-		);
-		await screen.findByRole("combobox", {
-			name: `Organization ${MockOrganization2.display_name}`,
-		});
-		await user.click(await screen.findByRole("switch", { name: switchName }));
+				name: `Organization ${to.display_name}`,
+			});
+		};
 
+		await user.click(await screen.findByRole("switch", { name: switchName }));
+		await selectOrganization(MockDefaultOrganization, MockOrganization2);
+		await user.click(await screen.findByRole("switch", { name: switchName }));
 		await waitFor(() =>
 			expect(update).toHaveBeenLastCalledWith(
 				MockOrganization2.id,
 				MockForkAgentDefinitionMetadata.name,
 				{ enabled: false },
 			),
+		);
+
+		// The first request settles after the switch and must release its
+		// own organization's row, not the other organization's.
+		resolveFirst({
+			...MockForkAgentDefinitionMetadata,
+			enabled: false,
+			content: "",
+		});
+		await selectOrganization(MockOrganization2, MockDefaultOrganization);
+		const firstSwitch = await screen.findByRole("switch", { name: switchName });
+		await waitFor(() => expect(firstSwitch).toBeEnabled());
+		await user.click(firstSwitch);
+
+		await waitFor(() => expect(update).toHaveBeenCalledTimes(3));
+		expect(update).toHaveBeenLastCalledWith(
+			MockDefaultOrganization.id,
+			MockForkAgentDefinitionMetadata.name,
+			{ enabled: false },
 		);
 	});
 });

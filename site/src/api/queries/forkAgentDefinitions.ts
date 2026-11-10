@@ -20,34 +20,46 @@ export const userAgentDefinitions = (organizationId: string) =>
 	});
 
 type UpdateUserAgentDefinitionArgs = {
+	organizationId: string;
 	name: string;
 	req: UpdateForkAgentDefinitionRequest;
 };
 
-/** Mutation options that update one of the current user's agent definitions. */
-export const updateUserAgentDefinition = (
-	queryClient: QueryClient,
-	organizationId: string,
-) =>
+/**
+ * Mutation options that update one of the current user's agent definitions.
+ * The organization travels in the variables so a request that settles after
+ * the user switches organizations still invalidates its own list.
+ */
+export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
-		mutationFn: ({ name, req }: UpdateUserAgentDefinitionArgs) =>
+		mutationFn: ({
+			organizationId,
+			name,
+			req,
+		}: UpdateUserAgentDefinitionArgs) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
-		onSettled: () =>
+		onSettled: (_data, _error, { organizationId }) =>
 			queryClient.invalidateQueries({
 				queryKey: userAgentDefinitionsKey(organizationId),
 				exact: true,
 			}),
 	});
 
-/** Mutation options that delete one of the current user's agent definitions. */
-export const deleteUserAgentDefinition = (
-	queryClient: QueryClient,
-	organizationId: string,
-) =>
+type DeleteUserAgentDefinitionArgs = {
+	organizationId: string;
+	name: string;
+};
+
+/**
+ * Mutation options that delete one of the current user's agent definitions.
+ * The list is invalidated after failures too, because a 404 or a lost
+ * response can mean the definition is already gone.
+ */
+export const deleteUserAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
-		mutationFn: (name: string) =>
+		mutationFn: ({ organizationId, name }: DeleteUserAgentDefinitionArgs) =>
 			deleteUserAgentDefinitionRequest(organizationId, name),
-		onSuccess: () =>
+		onSettled: (_data, _error, { organizationId }) =>
 			queryClient.invalidateQueries({
 				queryKey: userAgentDefinitionsKey(organizationId),
 				exact: true,

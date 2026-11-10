@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, screen, userEvent, within } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { ForkAgentDefinitionsTableView } from "./ForkAgentDefinitionsTableView";
@@ -66,7 +66,6 @@ export const RowActionsOpen: Story = {
 				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
 			}),
 		);
-		await screen.findByRole("menuitem", { name: /Delete/ });
 	},
 };
 

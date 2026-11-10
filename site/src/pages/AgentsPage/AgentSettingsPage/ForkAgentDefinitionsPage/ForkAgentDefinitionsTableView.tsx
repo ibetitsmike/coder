@@ -1,6 +1,7 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
 import { EllipsisVerticalIcon } from "lucide-react";
+import { useRef } from "react";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { Alert, AlertDescription } from "#/components/Alert/Alert";
@@ -74,6 +75,16 @@ export const ForkAgentDefinitionsTableView: React.FC<
 }) => {
 	const { rememberTrigger, restoreFocus, setPrimaryFallback } =
 		useDialogFocusReturn();
+	// Deleting the only row removes every button on the page in a
+	// single-organization deployment, so focus falls back to the table.
+	const tableRef = useRef<HTMLTableElement>(null);
+	const restoreDeleteFocus = (event: Event) => {
+		restoreFocus(event);
+		if (!event.defaultPrevented && tableRef.current?.isConnected) {
+			event.preventDefault();
+			tableRef.current.focus();
+		}
+	};
 	const deleteErrorDetail = deleteState?.error
 		? getErrorDetail(deleteState.error)
 		: undefined;
@@ -177,7 +188,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				/>
 			)}
 
-			<Table aria-label={title}>
+			<Table ref={tableRef} aria-label={title} tabIndex={-1}>
 				<TableHeader>
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>
@@ -199,14 +210,15 @@ export const ForkAgentDefinitionsTableView: React.FC<
 					type="delete"
 					open
 					onClose={deleteState.onClose}
-					onCloseAutoFocus={restoreFocus}
+					onCloseAutoFocus={restoreDeleteFocus}
 					title={`Delete ${deleteState.definition.name}?`}
 					confirmText="Delete"
 					description={
 						<>
 							<p className="m-0">
-								Chats can no longer spawn {deleteState.definition.name}. This
-								action cannot be undone.
+								Your personal definition {deleteState.definition.name} will be
+								deleted. Organization, project, and workspace definitions with
+								the same name are not affected. This action cannot be undone.
 							</p>
 							{Boolean(deleteState.error) && (
 								<Alert severity="error" className="mt-3">

@@ -30,18 +30,20 @@ export const ForkAgentDefinitionsTable: React.FC<
 
 	// Pending toggles are keyed by organization, then name, so a second
 	// toggle, or a switch to another organization with the same names, does
-	// not hide or borrow a pending value while its request runs.
+	// not hide or borrow a pending value while its request runs. Callbacks
+	// read the organization from the variables because TanStack Query runs
+	// the latest options when an earlier request settles.
 	const [pendingToggles, setPendingToggles] = useState<
 		Readonly<Record<string, Readonly<Record<string, boolean>>>>
 	>({});
-	const updateOptions = updateUserAgentDefinition(queryClient, organizationId);
+	const updateOptions = updateUserAgentDefinition(queryClient);
 	const toggleMutation = useMutation({
 		...updateOptions,
-		onMutate: ({ name, req }) => {
+		onMutate: ({ organizationId: orgId, name, req }) => {
 			setPendingToggles((current) => ({
 				...current,
-				[organizationId]: {
-					...current[organizationId],
+				[orgId]: {
+					...current[orgId],
 					[name]: Boolean(req.enabled),
 				},
 			}));
@@ -53,37 +55,38 @@ export const ForkAgentDefinitionsTable: React.FC<
 		},
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
-			const { name } = args[2];
+			const { organizationId: orgId, name } = args[2];
 			setPendingToggles((current) => ({
 				...current,
-				[organizationId]: Object.fromEntries(
-					Object.entries(current[organizationId] ?? {}).filter(
-						([key]) => key !== name,
-					),
+				[orgId]: Object.fromEntries(
+					Object.entries(current[orgId] ?? {}).filter(([key]) => key !== name),
 				),
 			}));
 		},
 	});
 
-	const deleteMutation = useMutation(
-		deleteUserAgentDefinition(queryClient, organizationId),
-	);
+	const deleteMutation = useMutation(deleteUserAgentDefinition(queryClient));
 
 	let deleteState: ForkAgentDefinitionDeleteState | undefined;
 	if (deleteTarget) {
-		const isTarget = deleteMutation.variables === deleteTarget.name;
+		const isTarget =
+			deleteMutation.variables?.organizationId === organizationId &&
+			deleteMutation.variables.name === deleteTarget.name;
 		const isDeleting = isTarget && deleteMutation.isPending;
 		deleteState = {
 			definition: deleteTarget,
 			error: isTarget ? deleteMutation.error : undefined,
 			isDeleting,
 			onConfirm: () =>
-				deleteMutation.mutate(deleteTarget.name, {
-					onSuccess: () => {
-						setDeleteTarget(undefined);
-						toast.success("Agent definition deleted.");
+				deleteMutation.mutate(
+					{ organizationId, name: deleteTarget.name },
+					{
+						onSuccess: () => {
+							setDeleteTarget(undefined);
+							toast.success("Agent definition deleted.");
+						},
 					},
-				}),
+				),
 			// The dialog shows the delete error, so it stays open until the
 			// request settles.
 			onClose: () => {
@@ -106,7 +109,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 			}}
 			pendingToggles={pendingToggles[organizationId]}
 			onToggleEnabled={(name, enabled) =>
-				toggleMutation.mutate({ name, req: { enabled } })
+				toggleMutation.mutate({ organizationId, name, req: { enabled } })
 			}
 			onDelete={(definition) => {
 				deleteMutation.reset();
