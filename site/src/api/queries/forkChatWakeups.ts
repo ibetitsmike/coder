@@ -16,6 +16,9 @@ export const chatWakeups = (chatId: string) =>
 		queryFn: ({ signal }) => getChatWakeups(chatId, signal),
 		// Wake-ups have no watch socket, so poll to see worker-made changes.
 		refetchInterval: 30_000,
+		// A revisited chat must read again instead of showing cached
+		// wake-ups: access may be gone.
+		gcTime: 0,
 	});
 
 type UpdateChatWakeupVariables = {
