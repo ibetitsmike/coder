@@ -386,7 +386,7 @@ func TestForkSpawnIsolationCreateChat(t *testing.T) {
 		require.ErrorContains(t, err, "initial messages")
 		creates, deletes := conn.calls()
 		require.Len(t, creates, 1)
-		require.Equal(t, []workspacesdk.ForkDeleteWorktreeRequest{{Path: "/wt/child"}}, deletes)
+		require.Equal(t, []workspacesdk.ForkDeleteWorktreeRequest{{Path: "/wt/child", Branch: "agent/child"}}, deletes)
 		require.Empty(t, f.children(t, root))
 	})
 

@@ -211,7 +211,7 @@ func (p *Server) createSubagentWorktree(
 		// the worktree must still go.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), worktreeCleanupTimeout)
 		defer cancel()
-		if err := worktrees.ForkDeleteWorktree(cleanupCtx, workspacesdk.ForkDeleteWorktreeRequest{Path: worktree.Path}); err != nil {
+		if err := worktrees.ForkDeleteWorktree(cleanupCtx, workspacesdk.ForkDeleteWorktreeRequest{Path: worktree.Path, Branch: worktree.Branch}); err != nil {
 			p.logger.Warn(ctx, "remove worktree of subagent that failed to spawn",
 				slog.F("chat_id", chatID), slog.F("path", worktree.Path), slog.Error(err))
 		}
