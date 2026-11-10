@@ -96,21 +96,81 @@ func withSubagentResume(ctx context.Context) context.Context {
 	return context.WithValue(ctx, subagentResumeKey{}, true)
 }
 
+// ErrSecretQuestionPending means that the chat waits for a secret answer, so
+// a message would answer its question without the value.
+var ErrSecretQuestionPending = xerrors.New("the chat waits for a secret answer, which a chat message cannot carry")
+
+// ErrSecretAnswerNotPending means that the question of a secret answer
+// report is no longer pending or has no stored answer, so the report would
+// answer another question without its value.
+var ErrSecretAnswerNotPending = xerrors.New("the question of the secret answer is not pending")
+
+type secretAnswerReportKey struct{}
+
+// WithSecretAnswerReport marks ctx as the send of the message that reports
+// the stored secret answer to the question of toolCallID, the one message
+// that may answer a secret question.
+func WithSecretAnswerReport(ctx context.Context, toolCallID string) context.Context {
+	return context.WithValue(ctx, secretAnswerReportKey{}, toolCallID)
+}
+
 // forkValidateSubagentResume returns an error when a message_agent send would
 // resume the finished subagent target while its family already has the
 // maximum number of live subagents. sendSubagentMessage calls it before
 // SendMessage runs the prompt hooks, and SendMessage calls it again with inTx
 // in the transaction that resumes target. That call takes the lock that
 // serializes the family's spawns, so a concurrent spawn cannot pass the same
-// count.
+// count. It also refuses a send to a target whose pending question is
+// secret, because the message would answer the question without the value.
+// In the transaction of a send or an edit it refuses every such message but
+// the report of the answer, because a question can be recorded after the
+// caller's own check. The report passes only while its question is pending
+// and its answer is stored, because a concurrent answer can resume the
+// chat, which then asks a new question.
 func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
-	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() ||
-		!target.ParentChatID.Valid || (target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError) {
+	if !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid {
+		return nil
+	}
+	resume, _ := ctx.Value(subagentResumeKey{}).(bool)
+	reportCallID, report := ctx.Value(secretAnswerReportKey{}).(string)
+	if !resume && !inTx {
 		return nil
 	}
 	fdb, err := forkdb.From(store)
 	if err != nil {
 		return xerrors.Errorf("fork queries: %w", err)
+	}
+	question, err := fdb.GetPendingChatDescendantQuestion(ctx, target.ID)
+	pending := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return xerrors.Errorf("get pending question of chat %s: %w", target.ID, err)
+	}
+	if report {
+		if !pending || question.ToolCallID != reportCallID {
+			return ErrSecretAnswerNotPending
+		}
+		answers, err := fdb.GetChatSecretAnswersByChatID(ctx, target.ID)
+		if err != nil {
+			return xerrors.Errorf("get secret answers of chat %s: %w", target.ID, err)
+		}
+		if !slices.ContainsFunc(answers, func(answer forkdb.ChatSecretAnswer) bool {
+			return answer.ToolCallID == reportCallID
+		}) {
+			return ErrSecretAnswerNotPending
+		}
+		return nil
+	}
+	switch {
+	case pending && question.Secret() && resume:
+		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat")
+	case pending && question.Secret():
+		return ErrSecretQuestionPending
+	}
+	if !resume {
+		return nil
+	}
+	if target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError {
+		return nil
 	}
 	limits, err := p.subagentLimits(ctx, fdb, target.OrganizationID)
 	if err != nil {
@@ -166,7 +226,9 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 // isolation, it also records the child's chat_subagents row in the same
 // transaction, with the custom agent's tool policy and the child's worktree.
 // Nested subagents also recheck the depth and live subagent limits there. A
-// worktree is created before the transaction and removed if it fails.
+// worktree is created before the transaction and removed if it fails. A
+// child's own workspace is created after it, before the child gets its
+// prompt.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -177,6 +239,17 @@ func (p *Server) createSubagentChatWithID(
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
 	isolation, isolated := subagentIsolationFromContext(ctx)
+	if !isolated && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		worktree, bound, err := p.chatWorktree(ctx, parent)
+		if err != nil {
+			return chatstate.CreateChatResult{}, xerrors.Errorf("resolve parent worktree: %w", err)
+		}
+		if bound {
+			if input.InitialMessages, err = withSubagentWorktreePrompt(input, worktree, true); err != nil {
+				return chatstate.CreateChatResult{}, err
+			}
+		}
+	}
 	if !nested && customAgent == nil && !isolated {
 		return chatstate.CreateChatWithID(ctx, p.db, publisher, chatID, input)
 	}
@@ -190,7 +263,21 @@ func (p *Server) createSubagentChatWithID(
 	}
 	subagent := forkdb.InsertChatSubagentParams{Isolation: subagentIsolationShared, ToolPolicy: toolPolicy}
 	committed := false
-	if isolated {
+	var workspaceSource subagentWorkspaceSource
+	var workspacePrompt chatstate.Message
+	switch {
+	case isolated && isolation.isolation == subagentIsolationWorkspace:
+		var err error
+		workspaceSource, err = p.subagentWorkspaceSourceOf(ctx, parent, input)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+		input, workspacePrompt, err = withDeferredSubagentPrompt(input)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+		subagent.Isolation = subagentIsolationWorkspace
+	case isolated:
 		worktree, done, err := p.createSubagentWorktree(ctx, chatID, parent, input, isolation)
 		if err != nil {
 			return chatstate.CreateChatResult{}, err
@@ -199,6 +286,10 @@ func (p *Server) createSubagentChatWithID(
 		subagent.Isolation = subagentIsolationWorktree
 		subagent.WorktreePath = worktree.Path
 		subagent.Branch = worktree.Branch
+		input.InitialMessages, err = withSubagentWorktreePrompt(input, subagentWorktree{path: worktree.Path, branch: worktree.Branch}, false)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
 	}
 	// CreateChatWithID publishes into this buffer when its nested
 	// transaction returns, so nothing reaches subscribers before the outer
@@ -261,7 +352,16 @@ func (p *Server) createSubagentChatWithID(
 		return chatstate.CreateChatResult{}, err
 	}
 	committed = true
-	return result, buffer.Flush()
+	if err := buffer.Flush(); err != nil {
+		return result, err
+	}
+	if subagent.Isolation == subagentIsolationWorkspace {
+		result.Chat, err = p.startSubagentWorkspace(ctx, result.Chat, workspaceSource, workspacePrompt)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+	}
+	return result, nil
 }
 
 // subagentCanSpawn reports whether chat may spawn children: explore and

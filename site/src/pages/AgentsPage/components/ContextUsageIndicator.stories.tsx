@@ -4,6 +4,7 @@ import type { ChatContext } from "#/api/typesGenerated";
 import {
 	MockChatContextACPHarnesses,
 	MockChatContextACPHarnessIssue,
+	MockChatContextAgentDefinitions,
 	MockChatContextClean,
 	MockChatContextDirty,
 	MockChatContextResourceFailures,
@@ -303,6 +304,22 @@ export const ACPHarnessesWithoutSourcePath: Story = {
 			...ACPHarnesses.args?.usage,
 			context: mockChatContextACPHarnessesWithoutSourcePath,
 		},
+	},
+};
+
+export const AgentDefinitions: Story = {
+	args: {
+		usage: {
+			usedTokens: 12_000,
+			contextLimitTokens: 200_000,
+			context: MockChatContextAgentDefinitions,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(within(canvasElement).getByRole("button"));
+		await userEvent.click(
+			screen.getByRole("button", { name: /Agent definitions/ }),
+		);
 	},
 };
 

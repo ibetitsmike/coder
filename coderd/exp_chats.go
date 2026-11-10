@@ -3162,6 +3162,9 @@ func (api *API) postChatMessages(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	response, err := api.sendChatMessage(ctx, apiKey.UserID, chat, req)
 	if err != nil {
@@ -3367,6 +3370,9 @@ func (api *API) sendChatMessageError(err error) error {
 	if loopErr := forkChatLoopError(err); loopErr != nil {
 		return loopErr
 	}
+	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
+		return secretQuestionPendingError(err)
+	}
 	if xerrors.Is(err, chatd.ErrChatArchived) {
 		return httperror.WrapResponseError(http.StatusBadRequest, codersdk.Response{
 			Message: "Cannot send messages to an archived chat.",
@@ -3464,6 +3470,9 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	contentBlocks, _, inputError := createChatInputFromParts(ctx, api.Database, chat.ID, chat.WorkspaceID, req.Content, "content")
 	if inputError != nil {
@@ -3516,6 +3525,8 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		switch {
+		case xerrors.Is(editErr, chatd.ErrSecretQuestionPending):
+			writeChatError(ctx, rw, secretQuestionPendingError(editErr))
 		case xerrors.Is(editErr, chatd.ErrChatArchived):
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: "Cannot edit messages in an archived chat.",
@@ -3804,6 +3815,9 @@ func (api *API) patchChatQueuedMessage(rw http.ResponseWriter, r *http.Request) 
 			Message: "model_config_id and reasoning_effort require content.",
 			Detail:  "The overrides apply to the content they are sent with.",
 		})
+		return
+	}
+	if req.Content != nil && maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
@@ -8854,6 +8868,9 @@ func (api *API) createChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 		if err := validateChatModelConfigProviderModel(lockedAIProvider, insertParams.Model, req.ModelConfig); err != nil {
 			return err
 		}
+		if err := validateChatModelAliases(ctx, tx, insertParams.OrganizationID, inserted.ID, insertParams.AIProviderID, insertParams.Options); err != nil {
+			return err
+		}
 		providerType = lockedAIProvider.Type
 
 		transition, err := ensureDefaultChatModelConfig(ctx, tx, insertParams.OrganizationID)
@@ -9047,6 +9064,9 @@ func (api *API) updateChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 			if err := validateChatModelConfigProviderModel(aiProvider, updateParams.Model, unmarshalChatModelCallConfig(modelConfigRaw)); err != nil {
 				return err
 			}
+		}
+		if err := validateChatModelAliases(ctx, tx, lockedExisting.OrganizationID, lockedExisting.ID, updateParams.AIProviderID, updateParams.Options); err != nil {
+			return err
 		}
 
 		setAsDefault := updateParams.IsDefault && !lockedExisting.IsDefault
@@ -9430,7 +9450,8 @@ func isZeroChatModelCallConfig(config *codersdk.ChatModelCallConfig) bool {
 		config.FrequencyPenalty == nil &&
 		config.ReasoningEffort == nil &&
 		isZeroChatModelOpenAIConfig(config.OpenAIConfig) &&
-		isZeroChatModelProviderOptions(config.ProviderOptions)
+		isZeroChatModelProviderOptions(config.ProviderOptions) &&
+		len(config.Aliases) == 0
 }
 
 func isZeroChatModelOpenAIConfig(config *codersdk.ChatModelOpenAIConfig) bool {

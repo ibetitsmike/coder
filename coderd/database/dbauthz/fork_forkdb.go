@@ -102,6 +102,22 @@ func (f *forkQuerier) CountOrganizationChatWakeupRunsSince(ctx context.Context, 
 	return f.db.CountOrganizationChatWakeupRunsSince(ctx, arg)
 }
 
+// DeleteChatSecretAnswer authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.DeleteChatSecretAnswerParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatSecretAnswer(ctx, arg)
+}
+
+// DeleteChatSecretAnswersByChatID authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, chatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatSecretAnswersByChatID(ctx, chatID)
+}
+
 func (f *forkQuerier) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
 		return err
@@ -114,6 +130,13 @@ func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 		return err
 	}
 	return f.db.DeleteExpiredPluginLinkCodes(ctx)
+}
+
+func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -232,6 +255,15 @@ func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chat
 	return f.db.GetPendingChatDescendantQuestion(ctx, chatID)
 }
 
+// GetChatSecretAnswersByChatID returns secret values, so it requires update
+// access to the owning chat, not read access.
+func (f *forkQuerier) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatSecretAnswersByChatID(ctx, chatID)
+}
+
 func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	return f.authorizeChatWakeup(ctx, policy.ActionRead, id)
 }
@@ -317,6 +349,14 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 		return forkdb.AgentDefinition{}, err
 	}
 	return f.db.GetUserAgentDefinitionByName(ctx, arg)
+}
+
+// InsertChatSecretAnswer authorizes as an update of the owning chat.
+func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.InsertChatSecretAnswer(ctx, arg)
 }
 
 // InsertChatSubagent authorizes as an update of the owning chat, like
@@ -476,6 +516,15 @@ func (f *forkQuerier) SumOrganizationWakeupChatCostMicrosSince(ctx context.Conte
 		return 0, err
 	}
 	return f.db.SumOrganizationWakeupChatCostMicrosSince(ctx, arg)
+}
+
+// UpdateChatSubagentWorkspaceID authorizes as an update of the owning chat,
+// like InsertChatSubagent.
+func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.UpdateChatSubagentWorkspaceID(ctx, arg)
 }
 
 // UpdateChatWakeupRunStatus is worker-only, so it needs site-wide chat access, like chatd's.
