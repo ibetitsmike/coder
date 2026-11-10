@@ -7,7 +7,6 @@ package chatd
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -245,8 +244,8 @@ func (p *Server) pullRequestReadFailed(ctx context.Context, wakeup forkdb.ChatWa
 			slog.Error(err),
 		)
 	}
-	if eventsFinalPoll(wakeup) && !next.After(wakeup.ExpiresAt.Time.Add(pullRequestFinalRetryWindow)) {
-		return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}}
+	if retry, ok := eventsFinalRetry(wakeup, now, next); ok {
+		return retry
 	}
 	return eventsWakeupRunAt(wakeup, now, 0, next)
 }

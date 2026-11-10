@@ -323,7 +323,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// A child's status has no time it became done, so a final poll that
 	// runs well after the expiry cannot tell whether the child was done by
 	// then and leaves children out.
-	childrenCutOff := eventsFinalPoll(wakeup) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
+	childrenCutOff := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
 	for _, event := range events {
 		switch event.Type {
 		case wakeupEventChildDone:
@@ -419,11 +419,23 @@ func eventsWakeupRunAt(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, 
 	return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}, runDelta: runDelta}
 }
 
-// eventsFinalPoll reports whether wakeup is the last poll of an events
-// wake-up, which eventsWakeupRunAt schedules at the expiry.
-func eventsFinalPoll(wakeup forkdb.ChatWakeup) bool {
-	return wakeup.Kind == forkdb.ChatWakeupKindEvents && wakeup.ExpiresAt.Valid && wakeup.NextRunAt.Valid &&
-		!wakeup.NextRunAt.Time.Before(wakeup.ExpiresAt.Time)
+// eventsFinalPoll reports whether a claim of wakeup at now is the last poll
+// of an events wake-up. eventsWakeupRunAt schedules it at the expiry, but any
+// claim at or after the expiry counts, so a chat that was busy across the
+// poll before still gets one read through the expiry.
+func eventsFinalPoll(wakeup forkdb.ChatWakeup, now time.Time) bool {
+	return wakeup.Kind == forkdb.ChatWakeupKindEvents && wakeup.ExpiresAt.Valid && !now.Before(wakeup.ExpiresAt.Time)
+}
+
+// eventsFinalRetry ends the claim of a failed final poll of wakeup with a
+// retry at next, as long as next is within pullRequestFinalRetryWindow after
+// the expiry, so a transient failure at the expiry does not lose what
+// happened until then.
+func eventsFinalRetry(wakeup forkdb.ChatWakeup, now, next time.Time) (wakeupFinish, bool) {
+	if !eventsFinalPoll(wakeup, now) || next.After(wakeup.ExpiresAt.Time.Add(pullRequestFinalRetryWindow)) {
+		return wakeupFinish{}, false
+	}
+	return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}}, true
 }
 
 // childDoneRunKey names the run of a child_done event, so each child wakes
