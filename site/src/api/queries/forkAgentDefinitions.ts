@@ -114,16 +114,14 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 				userAgentDefinitions(organizationId).queryKey,
 				(definitions) => {
 					// A refetch can list the definition before this response
-					// arrives. Its row replaces that one unless it shows a later
-					// change or a recreated definition.
+					// arrives, or still list a deleted one with this name. Its
+					// row replaces that one unless the row is newer, such as a
+					// later change or a recreate.
 					const listed = definitions?.find(
 						(definition) =>
 							definition.id === created.id || definition.name === created.name,
 					);
-					if (
-						!definitions ||
-						(listed && (listed.id !== created.id || isNewer(listed, created)))
-					) {
+					if (!definitions || (listed && isNewer(listed, created))) {
 						return definitions;
 					}
 					return [

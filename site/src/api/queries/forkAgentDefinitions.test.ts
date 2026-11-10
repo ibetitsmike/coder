@@ -71,7 +71,7 @@ describe("isNewer", () => {
 describe("createUserAgentDefinition", () => {
 	it.each([
 		["a later change", definitionAt("2030-01-01T00:00:00.000900Z")],
-		["a recreated definition", definitionAt("2029-01-01T00:00:00Z", "other")],
+		["a later recreate", definitionAt("2030-01-01T00:00:00.000900Z", "other")],
 	])("keeps a listed row that shows %s", async (_case, listed) => {
 		const queryClient = createQueryClient();
 		const listKey = userAgentDefinitions(org).queryKey;
@@ -87,6 +87,28 @@ describe("createUserAgentDefinition", () => {
 		).mutate({ organizationId: org, req: { content: "" } });
 
 		expect(queryClient.getQueryData(listKey)).toEqual([metadataOf(listed)]);
+	});
+
+	it("replaces an older listed row of a deleted definition with the created one", async () => {
+		const queryClient = createQueryClient();
+		const listKey = userAgentDefinitions(org).queryKey;
+		queryClient.setQueryData(listKey, [
+			metadataOf(definitionAt("2029-01-01T00:00:00Z", "deleted")),
+		]);
+		const MockCreatedDefinition = definitionAt("2030-01-01T00:00:00Z");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockResolvedValue(MockCreatedDefinition);
+
+		await new MutationObserver(
+			queryClient,
+			createUserAgentDefinition(queryClient),
+		).mutate({ organizationId: org, req: { content: "" } });
+
+		expect(queryClient.getQueryData(listKey)).toEqual([
+			metadataOf(MockCreatedDefinition),
+		]);
 	});
 
 	it("adds a created definition in name order to a list fetched during the request", async () => {
