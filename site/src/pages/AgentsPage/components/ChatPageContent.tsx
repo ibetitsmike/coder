@@ -175,7 +175,10 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		store,
 		selectSubagentStatusOverrides,
 	);
-	const undeliveredQueuedMessages = useChatSelector(store, selectQueuedMessages);
+	const undeliveredQueuedMessages = useChatSelector(
+		store,
+		selectQueuedMessages,
+	);
 	const isChatCompleted = !hasStream;
 
 	const liveStreamState =
