@@ -4,6 +4,7 @@ package coderd_test
 // fork-nested-subagents experiment.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/x/agenthooks"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/serpent"
 )
@@ -296,9 +298,82 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		require.NoError(t, client.AnswerChatSecretQuestion(ctx, escaped.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: callID, Value: secret}), callID)
 	}
 
+	// The user can decline a secret question, such as for a value too
+	// short to hide, which answers it without a value.
+	_, declined, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	ask(declined, "call-decline", `[{"header": "PIN", "question": "Enter the PIN.", "secret": true}]`)
+	err = client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-decline", Value: secret, Declined: true})
+	requireStatus(t, http.StatusBadRequest, err)
+	err = client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-other", Declined: true})
+	requireStatus(t, http.StatusConflict, err)
+	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-normal", Declined: true})
+	requireStatus(t, http.StatusBadRequest, err)
+	// A stored answer whose report failed does not outlive the decline.
+	require.NoError(t, fdb.InsertChatSecretAnswer(sysCtx, forkdb.InsertChatSecretAnswerParams{ChatID: declined.ID, ToolCallID: "call-decline", Value: secret}))
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, declined.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-decline", Declined: true}))
+	_, err = fdb.GetPendingChatDescendantQuestion(sysCtx, declined.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows, "declining answers the secret question")
+	answers, err = fdb.GetChatSecretAnswersByChatID(sysCtx, declined.ID)
+	require.NoError(t, err)
+	require.Empty(t, answers)
+	_, err = client.CreateChatMessage(ctx, declined.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText, Text: "The PIN is 1234.",
+	}}})
+	require.NoError(t, err, "a declined secret question no longer refuses messages")
+
 	// A normal question still takes a normal answer.
 	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
 	require.NoError(t, err)
+}
+
+// A user_prompt_submit hook that rewrites prompts does not rewrite the
+// message of the secret answer route, which must retire the question.
+func TestForkChatSecretAnswerPromptOverride(t *testing.T) {
+	t.Parallel()
+
+	const hookSecret = "test-hook-secret-32-bytes-minimum!!"
+	ctx := testutil.Context(t, testutil.WaitLong)
+	consumer := newHookConsumer(t, hookSecret, agenthooks.Hooks{
+		UserPromptSubmit: func(context.Context, agenthooks.Meta, agenthooks.UserPromptSubmitData) (agenthooks.Response, error) {
+			return agenthooks.Response{Permission: &agenthooks.Permission{
+				Decision:      agenthooks.PermissionAllow,
+				InputOverride: json.RawMessage(`{"prompt":"redacted"}`),
+			}}, nil
+		},
+	})
+	t.Cleanup(consumer.Close)
+	client, db := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
+		opts.ChatWorkerDisabled = true
+		opts.DeploymentValues.Experiments = append(
+			opts.DeploymentValues.Experiments,
+			string(codersdk.ExperimentForkNestedSubagents),
+		)
+		require.NoError(t, opts.DeploymentValues.AI.Chat.HookURL.Set(consumer.URL))
+		opts.DeploymentValues.AI.Chat.HookSecret = serpent.String(hookSecret)
+		opts.DeploymentValues.AI.Chat.HookTimeout = serpent.Duration(time.Second)
+		opts.DeploymentValues.AI.Chat.HookEnabled = serpent.Bool(true)
+	})
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	sysCtx := dbauthz.AsSystemRestricted(ctx)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+
+	for _, req := range []codersdk.ChatSecretAnswerRequest{
+		{ToolCallID: "call-secret", Value: "hunter2-secret-value"},
+		{ToolCallID: "call-secret", Declined: true},
+	} {
+		_, child, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+		_, err := fdb.UpsertChatDescendantQuestion(sysCtx, forkdb.UpsertChatDescendantQuestionParams{
+			ChatID:     child.ID,
+			ToolCallID: "call-secret",
+			Questions:  json.RawMessage(`[{"header": "Token", "question": "Paste the API token.", "secret": true}]`),
+		})
+		require.NoError(t, err)
+		require.NoError(t, client.AnswerChatSecretQuestion(ctx, child.ID, req))
+		_, err = fdb.GetPendingChatDescendantQuestion(sysCtx, child.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows, "declined=%v", req.Declined)
+	}
 }
 
 // With the experiment off, the secret answer route is gone, so a chat
@@ -325,6 +400,59 @@ func TestForkChatSecretQuestionExperimentOff(t *testing.T) {
 		Text: "Skip the token.",
 	}}})
 	require.NoError(t, err)
+}
+
+// A message that the user queued before the child asked a secret question
+// does not answer the question when the end of the turn promotes it.
+func TestForkChatSecretQuestionQueuedMessage(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db, api := newChatClientWithAPIAndDatabase(t, withChatWorkerDisabled, func(opts *coderdtest.Options) {
+		opts.DeploymentValues.Experiments = append(
+			opts.DeploymentValues.Experiments,
+			string(codersdk.ExperimentForkNestedSubagents),
+		)
+	})
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	root, child, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	sysCtx := dbauthz.AsSystemRestricted(ctx)
+	_, err := db.UpdateChatStatus(sysCtx, database.UpdateChatStatusParams{
+		ID:          child.ID,
+		Status:      database.ChatStatusRunning,
+		WorkerID:    uuid.NullUUID{UUID: uuid.New(), Valid: true},
+		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
+		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	require.NoError(t, err)
+	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText,
+		Text: "Also check the staging database.",
+	}}})
+	require.NoError(t, err)
+	queued, err := db.GetChatQueuedMessages(sysCtx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1)
+
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatDescendantQuestion(sysCtx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     child.ID,
+		ToolCallID: "call-secret",
+		Questions:  json.RawMessage(`[{"header": "Token", "question": "Paste the API token.", "secret": true}]`),
+	})
+	require.NoError(t, err)
+	// FinishTurn promotes the queue head into the chat's messages.
+	driveChatToWaiting(ctx, t, api, child.ID)
+	queued, err = db.GetChatQueuedMessages(sysCtx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, queued, "the end of the turn delivers the queued message")
+
+	listed, err := client.ChatDescendantQuestions(ctx, root.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the secret question stays pending")
+	require.Equal(t, "call-secret", listed[0].ToolCallID)
 }
 
 // An answer past its TTL is replaced, even while the message that reports

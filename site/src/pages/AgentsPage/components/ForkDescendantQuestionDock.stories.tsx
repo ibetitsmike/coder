@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { spyOn } from "storybook/test";
+import { spyOn, userEvent, within } from "storybook/test";
 import { API } from "#/api/api";
 import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
 import { MockChat } from "#/testHelpers/chatEntities";
@@ -84,5 +84,121 @@ export const AnswersDisabled: Story = {
 				data: [MockChatDescendantQuestion],
 			},
 		],
+	},
+};
+
+const mockSecretQuestion = {
+	...MockChatDescendantQuestion,
+	tool_call_id: "call-secret",
+	questions: [
+		{
+			header: "Token",
+			question: "Paste the **API token** for the staging registry.",
+			options: [],
+			secret: true,
+		},
+	],
+};
+
+export const SecretPending: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+};
+
+export const SecretAnswersDisabled: Story = {
+	args: { canAnswer: false },
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+};
+
+// A settled answer reloads the questions. The reload stays pending, so the
+// story keeps the seeded question instead of showing a load error.
+const keepQuestionsReloading = () => {
+	spyOn(API.getAxiosInstance(), "get").mockReturnValue(new Promise(() => {}));
+};
+
+export const SecretAnswerSent: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: undefined,
+		});
+		keepQuestionsReloading();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(
+			canvas.getByLabelText(/API token/),
+			"staging-token-value",
+		);
+		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
+		await canvas.findByRole("status");
+	},
+};
+
+export const SecretAnswerSubmitting: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockReturnValue(
+			new Promise(() => {}),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(
+			canvas.getByLabelText(/API token/),
+			"staging-token-value",
+		);
+		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
+		await canvas.findByText("Submitting...");
+	},
+};
+
+export const SecretAnswerFailed: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockRejectedValue(
+			mockApiError({ message: "The secret answer is too short." }),
+		);
+		keepQuestionsReloading();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(canvas.getByLabelText(/API token/), "short-value");
+		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
+		await canvas.findByRole("alert");
 	},
 };

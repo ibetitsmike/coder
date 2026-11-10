@@ -364,6 +364,16 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: callID, Value: "a-secret-value",
 	}))
+	// A decline must not delete the value that a queued report delivers.
+	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call ` + callID + `:\nThe user gave a secret answer."}]`),
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, send(WithSecretAnswerDecline(ctx, callID)), ErrSecretAnswerQueued)
+	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.NoError(t, f.db.DeleteAllChatQueuedMessages(ctx, child.ID))
 	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
 	// A late report of the answer must not answer a newer question.
 	ask(`[{"header":"Key","question":"Paste the key.","secret":true}]`)
@@ -389,21 +399,14 @@ func TestDescendantSecretQuestion(t *testing.T) {
 		return properties
 	}
 
-	off := f.server.newDescendantQuestionTool(child)
-	require.NotContains(t, itemProperties(off.Info()), "secret", "the model cannot ask a secret question until the UI takes one")
-	resp, err := off.Run(ctx, fantasy.ToolCall{ID: "call_off", Input: secretInput})
-	require.NoError(t, err)
-	require.True(t, resp.IsError, "without options the call is an ordinary invalid question")
-
-	on := off
-	on.secret = true
+	on := f.server.newDescendantQuestionTool(child)
 	require.Contains(t, itemProperties(on.Info()), "secret")
 
 	// Screenshots of a computer-use chat reach the model unscrubbed.
 	computerUse := on
 	computerUse.chat.Mode = database.NullChatMode{ChatMode: database.ChatModeComputerUse, Valid: true}
 	require.NotContains(t, itemProperties(computerUse.Info()), "secret")
-	resp, err = computerUse.Run(ctx, fantasy.ToolCall{ID: "call_computer", Input: secretInput})
+	resp, err := computerUse.Run(ctx, fantasy.ToolCall{ID: "call_computer", Input: secretInput})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "a computer-use chat cannot ask secret questions")

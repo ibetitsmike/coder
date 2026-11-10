@@ -5608,7 +5608,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/{chat}/questions/secret-answer": {
             "post": {
-                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered.",
+                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered. A declined answer stores\nnothing and says that the user declined.",
                 "consumes": [
                     "application/json"
                 ],
@@ -25550,6 +25550,10 @@ const docTemplate = `{
         "codersdk.ChatSecretAnswerRequest": {
             "type": "object",
             "properties": {
+                "declined": {
+                    "description": "Declined answers without a value, for a value the user cannot or\nwill not give as a secret, such as one too short to hide. Value must\nbe empty.",
+                    "type": "boolean"
+                },
                 "tool_call_id": {
                     "type": "string"
                 },

@@ -19,6 +19,7 @@ import { DiffFileHeader } from "./DiffFileHeader";
 import { EditFilesTool } from "./EditFilesTool";
 import { ExecuteTool as ExecuteToolComponent } from "./ExecuteTool";
 import { type FindToolsMatch, FindToolsTool } from "./FindToolsTool";
+import { hasSecretQuestion } from "./forkSecretQuestions";
 import { createForkToolRenderers } from "./forkToolRenderers";
 import { ListAgentsTool } from "./ListAgentsTool";
 import { ListSubagentModelsTool } from "./ListSubagentModelsTool";
@@ -693,6 +694,7 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 		(resultRecord
 			? asString(resultRecord.error || resultRecord.message)
 			: "") || (typeof result === "string" && isError ? result : "");
+	const isSecret = hasSecretQuestion(args, result);
 
 	return (
 		<AskUserQuestionTool
@@ -700,7 +702,12 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 			status={status}
 			isError={isError}
 			errorMessage={errorMessage || undefined}
-			onSubmitAnswer={onSendAskUserQuestionResponse}
+			onSubmitAnswer={isSecret ? undefined : onSendAskUserQuestionResponse}
+			answerElsewhereNotice={
+				isSecret
+					? "Answer this secret question in the question panel of the root chat."
+					: undefined
+			}
 			isChatCompleted={isChatCompleted}
 			isLatestAskUserQuestion={isLatestAskUserQuestion}
 			isDocked={isDockedAskUserQuestion}

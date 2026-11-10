@@ -126,6 +126,7 @@ func (p *Server) SendMessage(
 		if err != nil {
 			return SendMessageResult{}, p.handleUserPromptDispatchError(ctx, opts.ChatID, chathooks.UserPromptDenial(err))
 		}
+		promptResult = forkKeepSecretAnswerPrompt(ctx, promptResult)
 		contentParts, _, err = chathooks.ComposeUserPromptContent(contentParts, promptResult)
 		if err != nil {
 			return SendMessageResult{}, err
