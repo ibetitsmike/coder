@@ -25,7 +25,8 @@ type UpdateChatWakeupVariables = {
 
 /**
  * Pauses, resumes or cancels a wake-up: writes the returned wake-up into the
- * cached list and refetches to pick up worker-made changes.
+ * cached list, and refetches after success or failure, since a failure such
+ * as a 409 means the cached row is stale.
  */
 export const updateChatWakeup = (queryClient: QueryClient, chatId: string) =>
 	mutationOptions({
@@ -37,6 +38,7 @@ export const updateChatWakeup = (queryClient: QueryClient, chatId: string) =>
 					oldWakeup.id === wakeup.id ? wakeup : oldWakeup,
 				),
 			);
-			void queryClient.invalidateQueries({ queryKey: chatWakeupsKey(chatId) });
 		},
+		onSettled: () =>
+			queryClient.invalidateQueries({ queryKey: chatWakeupsKey(chatId) }),
 	});

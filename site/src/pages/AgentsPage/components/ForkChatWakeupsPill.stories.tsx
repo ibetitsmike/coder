@@ -75,8 +75,8 @@ export const UpdateError: Story = {
 	play: Expanded.play,
 };
 
-export const UpdatePending: Story = {
-	args: { pendingId: MockChatWakeupInterval.id },
+export const ActionsDisabled: Story = {
+	args: { isDisabled: true },
 	play: Expanded.play,
 };
 
