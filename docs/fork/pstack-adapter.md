@@ -52,7 +52,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
     - Another pstack skill: read_file ~/.coder/skills/<name>/SKILL.md.
     - Work in the repository the user names, or else in the Working Directory of <workspace-context>.
       Write no files outside it unless the step names the path.
-    - SendToUser: put the message in your reply.
+    - SendToUser: put the message in your reply, and if you have notify_user, also call it with the message.
     - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
     - Recent chats, or a top-level chat ID you don't have: search_chats, if you have it.
     - A child's chat ID you don't have: list_agents in its parent.
@@ -136,7 +136,8 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 
 ### Wake-ups
 
-When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup` and `wait_for_events`, except in plan-mode turns and in `explore` children.
+When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup`, `wait_for_events`, and [`notify_user`](#notifications), except in plan-mode turns and in `explore` children.
+A [custom agent tool policy](#custom-agent-tool-policy) can also remove them from a custom child.
 A wake-up sends its `prompt` to the chat later, as a new user message from the chat owner.
 Set exactly one of `delay_seconds`, `interval_seconds`, and `cron`, or the call fails with `set exactly one of delay_seconds, interval_seconds and cron`.
 `delay_seconds` runs the wake-up once.
@@ -177,6 +178,30 @@ While the chat is busy, the run waits until the chat is idle.
 Coder Agents doesn't replay runs that it missed.
 No tool, API, or page lists or cancels a wake-up.
 To stop one early, archive the chat, and the wake-up stops at its next run without sending its prompt.
+
+Before a run sends its prompt, Coder Agents checks four limits over the 24&nbsp;hours before the run.
+A chat can get 288 wake-up runs in those 24&nbsp;hours, an average of one every 5&nbsp;minutes but not a fixed pace, and the chats of an organization can get 2880 together.
+The spend limits are \$20 of model cost in the chat and \$200 across the organization's chats that have or had a wake-up.
+The spend counts every message in those chats, not only the ones that wake-ups started, and a model without prices counts as zero.
+The check only uses the cost recorded so far, so the run that it lets through can take the spend past a limit, and runs on several replicas at once can pass an organization limit by a few runs.
+When the chat or its organization has reached a limit, the wake-up pauses without sending its prompt.
+A wake-up also pauses when a prompt hook denies its prompt, or when its cron schedule or its events are invalid.
+A paused wake-up never runs again, and it still counts toward the chat's limit of 10 active or paused wake-ups.
+When a wake-up pauses, Coder Agents sends the chat owner a Coder notification titled `Chat wake-up paused` that names the chat and the reason.
+It sends at most one per chat and reason each UTC day, unless the chat gets a new title in between, because the notification text includes the title.
+It uses the **Custom Notification** template, so the owner doesn't get it after turning that template off, and the wake-up stays paused all the same.
+
+### Notifications
+
+With the `fork-chat-wakeups` experiment, `notify_user` sends the chat owner a Coder notification.
+The owner gets it in the Coder notifications inbox when the deployment keeps the inbox on, and by email or webhook when the deployment sends notifications that way.
+Pass the text as `message`, up to 2000 bytes, and an optional `title`, up to 120 bytes.
+When you omit `title` or leave it blank, the notification uses the chat title, cut to its first 120 bytes.
+The result is `{"sent":true}`.
+When the chat has sent 10 notifications in the past hour, the next call fails with `notification limit reached: at most 10 per chat per hour`.
+The wake-up pause notifications of the chat count toward those 10, but Coder Agents still sends a pause notification when the chat is at the limit.
+An empty `message` fails with `message is required`, and a chat that a system user owns fails with `chats owned by a system user cannot send notifications`.
+The result is also `{"sent":true}` when Coder drops the notification, because the owner turned off the **Custom Notification** template, the chat sent the same title and message earlier in the same clock minute, or the deployment has the inbox off and sends no email or webhook notifications.
 
 ## Subagent fields
 
@@ -340,7 +365,7 @@ With `fork-nested-subagents`, a `shared` child of the worktree child works in th
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
 Otherwise Coder Agents keeps both until you archive the root chat or the deployment archives it as inactive.
-After the archive, Coder Agents removes each child's worktree and branch in the background.
+If the experiment is still on at the archive, Coder Agents then removes each child's worktree and branch in the background.
 It keeps a worktree that has uncommitted or untracked files, is no longer on its branch, or has submodule commits that are on no remote.
 It also keeps a worktree when its branch, or the `HEAD` or branch reflog, reaches a commit that is on no other branch or remote, such as a commit that a reset moved the branch away from.
 It keeps them all when it can't reach the workspace agent or the agent is older than the server.
@@ -367,8 +392,12 @@ When the build fails, or the agent or its startup scripts don't get ready, `spaw
 It fails the same way before any build when the parent workspace's template doesn't allow Coder Agents or has an externally managed agent, so spawn the child with `isolation: "shared"` or `isolation: "worktree"` in such a workspace.
 After a failed spawn, Coder Agents archives the child and tries once to stop the workspace, if it created one, but it doesn't retry a failed archive or stop and never deletes the workspace.
 So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
-When the spawn succeeds, Coder Agents doesn't stop or delete the child's workspace, not even after you archive the chats.
-Delete it on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
+When the spawn succeeds, Coder Agents doesn't stop the child's workspace until you archive the root chat or the deployment archives it as inactive.
+The workspace can still stop earlier on its own schedule, such as the deployment's chat workspace TTL or the template's default autostop.
+If the experiment is still on at the archive, Coder Agents then stops each child's workspace in the background, after it tries to remove the family's worktrees, but it never deletes the workspace.
+A worktree that it keeps doesn't prevent the stop, even when the worktree is in that workspace.
+It doesn't retry a failed stop, and it skips a child that is bound to another workspace by then.
+Delete the workspace on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
 
 ## Models
 
@@ -431,7 +460,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 |----------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
 | Sticky `/poteto-mode`                                                                                    | No pinned skills                                                                                                                                                                                                                              | Read `poteto-mode` again at the start of each turn while the mode is on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | W6                    |
 | `/loop`, watchers that wake you, PR and CI subscriptions                                                 | With the `fork-chat-wakeups` experiment, `schedule_wakeup` and a `/loop` message wake the chat later with a prompt, and `wait_for_events` wakes it when a child agent is done. No wake-up on a PR or CI event. Refer to [Wake-ups](#wake-ups) | If you have `schedule_wakeup`, schedule the later step with a prompt that names it and its check, then end the turn. For `/loop 1h`, run the step once now, then pass `interval_seconds: 3600`. For a watcher, poll with `interval_seconds`, or call `wait_for_events` when it watches child agents. Always set `max_runs` or `expires_in_seconds`, and tell the prompt to reply only "done" once the check passes. Otherwise wait inside the turn (`wait_agent` timeouts, `gh pr checks --watch`), skip a step that needs a later wake, and tell the user to send the next message. | W5                    |
-| `SendToUser`                                                                                             | No notification tool                                                                                                                                                                                                                          | Put the message in your reply.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | W5 (`notify_user`)    |
+| `SendToUser`                                                                                             | With the `fork-chat-wakeups` experiment, `notify_user` sends the chat owner a Coder notification. Refer to [Notifications](#notifications)                                                                                                    | Put the message in your reply. If you have `notify_user`, also call it with the message.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | W5                    |
 | `SendToUser` secret requests                                                                             | No masked input                                                                                                                                                                                                                               | Skip with the line. Ask the user to put the secret in the workspace environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | W2 (secret questions) |
 | Cursor Automations: routines, `update_state` calls, `api2.cursor.sh/automations` webhooks, routine wakes | None                                                                                                                                                                                                                                          | Skip with the line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Stays                 |
 | Bugbot                                                                                                   | Bugbot comments on a GitHub PR are ordinary review threads                                                                                                                                                                                    | Triage them with the forge command that the step gives. Skip a step that starts, waits for, or configures Bugbot when the PR has no Bugbot check or comment.                                                                                                                                                                                                                                                                                                                                                                                                                         | Stays                 |
@@ -444,12 +473,12 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `5f6b636911`:
+Checked against fork `main` at `bef9c59966`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:310-327`, `:341-369`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:374-386`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:370-387`, `:401-429`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:434-446`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
@@ -466,26 +495,27 @@ Checked against fork `main` at `5f6b636911`:
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:414-431`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1874-1875`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
   Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
-- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:196-204`, `:285`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:754-757`, `:946-948`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:256-264`, `:345`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:754-757`, `:946-948`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
-  Orchestration guidance dropped, `fork_subagents.go:401-403`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:758-760`.
+  Orchestration guidance dropped, `fork_subagents.go:461-463`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:758-760`.
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:710-713`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
-- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:48-54`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:101-115`, result fields, `:135-141`.
-  Worktree creation and its errors, `fork_isolation.go:172-220`, `:245-247`, from the worktree that the parent works in when `repo_path` is omitted, `:181-188`, removed only when the spawn fails, `:223-236`, called at spawn, `coderd/x/chatd/fork_subagents.go:181`, `:220-233`.
-  Removed after a root archive, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:41-111`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:113-173`, with a notice in the root chat, `:175-197`.
-  The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:50`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
+- Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:49-55`, arguments, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-88`, checks, `:101-115`, result fields, `:135-141`.
+  Worktree creation and its errors, `fork_isolation.go:172-220`, `:245-247`, from the worktree that the parent works in when `repo_path` is omitted, `:181-188`, removed only when the spawn fails, `:223-236`, called at spawn, `coderd/x/chatd/fork_subagents.go:241`, `:280-293`.
+  Removed after a root archive with the experiment on, `coderd/x/chatd/fork_family_lock.go:23-35`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
+  The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:51`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
   Branch name, `fork_isolation.go:258-280`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
-  The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:182-192`, `:229-232`.
+  The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:242-252`, `:289-292`.
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
 - Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-89`, checks, `:108-111`, result fields, `:135-141`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
-  The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:209-219`, `:298-303`.
-  The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`.
+  The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:269-279`, `:358-363`.
+  The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
-  No other stop or delete: `stopWorkspaceFn` has no other caller in `coderd/x/chatd` than the root chat's `stop_workspace`, `coderd/x/chatd/turn_environment.go:2616-2622`, and the workspace tools are root-only, `:732-741`.
+  Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktree cleanup, whatever it keeps, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
+  No delete: nothing in `coderd/x/chatd` deletes a workspace, and the workspace tools are root-only, `coderd/x/chatd/turn_environment.go:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
@@ -497,23 +527,23 @@ Checked against fork `main` at `5f6b636911`:
   The same hourglass and label in the top bar of a `running` subagent's chat that waits, only with the experiment and for the chat owner, `site/src/pages/AgentsPage/components/ForkSubagentSlotBadge.tsx:26-51`, `ChatTopBar.tsx:281-286`.
   `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:565-584`, and `wait_agent` on a `paused` child, `:481-489`.
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:621-632`, and `interrupt_agent` moves it to `running`, `:159-169`.
-  `interrupt_agent` interrupts the active descendants first, for any status, `:159-162`, `coderd/x/chatd/chat_mutations.go:898`, `:916`, `coderd/x/chatd/fork_cascade.go:32-39`, `:60-80`.
-  Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
+  `interrupt_agent` interrupts the active descendants first, for any status, `:159-162`, `coderd/x/chatd/chat_mutations.go:901`, `:919`, `coderd/x/chatd/fork_cascade.go:32-39`, `:60-80`.
+  Live limit on spawn and resume, `fork_subagents.go:72-88`, `:130-199`, and its error, `:210-222`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
   The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:93-96`, `:104-106`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:541`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:187-311`, and for a project the owner owns or that is shared with them, `:264-268`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:219-222`.
-  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:263-266`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:47`.
+  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:323-326`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:88-92`, `:99-103`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:725-731`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
-  For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:36-38`, `fork_tools.go:39-43`, ending the turn, `fork_descendant_questions.go:42-52`, `coderd/x/chatd/turn_environment.go:1096`, and not in plan-mode child turns, `:2053-2062`.
+  For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:41-43`, `fork_tools.go:40-44`, ending the turn, `fork_descendant_questions.go:47-57`, `coderd/x/chatd/turn_environment.go:1096`, and not in plan-mode child turns, `:2053-2062`.
   Unanswered until the child gets a user message after the question, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-23`.
-  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:295-305`, which first waits for the answer when the question is unanswered at the call, `:263-282`, `:311-332`, added with the experiment, `fork_tools.go:44-46`.
-  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:54`, `coderd/fork_chat_questions.go:52-101`.
+  `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:352-366`, which first waits for the answer when the question is unanswered at the call, `:320-339`, `:371-392`, added with the experiment, `fork_tools.go:45-47`.
+  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:54`, `coderd/fork_chat_questions.go:53-102`.
   The root chat page shows the oldest one only with the experiment and only on a root chat the viewer can act on, `site/src/pages/AgentsPage/components/ForkDescendantQuestionDock.tsx:38-46`, `:80-81`, `:123-136`, and posts the answer to the asking chat, `site/src/api/queries/forkChatQuestions.ts:55-57`.
   The root chat's own open question hides it until that answer is queued, `site/src/pages/AgentsPage/components/ChatPageContent.tsx:224-229`, `:288-302`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
@@ -539,12 +569,17 @@ Checked against fork `main` at `5f6b636911`:
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:32`, and run as the chat owner, `fork_search_chats.go:97-103`.
   Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:47-56`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
-- No notification or PR tool: no matches in `coderd/x/chatd` for `notify_user` or `pull_request`.
-- Wake-ups, only with `fork-chat-wakeups`: `schedule_wakeup` and `wait_for_events`, `coderd/x/chatd/fork_tools.go:35-38`, not in the plan-mode or `explore` allowlists, `turn_environment.go:2054-2069`, `:2126-2135`.
+- No PR tool: no matches in `coderd/x/chatd` for `pull_request`.
+- Wake-ups, only with `fork-chat-wakeups`: `schedule_wakeup`, `wait_for_events`, and `notify_user`, `coderd/x/chatd/fork_tools.go:35-39`, not in the plan-mode or `explore` allowlists, `turn_environment.go:2054-2069`, `:2126-2135`.
   Arguments and result, `coderd/x/chatd/fork_schedule_wakeup.go:54-70`, `:99-113`, the description, `:77-82`, one schedule, `:119-142`, and the limits, `:31-35`, `:160-202`, `:226-228`.
   `/loop`, `coderd/x/chatd/fork_loop_command.go:26-31`, `:44-59`, `:100-135`, scheduled with the message, `coderd/x/chatd/chat_mutations.go:88`, `:221`, or with a new chat, `coderd/x/chatd/chatd.go:677`, `:797`.
-  Delivery every 15&nbsp;seconds, `coderd/x/chatd/fork_wakeups.go:28`, `:43-61`, as the chat owner, `:235-252`, after a busy chat goes idle, `:138-146`, canceled for an archived chat, `:134-135`, and no missed runs replayed, `:315-351`.
+  Delivery every 15&nbsp;seconds, `coderd/x/chatd/fork_wakeups.go:28`, `:43-61`, as the chat owner, `:241-260`, after a busy chat goes idle, `:138-146`, canceled for an archived chat, `:134-135`, and no missed runs replayed, `:326-362`.
   `wait_for_events` arguments, defaults, and result, `coderd/x/chatd/fork_wait_for_events.go:28-53`, the description, `:67-74`, the watched children and the errors, `:156-217`, the expiry and the prompt, which `validate` checks like a `schedule_wakeup` prompt, `:219-238`, `fork_schedule_wakeup.go:160-169`.
-  One message per done child, while the chat is idle, `fork_wait_for_events.go:251-305`, `fork_wakeups.go:138-148`, and completed after the last child, `fork_wait_for_events.go:307-314`, polling every 15&nbsp;seconds, `fork_wakeups.go:335-336`.
-  Done children, `fork_wait_for_events.go:322-335`, with the children that wait for their own `wait_for_events` or for an answer read in one snapshot, `:337-381`.
+  One message per done child, while the chat is idle, `fork_wait_for_events.go:251-308`, `fork_wakeups.go:138-148`, and completed after the last child, `fork_wait_for_events.go:310-317`, polling every 15&nbsp;seconds, `fork_wakeups.go:346-347`.
+  Done children, `fork_wait_for_events.go:325-338`, with the children that wait for their own `wait_for_events` or for an answer read in one snapshot, `:340-384`.
   No wake-up route or page: `wakeup` has no match in `coderd/*.go` or `site/src/pages`.
+  The daily limits, `coderd/x/chatd/fork_wakeup_caps.go:22-38`, `:51-96`, checked before each send, `fork_wakeups.go:150-152`, `fork_wait_for_events.go:295-297`, over delivered runs and every message cost, `coderd/database/forkdb/queries/chat_wakeups.sql:186-219`.
+  The other pauses, `fork_wakeups.go:307-310`, `:339-344`, `fork_wait_for_events.go:262`, and the notification after each pause, `fork_wakeups.go:205-207`, `:299-301`, `:378-380`, with its title, reasons, and the chat title in its text, once per chat, reason, and title a UTC day, `fork_wakeup_caps.go:36-49`, `:98-128`, by the dedupe hash, `coderd/database/migrations/000245_notifications_dedupe.up.sql:13-26`.
+  No resume or removal of a paused wake-up: nothing in `coderd/x/chatd` calls `UpdateChatWakeupStatus` or `CancelChatWakeupsByChatID`, and the limit of 10 counts paused wake-ups, `fork_schedule_wakeup.go:213-228`.
+- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-158`, and the send with a dedupe bucket per minute, `:124-143`, which enqueues nothing without a delivery method, `coderd/notifications/enqueuer.go:104-117`, removed by a custom agent tool policy, `fork_agent_tool_policy.go:208-229`, with pause notifications sent past the limit, `fork_wakeup_caps.go:102-128`, counted in `chat_wakeups.sql:222-228`.
+  The title and message limits, `codersdk/notifications.go:299-321`, the inbox and the deployment's method, `coderd/notifications/enqueuer.go:104-116`, and the notifications that a turned-off template or the dedupe drops without an error, `:138-165`.
