@@ -103,6 +103,26 @@ func TestNestedInterruptCascade(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, interrupted)
 		f.requireStatus(t, database.ChatStatusWaiting, child, grandchild)
+	}) // A descendant whose worker is already interrupting it transitions
+	// nothing, so the cascade must not report the interrupt as taken.
+	t.Run("IdleTargetAlreadyInterruptingDescendant", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+		ctx := chatdTestContext(t)
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		owned := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+		f.setStatus(t, f.root, database.ChatStatusWaiting, uuid.NullUUID{})
+		f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
+		f.setStatus(t, grandchild, database.ChatStatusInterrupting, owned)
+
+		_, interrupted, err := f.server.interruptSubagent(ctx, f.root.ID, child.ID)
+		require.NoError(t, err)
+		require.False(t, interrupted)
+		f.requireStatus(t, database.ChatStatusInterrupting, grandchild)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {
