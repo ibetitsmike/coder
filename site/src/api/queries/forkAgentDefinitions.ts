@@ -50,7 +50,16 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 		onSuccess: ({ content: _content, ...created }, { organizationId }) => {
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
-				(definitions) => definitions && [...definitions, created],
+				// A refetch can list the definition before this response
+				// arrives, so replace that row instead of adding a second one.
+				(definitions) =>
+					definitions && [
+						...definitions.filter(
+							(listed) =>
+								listed.id !== created.id && listed.name !== created.name,
+						),
+						created,
+					],
 			);
 		},
 		onSettled: (_data, _error, { organizationId }) =>

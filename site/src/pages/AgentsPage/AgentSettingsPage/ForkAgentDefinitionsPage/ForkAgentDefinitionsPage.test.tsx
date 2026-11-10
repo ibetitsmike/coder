@@ -269,6 +269,37 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 	});
 
+	it("keeps one row for a created definition a refetch already listed", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(queryClient.getQueryState(key)?.status).toBe("error"),
+		);
+		expect(queryClient.getQueryData(key)).toEqual([
+			MockForkAgentDefinitionMetadata,
+		]);
+	});
+
 	it("creates a definition from an imported file with all its front-matter", async () => {
 		const user = userEvent.setup();
 		renderPage();
