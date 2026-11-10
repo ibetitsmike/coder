@@ -53,6 +53,19 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		orgSubagents.Get("/organizations/{organization}/subagent-limits", api.forkOrganizationSubagentLimits)
 		orgSubagents.Put("/organizations/{organization}/subagent-limits", api.updateForkOrganizationSubagentLimits)
 
+		orgAgentDefinitions := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		const orgAgentDefinitionsPath = "/organizations/{organization}/agent-definitions"
+		orgAgentDefinitions.Get(orgAgentDefinitionsPath, api.forkOrganizationAgentDefinitions)
+		orgAgentDefinitions.Post(orgAgentDefinitionsPath, api.postForkOrganizationAgentDefinition)
+		orgAgentDefinitions.Get(orgAgentDefinitionsPath+"/{agentDefinition}", api.forkOrganizationAgentDefinition)
+		orgAgentDefinitions.Patch(orgAgentDefinitionsPath+"/{agentDefinition}", api.patchForkOrganizationAgentDefinition)
+		orgAgentDefinitions.Delete(orgAgentDefinitionsPath+"/{agentDefinition}", api.deleteForkOrganizationAgentDefinition)
+		orgAgentDefinitions.Get(orgAgentDefinitionsPath+"/{agentDefinition}/acl", api.forkOrganizationAgentDefinitionACL)
+		orgAgentDefinitions.Patch(orgAgentDefinitionsPath+"/{agentDefinition}/acl", api.patchForkOrganizationAgentDefinitionACL)
+
 		userAgentDefinitions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
 			httpmw.ExtractOrganizationParam(api.Database),

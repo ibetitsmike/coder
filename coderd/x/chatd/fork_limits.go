@@ -5,7 +5,9 @@ package chatd
 
 import (
 	"cmp"
+	"database/sql"
 
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -35,7 +37,36 @@ func forkLimitsFromConfig(cfg codersdk.ForkChatConfig) ForkLimits {
 	}
 }
 
-func (l ForkLimits) withDefaults() ForkLimits {
+// WithDefaults sets the default subagent depth when it is unset.
+func (l ForkLimits) WithDefaults() ForkLimits {
 	l.MaxSubagentDepth = cmp.Or(l.MaxSubagentDepth, codersdk.DefaultChatMaxSubagentDepth)
 	return l
+}
+
+// EffectiveSubagentLimits returns the subagent limits in force in an
+// organization: the deployment limits, lowered by the organization's where
+// it sets them. A capacity limit of 0 means no limit.
+func EffectiveSubagentLimits(deployment ForkLimits, org forkdb.ChatOrganizationSubagentLimit) ForkLimits {
+	limits := ForkLimits{
+		MaxSubagentDepth:                deployment.MaxSubagentDepth,
+		MaxConcurrentSubagents:          effectiveCapacityLimit(deployment.MaxConcurrentSubagents, org.MaxConcurrent),
+		MaxConcurrentSubagentsPerFamily: effectiveCapacityLimit(deployment.MaxConcurrentSubagentsPerFamily, org.MaxConcurrentPerFamily),
+		MaxLiveSubagentsPerFamily:       effectiveCapacityLimit(deployment.MaxLiveSubagentsPerFamily, org.MaxLivePerFamily),
+	}
+	if org.MaxDepth.Valid {
+		limits.MaxSubagentDepth = min(limits.MaxSubagentDepth, int(org.MaxDepth.Int32))
+	}
+	return limits
+}
+
+// effectiveCapacityLimit lowers the deployment limit to the organization's.
+// 0 means no limit.
+func effectiveCapacityLimit(deployment int, org sql.NullInt32) int {
+	if !org.Valid {
+		return deployment
+	}
+	if deployment == 0 {
+		return int(org.Int32)
+	}
+	return min(deployment, int(org.Int32))
 }

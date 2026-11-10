@@ -36,6 +36,9 @@ type Querier interface {
 	// history is delivered. Older chats start at their newest message so linking
 	// does not replay history.
 	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
+	// Reports whether no worker with a fresh heartbeat owns the chat, with the
+	// heartbeat predicate of GetChatQueuedForCapacity.
+	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
@@ -43,6 +46,7 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
@@ -64,6 +68,7 @@ type Querier interface {
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
+	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
 	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error

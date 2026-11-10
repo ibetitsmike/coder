@@ -121,3 +121,39 @@ func TestCountLiveSubagentsInFamily(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 4, live)
 }
+
+func TestGetChatAwaitingWorker(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	seed := database.Chat{
+		OrganizationID:    dbgen.Organization(t, db, database.Organization{}).ID,
+		OwnerID:           dbgen.User(t, db, database.User{}).ID,
+		LastModelConfigID: dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}).ID,
+		Status:            database.ChatStatusRunning,
+	}
+	// owned returns a chat owned by a runner whose heartbeat is age old.
+	owned := func(age time.Duration) database.Chat {
+		c := dbgen.Chat(t, db, seed)
+		runnerID := uuid.New()
+		_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET worker_id = $2, runner_id = $3 WHERE id = $1", c.ID, uuid.New(), runnerID)
+		require.NoError(t, err)
+		_, err = sqlDB.ExecContext(ctx,
+			"INSERT INTO chat_heartbeats (chat_id, runner_id, heartbeat_at) VALUES ($1, $2, NOW() - ($3 * INTERVAL '1 second'))",
+			c.ID, runnerID, int(age.Seconds()))
+		require.NoError(t, err)
+		return c
+	}
+	awaiting := func(c database.Chat) bool {
+		t.Helper()
+		got, err := fdb.GetChatAwaitingWorker(ctx, forkdb.GetChatAwaitingWorkerParams{ChatID: c.ID, StaleSeconds: 60})
+		require.NoError(t, err)
+		return got
+	}
+	require.True(t, awaiting(dbgen.Chat(t, db, seed)), "unowned")
+	require.True(t, awaiting(owned(time.Hour)), "stale heartbeat")
+	require.False(t, awaiting(owned(0)), "fresh heartbeat")
+}

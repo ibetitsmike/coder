@@ -67,6 +67,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
 		},
+		"GetChatAwaitingWorker": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.GetChatAwaitingWorkerParams{})
+			fdb.EXPECT().GetChatAwaitingWorker(gomock.Any(), arg).Return(true, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(true)
+		},
 		"GetChatOrganizationSubagentLimits": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			limits := testutil.Fake(t, faker, forkdb.ChatOrganizationSubagentLimit{})
 			fdb.EXPECT().GetChatOrganizationSubagentLimits(gomock.Any(), limits.OrganizationID).Return(limits, nil).AnyTimes()
@@ -337,6 +342,19 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns(def)
 		},
+		"GetOrganizationAgentDefinitionByNameForUpdate": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams{OrganizationID: def.OrganizationID, Name: def.Name}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByNameForUpdate(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns(def)
+		},
+		"UpdateOrganizationAgentDefinitionACLByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.UpdateOrganizationAgentDefinitionACLByNameParams{OrganizationID: def.OrganizationID, Name: def.Name, GroupAcl: database.ChatACL{}, UserAcl: def.UserAcl}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}).Return(def, nil).AnyTimes()
+			fdb.EXPECT().UpdateOrganizationAgentDefinitionACLByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionShare).Returns(def)
+		},
 		// The NotAuthorized subtest gets no rows back: the post-filter drops
 		// every row that the actor cannot read.
 		"ListOrganizationAgentDefinitionMetadata": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
@@ -556,6 +574,69 @@ func TestUserAgentDefinitionOrganizationMembership(t *testing.T) {
 					require.True(t, dbauthz.IsNotAuthorizedError(err), "%s: expected authorization failure, got: %v", op.name, err)
 				}
 			}
+		})
+	}
+}
+
+// TestOrganizationAgentDefinitionOrganizationMembership runs the
+// organization-tier reads against the real authorizer: RBAC applies ACL
+// grants only to organization members, so a direct grant stops working once
+// its user leaves the organization.
+func TestOrganizationAgentDefinitionOrganizationMembership(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	store, _ := dbtestutil.NewDB(t)
+	db := dbauthz.New(store, rbac.NewAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, &slogtest.Options{
+		IgnoreErrors: true,
+	}), coderdtest.AccessControlStorePointer())
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	rawFDB, err := forkdb.From(store)
+	require.NoError(t, err)
+
+	org := dbgen.Organization(t, store, database.Organization{})
+	grantee := dbgen.User(t, store, database.User{})
+	_, err = rawFDB.InsertOrganizationAgentDefinition(ctx, forkdb.InsertOrganizationAgentDefinitionParams{
+		OrganizationID: org.ID,
+		Name:           "shared",
+		Content:        "Review the change.",
+		GroupAcl:       database.ChatACL{},
+		UserAcl:        database.ChatACL{grantee.ID.String(): {Permissions: []policy.Action{policy.ActionRead}}},
+	})
+	require.NoError(t, err)
+	subject := func(roles ...rbac.RoleIdentifier) rbac.Subject {
+		return rbac.Subject{
+			ID:     grantee.ID.String(),
+			Roles:  must(rolestore.Expand(ctx, store, roles)),
+			Groups: []string{},
+			Scope:  rbac.ExpandableScope(rbac.ScopeAll),
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		subject rbac.Subject
+		allowed bool
+	}{
+		{name: "member", subject: subject(rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID)), allowed: true},
+		{name: "removed-member", subject: subject(rbac.RoleMember()), allowed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := dbauthz.As(testutil.Context(t, testutil.WaitLong), tc.subject)
+			_, getErr := fdb.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: org.ID, Name: "shared"})
+			rows, listErr := fdb.ListOrganizationAgentDefinitionMetadata(ctx, org.ID)
+			if tc.allowed {
+				require.NoError(t, getErr)
+				require.NoError(t, listErr)
+				require.Len(t, rows, 1)
+				return
+			}
+			require.True(t, dbauthz.IsNotAuthorizedError(getErr), "get: %v", getErr)
+			require.NoError(t, listErr)
+			require.Empty(t, rows)
 		})
 	}
 }

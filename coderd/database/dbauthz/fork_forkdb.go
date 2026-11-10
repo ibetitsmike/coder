@@ -109,6 +109,13 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return false, err
+	}
+	return f.db.GetChatAwaitingWorker(ctx, arg)
+}
+
 func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
 		return forkdb.ChatOrganizationSubagentLimit{}, err
@@ -150,6 +157,10 @@ func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chat
 
 func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByName)(ctx, arg)
+}
+
+func (f *forkQuerier) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams) (forkdb.AgentDefinition, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByNameForUpdate)(ctx, arg)
 }
 
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
@@ -276,6 +287,16 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionShare, fetch, f.db.UpdateOrganizationAgentDefinitionACLByName)(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
