@@ -98,8 +98,12 @@ API chats outside plan mode and child chats don't have it.
 
 `todo_write` and `todo_read` exist only when the deployment enables the `fork-chat-todos` experiment.
 Plan-mode turns and `explore` children don't get them.
+An item's status is `pending`, `in_progress`, `done`, or `cancelled`.
+A `todo_write` with any other status, such as `completed`, fails and stores nothing.
 The list survives a compaction.
 The web UI shows a non-empty list in a pill in the composer.
+In the conversation, the web UI shows each `todo_write` and `todo_read` call as a card, such as **Updated todos (1/3 done)**.
+The card of a call that returns a non-empty list expands to the list, and the card of a failed call expands to its error.
 
 ### Attachments
 
@@ -142,11 +146,15 @@ A definition whose effort isn't a valid reasoning effort fails every spawn.
 A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
-With the experiment, the API also stores definitions for one user in an organization and for a whole organization.
-`spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization and the enabled organization definitions that the owner can read.
-A name that only one of the workspace, personal, and organization sources defines keeps its bare name.
-A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, or `org/<name>`.
+With the experiment, the API also stores definitions for one user in an organization, for a whole organization, and for a chat project.
+`spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
+It offers project definitions only when the chat owner owns the project or the project is shared with them, and a child chat uses its root chat's project.
+A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
+A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
+When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
+`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` report a custom child's definition name in `type`, not `general`.
+That name has no `workspace/`, `personal/`, `org/`, or `project/` prefix, so do not pass it back to `spawn_agent` when more than one source defines it.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
 ### Custom agent tool policy
@@ -215,6 +223,7 @@ These three flags default to 0, which means no limit.
 An organization's `max_concurrent`, `max_concurrent_per_family`, and `max_live_per_family` subagent limits apply too, and the lower of the deployment and organization values wins.
 An organization admin or auditor can read the flag values and the lower values in the `deployment` and `effective` fields of `GET /api/v2/chats/fork/organizations/{organization}/subagent-limits`.
 Neither field includes the default cap of 10 subagent turns.
+An organization admin can also change the organization values in the **Subagent limits** section of **AI Settings** > **Coder Agents**, and an auditor can view them there.
 
 ## Models
 
@@ -286,7 +295,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `e6cd44a997`:
+Checked against fork `main` at `c43627ac25`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -298,9 +307,9 @@ Checked against fork `main` at `e6cd44a997`:
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:97-100`, 30-second wait, `:26`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
   Front-matter fields and the `general` default base type: `codersdk/workspacesdk/fork_agentdefinition.go:63-76`, `:99-103`, `:171-181`.
-  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-54`, `:101-111`, called from `subagent_catalog.go:185` and `:233`.
-  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:346`.
-  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:317-328`, and the model match, `:353-379`.
+  Custom types only with `fork-agent-definitions`, listed after the built-in types, with built-in names winning: `coderd/x/chatd/fork_agent_definitions.go:37-45`, `:51-54`, `:102-112`, called from `subagent_catalog.go:185` and `:233`.
+  The definition's body becomes the child's system prompt, `fork_agent_definitions.go:379`.
+  The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:350-361`, and the model match, `:386-412`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
   Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
@@ -312,13 +321,16 @@ Checked against fork `main` at `e6cd44a997`:
 - `wait_agent` returns the last assistant message: `subagent_operations.go:643-675`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:274-282`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
+  The organization settings section, only with `fork-nested-subagents` and for a user who can read the organization's chat model configs, `site/src/pages/AISettingsPage/CoderAgentsPage/ForkSubagentLimits.tsx:31-55`, read-only without edit permission, `components/ForkSubagentLimitsSettings.tsx:179-189`.
   Concurrency limits without the ancestors, `fork_capacity.go:75-117`, and `waiting_for_capacity` in `list_agents`, `coderd/x/chatd/fork_list_agents.go:34-40`, `:81-88`, from `fork_capacity.go:146-192`.
   `list_agents` pages of 10 and `paused`, `coderd/x/chatd/subagent.go:570-589`, and `wait_agent` on a `paused` child, `:479-487`.
   `wait_agent` returns at once for `requires_action`, `coderd/x/chatd/subagent_operations.go:629-640`, and `interrupt_agent` moves it to `running`, `:160-177`.
   `interrupt_agent` interrupts the active descendants first, for any status, `:160-162`, `coderd/x/chatd/chat_mutations.go:883`, `:893-895`, `coderd/x/chatd/fork_cascade.go:32-39`, `:83-92`.
   Live limit on spawn and resume, `fork_subagents.go:72-88`, `:106-139`, and its error, `:150-162`, with the live statuses, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
-  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:179-272`.
-  Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-140`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
+  Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
+  Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:181-305`, and for a project the owner owns or that is shared with them, `:258-262`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
+  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:233-236`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:34`.
+  Bare names for one source and qualified names for several, `fork_agent_definitions.go:95-142`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:724-730`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
@@ -331,8 +343,10 @@ Checked against fork `main` at `e6cd44a997`:
 - Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:340-343`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
+  Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:20-35`, `:42-49`, with its labels, `ForkTodoTool.tsx:37-50`, `:67-77`, and its expandable list or error, `:78-99`, `:115-128`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-33`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:32`.

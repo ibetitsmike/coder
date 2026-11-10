@@ -112,6 +112,14 @@ func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID,
 // pendingDescendantQuestion returns the unanswered question of chatID, or
 // nil when there is none.
 func (p *Server) pendingDescendantQuestion(ctx context.Context, chatID uuid.UUID) (json.RawMessage, error) {
+	question, err := p.pendingDescendantQuestionRow(ctx, chatID)
+	if err != nil || question == nil {
+		return nil, err
+	}
+	return question.Questions, nil
+}
+
+func (p *Server) pendingDescendantQuestionRow(ctx context.Context, chatID uuid.UUID) (*forkdb.ChatDescendantQuestion, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		return nil, err
@@ -123,7 +131,7 @@ func (p *Server) pendingDescendantQuestion(ctx context.Context, chatID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	return question.Questions, nil
+	return &question, nil
 }
 
 // descendantQuestionWaitTool is wait_agent that reports needs_input while
@@ -171,9 +179,10 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	}
 	deadline := t.server.clock.Now().Add(timeout)
 
-	questions, err := t.server.pendingDescendantQuestion(ctx, childID)
-	if err == nil && questions != nil {
-		questions, err = t.server.awaitDescendantAnswer(ctx, childID, timeout)
+	pending, err := t.server.pendingDescendantQuestionRow(ctx, childID)
+	var questions json.RawMessage
+	if err == nil && pending != nil {
+		questions, err = t.server.awaitDescendantAnswer(ctx, childID, pending.ToolCallID, timeout)
 		if err == nil {
 			// An unanswered child gets a short wait that collects its status
 			// and report; an answered one is waited on for the rest of the
@@ -215,9 +224,10 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	return toolJSONResponse(result), nil
 }
 
-// awaitDescendantAnswer polls until the question of childID is answered, and
-// returns the question when it is still unanswered after timeout.
-func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, timeout time.Duration) (json.RawMessage, error) {
+// awaitDescendantAnswer polls until the question toolCallID of childID is
+// answered or replaced. It returns the pending question, if any, when it
+// stops.
+func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, toolCallID string, timeout time.Duration) (json.RawMessage, error) {
 	timer := p.clock.NewTimer(timeout, "chatd", "descendant_question_await")
 	defer timer.Stop()
 	ticker := p.clock.NewTicker(descendantQuestionPollInterval, "chatd", "descendant_question_poll")
@@ -230,9 +240,12 @@ func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, t
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		questions, err := p.pendingDescendantQuestion(ctx, childID)
-		if err != nil || questions == nil {
+		question, err := p.pendingDescendantQuestionRow(ctx, childID)
+		if err != nil || question == nil {
 			return nil, err
+		}
+		if question.ToolCallID != toolCallID {
+			return question.Questions, nil
 		}
 	}
 }
