@@ -184,7 +184,7 @@ func TestSubstituteExecuteSecretAnswers(t *testing.T) {
 	}
 	// Every character here ends or escapes a shell word or runs code when
 	// the value is spliced into the command.
-	const value = "a'b\"c$(echo INJECTED);d`echo INJECTED`\ne\\f"
+	const value = "a'b\"c;d|echo INJECTED&e*\nf\\g"
 	answers := []forkdb.ChatSecretAnswer{{ToolCallID: "call_other", Value: "unused-value"}, {ToolCallID: "call_s", Value: value}}
 	// The model writes the placeholder bare, in double quotes and in
 	// single quotes.
@@ -225,14 +225,23 @@ func TestSubstituteExecuteSecretAnswers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `{"command":"echo hi","workdir":"unused-value"}`, input)
 
-	// Bash runs the subscript of an array reference in a value that it
-	// evaluates as arithmetic, as in $(( )).
-	arithmetic := []forkdb.ChatSecretAnswer{{ToolCallID: "call_a", Value: "a[$(echo INJECTED)0]"}, {ToolCallID: "call_b", Value: "p[w]$d"}}
-	_, err = substituteExecuteSecretAnswers(`{"command":"echo $(( {{secret:call_a}} ))"}`, arithmetic)
-	require.ErrorContains(t, err, "the value of {{secret:call_a}} holds [ and then $ or a backtick")
-	_, err = substituteExecuteSecretAnswers(`{"command":"echo {{secret:call_b}}"}`, arithmetic)
-	require.Error(t, err)
-	require.False(t, secretArithmeticUnsafe("p$w[d]"), "a $ before the subscript is not expanded")
+	// A value that holds its own placeholder is substituted once.
+	self := []forkdb.ChatSecretAnswer{{ToolCallID: "call_s", Value: "{{secret:call_s}}'; echo INJECTED; #"}}
+	input, err = substituteExecuteSecretAnswers(`{"command":"printf '%s' {{secret:call_s}}","workdir":"/tmp"}`, self)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(input), &decoded))
+	//nolint:gosec // The test runs the command the wrapper wrote.
+	out, err = exec.CommandContext(chatdTestContext(t), "sh", "-c", decoded.Command).Output()
+	require.NoError(t, err, decoded.Command)
+	require.Equal(t, self[0].Value, string(out))
+
+	// Bash evaluates a variable again in arithmetic, as in $(( )), and in
+	// array subscripts, so a value with $ or a backtick could run there.
+	for _, unsafe := range []string{"a[$(echo INJECTED)0]", "a`echo INJECTED`b"} {
+		_, err = substituteExecuteSecretAnswers(`{"command":"echo $(( {{secret:call_a}} ))"}`,
+			[]forkdb.ChatSecretAnswer{{ToolCallID: "call_a", Value: unsafe}})
+		require.ErrorContains(t, err, "the value of {{secret:call_a}} holds $ or a backtick")
+	}
 
 	unchanged := `{"command":"echo hi"}`
 	input, err = substituteExecuteSecretAnswers(unchanged, answers)
@@ -265,6 +274,12 @@ func TestScrubSecretAnswers(t *testing.T) {
 	require.Equal(t, "{{secret:call_u}} {{secret:call_u}}",
 		scrubSecretAnswers(`p\u00e4ss-\ud83d\udd11-word p\u00E4ss-\uD83D\uDD11-word`, unicodeValue),
 		"an ASCII-only JSON encoder escapes each non-ASCII character")
+	slash := []forkdb.ChatSecretAnswer{{ToolCallID: "call_p", Value: "a/bcdefg"}}
+	require.Equal(t, `{"p":"{{secret:call_p}}"}`, scrubSecretAnswers(`{"p":"a\/bcdefg"}`, slash),
+		"a JSON encoder can escape /")
+	likePlaceholder := []forkdb.ChatSecretAnswer{{ToolCallID: "call_s", Value: "{{secret:my-token}}"}}
+	require.Equal(t, "x {{secret:call_s}} y", scrubSecretAnswers("x {{secret:my-token}} y", likePlaceholder),
+		"a value that starts like its placeholder leaves the placeholder whole")
 }
 
 func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
