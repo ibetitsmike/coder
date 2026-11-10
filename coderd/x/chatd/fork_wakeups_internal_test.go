@@ -1,21 +1,30 @@
 package chatd
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/agenthooks/dispatch"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
 )
 
 var wakeupTestSlot = time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
@@ -52,32 +61,41 @@ func TestWakeupDeliversIntervalWithoutReplay(t *testing.T) {
 
 func TestWakeupSkipsBusyChat(t *testing.T) {
 	t.Parallel()
-	f := newWorkerTestFixture(t)
-	ctx := testutil.Context(t, testutil.WaitLong)
-	chat := f.createWakeupChat(t)
-	forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
-	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
-		Kind:            forkdb.ChatWakeupKindInterval,
-		IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
-	})
-	worker := f.newArchiveWorker(t, nil, nil, nil)
+	for _, status := range []database.ChatStatus{
+		database.ChatStatusRunning,
+		database.ChatStatusInterrupting,
+		database.ChatStatusRequiresAction,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			chat := f.createWakeupChat(t)
+			forceExecutionState(t, f, chat.ID, status, false)
+			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+				Kind:            forkdb.ChatWakeupKindInterval,
+				IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
 
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(5*time.Second))
-	require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
-	queued, err := f.db.GetChatQueuedMessages(ctx, chat.ID)
-	require.NoError(t, err)
-	require.Empty(t, queued, "a wake-up never queues behind a busy chat")
-	require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
-	got := f.wakeup(t, wakeup.ID)
-	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
-	require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-	require.False(t, got.LeaseExpiresAt.Valid, "the next tick can claim it")
-	require.Zero(t, got.RunCount)
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(5*time.Second))
+			require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+			queued, err := f.db.GetChatQueuedMessages(ctx, chat.ID)
+			require.NoError(t, err)
+			require.Empty(t, queued, "a wake-up never queues behind a busy chat")
+			require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
+			got := f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+			require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
+			require.False(t, got.LeaseExpiresAt.Valid, "the next tick can claim it")
+			require.Zero(t, got.RunCount)
 
-	forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(20*time.Second))
-	require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
-	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+			forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(20*time.Second))
+			require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
+			require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+		})
+	}
 }
 
 func TestWakeupConcurrentWorkersDeliverOnce(t *testing.T) {
@@ -107,6 +125,10 @@ func TestWakeupConcurrentWorkersDeliverOnce(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
+	// The first delivery starts a turn, so a duplicate send would queue.
+	queued, err := f.db.GetChatQueuedMessages(ctx, chat.ID)
+	require.NoError(t, err)
+	require.Empty(t, queued)
 	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
 	require.EqualValues(t, 1, f.wakeup(t, wakeup.ID).RunCount)
 }
@@ -162,6 +184,63 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.False(t, got.NextRunAt.Valid)
 	})
 
+	t.Run("Expired", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+			ExpiresAt:       sql.NullTime{Time: wakeupTestSlot, Valid: true},
+		})
+
+		f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+		require.Equal(t, "expired", got.StatusReason.String)
+		require.False(t, got.NextRunAt.Valid)
+	})
+
+	t.Run("HookDenied", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		consumer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+			rw.Header().Set("Content-Type", "application/json")
+			_, _ = rw.Write([]byte(`{"permission": {"decision": "deny", "reason": "blocked"}, "user_message": "not allowed"}`))
+		}))
+		t.Cleanup(consumer.Close)
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		worker.server.hooks = chathooks.NewTrigger(dispatch.New(
+			slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+			consumer.Client(),
+			consumer.URL,
+			false,
+			"test-hook-secret-32-bytes-minimum!!",
+			time.Second,
+			"test-deployment",
+			"test-version",
+			prometheus.NewRegistry(),
+		))
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+		require.Equal(t, []string{"failed"}, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status, "a denied prompt must not retry every interval")
+		require.Equal(t, "hook_denied", got.StatusReason.String)
+		require.False(t, got.NextRunAt.Valid)
+		require.Zero(t, got.RunCount)
+	})
+
 	t.Run("Delay", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
@@ -202,6 +281,40 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.EqualValues(t, 2, got.RunCount)
 		require.False(t, got.NextRunAt.Valid)
 	})
+}
+
+// The started worker runs the wake-up loop when the experiment is enabled:
+// once at start, then on every poll tick.
+func TestWakeupLoopRunsInStartedWorker(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	mClock := quartz.NewMock(t)
+	mClock.Set(wakeupTestSlot.Add(time.Second))
+	first := f.createWakeupChat(t)
+	firstWakeup := f.insertWakeup(t, first, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+
+	opts := testOptions(t, f, nil)
+	opts.Clock = mClock
+	server := newUnstartedServer(t, f.pubsub, f.db)
+	server.experiments = codersdk.Experiments{codersdk.ExperimentForkChatWakeups}
+	worker, err := newChatWorker(server, opts)
+	require.NoError(t, err)
+	tickerTrap := mClock.Trap().NewTicker("chatworker", "wakeups")
+	defer tickerTrap.Close()
+	require.NoError(t, worker.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, worker.Close()) })
+
+	// The loop runs the first pass before it creates its ticker.
+	tickerTrap.MustWait(ctx).MustRelease(ctx)
+	require.Equal(t, 1, f.countPromptMessages(t, first, firstWakeup.Prompt))
+
+	second := f.createWakeupChat(t)
+	secondWakeup := f.insertWakeup(t, second, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+	mClock.Advance(wakeupPollInterval).MustWait(ctx)
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		return f.countPromptMessages(t, second, secondWakeup.Prompt) == 1
+	}, testutil.IntervalFast, "the poll tick must deliver the second wake-up")
 }
 
 func TestNextWakeupRun(t *testing.T) {
