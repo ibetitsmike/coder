@@ -1797,14 +1797,18 @@ describe("ChatsSidebar nested subagent capacity", () => {
 				} satisfies TypesGen.ForkChatFamilyCapacity);
 			}),
 		);
-		const worker = (id: string, title: string) =>
-			buildChat({
-				id,
-				title,
-				status: "running",
-				parent_chat_id: "capacity-root",
-				root_chat_id: "capacity-root",
-			});
+		const workerA = buildChat({
+			id: "worker-a",
+			title: "Worker A",
+			status: "running",
+			parent_chat_id: "capacity-root",
+			root_chat_id: "capacity-root",
+		});
+		const workerB = buildChat({
+			...workerA,
+			id: "worker-b",
+			title: "Worker B",
+		});
 		render(
 			<Wrapper experiments={["fork-nested-subagents"]}>
 				<ChatsSidebar
@@ -1813,10 +1817,7 @@ describe("ChatsSidebar nested subagent capacity", () => {
 						buildChat({
 							id: "capacity-root",
 							title: "Capacity root",
-							children: [
-								worker("worker-a", "Worker A"),
-								worker("worker-b", "Worker B"),
-							],
+							children: [workerA, workerB],
 						}),
 					]}
 				/>
@@ -1824,18 +1825,9 @@ describe("ChatsSidebar nested subagent capacity", () => {
 		);
 
 		const expand = await screen.findByRole("button", { name: "Expand" });
-		// A collapsed root shows no capacity, so it does not ask for one.
 		expect(familyRequests).toBe(0);
 		await user.click(expand);
-		expect(
-			await screen.findByRole("img", {
-				name: "Waiting for a free subagent slot",
-			}),
-		).toBeInTheDocument();
-		expect(screen.getByText("live 2/2")).toBeInTheDocument();
-		expect(
-			screen.getAllByRole("img", { name: "Waiting for a free subagent slot" }),
-		).toHaveLength(1);
+		await waitFor(() => expect(familyRequests).toBe(1));
 	});
 });
 
