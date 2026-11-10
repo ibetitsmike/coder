@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it } from "vitest";
+import { chatEntityKey } from "#/api/queries/chats";
 import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
 import type {
 	ChatDescendantQuestion,
@@ -148,7 +149,12 @@ describe("ForkDescendantQuestionDock", () => {
 		]);
 		const user = userEvent.setup();
 
-		renderDock();
+		const { queryClient } = renderDock();
+		// The child's chat was opened before, so its entity is cached.
+		queryClient.setQueryData(chatEntityKey(mockOldestQuestion.chat_id), {
+			...MockChat,
+			id: mockOldestQuestion.chat_id,
+		});
 
 		await user.click(
 			await screen.findByRole("radio", { name: /Skip old rows/ }),
@@ -173,6 +179,10 @@ describe("ForkDescendantQuestionDock", () => {
 		await waitFor(() =>
 			expect(questionRequests).toEqual([MockChat.id, MockChat.id, MockChat.id]),
 		);
+		expect(
+			queryClient.getQueryState(chatEntityKey(mockOldestQuestion.chat_id))
+				?.isInvalidated,
+		).toBe(true);
 	});
 
 	it("does not send an answer to a question that is no longer pending", async () => {

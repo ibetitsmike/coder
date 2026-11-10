@@ -2,6 +2,11 @@ import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import { API } from "#/api/api";
 import { getChatDescendantQuestions } from "#/api/forkChatQuestions";
 import type { ChatDescendantQuestion } from "#/api/typesGenerated";
+import {
+	invalidateChatDebugRuns,
+	invalidateChatEntity,
+	invalidateChatPrompts,
+} from "./chats";
 
 /** Query key for the pending descendant questions of a root chat's family. */
 export const chatDescendantQuestionsKey = (rootChatId: string) =>
@@ -50,6 +55,13 @@ export const answerChatDescendantQuestion = (
 			return API.experimental.createChatMessage(question.chat_id, {
 				content: [{ type: "text", text }],
 			});
+		},
+		// The root page does not watch the descendant's stream, so it
+		// refreshes the descendant's caches as createChatMessage does.
+		onSuccess: (_, { question }) => {
+			void invalidateChatDebugRuns(queryClient, question.chat_id);
+			void invalidateChatEntity(queryClient, question.chat_id);
+			void invalidateChatPrompts(queryClient, question.chat_id);
 		},
 		onSettled: () =>
 			queryClient.invalidateQueries({
