@@ -116,11 +116,16 @@ func (p *Server) createSubagentWorkspace(ctx context.Context, child database.Cha
 		return database.Chat{}, xerrors.Errorf("create the child's workspace: %w", err)
 	}
 	// create_workspace reports most failures as a JSON result, not as an
-	// error response.
+	// error response. It also reports a created workspace whose agent is
+	// missing or not ready, or whose startup scripts did not finish, which
+	// the child could not use.
 	var result struct {
-		Created bool `json:"created"`
+		Created        bool   `json:"created"`
+		AgentStatus    string `json:"agent_status"`
+		StartupScripts string `json:"startup_scripts"`
 	}
-	if resp.IsError || json.Unmarshal([]byte(resp.Content), &result) != nil || !result.Created {
+	if resp.IsError || json.Unmarshal([]byte(resp.Content), &result) != nil ||
+		!result.Created || result.AgentStatus != "" || result.StartupScripts != "" {
 		return database.Chat{}, xerrors.Errorf("create the child's workspace: %s", resp.Content)
 	}
 
@@ -163,7 +168,7 @@ func (p *Server) createSubagentWorkspace(ctx context.Context, child database.Cha
 }
 
 // discardSubagent archives the child chatID whose workspace failed and stops
-// the workspace if it has one. Both are best-effort.
+// the workspace in the background if it has one. Both are best-effort.
 func (p *Server) discardSubagent(ctx context.Context, chatID uuid.UUID) {
 	// The spawn may have failed because its context was canceled, and the
 	// child must still go.
@@ -185,12 +190,40 @@ func (p *Server) discardSubagent(ctx context.Context, chatID uuid.UUID) {
 	if !archived.WorkspaceID.Valid || p.stopWorkspaceFn == nil {
 		return
 	}
-	if _, err := p.stopWorkspaceFn(ctx, archived.OwnerID, archived.WorkspaceID.UUID, codersdk.CreateWorkspaceBuildRequest{
-		Transition: codersdk.WorkspaceTransitionStop,
+	// The stop can wait for the create build that the spawn gave up on.
+	stopCtx, stop := p.inflightContext(ctx)
+	if err := p.goInflight(func() {
+		defer stop()
+		if err := p.stopSubagentWorkspace(stopCtx, archived); err != nil {
+			p.logger.Warn(stopCtx, "stop workspace of subagent that failed to start",
+				slog.F("chat_id", chatID), slog.F("workspace_id", archived.WorkspaceID.UUID), slog.Error(err))
+		}
 	}); err != nil {
-		p.logger.Warn(ctx, "stop workspace of subagent that failed to start",
-			slog.F("chat_id", chatID), slog.F("workspace_id", archived.WorkspaceID.UUID), slog.Error(err))
+		stop()
+		p.logger.Warn(ctx, "schedule stop of subagent workspace", slog.F("chat_id", chatID), slog.Error(err))
 	}
+}
+
+// stopSubagentWorkspace stops the workspace of child with the stop_workspace
+// tool, which first waits for an active build and does nothing when the
+// workspace is already stopped.
+func (p *Server) stopSubagentWorkspace(ctx context.Context, child database.Chat) error {
+	tool := chattool.StopWorkspace(p.db, child.ID, chattool.StopWorkspaceOptions{
+		OwnerID: child.OwnerID,
+		StopFn:  p.stopWorkspaceFn,
+		Logger:  p.logger,
+	})
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: child.ID.String(), Name: tool.Info().Name, Input: "{}"})
+	if err != nil {
+		return xerrors.Errorf("stop workspace: %w", err)
+	}
+	var result struct {
+		Stopped bool `json:"stopped"`
+	}
+	if resp.IsError || json.Unmarshal([]byte(resp.Content), &result) != nil || !result.Stopped {
+		return xerrors.Errorf("stop workspace: %s", resp.Content)
+	}
+	return nil
 }
 
 // subagentWorkspaceName returns the name of the workspace of a child spawned

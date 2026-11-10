@@ -21,13 +21,18 @@ import (
 )
 
 // fakeWorkspaces stands in for coderd's workspace creation and stop. A
-// created workspace is bound to the chat; its build fails with buildFails,
-// and createErr fails the creation itself.
+// created workspace is bound to the chat and has an agent that conns
+// connects to. Its build fails with buildFails, it has no agent with noAgent,
+// its startup scripts fail with startupFails, and createErr fails the creation
+// itself.
 type fakeWorkspaces struct {
-	t          *testing.T
-	db         database.Store
-	createErr  error
-	buildFails bool
+	t            *testing.T
+	db           database.Store
+	conns        *sync.Map
+	createErr    error
+	buildFails   bool
+	noAgent      bool
+	startupFails bool
 
 	mu      sync.Mutex
 	creates []codersdk.CreateWorkspaceRequest
@@ -54,9 +59,24 @@ func (w *fakeWorkspaces) create(ctx context.Context, ownerID, chatID uuid.UUID, 
 	}).Seed(database.WorkspaceBuild{TemplateVersionID: template.ActiveVersionID})
 	if w.buildFails {
 		builder = builder.Failed()
+	} else if !w.noAgent {
+		builder = builder.WithAgent()
 	}
 	built := builder.Do()
 	w.created = append(w.created, built.Workspace)
+	for _, agent := range built.Agents {
+		state := database.WorkspaceAgentLifecycleStateReady
+		if w.startupFails {
+			state = database.WorkspaceAgentLifecycleStateStartError
+		}
+		if err := w.db.UpdateWorkspaceAgentLifecycleStateByID(ctx, database.UpdateWorkspaceAgentLifecycleStateByIDParams{
+			ID:             agent.ID,
+			LifecycleState: state,
+		}); err != nil {
+			return codersdk.Workspace{}, database.Chat{}, err
+		}
+		w.conns.Store(agent.ID, &fakeWorktreeConn{})
+	}
 	chat, err := w.db.UpdateChatWorkspaceBinding(ctx, database.UpdateChatWorkspaceBindingParams{
 		ID:          chatID,
 		WorkspaceID: uuid.NullUUID{UUID: built.Workspace.ID, Valid: true},
@@ -72,12 +92,23 @@ func (w *fakeWorkspaces) create(ctx context.Context, ownerID, chatID uuid.UUID, 
 	}, chat, nil
 }
 
-func (w *fakeWorkspaces) stop(_ context.Context, _ uuid.UUID, workspaceID uuid.UUID, req codersdk.CreateWorkspaceBuildRequest) (codersdk.WorkspaceBuild, error) {
+func (w *fakeWorkspaces) stop(ctx context.Context, _ uuid.UUID, workspaceID uuid.UUID, req codersdk.CreateWorkspaceBuildRequest) (codersdk.WorkspaceBuild, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	require.Equal(w.t, codersdk.WorkspaceTransitionStop, req.Transition)
 	w.stops = append(w.stops, workspaceID)
-	return codersdk.WorkspaceBuild{}, nil
+	workspace, err := w.db.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return codersdk.WorkspaceBuild{}, err
+	}
+	latest, err := w.db.GetLatestWorkspaceBuildByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return codersdk.WorkspaceBuild{}, err
+	}
+	built := dbfake.WorkspaceBuild(w.t, w.db, workspace.WorkspaceTable()).
+		Seed(database.WorkspaceBuild{BuildNumber: latest.BuildNumber + 1, Transition: database.WorkspaceTransitionStop}).
+		Do()
+	return codersdk.WorkspaceBuild{ID: built.Build.ID}, nil
 }
 
 // workspaceRoot returns a root chat bound to a workspace of a new template in
@@ -85,6 +116,7 @@ func (w *fakeWorkspaces) stop(_ context.Context, _ uuid.UUID, workspaceID uuid.U
 func (f *isolationFixture) workspaceRoot(t *testing.T, workspaces *fakeWorkspaces) (database.Chat, database.Template) {
 	t.Helper()
 	ctx := chatdTestContext(t)
+	workspaces.conns = &f.conns
 	f.server.createWorkspaceFn = workspaces.create
 	f.server.stopWorkspaceFn = workspaces.stop
 	version := dbgen.TemplateVersion(t, f.db, database.TemplateVersion{OrganizationID: f.org.ID, CreatedBy: f.user.ID})
@@ -210,6 +242,22 @@ func TestForkSpawnIsolationWorkspace(t *testing.T) {
 			wantErr:  "workspace build failed",
 			wantStop: true,
 		},
+		{
+			name: "NoAgent",
+			workspaces: func(t *testing.T, db database.Store) *fakeWorkspaces {
+				return &fakeWorkspaces{t: t, db: db, noAgent: true}
+			},
+			wantErr:  "no_agent",
+			wantStop: true,
+		},
+		{
+			name: "StartupScriptsFail",
+			workspaces: func(t *testing.T, db database.Store) *fakeWorkspaces {
+				return &fakeWorkspaces{t: t, db: db, startupFails: true}
+			},
+			wantErr:  "startup_scripts_failed",
+			wantStop: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -229,6 +277,8 @@ func TestForkSpawnIsolationWorkspace(t *testing.T) {
 			require.True(t, child.Archived)
 			require.Equal(t, database.ChatStatusWaiting, child.Status)
 
+			// The workspace is stopped in the background.
+			f.server.drainInflight()
 			workspaces.mu.Lock()
 			defer workspaces.mu.Unlock()
 			if tc.wantStop {
