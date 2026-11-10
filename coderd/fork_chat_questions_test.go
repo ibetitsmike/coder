@@ -92,6 +92,8 @@ func TestForkChatDescendantQuestions(t *testing.T) {
 			`[{"header": "DB", "question": "Which database?", "options": [{"label": "Postgres"}, {"label": "SQLite"}]}]`)
 		childAsked := ask(child, "call-child",
 			`[{"header": "API", "question": "REST or gRPC?", "options": [{"label": "REST"}]}]`)
+		// A row that does not decode is skipped instead of failing the family.
+		_ = ask(newChat(t, db, user, &root), "call-malformed", `{"header": "not a list"}`)
 		want := []codersdk.ChatDescendantQuestion{{
 			ChatID:       grandchild.ID,
 			ParentChatID: child.ID,
