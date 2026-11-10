@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -116,6 +117,16 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	apiKey := httpmw.APIKey(r)
 	chat := httpmw.ChatParam(r)
 	toolCallID := chi.URLParam(r, "tool_call_id")
+	// chi routes on the escaped path when the ID has a character such as
+	// "/" that the client escapes, and then returns the segment escaped.
+	if r.URL.RawPath != "" {
+		unescaped, err := url.PathUnescape(toolCallID)
+		if err != nil {
+			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "Invalid tool call ID."})
+			return
+		}
+		toolCallID = unescaped
+	}
 
 	if maybeWriteChatError(ctx, rw, api.checkSendChatMessage(ctx, apiKey.UserID, chat)) {
 		return
