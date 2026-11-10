@@ -579,3 +579,102 @@ func TestForkAgentDefinitionToolResultType(t *testing.T) {
 	}
 	require.Equal(t, map[string]any{reviewerID: "reviewer", general["chat_id"].(string): subagentTypeGeneral}, types)
 }
+
+func TestForkAgentDefinitionModelAlias(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t,
+		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions},
+		func(otherModel database.ChatModelConfig) map[string]string {
+			return map[string]string{
+				"fast":  agentDefinitionMarkdown("name: fast\nmodel: FAST", "Fast."),
+				"deep":  agentDefinitionMarkdown("name: deep\nmodel: deep", "Deep."),
+				"wide":  agentDefinitionMarkdown("name: wide\nmodel: wide", "Wide."),
+				"exact": agentDefinitionMarkdown("name: exact\nmodel: "+otherModel.Model, "Exact."),
+			}
+		})
+	insertInternalAIProvider(t, f.db, database.AIProviderTypeAnthropic, "test-key", true)
+	insertInternalAIProvider(t, f.db, database.AIProviderTypeGoogle, "test-key", true)
+	aliases := func(names ...string) json.RawMessage {
+		raw, err := json.Marshal(codersdk.ChatModelCallConfig{Aliases: names})
+		require.NoError(t, err)
+		return raw
+	}
+	parentProviderModel := insertInternalChatModelConfigWithOptions(t, f.db, f.root.OrganizationID, "openai", "gpt-fast", true, aliases("fast"))
+	anthropicModel := insertInternalChatModelConfigWithOptions(t, f.db, f.root.OrganizationID, "anthropic", "claude-fast", true,
+		aliases("fast", "deep", "wide", f.otherModel.Model))
+	googleModel := insertInternalChatModelConfigWithOptions(t, f.db, f.root.OrganizationID, "google", "gemini-wide", true, aliases("wide"))
+
+	t.Run("ParentProviderWins", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "fast"})
+		require.NoError(t, err)
+		require.Equal(t, parentProviderModel.ID, child.LastModelConfigID)
+	})
+
+	t.Run("SingleMatch", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "deep"})
+		require.NoError(t, err)
+		require.Equal(t, anthropicModel.ID, child.LastModelConfigID)
+	})
+
+	t.Run("ExactModelBeatsAlias", func(t *testing.T) {
+		t.Parallel()
+		child, err := f.spawn(t, spawnAgentArgs{Type: "exact"})
+		require.NoError(t, err)
+		require.Equal(t, f.otherModel.ID, child.LastModelConfigID)
+	})
+
+	t.Run("AmbiguousOnOtherProviders", func(t *testing.T) {
+		t.Parallel()
+		_, err := f.spawn(t, spawnAgentArgs{Type: "wide"})
+		require.ErrorContains(t, err, `agent "wide" sets model "wide", an alias of several models, none on the parent chat's AI provider`)
+		require.ErrorContains(t, err, "claude-fast ("+anthropicModel.ID.String()+")")
+		require.ErrorContains(t, err, "gemini-wide ("+googleModel.ID.String()+")")
+	})
+
+	t.Run("ListedModelsShowAliases", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		resp := runSubagentTool(ctx, t, f.server, f.root, f.root.LastModelConfigID, listSubagentModelsToolName, struct{}{})
+		require.False(t, resp.IsError, "expected success but got: %s", resp.Content)
+		var result struct {
+			Models []struct {
+				ModelConfigID uuid.UUID `json:"model_config_id"`
+				Aliases       []string  `json:"aliases"`
+			} `json:"models"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+		aliasesByID := make(map[uuid.UUID][]string, len(result.Models))
+		for _, model := range result.Models {
+			aliasesByID[model.ModelConfigID] = model.Aliases
+		}
+		require.Equal(t, []string{"wide"}, aliasesByID[googleModel.ID])
+		require.Contains(t, aliasesByID, f.otherModel.ID)
+		require.Nil(t, aliasesByID[f.otherModel.ID])
+	})
+}
+
+func TestForkModelAliasesHiddenWithoutExperiment(t *testing.T) {
+	t.Parallel()
+
+	f := newAgentDefinitionsFixture(t, nil, func(database.ChatModelConfig) map[string]string { return nil })
+	raw, err := json.Marshal(codersdk.ChatModelCallConfig{Aliases: []string{"fast"}})
+	require.NoError(t, err)
+	aliased := insertInternalChatModelConfigWithOptions(t, f.db, f.root.OrganizationID, "openai", "gpt-fast", true, raw)
+
+	ctx := chatdTestContext(t)
+	resp := runSubagentTool(ctx, t, f.server, f.root, f.root.LastModelConfigID, listSubagentModelsToolName, struct{}{})
+	require.False(t, resp.IsError, "expected success but got: %s", resp.Content)
+	var result struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+	var found bool
+	for _, model := range result.Models {
+		require.NotContains(t, model, "aliases")
+		found = found || model["model_config_id"] == aliased.ID.String()
+	}
+	require.True(t, found, "the aliased model is listed")
+}

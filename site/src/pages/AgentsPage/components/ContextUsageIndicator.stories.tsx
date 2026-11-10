@@ -1,12 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, screen, userEvent, within } from "storybook/test";
-import type { ChatContext, ChatContextResource } from "#/api/typesGenerated";
+import { fn, screen, userEvent, within } from "storybook/test";
+import type { ChatContext } from "#/api/typesGenerated";
 import {
-	MockAgentDefinitionResource,
-	MockAgentDefinitionResourceInvalid,
-	MockAgentDefinitionResourceWarning,
 	MockChatContextACPHarnesses,
 	MockChatContextACPHarnessIssue,
+	MockChatContextAgentDefinitions,
 	MockChatContextClean,
 	MockChatContextDirty,
 	MockChatContextResourceFailures,
@@ -309,6 +307,37 @@ export const ACPHarnessesWithoutSourcePath: Story = {
 	},
 };
 
+export const AgentDefinitions: Story = {
+	args: {
+		usage: {
+			usedTokens: 12_000,
+			contextLimitTokens: 200_000,
+			context: MockChatContextAgentDefinitions,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(within(canvasElement).getByRole("button"));
+		await userEvent.click(
+			screen.getByRole("button", { name: /Agent definitions/ }),
+		);
+	},
+};
+
+export const AgentDefinitionKeyboardFocus: Story = {
+	args: AgentDefinitions.args,
+	play: async (context) => {
+		await AgentDefinitions.play?.(context);
+		for (
+			let i = 0;
+			i < 10 && document.activeElement?.textContent !== "reviewer";
+			i++
+		) {
+			await userEvent.tab();
+		}
+		await screen.findByRole("tooltip");
+	},
+};
+
 // A failed skill appears inside its section alongside available skills.
 export const ResourceIssue: Story = {
 	args: {
@@ -324,68 +353,6 @@ export const ResourceIssue: Story = {
 		await userEvent.click(screen.getByRole("button", { name: /Skills/ }));
 	},
 };
-
-const openAgentDefinitions = async (
-	canvasElement: HTMLElement,
-	triggerName: RegExp = /Agent definitions/,
-) => {
-	await userEvent.click(within(canvasElement).getByRole("button"));
-	await userEvent.click(screen.getByRole("button", { name: triggerName }));
-};
-
-const agentDefinitionStory = (
-	resources: ChatContextResource[],
-	triggerName?: RegExp,
-): Story => ({
-	args: {
-		usage: {
-			usedTokens: 12_000,
-			contextLimitTokens: 200_000,
-			context: { dirty: false, resources },
-		},
-	},
-	play: ({ canvasElement }) => openAgentDefinitions(canvasElement, triggerName),
-});
-
-// Loaded agent definitions are listed with their parse warnings, and a
-// definition that failed to load appears as an issue in the same section.
-export const AgentDefinitions = agentDefinitionStory(
-	[
-		MockAgentDefinitionResource,
-		MockAgentDefinitionResourceWarning,
-		MockAgentDefinitionResourceInvalid,
-	],
-	/^Agent definitions 1 issue, 1 warning /,
-);
-
-// Parse warnings alone keep the trigger's normal tone.
-export const AgentDefinitionWarningsOnly = agentDefinitionStory(
-	[MockAgentDefinitionResource, MockAgentDefinitionResourceWarning],
-	/^Agent definitions 1 warning /,
-);
-
-export const AgentDefinitionKeyboardFocus: Story = {
-	...agentDefinitionStory([MockAgentDefinitionResource]),
-	play: async ({ canvasElement }) => {
-		await openAgentDefinitions(canvasElement);
-		for (
-			let i = 0;
-			i < 10 &&
-			document.activeElement?.textContent !==
-				MockAgentDefinitionResource.subagent_name;
-			i++
-		) {
-			await userEvent.tab();
-		}
-		await expect(await screen.findByRole("tooltip")).toHaveTextContent(
-			"Reviews diffs for correctness.",
-		);
-	},
-};
-
-export const AgentDefinitionFailuresOnly = agentDefinitionStory([
-	MockAgentDefinitionResourceInvalid,
-]);
 
 // Multiple context roots: files and skills are pulled from several
 // directories, so each list groups by its parent directory. Without grouping

@@ -3,14 +3,12 @@ import {
 	BotIcon,
 	CircleAlertIcon,
 	FileIcon,
-	type LucideIcon,
 	PlugIcon,
 	TriangleAlertIcon,
 	ZapIcon,
 } from "lucide-react";
 import type {
 	ChatContext,
-	ChatContextResource,
 	ChatContextResourceKind,
 	ChatContextResourceStatus,
 	ChatContextTool,
@@ -64,7 +62,7 @@ export type AgentContextUsage = {
 // Normalized popover entries, sourced from the chat's pinned context
 // resources.
 type ContextFileItem = { readonly path: string; readonly dir: string };
-type ContextNamedItem = {
+type ContextSkillItem = {
 	readonly source: string;
 	readonly name: string;
 	readonly description?: string;
@@ -77,6 +75,15 @@ type ContextMcpServerItem = {
 	readonly name: string;
 	readonly source: string;
 	readonly tools: readonly ChatContextTool[];
+};
+// The server reports an OK definition's non-fatal parse warnings in its
+// error field.
+type ContextAgentDefinitionItem = {
+	readonly source: string;
+	readonly name: string;
+	readonly description?: string;
+	readonly warnings: string;
+	readonly dir: string;
 };
 // A pinned resource the agent could not use, surfaced with its error so the
 // failure is visible instead of silent.
@@ -165,11 +172,10 @@ const groupByDirectory = <T extends { readonly dir: string }>(
 
 const ContextResourceIssues: React.FC<{
 	issues: readonly ContextIssueItem[];
-	title?: string;
-}> = ({ issues, title = "Issues" }) =>
+}> = ({ issues }) =>
 	issues.length > 0 ? (
 		<ContextAlert severity="warning" variant="panel">
-			<ContextAlertTitle>{title}</ContextAlertTitle>
+			<ContextAlertTitle>Issues</ContextAlertTitle>
 			<ContextAlertDescription>
 				{issues.map((issue) => (
 					<span
@@ -180,8 +186,7 @@ const ContextResourceIssues: React.FC<{
 						<span className="truncate">
 							{issue.name}{" "}
 							<span className="text-content-secondary">
-								({RESOURCE_KIND_LABELS[issue.kind]}
-								{issue.status !== "ok" && `: ${issue.status}`})
+								({RESOURCE_KIND_LABELS[issue.kind]}: {issue.status})
 							</span>
 						</span>
 						{issue.error && <span>{issue.error}</span>}
@@ -191,21 +196,12 @@ const ContextResourceIssues: React.FC<{
 		</ContextAlert>
 	) : null;
 
-const countLabel = (count: number, noun: string) =>
-	count > 0 ? [`${count} ${noun}${count === 1 ? "" : "s"}`] : [];
-
-const ContextIssueIndicator: React.FC<{
-	count: number;
-	warningCount?: number;
-}> = ({ count, warningCount = 0 }) =>
-	count + warningCount > 0 ? (
+const ContextIssueIndicator: React.FC<{ count: number }> = ({ count }) =>
+	count > 0 ? (
 		<span className="ml-1 inline-flex align-middle text-content-warning">
 			<TriangleAlertIcon aria-hidden="true" className="size-3" />
 			<span className="sr-only">
-				{[
-					...countLabel(count, "issue"),
-					...countLabel(warningCount, "warning"),
-				].join(", ")}
+				{count} {count === 1 ? "issue" : "issues"}
 			</span>
 		</span>
 	) : null;
@@ -241,86 +237,46 @@ const ContextHarnessSection: React.FC<{
 	</ContextResourceAccordion>
 );
 
-const ContextNamedResourceSection: React.FC<{
-	label: string;
-	icon: LucideIcon;
-	items: readonly ContextNamedItem[];
+const ContextAgentDefinitionSection: React.FC<{
+	items: readonly ContextAgentDefinitionItem[];
 	issues: readonly ContextIssueItem[];
-	warnings?: readonly ContextIssueItem[];
-}> = ({ label, icon, items, issues, warnings = [] }) => {
-	const groups = groupByDirectory(items);
+}> = ({ items, issues }) => {
+	const warningCount = items.filter((item) => item.warnings !== "").length;
 	return (
 		<ContextResourceAccordion>
 			<ContextResourceAccordionTrigger detail={`${items.length} available`}>
-				{label}
-				<ContextIssueIndicator
-					count={issues.length}
-					warningCount={warnings.length}
-				/>
+				Agent definitions
+				<ContextIssueIndicator count={issues.length + warningCount} />
 			</ContextResourceAccordionTrigger>
 			<ContextResourceAccordionContent>
-				{groups.length > 0 && (
+				{items.length > 0 && (
 					<ContextResourceTree>
-						{groups.map((group) => (
+						{groupByDirectory(items).map((group) => (
 							<ContextResourceTreeDirectory key={group.dir} dir={group.dir}>
-								{group.items.map((item) => (
+								{group.items.map((definition) => (
 									<ContextResourceTreeItem
-										key={item.source}
-										icon={group.dir === "" ? icon : undefined}
-										name={item.name}
-										description={item.description}
+										key={definition.source}
+										icon={group.dir === "" ? BotIcon : undefined}
+										name={definition.name}
+										title={definition.source}
+										description={definition.description}
 										className="text-content-primary"
-									/>
+									>
+										{definition.warnings !== "" && (
+											<span className="break-words text-content-warning">
+												{definition.warnings}
+											</span>
+										)}
+									</ContextResourceTreeItem>
 								))}
 							</ContextResourceTreeDirectory>
 						))}
 					</ContextResourceTree>
 				)}
 				<ContextResourceIssues issues={issues} />
-				<ContextResourceIssues issues={warnings} title="Warnings" />
 			</ContextResourceAccordionContent>
 		</ContextResourceAccordion>
 	);
-};
-
-// Agent definitions the backend loaded can still carry non-fatal parse
-// warnings, so they are listed separately from the definitions it dropped.
-const getLoadedAgentDefinitions = (
-	resources: readonly ChatContextResource[],
-): {
-	items: readonly ContextNamedItem[];
-	warnings: readonly ContextIssueItem[];
-} => {
-	const loaded = resources
-		.filter(
-			(resource) => resource.kind === "subagent" && resource.status === "ok",
-		)
-		.map((resource) => ({
-			resource,
-			name: resource.subagent_name || getPathBasename(resource.source),
-		}))
-		.filter(({ name }) => name.trim().length > 0);
-	return {
-		items: loaded.map(({ resource, name }) => ({
-			source: resource.source,
-			name,
-			description: resource.subagent_description,
-			dir: getPathDirname(resource.source),
-		})),
-		warnings: loaded.flatMap(({ resource, name }) =>
-			resource.error
-				? [
-						{
-							name,
-							kind: resource.kind,
-							status: resource.status,
-							error: resource.error,
-							source: resource.source,
-						},
-					]
-				: [],
-		),
-	};
 };
 
 export const ContextUsageIndicator: React.FC<{
@@ -388,7 +344,7 @@ export const ContextUsageIndicator: React.FC<{
 		// Drop entries with no usable path so an empty marker never renders as a
 		// nameless "Context files" row.
 		.filter((file) => file.path.trim().length > 0);
-	const skillItems: readonly ContextNamedItem[] = (pinnedResources ?? [])
+	const skillItems: readonly ContextSkillItem[] = (pinnedResources ?? [])
 		.filter((resource) => resource.kind === "skill" && resource.status === "ok")
 		.map((resource) => ({
 			source: resource.source,
@@ -434,7 +390,20 @@ export const ContextUsageIndicator: React.FC<{
 			dir: resource.source_path ?? "",
 		}))
 		.filter((harness) => harness.slug.trim().length > 0);
-	const agentDefinitions = getLoadedAgentDefinitions(pinnedResources ?? []);
+	const agentDefinitionItems: readonly ContextAgentDefinitionItem[] = (
+		pinnedResources ?? []
+	)
+		.filter(
+			(resource) => resource.kind === "subagent" && resource.status === "ok",
+		)
+		.map((resource) => ({
+			source: resource.source,
+			name: resource.subagent_name ?? "",
+			description: resource.subagent_description,
+			warnings: resource.error ?? "",
+			dir: getPathDirname(resource.source),
+		}))
+		.filter((definition) => definition.name.trim().length > 0);
 	// Pinned resources the agent could not use (invalid skill, unreadable or
 	// oversize file) are surfaced as issues with their error so the failure is
 	// visible rather than a silent omission.
@@ -470,26 +439,35 @@ export const ContextUsageIndicator: React.FC<{
 		skillItems.length > 0 ||
 		hasMcp ||
 		harnessItems.length > 0 ||
-		agentDefinitions.items.length > 0 ||
+		agentDefinitionItems.length > 0 ||
 		issueItems.length > 0;
 
 	const hasResourceIssues = issueItems.length > 0;
-	const needsAttention = isDirty || hasContextError || hasResourceIssues;
+	const hasAgentDefinitionWarnings = agentDefinitionItems.some(
+		(definition) => definition.warnings !== "",
+	);
+	const needsAttention =
+		isDirty ||
+		hasContextError ||
+		hasResourceIssues ||
+		hasAgentDefinitionWarnings;
 	const AttentionIcon = hasContextError ? CircleAlertIcon : TriangleAlertIcon;
 	const toneClassName = hasContextError
 		? "text-content-destructive"
-		: isDirty || hasResourceIssues
+		: isDirty || hasResourceIssues || hasAgentDefinitionWarnings
 			? "text-content-warning"
 			: getIndicatorToneClassName(percentUsed, compactionPercent);
 
 	// Group files and skills by directory so every context root is labeled,
 	// keeping resources pulled from different directories distinguishable.
 	const fileGroups = groupByDirectory(fileItems);
+	const skillGroups = groupByDirectory(skillItems);
 
 	const statusNotes = [
 		hasContextError ? "Context error." : "",
 		isDirty ? "Context changed." : "",
 		hasResourceIssues ? "Some context resources failed to load." : "",
+		hasAgentDefinitionWarnings ? "Some agent definitions have warnings." : "",
 	].filter((note) => note !== "");
 	const statusNote = statusNotes.length > 0 ? ` ${statusNotes.join(" ")}` : "";
 	let ariaLabel = "Context usage";
@@ -660,12 +638,37 @@ export const ContextUsageIndicator: React.FC<{
 							</ContextResourceAccordion>
 						)}
 						{(skillItems.length > 0 || skillIssues.length > 0) && (
-							<ContextNamedResourceSection
-								label="Skills"
-								icon={ZapIcon}
-								items={skillItems}
-								issues={skillIssues}
-							/>
+							<ContextResourceAccordion>
+								<ContextResourceAccordionTrigger
+									detail={`${skillItems.length} available`}
+								>
+									Skills
+									<ContextIssueIndicator count={skillIssues.length} />
+								</ContextResourceAccordionTrigger>
+								<ContextResourceAccordionContent>
+									{skillItems.length > 0 && (
+										<ContextResourceTree>
+											{skillGroups.map((group) => (
+												<ContextResourceTreeDirectory
+													key={group.dir}
+													dir={group.dir}
+												>
+													{group.items.map((skill) => (
+														<ContextResourceTreeItem
+															key={skill.source}
+															icon={group.dir === "" ? ZapIcon : undefined}
+															name={skill.name}
+															description={skill.description}
+															className="text-content-primary"
+														/>
+													))}
+												</ContextResourceTreeDirectory>
+											))}
+										</ContextResourceTree>
+									)}
+									<ContextResourceIssues issues={skillIssues} />
+								</ContextResourceAccordionContent>
+							</ContextResourceAccordion>
 						)}
 						{(hasMcp || mcpIssues.length > 0) && (
 							<ContextResourceAccordion>
@@ -715,14 +718,11 @@ export const ContextUsageIndicator: React.FC<{
 								issues={harnessIssues}
 							/>
 						)}
-						{(agentDefinitions.items.length > 0 ||
+						{(agentDefinitionItems.length > 0 ||
 							agentDefinitionIssues.length > 0) && (
-							<ContextNamedResourceSection
-								label="Agent definitions"
-								icon={BotIcon}
-								items={agentDefinitions.items}
+							<ContextAgentDefinitionSection
+								items={agentDefinitionItems}
 								issues={agentDefinitionIssues}
-								warnings={agentDefinitions.warnings}
 							/>
 						)}
 					</div>

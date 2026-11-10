@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -30,6 +31,51 @@ func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID)
 		&i.ToolPolicy,
 	)
 	return i, err
+}
+
+const getChatSubagentTypesByChatIDs = `-- name: GetChatSubagentTypesByChatIDs :many
+SELECT
+	chats.id AS chat_id,
+	COALESCE(chat_subagents.agent_type, CASE chats.mode
+		WHEN 'explore' THEN 'explore'
+		WHEN 'computer_use' THEN 'computer_use'
+		ELSE 'general'
+	END)::text AS agent_type
+FROM chats
+LEFT JOIN chat_subagents ON chat_subagents.chat_id = chats.id
+WHERE chats.id = ANY($1::uuid[])
+	AND chats.parent_chat_id IS NOT NULL
+`
+
+type GetChatSubagentTypesByChatIDsRow struct {
+	ChatID    uuid.UUID `db:"chat_id" json:"chat_id"`
+	AgentType string    `db:"agent_type" json:"agent_type"`
+}
+
+// Returns the agent type of each child chat in @chat_ids. A child spawned
+// without a chat_subagents row gets its type from its mode, as
+// subagentTypeFromChat in coderd/x/chatd derives it.
+func (q *Queries) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getChatSubagentTypesByChatIDs, pq.Array(chatIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetChatSubagentTypesByChatIDsRow
+	for rows.Next() {
+		var i GetChatSubagentTypesByChatIDsRow
+		if err := rows.Scan(&i.ChatID, &i.AgentType); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getChatSubagentsByParentChatID = `-- name: GetChatSubagentsByParentChatID :many

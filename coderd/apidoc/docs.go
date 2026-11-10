@@ -5564,6 +5564,93 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/{chat}/questions": {
+            "get": {
+                "description": "Returns the unanswered ask_user_question calls of the\nunarchived descendants in the family of the chat, oldest first.\nA child chat lists the same family as its root.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List pending descendant questions",
+                "operationId": "list-pending-descendant-questions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatDescendantQuestion"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/questions/secret-answer": {
+            "post": {
+                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Answer secret descendant question",
+                "operationId": "answer-secret-descendant-question",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Secret answer",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatSecretAnswerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -6067,6 +6154,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/{chat}/interrupt": {
             "post": {
+                "description": "Interrupts the active turn of a chat.\nIf the chat has nothing to interrupt, for example because its turn already ended, the endpoint returns the chat unchanged.",
                 "produces": [
                     "application/json"
                 ],
@@ -23205,6 +23293,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "agent_type": {
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "type": "string"
+                },
                 "archived": {
                     "type": "boolean"
                 },
@@ -23476,12 +23568,12 @@ const docTemplate = `{
         "codersdk.ChatBusyBehavior": {
             "type": "string",
             "enum": [
-                "queue",
-                "interrupt"
+                "steer",
+                "queue"
             ],
             "x-enum-varnames": [
-                "ChatBusyBehaviorQueue",
-                "ChatBusyBehaviorInterrupt"
+                "ChatBusyBehaviorSteer",
+                "ChatBusyBehaviorQueue"
             ]
         },
         "codersdk.ChatClientType": {
@@ -23730,6 +23822,35 @@ const docTemplate = `{
             "properties": {
                 "debug_retention_days": {
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ChatDescendantQuestion": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "chat_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "parent_chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestion"
+                    }
+                },
+                "tool_call_id": {
+                    "type": "string"
                 }
             }
         },
@@ -24392,6 +24513,7 @@ const docTemplate = `{
                     }
                 },
                 "queued_messages": {
+                    "description": "QueuedMessages lists the queued messages in delivery order: steer\nmessages first, then queue messages.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatQueuedMessage"
@@ -24527,6 +24649,12 @@ const docTemplate = `{
         "codersdk.ChatModelCallConfig": {
             "type": "object",
             "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "frequency_penalty": {
                     "type": "number"
                 },
@@ -25325,9 +25453,50 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatQuestion": {
+            "type": "object",
+            "properties": {
+                "header": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestionOption"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                },
+                "secret": {
+                    "description": "Secret questions take a free-text answer through\nAnswerChatSecretQuestion, which never writes it to a chat message.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "codersdk.ChatQuestionOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
         "codersdk.ChatQueuedMessage": {
             "type": "object",
             "properties": {
+                "busy_behavior": {
+                    "description": "BusyBehavior is the lane of the message. Steer messages go in\nbefore the next model call, and queue messages go in after the\nturn ends.",
+                    "enum": [
+                        "steer",
+                        "queue"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ChatBusyBehavior"
+                        }
+                    ]
+                },
                 "chat_id": {
                     "type": "string",
                     "format": "uuid"
@@ -25343,7 +25512,7 @@ const docTemplate = `{
                     "format": "date-time"
                 },
                 "editing_since": {
-                    "description": "EditingSince is set while the owner edits the message. A message\nunder edit and every message behind it wait until the edit ends; a\nturn that ends at a message under edit pauses the chat.",
+                    "description": "EditingSince is set while the owner edits the message. A message\nunder edit and every message behind it wait until the edit ends. A\nsteer message under edit also holds the steer messages ahead of\nit. A turn that ends at a message under edit pauses the chat.",
                     "type": "string",
                     "format": "date-time"
                 },
@@ -25377,6 +25546,17 @@ const docTemplate = `{
                 "ChatRoleRead",
                 "ChatRoleDeleted"
             ]
+        },
+        "codersdk.ChatSecretAnswerRequest": {
+            "type": "object",
+            "properties": {
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
         },
         "codersdk.ChatSkillSource": {
             "type": "string",
@@ -25443,6 +25623,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/codersdk.ChatStreamMessagePart"
                 },
                 "queued_messages": {
+                    "description": "QueuedMessages lists the queued messages in delivery order: steer\nmessages first, then queue messages.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatQueuedMessage"
@@ -26001,9 +26182,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "busy_behavior": {
+                    "description": "BusyBehavior controls when the message reaches the agent if the\nchat is busy. \"steer\", the default, delivers it before the next\nmodel call. \"queue\" delivers it after the active turn ends.",
                     "enum": [
-                        "queue",
-                        "interrupt"
+                        "steer",
+                        "queue"
                     ],
                     "allOf": [
                         {
@@ -26055,7 +26237,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/codersdk.ChatMessage"
                 },
                 "messages": {
-                    "description": "Messages contains all user-visible messages inserted by the send, in\ninsertion order. A queued send on an errored chat may promote the\nprevious queue head, so clients must upsert the full batch.",
+                    "description": "Messages contains all user-visible messages inserted by the send, in\ninsertion order. A send to an errored or paused chat can also insert\nqueued messages: a steer send inserts the queued steer messages\nbefore the new message, and a queue send to an errored chat inserts\nthe steer lane, or the first queue message when that lane is empty.\nClients must upsert the full batch.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatMessage"
@@ -27959,6 +28141,7 @@ const docTemplate = `{
                 "fork-chat-todos",
                 "fork-nested-subagents",
                 "fork-agent-definitions",
+                "fork-subagent-isolation",
                 "fork-chat-wakeups",
                 "example",
                 "notifications",
@@ -28002,6 +28185,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -28024,6 +28208,7 @@ const docTemplate = `{
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
                 "ExperimentForkAgentDefinitions",
+                "ExperimentForkSubagentIsolation",
                 "ExperimentForkChatWakeups",
                 "ExperimentExample",
                 "ExperimentNotifications",
