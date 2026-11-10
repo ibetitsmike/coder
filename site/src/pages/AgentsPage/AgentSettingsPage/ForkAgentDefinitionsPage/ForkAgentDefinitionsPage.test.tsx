@@ -261,7 +261,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
 				content:
-					'---\nname: "code-reviewer"\ndescription: "Reviews diffs."\nmodel: "gpt-5"\n---\nReview the diff.\n',
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\nmodel: gpt-5\n---\nReview the diff.\n",
 			}),
 		);
 		await waitFor(() =>
@@ -299,7 +299,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
 				content:
-					'---\nname: "release-notes"\nmodel: "sonnet"\ntools: Read, Grep\n---\nWrite release notes.\n',
+					"---\nname: release-notes\nmodel: sonnet\ntools: Read, Grep\n---\nWrite release notes.\n",
 			}),
 		);
 	});
@@ -343,7 +343,7 @@ describe("ForkAgentDefinitionsPage", () => {
 
 		await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
 		expect(create).toHaveBeenLastCalledWith(MockDefaultOrganization.id, {
-			content: '---\nname: "code-reviewer"\n---\nReview the diff.\n',
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
 		});
 	});
 
@@ -461,7 +461,7 @@ describe("ForkAgentDefinitionsPage", () => {
 				MockForkAgentDefinitionMetadata.name,
 				{
 					content:
-						'---\nname: "code-reviewer"\ndescription: "Reviews diffs for bugs."\n---\nReview the diff.\n',
+						"---\nname: code-reviewer\ndescription: Reviews diffs for bugs.\n---\nReview the diff.\n",
 				},
 			),
 		);
@@ -611,7 +611,7 @@ describe("ForkAgentDefinitionsPage", () => {
 				MockForkAgentDefinitionMetadata.name,
 				{
 					content:
-						'---\nname: "code-reviewer"\ndescription: "Reviews diffs for bugs."\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n',
+						"---\nname: code-reviewer\ndescription: Reviews diffs for bugs.\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n",
 				},
 			),
 		);
