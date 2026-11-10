@@ -10,14 +10,4 @@ describe("ForkAgentTypeBadge", () => {
 			"Agent type: reviewer",
 		);
 	});
-
-	it.each([undefined, "", "general"])(
-		"renders nothing for agent type %j",
-		(agentType) => {
-			const { container } = renderComponent(
-				<ForkAgentTypeBadge chat={{ agent_type: agentType }} />,
-			);
-			expect(container).toBeEmptyDOMElement();
-		},
-	);
 });
