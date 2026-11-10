@@ -89,16 +89,22 @@ describe("createUserAgentDefinition", () => {
 		expect(queryClient.getQueryData(listKey)).toEqual([metadataOf(listed)]);
 	});
 
-	it("does not add a definition a list fetched during the request no longer has", async () => {
+	it("adds a created definition in name order to a list fetched during the request", async () => {
 		const queryClient = createQueryClient();
 		const listKey = userAgentDefinitions(org).queryKey;
-		queryClient.setQueryData(listKey, []);
+		const MockLaterMetadata = {
+			...metadataOf(definitionAt("2029-01-01T00:00:00Z", "later")),
+			name: "z-reviewer",
+		};
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"createUserAgentDefinition",
 		).mockImplementation(async () => {
-			queryClient.setQueryData(listKey, [], { updatedAt: Date.now() + 1 });
-			return definitionAt("2030-01-01T00:00:00Z");
+			queryClient.setQueryData(listKey, [MockLaterMetadata]);
+			return {
+				...definitionAt("2030-01-01T00:00:00Z", "new"),
+				name: "a-reviewer",
+			};
 		});
 
 		await new MutationObserver(
@@ -106,7 +112,9 @@ describe("createUserAgentDefinition", () => {
 			createUserAgentDefinition(queryClient),
 		).mutate({ organizationId: org, req: { content: "" } });
 
-		expect(queryClient.getQueryData(listKey)).toEqual([]);
+		expect(
+			queryClient.getQueryData(listKey)?.map((definition) => definition.name),
+		).toEqual(["a-reviewer", "z-reviewer"]);
 	});
 });
 
@@ -165,6 +173,31 @@ describe("agent definition mutations", () => {
 });
 
 describe("updateUserAgentDefinition", () => {
+	it("replaces a stale row with the recreated definition the update returns", async () => {
+		const queryClient = createQueryClient();
+		const listKey = userAgentDefinitions(org).queryKey;
+		queryClient.setQueryData(listKey, [
+			metadataOf(definitionAt("2029-01-01T00:00:00Z")),
+		]);
+		const MockRecreatedDefinition = definitionAt(
+			"2030-01-01T00:00:00Z",
+			"recreated",
+		);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue(MockRecreatedDefinition);
+
+		await new MutationObserver(
+			queryClient,
+			updateUserAgentDefinition(queryClient),
+		).mutate({ organizationId: org, name, req: { enabled: false } });
+
+		expect(queryClient.getQueryData(listKey)).toEqual([
+			metadataOf(MockRecreatedDefinition),
+		]);
+	});
+
 	it("keeps a newer cached detail of a recreated definition", async () => {
 		const queryClient = createQueryClient();
 		const detailKey = userAgentDefinition(queryClient, org, name).queryKey;

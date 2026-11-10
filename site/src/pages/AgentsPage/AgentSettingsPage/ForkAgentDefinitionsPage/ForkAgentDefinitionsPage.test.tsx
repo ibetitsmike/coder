@@ -828,6 +828,36 @@ describe("ForkAgentDefinitionsPage", () => {
 		expect(description).toHaveValue("Mine.");
 	});
 
+	it("saves a recreated definition that a stale listed row still names", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			id: "recreated",
+			updated_at: "2030-01-01T00:00:00Z",
+			content: "---\nname: code-reviewer\n---\nRecreated body.\n",
+		});
+		const updateDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await user.type(await screen.findByLabelText("Description"), "Mine.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() => expect(updateDefinition).toHaveBeenCalled());
+	});
+
 	it("does not open content older than the listed definition, and retries", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();

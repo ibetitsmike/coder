@@ -42,9 +42,6 @@ type EditorTarget = { organizationId: string } & (
 	  }
 );
 
-const isNotFound = (error: unknown) =>
-	isAxiosError(error) && error.response?.status === 404;
-
 const submitError = (
 	error: unknown,
 	fallback: string,
@@ -245,13 +242,13 @@ export const ForkAgentDefinitionsTable: React.FC<
 		}
 		const { name, values, loadedFrom } = editorTarget;
 		// Saving by name would overwrite a definition edited or recreated
-		// since the editor loaded it, so the user keeps the draft instead.
+		// since the editor loaded it, so the user keeps the draft instead. An
+		// older listed row, such as one a recreate replaced before the editor
+		// opened, is not a change.
 		const isChanged =
 			loadedFrom !== undefined &&
 			[listed, detail].some(
-				(current) =>
-					current !== undefined &&
-					(current.id !== loadedFrom.id || isNewer(current, loadedFrom)),
+				(current) => current !== undefined && isNewer(current, loadedFrom),
 			);
 		const loadError = values
 			? undefined
@@ -268,7 +265,11 @@ export const ForkAgentDefinitionsTable: React.FC<
 			isLoading: !values && !loadError,
 			loadError,
 			onRetry:
-				(definitionQuery.error && !isNotFound(definitionQuery.error)) ||
+				(definitionQuery.error &&
+					!(
+						isAxiosError(definitionQuery.error) &&
+						definitionQuery.error.response?.status === 404
+					)) ||
 				isOutdated
 					? () => {
 							void definitionQuery.refetch();

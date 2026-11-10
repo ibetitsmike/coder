@@ -106,39 +106,32 @@ export const createUserAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ organizationId, req }: CreateUserAgentDefinitionArgs) =>
 			createUserAgentDefinitionRequest(organizationId, req),
-		onMutate: () => ({ requestedAt: Date.now() }),
-		onSuccess: (
-			{ content: _content, ...created },
-			{ organizationId },
-			context,
-		) => {
-			const listKey = userAgentDefinitions(organizationId).queryKey;
-			// A list fetched while the request ran can already show the
-			// definition deleted again, so the refetch below adds it instead.
-			const isListFetchedSince =
-				(queryClient.getQueryState(listKey)?.dataUpdatedAt ?? 0) >
-				(context?.requestedAt ?? 0);
-			queryClient.setQueryData(listKey, (definitions) => {
-				// A refetch can list the definition before this response
-				// arrives. Its row replaces that one unless it shows a later
-				// change or a recreated definition.
-				const listed = definitions?.find(
-					(definition) =>
-						definition.id === created.id || definition.name === created.name,
-				);
-				if (
-					!definitions ||
-					(listed
-						? listed.id !== created.id || isNewer(listed, created)
-						: isListFetchedSince)
-				) {
-					return definitions;
-				}
-				return [
-					...definitions.filter((definition) => definition !== listed),
-					created,
-				];
-			});
+		// A list without the name may predate the commit or follow a delete;
+		// only the refetch below can tell, so the created row is added until it
+		// settles. The rows keep the API's order by name.
+		onSuccess: ({ content: _content, ...created }, { organizationId }) => {
+			queryClient.setQueryData(
+				userAgentDefinitions(organizationId).queryKey,
+				(definitions) => {
+					// A refetch can list the definition before this response
+					// arrives. Its row replaces that one unless it shows a later
+					// change or a recreated definition.
+					const listed = definitions?.find(
+						(definition) =>
+							definition.id === created.id || definition.name === created.name,
+					);
+					if (
+						!definitions ||
+						(listed && (listed.id !== created.id || isNewer(listed, created)))
+					) {
+						return definitions;
+					}
+					return [
+						...definitions.filter((definition) => definition !== listed),
+						created,
+					].sort((a, b) => (a.name < b.name ? -1 : 1));
+				},
+			);
 		},
 		onSettled: (_data, error, { organizationId }) =>
 			invalidateList(queryClient, organizationId, {
@@ -168,15 +161,16 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
 		// Writing the result keeps an accepted change visible, in the list and
 		// in a reopened editor, even if the reconciling refetch below fails.
-		// A response that arrives after a later change was cached is older
-		// than it, so it does not replace it.
+		// Rows match by name, as the request does, so a stale row of a
+		// recreated definition takes the response. A response older than a
+		// cached change does not replace it.
 		onSuccess: (definition, { organizationId, name }) => {
 			const { content: _content, ...updated } = definition;
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
 				(definitions) =>
 					definitions?.map((listed) =>
-						listed.id === updated.id && !isNewer(listed, updated)
+						listed.name === updated.name && !isNewer(listed, updated)
 							? updated
 							: listed,
 					),
