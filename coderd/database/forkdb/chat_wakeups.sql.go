@@ -494,6 +494,34 @@ func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupR
 	return i, err
 }
 
+const listChatWakeupRunKeys = `-- name: ListChatWakeupRunKeys :many
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = $1::uuid AND status <> 'failed' ORDER BY created_at, id
+`
+
+// Failed runs are left out, so a failed attempt never blocks a later run.
+func (q *Queries) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listChatWakeupRunKeys, wakeupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var run_key string
+		if err := rows.Scan(&run_key); err != nil {
+			return nil, err
+		}
+		items = append(items, run_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatWakeupsByChatID = `-- name: ListChatWakeupsByChatID :many
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE chat_id = $1 ORDER BY created_at, id
 `
@@ -533,6 +561,40 @@ func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID)
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChildChatIDsWithActiveEventsWakeups = `-- name: ListChildChatIDsWithActiveEventsWakeups :many
+SELECT DISTINCT w.chat_id
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE c.parent_chat_id = $1::uuid
+    AND w.kind = 'events'
+    AND w.status = 'active'
+`
+
+// Lists the children of @parent_chat_id that wait for events of their own,
+// so a caller checks every child in one read.
+func (q *Queries) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listChildChatIDsWithActiveEventsWakeups, parentChatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var chat_id uuid.UUID
+		if err := rows.Scan(&chat_id); err != nil {
+			return nil, err
+		}
+		items = append(items, chat_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

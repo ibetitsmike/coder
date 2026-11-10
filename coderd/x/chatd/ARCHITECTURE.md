@@ -1217,6 +1217,7 @@ The generation goroutine supports:
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
   <!-- TODO(ibetitsmike): describe the descendant ask_user_question (fork-nested-subagents): a non-root chat that is not an explore subagent gets a blocking ask_user_question that records the question in `chatd.chat_descendant_questions` and ends the turn; the answer is the next user message. wait_agent reports needs_input while a child's question is unanswered and waits for the answer when called while it is pending. -->
+  <!-- TODO(ibetitsmike): describe secret answers (fork-nested-subagents): `withSecretAnswers` wraps a descendant chat's tools, so execute, write_file and edit_files input get the value in place of `{{secret:<tool call ID>}}`, and every tool output, metadata and error shows the placeholder instead of the value. -->
   <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
 - file links
 - workspace binding

@@ -233,6 +233,13 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().ListChatWakeupsByChatID(gomock.Any(), chat.ID).Return(wakeups, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(wakeups)
 		},
+		"ListChildChatIDsWithActiveEventsWakeups": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			parent := testutil.Fake(t, faker, database.Chat{})
+			ids := []uuid.UUID{uuid.New()}
+			db.EXPECT().GetChatByID(gomock.Any(), parent.ID).Return(parent, nil).AnyTimes()
+			fdb.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), parent.ID).Return(ids, nil).AnyTimes()
+			check.Args(parent.ID).Asserts(parent, policy.ActionRead).Returns(ids)
+		},
 		"UpdateChatWakeupStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
@@ -282,6 +289,15 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
+		},
+		"ListChatWakeupRunKeys": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			keys := []string{"child_done:" + uuid.NewString()}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(keys, nil).AnyTimes()
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(keys)
 		},
 		"UpdateChatWakeupRunStatus": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.UpdateChatWakeupRunStatusParams{})
