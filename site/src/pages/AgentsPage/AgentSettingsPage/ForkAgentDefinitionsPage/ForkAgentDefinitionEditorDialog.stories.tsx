@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { emptyAgentDefinitionFormValues } from "./agentDefinitionMarkdown";
 import { ForkAgentDefinitionEditorDialog } from "./ForkAgentDefinitionEditorDialog";
@@ -31,6 +31,23 @@ export const Edit: Story = {
 			body: "Review the diff and report bugs with file and line references.",
 			extraFrontMatter: "tools:\n  - Read\n  - Grep",
 		},
+	},
+};
+
+export const Submitting: Story = {
+	args: { ...Edit.args, isSubmitting: true },
+};
+
+export const ImportError: Story = {
+	play: async ({ canvasElement }) => {
+		const dialog = within(
+			await within(canvasElement.ownerDocument.body).findByRole("dialog"),
+		);
+		await userEvent.upload(
+			dialog.getByLabelText("Upload agent definition file"),
+			new File(["Review the diff."], "reviewer.md", { type: "text/markdown" }),
+		);
+		await dialog.findByText("The file must start with --- front-matter.");
 	},
 };
 

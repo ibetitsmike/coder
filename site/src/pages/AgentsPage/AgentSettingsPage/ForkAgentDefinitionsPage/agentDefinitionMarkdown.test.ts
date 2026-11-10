@@ -54,4 +54,33 @@ describe("agent definition markdown", () => {
 		);
 		expect(parseAgentDefinitionMarkdown(rebuilt)).toEqual(edited);
 	});
+
+	it("keeps indented comments after owned keys but not the text of their values", () => {
+		const content = [
+			"---",
+			"name: code-reviewer",
+			"  # After a plain value.",
+			"description: |",
+			"  Reviews diffs.",
+			"  # Part of the description.",
+			'model: "son',
+			'  # part of the model."',
+			"  # After a closed quote.",
+			"tools: Read",
+			"---",
+			"Review the diff.",
+		].join("\n");
+
+		expect(parseAgentDefinitionMarkdown(content)).toEqual({
+			name: "code-reviewer",
+			description: "Reviews diffs.\n# Part of the description.",
+			model: "son # part of the model.",
+			body: "Review the diff.",
+			extraFrontMatter: [
+				"  # After a plain value.",
+				"  # After a closed quote.",
+				"tools: Read",
+			].join("\n"),
+		});
+	});
 });

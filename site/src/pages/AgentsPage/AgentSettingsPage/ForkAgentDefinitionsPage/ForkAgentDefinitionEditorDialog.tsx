@@ -78,12 +78,18 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 	onClose,
 	onCloseAutoFocus,
 }) => {
-	// Escape and outside clicks wait for a save, whose failure the form
-	// shows, just like the disabled Cancel button.
+	const cancelButtonRef = useRef<HTMLButtonElement>(null);
 	const handleOpenChange = (open: boolean) => {
 		if (!open && !isSubmitting) {
 			onClose();
 		}
+	};
+	// Escape and outside clicks act as Cancel, which the form disables from
+	// the moment Save is clicked, so a save in flight keeps the dialog open
+	// to show its result.
+	const dismissWithCancel = (event: Event) => {
+		event.preventDefault();
+		cancelButtonRef.current?.click();
 	};
 
 	if (isLoading || !initialValues) {
@@ -120,6 +126,8 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 			<DialogContent
 				className="flex max-h-[90vh] max-w-2xl flex-col gap-0 overflow-hidden p-0"
 				onCloseAutoFocus={onCloseAutoFocus}
+				onEscapeKeyDown={dismissWithCancel}
+				onInteractOutside={dismissWithCancel}
 			>
 				<AgentDefinitionEditorForm
 					mode={mode}
@@ -128,6 +136,7 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 					isSubmitting={isSubmitting}
 					onSubmit={onSubmit}
 					onClose={onClose}
+					cancelButtonRef={cancelButtonRef}
 				/>
 			</DialogContent>
 		</Dialog>
@@ -139,20 +148,25 @@ type AgentDefinitionEditorFormProps = Pick<
 	"mode" | "submitError" | "isSubmitting" | "onSubmit" | "onClose"
 > & {
 	initialValues: AgentDefinitionFormValues;
+	cancelButtonRef: React.Ref<HTMLButtonElement>;
 };
 
 /**
  * The skill form owns the name, description, and body. The model and the
- * other front-matter live here and join them in the saved markdown.
+ * other front-matter live here and join them in the saved markdown. Every
+ * field keeps the values the form opened with as its baseline, so refreshed
+ * initialValues cannot reset some fields and leave others stale.
  */
 const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 	mode,
-	initialValues,
+	initialValues: refreshedInitialValues,
 	submitError,
 	isSubmitting,
 	onSubmit,
 	onClose,
+	cancelButtonRef,
 }) => {
+	const [initialValues] = useState(refreshedInitialValues);
 	const [model, setModel] = useState(initialValues.model);
 	const [extraFrontMatter, setExtraFrontMatter] = useState(
 		initialValues.extraFrontMatter,
@@ -202,7 +216,11 @@ const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 				<AgentDefinitionModelField model={model} onModelChange={setModel} />
 				<SkillEditorBodyField placeholder="Instructions the agent follows when a chat spawns it." />
 			</SkillEditorFields>
-			<EditorFooter isAgentDirty={isAgentDirty} onClose={onClose} />
+			<EditorFooter
+				isAgentDirty={isAgentDirty}
+				onClose={onClose}
+				cancelButtonRef={cancelButtonRef}
+			/>
 		</SkillEditorForm>
 	);
 };
@@ -359,17 +377,24 @@ type EditorFooterProps = {
 	/** Whether the model or the other front-matter changed. */
 	isAgentDirty: boolean;
 	onClose: () => void;
+	cancelButtonRef: React.Ref<HTMLButtonElement>;
 };
 
 const EditorFooter: React.FC<EditorFooterProps> = ({
 	isAgentDirty,
 	onClose,
+	cancelButtonRef,
 }) => {
 	const { form, mode, isBusy, isSubmitting } = useSkillEditorContext();
 	const canSubmit = !isBusy && form.isValid && (form.dirty || isAgentDirty);
 	return (
 		<DialogFooter className="border-t border-border px-6 py-4">
-			<Button variant="outline" disabled={isBusy} onClick={onClose}>
+			<Button
+				ref={cancelButtonRef}
+				variant="outline"
+				disabled={isBusy}
+				onClick={onClose}
+			>
 				Cancel
 			</Button>
 			<Button type="submit" disabled={!canSubmit}>
