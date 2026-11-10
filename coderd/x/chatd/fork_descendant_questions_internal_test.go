@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
@@ -98,6 +99,9 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.True(t, resp.IsError)
 	_, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
 	require.ErrorIs(t, err, sql.ErrNoRows, "an invalid question is not recorded")
+	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		ChatID: child.ID, ToolCallID: "call-0", Value: "earlier secret",
+	}))
 
 	resp, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: descendantQuestionInput})
 	require.NoError(t, err)
@@ -110,6 +114,9 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "call-1", row.ToolCallID)
 	require.JSONEq(t, string(result["questions"]), string(row.Questions))
+	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, answers, "a new question drops the secret answers of earlier ones")
 }
 
 func TestDescendantQuestionWaitAgent(t *testing.T) {

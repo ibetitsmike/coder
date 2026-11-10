@@ -29,6 +29,9 @@ type ChatQuestion struct {
 	Header   string               `json:"header"`
 	Question string               `json:"question"`
 	Options  []ChatQuestionOption `json:"options"`
+	// Secret questions take a free-text answer through
+	// AnswerChatSecretQuestion, which never writes it to a chat message.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // ChatQuestionOption is an answer the user can pick for a ChatQuestion.
@@ -40,4 +43,19 @@ type ChatQuestionOption struct {
 // in the family of chatID, oldest first.
 func (c *Client) ChatDescendantQuestions(ctx context.Context, chatID uuid.UUID) ([]ChatDescendantQuestion, error) {
 	return requestJSON[[]ChatDescendantQuestion](ctx, c, http.MethodGet, fmt.Sprintf("/api/v2/chats/fork/%s/questions", chatID), http.StatusOK, nil)
+}
+
+// ChatSecretAnswerRequest answers a secret question of a descendant chat.
+// The tool call ID travels in the body because coderd routes on the
+// unescaped path, where an ID with a "/" would not match the route.
+type ChatSecretAnswerRequest struct {
+	ToolCallID string `json:"tool_call_id"`
+	Value      string `json:"value"`
+}
+
+// AnswerChatSecretQuestion answers the pending secret question req.ToolCallID of
+// chatID. The server keeps the value out of chat messages and tells the chat
+// only that the user answered.
+func (c *Client) AnswerChatSecretQuestion(ctx context.Context, chatID uuid.UUID, req ChatSecretAnswerRequest) error {
+	return requestNoContent(ctx, c, http.MethodPost, fmt.Sprintf("/api/v2/chats/fork/%s/questions/secret-answer", chatID), req)
 }
