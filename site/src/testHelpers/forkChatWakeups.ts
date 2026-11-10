@@ -144,7 +144,7 @@ export const MockWaitForEventsResult = {
 		{
 			chat_id: "23456789-bcde-4234-8234-23456789abcd",
 			title: "Update the docs",
-			status: "pending",
+			status: "waiting",
 		},
 	],
 	pull_request: {
