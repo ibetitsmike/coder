@@ -2374,11 +2374,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -2682,6 +2684,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name                    | Type                                                            | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                 |
 |-------------------------|-----------------------------------------------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `agent_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `agent_type`            | string                                                          | false    |              | Agent type is the subagent type of a child chat, such as explore or a custom agent definition name. Only set with the fork-agent-definitions experiment.                                                                                                                                                    |
 | `archived`              | boolean                                                         | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `build_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `children`              | array of [codersdk.Chat](#codersdkchat)                         | false    |              | Children holds the descendant (subagent) chats of this root chat, flat: each entry's parent_chat_id gives its place in the tree. Without fork-nested-subagents descendants are only direct children. Always initialized to an empty slice so the JSON field is present as []. Always empty for child chats. |
@@ -6070,6 +6073,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "chat": {
     "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+    "agent_type": "string",
     "archived": true,
     "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
     "children": [
