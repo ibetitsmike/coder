@@ -98,6 +98,8 @@ API chats outside plan mode and child chats don't have it.
 
 `todo_write` and `todo_read` exist only when the deployment enables the `fork-chat-todos` experiment.
 Plan-mode turns and `explore` children don't get them.
+An item's status is `pending`, `in_progress`, `done`, or `cancelled`.
+A `todo_write` with any other status, such as `completed`, fails and stores nothing.
 The list survives a compaction.
 The web UI shows a non-empty list in a pill in the composer.
 In the conversation, the web UI shows each `todo_write` and `todo_read` call as a card, such as **Updated todos (1/3 done)**, that expands to the list.
@@ -338,6 +340,7 @@ Checked against fork `main` at `54351e1e1f`:
 - Omitted `model_config_id`: subagent model override first, `subagent_catalog.go:60-77` and `:84-102`, else the parent's model, `subagent_operations.go:340-343`.
 - Project memory for root chats: `coderd/x/chatd/memory.go:20-33`.
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
+  Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
   Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:20-35`, `:42-49`, with its labels, `ForkTodoTool.tsx:37-50`, `:67-77`.
