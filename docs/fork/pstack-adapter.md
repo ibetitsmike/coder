@@ -185,6 +185,8 @@ A chat pins the definitions when it starts, like `AGENTS.md` and the skills, so 
 `GET /api/v2/chats/{chat}` lists each definition file that the chat pinned in `context.resources`, with kind `subagent` and its `status`.
 An `ok` file also reports `subagent_name`, `subagent_description`, and any parse warnings in `error`.
 A file with any other status, such as `invalid`, reports the reason in `error` and adds no custom type, so check there when a type is missing from `spawn_agent`.
+The context usage indicator in the chat composer lists the same files under **Agent definitions**, with each `ok` definition's warnings under its name and the other files as issues.
+A definition with warnings turns the indicator to its warning color.
 The `spawn_agent` description lists the custom types after the built-in ones.
 The child gets the definition's body as a system message, so do not paste the body into `prompt`.
 A definition without `model` runs on your model, and pstack's agents set none.
