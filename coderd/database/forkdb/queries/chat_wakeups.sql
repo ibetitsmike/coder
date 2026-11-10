@@ -161,7 +161,9 @@ ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
 -- name: ListChatWakeupRunKeys :many
-SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid ORDER BY created_at, id;
+-- Failed runs are left out: their keys are unique per attempt and never
+-- block a run, and a long outage would add one per poll.
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid AND status <> 'failed' ORDER BY created_at, id;
 
 -- name: UpdateChatWakeupRunStatus :one
 UPDATE chat_wakeup_runs

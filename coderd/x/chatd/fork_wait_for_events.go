@@ -342,14 +342,9 @@ func (p *Server) childDone(ctx context.Context, child database.Chat) (bool, erro
 			return false, nil
 		}
 	}
-	awaits, err := p.childAwaitsAnswer(ctx, child.ID)
+	question, err := p.pendingDescendantQuestion(ctx, child.ID)
 	if err != nil {
 		return false, xerrors.Errorf("check questions of child %s: %w", child.ID, err)
 	}
-	return !awaits, nil
+	return question == nil, nil
 }
-
-// childAwaitsAnswer reports whether a child is waiting for an answer to a
-// descendant question, which does not count as done.
-// TODO(ibetitsmike): call pendingDescendantQuestion once #86 is on main.
-func (*Server) childAwaitsAnswer(context.Context, uuid.UUID) (bool, error) { return false, nil }
