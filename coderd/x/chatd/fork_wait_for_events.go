@@ -7,7 +7,9 @@ package chatd
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -33,9 +35,9 @@ const (
 )
 
 type waitForEventsArgs struct {
-	ChildChatIDs     []string `json:"child_chat_ids,omitempty" description:"IDs of the direct child agents of this chat to wait for. Defaults to every child agent that is still working."`
+	ChildChatIDs     []string `json:"child_chat_ids,omitempty" description:"IDs of the direct child agents of this chat to wait for. Defaults to every child agent that is still working. At most 50."`
 	Prompt           string   `json:"prompt,omitempty" description:"Text that starts every wake-up message. Defaults to a request to read the child's result with wait_agent."`
-	ExpiresInSeconds *int     `json:"expires_in_seconds,omitempty" description:"Stop waiting this many seconds from now. Defaults to 86400 (24 hours)."`
+	ExpiresInSeconds *int     `json:"expires_in_seconds,omitempty" description:"Stop waiting this many seconds from now, at least 60. Defaults to 86400 (24 hours)."`
 }
 
 type waitForEventsChild struct {
@@ -70,33 +72,84 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			"interrupts a running turn. Stops after expires_in_seconds "+
 			"(default 24 hours). Returns the wake-up ID and the watched children.",
 		func(ctx context.Context, args waitForEventsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			children, err := p.waitForEventsChildren(ctx, chat, args.ChildChatIDs)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-			spec, err := waitForEventsSpec(args, children)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
 			id, ok := workspacesdk.ToolCallIDFromContext(ctx)
 			if !ok {
 				return fantasy.NewTextErrorResponse("wait_for_events requires a deterministic tool-call ID"), nil
 			}
-			wakeup, err := p.createChatWakeup(ctx, p.db, chat, id, chat.OwnerID, spec, p.clock.Now())
+			// A replayed call returns the wake-up it created, even when the
+			// children changed since and the watch set would differ now.
+			wakeup, err := p.chatWakeupByID(ctx, chat, id)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-			result := waitForEventsResult{
-				ID:        wakeup.ID,
-				ExpiresAt: wakeup.ExpiresAt.Time,
-				Children:  make([]waitForEventsChild, 0, len(children)),
+			if wakeup == nil {
+				children, err := p.waitForEventsChildren(ctx, chat, args.ChildChatIDs)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				spec, err := waitForEventsSpec(args, children)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				created, err := p.createChatWakeup(ctx, p.db, chat, id, chat.OwnerID, spec, p.clock.Now())
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				wakeup = &created
 			}
-			for _, child := range children {
-				result.Children = append(result.Children, waitForEventsChild{ChatID: child.ID, Title: child.Title, Status: child.Status})
+			result, err := p.waitForEventsResponse(ctx, chat, *wakeup)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			return toolJSONResponse(result), nil
 		},
 	)
+}
+
+// chatWakeupByID returns the wake-up of chat with id, or nil when chat has
+// none.
+func (p *Server) chatWakeupByID(ctx context.Context, chat database.Chat, id uuid.UUID) (*forkdb.ChatWakeup, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return nil, xerrors.Errorf("fork queries: %w", err)
+	}
+	wakeup, err := fdb.GetChatWakeupByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && wakeup.ChatID != chat.ID) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, xerrors.Errorf("get chat wake-up: %w", err)
+	}
+	return &wakeup, nil
+}
+
+// waitForEventsResponse describes wakeup with the current state of the
+// children its events watch.
+func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup) (waitForEventsResult, error) {
+	var events []wakeupEvent
+	if err := json.Unmarshal(wakeup.Events, &events); err != nil {
+		return waitForEventsResult{}, xerrors.Errorf("decode events: %w", err)
+	}
+	rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
+		ParentIds: []uuid.UUID{chat.ID},
+	})
+	if err != nil {
+		return waitForEventsResult{}, xerrors.Errorf("list child agents: %w", err)
+	}
+	result := waitForEventsResult{
+		ID:        wakeup.ID,
+		ExpiresAt: wakeup.ExpiresAt.Time,
+		Children:  make([]waitForEventsChild, 0, len(events)),
+	}
+	for _, event := range events {
+		index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
+		if event.Type != wakeupEventChildDone || index < 0 {
+			continue
+		}
+		child := rows[index].Chat
+		result.Children = append(result.Children, waitForEventsChild{ChatID: child.ID, Title: child.Title, Status: child.Status})
+	}
+	return result, nil
 }
 
 // waitForEventsChildren returns the children of chat to watch: the direct
@@ -149,7 +202,7 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 		return nil, xerrors.New("no running child agents to wait for")
 	}
 	if len(watched) > maxWaitForEventsChildren {
-		watched = watched[:maxWaitForEventsChildren]
+		return nil, xerrors.Errorf("cannot wait for %d child agents at once, the maximum is %d", len(watched), maxWaitForEventsChildren)
 	}
 	return watched, nil
 }
@@ -168,8 +221,9 @@ func waitForEventsSpec(args waitForEventsArgs, children []database.Chat) (wakeup
 	}
 	if args.ExpiresInSeconds != nil {
 		maxSeconds := int(maxWakeupPeriod / time.Second)
-		if *args.ExpiresInSeconds <= 0 || *args.ExpiresInSeconds > maxSeconds {
-			return wakeupSpec{}, xerrors.Errorf("expires_in_seconds must be between 1 and %d, got %d", maxSeconds, *args.ExpiresInSeconds)
+		minSeconds := int(minWakeupPeriod / time.Second)
+		if *args.ExpiresInSeconds < minSeconds || *args.ExpiresInSeconds > maxSeconds {
+			return wakeupSpec{}, xerrors.Errorf("expires_in_seconds must be between %d and %d, got %d", minSeconds, maxSeconds, *args.ExpiresInSeconds)
 		}
 		spec.expiresInSeconds = *args.ExpiresInSeconds
 	}
@@ -243,7 +297,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		finish: func(admittedAt time.Time) wakeupFinish { return eventsWakeupFinish(wakeup, admittedAt, 1, pending) },
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	return p.finishWakeupSend(ctx, fdb, wakeup, now, delivery.runKey, err)
+	// A failed send keeps the child's own key free, so a later poll retries it.
+	failedRunKey := delivery.runKey + ":failed:" + now.UTC().Format(time.RFC3339Nano)
+	return p.finishWakeupSend(ctx, fdb, wakeup, now, failedRunKey, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched child still
