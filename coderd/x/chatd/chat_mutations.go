@@ -218,6 +218,11 @@ func (p *Server) SendMessage(
 		if err := forkLoop.schedule(ctx, store, lockedChat, p.clock.Now()); err != nil {
 			return err
 		}
+		if opts.forkAdmit != nil {
+			if err := opts.forkAdmit(ctx, store, sendResult); err != nil {
+				return err
+			}
+		}
 
 		if sendResult.QueuedMessage != nil {
 			result.Queued = true
