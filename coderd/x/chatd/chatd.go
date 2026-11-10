@@ -446,12 +446,8 @@ const (
 	// SendMessageBusyBehaviorQueue queues user messages while the chat is busy.
 	SendMessageBusyBehaviorQueue SendMessageBusyBehavior = "queue"
 	// SendMessageBusyBehaviorSteer delivers the message before the next
-	// assistant model call.
+	// assistant model call. It is the default.
 	SendMessageBusyBehaviorSteer SendMessageBusyBehavior = "steer"
-	// SendMessageBusyBehaviorInterrupt interrupts the active run. It persists
-	// the partial response, then delivers this message and the other steer
-	// messages ahead of queued messages.
-	SendMessageBusyBehaviorInterrupt SendMessageBusyBehavior = "interrupt"
 )
 
 // SendMessageOptions controls user message insertion with busy-state behavior.
@@ -477,8 +473,11 @@ type SendMessageResult struct {
 	QueuedMessage *database.ChatQueuedMessage
 	Message       database.ChatMessage
 	// InsertedMessages holds every message the send inserted, in
-	// insertion order. A queued send on an errored chat can still
-	// insert messages by promoting the previous queue head.
+	// insertion order. A send to an errored or paused chat can also
+	// insert queued messages: a steer send inserts the queued steer
+	// messages before the new message, and a queue send to an errored
+	// chat inserts the steer lane, or the first queue message when that
+	// lane is empty.
 	InsertedMessages []database.ChatMessage
 	Chat             database.Chat
 	// FirstUserTurn reports that the send inserted the first
@@ -671,6 +670,18 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 	if err != nil {
 		return database.Chat{}, err
 	}
+	submittedParts := contentParts
+	var loop *forkLoop
+	// A subagent's first message comes from its parent's model, not a user.
+	if !opts.ParentChatID.Valid {
+		contentParts, loop, err = p.forkLoopCommand(contentParts)
+		if err != nil {
+			return database.Chat{}, err
+		}
+		if loop != nil && opts.TitleSource == database.ChatTitleSourceFallback {
+			opts.Title = chatprompt.FallbackTitle(chatprompt.TitleText(contentParts, nil))
+		}
+	}
 	// The prompt-submit hook fires with the first SendMessage when the
 	// chat is created without an initial user message.
 	if p.hooks.Enabled() && len(contentParts) > 0 {
@@ -679,7 +690,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 			return database.Chat{}, err
 		}
 		turnID := uuid.New()
-		promptMessage, err := chathooks.UserPromptMessage(contentParts)
+		promptMessage, err := chathooks.UserPromptMessage(submittedParts)
 		if err != nil {
 			return database.Chat{}, err
 		}
@@ -697,6 +708,9 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 			return database.Chat{}, err
 		}
 		contentParts = composed
+		if err := loop.applyHookOverride(promptResult); err != nil {
+			return database.Chat{}, err
+		}
 		// Avoid deriving titles from the prompt that policy replaced.
 		if overridden && opts.TitleSource == database.ChatTitleSourceFallback {
 			opts.Title = chatprompt.FallbackTitle(chatprompt.TitleText(contentParts, nil))
@@ -780,6 +794,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		FileIDs:         chatprompt.FileIDs(contentParts),
 		InitialStatus:   initialStatus,
 		MaxFileLinks:    p.chatLimits.MaxAttachmentsPerChat,
+		ForkAfterInsert: loop.afterChatInsert(cmp.Or(opts.CreatedBy, opts.OwnerID), p.clock.Now()),
 	})
 	if err != nil {
 		return database.Chat{}, err

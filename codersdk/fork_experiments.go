@@ -13,6 +13,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkChatTodos,
 	ExperimentForkNestedSubagents,
 	ExperimentForkAgentDefinitions,
+	ExperimentForkSubagentIsolation,
 	ExperimentForkChatWakeups,
 }
 
@@ -27,6 +28,10 @@ const ExperimentForkNestedSubagents Experiment = "fork-nested-subagents"
 // ExperimentForkAgentDefinitions lets spawn_agent use the custom agent types
 // that workspace agent definition files declare.
 const ExperimentForkAgentDefinitions Experiment = "fork-agent-definitions"
+
+// ExperimentForkSubagentIsolation lets spawn_agent run a child in its own git
+// worktree.
+const ExperimentForkSubagentIsolation Experiment = "fork-subagent-isolation"
 
 // ExperimentForkChatWakeups lets chats schedule their own wake-ups: the
 // schedule_wakeup and wait_for_events tools, /loop, and the wake-up worker.
