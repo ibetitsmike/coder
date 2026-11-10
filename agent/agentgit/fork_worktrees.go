@@ -353,7 +353,16 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree HEAD commit.", err)
 		return
 	}
-	revList := []string{"rev-list", "--count", oid, "--not", "--exclude=refs/heads/" + req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--"}
+	// Removing the worktree deletes the HEAD and branch reflogs, the last
+	// refs to commits a reset moved the branch away from.
+	logged, err := a.git(ctx, path, "log", "--walk-reflogs", "--format=%H", "HEAD", "refs/heads/"+req.Branch, "--")
+	if err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree reflogs.", err)
+		return
+	}
+	revList := []string{"rev-list", "--count", oid}
+	revList = append(revList, strings.Fields(logged)...)
+	revList = append(revList, "--not", "--exclude=refs/heads/"+req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--")
 	count, err := a.git(ctx, path, revList...)
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to count unpushed commits.", err)

@@ -480,6 +480,16 @@ func TestForkWorktreeDelete(t *testing.T) {
 			wantMessage: "branch feature has 1 commits that are not on any other branch or remote",
 		},
 		{
+			name: "CommitOnlyInReflog",
+			setup: func(t *testing.T, _, _ string, wt workspacesdk.ForkWorktree) string {
+				wtCommit(t, wt.Path, "reset away\n")
+				wtGit(t, wt.Path, "reset", "--hard", "HEAD~1")
+				return wt.Path
+			},
+			wantStatus:  http.StatusConflict,
+			wantMessage: "branch feature has 1 commits that are not on any other branch or remote",
+		},
+		{
 			name: "RelativePath",
 			setup: func(t *testing.T, _, root string, wt workspacesdk.ForkWorktree) string {
 				rel, err := filepath.Rel(root, wt.Path)
