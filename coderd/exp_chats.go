@@ -613,6 +613,7 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 
 	sdkChats := db2sdk.ChatRowsWithChildren(chatRows, childRows, diffStatusesByChatID)
 	api.enrichChatsWithMissingAgentIDs(ctx, sdkChats)
+	api.fillForkChatAgentTypes(ctx, sdkChats)
 	httpapi.Write(ctx, rw, http.StatusOK, sdkChats)
 }
 
@@ -1935,6 +1936,7 @@ func (api *API) getChat(rw http.ResponseWriter, r *http.Request) {
 
 	enriched := []codersdk.Chat{sdkChat}
 	api.repairChatAgentIDs(ctx, enriched)
+	api.fillForkChatAgentTypes(ctx, enriched)
 	sdkChat = enriched[0]
 
 	httpapi.Write(ctx, rw, http.StatusOK, sdkChat)

@@ -11,3 +11,6 @@ SELECT chat_subagents.*
 FROM chat_subagents
 JOIN chats ON chats.id = chat_subagents.chat_id
 WHERE chats.parent_chat_id = @parent_chat_id::uuid;
+
+-- name: GetChatSubagentTypesByChatIDs :many
+SELECT chat_id, agent_type FROM chat_subagents WHERE chat_id = ANY(@chat_ids::uuid[]);

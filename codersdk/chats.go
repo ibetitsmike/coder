@@ -223,6 +223,10 @@ type Chat struct {
 	// subagents, so nesting depth is capped at 1 and this slice is
 	// always empty for child chats.
 	Children []Chat `json:"children"`
+	// AgentType is the subagent type of a child chat, such as explore or a
+	// custom agent definition name. Only set with the
+	// fork-agent-definitions experiment.
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // ChatProject groups related chats in an organization.

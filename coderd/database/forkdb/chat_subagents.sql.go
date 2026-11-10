@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -30,6 +31,38 @@ func (q *Queries) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID)
 		&i.ToolPolicy,
 	)
 	return i, err
+}
+
+const getChatSubagentTypesByChatIDs = `-- name: GetChatSubagentTypesByChatIDs :many
+SELECT chat_id, agent_type FROM chat_subagents WHERE chat_id = ANY($1::uuid[])
+`
+
+type GetChatSubagentTypesByChatIDsRow struct {
+	ChatID    uuid.UUID `db:"chat_id" json:"chat_id"`
+	AgentType string    `db:"agent_type" json:"agent_type"`
+}
+
+func (q *Queries) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getChatSubagentTypesByChatIDs, pq.Array(chatIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetChatSubagentTypesByChatIDsRow
+	for rows.Next() {
+		var i GetChatSubagentTypesByChatIDsRow
+		if err := rows.Scan(&i.ChatID, &i.AgentType); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getChatSubagentsByParentChatID = `-- name: GetChatSubagentsByParentChatID :many

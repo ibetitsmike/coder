@@ -534,6 +534,49 @@ export const RunningDelegatedChat: Story = {
 	},
 };
 
+export const ChildAgentTypes: Story = {
+	args: {
+		chats: [
+			buildChat({
+				id: "root-types",
+				title: "Root with typed children",
+				children: [
+					buildChat({
+						id: "child-reviewer",
+						title: "Review the diff",
+						parent_chat_id: "root-types",
+						root_chat_id: "root-types",
+						agent_type: "reviewer",
+					}),
+					buildChat({
+						id: "child-explore",
+						title: "Find the call sites",
+						parent_chat_id: "root-types",
+						root_chat_id: "root-types",
+						agent_type: "explore",
+					}),
+					buildChat({
+						id: "child-general",
+						title: "General child has no badge",
+						parent_chat_id: "root-types",
+						root_chat_id: "root-types",
+						agent_type: "general",
+					}),
+				],
+			}),
+		],
+	},
+	parameters: {
+		reactRouter: reactRouterParameters({
+			location: {
+				path: "/agents/child-reviewer",
+				pathParams: { agentId: "child-reviewer" },
+			},
+			routing: agentsRouting,
+		}),
+	},
+};
+
 export const ExpandCollapse: Story = {
 	args: {
 		chats: [

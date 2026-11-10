@@ -94,6 +94,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(sub, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(sub)
 		},
+		"GetChatSubagentTypesByChatIDs": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			rows := []forkdb.GetChatSubagentTypesByChatIDsRow{testutil.Fake(t, faker, forkdb.GetChatSubagentTypesByChatIDsRow{})}
+			ids := []uuid.UUID{rows[0].ChatID}
+			fdb.EXPECT().GetChatSubagentTypesByChatIDs(gomock.Any(), ids).Return(rows, nil).AnyTimes()
+			check.Args(ids).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(rows)
+		},
 		"GetChatSubagentsByParentChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			subs := []forkdb.ChatSubagent{testutil.Fake(t, faker, forkdb.ChatSubagent{})}
