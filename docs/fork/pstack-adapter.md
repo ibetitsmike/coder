@@ -298,12 +298,12 @@ The worktree comes from the git repository at `repo_path`, an absolute path.
 When you omit `repo_path`, it comes from the parent's worktree if the parent has one, else from the workspace agent's directory.
 Its new branch starts at `base_branch`, a branch or a commit, or at the repository's current `HEAD` when you omit `base_branch`.
 The worktree is at `~/.coder/worktrees/<repository directory>/<child chat ID>`, on the branch `agent/<title>-<first 8 hex digits of the child chat ID>`, where `<title>` is a slug of the child's title.
+A worktree that comes from the parent's worktree is at `~/.coder/worktrees/<parent chat ID>/<child chat ID>`.
 The `spawn_agent` result adds `isolation`, `worktree_path`, and `branch`.
 
 The child works in its worktree.
 A system message before its prompt names the worktree and the branch, and tells the child to make and commit every change there.
 `execute` without a `workdir` runs in the worktree, and `read_file`, `write_file`, `edit_files`, and `attach_file` resolve a relative path against it.
-The child's workspace context names the worktree as its working directory.
 An absolute path or an explicit `workdir` still reaches the rest of the workspace.
 With `fork-nested-subagents`, a `shared` child of the worktree child works in the same worktree, and its system message says so.
 
@@ -312,6 +312,7 @@ With `fork-nested-subagents`, a `shared` child of the worktree child works in th
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
 Otherwise Coder Agents keeps both, so after you merge the child's work, run `git worktree remove <worktree_path>` and `git branch -D <branch>` in the repository.
+Add `--force` to `git worktree remove` when the worktree still has uncommitted or untracked files.
 Without the experiment, `spawn_agent` has no `isolation`, `repo_path`, or `base_branch` field.
 
 ## Models
@@ -421,7 +422,7 @@ Checked against fork `main` at `b4dfdb922c`:
   Worktree creation and its errors, `fork_isolation.go:163-211`, `:236-238`, from the parent's worktree when `repo_path` is omitted, `:172-179`, removed only when the spawn fails, `:214-227`, called at spawn, `coderd/x/chatd/fork_subagents.go:179`, `:204-217`.
   Branch name, `fork_isolation.go:249-271`, path, `agent/agentgit/fork_worktrees.go:63`, `:177`, `:220-221`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:180-190`, `:213-216`.
-  Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`, and the working directory in the workspace context, `:76-90`, `coderd/x/chatd/turn_environment.go:468`.
+  Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
