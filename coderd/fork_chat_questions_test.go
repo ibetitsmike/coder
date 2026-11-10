@@ -278,3 +278,29 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
 	require.NoError(t, err)
 }
+
+// With the experiment off, the secret answer route is gone, so a chat
+// message still resumes a chat whose question is secret.
+func TestForkChatSecretQuestionExperimentOff(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db := newChatClientWithDatabase(t)
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	_, child, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatDescendantQuestion(dbauthz.AsSystemRestricted(ctx), forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     child.ID,
+		ToolCallID: "call-secret",
+		Questions:  json.RawMessage(`[{"header": "Token", "question": "Paste the API token.", "secret": true}]`),
+	})
+	require.NoError(t, err)
+
+	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText,
+		Text: "Skip the token.",
+	}}})
+	require.NoError(t, err)
+}

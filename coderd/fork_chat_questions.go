@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -167,7 +166,7 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		ToolCallID: toolCallID,
 		Value:      req.Value,
 	}
-	createdAt, err := fdb.InsertChatSecretAnswer(ctx, insert)
+	err = fdb.InsertChatSecretAnswer(ctx, insert)
 	if database.IsUniqueViolation(err) {
 		// The owner can delete the queued message that reports an answer,
 		// so the question stays pending with an answer the chat never
@@ -179,10 +178,14 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == nil {
-			err = fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: toolCallID})
-		}
-		if err == nil {
-			createdAt, err = fdb.InsertChatSecretAnswer(ctx, insert)
+			// One transaction, so a concurrent request never sees the
+			// question without an answer.
+			err = forkdb.InTx(api.Database, func(_ database.Store, ftx forkdb.Store) error {
+				if delErr := ftx.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: toolCallID}); delErr != nil {
+					return delErr
+				}
+				return ftx.InsertChatSecretAnswer(ctx, insert)
+			}, nil)
 		}
 		if database.IsUniqueViolation(err) {
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
@@ -202,20 +205,8 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		}},
 	})
 	if err != nil {
-		// Without the message the chat never learns of the answer, so the
-		// question stays pending and the user can answer again. The delete
-		// outlives a canceled request, whose answer row would make every
-		// retry fail with a conflict. It matches created_at so that it
-		// keeps the answer of a concurrent request that replaced this one.
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		if delErr := fdb.DeleteChatSecretAnswer(cleanupCtx, forkdb.DeleteChatSecretAnswerParams{
-			ChatID:     chat.ID,
-			ToolCallID: toolCallID,
-			CreatedAt:  sql.NullTime{Time: createdAt, Valid: true},
-		}); delErr != nil {
-			api.Logger.Error(ctx, "delete undelivered secret answer", slog.F("chat_id", chat.ID), slog.Error(delErr))
-		}
+		// The answer stays stored. The question stays pending without the
+		// message, and the next answer replaces it as an unreported one.
 		writeChatError(ctx, rw, err)
 		return
 	}
@@ -245,7 +236,9 @@ func secretAnswerQueued(ctx context.Context, db database.Store, chatID uuid.UUID
 // only postChatSecretAnswer keeps the value out of the chat's messages.
 // Errors implement httperror.Responder.
 func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Chat) error {
-	if !chat.ParentChatID.Valid {
+	// With the experiment off, the secret answer route is gone, so a chat
+	// message is the only way to resume the chat.
+	if !chat.ParentChatID.Valid || !api.Experiments.Enabled(codersdk.ExperimentForkNestedSubagents) {
 		return nil
 	}
 	fdb, err := forkdb.From(api.Database)
