@@ -351,19 +351,19 @@ export const findChatInListCaches = (
 };
 
 /**
- * Adds a child chat to its parent's `children` array across all
- * infinite chat query caches. If the parent is not in any loaded page,
- * the child is silently dropped (it will appear when the parent loads).
+ * Adds a descendant chat to its root chat's flat `children` array across
+ * all infinite chat query caches. If the root is not in any loaded page,
+ * the child is silently dropped (it will appear when the root loads).
  */
 export const addChildToParentInCache = (
 	queryClient: QueryClient,
 	child: TypesGen.Chat,
-	parentId: string,
+	rootId: string,
 ) => {
 	updateInfiniteChatsCache(queryClient, (chats) => {
 		let changed = false;
 		const next = chats.map((c) => {
-			if (c.id !== parentId) return c;
+			if (c.id !== rootId) return c;
 			// Avoid duplicates.
 			if (c.children?.some((ch) => ch.id === child.id)) return c;
 			changed = true;
