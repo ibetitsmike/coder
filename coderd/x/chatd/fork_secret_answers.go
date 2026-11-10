@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode"
@@ -213,8 +214,8 @@ func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAns
 		if !strings.Contains(command, placeholder) {
 			continue
 		}
-		if secretArithmeticUnsafe(answer.Value) {
-			return "", xerrors.Errorf("the value of %s holds [ and then $ or a backtick, which Bash runs as code where it evaluates a variable as arithmetic, so execute does not take it; "+
+		if strings.ContainsAny(answer.Value, "$`") {
+			return "", xerrors.Errorf("the value of %s holds $ or a backtick, which Bash can run as code where it evaluates a variable again, so execute does not take it; "+
 				"write it to a file with write_file and read it from there", placeholder)
 		}
 		name := secretShellVariableName(command, i+1)
@@ -224,22 +225,23 @@ func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAns
 	if len(vars) == 0 {
 		return substituteSecretAnswers(input, answers), nil
 	}
-	args["command"] = assignments.String() + expandSecretShellVariables(command, vars)
-	data, err := json.Marshal(args)
+	// The other parameters get their values before the command gets the
+	// assignments, because a value can hold a placeholder.
+	rest := maps.Clone(args)
+	delete(rest, "command")
+	data, err := json.Marshal(rest)
 	if err != nil {
 		return "", xerrors.Errorf("encode the execute input: %w", err)
 	}
-	return substituteSecretAnswers(string(data), answers), nil
-}
-
-// secretArithmeticUnsafe reports whether Bash can run part of value as code
-// when it evaluates a variable that holds value as arithmetic, for example
-// in $(( )), (( )), let or [[ -eq ]]. Such an evaluation expands only the
-// subscripts of array references in value, so a value is safe unless a $
-// or a backtick follows a [.
-func secretArithmeticUnsafe(value string) bool {
-	i := strings.IndexByte(value, '[')
-	return i >= 0 && strings.ContainsAny(value[i:], "$`")
+	if err := json.Unmarshal([]byte(substituteSecretAnswers(string(data), answers)), &args); err != nil {
+		return "", xerrors.Errorf("decode the execute input: %w", err)
+	}
+	args["command"] = assignments.String() + expandSecretShellVariables(command, vars)
+	data, err = json.Marshal(args)
+	if err != nil {
+		return "", xerrors.Errorf("encode the execute input: %w", err)
+	}
+	return string(data), nil
 }
 
 // secretShellVariableName returns the variable for the nth answer, with
@@ -327,24 +329,48 @@ func scrubSecretAnswers(text string, answers []forkdb.ChatSecretAnswer) string {
 	slices.SortFunc(answers, func(a, b forkdb.ChatSecretAnswer) int {
 		return len(b.Value) - len(a.Value)
 	})
-	for _, answer := range answers {
+	// Each pass writes a marker with a null byte, which no form holds, so
+	// no later pass replaces part of an earlier replacement. The markers
+	// become placeholders at the end.
+	forms := make([][]string, len(answers))
+	for i, answer := range answers {
 		if answer.Value == "" {
 			continue
 		}
-		placeholder := secretPlaceholder(answer.ToolCallID)
-		var forms []string
-		for _, value := range []string{answer.Value, shellQuote(answer.Value)} {
-			forms = append(forms, value, jsonStringContent(value), jsonStringContentNoHTMLEscape(value),
-				jsonStringContentASCII(value, "\\u%04x"), jsonStringContentASCII(value, "\\u%04X"))
-		}
-		for _, form := range forms {
-			text = strings.ReplaceAll(text, form, placeholder)
-		}
-		for _, form := range forms {
-			text = scrubSecretFragments(text, form, placeholder)
+		forms[i] = secretAnswerForms(answer.Value)
+		for _, form := range forms[i] {
+			text = strings.ReplaceAll(text, form, secretScrubMarker(i))
 		}
 	}
+	for i := range answers {
+		for _, form := range forms[i] {
+			text = scrubSecretFragments(text, form, secretScrubMarker(i))
+		}
+	}
+	for i, answer := range answers {
+		text = strings.ReplaceAll(text, secretScrubMarker(i), secretPlaceholder(answer.ToolCallID))
+	}
 	return text
+}
+
+func secretScrubMarker(i int) string {
+	return fmt.Sprintf("\x00%d\x00", i)
+}
+
+// secretAnswerForms returns value as is and shell-quoted, each also as JSON
+// encoders escape it in a string, with / as is and escaped.
+func secretAnswerForms(value string) []string {
+	var forms []string
+	for _, v := range []string{value, shellQuote(value)} {
+		forms = append(forms, v)
+		for _, form := range []string{
+			jsonStringContent(v), jsonStringContentNoHTMLEscape(v),
+			jsonStringContentASCII(v, "\\u%04x"), jsonStringContentASCII(v, "\\u%04X"),
+		} {
+			forms = append(forms, form, strings.ReplaceAll(form, "/", `\/`))
+		}
+	}
+	return forms
 }
 
 // scrubSecretFragments replaces each run of text that starts like form, and
