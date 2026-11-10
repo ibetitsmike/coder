@@ -110,6 +110,47 @@ describe("agent definition markdown", () => {
 		expect(parseAgentDefinitionMarkdown(rebuilt).description).toBe("true");
 	});
 
+	it("quotes values the server's YAML 1.1 decoder reads as dates", () => {
+		const rebuilt = buildAgentDefinitionMarkdown({
+			...emptyAgentDefinitionFormValues,
+			name: "2026-11-10",
+			body: "Review the diff.",
+		});
+		expect(rebuilt).toBe('---\nname: "2026-11-10"\n---\nReview the diff.\n');
+	});
+
+	it("keeps aliases of an owned value when that value changes or is removed", () => {
+		const parsed = parseAgentDefinitionMarkdown(
+			[
+				"---",
+				"name: reviewer",
+				"description: &summary Reviews diffs.",
+				"model: &default sonnet",
+				"reasoning_effort: *default",
+				"summary: *summary",
+				"---",
+				"Review the diff.",
+			].join("\n"),
+		);
+		const rebuilt = buildAgentDefinitionMarkdown({
+			...parsed,
+			description: "Finds bugs.",
+			model: "",
+		});
+		expect(rebuilt).toBe(
+			[
+				"---",
+				"name: reviewer",
+				"description: &summary Finds bugs.",
+				"reasoning_effort: sonnet",
+				"summary: Reviews diffs.",
+				"---",
+				"Review the diff.",
+				"",
+			].join("\n"),
+		);
+	});
+
 	it("rejects front-matter that is not a YAML mapping", () => {
 		expect(() =>
 			parseAgentDefinitionMarkdown("---\nname: [reviewer\n---\nbody"),
