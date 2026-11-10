@@ -262,7 +262,7 @@ func (f forkQueryMetricsStore) GetUserAgentDefinitionByName(ctx context.Context,
 	return f.s.GetUserAgentDefinitionByName(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+func (f forkQueryMetricsStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
 	defer f.observe(ctx, "InsertChatSecretAnswer", time.Now())
 	return f.s.InsertChatSecretAnswer(ctx, arg)
 }
