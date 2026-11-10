@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
-	deleteUserAgentDefinition,
-	updateUserAgentDefinition,
-	userAgentDefinitions,
+	type AgentDefinitionScope,
+	agentDefinitions,
+	deleteAgentDefinition,
+	isSameScope,
+	updateAgentDefinition,
 } from "#/api/queries/forkAgentDefinitions";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
@@ -17,26 +19,26 @@ import {
 import { useForkAgentDefinitionEditor } from "./useForkAgentDefinitionEditor";
 
 type ForkAgentDefinitionsTableProps = {
-	organizationId: string;
+	scope: AgentDefinitionScope;
 	action?: React.ReactNode;
 };
 
 export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
-> = ({ organizationId, action }) => {
+> = ({ scope, action }) => {
 	const queryClient = useQueryClient();
 	const [selectedDeleteTarget, setDeleteTarget] =
 		useState<ForkAgentDefinitionMetadata>();
 	const deleteTarget =
-		selectedDeleteTarget?.organization_id === organizationId
+		selectedDeleteTarget?.organization_id === scope.organizationId
 			? selectedDeleteTarget
 			: undefined;
 	if (selectedDeleteTarget && !deleteTarget) {
 		setDeleteTarget(undefined);
 	}
-	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
+	const definitionsQuery = useQuery(agentDefinitions(scope));
 	const { editorState, openCreate, openEdit } =
-		useForkAgentDefinitionEditor(organizationId);
+		useForkAgentDefinitionEditor(scope);
 
 	// Pending toggles are keyed by organization, then name, so a second
 	// toggle, or a switch to another organization with the same names, does
@@ -46,10 +48,10 @@ export const ForkAgentDefinitionsTable: React.FC<
 	const [pendingToggles, setPendingToggles] = useState<
 		Readonly<Record<string, Readonly<Record<string, boolean>>>>
 	>({});
-	const updateOptions = updateUserAgentDefinition(queryClient);
+	const updateOptions = updateAgentDefinition(queryClient);
 	const toggleMutation = useMutation({
 		...updateOptions,
-		onMutate: ({ organizationId: orgId, name, req }) => {
+		onMutate: ({ scope: { organizationId: orgId }, name, req }) => {
 			setPendingToggles((current) => ({
 				...current,
 				[orgId]: {
@@ -65,7 +67,10 @@ export const ForkAgentDefinitionsTable: React.FC<
 		},
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
-			const { organizationId: orgId, name } = args[2];
+			const {
+				scope: { organizationId: orgId },
+				name,
+			} = args[2];
 			setPendingToggles((current) => ({
 				...current,
 				[orgId]: Object.fromEntries(
@@ -75,12 +80,13 @@ export const ForkAgentDefinitionsTable: React.FC<
 		},
 	});
 
-	const deleteMutation = useMutation(deleteUserAgentDefinition(queryClient));
+	const deleteMutation = useMutation(deleteAgentDefinition(queryClient));
 
 	let deleteState: ForkAgentDefinitionDeleteState | undefined;
 	if (deleteTarget) {
 		const isTarget =
-			deleteMutation.variables?.organizationId === organizationId &&
+			deleteMutation.variables !== undefined &&
+			isSameScope(deleteMutation.variables.scope, scope) &&
 			deleteMutation.variables.name === deleteTarget.name;
 		const isDeleting = isTarget && deleteMutation.isPending;
 		deleteState = {
@@ -89,13 +95,13 @@ export const ForkAgentDefinitionsTable: React.FC<
 			isDeleting,
 			onConfirm: () =>
 				deleteMutation.mutate(
-					{ organizationId, name: deleteTarget.name },
+					{ scope, name: deleteTarget.name },
 					{
 						// A lost response can still have deleted the definition,
 						// so the refetched list decides whether the delete is done.
-						onSettled: (_data, error, { organizationId: orgId, name }) => {
+						onSettled: (_data, error, { scope: requestScope, name }) => {
 							const definitions = queryClient.getQueryData(
-								userAgentDefinitions(orgId).queryKey,
+								agentDefinitions(requestScope).queryKey,
 							);
 							const isGone =
 								definitions !== undefined &&
@@ -127,9 +133,9 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onRetry={() => {
 				void definitionsQuery.refetch();
 			}}
-			pendingToggles={pendingToggles[organizationId]}
+			pendingToggles={pendingToggles[scope.organizationId]}
 			onToggleEnabled={(name, enabled) =>
-				toggleMutation.mutate({ organizationId, name, req: { enabled } })
+				toggleMutation.mutate({ scope, name, req: { enabled } })
 			}
 			onCreate={openCreate}
 			onEdit={openEdit}

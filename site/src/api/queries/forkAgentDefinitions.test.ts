@@ -8,15 +8,19 @@ import type {
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import {
-	createUserAgentDefinition,
-	deleteUserAgentDefinition,
+	type AgentDefinitionScope,
+	agentDefinition,
+	agentDefinitions,
+	createAgentDefinition,
+	deleteAgentDefinition,
 	isNewer,
-	updateUserAgentDefinition,
-	userAgentDefinition,
-	userAgentDefinitions,
+	updateAgentDefinition,
 } from "./forkAgentDefinitions";
 
-const org = MockForkAgentDefinitionMetadata.organization_id;
+const scope: AgentDefinitionScope = {
+	tier: "user",
+	organizationId: MockForkAgentDefinitionMetadata.organization_id,
+};
 const name = MockForkAgentDefinitionMetadata.name;
 
 const definitionAt = (
@@ -68,13 +72,47 @@ describe("isNewer", () => {
 	});
 });
 
-describe("createUserAgentDefinition", () => {
+describe("createAgentDefinition", () => {
+	it("creates an organization definition in the organization's list only", async () => {
+		const queryClient = createQueryClient();
+		const organizationScope: AgentDefinitionScope = {
+			...scope,
+			tier: "organization",
+		};
+		queryClient.setQueryData(agentDefinitions(scope).queryKey, []);
+		queryClient.setQueryData(agentDefinitions(organizationScope).queryKey, []);
+		const created = definitionAt("2030-01-01T00:00:00Z");
+		const createOrganization = vi
+			.spyOn(forkAgentDefinitionsApi, "createOrganizationAgentDefinition")
+			.mockResolvedValue(created);
+		const createUser = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		);
+
+		await new MutationObserver(
+			queryClient,
+			createAgentDefinition(queryClient),
+		).mutate({ scope: organizationScope, req: { content: "" } });
+
+		expect(createOrganization).toHaveBeenCalledWith(scope.organizationId, {
+			content: "",
+		});
+		expect(createUser).not.toHaveBeenCalled();
+		expect(
+			queryClient.getQueryData(agentDefinitions(organizationScope).queryKey),
+		).toEqual([metadataOf(created)]);
+		expect(queryClient.getQueryData(agentDefinitions(scope).queryKey)).toEqual(
+			[],
+		);
+	});
+
 	it.each([
 		["a later change", definitionAt("2030-01-01T00:00:00.000900Z")],
 		["a later recreate", definitionAt("2030-01-01T00:00:00.000900Z", "other")],
 	])("keeps a listed row that shows %s", async (_case, listed) => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		queryClient.setQueryData(listKey, [metadataOf(listed)]);
 		vi.spyOn(
 			forkAgentDefinitionsApi,
@@ -83,15 +121,15 @@ describe("createUserAgentDefinition", () => {
 
 		await new MutationObserver(
 			queryClient,
-			createUserAgentDefinition(queryClient),
-		).mutate({ organizationId: org, req: { content: "" } });
+			createAgentDefinition(queryClient),
+		).mutate({ scope, req: { content: "" } });
 
 		expect(queryClient.getQueryData(listKey)).toEqual([metadataOf(listed)]);
 	});
 
 	it("replaces an older listed row of a deleted definition with the created one", async () => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		queryClient.setQueryData(listKey, [
 			metadataOf(definitionAt("2029-01-01T00:00:00Z", "deleted")),
 		]);
@@ -103,8 +141,8 @@ describe("createUserAgentDefinition", () => {
 
 		await new MutationObserver(
 			queryClient,
-			createUserAgentDefinition(queryClient),
-		).mutate({ organizationId: org, req: { content: "" } });
+			createAgentDefinition(queryClient),
+		).mutate({ scope, req: { content: "" } });
 
 		expect(queryClient.getQueryData(listKey)).toEqual([
 			metadataOf(MockCreatedDefinition),
@@ -113,7 +151,7 @@ describe("createUserAgentDefinition", () => {
 
 	it("adds a created definition in name order to a list fetched during the request", async () => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		const MockLaterMetadata = {
 			...metadataOf(definitionAt("2029-01-01T00:00:00Z", "later")),
 			name: "z-reviewer",
@@ -131,8 +169,8 @@ describe("createUserAgentDefinition", () => {
 
 		await new MutationObserver(
 			queryClient,
-			createUserAgentDefinition(queryClient),
-		).mutate({ organizationId: org, req: { content: "" } });
+			createAgentDefinition(queryClient),
+		).mutate({ scope, req: { content: "" } });
 
 		expect(
 			queryClient.getQueryData(listKey)?.map((definition) => definition.name),
@@ -151,8 +189,8 @@ describe("agent definition mutations", () => {
 				).mockRejectedValue(mockApiError({ message: "Name taken." }));
 				return new MutationObserver(
 					queryClient,
-					createUserAgentDefinition(queryClient),
-				).mutate({ organizationId: org, req: { content: "" } });
+					createAgentDefinition(queryClient),
+				).mutate({ scope, req: { content: "" } });
 			},
 		],
 		[
@@ -164,8 +202,8 @@ describe("agent definition mutations", () => {
 				).mockRejectedValue(mockApiError({ message: "Invalid." }));
 				return new MutationObserver(
 					queryClient,
-					updateUserAgentDefinition(queryClient),
-				).mutate({ organizationId: org, name, req: { content: "" } });
+					updateAgentDefinition(queryClient),
+				).mutate({ scope, name, req: { content: "" } });
 			},
 		],
 		[
@@ -177,8 +215,8 @@ describe("agent definition mutations", () => {
 				).mockRejectedValue(mockApiError({ message: "Forbidden." }));
 				return new MutationObserver(
 					queryClient,
-					deleteUserAgentDefinition(queryClient),
-				).mutate({ organizationId: org, name });
+					deleteAgentDefinition(queryClient),
+				).mutate({ scope, name });
 			},
 		],
 	])(
@@ -194,10 +232,10 @@ describe("agent definition mutations", () => {
 	);
 });
 
-describe("updateUserAgentDefinition", () => {
+describe("updateAgentDefinition", () => {
 	it("replaces a stale row with the recreated definition the update returns", async () => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		queryClient.setQueryData(listKey, [
 			metadataOf(definitionAt("2029-01-01T00:00:00Z")),
 		]);
@@ -212,8 +250,8 @@ describe("updateUserAgentDefinition", () => {
 
 		await new MutationObserver(
 			queryClient,
-			updateUserAgentDefinition(queryClient),
-		).mutate({ organizationId: org, name, req: { enabled: false } });
+			updateAgentDefinition(queryClient),
+		).mutate({ scope, name, req: { enabled: false } });
 
 		expect(queryClient.getQueryData(listKey)).toEqual([
 			metadataOf(MockRecreatedDefinition),
@@ -222,7 +260,7 @@ describe("updateUserAgentDefinition", () => {
 
 	it("keeps a newer cached detail of a recreated definition", async () => {
 		const queryClient = createQueryClient();
-		const detailKey = userAgentDefinition(queryClient, org, name).queryKey;
+		const detailKey = agentDefinition(queryClient, scope, name).queryKey;
 		const MockRecreatedDefinition = definitionAt(
 			"2030-01-01T00:00:00Z",
 			"recreated",
@@ -235,8 +273,8 @@ describe("updateUserAgentDefinition", () => {
 
 		await new MutationObserver(
 			queryClient,
-			updateUserAgentDefinition(queryClient),
-		).mutate({ organizationId: org, name, req: { enabled: false } });
+			updateAgentDefinition(queryClient),
+		).mutate({ scope, name, req: { enabled: false } });
 
 		expect(queryClient.getQueryData(detailKey)).toEqual(
 			MockRecreatedDefinition,
@@ -244,10 +282,10 @@ describe("updateUserAgentDefinition", () => {
 	});
 });
 
-describe("userAgentDefinition", () => {
+describe("agentDefinition", () => {
 	it("drops a definition the server no longer has from the cached list", async () => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		queryClient.setQueryData(listKey, [MockForkAgentDefinitionMetadata]);
 		vi.spyOn(
 			forkAgentDefinitionsApi,
@@ -258,7 +296,7 @@ describe("userAgentDefinition", () => {
 		});
 
 		await expect(
-			queryClient.fetchQuery(userAgentDefinition(queryClient, org, name)),
+			queryClient.fetchQuery(agentDefinition(queryClient, scope, name)),
 		).rejects.toBeDefined();
 
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
@@ -266,7 +304,7 @@ describe("userAgentDefinition", () => {
 
 	it("keeps a row a refetch replaced while the 404 was in flight", async () => {
 		const queryClient = createQueryClient();
-		const listKey = userAgentDefinitions(org).queryKey;
+		const listKey = agentDefinitions(scope).queryKey;
 		queryClient.setQueryData(listKey, [MockForkAgentDefinitionMetadata]);
 		const MockRecreatedMetadata = metadataOf(
 			definitionAt("2030-01-01T00:00:00Z", "recreated"),
@@ -283,7 +321,7 @@ describe("userAgentDefinition", () => {
 		});
 
 		await expect(
-			queryClient.fetchQuery(userAgentDefinition(queryClient, org, name)),
+			queryClient.fetchQuery(agentDefinition(queryClient, scope, name)),
 		).rejects.toBeDefined();
 
 		expect(queryClient.getQueryData(listKey)).toEqual([MockRecreatedMetadata]);
