@@ -748,8 +748,6 @@ export const NestedSubagentFamily: Story = {
 };
 
 export const NestedSubagentFamilyAtCapacity: Story = {
-	// The family is at its live limit and one worker waits for a concurrency
-	// slot, so the root shows its live chip and that worker its waiting icon.
 	args: {
 		chats: [
 			buildChat({

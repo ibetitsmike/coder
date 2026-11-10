@@ -35,11 +35,7 @@ type ForkFamilyCapacity = {
 	readonly liveLimit?: { readonly live: number; readonly max: number };
 };
 
-/**
- * Reads the family capacity for a tree row. A root row asks only while it is
- * expanded and has a live subagent; a subagent row asks only while it runs.
- * Both rows of a family share one query.
- */
+/** Every row of a family shares one query keyed by the family root. */
 export const useForkFamilyCapacity = (
 	chat: Chat,
 	isExpanded: boolean,
@@ -76,10 +72,14 @@ export const useForkFamilyCapacity = (
 	return {};
 };
 
-/** Marks a root row whose family is at its live subagent limit. */
-export const ForkFamilyLiveLimitChip: React.FC<{
+type ForkFamilyLiveLimitChipProps = {
 	liveLimit: ForkFamilyCapacity["liveLimit"];
-}> = ({ liveLimit }) => {
+};
+
+/** Renders nothing unless `liveLimit` is set. */
+export const ForkFamilyLiveLimitChip: React.FC<ForkFamilyLiveLimitChipProps> = ({
+	liveLimit,
+}) => {
 	if (!liveLimit) {
 		return null;
 	}
