@@ -2374,11 +2374,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -2682,6 +2684,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name                    | Type                                                            | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                 |
 |-------------------------|-----------------------------------------------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `agent_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `agent_type`            | string                                                          | false    |              | Agent type is the subagent type of a child chat, such as explore or a custom agent definition name. Only set with the fork-agent-definitions experiment.                                                                                                                                                    |
 | `archived`              | boolean                                                         | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `build_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
 | `children`              | array of [codersdk.Chat](#codersdkchat)                         | false    |              | Children holds the descendant (subagent) chats of this root chat, flat: each entry's parent_chat_id gives its place in the tree. Without fork-nested-subagents descendants are only direct children. Always initialized to an empty slice so the JSON field is present as []. Always empty for child chats. |
@@ -3164,6 +3167,40 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name                   | Type    | Required | Restrictions | Description |
 |------------------------|---------|----------|--------------|-------------|
 | `debug_retention_days` | integer | false    |              |             |
+
+## codersdk.ChatDescendantQuestion
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "chat_title": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "parent_chat_id": "c3609ee6-3b11-4a93-b9ae-e4fabcc99359",
+  "questions": [
+    {
+      "header": "string",
+      "options": [
+        {
+          "label": "string"
+        }
+      ],
+      "question": "string"
+    }
+  ],
+  "tool_call_id": "string"
+}
+```
+
+### Properties
+
+| Name             | Type                                                    | Required | Restrictions | Description |
+|------------------|---------------------------------------------------------|----------|--------------|-------------|
+| `chat_id`        | string                                                  | false    |              |             |
+| `chat_title`     | string                                                  | false    |              |             |
+| `created_at`     | string                                                  | false    |              |             |
+| `parent_chat_id` | string                                                  | false    |              |             |
+| `questions`      | array of [codersdk.ChatQuestion](#codersdkchatquestion) | false    |              |             |
+| `tool_call_id`   | string                                                  | false    |              |             |
 
 ## codersdk.ChatDiffContents
 
@@ -5360,6 +5397,42 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |-----------|-----------------------------------------------------|----------|--------------|-------------|
 | `prompts` | array of [codersdk.ChatPrompt](#codersdkchatprompt) | false    |              |             |
 
+## codersdk.ChatQuestion
+
+```json
+{
+  "header": "string",
+  "options": [
+    {
+      "label": "string"
+    }
+  ],
+  "question": "string"
+}
+```
+
+### Properties
+
+| Name       | Type                                                                | Required | Restrictions | Description |
+|------------|---------------------------------------------------------------------|----------|--------------|-------------|
+| `header`   | string                                                              | false    |              |             |
+| `options`  | array of [codersdk.ChatQuestionOption](#codersdkchatquestionoption) | false    |              |             |
+| `question` | string                                                              | false    |              |             |
+
+## codersdk.ChatQuestionOption
+
+```json
+{
+  "label": "string"
+}
+```
+
+### Properties
+
+| Name    | Type   | Required | Restrictions | Description |
+|---------|--------|----------|--------------|-------------|
+| `label` | string | false    |              |             |
+
 ## codersdk.ChatQueuedMessage
 
 ```json
@@ -6080,6 +6153,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "chat": {
     "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+    "agent_type": "string",
     "archived": true,
     "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
     "children": [
@@ -10548,6 +10622,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat, not counting a subagent's own ancestors. 0 means no limit.                                |
 | `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. 0 means no limit. |
 | `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0.                                                  |
+
+## codersdk.ForkChatFamilyCapacity
+
+```json
+{
+  "live_subagents": 3,
+  "max_live_subagents": 6,
+  "waiting_for_capacity": [
+    "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+  ]
+}
+```
+
+### Properties
+
+| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                 |
+|------------------------|-----------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
+| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
+| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
 
 ## codersdk.ForkOrganizationSubagentLimits
 

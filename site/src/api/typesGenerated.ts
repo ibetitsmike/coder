@@ -2208,6 +2208,12 @@ export interface Chat {
 	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
+	/**
+	 * AgentType is the subagent type of a child chat, such as explore or a
+	 * custom agent definition name. Only set with the
+	 * fork-agent-definitions experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/chats.go
@@ -2695,6 +2701,20 @@ export const ChatDebugStepOperations: ChatDebugStepOperation[] = [
 	"generate",
 	"stream",
 ];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatDescendantQuestion is an unanswered ask_user_question call of a
+ * descendant chat. The user answers it with a message to that chat.
+ */
+export interface ChatDescendantQuestion {
+	readonly chat_id: string;
+	readonly parent_chat_id: string;
+	readonly chat_title: string;
+	readonly tool_call_id: string;
+	readonly questions: readonly ChatQuestion[];
+	readonly created_at: string;
+}
 
 // From codersdk/chats.go
 /**
@@ -3741,6 +3761,24 @@ export const ChatProviderConfigSources: ChatProviderConfigSource[] = [
 	"env_preset",
 	"supported",
 ];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestion is one question of an ask_user_question call.
+ */
+export interface ChatQuestion {
+	readonly header: string;
+	readonly question: string;
+	readonly options: readonly ChatQuestionOption[];
+}
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestionOption is an answer the user can pick for a ChatQuestion.
+ */
+export interface ChatQuestionOption {
+	readonly label: string;
+}
 
 // From codersdk/chats.go
 /**
@@ -6325,6 +6363,31 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+}
+
+// From codersdk/fork_chat_family.go
+/**
+ * ForkChatFamilyCapacity is the subagent capacity of the family under a root
+ * chat. It is computed without a lock, so it may be stale when read.
+ */
+export interface ForkChatFamilyCapacity {
+	/**
+	 * LiveSubagents counts the unarchived subagents that have not finished:
+	 * status running, interrupting, requires_action or paused.
+	 */
+	readonly live_subagents: number;
+	/**
+	 * MaxLiveSubagents is the family's live subagent limit in force. 0 means
+	 * no limit. A spawn, or a message_agent that resumes a finished
+	 * subagent, fails while LiveSubagents is at the limit.
+	 */
+	readonly max_live_subagents: number;
+	/**
+	 * WaitingForCapacity lists the running subagents that no worker owns
+	 * because a deployment, organization or family concurrency limit is
+	 * full.
+	 */
+	readonly waiting_for_capacity: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go

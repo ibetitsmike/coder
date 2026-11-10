@@ -5525,6 +5525,87 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/family": {
+            "get": {
+                "description": "Returns the live subagent count and limit of the family under\na root chat, and the running subagents that wait for a\nconcurrency slot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the subagent capacity of a chat family",
+                "operationId": "get-the-subagent-capacity-of-a-chat-family",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Root chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkChatFamilyCapacity"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/questions": {
+            "get": {
+                "description": "Returns the unanswered ask_user_question calls of the\nunarchived descendants in the family of the chat, oldest first.\nA child chat lists the same family as its root.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List pending descendant questions",
+                "operationId": "list-pending-descendant-questions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatDescendantQuestion"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -23167,6 +23248,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "agent_type": {
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "type": "string"
+                },
                 "archived": {
                     "type": "boolean"
                 },
@@ -23692,6 +23777,35 @@ const docTemplate = `{
             "properties": {
                 "debug_retention_days": {
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ChatDescendantQuestion": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "chat_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "parent_chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestion"
+                    }
+                },
+                "tool_call_id": {
+                    "type": "string"
                 }
             }
         },
@@ -25285,6 +25399,31 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatPrompt"
                     }
+                }
+            }
+        },
+        "codersdk.ChatQuestion": {
+            "type": "object",
+            "properties": {
+                "header": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestionOption"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ChatQuestionOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
                 }
             }
         },
@@ -28443,6 +28582,29 @@ const docTemplate = `{
                 "max_subagent_depth": {
                     "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ForkChatFamilyCapacity": {
+            "type": "object",
+            "properties": {
+                "live_subagents": {
+                    "description": "LiveSubagents counts the unarchived subagents that have not finished:\nstatus running, interrupting, requires_action or paused.",
+                    "type": "integer",
+                    "example": 3
+                },
+                "max_live_subagents": {
+                    "description": "MaxLiveSubagents is the family's live subagent limit in force. 0 means\nno limit. A spawn, or a message_agent that resumes a finished\nsubagent, fails while LiveSubagents is at the limit.",
+                    "type": "integer",
+                    "example": 6
+                },
+                "waiting_for_capacity": {
+                    "description": "WaitingForCapacity lists the running subagents that no worker owns\nbecause a deployment, organization or family concurrency limit is\nfull.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
                 }
             }
         },
