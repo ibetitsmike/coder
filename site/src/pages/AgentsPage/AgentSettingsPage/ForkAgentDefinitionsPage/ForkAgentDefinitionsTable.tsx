@@ -33,7 +33,12 @@ import {
 // selected organization closes them instead of sending their input there.
 type EditorTarget = { organizationId: string } & (
 	| { mode: "create" }
-	| { mode: "edit"; name: string; values?: AgentDefinitionFormValues }
+	| {
+			mode: "edit";
+			name: string;
+			values?: AgentDefinitionFormValues;
+			loadedFrom?: Pick<ForkAgentDefinition, "id" | "updated_at">;
+	  }
 );
 
 // A request that got no response may still have been applied, so only the
@@ -86,11 +91,17 @@ export const ForkAgentDefinitionsTable: React.FC<
 		selectedDeleteTarget?.organization_id === organizationId
 			? selectedDeleteTarget
 			: undefined;
+	if (selectedDeleteTarget && !deleteTarget) {
+		setDeleteTarget(undefined);
+	}
 	const [selectedEditorTarget, setEditorTarget] = useState<EditorTarget>();
 	const editorTarget =
 		selectedEditorTarget?.organizationId === organizationId
 			? selectedEditorTarget
 			: undefined;
+	if (selectedEditorTarget && !editorTarget) {
+		setEditorTarget(undefined);
+	}
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
 	const editName = editorTarget?.mode === "edit" ? editorTarget.name : "";
 	const definitionQuery = useQuery({
@@ -230,9 +241,22 @@ export const ForkAgentDefinitionsTable: React.FC<
 		// The editor keeps the first values it gets, cached or fetched, so a
 		// later refetch cannot reset the user's edits.
 		if (loaded?.values && !editorTarget.values) {
-			setEditorTarget({ ...editorTarget, values: loaded.values });
+			setEditorTarget({
+				...editorTarget,
+				values: loaded.values,
+				loadedFrom: detail,
+			});
 		}
-		const { name, values } = editorTarget;
+		const { name, values, loadedFrom } = editorTarget;
+		// Saving by name would overwrite a definition edited or recreated
+		// since the editor loaded it, so the user keeps the draft instead.
+		const isChanged =
+			loadedFrom !== undefined &&
+			[listed, detail].some(
+				(current) =>
+					current !== undefined &&
+					(current.id !== loadedFrom.id || isNewer(current, loadedFrom)),
+			);
 		const loadError = values
 			? undefined
 			: (loaded?.error ??
@@ -255,12 +279,19 @@ export const ForkAgentDefinitionsTable: React.FC<
 						}
 					: undefined,
 			isRetrying: definitionQuery.isFetching,
-			submitError: submitError(
-				saveMutation.error,
-				"Failed to save agent definition.",
-			),
+			submitError: isChanged
+				? {
+						message: "This agent definition changed after you opened it.",
+						detail:
+							"Saving would overwrite the newer version. Copy your changes, then close and reopen the editor.",
+					}
+				: submitError(saveMutation.error, "Failed to save agent definition."),
 			isSubmitting: saveMutation.isPending,
-			onSubmit: ({ content }, onSettled) =>
+			onSubmit: ({ content }, onSettled) => {
+				if (isChanged) {
+					onSettled();
+					return;
+				}
 				saveMutation.mutate(
 					{ organizationId, name, req: { content } },
 					{
@@ -280,7 +311,8 @@ export const ForkAgentDefinitionsTable: React.FC<
 							onSettled();
 						},
 					},
-				),
+				);
+			},
 			onClose: () => closeEditor(saveMutation.isPending),
 		};
 	}

@@ -782,6 +782,48 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 	});
 
+	it("does not save over a definition that changed after the editor loaded it", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+		});
+		const updateDefinition = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		);
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		const description = await screen.findByLabelText("Description");
+		getDefinitions.mockResolvedValue([
+			{
+				...MockForkAgentDefinitionMetadata,
+				updated_at: "2030-01-01T00:00:00Z",
+			},
+		]);
+		await queryClient.refetchQueries({
+			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			exact: true,
+		});
+		await user.clear(description);
+		await user.type(description, "Mine.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		expect(updateDefinition).not.toHaveBeenCalled();
+		expect(description).toHaveValue("Mine.");
+	});
+
 	it("does not open content older than the listed definition, and retries", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
@@ -844,11 +886,10 @@ describe("ForkAgentDefinitionsPage", () => {
 			content: "---\nname: code-reviewer\n---\nDeleted body.\n",
 		});
 
-		await waitFor(() =>
-			expect(
-				screen.getByRole("dialog", { name: "Unable to load agent definition" }),
-			).toHaveTextContent("This agent definition no longer exists."),
-		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Unable to load agent definition",
+		});
+		expect(within(dialog).queryByRole("button", { name: "Retry" })).toBeNull();
 	});
 
 	it("drops a definition whose load returns 404 from the list", async () => {
@@ -912,8 +953,10 @@ describe("ForkAgentDefinitionsPage", () => {
 		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
 		await screen.findByLabelText("Description");
 		act(() => selectOrganization(MockOrganization2.id));
-
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		act(() => selectOrganization(MockDefaultOrganization.id));
+
+		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
 	it("keeps an editor opened in another organization when an earlier create succeeds", async () => {

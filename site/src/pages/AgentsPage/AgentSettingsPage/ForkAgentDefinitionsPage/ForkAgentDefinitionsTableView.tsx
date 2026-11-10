@@ -186,7 +186,6 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						<Button
 							ref={setSecondaryFallback}
 							variant="outline"
-							disabled={isLoading}
 							onClick={(event) => {
 								rememberTrigger(event);
 								onCreate();

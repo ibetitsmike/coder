@@ -93,6 +93,14 @@ export const LoadError: Story = {
 	},
 };
 
+export const LoadErrorWithoutRetry: Story = {
+	args: {
+		mode: "edit",
+		initialValues: undefined,
+		loadError: new Error("This agent definition no longer exists."),
+	},
+};
+
 export const Retrying: Story = {
 	args: { ...LoadError.args, isRetrying: true },
 };
