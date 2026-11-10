@@ -69,6 +69,72 @@ const RecentToolCalls: React.FC<{ calls: readonly RecentToolCall[] }> = ({
 	</ToolCall.Root>
 );
 
+const fieldClassName = "mt-1.5 text-[13px] text-content-secondary";
+
+const countLabel = (count: number, noun: string): string =>
+	`${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** Formats the diff_summary of a worktree child's wait_agent result. */
+const formatDiffSummary = (diffSummary: unknown): string => {
+	const summary = asRecord(diffSummary);
+	if (!summary) {
+		return "";
+	}
+	const count = (key: string): number => {
+		const value = summary[key];
+		return typeof value === "number" ? value : 0;
+	};
+	const parts = [
+		countLabel(count("commits"), "commit"),
+		`${countLabel(count("files_changed"), "file")} changed`,
+		`+${count("insertions")} -${count("deletions")}`,
+	];
+	const uncommitted = count("uncommitted_changes");
+	if (uncommitted > 0) {
+		parts.push(countLabel(uncommitted, "uncommitted change"));
+	}
+	return parts.join(", ");
+};
+
+/**
+ * Shows where an isolated child works: its branch and worktree, or its
+ * workspace.
+ */
+const IsolationFields: React.FC<{ result: Record<string, unknown> }> = ({
+	result,
+}) => {
+	const isolation = asString(result.isolation);
+	if (isolation === "worktree") {
+		const branch = asString(result.branch);
+		const path = asString(result.worktree_path);
+		return (
+			<>
+				{branch && (
+					<div className={fieldClassName}>
+						Branch: <span className="font-mono text-xs">{branch}</span>
+					</div>
+				)}
+				{path && (
+					<div className={`${fieldClassName} truncate`} title={path}>
+						Worktree: <span className="font-mono text-xs">{path}</span>
+					</div>
+				)}
+			</>
+		);
+	}
+	if (isolation === "workspace") {
+		const name = asString(result.workspace_name);
+		const error = asString(result.workspace_error).trim();
+		return (
+			<>
+				{name && <div className={fieldClassName}>Workspace: {name}</div>}
+				{error && <ToolCall.ErrorDetail>{error}</ToolCall.ErrorDetail>}
+			</>
+		);
+	}
+	return null;
+};
+
 /**
  * Shows the fork experiments' spawn_agent and wait_agent fields. It renders
  * outside the card's collapsed content, so a timed-out wait without a report
@@ -82,6 +148,7 @@ export const ForkSubagentFields: React.FC<{
 	const agentDefinitions = useForkExperiment("fork-agent-definitions");
 	const nestedSubagents = useForkExperiment("fork-nested-subagents");
 	const chatTodos = useForkExperiment("fork-chat-todos");
+	const isolation = useForkExperiment("fork-subagent-isolation");
 	const result = parseArgs(call.result);
 
 	if (descriptor.action === "spawn") {
@@ -97,10 +164,9 @@ export const ForkSubagentFields: React.FC<{
 		return (
 			<>
 				{customType && (
-					<div className="mt-1.5 text-[13px] text-content-secondary">
-						Agent type: {customType}
-					</div>
+					<div className={fieldClassName}>Agent type: {customType}</div>
 				)}
+				{isolation && result && <IsolationFields result={result} />}
 				{errorMessage && (
 					<ToolCall.ErrorDetail>{errorMessage}</ToolCall.ErrorDetail>
 				)}
@@ -108,11 +174,24 @@ export const ForkSubagentFields: React.FC<{
 		);
 	}
 
-	if (descriptor.action === "wait" && chatTodos && result) {
-		const callsError = asString(result.tool_calls_error).trim();
-		const calls = parseArray(result.tool_calls, parseRecentToolCall) ?? [];
+	if (descriptor.action === "wait" && result) {
+		const diffSummary = isolation ? formatDiffSummary(result.diff_summary) : "";
+		const diffSummaryError = isolation
+			? asString(result.diff_summary_error).trim()
+			: "";
+		const callsError = chatTodos
+			? asString(result.tool_calls_error).trim()
+			: "";
+		const calls = chatTodos
+			? (parseArray(result.tool_calls, parseRecentToolCall) ?? [])
+			: [];
 		return (
 			<>
+				{isolation && <IsolationFields result={result} />}
+				{diffSummary && <div className={fieldClassName}>{diffSummary}</div>}
+				{diffSummaryError && (
+					<ToolCall.ErrorDetail>{diffSummaryError}</ToolCall.ErrorDetail>
+				)}
 				{callsError && (
 					<ToolCall.ErrorDetail>{callsError}</ToolCall.ErrorDetail>
 				)}

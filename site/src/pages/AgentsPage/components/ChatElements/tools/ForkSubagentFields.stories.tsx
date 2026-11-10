@@ -26,6 +26,7 @@ const meta: Meta<typeof Tool> = {
 			"fork-chat-todos",
 			"fork-nested-subagents",
 			"fork-agent-definitions",
+			"fork-subagent-isolation",
 		],
 		reactRouter: reactRouterParameters({
 			routing: { path: "/" },
@@ -95,6 +96,54 @@ export const SpawnCustomType: Story = {
 	},
 };
 
+export const SpawnWorktree: Story = {
+	args: {
+		name: "spawn_agent",
+		args: {
+			type: "general",
+			title: "Fix the flaky test",
+			prompt: "Fix it.",
+			isolation: "worktree",
+		},
+		result: {
+			chat_id: reviewerChatId,
+			status: "pending",
+			title: "Fix the flaky test",
+			type: "general",
+			isolation: "worktree",
+			branch: "agent/fix-the-flaky-test-6f1c2a4e",
+			worktree_path:
+				"/home/coder/.coder/worktrees/coder/agent-fix-the-flaky-test-6f1c2a4e",
+		},
+	},
+};
+
+// With the experiments off, the card matches upstream.
+export const SpawnWorktreeExperimentsOff: Story = {
+	...SpawnWorktree,
+	parameters: { experiments: [] },
+};
+
+export const SpawnWorkspace: Story = {
+	args: {
+		name: "spawn_agent",
+		args: {
+			type: "general",
+			title: "Try the migration",
+			prompt: "Run it.",
+			isolation: "workspace",
+		},
+		result: {
+			chat_id: docsChatId,
+			status: "pending",
+			title: "Try the migration",
+			type: "general",
+			isolation: "workspace",
+			workspace_name: "dev-agent-0d9e",
+		},
+	},
+};
+
 export const SpawnLimitError: Story = {
 	args: {
 		name: "spawn_agent",
@@ -154,6 +203,51 @@ export const WaitToolCallsError: Story = {
 			status: "completed",
 			report: "Looks good.",
 			tool_calls_error: "read child chat messages: permission denied",
+		},
+	},
+};
+
+export const WaitWorktreeSummary: Story = {
+	args: {
+		name: "wait_agent",
+		args: { chat_id: reviewerChatId },
+		result: {
+			chat_id: reviewerChatId,
+			title: "Fix the flaky test",
+			type: "general",
+			status: "completed",
+			report: "Fixed the race in the test setup.",
+			isolation: "worktree",
+			branch: "agent/fix-the-flaky-test-6f1c2a4e",
+			worktree_path:
+				"/home/coder/.coder/worktrees/coder/agent-fix-the-flaky-test-6f1c2a4e",
+			diff_summary: {
+				commits: 2,
+				files_changed: 3,
+				insertions: 41,
+				deletions: 7,
+				uncommitted_changes: 1,
+			},
+		},
+	},
+};
+
+export const WaitWorktreeSummaryError: Story = {
+	args: {
+		name: "wait_agent",
+		args: { chat_id: reviewerChatId },
+		result: {
+			chat_id: reviewerChatId,
+			title: "Fix the flaky test",
+			type: "general",
+			status: "completed",
+			report: "Fixed the race in the test setup.",
+			isolation: "worktree",
+			branch: "agent/fix-the-flaky-test-6f1c2a4e",
+			worktree_path:
+				"/home/coder/.coder/worktrees/coder/agent-fix-the-flaky-test-6f1c2a4e",
+			diff_summary_error:
+				"connect to workspace agent: context deadline exceeded",
 		},
 	},
 };
