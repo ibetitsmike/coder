@@ -138,11 +138,20 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 	}, [isStaleTurnSummary]);
 	const displayedTurnSummary = isStaleTurnSummary ? undefined : lastTurnSummary;
 	const isSharedChat = chat.shared;
-	const subtitle =
-		errorReason || streamingSubtitle || displayedTurnSummary || modelName;
-	const displayConfig = getChatDisplayConfig(chat);
 	const isExpanded = normalizedSearch ? true : (expandedById[chatID] ?? false);
-	const familyCapacity = useForkFamilyCapacity(chat, isExpanded, chatTree);
+	const familyCapacity = useForkFamilyCapacity(
+		chat,
+		isExpanded,
+		chatTree,
+		currentUserId,
+	);
+	const subtitle =
+		errorReason ||
+		familyCapacity.status?.label ||
+		streamingSubtitle ||
+		displayedTurnSummary ||
+		modelName;
+	const displayConfig = getChatDisplayConfig(chat);
 	const {
 		icon: StatusIcon,
 		className: statusClassName,

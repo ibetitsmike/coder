@@ -40,19 +40,27 @@ export const useForkFamilyCapacity = (
 	chat: Chat,
 	isExpanded: boolean,
 	chatTree: ChatTree,
+	currentUserId: string,
 ): ForkFamilyCapacity => {
 	const { experiments } = useDashboard();
 	const parentID = getParentChatID(chat);
 	const rootID = asNonEmptyString(chat.root_chat_id) ?? parentID ?? chat.id;
 	const enabled =
 		experiments.includes("fork-nested-subagents") &&
+		chat.owner_id === currentUserId &&
 		(parentID
 			? chat.status === "running"
 			: isExpanded &&
 				collectDescendantChats(chatTree, chat.id).some((descendant) =>
 					liveStatuses.has(descendant.status),
 				));
-	const { data } = useQuery({ ...forkChatFamilyCapacity(rootID), enabled });
+	// Only the root row polls, so rows mounted later do not add intervals at
+	// other offsets; subagent rows read the shared cache.
+	const { data } = useQuery({
+		...forkChatFamilyCapacity(rootID),
+		enabled,
+		...(parentID ? { refetchInterval: false } : {}),
+	});
 	if (!enabled || !data) {
 		return {};
 	}
@@ -85,7 +93,7 @@ export const ForkFamilyLiveLimitChip: React.FC<
 	}
 	return (
 		<span
-			title="This family is at its live subagent limit. It cannot spawn another subagent until one finishes."
+			title="This family is at its live subagent limit. It cannot spawn another subagent until enough subagents finish."
 			className="shrink-0 rounded-sm bg-surface-tertiary px-1 text-[11px] leading-4 tabular-nums text-content-warning"
 		>
 			live {liveLimit.live}/{liveLimit.max}
