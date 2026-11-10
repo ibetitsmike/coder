@@ -413,31 +413,45 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 	})
 }
 
-// Busy chats are not claimed, so a full batch of them cannot starve a due
-// wake-up of an idle chat.
+// Chats that would queue a new message are not claimed, so a full batch of
+// them cannot starve a due wake-up of an idle chat.
 func TestWakeupBusyChatsDoNotStarveIdleChats(t *testing.T) {
 	t.Parallel()
-	f := newWorkerTestFixture(t)
-	ctx := testutil.Context(t, testutil.WaitLong)
-	for range wakeupClaimBatch {
-		busy := f.createWakeupChat(t)
-		forceExecutionState(t, f, busy.ID, database.ChatStatusRunning, false)
-		f.insertWakeup(t, busy, forkdb.InsertChatWakeupParams{
-			Kind:            forkdb.ChatWakeupKindInterval,
-			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+	for _, status := range []database.ChatStatus{
+		database.ChatStatusRunning,
+		database.ChatStatusPaused,
+		// An errored chat with a non-empty queue queues a new message too.
+		database.ChatStatusError,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			for range wakeupClaimBatch {
+				busy := f.createWakeupChat(t)
+				forceExecutionState(t, f, busy.ID, status, false)
+				if status == database.ChatStatusError {
+					_, err := f.sqlDB.ExecContext(ctx, "INSERT INTO chat_queued_messages (chat_id, content, created_by) VALUES ($1, '[]'::jsonb, $2)", busy.ID, busy.OwnerID)
+					require.NoError(t, err)
+				}
+				f.insertWakeup(t, busy, forkdb.InsertChatWakeupParams{
+					Kind:            forkdb.ChatWakeupKindInterval,
+					IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+				})
+			}
+			idle := f.createWakeupChat(t)
+			wakeup := f.insertWakeup(t, idle, forkdb.InsertChatWakeupParams{
+				Kind:            forkdb.ChatWakeupKindInterval,
+				IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+			})
+			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET next_run_at = $2 WHERE id = $1", wakeup.ID, wakeupTestSlot.Add(time.Second))
+			require.NoError(t, err)
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(5*time.Second))
+			require.Equal(t, 1, f.countPromptMessages(t, idle, wakeup.Prompt))
 		})
 	}
-	idle := f.createWakeupChat(t)
-	wakeup := f.insertWakeup(t, idle, forkdb.InsertChatWakeupParams{
-		Kind:            forkdb.ChatWakeupKindInterval,
-		IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
-	})
-	_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET next_run_at = $2 WHERE id = $1", wakeup.ID, wakeupTestSlot.Add(time.Second))
-	require.NoError(t, err)
-	worker := f.newArchiveWorker(t, nil, nil, nil)
-
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(5*time.Second))
-	require.Equal(t, 1, f.countPromptMessages(t, idle, wakeup.Prompt))
 }
 
 // The started worker runs the wake-up loop when the experiment is enabled:

@@ -72,6 +72,7 @@ func (w *chatWorker) wakeupOnce(ctx context.Context, now time.Time) {
 		w.opts.Logger.Warn(ctx, "chatworker wake-up fork queries unavailable", slogError(err))
 		return
 	}
+	start := w.opts.Clock.Now("chatworker", "wakeups")
 	rows, err := fdb.ClaimDueChatWakeups(ctx, forkdb.ClaimDueChatWakeupsParams{
 		Now:            now,
 		LeaseExpiresAt: now.Add(wakeupLease),
@@ -83,10 +84,10 @@ func (w *chatWorker) wakeupOnce(ctx context.Context, now time.Time) {
 		}
 		return
 	}
-	claimedAt := w.opts.Clock.Now("chatworker", "wakeups")
 	for _, row := range rows {
-		// Rows are delivered one by one, so each uses its own time.
-		rowNow := now.Add(w.opts.Clock.Since(claimedAt, "chatworker", "wakeups"))
+		// Rows are delivered one by one, so each uses its own time, which
+		// includes the time the claim took.
+		rowNow := now.Add(w.opts.Clock.Since(start, "chatworker", "wakeups"))
 		if !rowNow.Before(row.LeaseExpiresAt.Time) {
 			// Another replica may hold the row now; it is due again anyway.
 			continue
