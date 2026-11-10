@@ -302,6 +302,11 @@ func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chat
 	return f.s.ListChatWakeupsByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "ListChildChatIDsWithActiveEventsWakeups", time.Now())
+	return f.s.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
+}
+
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	defer f.observe(ctx, "ListOrganizationAgentDefinitionMetadata", time.Now())
 	return f.s.ListOrganizationAgentDefinitionMetadata(ctx, organizationID)
