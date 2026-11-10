@@ -75,6 +75,16 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 	require.Equal(t, "call-2", got.ToolCallID)
 	require.JSONEq(t, `[{"header": "API"}]`, string(got.Questions))
 
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        chat.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Visibility:    database.ChatMessageVisibilityModel,
+		Compressed:    true,
+	})
+	_, ok = pending()
+	require.False(t, ok, "a context boundary, such as a clear, retires the question")
+
 	_, err := sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", chat.ID)
 	require.NoError(t, err)
 	var count int

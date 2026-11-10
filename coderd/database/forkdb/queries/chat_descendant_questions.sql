@@ -16,7 +16,8 @@ WHERE q.chat_id = @chat_id::uuid
         FROM chat_messages m
         WHERE m.chat_id = q.chat_id
             AND m.role = 'user'
-            AND m.visibility <> 'model'
+            -- A context boundary, such as a clear, retires the question.
+            AND (m.visibility <> 'model' OR m.compressed)
             AND NOT m.deleted
             AND m.created_at > q.created_at
     );
