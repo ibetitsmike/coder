@@ -215,7 +215,7 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 	}
 	switch {
 	case pending && question.Secret() && resume:
-		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat")
+		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can enter, in the question panel above the root chat's input; never ask the user to send the value as a chat message")
 	case pending && question.Secret():
 		return ErrSecretQuestionPending
 	}
