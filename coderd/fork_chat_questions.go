@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -184,6 +185,11 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		var queued bool
 		queued, err = secretAnswerQueued(ctx, api.Database, chat.ID, toolCallID)
 		if err == nil && queued {
+			// Reads skip an answer past its TTL before dbpurge deletes
+			// it, so an expired answer is replaced like an unreported one.
+			queued, err = secretAnswerLive(ctx, fdb, chat.ID, toolCallID)
+		}
+		if err == nil && queued {
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
 			return
 		}
@@ -239,6 +245,18 @@ func secretAnswerQueued(ctx context.Context, db database.Store, chatID uuid.UUID
 		}
 	}
 	return false, nil
+}
+
+// secretAnswerLive reports whether the stored answer to the question of
+// toolCallID is within its TTL.
+func secretAnswerLive(ctx context.Context, fdb forkdb.Store, chatID uuid.UUID, toolCallID string) (bool, error) {
+	answers, err := fdb.GetChatSecretAnswersByChatID(ctx, chatID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(answers, func(answer forkdb.ChatSecretAnswer) bool {
+		return answer.ToolCallID == toolCallID
+	}), nil
 }
 
 // rejectSecretQuestionAnswer refuses every message to a chat whose pending
