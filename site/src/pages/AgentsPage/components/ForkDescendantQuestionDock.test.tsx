@@ -238,7 +238,9 @@ describe("ForkDescendantQuestionDock", () => {
 				},
 			],
 		};
-		const { questionRequests, sentMessages } = serveQuestions([mockSecretQuestion]);
+		const { questionRequests, sentMessages } = serveQuestions([
+			mockSecretQuestion,
+		]);
 		const secretAnswers: Array<{ chatId: string; body: unknown }> = [];
 		server.use(
 			http.post<{ chatId: string }>(
@@ -285,7 +287,12 @@ describe("ForkDescendantQuestionDock", () => {
 			...mockOldestQuestion,
 			tool_call_id: "call-pin",
 			questions: [
-				{ header: "PIN", question: "Enter the PIN.", options: [], secret: true },
+				{
+					header: "PIN",
+					question: "Enter the PIN.",
+					options: [],
+					secret: true,
+				},
 			],
 		};
 		const { sentMessages } = serveQuestions([mockSecretQuestion]);

@@ -133,11 +133,16 @@ export const SecretAnswerSent: Story = {
 		],
 	},
 	beforeEach: () => {
-		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({ data: undefined });
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: undefined,
+		});
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.type(canvas.getByLabelText(/API token/), "staging-token-value");
+		await userEvent.type(
+			canvas.getByLabelText(/API token/),
+			"staging-token-value",
+		);
 		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
 		await canvas.findByRole("status");
 	},
