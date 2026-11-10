@@ -23,9 +23,9 @@ describe("hasSecretQuestion", () => {
 	// getAskUserQuestions renders the result's questions when the arguments
 	// have none, so the row must not take an answer for those either.
 	it("finds a secret question in the result when the arguments have none", () => {
-		expect(
-			hasSecretQuestion("not json", { questions: secretQuestions }),
-		).toBe(true);
+		expect(hasSecretQuestion("not json", { questions: secretQuestions })).toBe(
+			true,
+		);
 		expect(
 			hasSecretQuestion(undefined, {
 				output: JSON.stringify({ questions: secretQuestions }),

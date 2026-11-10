@@ -125,10 +125,7 @@ export const SecretAnswerFailed: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.type(
-			canvas.getByLabelText(/API token/),
-			"short-value",
-		);
+		await userEvent.type(canvas.getByLabelText(/API token/), "short-value");
 		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
 		await canvas.findByRole("alert");
 	},
