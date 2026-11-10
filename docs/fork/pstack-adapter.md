@@ -100,6 +100,7 @@ API chats outside plan mode and child chats don't have it.
 Plan-mode turns and `explore` children don't get them.
 The list survives a compaction.
 The web UI shows a non-empty list in a pill in the composer.
+In the conversation, the web UI shows each `todo_write` and `todo_read` call as a card, such as **Updated todos (1/3 done)**, that expands to the list.
 
 ### Attachments
 
@@ -290,7 +291,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `1ef5ccc60b`:
+Checked against fork `main` at `54351e1e1f`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -339,6 +340,7 @@ Checked against fork `main` at `1ef5ccc60b`:
 - Todo tools: `coderd/x/chatd/fork_chat_todos.go`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go`. The plan-mode and `explore` allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go`, don't list them.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:18-26`, `ChatTodoPill.tsx:99-107`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:20-35`, `:42-49`, with its labels, `ForkTodoTool.tsx:37-50`, `:67-77`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:28-33`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, added with the same experiment, `fork_tools.go:32`.
