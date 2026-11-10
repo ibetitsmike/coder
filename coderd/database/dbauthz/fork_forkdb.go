@@ -6,7 +6,6 @@ package dbauthz
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -124,11 +123,11 @@ func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 	return f.db.DeleteExpiredPluginLinkCodes(ctx)
 }
 
-func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error) {
+func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return 0, err
 	}
-	return f.db.DeleteOldChatSecretAnswers(ctx, beforeTime)
+	return f.db.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
