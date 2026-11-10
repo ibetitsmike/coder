@@ -130,7 +130,8 @@ An answer stays in the chat for 24&nbsp;hours, and a later question doesn't remo
 Only the root chat's page can answer a secret question.
 `message_agent` to the child fails with `cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat`.
 A message or an edit in the child's own chat fails with `The chat's question takes a secret answer, which a chat message cannot carry.`, and the child's chat shows `Answer this secret question in the question panel of the root chat.` on the question.
-`wait_agent` returns `needs_input: true` with a note that only the user can give the value, so tell the user that the question waits on the root chat's page.
+`wait_agent` returns `needs_input: true` with a note that only the user can give the value, so tell the user to answer in the question panel on the root chat's page.
+Never ask the user to paste the value into a chat, because a message in the root chat puts the value in the transcript and doesn't answer the question.
 
 ### Todo list
 
