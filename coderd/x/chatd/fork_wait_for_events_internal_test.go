@@ -462,3 +462,31 @@ func (f *workerTestFixture) wakeMessages(t *testing.T, chat database.Chat, promp
 	}
 	return texts
 }
+
+// A child that ended its turn with a question for the user is not done until
+// the question is answered.
+func TestWakeupEventsChildWithPendingQuestion(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	coordinator := f.createWakeupChat(t)
+	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     child.ID,
+		ToolCallID: "call-1",
+		Questions:  json.RawMessage(`[{"question":"Which one?"}]`),
+	})
+	require.NoError(t, err)
+	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(child),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
+}
