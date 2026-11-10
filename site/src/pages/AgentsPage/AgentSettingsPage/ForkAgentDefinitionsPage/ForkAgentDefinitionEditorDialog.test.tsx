@@ -26,7 +26,7 @@ const importedFile = new File(
 	{ type: "text/markdown" },
 );
 
-const editedValues: AgentDefinitionFormValues = {
+const mockEditedValues: AgentDefinitionFormValues = {
 	name: "reviewer",
 	description: "Reviews diffs.",
 	model: "sonnet",
@@ -204,7 +204,7 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 		const user = userEvent.setup();
 		const { onSubmit, onClose } = renderDialog({
 			mode: "edit",
-			initialValues: editedValues,
+			initialValues: mockEditedValues,
 		});
 
 		await user.keyboard("{Escape}");
@@ -231,12 +231,12 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 				onClose={() => {}}
 			/>
 		);
-		const { rerender } = renderRTL(dialog(editedValues));
+		const { rerender } = renderRTL(dialog(mockEditedValues));
 
 		await user.type(screen.getByLabelText("Body"), " Then report.");
 		rerender(
 			dialog({
-				...editedValues,
+				...mockEditedValues,
 				description: "Changed in another tab.",
 				model: "opus",
 				frontMatter: "name: reviewer\ntools: Grep",

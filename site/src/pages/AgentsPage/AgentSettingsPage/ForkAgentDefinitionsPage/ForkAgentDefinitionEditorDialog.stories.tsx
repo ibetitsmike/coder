@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, userEvent, within } from "storybook/test";
+import { fn, screen, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
+import { SKILL_MAX_SIZE_BYTES } from "../../utils/skills";
 import { emptyAgentDefinitionFormValues } from "./agentDefinitionMarkdown";
 import { ForkAgentDefinitionEditorDialog } from "./ForkAgentDefinitionEditorDialog";
 
@@ -40,15 +41,28 @@ export const Submitting: Story = {
 };
 
 export const ImportError: Story = {
-	play: async ({ canvasElement }) => {
-		const dialog = within(
-			await within(canvasElement.ownerDocument.body).findByRole("dialog"),
-		);
+	play: async () => {
+		const dialog = within(await screen.findByRole("dialog"));
 		await userEvent.upload(
 			dialog.getByLabelText("Upload agent definition file"),
 			new File(["Review the diff."], "reviewer.md", { type: "text/markdown" }),
 		);
 		await dialog.findByText("The file must start with --- front-matter.");
+	},
+};
+
+export const SizeError: Story = {
+	args: {
+		initialValues: {
+			...emptyAgentDefinitionFormValues,
+			name: "code-reviewer",
+			body: "a".repeat(SKILL_MAX_SIZE_BYTES),
+		},
+	},
+	play: async () => {
+		const dialog = within(await screen.findByRole("dialog"));
+		await userEvent.click(dialog.getByLabelText("Body"));
+		await userEvent.tab();
 	},
 };
 
