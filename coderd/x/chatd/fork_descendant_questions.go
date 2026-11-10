@@ -172,25 +172,26 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	deadline := t.server.clock.Now().Add(timeout)
 
 	questions, err := t.server.pendingDescendantQuestion(ctx, childID)
-	waited := err == nil && questions != nil
-	if waited {
+	if err == nil && questions != nil {
 		questions, err = t.server.awaitDescendantAnswer(ctx, childID, timeout)
+		if err == nil {
+			// An unanswered child gets a short wait that collects its status
+			// and report; an answered one is waited on for the rest of the
+			// timeout, rounded up to whole seconds.
+			remaining := 1
+			if questions == nil {
+				remaining = max(1, int((deadline.Sub(t.server.clock.Now())+time.Second-1)/time.Second))
+			}
+			input["timeout_seconds"] = remaining
+			data, err := json.Marshal(input)
+			if err != nil {
+				return fantasy.NewTextErrorResponse("encode wait parameters: " + err.Error()), nil
+			}
+			call.Input = string(data)
+		}
 	}
 	if err != nil {
 		return fantasy.NewTextErrorResponse("read the child's question: " + err.Error()), nil
-	}
-	if questions != nil {
-		return t.server.needsInputResult(ctx, childID, questions), nil
-	}
-	if waited {
-		// The answer arrived, so wait on the child for the rest of the
-		// timeout, rounded up to whole seconds.
-		input["timeout_seconds"] = max(1, int((deadline.Sub(t.server.clock.Now())+time.Second-1)/time.Second))
-		data, err := json.Marshal(input)
-		if err != nil {
-			return fantasy.NewTextErrorResponse("encode wait parameters: " + err.Error()), nil
-		}
-		call.Input = string(data)
 	}
 
 	resp, err := t.AgentTool.Run(ctx, call)
@@ -198,11 +199,14 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 		return resp, err
 	}
 	var result map[string]any
-	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil || result["timed_out"] == true {
+	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
 		return resp, nil
 	}
 	questions, err = t.server.pendingDescendantQuestion(ctx, childID)
-	if err != nil || questions == nil {
+	if err != nil {
+		return fantasy.NewTextErrorResponse("read the child's question: " + err.Error()), nil
+	}
+	if questions == nil {
 		return resp, nil
 	}
 	result["needs_input"] = true
@@ -231,19 +235,4 @@ func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, t
 			return nil, err
 		}
 	}
-}
-
-func (p *Server) needsInputResult(ctx context.Context, childID uuid.UUID, questions json.RawMessage) fantasy.ToolResponse {
-	result := map[string]any{
-		"chat_id":     childID.String(),
-		"timed_out":   true,
-		"needs_input": true,
-		"questions":   questions,
-		"note":        descendantQuestionNote,
-	}
-	if child, err := p.db.GetChatByID(ctx, childID); err == nil {
-		result["status"] = string(child.Status)
-		result["title"] = child.Title
-	}
-	return toolJSONResponse(result)
 }

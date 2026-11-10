@@ -116,7 +116,9 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	t.Parallel()
 
 	mClock := quartz.NewMock(t)
-	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{},
+	// fork-chat-todos adds include_tool_calls, which the question wrapper
+	// must keep.
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentForkChatTodos}, Limits{},
 		withInternalTestServerClock(mClock))
 	ctx := chatdTestContext(t)
 	root := f.root
@@ -141,7 +143,7 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	waitAsync := func(chatID uuid.UUID, timeoutSeconds int) <-chan fantasy.ToolResponse {
 		ch := make(chan fantasy.ToolResponse, 1)
 		go func() {
-			input := fmt.Sprintf(`{"chat_id":%q,"timeout_seconds":%d}`, chatID, timeoutSeconds)
+			input := fmt.Sprintf(`{"chat_id":%q,"timeout_seconds":%d,"include_tool_calls":1}`, chatID, timeoutSeconds)
 			resp, err := wait.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: waitAgentToolName, Input: input})
 			if err != nil {
 				resp = fantasy.NewTextErrorResponse(err.Error())
@@ -169,17 +171,17 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	defer pollTrap.Close()
 
 	// A call made while the question is pending waits for the answer and
-	// reports needs_input when the timeout elapses first.
+	// reports needs_input with the child's status when the timeout elapses
+	// first.
 	done := waitAsync(child.ID, 1)
 	awaitTrap.MustWait(ctx).MustRelease(ctx)
 	pollTrap.MustWait(ctx).MustRelease(ctx)
 	mClock.Advance(time.Second).MustWait(ctx)
 	result := decode(testutil.RequireReceive(ctx, t, done))
-	require.Equal(t, true, result["timed_out"])
 	require.Equal(t, true, result["needs_input"])
 	require.Equal(t, string(database.ChatStatusWaiting), result["status"])
 	require.NotEmpty(t, result["questions"])
-	require.NotContains(t, result, "report", "the child was not waited on")
+	require.Contains(t, result, "tool_calls")
 
 	// An answer during the wait lets the call wait on the child for the
 	// rest of the timeout, and the answered question is no longer reported.
@@ -230,4 +232,28 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	require.Equal(t, "asked again", result["report"])
 	require.Equal(t, true, result["needs_input"])
 	require.NotEmpty(t, result["questions"])
+
+	// A question the child asks before the wait times out is reported even
+	// though the child is still running.
+	dbgen.ChatMessage(t, f.db, database.ChatMessage{
+		ChatID:        child.ID,
+		ModelConfigID: uuid.NullUUID{UUID: child.LastModelConfigID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+	})
+	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusRunning, "")
+	done = waitAsync(child.ID, 2)
+	subagentAwaitTrap.MustWait(ctx).MustRelease(ctx)
+	subagentPollTrap.MustWait(ctx).MustRelease(ctx)
+	resp, err = f.server.newDescendantQuestionTool(child).Run(ctx,
+		fantasy.ToolCall{ID: uuid.NewString(), Name: askUserQuestionToolName, Input: descendantQuestionInput})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	for elapsed := time.Duration(0); elapsed < 2*time.Second; {
+		d, w := mClock.AdvanceNext()
+		w.MustWait(ctx)
+		elapsed += d
+	}
+	result = decode(testutil.RequireReceive(ctx, t, done))
+	require.Equal(t, true, result["timed_out"])
+	require.Equal(t, true, result["needs_input"])
 }
