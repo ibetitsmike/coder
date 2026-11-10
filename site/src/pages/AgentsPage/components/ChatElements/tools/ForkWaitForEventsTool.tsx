@@ -1,7 +1,6 @@
 // This file is fork code: it renders the wait_for_events tool of the
 // fork-chat-wakeups experiment.
 
-import { cn } from "cn";
 import { ExternalLinkIcon } from "lucide-react";
 import type React from "react";
 import { DATE_FORMAT, formatDateTime } from "#/utils/time";
@@ -85,7 +84,7 @@ export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 								href={pullRequestURL}
 								target="_blank"
 								rel="noreferrer"
-								className={cn(forkLinkRowClassName, "max-w-full break-all")}
+								className={forkLinkRowClassName}
 							>
 								{pullRequestEvents.length > 0
 									? `${pullRequestURL} (${pullRequestEvents.join(", ")})`

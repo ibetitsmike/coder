@@ -19,10 +19,8 @@ const formatSchedule = (args: Record<string, unknown> | null): string => {
 	}
 	const cron = asString(args?.cron);
 	if (cron !== "") {
-		const timezone = asString(args?.timezone);
-		return timezone === ""
-			? `on cron ${cron}`
-			: `on cron ${cron} (${timezone})`;
+		// The server runs a cron schedule without a time zone in UTC.
+		return `on cron ${cron} (${asString(args?.timezone) || "UTC"})`;
 	}
 	const delay = asNumber(args?.delay_seconds);
 	return delay === undefined ? "" : `in ${humanDurationShort(delay * 1000)}`;
