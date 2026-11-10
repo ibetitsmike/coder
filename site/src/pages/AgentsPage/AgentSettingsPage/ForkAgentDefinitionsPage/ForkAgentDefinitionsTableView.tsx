@@ -74,6 +74,44 @@ type ForkAgentDefinitionsTableViewProps = {
 	deleteState?: ForkAgentDefinitionDeleteState;
 };
 
+type EnabledCellProps = {
+	definition: ForkAgentDefinitionMetadata;
+	canUpdate: boolean;
+	pendingEnabled: boolean | undefined;
+	onToggleEnabled: (name: string, enabled: boolean) => void;
+};
+
+const EnabledCell: React.FC<EnabledCellProps> = ({
+	definition,
+	canUpdate,
+	pendingEnabled,
+	onToggleEnabled,
+}) => {
+	if (!canUpdate) {
+		return definition.enabled ? (
+			<CheckIcon
+				role="img"
+				aria-label="Enabled"
+				className="size-icon-sm text-content-success"
+			/>
+		) : (
+			<XIcon
+				role="img"
+				aria-label="Disabled"
+				className="size-icon-sm text-content-secondary"
+			/>
+		);
+	}
+	return (
+		<Switch
+			aria-label={`Enable ${definition.name}`}
+			checked={pendingEnabled ?? definition.enabled}
+			disabled={pendingEnabled !== undefined}
+			onCheckedChange={(enabled) => onToggleEnabled(definition.name, enabled)}
+		/>
+	);
+};
+
 export const ForkAgentDefinitionsTableView: React.FC<
 	ForkAgentDefinitionsTableViewProps
 > = ({
@@ -139,30 +177,12 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						)}
 					</TableCell>
 					<TableCell>
-						{!access.update ? (
-							definition.enabled ? (
-								<CheckIcon
-									role="img"
-									aria-label="Enabled"
-									className="size-icon-sm text-content-success"
-								/>
-							) : (
-								<XIcon
-									role="img"
-									aria-label="Disabled"
-									className="size-icon-sm text-content-secondary"
-								/>
-							)
-						) : (
-							<Switch
-								aria-label={`Enable ${definition.name}`}
-								checked={pendingEnabled ?? definition.enabled}
-								disabled={pendingEnabled !== undefined}
-								onCheckedChange={(enabled) =>
-									onToggleEnabled(definition.name, enabled)
-								}
-							/>
-						)}
+						<EnabledCell
+							definition={definition}
+							canUpdate={access.update}
+							pendingEnabled={pendingEnabled}
+							onToggleEnabled={onToggleEnabled}
+						/>
 					</TableCell>
 					<TableCell className="hidden whitespace-nowrap sm:table-cell">
 						{formatUpdatedAt(definition.updated_at)}
