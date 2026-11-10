@@ -224,4 +224,146 @@ describe("ForkDescendantQuestionDock", () => {
 			`/agents/${mockOldestQuestion.chat_id}`,
 		);
 	});
+
+	it("sends a secret answer only to the secret answer route", async () => {
+		const mockSecretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-secret",
+			questions: [
+				{
+					header: "Token",
+					question: "Paste the API token.",
+					options: [],
+					secret: true,
+				},
+			],
+		};
+		const { questionRequests, sentMessages } = serveQuestions([
+			mockSecretQuestion,
+		]);
+		const secretAnswers: Array<{ chatId: string; body: unknown }> = [];
+		server.use(
+			http.post<{ chatId: string }>(
+				"/api/v2/chats/fork/:chatId/questions/secret-answer",
+				async ({ params, request }) => {
+					secretAnswers.push({
+						chatId: params.chatId,
+						body: await request.json(),
+					});
+					return new HttpResponse(null, { status: 204 });
+				},
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		await user.type(
+			await screen.findByLabelText(/Paste the API token/),
+			"hunter2-secret-value",
+		);
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+
+		// The status keeps the dock's focus, so the next question takes it.
+		expect(await screen.findByRole("status")).toHaveFocus();
+		expect(secretAnswers).toEqual([
+			{
+				chatId: mockSecretQuestion.chat_id,
+				body: { tool_call_id: "call-secret", value: "hunter2-secret-value" },
+			},
+		]);
+		expect(sentMessages).toEqual([]);
+		const stored = Object.keys(localStorage).map((key) =>
+			localStorage.getItem(key),
+		);
+		expect(JSON.stringify(stored)).not.toContain("hunter2");
+		await waitFor(() =>
+			expect(questionRequests).toEqual([MockChat.id, MockChat.id]),
+		);
+	});
+
+	it("declines a secret question without sending the typed value", async () => {
+		const mockSecretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-pin",
+			questions: [
+				{
+					header: "PIN",
+					question: "Enter the PIN.",
+					options: [],
+					secret: true,
+				},
+			],
+		};
+		const { sentMessages } = serveQuestions([mockSecretQuestion]);
+		const secretAnswers: unknown[] = [];
+		server.use(
+			http.post(
+				"/api/v2/chats/fork/:chatId/questions/secret-answer",
+				async ({ request }) => {
+					secretAnswers.push(await request.json());
+					return new HttpResponse(null, { status: 204 });
+				},
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		await user.type(await screen.findByLabelText(/Enter the PIN/), "1234");
+		await user.click(screen.getByRole("button", { name: "Decline" }));
+
+		expect(await screen.findByRole("status")).toHaveTextContent(
+			"Secret question declined.",
+		);
+		expect(secretAnswers).toEqual([
+			{ tool_call_id: "call-pin", value: "", declined: true },
+		]);
+		expect(sentMessages).toEqual([]);
+	});
+
+	it("clears a secret answer error once the value changes", async () => {
+		const mockSecretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-pin",
+			questions: [
+				{
+					header: "PIN",
+					question: "Enter the PIN.",
+					options: [],
+					secret: true,
+				},
+			],
+		};
+		serveQuestions([mockSecretQuestion]);
+		server.use(
+			http.post("/api/v2/chats/fork/:chatId/questions/secret-answer", () =>
+				HttpResponse.json(
+					{ message: "The answer must be at least 8 bytes." },
+					{ status: 400 },
+				),
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		const field = await screen.findByLabelText(/Enter the PIN/);
+		await user.type(field, "1234");
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"The answer must be at least 8 bytes.",
+		);
+		expect(field).toHaveAttribute("aria-invalid", "true");
+		expect(field).toHaveAccessibleDescription(
+			expect.stringContaining("The answer must be at least 8 bytes."),
+		);
+
+		await user.type(field, "5678");
+
+		expect(field).toHaveAttribute("aria-invalid", "false");
+		expect(field).not.toHaveAccessibleDescription(
+			expect.stringContaining("The answer must be at least 8 bytes."),
+		);
+	});
 });

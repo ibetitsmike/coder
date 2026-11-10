@@ -3858,6 +3858,12 @@ export const ChatRoles: ChatRole[] = ["", "read"];
 export interface ChatSecretAnswerRequest {
 	readonly tool_call_id: string;
 	readonly value: string;
+	/**
+	 * Declined answers without a value, for a value the user cannot or
+	 * will not give as a secret, such as one too short to hide. Value must
+	 * be empty.
+	 */
+	readonly declined?: boolean;
 }
 
 // From codersdk/chats.go

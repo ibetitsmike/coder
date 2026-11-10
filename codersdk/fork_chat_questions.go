@@ -51,11 +51,15 @@ func (c *Client) ChatDescendantQuestions(ctx context.Context, chatID uuid.UUID) 
 type ChatSecretAnswerRequest struct {
 	ToolCallID string `json:"tool_call_id"`
 	Value      string `json:"value"`
+	// Declined answers without a value, for a value the user cannot or
+	// will not give as a secret, such as one too short to hide. Value must
+	// be empty.
+	Declined bool `json:"declined,omitempty"`
 }
 
 // AnswerChatSecretQuestion answers the pending secret question req.ToolCallID of
 // chatID. The server keeps the value out of chat messages and tells the chat
-// only that the user answered.
+// only that the user answered or declined.
 func (c *Client) AnswerChatSecretQuestion(ctx context.Context, chatID uuid.UUID, req ChatSecretAnswerRequest) error {
 	return requestNoContent(ctx, c, http.MethodPost, fmt.Sprintf("/api/v2/chats/fork/%s/questions/secret-answer", chatID), req)
 }

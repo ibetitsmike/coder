@@ -2,7 +2,10 @@
 // question calls live here so api.ts, an upstream file, stays unchanged.
 
 import { API } from "./api";
-import type { ChatDescendantQuestion } from "./typesGenerated";
+import type {
+	ChatDescendantQuestion,
+	ChatSecretAnswerRequest,
+} from "./typesGenerated";
 
 /** Fetches the unanswered ask_user_question calls of a chat's family, oldest first. */
 export const getChatDescendantQuestions = async (
@@ -14,4 +17,18 @@ export const getChatDescendantQuestions = async (
 		{ signal },
 	);
 	return response.data;
+};
+
+/**
+ * Answers the pending secret question req.tool_call_id of chatId. The server
+ * keeps the value out of the chat's messages.
+ */
+export const answerChatSecretQuestion = async (
+	chatId: string,
+	req: ChatSecretAnswerRequest,
+): Promise<void> => {
+	await API.getAxiosInstance().post(
+		`/api/v2/chats/fork/${chatId}/questions/secret-answer`,
+		req,
+	);
 };

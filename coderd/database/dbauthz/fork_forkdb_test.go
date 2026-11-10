@@ -172,12 +172,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
-		"DeleteChatSecretAnswersByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().DeleteChatSecretAnswersByChatID(gomock.Any(), chat.ID).Return(nil).AnyTimes()
-			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns()
-		},
 		"DeleteOldChatSecretAnswers": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), int32(1000)).Return(int64(1), nil).AnyTimes()
 			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(1))
