@@ -157,3 +157,86 @@ func TestGetChatAwaitingWorker(t *testing.T) {
 	require.True(t, awaiting(owned(time.Hour)), "stale heartbeat")
 	require.False(t, awaiting(owned(0)), "fresh heartbeat")
 }
+
+func TestGetFamilySubagentsAwaitingWorker(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	orgA := dbgen.Organization(t, db, database.Organization{}).ID
+	orgB := dbgen.Organization(t, db, database.Organization{}).ID
+	ownerID := dbgen.User(t, db, database.User{}).ID
+	modelID := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}).ID
+	// chat creates a chat under parent. A nil age leaves it unowned; otherwise
+	// a runner whose heartbeat is age old owns it.
+	chat := func(orgID uuid.UUID, parent *database.Chat, status database.ChatStatus, age *time.Duration) database.Chat {
+		seed := database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: modelID, Status: status}
+		if parent != nil {
+			seed.ParentChatID = uuid.NullUUID{UUID: parent.ID, Valid: true}
+			seed.RootChatID = parent.RootChatID
+			if !parent.RootChatID.Valid {
+				seed.RootChatID = seed.ParentChatID
+			}
+		}
+		c := dbgen.Chat(t, db, seed)
+		if age == nil {
+			return c
+		}
+		runnerID := uuid.New()
+		_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET worker_id = $2, runner_id = $3 WHERE id = $1", c.ID, uuid.New(), runnerID)
+		require.NoError(t, err)
+		_, err = sqlDB.ExecContext(ctx,
+			"INSERT INTO chat_heartbeats (chat_id, runner_id, heartbeat_at) VALUES ($1, $2, NOW() - ($3 * INTERVAL '1 second'))",
+			c.ID, runnerID, int(age.Seconds()))
+		require.NoError(t, err)
+		return c
+	}
+	fresh, stale := time.Duration(0), time.Hour
+	running := database.ChatStatusRunning
+	root := chat(orgA, nil, running, &fresh)
+	coordinator := chat(orgA, &root, running, &fresh)
+	worker := chat(orgA, &coordinator, running, nil)
+	sibling := chat(orgA, &root, running, nil)
+	abandoned := chat(orgA, &root, running, &stale)
+	_ = chat(orgA, &root, database.ChatStatusWaiting, nil)
+	otherRoot := chat(orgA, nil, running, nil)
+	_ = chat(orgA, &otherRoot, running, &fresh)
+	otherOrgRoot := chat(orgB, nil, running, nil)
+	_ = chat(orgB, &otherOrgRoot, running, &fresh)
+
+	rows, err := fdb.GetFamilySubagentsAwaitingWorker(ctx, forkdb.GetFamilySubagentsAwaitingWorkerParams{
+		RootChatID:     root.ID,
+		OrganizationID: orgA,
+		StaleSeconds:   60,
+	})
+	require.NoError(t, err)
+	got := map[uuid.UUID]forkdb.CountActiveSubagentsForCapacityRow{}
+	for _, row := range rows {
+		got[row.ChatID] = forkdb.CountActiveSubagentsForCapacityRow{
+			ActiveCount:             row.ActiveCount,
+			ActiveOrganizationCount: row.ActiveOrganizationCount,
+			ActiveFamilyCount:       row.ActiveFamilyCount,
+		}
+	}
+	// Each running chat that no fresh worker owns matches the counts of
+	// CountActiveSubagentsForCapacity, which excludes its active ancestors.
+	want := map[uuid.UUID]forkdb.CountActiveSubagentsForCapacityRow{}
+	for _, c := range []database.Chat{worker, sibling, abandoned} {
+		counts, err := fdb.CountActiveSubagentsForCapacity(ctx, forkdb.CountActiveSubagentsForCapacityParams{
+			ChatID:         c.ID,
+			OrganizationID: orgA,
+			RootChatID:     root.ID,
+			StaleSeconds:   60,
+		})
+		require.NoError(t, err)
+		want[c.ID] = counts
+	}
+	require.Equal(t, want, got)
+	require.Equal(t, forkdb.CountActiveSubagentsForCapacityRow{
+		ActiveCount:             2,
+		ActiveOrganizationCount: 1,
+		ActiveFamilyCount:       0,
+	}, got[worker.ID])
+}
