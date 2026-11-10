@@ -5608,7 +5608,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/{chat}/questions/secret-answer": {
             "post": {
-                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered.",
+                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered. A declined answer stores\nnothing and says that the user declined.",
                 "consumes": [
                     "application/json"
                 ],
