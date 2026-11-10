@@ -328,6 +328,7 @@ func (api *API) watchChats(rw http.ResponseWriter, r *http.Request) {
 				if encoder == nil {
 					return
 				}
+				api.fillForkWatchedChatAgentType(cbCtx, &payload)
 				// The encoder is only written from the pubsub delivery
 				// goroutine, which processes messages serially. Do not
 				// add a second write path without synchronization.
@@ -580,10 +581,7 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 	// sidebar views don't surface state-mismatched rows.
 	var childRows []database.GetChildChatsByParentIDsRow
 	if len(rootIDs) > 0 {
-		childRows, err = api.Database.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
-			ParentIds: rootIDs,
-			Archived:  searchParams.Archived,
-		})
+		childRows, err = api.forkEmbeddedChildChats(ctx, rootIDs, searchParams.Archived)
 		if err != nil {
 			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 				Message: "Failed to list child chats.",
@@ -613,6 +611,7 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 
 	sdkChats := db2sdk.ChatRowsWithChildren(chatRows, childRows, diffStatusesByChatID)
 	api.enrichChatsWithMissingAgentIDs(ctx, sdkChats)
+	api.fillForkChatAgentTypes(ctx, sdkChats)
 	httpapi.Write(ctx, rw, http.StatusOK, sdkChats)
 }
 
@@ -1888,10 +1887,7 @@ func (api *API) getChat(rw http.ResponseWriter, r *http.Request) {
 	// tree in a single response.
 	if !chat.ParentChatID.Valid {
 		// Embed children matching the parent's archive state.
-		childRows, err := api.Database.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
-			ParentIds: []uuid.UUID{chat.ID},
-			Archived:  sql.NullBool{Bool: chat.Archived, Valid: true},
-		})
+		childRows, err := api.forkEmbeddedChildChats(ctx, []uuid.UUID{chat.ID}, sql.NullBool{Bool: chat.Archived, Valid: true})
 		if err != nil {
 			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 				Message: "Failed to fetch child chats.",
@@ -1935,6 +1931,7 @@ func (api *API) getChat(rw http.ResponseWriter, r *http.Request) {
 
 	enriched := []codersdk.Chat{sdkChat}
 	api.repairChatAgentIDs(ctx, enriched)
+	api.fillForkChatAgentTypes(ctx, enriched)
 	sdkChat = enriched[0]
 
 	httpapi.Write(ctx, rw, http.StatusOK, sdkChat)

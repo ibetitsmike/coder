@@ -538,6 +538,7 @@ const SubagentRenderer: React.FC<ToolRendererProps> = ({
 			}
 			recordingFileId={recordingFileId || undefined}
 			thumbnailFileId={thumbnailFileId || undefined}
+			forkCall={{ args, result }}
 		/>
 	);
 };

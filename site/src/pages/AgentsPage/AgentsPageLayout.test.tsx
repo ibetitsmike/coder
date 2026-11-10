@@ -971,3 +971,46 @@ describe("AgentsPageLayout project moves", () => {
 		);
 	});
 });
+
+describe("AgentsPageLayout nested subagents", () => {
+	it("adds a created grandchild to its root's children", async () => {
+		const child: Chat = {
+			...MockChat,
+			id: "child-1",
+			parent_chat_id: MockChat.id,
+			root_chat_id: MockChat.id,
+		};
+		const root: Chat = { ...MockChat, children: [child] };
+		vi.spyOn(API.experimental, "getChats").mockResolvedValue([root]);
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue(root);
+		const publishChatWatchEvent = mockChatWatchSocket();
+		const { queryClient } = renderLayout();
+		const sidebarChats = () =>
+			queryClient
+				.getQueryData<InfiniteData<Chat[]>>(
+					infiniteChats({ sources: DEFAULT_AGENT_SIDEBAR_FILTERS.sources })
+						.queryKey,
+				)
+				?.pages.flat();
+		await waitFor(() => expect(sidebarChats()).toEqual([root]));
+
+		// The grandchild's parent is not a root, so the event must key
+		// the add on the family root.
+		publishChatWatchEvent({
+			kind: "created",
+			chat: {
+				...MockChat,
+				id: "grandchild-1",
+				parent_chat_id: child.id,
+				root_chat_id: MockChat.id,
+			},
+		});
+
+		await waitFor(() =>
+			expect(sidebarChats()?.[0].children?.map((c) => c.id)).toEqual([
+				"grandchild-1",
+				"child-1",
+			]),
+		);
+	});
+});

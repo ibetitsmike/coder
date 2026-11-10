@@ -1093,7 +1093,7 @@ func (p *Server) buildTurnEnvironment(
 		CallTemplate:         resolved.newCall(),
 		ContextLimitFallback: modelConfig.ContextLimit,
 		DynamicToolNames:     dynamicToolNames,
-		StopAfterTools:       stopAfterBehaviorTools(currentPlanMode, chat.Mode, chat.ParentChatID),
+		StopAfterTools:       p.forkStopAfterTools(stopAfterBehaviorTools(currentPlanMode, chat.Mode, chat.ParentChatID), chat),
 		ExclusiveToolNames:   exclusiveToolNames,
 		BuiltinToolNames:     builtinToolNames,
 		ToolNameToConfigID:   toolNameToConfigID,
