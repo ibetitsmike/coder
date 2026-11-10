@@ -20,7 +20,9 @@ vi.mock("#/hooks/useAuthenticated", () => ({
 		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
 	}),
 }));
-const dashboard = vi.hoisted(() => ({ experiments: [] as string[] }));
+const dashboard = vi.hoisted((): { experiments: string[] } => ({
+	experiments: [],
+}));
 vi.mock("#/modules/dashboard/useDashboard", () => ({
 	useDashboard: () => ({
 		experiments: dashboard.experiments,
