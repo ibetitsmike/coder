@@ -317,10 +317,10 @@ If the spawn fails after `spawn_agent` creates the worktree, Coder Agents remove
 Otherwise Coder Agents keeps both until you archive the root chat or the deployment archives it as inactive.
 After the archive, Coder Agents removes each child's worktree and branch in the background.
 It keeps a worktree that has uncommitted or untracked files, is no longer on its branch, or has submodule commits that are on no remote.
-It also keeps a worktree whose branch has commits that are on no other branch or remote.
+It also keeps a worktree when its branch, or the `HEAD` or branch reflog, reaches a commit that is on no other branch or remote, such as a commit that a reset moved the branch away from.
 It keeps them all when it can't reach the workspace agent or the agent is older than the server.
 Then it posts one notice in the root chat that lists the path, branch, and reason of each worktree it kept.
-So merge or push each child's branch, and push its submodule commits, before you archive the root chat.
+So merge or push each child's branch, push its submodule commits, and put any commit that a reset dropped on another branch before you archive the root chat.
 To remove a kept worktree yourself, run `git worktree remove <worktree_path>` and `git branch -D <branch>` in the repository.
 Add `--force` to `git worktree remove` when the worktree still has uncommitted or untracked files.
 Without the experiment, `spawn_agent` has no `isolation`, `repo_path`, or `base_branch` field.
