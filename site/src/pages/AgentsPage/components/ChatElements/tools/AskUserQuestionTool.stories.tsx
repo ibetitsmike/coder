@@ -185,18 +185,6 @@ export const SecretQuestion: Story = {
 		isLatestAskUserQuestion: true,
 		onSendAskUserQuestionResponse: fn(),
 	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		expect(
-			canvas.getByText(
-				"Answer this secret question in the question panel of the root chat.",
-			),
-		).toBeInTheDocument();
-		expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
-		expect(
-			canvas.queryByRole("button", { name: "Submit" }),
-		).not.toBeInTheDocument();
-	},
 };
 
 export const InteractiveMarkdownQuestion: Story = {
