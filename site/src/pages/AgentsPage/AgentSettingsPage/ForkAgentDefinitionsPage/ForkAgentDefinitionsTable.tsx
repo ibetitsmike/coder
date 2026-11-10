@@ -28,10 +28,11 @@ export const ForkAgentDefinitionsTable: React.FC<
 		useState<ForkAgentDefinitionMetadata>();
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
 
-	// Each row tracks its own toggle, so a second toggle does not hide the
-	// first one's pending value while both requests run.
+	// Pending toggles are keyed by organization, then name, so a second
+	// toggle, or a switch to another organization with the same names, does
+	// not hide or borrow a pending value while its request runs.
 	const [pendingToggles, setPendingToggles] = useState<
-		Readonly<Record<string, boolean>>
+		Readonly<Record<string, Readonly<Record<string, boolean>>>>
 	>({});
 	const updateOptions = updateUserAgentDefinition(queryClient, organizationId);
 	const toggleMutation = useMutation({
@@ -39,7 +40,10 @@ export const ForkAgentDefinitionsTable: React.FC<
 		onMutate: ({ name, req }) => {
 			setPendingToggles((current) => ({
 				...current,
-				[name]: Boolean(req.enabled),
+				[organizationId]: {
+					...current[organizationId],
+					[name]: Boolean(req.enabled),
+				},
 			}));
 		},
 		onError: (error, { name }) => {
@@ -50,11 +54,14 @@ export const ForkAgentDefinitionsTable: React.FC<
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
 			const { name } = args[2];
-			setPendingToggles((current) =>
-				Object.fromEntries(
-					Object.entries(current).filter(([key]) => key !== name),
+			setPendingToggles((current) => ({
+				...current,
+				[organizationId]: Object.fromEntries(
+					Object.entries(current[organizationId] ?? {}).filter(
+						([key]) => key !== name,
+					),
 				),
-			);
+			}));
 		},
 	});
 
@@ -97,7 +104,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onRetry={() => {
 				void definitionsQuery.refetch();
 			}}
-			pendingToggles={pendingToggles}
+			pendingToggles={pendingToggles[organizationId]}
 			onToggleEnabled={(name, enabled) =>
 				toggleMutation.mutate({ name, req: { enabled } })
 			}

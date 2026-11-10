@@ -210,4 +210,37 @@ describe("ForkAgentDefinitionsPage", () => {
 			other.name,
 		]);
 	});
+
+	it("keeps a pending toggle in its own organization", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockImplementation(() => new Promise(() => {}));
+		const switchName = `Enable ${MockForkAgentDefinitionMetadata.name}`;
+
+		await user.click(await screen.findByRole("switch", { name: switchName }));
+		await user.click(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockDefaultOrganization.display_name}`,
+			}),
+		);
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(MockOrganization2.display_name),
+			}),
+		);
+		await screen.findByRole("combobox", {
+			name: `Organization ${MockOrganization2.display_name}`,
+		});
+		await user.click(await screen.findByRole("switch", { name: switchName }));
+
+		await waitFor(() =>
+			expect(update).toHaveBeenLastCalledWith(
+				MockOrganization2.id,
+				MockForkAgentDefinitionMetadata.name,
+				{ enabled: false },
+			),
+		);
+	});
 });
