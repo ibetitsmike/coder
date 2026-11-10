@@ -587,6 +587,39 @@ func TestForkWorktreeDelete(t *testing.T) {
 	}
 }
 
+func TestForkWorktreeDeleteRemovesBranchConfig(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	wtGit(t, repo, "config", "branch.feature.remote", "origin")
+	wtGit(t, repo, "config", "branch.feature.merge", "refs/heads/feature")
+
+	rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	err := exec.Command("git", "-C", repo, "config", "--get-regexp", `^branch\.feature\.`).Run()
+	require.Error(t, err, "branch feature config must be removed")
+}
+
+// More reflog entries than fit in one argv must not break the unpushed
+// check.
+func TestForkWorktreeDeleteLongReflog(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	oid := wtGit(t, wt.Path, "rev-parse", "HEAD")
+	entry := oid + " " + oid + " Test <test@example.com> 1700000000 +0000\tcheckout: moving\n"
+	logs := filepath.Join(wtGit(t, wt.Path, "rev-parse", "--absolute-git-dir"), "logs", "HEAD")
+	require.NoError(t, os.WriteFile(logs, []byte(strings.Repeat(entry, 80000)), 0o600))
+
+	rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.NoDirExists(t, wt.Path)
+}
+
 func TestForkWorktreeDeleteWrongBranch(t *testing.T) {
 	t.Parallel()
 

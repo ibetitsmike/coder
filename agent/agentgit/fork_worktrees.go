@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -98,7 +100,12 @@ func (e *gitError) Error() string {
 func (e *gitError) Unwrap() error { return e.err }
 
 func (a *worktreeAPI) git(ctx context.Context, dir string, args ...string) (string, error) {
+	return a.gitWithInput(ctx, dir, nil, args...)
+}
+
+func (a *worktreeAPI) gitWithInput(ctx context.Context, dir string, stdin io.Reader, args ...string) (string, error) {
 	cmd := a.execer.CommandContext(ctx, a.gitBin, append([]string{"-C", dir}, args...)...)
+	cmd.Stdin = stdin
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -360,10 +367,10 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree reflogs.", err)
 		return
 	}
-	revList := []string{"rev-list", "--count", oid}
-	revList = append(revList, strings.Fields(logged)...)
-	revList = append(revList, "--not", "--exclude=refs/heads/"+req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--")
-	count, err := a.git(ctx, path, revList...)
+	// Reflogs can outgrow argv, so the commits go through --stdin, which
+	// reads them as positive revisions ahead of --not.
+	count, err := a.gitWithInput(ctx, path, strings.NewReader(oid+"\n"+logged),
+		"rev-list", "--count", "--stdin", "--not", "--exclude=refs/heads/"+req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--")
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to count unpushed commits.", err)
 		return
@@ -400,6 +407,13 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 	if _, err := a.git(ctx, commonDir, "update-ref", "-d", "refs/heads/"+req.Branch, oid); err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, fmt.Sprintf("Removed worktree %s but failed to delete branch %s.", path, req.Branch), err)
 		return
+	}
+	// update-ref leaves the upstream settings that git branch -d would
+	// remove, and a later branch with the same name would inherit them.
+	if _, err := a.git(ctx, commonDir, "config", "--local", "--get-regexp", `^branch\.`+regexp.QuoteMeta(req.Branch)+`\.`); err == nil {
+		if _, err := a.git(ctx, commonDir, "config", "--local", "--remove-section", "branch."+req.Branch); err != nil {
+			a.logger.Warn(ctx, "remove config of deleted worktree branch", slog.F("branch", req.Branch), slog.Error(err))
+		}
 	}
 	rw.WriteHeader(http.StatusNoContent)
 }
