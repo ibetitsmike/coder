@@ -77,9 +77,9 @@ type ForkFamilyLiveLimitChipProps = {
 };
 
 /** Renders nothing unless `liveLimit` is set. */
-export const ForkFamilyLiveLimitChip: React.FC<ForkFamilyLiveLimitChipProps> = ({
-	liveLimit,
-}) => {
+export const ForkFamilyLiveLimitChip: React.FC<
+	ForkFamilyLiveLimitChipProps
+> = ({ liveLimit }) => {
 	if (!liveLimit) {
 		return null;
 	}

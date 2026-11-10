@@ -13,5 +13,7 @@ export const forkChatFamilyCapacity = (rootChatId: string) =>
 	queryOptions({
 		queryKey: forkChatFamilyCapacityKey(rootChatId),
 		queryFn: ({ signal }) => getForkChatFamilyCapacity(rootChatId, signal),
-		refetchInterval: 5_000,
+		// A failing read backs off instead of stopping, so a transient error
+		// does not hide capacity until the row remounts.
+		refetchInterval: ({ state }) => (state.status === "error" ? 30_000 : 5_000),
 	});
