@@ -49,7 +49,10 @@ export const MockChatWakeupEvents: ChatWakeup = {
 	timezone: "UTC",
 	events: [
 		{ type: "child_done", chat_id: "12345678-abcd-4123-8123-123456789abc" },
-		{ type: "pull_request", url: "https://github.com/ibetitsmike/coder/pull/11" },
+		{
+			type: "pull_request",
+			url: "https://github.com/ibetitsmike/coder/pull/11",
+		},
 	],
 	status: "active",
 	run_count: 0,

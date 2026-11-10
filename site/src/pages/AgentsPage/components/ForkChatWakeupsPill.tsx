@@ -42,10 +42,7 @@ export const ForkChatWakeupsPill: React.FC<ForkChatWakeupsPillProps> = ({
 				error && variables
 					? {
 							id: variables.wakeupId,
-							message: getErrorMessage(
-								error,
-								"Failed to update the wake-up.",
-							),
+							message: getErrorMessage(error, "Failed to update the wake-up."),
 						}
 					: undefined
 			}

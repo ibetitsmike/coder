@@ -6,7 +6,7 @@ import {
 import type { ChatWakeup } from "#/api/typesGenerated";
 
 /** Query key for a chat's wake-ups. */
-export const chatWakeupsKey = (chatId: string) =>
+const chatWakeupsKey = (chatId: string) =>
 	["chats", "fork-wakeups", chatId] as const;
 
 /** Query options for a chat's wake-ups, oldest first. */

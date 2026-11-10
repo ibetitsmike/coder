@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
-import type { ChatTodoList, Experiment } from "#/api/typesGenerated";
+import type {
+	ChatTodoList,
+	ChatWakeup,
+	Experiment,
+} from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { MockChat } from "#/testHelpers/chatEntities";
 import {
@@ -171,6 +175,27 @@ describe("ForkComposerSlot todo list", () => {
 	});
 });
 
+// Serves wake-ups from a list that a PATCH updates, so the refetch after an
+// update returns the new status like the server would.
+const mockWakeupsServer = (initial: ChatWakeup[]) => {
+	let wakeups = initial;
+	vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
+		async () => wakeups,
+	);
+	return vi
+		.spyOn(forkChatWakeupsApi, "updateChatWakeup")
+		.mockImplementation(async (_chatId, wakeupId, req) => {
+			wakeups = wakeups.map((wakeup) =>
+				wakeup.id === wakeupId ? { ...wakeup, status: req.status } : wakeup,
+			);
+			const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
+			if (!updated) {
+				throw new Error(`Unknown wake-up: ${wakeupId}`);
+			}
+			return updated;
+		});
+};
+
 describe("ForkComposerSlot wake-ups", () => {
 	it("does not request wake-ups while fork-chat-wakeups is off", () => {
 		const getWakeups = vi
@@ -200,24 +225,7 @@ describe("ForkComposerSlot wake-ups", () => {
 	});
 
 	it("pauses an active wake-up", async () => {
-		let wakeups = [MockChatWakeupInterval];
-		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
-			async () => wakeups,
-		);
-		const updateWakeup = vi
-			.spyOn(forkChatWakeupsApi, "updateChatWakeup")
-			.mockImplementation(async (_chatId, wakeupId, req) => {
-				wakeups = wakeups.map((wakeup) =>
-					wakeup.id === wakeupId
-						? { ...wakeup, status: req.status }
-						: wakeup,
-				);
-				const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
-				if (!updated) {
-					throw new Error(`Unknown wake-up: ${wakeupId}`);
-				}
-				return updated;
-			});
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
 		const user = userEvent.setup();
 
 		renderSlot(["fork-chat-wakeups"]);
@@ -238,24 +246,7 @@ describe("ForkComposerSlot wake-ups", () => {
 	});
 
 	it("cancels a wake-up", async () => {
-		let wakeups = [MockChatWakeupInterval];
-		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
-			async () => wakeups,
-		);
-		const updateWakeup = vi
-			.spyOn(forkChatWakeupsApi, "updateChatWakeup")
-			.mockImplementation(async (_chatId, wakeupId, req) => {
-				wakeups = wakeups.map((wakeup) =>
-					wakeup.id === wakeupId
-						? { ...wakeup, status: req.status }
-						: wakeup,
-				);
-				const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
-				if (!updated) {
-					throw new Error(`Unknown wake-up: ${wakeupId}`);
-				}
-				return updated;
-			});
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
 		const user = userEvent.setup();
 
 		renderSlot(["fork-chat-wakeups"]);

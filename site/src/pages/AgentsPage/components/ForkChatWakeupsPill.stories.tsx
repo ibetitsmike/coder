@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import {
-	MockChatWakeupCron,
 	MockChatWakeupCompleted,
+	MockChatWakeupCron,
 	MockChatWakeupEvents,
 	MockChatWakeupInterval,
 	MockChatWakeupPaused,
@@ -14,7 +14,13 @@ const meta: Meta<typeof ForkChatWakeupsPillView> = {
 	title: "pages/AgentsPage/ForkChatWakeupsPill",
 	component: ForkChatWakeupsPillView,
 	args: {
-		wakeups: [MockChatWakeupInterval],
+		wakeups: [
+			MockChatWakeupInterval,
+			MockChatWakeupCron,
+			MockChatWakeupEvents,
+			MockChatWakeupPaused,
+			MockChatWakeupCompleted,
+		],
 		error: undefined,
 		onUpdate: fn(),
 	},
@@ -45,40 +51,6 @@ export const ExpandedMobile: Story = {
 	play: Expanded.play,
 };
 
-export const Cron: Story = {
-	args: {
-		wakeups: [MockChatWakeupCron],
-	},
-	play: Expanded.play,
-};
-
-export const Events: Story = {
-	args: {
-		wakeups: [MockChatWakeupEvents],
-	},
-	play: Expanded.play,
-};
-
-export const Paused: Story = {
-	args: {
-		wakeups: [MockChatWakeupPaused],
-	},
-	play: Expanded.play,
-};
-
-export const LongContent: Story = {
-	args: {
-		wakeups: [
-			{
-				...MockChatWakeupInterval,
-				prompt:
-					"Trace every caller of the transcript reader, confirm each one passes the owner's credentials, and note the callers that read a descendant chat through the parent walk",
-			},
-		],
-	},
-	play: Expanded.play,
-};
-
 export const LoadError: Story = {
 	args: {
 		wakeups: undefined,
@@ -95,7 +67,6 @@ export const LoadError: Story = {
 
 export const UpdateError: Story = {
 	args: {
-		wakeups: [MockChatWakeupInterval, MockChatWakeupCompleted],
 		updateError: {
 			id: MockChatWakeupInterval.id,
 			message: "This wake-up has already finished.",
