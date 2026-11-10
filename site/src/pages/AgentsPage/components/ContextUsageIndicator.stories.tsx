@@ -322,6 +322,54 @@ export const ResourceIssue: Story = {
 	},
 };
 
+const mockChatContextAgentDefinitions: ChatContext = {
+	dirty: false,
+	resources: [
+		{
+			source: "/home/coder/project/.agents/agents/reviewer.md",
+			kind: "subagent",
+			size_bytes: 512,
+			status: "ok",
+			subagent_name: "reviewer",
+			subagent_description: "Reviews diffs for correctness.",
+		},
+		{
+			source: "/home/coder/project/.agents/agents/explorer.md",
+			kind: "subagent",
+			size_bytes: 384,
+			status: "ok",
+			subagent_name: "explorer",
+			subagent_description: "Read-only exploration.",
+			error: 'unknown front-matter field "color" ignored',
+		},
+		{
+			source: "/home/coder/project/.agents/agents/Gate-Bad.md",
+			kind: "subagent",
+			size_bytes: 96,
+			status: "invalid",
+			error: 'name "Gate-Bad" is not kebab-case',
+		},
+	],
+};
+
+// Loaded agent definitions are listed with their parse warnings, and a
+// definition that failed to load appears as an issue in the same section.
+export const AgentDefinitions: Story = {
+	args: {
+		usage: {
+			usedTokens: 12_000,
+			contextLimitTokens: 200_000,
+			context: mockChatContextAgentDefinitions,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(within(canvasElement).getByRole("button"));
+		await userEvent.click(
+			screen.getByRole("button", { name: /Agent definitions/ }),
+		);
+	},
+};
+
 // Multiple context roots: files and skills are pulled from several
 // directories, so each list groups by its parent directory. Without grouping
 // the two AGENTS.md files would render as identical, ambiguous rows.

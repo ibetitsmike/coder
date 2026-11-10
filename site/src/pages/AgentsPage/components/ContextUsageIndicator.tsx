@@ -163,10 +163,11 @@ const groupByDirectory = <T extends { readonly dir: string }>(
 
 const ContextResourceIssues: React.FC<{
 	issues: readonly ContextIssueItem[];
-}> = ({ issues }) =>
+	title?: string;
+}> = ({ issues, title = "Issues" }) =>
 	issues.length > 0 ? (
 		<ContextAlert severity="warning" variant="panel">
-			<ContextAlertTitle>Issues</ContextAlertTitle>
+			<ContextAlertTitle>{title}</ContextAlertTitle>
 			<ContextAlertDescription>
 				{issues.map((issue) => (
 					<span
@@ -177,7 +178,8 @@ const ContextResourceIssues: React.FC<{
 						<span className="truncate">
 							{issue.name}{" "}
 							<span className="text-content-secondary">
-								({RESOURCE_KIND_LABELS[issue.kind]}: {issue.status})
+								({RESOURCE_KIND_LABELS[issue.kind]}
+								{issue.status !== "ok" && `: ${issue.status}`})
 							</span>
 						</span>
 						{issue.error && <span>{issue.error}</span>}
@@ -227,6 +229,45 @@ const ContextHarnessSection: React.FC<{
 		</ContextResourceAccordionContent>
 	</ContextResourceAccordion>
 );
+
+// Agent definitions the backend loaded can still carry non-fatal parse
+// warnings, so they are listed separately from the definitions it dropped.
+const ContextAgentDefinitionsSection: React.FC<{
+	items: readonly ContextSkillItem[];
+	issues: readonly ContextIssueItem[];
+	warnings: readonly ContextIssueItem[];
+}> = ({ items, issues, warnings }) => {
+	const groups = groupByDirectory(items);
+	return (
+		<ContextResourceAccordion>
+			<ContextResourceAccordionTrigger detail={`${items.length} available`}>
+				Agent definitions
+				<ContextIssueIndicator count={issues.length + warnings.length} />
+			</ContextResourceAccordionTrigger>
+			<ContextResourceAccordionContent>
+				{groups.length > 0 && (
+					<ContextResourceTree>
+						{groups.map((group) => (
+							<ContextResourceTreeDirectory key={group.dir} dir={group.dir}>
+								{group.items.map((agent) => (
+									<ContextResourceTreeItem
+										key={agent.source}
+										icon={group.dir === "" ? BotIcon : undefined}
+										name={agent.name}
+										description={agent.description}
+										className="text-content-primary"
+									/>
+								))}
+							</ContextResourceTreeDirectory>
+						))}
+					</ContextResourceTree>
+				)}
+				<ContextResourceIssues issues={issues} />
+				<ContextResourceIssues issues={warnings} title="Warnings" />
+			</ContextResourceAccordionContent>
+		</ContextResourceAccordion>
+	);
+};
 
 export const ContextUsageIndicator: React.FC<{
 	usage: AgentContextUsage;
@@ -339,6 +380,27 @@ export const ContextUsageIndicator: React.FC<{
 			dir: resource.source_path ?? "",
 		}))
 		.filter((harness) => harness.slug.trim().length > 0);
+	const okAgentDefinitions = (pinnedResources ?? []).filter(
+		(resource) => resource.kind === "subagent" && resource.status === "ok",
+	);
+	const agentDefinitionItems: readonly ContextSkillItem[] = okAgentDefinitions
+		.map((resource) => ({
+			source: resource.source,
+			name: resource.subagent_name || getPathBasename(resource.source),
+			description: resource.subagent_description,
+			dir: getPathDirname(resource.source),
+		}))
+		.filter((agent) => agent.name.trim().length > 0);
+	const agentDefinitionWarnings: readonly ContextIssueItem[] =
+		okAgentDefinitions
+			.filter((resource) => resource.error)
+			.map((resource) => ({
+				name: resource.subagent_name || getPathBasename(resource.source),
+				kind: resource.kind,
+				status: resource.status,
+				error: resource.error ?? "",
+				source: resource.source,
+			}));
 	// Pinned resources the agent could not use (invalid skill, unreadable or
 	// oversize file) are surfaced as issues with their error so the failure is
 	// visible rather than a silent omission.
@@ -365,12 +427,16 @@ export const ContextUsageIndicator: React.FC<{
 	const harnessIssues = issueItems.filter(
 		(issue) => issue.kind === "acp_harness",
 	);
+	const agentDefinitionIssues = issueItems.filter(
+		(issue) => issue.kind === "subagent",
+	);
 
 	const hasContextList =
 		fileItems.length > 0 ||
 		skillItems.length > 0 ||
 		hasMcp ||
 		harnessItems.length > 0 ||
+		agentDefinitionItems.length > 0 ||
 		issueItems.length > 0;
 
 	const hasResourceIssues = issueItems.length > 0;
@@ -639,6 +705,14 @@ export const ContextUsageIndicator: React.FC<{
 							<ContextHarnessSection
 								groups={groupByDirectory(harnessItems)}
 								issues={harnessIssues}
+							/>
+						)}
+						{(agentDefinitionItems.length > 0 ||
+							agentDefinitionIssues.length > 0) && (
+							<ContextAgentDefinitionsSection
+								items={agentDefinitionItems}
+								issues={agentDefinitionIssues}
+								warnings={agentDefinitionWarnings}
 							/>
 						)}
 					</div>
