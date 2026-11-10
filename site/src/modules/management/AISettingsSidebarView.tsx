@@ -16,6 +16,7 @@ import {
 	type Permissions,
 } from "#/modules/permissions";
 import { modelOrganizationSearchParam } from "#/pages/AISettingsPage/ModelsPage/organizationModels";
+import { useForkAgentDefinitionsPath } from "./forkAISettingsNav";
 
 type AISettingsSidebarViewProps = {
 	/** Site-wide permissions. */
@@ -130,6 +131,10 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 			? organizationName
 			: null,
 	);
+	const agentDefinitionsPath = useForkAgentDefinitionsPath(
+		skillOrganizations,
+		organizationName,
+	);
 
 	return (
 		<BaseSidebar>
@@ -168,6 +173,11 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 						<SubNavItem href={instructionsPath}>Instructions</SubNavItem>
 						{permissions.viewAnyOrganizationSkills && (
 							<SubNavItem href={skillsPath}>Skills</SubNavItem>
+						)}
+						{permissions.viewAnyOrganizationSkills && agentDefinitionsPath && (
+							<SubNavItem href={agentDefinitionsPath}>
+								Agent definitions
+							</SubNavItem>
 						)}
 						<SubNavItem href="/ai/settings/lifecycle">Lifecycle</SubNavItem>
 					</SubNavGroup>
@@ -208,6 +218,11 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 					permissions.viewAnyOrganizationSkills && (
 						<SubNavGroup>
 							<SubNavItem href={skillsPath}>Skills</SubNavItem>
+							{agentDefinitionsPath && (
+								<SubNavItem href={agentDefinitionsPath}>
+									Agent definitions
+								</SubNavItem>
+							)}
 						</SubNavGroup>
 					)}
 			</div>
