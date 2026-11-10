@@ -54,12 +54,12 @@ export const useForkFamilyCapacity = (
 				collectDescendantChats(chatTree, chat.id).some((descendant) =>
 					liveStatuses.has(descendant.status),
 				));
-	// Only the root row polls, so rows mounted later do not add intervals at
-	// other offsets; subagent rows read the shared cache.
+	// Only the root row polls. Subagent rows read the shared cache, so rows
+	// mounted later add no fetches of their own.
 	const { data } = useQuery({
 		...forkChatFamilyCapacity(rootID),
 		enabled,
-		...(parentID ? { refetchInterval: false } : {}),
+		...(parentID ? { refetchInterval: false, refetchOnMount: false } : {}),
 	});
 	if (!enabled || !data) {
 		return {};
