@@ -139,29 +139,35 @@ func (p *Server) chatWakeupByID(ctx context.Context, chat database.Chat, id uuid
 }
 
 // newWaitForEventsSpec resolves what a new wait_for_events call watches: its
-// pull request, its children, or both, and maps it to a wake-up spec.
+// pull request, its children, or both, and maps it to a wake-up spec. It
+// checks the local arguments before it reads the pull request, which can page
+// through its activity on the owner's quota.
 func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, args waitForEventsArgs) (wakeupSpec, error) {
-	var pullRequest *wakeupEvent
-	switch {
-	case strings.TrimSpace(args.PullRequestURL) != "":
-		event, err := p.pullRequestWaitEvent(ctx, chat, args.PullRequestURL, args.PullRequestEvents)
-		if err != nil {
-			return wakeupSpec{}, err
-		}
-		pullRequest = &event
-	case len(args.PullRequestEvents) > 0:
+	watchesPullRequest := strings.TrimSpace(args.PullRequestURL) != ""
+	if !watchesPullRequest && len(args.PullRequestEvents) > 0 {
 		return wakeupSpec{}, xerrors.New("pull_request_events requires pull_request_url")
+	}
+	expiresInSeconds, err := waitForEventsExpiry(args)
+	if err != nil {
+		return wakeupSpec{}, err
 	}
 	var children []database.Chat
 	// A call that names only a pull request waits for no children.
-	if pullRequest == nil || len(args.ChildChatIDs) > 0 {
-		var err error
+	if !watchesPullRequest || len(args.ChildChatIDs) > 0 {
 		children, err = p.waitForEventsChildren(ctx, chat, args.ChildChatIDs)
 		if err != nil {
 			return wakeupSpec{}, err
 		}
 	}
-	return waitForEventsSpec(args, children, pullRequest)
+	var pullRequest *wakeupEvent
+	if watchesPullRequest {
+		event, err := p.pullRequestWaitEvent(ctx, chat, args.PullRequestURL, args.PullRequestEvents)
+		if err != nil {
+			return wakeupSpec{}, err
+		}
+		pullRequest = &event
+	}
+	return waitForEventsSpec(args.Prompt, expiresInSeconds, children, pullRequest)
 }
 
 // waitForEventsResponse describes wakeup with the current state of the
@@ -260,28 +266,34 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 	return watched, nil
 }
 
-// waitForEventsSpec maps wait_for_events arguments to the spec of an events
+// waitForEventsExpiry returns how many seconds a wait_for_events wake-up
+// lasts: expires_in_seconds when set, else the default.
+func waitForEventsExpiry(args waitForEventsArgs) (int, error) {
+	if args.ExpiresInSeconds == nil {
+		return int(defaultWaitForEventsExpiry / time.Second), nil
+	}
+	maxSeconds := int(maxWakeupPeriod / time.Second)
+	minSeconds := int(minWakeupPeriod / time.Second)
+	if *args.ExpiresInSeconds < minSeconds || *args.ExpiresInSeconds > maxSeconds {
+		return 0, xerrors.Errorf("expires_in_seconds must be between %d and %d, got %d", minSeconds, maxSeconds, *args.ExpiresInSeconds)
+	}
+	return *args.ExpiresInSeconds, nil
+}
+
+// waitForEventsSpec maps a wait_for_events call to the spec of an events
 // wake-up with one child_done event per child, then pullRequest if set.
-func waitForEventsSpec(args waitForEventsArgs, children []database.Chat, pullRequest *wakeupEvent) (wakeupSpec, error) {
+func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.Chat, pullRequest *wakeupEvent) (wakeupSpec, error) {
 	spec := wakeupSpec{
 		source:           wakeupSourceEvents,
 		kind:             forkdb.ChatWakeupKindEvents,
-		prompt:           args.Prompt,
-		expiresInSeconds: int(defaultWaitForEventsExpiry / time.Second),
+		prompt:           prompt,
+		expiresInSeconds: expiresInSeconds,
 	}
 	if strings.TrimSpace(spec.prompt) == "" {
 		spec.prompt = defaultWaitForEventsPrompt
 		if pullRequest != nil {
 			spec.prompt = defaultPullRequestWaitPrompt
 		}
-	}
-	if args.ExpiresInSeconds != nil {
-		maxSeconds := int(maxWakeupPeriod / time.Second)
-		minSeconds := int(minWakeupPeriod / time.Second)
-		if *args.ExpiresInSeconds < minSeconds || *args.ExpiresInSeconds > maxSeconds {
-			return wakeupSpec{}, xerrors.Errorf("expires_in_seconds must be between %d and %d, got %d", minSeconds, maxSeconds, *args.ExpiresInSeconds)
-		}
-		spec.expiresInSeconds = *args.ExpiresInSeconds
 	}
 	events := make([]wakeupEvent, 0, len(children))
 	for _, child := range children {
