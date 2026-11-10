@@ -69,12 +69,9 @@ const RecentToolCalls: React.FC<{ calls: readonly RecentToolCall[] }> = ({
 	</ToolCall.Root>
 );
 
-const fieldClassName = "mt-1.5 text-[13px] text-content-secondary";
-
 const countLabel = (count: number, noun: string): string =>
 	`${count} ${noun}${count === 1 ? "" : "s"}`;
 
-/** Formats the diff_summary of a worktree child's wait_agent result. */
 const formatDiffSummary = (diffSummary: unknown): string => {
 	const summary = asRecord(diffSummary);
 	if (!summary) {
@@ -96,10 +93,6 @@ const formatDiffSummary = (diffSummary: unknown): string => {
 	return parts.join(", ");
 };
 
-/**
- * Shows where an isolated child works: its branch and worktree, or its
- * workspace.
- */
 const IsolationFields: React.FC<{ result: Record<string, unknown> }> = ({
 	result,
 }) => {
@@ -110,12 +103,15 @@ const IsolationFields: React.FC<{ result: Record<string, unknown> }> = ({
 		return (
 			<>
 				{branch && (
-					<div className={fieldClassName}>
+					<div className="mt-1.5 text-[13px] text-content-secondary">
 						Branch: <span className="font-mono text-xs">{branch}</span>
 					</div>
 				)}
 				{path && (
-					<div className={`${fieldClassName} truncate`} title={path}>
+					<div
+						className="mt-1.5 truncate text-[13px] text-content-secondary"
+						title={path}
+					>
 						Worktree: <span className="font-mono text-xs">{path}</span>
 					</div>
 				)}
@@ -127,7 +123,11 @@ const IsolationFields: React.FC<{ result: Record<string, unknown> }> = ({
 		const error = asString(result.workspace_error).trim();
 		return (
 			<>
-				{name && <div className={fieldClassName}>Workspace: {name}</div>}
+				{name && (
+					<div className="mt-1.5 text-[13px] text-content-secondary">
+						Workspace: {name}
+					</div>
+				)}
 				{error && <ToolCall.ErrorDetail>{error}</ToolCall.ErrorDetail>}
 			</>
 		);
@@ -148,7 +148,7 @@ export const ForkSubagentFields: React.FC<{
 	const agentDefinitions = useForkExperiment("fork-agent-definitions");
 	const nestedSubagents = useForkExperiment("fork-nested-subagents");
 	const chatTodos = useForkExperiment("fork-chat-todos");
-	const isolation = useForkExperiment("fork-subagent-isolation");
+	const subagentIsolation = useForkExperiment("fork-subagent-isolation");
 	const result = parseArgs(call.result);
 
 	if (descriptor.action === "spawn") {
@@ -164,9 +164,11 @@ export const ForkSubagentFields: React.FC<{
 		return (
 			<>
 				{customType && (
-					<div className={fieldClassName}>Agent type: {customType}</div>
+					<div className="mt-1.5 text-[13px] text-content-secondary">
+						Agent type: {customType}
+					</div>
 				)}
-				{isolation && result && <IsolationFields result={result} />}
+				{subagentIsolation && result && <IsolationFields result={result} />}
 				{errorMessage && (
 					<ToolCall.ErrorDetail>{errorMessage}</ToolCall.ErrorDetail>
 				)}
@@ -175,8 +177,10 @@ export const ForkSubagentFields: React.FC<{
 	}
 
 	if (descriptor.action === "wait" && result) {
-		const diffSummary = isolation ? formatDiffSummary(result.diff_summary) : "";
-		const diffSummaryError = isolation
+		const diffSummary = subagentIsolation
+			? formatDiffSummary(result.diff_summary)
+			: "";
+		const diffSummaryError = subagentIsolation
 			? asString(result.diff_summary_error).trim()
 			: "";
 		const callsError = chatTodos
@@ -187,8 +191,12 @@ export const ForkSubagentFields: React.FC<{
 			: [];
 		return (
 			<>
-				{isolation && <IsolationFields result={result} />}
-				{diffSummary && <div className={fieldClassName}>{diffSummary}</div>}
+				{subagentIsolation && <IsolationFields result={result} />}
+				{diffSummary && (
+					<div className="mt-1.5 text-[13px] text-content-secondary">
+						{diffSummary}
+					</div>
+				)}
 				{diffSummaryError && (
 					<ToolCall.ErrorDetail>{diffSummaryError}</ToolCall.ErrorDetail>
 				)}

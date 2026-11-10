@@ -118,7 +118,6 @@ export const SpawnWorktree: Story = {
 	},
 };
 
-// With the experiments off, the card matches upstream.
 export const SpawnWorktreeExperimentsOff: Story = {
 	...SpawnWorktree,
 	parameters: { experiments: [] },
@@ -140,6 +139,20 @@ export const SpawnWorkspace: Story = {
 			type: "general",
 			isolation: "workspace",
 			workspace_name: "dev-agent-0d9e",
+		},
+	},
+};
+
+export const SpawnWorkspaceError: Story = {
+	args: {
+		...SpawnWorkspace.args,
+		result: {
+			chat_id: docsChatId,
+			status: "pending",
+			title: "Try the migration",
+			type: "general",
+			isolation: "workspace",
+			workspace_error: `get workspace of subagent ${docsChatId}: sql: no rows in result set`,
 		},
 	},
 };
