@@ -20,6 +20,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const (
@@ -77,7 +78,11 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-			wakeup, err := p.createChatWakeup(ctx, p.db, chat, spec, p.clock.Now())
+			id, ok := workspacesdk.ToolCallIDFromContext(ctx)
+			if !ok {
+				return fantasy.NewTextErrorResponse("wait_for_events requires a deterministic tool-call ID"), nil
+			}
+			wakeup, err := p.createChatWakeup(ctx, p.db, chat, id, chat.OwnerID, spec, p.clock.Now())
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

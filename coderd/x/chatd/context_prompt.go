@@ -303,7 +303,7 @@ func contextResourcesToPrompt(
 // so the UI can explain why a resource was dropped from the prompt instead of
 // silently omitting it.
 // ACP harnesses are included only when the chat-acp-subagents experiment is
-// enabled.
+// enabled, and custom agent definitions only when fork-agent-definitions is.
 func (server *Server) ContextResources(
 	ctx context.Context,
 	chat database.Chat,
@@ -316,6 +316,11 @@ func (server *Server) ContextResources(
 	if !server.experiments.Enabled(codersdk.ExperimentChatACPSubagents) {
 		resources = slices.DeleteFunc(resources, func(resource codersdk.ChatContextResource) bool {
 			return resource.Kind == codersdk.ChatContextResourceKindACPHarness
+		})
+	}
+	if !server.agentDefinitionsEnabled() {
+		resources = slices.DeleteFunc(resources, func(resource codersdk.ChatContextResource) bool {
+			return resource.Kind == codersdk.ChatContextResourceKindSubagent
 		})
 	}
 	server.logger.Debug(ctx, "computed chat context resources",
@@ -333,15 +338,16 @@ func (server *Server) ContextResources(
 // inventory the user can act on, each stamped with its Status:
 //
 //   - OK instruction files with non-empty (sanitized) content, OK skills with
-//     a name, OK MCP configs/servers (mcp_server carries its tools), and
-//     OK ACP harnesses with their configuration directory.
+//     a name, OK MCP configs/servers (mcp_server carries its tools),
+//     OK ACP harnesses with their configuration directory, and OK custom
+//     agent definitions with their name and any parse warnings.
 //   - Non-OK rows (invalid, unreadable, oversize, excluded) of a tracked kind,
 //     carrying Status and Error so the UI can explain why the resource was
 //     dropped from the prompt instead of silently omitting it. Their
 //     body-specific fields are empty.
 //
 // OK-but-empty instruction files, OK skills with no name, and untracked kinds
-// (reserved plugin/hook/subagent/command) are skipped. Input order (source ASC
+// (reserved plugin/hook/command) are skipped. Input order (source ASC
 // from the query) is preserved.
 func pinnedContextResources(resources []database.ChatContextResource) []codersdk.ChatContextResource {
 	var out []codersdk.ChatContextResource
@@ -402,6 +408,10 @@ func pinnedContextResources(resources []database.ChatContextResource) []codersdk
 				Status:    codersdk.ChatContextResourceStatusOK,
 				Tools:     mcpToolsFromServerBody(r.Source, r.Body),
 			})
+		case database.WorkspaceAgentContextBodyKindSubagent:
+			if resource, ok := subagentContextResource(r); ok {
+				out = append(out, resource)
+			}
 		case database.WorkspaceAgentContextBodyKindAcpHarness:
 			out = append(out, codersdk.ChatContextResource{
 				Source:     r.Source,
@@ -417,8 +427,8 @@ func pinnedContextResources(resources []database.ChatContextResource) []codersdk
 
 // contextResourceKind maps a database body kind to the codersdk kind reported
 // on the chat. ok is false only for kinds chatd does not track yet (the
-// reserved plugin/hook/subagent/command kinds), which are omitted from the
-// resource list.
+// reserved plugin/hook/command kinds), which are omitted from the resource
+// list.
 func contextResourceKind(kind database.WorkspaceAgentContextBodyKind) (codersdk.ChatContextResourceKind, bool) {
 	switch kind {
 	case database.WorkspaceAgentContextBodyKindInstructionFile:
@@ -431,6 +441,8 @@ func contextResourceKind(kind database.WorkspaceAgentContextBodyKind) (codersdk.
 		return codersdk.ChatContextResourceKindMCPServer, true
 	case database.WorkspaceAgentContextBodyKindAcpHarness:
 		return codersdk.ChatContextResourceKindACPHarness, true
+	case database.WorkspaceAgentContextBodyKindSubagent:
+		return codersdk.ChatContextResourceKindSubagent, true
 	default:
 		return "", false
 	}

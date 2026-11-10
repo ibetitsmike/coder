@@ -372,6 +372,19 @@ func (f *forkQuerier) ListUserAgentDefinitionMetadata(ctx context.Context, arg f
 	return f.db.ListUserAgentDefinitionMetadata(ctx, arg)
 }
 
+// LockChatForNoKeyUpdate authorizes as an update of the chat, like
+// InsertChatSubagent.
+func (f *forkQuerier) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	chat, err := f.q.db.GetChatByID(ctx, id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+		return uuid.Nil, err
+	}
+	return f.db.LockChatForNoKeyUpdate(ctx, id)
+}
+
 func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
 		return err

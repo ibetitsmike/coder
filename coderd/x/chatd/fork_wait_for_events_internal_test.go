@@ -16,6 +16,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
 )
@@ -46,7 +47,7 @@ func TestWaitForEventsTool(t *testing.T) {
 		t.Helper()
 		tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 		require.NoError(t, err)
-		content := runChatTodoTool(ctx, t, tools, waitForEventsToolName, args, wantError)
+		content := runChatTodoTool(workspacesdk.WithToolCallID(ctx, uuid.New()), t, tools, waitForEventsToolName, args, wantError)
 		var result waitForEventsResult
 		if !wantError {
 			require.NoError(t, json.Unmarshal([]byte(content), &result), content)

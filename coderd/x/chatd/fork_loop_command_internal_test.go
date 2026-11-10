@@ -4,9 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
@@ -68,11 +70,11 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		server.experiments = experiments
 		return server
 	}
-	send := func(t *testing.T, server *Server, chat database.Chat) error {
+	send := func(t *testing.T, server *Server, chat database.Chat, sender uuid.UUID) error {
 		t.Helper()
 		_, err := server.SendMessage(chatdTestContext(t), SendMessageOptions{
 			ChatID:    chat.ID,
-			CreatedBy: chat.OwnerID,
+			CreatedBy: sender,
 			Content:   []codersdk.ChatMessagePart{codersdk.ChatMessageText("/loop 5m " + prompt)},
 		})
 		return err
@@ -92,7 +94,7 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		chat := f.createWakeupChat(t)
 		server := newServer(t, f, codersdk.Experiments{codersdk.ExperimentForkChatWakeups})
 
-		require.NoError(t, send(t, server, chat))
+		require.NoError(t, send(t, server, chat, chat.OwnerID))
 		require.Equal(t, 1, f.countPromptMessages(t, chat, prompt), "the first run is the sent message")
 		rows := wakeups(t, f, chat)
 		require.Len(t, rows, 1)
@@ -107,6 +109,19 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		require.True(t, wakeupTestSlot.Add(5*time.Minute).Equal(got.NextRunAt.Time), "next run %s", got.NextRunAt.Time)
 	})
 
+	t.Run("SentByAnotherUser", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		chat := f.createWakeupChat(t)
+		sender := dbgen.User(t, f.db, database.User{})
+		server := newServer(t, f, codersdk.Experiments{codersdk.ExperimentForkChatWakeups})
+
+		require.NoError(t, send(t, server, chat, sender.ID))
+		rows := wakeups(t, f, chat)
+		require.Len(t, rows, 1)
+		require.Equal(t, sender.ID, rows[0].CreatedBy, "the loop belongs to the user who sent it")
+	})
+
 	t.Run("ArchivedChat", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
@@ -114,7 +129,7 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, true)
 		server := newServer(t, f, codersdk.Experiments{codersdk.ExperimentForkChatWakeups})
 
-		require.ErrorIs(t, send(t, server, chat), ErrChatArchived)
+		require.ErrorIs(t, send(t, server, chat, chat.OwnerID), ErrChatArchived)
 		require.Empty(t, wakeups(t, f, chat))
 	})
 
@@ -124,7 +139,7 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		chat := f.createWakeupChat(t)
 		server := newServer(t, f, upstreamExperimentsKnown())
 
-		require.NoError(t, send(t, server, chat))
+		require.NoError(t, send(t, server, chat, chat.OwnerID))
 		require.Equal(t, 1, f.countPromptMessages(t, chat, "/loop 5m "+prompt))
 		require.Empty(t, wakeups(t, f, chat))
 	})

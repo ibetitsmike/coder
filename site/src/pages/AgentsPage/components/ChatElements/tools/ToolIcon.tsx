@@ -27,6 +27,7 @@ import {
 	TooltipTrigger,
 } from "#/components/Tooltip/Tooltip";
 import { ACPToolNames } from "./acpToolNames";
+import { forkToolIcons } from "./forkToolIcons";
 
 export const toolIcons: Partial<Record<string, LucideIcon>> = {
 	[ACPToolNames.SpawnAgent]: BotIcon,
@@ -57,6 +58,7 @@ export const toolIcons: Partial<Record<string, LucideIcon>> = {
 	computer: MonitorIcon,
 	find_tools: SearchIcon,
 	web_search: GlobeIcon,
+	...forkToolIcons,
 };
 
 export const ToolIcon: React.FC<{

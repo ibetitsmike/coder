@@ -1,8 +1,9 @@
 package chatd
 
 // This file is fork code: it holds the /loop chat command of the
-// fork-chat-wakeups experiment. SendMessage calls forkLoopCommand before it
-// stores a message and schedules the loop in the same transaction.
+// fork-chat-wakeups experiment. SendMessage and CreateChat call
+// forkLoopCommand before they store a user message and schedule the loop in
+// the same transaction.
 
 import (
 	"context"
@@ -13,10 +14,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -27,8 +30,8 @@ var (
 	loopIntervalUnitSeconds = map[string]int{"s": 1, "m": 60, "h": 3600, "d": 86400}
 )
 
-// forkLoop is a parsed /loop command whose wake-up SendMessage creates with
-// the message.
+// forkLoop is a parsed /loop command whose wake-up is created with its first
+// message.
 type forkLoop struct {
 	server *Server
 	spec   wakeupSpec
@@ -56,13 +59,39 @@ func (p *Server) forkLoopCommand(parts []codersdk.ChatMessagePart) ([]codersdk.C
 }
 
 // schedule creates the interval wake-up of the loop in store, the transaction
-// that stores its first message. It does nothing for a nil loop.
-func (l *forkLoop) schedule(ctx context.Context, store database.Store, chat database.Chat, now time.Time) error {
+// that stores its first message, attributed to createdBy, the sender of that
+// message. It does nothing for a nil loop.
+func (l *forkLoop) schedule(ctx context.Context, store database.Store, chat database.Chat, createdBy uuid.UUID, now time.Time) error {
 	if l == nil {
 		return nil
 	}
-	_, err := l.server.createChatWakeup(ctx, store, chat, l.spec, now)
+	_, err := l.server.createChatWakeup(ctx, store, chat, uuid.New(), createdBy, l.spec, now)
 	return err
+}
+
+// applyHookOverride makes the prompt that a user_prompt_submit hook put in
+// place of the submitted one the prompt of every run, not only of the first.
+func (l *forkLoop) applyHookOverride(result *chathooks.Result) error {
+	if l == nil {
+		return nil
+	}
+	override, ok, err := chathooks.UserPromptOverride(result)
+	if err != nil || !ok {
+		return err
+	}
+	l.spec.prompt = override
+	return nil
+}
+
+// afterChatInsert returns the hook that CreateChat runs in the transaction
+// that inserts the chat, or nil for a nil loop.
+func (l *forkLoop) afterChatInsert(createdBy uuid.UUID, now time.Time) func(context.Context, database.Store, database.Chat) error {
+	if l == nil {
+		return nil
+	}
+	return func(ctx context.Context, store database.Store, chat database.Chat) error {
+		return l.schedule(ctx, store, chat, createdBy, now)
+	}
 }
 
 // parseLoopCommand parses "/loop [interval] <prompt>". ok is false when text

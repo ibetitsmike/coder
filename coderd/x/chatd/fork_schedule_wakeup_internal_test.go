@@ -6,10 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
 )
@@ -35,7 +38,7 @@ func TestScheduleWakeupTool(t *testing.T) {
 	}
 	schedule := func(args scheduleWakeupArgs, wantError bool) scheduleWakeupResult {
 		t.Helper()
-		content := runChatTodoTool(ctx, t, tools, scheduleWakeupToolName, args, wantError)
+		content := runChatTodoTool(workspacesdk.WithToolCallID(ctx, uuid.New()), t, tools, scheduleWakeupToolName, args, wantError)
 		var result scheduleWakeupResult
 		if !wantError {
 			require.NoError(t, json.Unmarshal([]byte(content), &result), content)
@@ -69,13 +72,44 @@ func TestScheduleWakeupTool(t *testing.T) {
 		"TwoKinds":        {Prompt: "x", DelaySeconds: new(60), IntervalSeconds: new(60)},
 		"ShortInterval":   {Prompt: "x", IntervalSeconds: new(30)},
 		"UnknownTimezone": {Prompt: "x", Cron: new("0 9 * * *"), Timezone: new("Mars/Olympus_Mons")},
+		"CronNeverRuns":   {Prompt: "x", Cron: new("0 0 31 2 *")},
 	} {
 		t.Logf("case %s", name)
 		schedule(args, true)
 	}
 	require.Len(t, wakeups(), 2, "refused calls create nothing")
 
-	for i := range maxChatWakeups - 2 {
+	tool := findToolByName(tools, scheduleWakeupToolName)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"x","delay_seconds":60}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a call without an occurrence ID cannot be replayed safely")
+	require.Len(t, wakeups(), 2)
+
+	// A replayed tool call returns the wake-up it created the first time.
+	callCtx := workspacesdk.WithToolCallID(ctx, uuid.New())
+	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","interval_seconds":60}`}
+	var replayed [2]scheduleWakeupResult
+	for i := range replayed {
+		resp, err := tool.Run(callCtx, call)
+		require.NoError(t, err)
+		require.False(t, resp.IsError, resp.Content)
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &replayed[i]))
+	}
+	require.Equal(t, replayed[0].ID, replayed[1].ID)
+	require.Len(t, wakeups(), 3)
+
+	// That holds after the first run time has passed too: at 12:45 the next
+	// 12:30 is tomorrow, past the expiry.
+	spec := wakeupSpec{source: wakeupSourceTool, kind: forkdb.ChatWakeupKindCron, prompt: "daily", cron: "30 12 * * *", expiresInSeconds: 3600}
+	id := uuid.New()
+	created, err := server.createChatWakeup(ctx, f.db, chat, id, chat.OwnerID, spec, wakeupTestSlot)
+	require.NoError(t, err)
+	again, err := server.createChatWakeup(ctx, f.db, chat, id, chat.OwnerID, spec, wakeupTestSlot.Add(45*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, created.ID, again.ID)
+	require.Len(t, wakeups(), 4)
+
+	for i := range maxChatWakeups - 4 {
 		schedule(scheduleWakeupArgs{Prompt: fmt.Sprintf("poll %d", i), IntervalSeconds: new(60)}, false)
 	}
 	schedule(scheduleWakeupArgs{Prompt: "one too many", IntervalSeconds: new(60)}, true)

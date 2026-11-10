@@ -78,7 +78,11 @@ WHERE chat_id = @chat_id
 RETURNING *;
 
 -- Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
--- workers from blocking on, or claiming, the same rows.
+-- workers from blocking on, or claiming, the same rows. Rows of chats that
+-- would queue a new message stay unclaimed, so they cannot fill the batch and
+-- starve the rows of idle chats. Those are the busy and paused chats, and the
+-- errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
+-- Archived chats are always claimed so the worker cancels their wake-ups.
 -- name: ClaimDueChatWakeups :many
 UPDATE chat_wakeups
 SET
@@ -90,6 +94,19 @@ WHERE id IN (
     WHERE cw.status = 'active'
         AND cw.next_run_at <= @now::timestamptz
         AND (cw.lease_expires_at IS NULL OR cw.lease_expires_at <= @now::timestamptz)
+        AND NOT EXISTS (
+            SELECT 1
+            FROM chats c
+            WHERE c.id = cw.chat_id
+                AND NOT c.archived
+                AND (
+                    c.status IN ('running', 'interrupting', 'requires_action', 'paused')
+                    OR (
+                        c.status = 'error'
+                        AND EXISTS (SELECT 1 FROM chat_queued_messages q WHERE q.chat_id = c.id)
+                    )
+                )
+        )
     ORDER BY cw.next_run_at, cw.id
     LIMIT @limit_count::int
     FOR UPDATE SKIP LOCKED

@@ -17,7 +17,11 @@ type Querier interface {
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-	// workers from blocking on, or claiming, the same rows.
+	// workers from blocking on, or claiming, the same rows. Rows of chats that
+	// would queue a new message stay unclaimed, so they cannot fill the batch and
+	// starve the rows of idle chats. Those are the busy and paused chats, and the
+	// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
+	// Archived chats are always claimed so the worker cancels their wake-ups.
 	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
@@ -89,6 +93,10 @@ type Querier interface {
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
+	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
+	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
+	// rows take, so a child transaction can commit while the lock is held.
+	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error
