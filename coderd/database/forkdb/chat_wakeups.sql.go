@@ -477,6 +477,33 @@ func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupR
 	return i, err
 }
 
+const listChatWakeupRunKeys = `-- name: ListChatWakeupRunKeys :many
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = $1::uuid ORDER BY created_at, id
+`
+
+func (q *Queries) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listChatWakeupRunKeys, wakeupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var run_key string
+		if err := rows.Scan(&run_key); err != nil {
+			return nil, err
+		}
+		items = append(items, run_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatWakeupsByChatID = `-- name: ListChatWakeupsByChatID :many
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, events, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE chat_id = $1 ORDER BY created_at, id
 `

@@ -272,6 +272,11 @@ func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByNameForUpdate(ctx
 	return f.s.GetOrganizationAgentDefinitionByNameForUpdate(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+	defer f.observe(ctx, "ListChatWakeupRunKeys", time.Now())
+	return f.s.ListChatWakeupRunKeys(ctx, wakeupID)
+}
+
 func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "ListChatWakeupsByChatID", time.Now())
 	return f.s.ListChatWakeupsByChatID(ctx, chatID)

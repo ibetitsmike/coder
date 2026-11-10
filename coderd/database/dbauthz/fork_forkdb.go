@@ -340,6 +340,13 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 	return f.db.InsertUserAgentDefinition(ctx, arg)
 }
 
+func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionRead, wakeupID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatWakeupRunKeys(ctx, wakeupID)
+}
+
 func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err

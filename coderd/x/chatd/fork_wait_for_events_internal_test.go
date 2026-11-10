@@ -1,0 +1,293 @@
+package chatd
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
+)
+
+func TestWaitForEventsTool(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := chatdTestContext(t)
+	coordinator := f.createWakeupChat(t)
+	running := f.createChildAgent(t, coordinator, "running", database.ChatStatusRunning)
+	paused := f.createChildAgent(t, coordinator, "paused", database.ChatStatusPaused)
+	waiting := f.createChildAgent(t, coordinator, "waiting", database.ChatStatusWaiting)
+	stranger := f.createWakeupChat(t)
+
+	mClock := quartz.NewMock(t)
+	mClock.Set(wakeupTestSlot)
+	server := newUnstartedServer(t, f.pubsub, f.db, withInternalTestServerClock(mClock))
+	server.experiments = codersdk.Experiments{codersdk.ExperimentForkChatWakeups}
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	wakeups := func(chat database.Chat) []forkdb.ChatWakeup {
+		t.Helper()
+		rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), chat.ID)
+		require.NoError(t, err)
+		return rows
+	}
+	wait := func(chat database.Chat, args waitForEventsArgs, wantError bool) (waitForEventsResult, string) {
+		t.Helper()
+		tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+		require.NoError(t, err)
+		content := runChatTodoTool(ctx, t, tools, waitForEventsToolName, args, wantError)
+		var result waitForEventsResult
+		if !wantError {
+			require.NoError(t, json.Unmarshal([]byte(content), &result), content)
+		}
+		return result, content
+	}
+	childIDs := func(result waitForEventsResult) []uuid.UUID {
+		ids := make([]uuid.UUID, 0, len(result.Children))
+		for _, child := range result.Children {
+			ids = append(ids, child.ChatID)
+		}
+		return ids
+	}
+
+	// By default, only the children that are still working are watched.
+	def, _ := wait(coordinator, waitForEventsArgs{}, false)
+	require.Equal(t, []uuid.UUID{running.ID, paused.ID}, childIDs(def))
+	require.Equal(t, waitForEventsChild{ChatID: running.ID, Title: "running", Status: database.ChatStatusRunning}, def.Children[0])
+	rows := wakeups(coordinator)
+	require.Len(t, rows, 1)
+	row := rows[0]
+	require.Equal(t, def.ID, row.ID)
+	require.Equal(t, forkdb.ChatWakeupKindEvents, row.Kind)
+	require.Equal(t, wakeupSourceEvents, row.Source)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, row.Status)
+	require.Equal(t, defaultWaitForEventsPrompt, row.Prompt)
+	require.Equal(t, coordinator.OwnerID, row.CreatedBy)
+	require.JSONEq(t, fmt.Sprintf(`[{"type":"child_done","chat_id":%q},{"type":"child_done","chat_id":%q}]`, running.ID, paused.ID), string(row.Events))
+	require.True(t, wakeupTestSlot.Equal(row.NextRunAt.Time), "the first poll is now: %s", row.NextRunAt.Time)
+	require.True(t, wakeupTestSlot.Add(24*time.Hour).Equal(row.ExpiresAt.Time), "expires %s", row.ExpiresAt.Time)
+	require.True(t, row.ExpiresAt.Time.Equal(def.ExpiresAt))
+
+	// Named children may be done already; duplicates are watched once.
+	named, _ := wait(coordinator, waitForEventsArgs{
+		ChildChatIDs:     []string{waiting.ID.String(), waiting.ID.String(), running.ID.String()},
+		Prompt:           "  check the children  ",
+		ExpiresInSeconds: new(600),
+	}, false)
+	require.Equal(t, []uuid.UUID{waiting.ID, running.ID}, childIDs(named))
+	got := f.wakeup(t, named.ID)
+	require.Equal(t, "check the children", got.Prompt)
+	require.True(t, wakeupTestSlot.Add(10*time.Minute).Equal(got.ExpiresAt.Time), "expires %s", got.ExpiresAt.Time)
+
+	for name, tc := range map[string]struct {
+		chat    database.Chat
+		args    waitForEventsArgs
+		wantErr string
+	}{
+		"NotAChild":      {coordinator, waitForEventsArgs{ChildChatIDs: []string{stranger.ID.String()}}, "is not a child of this chat"},
+		"UnknownChat":    {coordinator, waitForEventsArgs{ChildChatIDs: []string{uuid.NewString()}}, "is not a child of this chat"},
+		"NoChildren":     {stranger, waitForEventsArgs{}, "no running child agents to wait for"},
+		"ExpiryTooLong":  {coordinator, waitForEventsArgs{ExpiresInSeconds: new(31 * 24 * 3600)}, "expires_in_seconds"},
+		"LoopPrompt":     {coordinator, waitForEventsArgs{Prompt: "/loop 5m poll"}, "must not start with /loop"},
+		"InvalidChildID": {coordinator, waitForEventsArgs{ChildChatIDs: []string{"not-a-uuid"}}, "invalid child chat ID"},
+	} {
+		t.Logf("case %s", name)
+		_, content := wait(tc.chat, tc.args, true)
+		require.Contains(t, content, tc.wantErr)
+	}
+	require.Len(t, wakeups(coordinator), 2, "refused calls create nothing")
+	require.Empty(t, wakeups(stranger))
+
+	// Only children that are done: nothing to wait for.
+	forceExecutionState(t, f, running.ID, database.ChatStatusWaiting, false)
+	forceExecutionState(t, f, paused.ID, database.ChatStatusError, false)
+	_, content := wait(coordinator, waitForEventsArgs{}, true)
+	require.Contains(t, content, "no running child agents to wait for")
+}
+
+// The acceptance of PRD 6.4 R4.3: a coordinator that ends its turn after
+// spawning children is woken once per child completion.
+func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	coordinator := f.createWakeupChat(t)
+	one := f.createChildAgent(t, coordinator, "one", database.ChatStatusRunning)
+	two := f.createChildAgent(t, coordinator, "two", database.ChatStatusRunning)
+	three := f.createChildAgent(t, coordinator, "three", database.ChatStatusRunning)
+	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(one, two, three),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	now := wakeupTestSlot
+	tick := func() {
+		t.Helper()
+		now = now.Add(wakeupPollInterval)
+		worker.wakeupOnce(ctx, now)
+	}
+	doneText := func(child database.Chat) string {
+		return fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status waiting.", wakeup.Prompt, child.Title, child.ID)
+	}
+
+	tick()
+	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt), "no child is done")
+	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+	require.True(t, now.Add(wakeupPollInterval).Equal(got.NextRunAt.Time), "polls again: %s", got.NextRunAt.Time)
+
+	forceExecutionState(t, f, one.ID, database.ChatStatusWaiting, false)
+	tick()
+	require.Equal(t, []string{doneText(one)}, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Equal(t, []string{childDoneRunKey(one.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+	got = f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+	require.EqualValues(t, 1, got.RunCount)
+
+	// The coordinator's turn ends; the same child does not wake it again.
+	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
+	tick()
+	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
+
+	// Two children finish at once: one message per tick, never a batch.
+	forceExecutionState(t, f, two.ID, database.ChatStatusWaiting, false)
+	forceExecutionState(t, f, three.ID, database.ChatStatusWaiting, false)
+	tick()
+	require.Equal(t, []string{doneText(one), doneText(two)}, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	tick()
+	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 2, "the next child waits for the coordinator's turn")
+	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
+
+	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
+	tick()
+	require.Equal(t, []string{doneText(one), doneText(two), doneText(three)}, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Equal(t, []string{childDoneRunKey(one.ID), childDoneRunKey(two.ID), childDoneRunKey(three.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	got = f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+	require.EqualValues(t, 3, got.RunCount)
+	require.False(t, got.NextRunAt.Valid)
+}
+
+func TestWakeupEventsWaitsForBusyChat(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	coordinator := f.createWakeupChat(t)
+	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
+	forceExecutionState(t, f, coordinator.ID, database.ChatStatusRunning, false)
+	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(child),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	var prompts atomic.Int32
+	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+		prompts.Add(1)
+		_, _ = rw.Write([]byte(`{}`))
+	})
+
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Zero(t, prompts.Load(), "a busy coordinator gets no send attempt")
+	require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+	require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
+	require.False(t, got.LeaseExpiresAt.Valid)
+
+	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(20*time.Second))
+	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
+	require.EqualValues(t, 1, prompts.Load())
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
+}
+
+// An archived child counts as done, and a watched child that is gone neither
+// sends a message nor keeps the wake-up open.
+func TestWakeupEventsArchivedAndMissingChildren(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	coordinator := f.createWakeupChat(t)
+	archived := f.createChildAgent(t, coordinator, "archived", database.ChatStatusRunning)
+	forceExecutionState(t, f, archived.ID, database.ChatStatusRunning, true)
+	missing := database.Chat{ID: uuid.New()}
+	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: childDoneEvents(missing, archived),
+	})
+
+	f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.Equal(t, []string{
+		fmt.Sprintf("%s\n\nChild agent \"archived\" (%s) is done with status running.", wakeup.Prompt, archived.ID),
+	}, f.wakeMessages(t, coordinator, wakeup.Prompt))
+	require.Equal(t, []string{childDoneRunKey(archived.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+}
+
+// createChildAgent creates a direct child of parent with title and status.
+func (f *workerTestFixture) createChildAgent(t *testing.T, parent database.Chat, title string, status database.ChatStatus) database.Chat {
+	t.Helper()
+	child := f.createWakeupChat(t)
+	f.linkChild(t, parent.ID, child.ID)
+	_, err := f.sqlDB.ExecContext(testutil.Context(t, testutil.WaitShort), "UPDATE chats SET title = $1 WHERE id = $2", title, child.ID)
+	require.NoError(t, err)
+	return forceExecutionState(t, f, child.ID, status, false)
+}
+
+func childDoneEvents(children ...database.Chat) json.RawMessage {
+	events := make([]string, 0, len(children))
+	for _, child := range children {
+		events = append(events, fmt.Sprintf(`{"type":"child_done","chat_id":%q}`, child.ID))
+	}
+	return json.RawMessage("[" + strings.Join(events, ",") + "]")
+}
+
+func (f *workerTestFixture) wakeupRunKeys(t *testing.T, wakeupID uuid.UUID) []string {
+	t.Helper()
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	keys, err := fdb.ListChatWakeupRunKeys(testutil.Context(t, testutil.WaitShort), wakeupID)
+	require.NoError(t, err)
+	return keys
+}
+
+// wakeMessages returns, in order, the texts of the user messages from the
+// chat owner that start with prompt.
+func (f *workerTestFixture) wakeMessages(t *testing.T, chat database.Chat, prompt string) []string {
+	t.Helper()
+	messages, err := f.db.GetChatMessagesByChatID(testutil.Context(t, testutil.WaitShort), database.GetChatMessagesByChatIDParams{ChatID: chat.ID})
+	require.NoError(t, err)
+	var texts []string
+	for _, msg := range messages {
+		if msg.Role != database.ChatMessageRoleUser || msg.CreatedBy.UUID != chat.OwnerID {
+			continue
+		}
+		parts, err := chatprompt.ParseContent(msg)
+		require.NoError(t, err)
+		var text strings.Builder
+		for _, part := range parts {
+			text.WriteString(part.Text)
+		}
+		if strings.HasPrefix(text.String(), prompt) {
+			texts = append(texts, text.String())
+		}
+	}
+	return texts
+}

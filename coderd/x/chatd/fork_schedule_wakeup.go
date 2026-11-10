@@ -25,6 +25,7 @@ const (
 	scheduleWakeupToolName = "schedule_wakeup"
 	wakeupSourceTool       = "schedule_wakeup"
 	wakeupSourceLoop       = "loop"
+	wakeupSourceEvents     = "wait_for_events"
 
 	// minWakeupPeriod matches the chat_wakeups interval CHECK constraint.
 	minWakeupPeriod     = time.Minute
@@ -35,7 +36,7 @@ const (
 )
 
 // wakeupSpec describes a wake-up to create. Exactly the field of its kind is
-// set: delaySeconds, intervalSeconds or cron.
+// set: delaySeconds, intervalSeconds, cron or events.
 type wakeupSpec struct {
 	source           string
 	kind             forkdb.ChatWakeupKind
@@ -43,6 +44,7 @@ type wakeupSpec struct {
 	delaySeconds     int
 	intervalSeconds  int
 	cron             string
+	events           json.RawMessage
 	timezone         string
 	maxRuns          int
 	expiresInSeconds int
@@ -174,6 +176,11 @@ func (spec wakeupSpec) validate() (wakeupSpec, error) {
 		if len(strings.Fields(spec.cron)) != 5 {
 			return wakeupSpec{}, xerrors.Errorf("cron must have 5 fields (minute hour day-of-month month day-of-week), got %q", spec.cron)
 		}
+	case forkdb.ChatWakeupKindEvents:
+		var events []json.RawMessage
+		if err := json.Unmarshal(spec.events, &events); err != nil || len(events) == 0 {
+			return wakeupSpec{}, xerrors.New("events must be a non-empty JSON array")
+		}
 	default:
 		return wakeupSpec{}, xerrors.Errorf("unsupported wake-up kind %q", spec.kind)
 	}
@@ -211,6 +218,10 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
+	events := json.RawMessage(`[]`)
+	if spec.kind == forkdb.ChatWakeupKindEvents {
+		events = spec.events
+	}
 
 	fdb, err := forkdb.From(store)
 	if err != nil {
@@ -240,7 +251,7 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 		IntervalSeconds: draft.IntervalSeconds,
 		Cron:            draft.Cron,
 		Timezone:        spec.timezone,
-		Events:          json.RawMessage(`[]`),
+		Events:          events,
 		Status:          forkdb.ChatWakeupStatusActive,
 		NextRunAt:       sql.NullTime{Time: next, Valid: true},
 		ExpiresAt:       draft.ExpiresAt,
@@ -256,10 +267,10 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 
 // firstWakeupRun returns the first run time of a new wake-up. A repeating
 // wake-up schedules its first run the way the worker schedules every later
-// run, as if a run had just happened now.
+// run, as if a run had just happened now. An events wake-up polls now.
 func firstWakeupRun(draft forkdb.ChatWakeup, now time.Time, delay time.Duration) (time.Time, error) {
 	errExpired := xerrors.New("the wake-up expires before its first run")
-	if draft.Kind == forkdb.ChatWakeupKindDelay {
+	if draft.Kind == forkdb.ChatWakeupKindDelay || draft.Kind == forkdb.ChatWakeupKindEvents {
 		next := now.Add(delay)
 		if draft.ExpiresAt.Valid && !next.Before(draft.ExpiresAt.Time) {
 			return time.Time{}, errExpired
