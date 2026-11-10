@@ -12,7 +12,6 @@ package forkdbmock
 import (
 	context "context"
 	reflect "reflect"
-	time "time"
 
 	forkdb "github.com/coder/coder/v2/coderd/database/forkdb"
 	uuid "github.com/google/uuid"
@@ -681,12 +680,11 @@ func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gom
 }
 
 // InsertChatSecretAnswer mocks base method.
-func (m *MockStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
+func (m *MockStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "InsertChatSecretAnswer", ctx, arg)
-	ret0, _ := ret[0].(time.Time)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // InsertChatSecretAnswer indicates an expected call of InsertChatSecretAnswer.

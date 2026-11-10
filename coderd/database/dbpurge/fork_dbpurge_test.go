@@ -42,11 +42,10 @@ func TestDeleteOldChatSecretAnswers(t *testing.T) {
 		"call_old":    now.Add(-25 * time.Hour),
 		"call_recent": now.Add(-23 * time.Hour),
 	} {
-		_, err := fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		require.NoError(t, fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 			ChatID: chat.ID, ToolCallID: callID, Value: "value",
-		})
-		require.NoError(t, err)
-		_, err = sqlDB.ExecContext(ctx,
+		}))
+		_, err := sqlDB.ExecContext(ctx,
 			`UPDATE chat_secret_answers SET created_at = $1 WHERE chat_id = $2 AND tool_call_id = $3`,
 			createdAt, chat.ID, callID)
 		require.NoError(t, err)

@@ -6,7 +6,6 @@ package dbauthz
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -337,9 +336,9 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 }
 
 // InsertChatSecretAnswer authorizes as an update of the owning chat.
-func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
+func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
-		return time.Time{}, err
+		return err
 	}
 	return f.db.InsertChatSecretAnswer(ctx, arg)
 }
