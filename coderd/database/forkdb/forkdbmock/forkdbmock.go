@@ -217,6 +217,21 @@ func (mr *MockStoreMockRecorder) EnsurePluginChatBindings(ctx, pluginID any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsurePluginChatBindings", reflect.TypeOf((*MockStore)(nil).EnsurePluginChatBindings), ctx, pluginID)
 }
 
+// GetChatAwaitingWorker mocks base method.
+func (m *MockStore) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatAwaitingWorker", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatAwaitingWorker indicates an expected call of GetChatAwaitingWorker.
+func (mr *MockStoreMockRecorder) GetChatAwaitingWorker(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetChatAwaitingWorker), ctx, arg)
+}
+
 // GetChatOrganizationSubagentLimits mocks base method.
 func (m *MockStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	m.ctrl.T.Helper()

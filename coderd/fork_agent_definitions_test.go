@@ -1,6 +1,7 @@
 package coderd_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
@@ -273,6 +275,54 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		require.NoError(t, err)
 		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("RemovalBeforeGrant", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+		client := coderdtest.New(t, &coderdtest.Options{
+			Database: db,
+			Pubsub:   ps,
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+			}),
+		})
+		orgID := coderdtest.CreateFirstUser(t, client).OrganizationID
+		_, err := client.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		require.NoError(t, err)
+		_, user := coderdtest.CreateAnotherUser(t, client, orgID)
+
+		// A member removal that has not committed yet must not miss a grant
+		// written meanwhile.
+		tx, err := sqlDB.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		_, err = tx.ExecContext(ctx, `DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2`, orgID, user.ID)
+		require.NoError(t, err)
+		patchErr := make(chan error, 1)
+		go func() {
+			patchErr <- client.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+				UserRoles: map[string]codersdk.OrganizationSkillRole{user.ID.String(): codersdk.OrganizationSkillRoleRead},
+			})
+		}()
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			if len(patchErr) > 0 {
+				return true
+			}
+			var waits int
+			err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`).Scan(&waits)
+			return err == nil && waits > 0
+		}, testutil.IntervalFast, "PATCH returns or waits for the membership lock")
+		require.NoError(t, tx.Commit())
+
+		err = testutil.RequireReceive(ctx, t, patchErr)
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+		var granted bool
+		require.NoError(t, sqlDB.QueryRowContext(ctx, `SELECT user_acl ? $2 FROM chatd.agent_definitions WHERE organization_id = $1 AND name = 'reviewer'`, orgID, user.ID.String()).Scan(&granted))
+		require.False(t, granted)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {

@@ -77,6 +77,19 @@ func (api *API) patchForkOrganizationAgentDefinitionACL(rw http.ResponseWriter, 
 		return
 	}
 	err := forkdb.InTx(api.Database, func(tx database.Store, ftx forkdb.Store) error {
+		// Lock granted users' memberships before the definition row, in the
+		// same order as a member removal and its trigger, so a removal cannot
+		// miss the grant written below.
+		if userIDs := activeACLIDs(req.UserRoles); len(userIDs) > 0 {
+			//nolint:gocritic // Validation below reports users that are not members.
+			_, err := tx.LockOrganizationMembersByUserIDsForShare(dbauthz.AsSystemRestricted(ctx), database.LockOrganizationMembersByUserIDsForShareParams{
+				OrganizationID: current.OrganizationID,
+				UserIds:        userIDs,
+			})
+			if err != nil {
+				return xerrors.Errorf("lock organization members: %w", err)
+			}
+		}
 		//nolint:gocritic // The ACL write below reauthorizes the locked row for share.
 		locked, err := ftx.GetOrganizationAgentDefinitionByNameForUpdate(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams{
 			OrganizationID: current.OrganizationID,

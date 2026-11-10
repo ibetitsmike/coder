@@ -116,6 +116,13 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return false, err
+	}
+	return f.db.GetChatAwaitingWorker(ctx, arg)
+}
+
 func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
 		return forkdb.ChatOrganizationSubagentLimit{}, err
