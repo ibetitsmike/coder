@@ -10,7 +10,6 @@ package chatd
 // dropped too, which no current source type produces.
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 
