@@ -182,6 +182,15 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
 }
 
+// GetChatSubagentTypesByChatIDs is system-only: it reads many chats at once,
+// so callers must already have read the chats they pass.
+func (f *forkQuerier) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatSubagentTypesByChatIDs(ctx, chatIDs)
+}
+
 // GetChatSubagentsByParentChatID authorizes through the parent chat.
 func (f *forkQuerier) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
 	if _, err := f.q.GetChatByID(ctx, parentChatID); err != nil {
@@ -206,8 +215,24 @@ func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID
 	return f.db.GetChatTodosByChatID(ctx, chatID)
 }
 
+// GetPendingChatDescendantQuestion authorizes through the owning chat.
+func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (forkdb.ChatDescendantQuestion, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	return f.db.GetPendingChatDescendantQuestion(ctx, chatID)
+}
+
 func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	return f.authorizeChatWakeup(ctx, policy.ActionRead, id)
+}
+
+// GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
+func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.RootChatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
 func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -358,6 +383,15 @@ func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Contex
 	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
 }
 
+// ListPendingChatDescendantQuestionsByRoot authorizes through the family's
+// root chat.
+func (f *forkQuerier) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID)
+}
+
 func (f *forkQuerier) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
 	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionRead, projectID); err != nil {
 		return nil, err
@@ -488,6 +522,18 @@ func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg f
 		return forkdb.AgentDefinition{}, err
 	}
 	return f.db.UpdateUserAgentDefinitionByName(ctx, arg)
+}
+
+// UpsertChatDescendantQuestion authorizes as an update of the owning chat.
+func (f *forkQuerier) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
+	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	return f.db.UpsertChatDescendantQuestion(ctx, arg)
 }
 
 func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {

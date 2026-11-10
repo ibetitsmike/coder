@@ -5525,6 +5525,87 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/family": {
+            "get": {
+                "description": "Returns the live subagent count and limit of the family under\na root chat, and the running subagents that wait for a\nconcurrency slot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the subagent capacity of a chat family",
+                "operationId": "get-the-subagent-capacity-of-a-chat-family",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Root chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkChatFamilyCapacity"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/questions": {
+            "get": {
+                "description": "Returns the unanswered ask_user_question calls of the\nunarchived descendants in the family of the chat, oldest first.\nA child chat lists the same family as its root.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List pending descendant questions",
+                "operationId": "list-pending-descendant-questions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatDescendantQuestion"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -6028,6 +6109,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/{chat}/interrupt": {
             "post": {
+                "description": "Interrupts the active turn of a chat.\nIf the chat has nothing to interrupt, for example because its turn already ended, the endpoint returns the chat unchanged.",
                 "produces": [
                     "application/json"
                 ],
@@ -23166,6 +23248,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "agent_type": {
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "type": "string"
+                },
                 "archived": {
                     "type": "boolean"
                 },
@@ -23174,7 +23260,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "children": {
-                    "description": "Children holds child (subagent) chats nested under this root\nchat. Always initialized to an empty slice so the JSON field\nis present as []. Child chats cannot create their own\nsubagents, so nesting depth is capped at 1 and this slice is\nalways empty for child chats.",
+                    "description": "Children holds the descendant (subagent) chats of this root chat,\nflat: each entry's parent_chat_id gives its place in the tree.\nWithout fork-nested-subagents descendants are only direct\nchildren. Always initialized to an empty slice so the JSON field\nis present as []. Always empty for child chats.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.Chat"
@@ -23437,12 +23523,12 @@ const docTemplate = `{
         "codersdk.ChatBusyBehavior": {
             "type": "string",
             "enum": [
-                "queue",
-                "interrupt"
+                "steer",
+                "queue"
             ],
             "x-enum-varnames": [
-                "ChatBusyBehaviorQueue",
-                "ChatBusyBehaviorInterrupt"
+                "ChatBusyBehaviorSteer",
+                "ChatBusyBehaviorQueue"
             ]
         },
         "codersdk.ChatClientType": {
@@ -23691,6 +23777,35 @@ const docTemplate = `{
             "properties": {
                 "debug_retention_days": {
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ChatDescendantQuestion": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "chat_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "parent_chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestion"
+                    }
+                },
+                "tool_call_id": {
+                    "type": "string"
                 }
             }
         },
@@ -24353,6 +24468,7 @@ const docTemplate = `{
                     }
                 },
                 "queued_messages": {
+                    "description": "QueuedMessages lists the queued messages in delivery order: steer\nmessages first, then queue messages.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatQueuedMessage"
@@ -25286,9 +25402,46 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatQuestion": {
+            "type": "object",
+            "properties": {
+                "header": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestionOption"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ChatQuestionOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
         "codersdk.ChatQueuedMessage": {
             "type": "object",
             "properties": {
+                "busy_behavior": {
+                    "description": "BusyBehavior is the lane of the message. Steer messages go in\nbefore the next model call, and queue messages go in after the\nturn ends.",
+                    "enum": [
+                        "steer",
+                        "queue"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ChatBusyBehavior"
+                        }
+                    ]
+                },
                 "chat_id": {
                     "type": "string",
                     "format": "uuid"
@@ -25304,7 +25457,7 @@ const docTemplate = `{
                     "format": "date-time"
                 },
                 "editing_since": {
-                    "description": "EditingSince is set while the owner edits the message. A message\nunder edit and every message behind it wait until the edit ends; a\nturn that ends at a message under edit pauses the chat.",
+                    "description": "EditingSince is set while the owner edits the message. A message\nunder edit and every message behind it wait until the edit ends. A\nsteer message under edit also holds the steer messages ahead of\nit. A turn that ends at a message under edit pauses the chat.",
                     "type": "string",
                     "format": "date-time"
                 },
@@ -25404,6 +25557,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/codersdk.ChatStreamMessagePart"
                 },
                 "queued_messages": {
+                    "description": "QueuedMessages lists the queued messages in delivery order: steer\nmessages first, then queue messages.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatQueuedMessage"
@@ -25962,9 +26116,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "busy_behavior": {
+                    "description": "BusyBehavior controls when the message reaches the agent if the\nchat is busy. \"steer\", the default, delivers it before the next\nmodel call. \"queue\" delivers it after the active turn ends.",
                     "enum": [
-                        "queue",
-                        "interrupt"
+                        "steer",
+                        "queue"
                     ],
                     "allOf": [
                         {
@@ -26016,7 +26171,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/codersdk.ChatMessage"
                 },
                 "messages": {
-                    "description": "Messages contains all user-visible messages inserted by the send, in\ninsertion order. A queued send on an errored chat may promote the\nprevious queue head, so clients must upsert the full batch.",
+                    "description": "Messages contains all user-visible messages inserted by the send, in\ninsertion order. A send to an errored or paused chat can also insert\nqueued messages: a steer send inserts the queued steer messages\nbefore the new message, and a queue send to an errored chat inserts\nthe steer lane, or the first queue message when that lane is empty.\nClients must upsert the full batch.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatMessage"
@@ -28427,6 +28582,29 @@ const docTemplate = `{
                 "max_subagent_depth": {
                     "description": "MaxSubagentDepth is the maximum depth of nested subagent chats when\nthe fork-nested-subagents experiment is enabled. A root chat is at\ndepth 0.",
                     "type": "integer"
+                }
+            }
+        },
+        "codersdk.ForkChatFamilyCapacity": {
+            "type": "object",
+            "properties": {
+                "live_subagents": {
+                    "description": "LiveSubagents counts the unarchived subagents that have not finished:\nstatus running, interrupting, requires_action or paused.",
+                    "type": "integer",
+                    "example": 3
+                },
+                "max_live_subagents": {
+                    "description": "MaxLiveSubagents is the family's live subagent limit in force. 0 means\nno limit. A spawn, or a message_agent that resumes a finished\nsubagent, fails while LiveSubagents is at the limit.",
+                    "type": "integer",
+                    "example": 6
+                },
+                "waiting_for_capacity": {
+                    "description": "WaitingForCapacity lists the running subagents that no worker owns\nbecause a deployment, organization or family concurrency limit is\nfull.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
                 }
             }
         },

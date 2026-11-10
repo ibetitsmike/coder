@@ -61,8 +61,8 @@ import { MoveToProjectMenuItems } from "./MoveToProjectMenuItems";
 type ArchiveBlockedReason = "active" | "paused";
 
 // Archive is allowed only from W, E0, E1, and E1P (the SetArchived edges in
-// coderd/x/chatd/ARCHITECTURE.md). It cascades to the embedded children
-// (depth capped at 1), so each child's status counts too.
+// coderd/x/chatd/ARCHITECTURE.md). It cascades to the family, so each
+// descendant's status counts too.
 const archiveBlockedReasonByStatus = {
 	waiting: undefined,
 	error: undefined,

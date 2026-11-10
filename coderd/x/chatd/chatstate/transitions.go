@@ -321,26 +321,33 @@ func (tx *Tx) insertQueuedMessage(ownerFallback uuid.UUID, m Message, busyBehavi
 }
 
 // steerLane returns the steer rows that the next delivery moves into
-// history. It stops at the first row under edit, so rows behind an edit
-// wait for it. queued must be in delivery order, with all steer rows
-// first.
+// history. A steer row under edit holds the whole lane, so it returns
+// none while any steer row is under edit. queued must be in delivery
+// order, with all steer rows first.
 func steerLane(queued []database.ChatQueuedMessage) []database.ChatQueuedMessage {
 	n := 0
-	for n < len(queued) && queued[n].BusyBehavior == database.ChatBusyBehaviorSteer && !queuePaused(queued[n]) {
+	for n < len(queued) && queued[n].BusyBehavior == database.ChatBusyBehaviorSteer {
+		if queuePaused(queued[n]) {
+			return nil
+		}
 		n++
 	}
 	return queued[:n]
 }
 
 // nextDelivery returns the rows that the next delivery moves into
-// history: the steer lane when it is not empty, otherwise the queue
-// head. It returns none when the queue is empty or the head is under
-// edit. queued must be in delivery order.
+// history: the steer lane when steer rows exist, otherwise the queue
+// head. It returns none when the queue is empty, a steer row is under
+// edit, or the queue head is under edit. queued must be in delivery
+// order.
 func nextDelivery(queued []database.ChatQueuedMessage) []database.ChatQueuedMessage {
-	if lane := steerLane(queued); len(lane) > 0 {
-		return lane
+	if len(queued) == 0 {
+		return nil
 	}
-	if len(queued) == 0 || queuePaused(queued[0]) {
+	if queued[0].BusyBehavior == database.ChatBusyBehaviorSteer {
+		return steerLane(queued)
+	}
+	if queuePaused(queued[0]) {
 		return nil
 	}
 	return queued[:1]
@@ -535,9 +542,7 @@ func (tx *Tx) SetProject(input SetProjectInput) (SetProjectResult, error) {
 	return SetProjectResult{Chat: chat}, nil
 }
 
-// BusyBehavior controls how SendMessage behaves when the chat is
-// currently busy (R*/I*/A*), errored with a non-empty queue (E1, E1P),
-// or paused (P). From W and E0 the behaviors are equivalent.
+// BusyBehavior selects the delivery lane for messages sent to a busy chat.
 type BusyBehavior string
 
 const (
@@ -548,8 +553,7 @@ const (
 	// BusyBehaviorSteer stores the message in the steer lane. It is
 	// delivered before the next assistant model call, or when a turn
 	// or an interruption ends.
-	BusyBehaviorSteer     BusyBehavior = "steer"
-	BusyBehaviorInterrupt BusyBehavior = "interrupt"
+	BusyBehaviorSteer BusyBehavior = "steer"
 )
 
 // SendMessageInput configures [Tx.SendMessage].
@@ -557,7 +561,8 @@ type SendMessageInput struct {
 	Message      Message
 	BusyBehavior BusyBehavior
 	// MaxQueueSize is the maximum number of messages that can be queued
-	// in the chat. It must be positive when the message is queued.
+	// in the chat. It must be positive when the send can make the queue
+	// longer.
 	MaxQueueSize int
 	// FileIDs are linked to the chat by [LinkFiles], which caps the
 	// chat at MaxFileLinks files.
@@ -571,17 +576,13 @@ type SendMessageResult struct {
 	QueuedMessage    *database.ChatQueuedMessage
 	// PromotedQueuedAt is zero when no queued message was delivered.
 	PromotedQueuedAt time.Time
-	// FinishedInterruption reports that the call also applied
-	// FinishInterruption because no worker owns the chat.
-	FinishedInterruption bool
 }
 
 // SendMessage inserts directly in idle states and queues by lane in busy
 // states. From E1, E1P, or P, it queues the message and resumes with the
 // steer lane, or the queue head if no steer messages exist, unless a
-// message under edit blocks the delivery. An interrupt send inserts
-// directly from E1, E1P, P, and A*, and otherwise queues at the end of
-// the steer lane.
+// message under edit blocks the delivery. MaxQueueSize applies only to
+// sends that can make the queue longer.
 func (tx *Tx) SendMessage(input SendMessageInput) (SendMessageResult, error) {
 	chat, from, err := tx.requireFromAllowed(TransitionSendMessage)
 	if err != nil {
@@ -594,14 +595,10 @@ func (tx *Tx) SendMessage(input SendMessageInput) (SendMessageResult, error) {
 		)
 	}
 	switch input.BusyBehavior {
-	case BusyBehaviorQueue, BusyBehaviorSteer, BusyBehaviorInterrupt:
+	case BusyBehaviorQueue, BusyBehaviorSteer:
 		// ok
 	default:
-		// Reject unknown / empty BusyBehavior up front so an invalid
-		// value cannot fall through to the queue path on busy states
-		// or be silently ignored on idle states. The callers in chatd
-		// default empty to queue; chatstate is the lower-level API
-		// and refuses to guess.
+		// Callers must choose a lane explicitly, even when the chat is idle.
 		return SendMessageResult{}, newTransitionError(
 			TransitionSendMessage, from,
 			"invalid BusyBehavior",
@@ -611,65 +608,61 @@ func (tx *Tx) SendMessage(input SendMessageInput) (SendMessageResult, error) {
 	if err != nil {
 		return SendMessageResult{}, xerrors.Errorf("count queued messages: %w", err)
 	}
-	if err := sendMessageQueueCapacityError(from, queuedCount, input.BusyBehavior, input.MaxQueueSize); err != nil {
+	queue, err := LoadQueueState(tx.ctx, tx.store, tx.chatID)
+	if err != nil {
+		return SendMessageResult{}, xerrors.Errorf("load queue state: %w", err)
+	}
+	if err := sendMessageQueueCapacityError(from, queue, input.BusyBehavior, queuedCount, input.MaxQueueSize); err != nil {
 		return SendMessageResult{}, err
 	}
 	if err := LinkFiles(tx.ctx, tx.store, tx.chatID, input.FileIDs, input.MaxFileLinks); err != nil {
 		return SendMessageResult{}, err
 	}
-	if sendMessageInsertsDirectly(from, input.BusyBehavior) {
-		return tx.sendMessageDirect(chat, input)
-	}
 	switch from {
+	case StateW, StateE0:
+		return tx.sendMessageDirect(chat, input)
+
 	// Error or paused: queue the message, deliver the steer lane or
-	// the queue head into history, clear last_error. A head under edit
-	// blocks the delivery and keeps the status.
+	// the queue head into history, clear last_error. A message under
+	// edit that holds the delivery keeps the status.
 	case StateE1, StateE1P, StateP:
 		return tx.sendMessageE1(chat, input)
 
-	// Running or interrupting, with or without a queue. An interrupt
-	// reaches I1, or I1P when it lands behind a blocked head; queue and
-	// steer sends keep the status.
-	case StateR0, StateR1, StateR1P, StateI0, StateI1, StateI1P:
-		if input.BusyBehavior == BusyBehaviorInterrupt {
-			return tx.sendMessageInterrupt(chat, input)
-		}
-		return tx.queueMessage(chat, input)
-
-	// Requires-action: queue and steer sends keep the status.
-	case StateA0, StateA1, StateA1P:
+	case StateR0, StateR1, StateR1P, StateI0, StateI1, StateI1P, StateA0, StateA1, StateA1P:
 		return tx.queueMessage(chat, input)
 	}
 	return SendMessageResult{}, newTransitionError(TransitionSendMessage, from, "unhandled state in SendMessage")
 }
 
-// sendMessageInsertsDirectly reports whether SendMessage from the state
-// inserts the message into history instead of the queue. W and E0 take
-// every send directly; E1, E1P, A*, and P take only interrupts directly.
-// A direct interrupt runs ahead of the queue, including a blocked head,
-// which stays queued and blocks again when the turn ends.
-func sendMessageInsertsDirectly(from ExecutionState, behavior BusyBehavior) bool {
+// sendMessageGrowsQueue reports whether SendMessage from the state can
+// make the queue longer. W and E0 insert the message into history. E1
+// queues the message, but it also delivers at least one queued message
+// in the same transaction. In E1P and P a message under edit holds the
+// queue. A queue send waits. A steer send waits only when a steer
+// message is under edit; when the queue head is under edit, the steer
+// lane holds only the new message, which is delivered at once.
+func sendMessageGrowsQueue(from ExecutionState, queue QueueState, busy BusyBehavior) bool {
 	switch from {
-	case StateW, StateE0:
-		return true
-	case StateE1, StateE1P, StateA0, StateA1, StateA1P, StateP:
-		return behavior == BusyBehaviorInterrupt
-	default:
+	case StateW, StateE0, StateE1:
 		return false
+	case StateE1P, StateP:
+		return busy != BusyBehaviorSteer || queue.HeadSteer
+	default:
+		return true
 	}
 }
 
 // CheckSendMessageQueueCapacity returns a *MessageQueueFullError when
-// SendMessage from chat, with the given queue state and queuedCount
-// queued messages, would add to a full queue. [Tx.SendMessage] runs the
-// same check under the row lock; callers outside a transaction can call
-// it first to reject a send early.
-func CheckSendMessageQueueCapacity(chat database.Chat, queue QueueState, queuedCount int64, behavior BusyBehavior, maxQueueSize int) error {
-	return sendMessageQueueCapacityError(ClassifyExecutionState(chat, queue, true), queuedCount, behavior, maxQueueSize)
+// SendMessage from chat, with the given queue state, busy behavior, and
+// queuedCount queued messages, would add to a full queue.
+// [Tx.SendMessage] runs the same check under the row lock; callers
+// outside a transaction can call it first to reject a send early.
+func CheckSendMessageQueueCapacity(chat database.Chat, queue QueueState, busy BusyBehavior, queuedCount int64, maxQueueSize int) error {
+	return sendMessageQueueCapacityError(ClassifyExecutionState(chat, queue, true), queue, busy, queuedCount, maxQueueSize)
 }
 
-func sendMessageQueueCapacityError(from ExecutionState, queuedCount int64, behavior BusyBehavior, maxQueueSize int) error {
-	if sendMessageInsertsDirectly(from, behavior) {
+func sendMessageQueueCapacityError(from ExecutionState, queue QueueState, busy BusyBehavior, queuedCount int64, maxQueueSize int) error {
+	if !sendMessageGrowsQueue(from, queue, busy) {
 		return nil
 	}
 	if maxQueueSize <= 0 {
@@ -707,8 +700,8 @@ func (tx *Tx) sendMessageDirect(chat database.Chat, input SendMessageInput) (Sen
 
 // sendMessageE1 queues the message from E1, E1P, or P. A non-empty
 // next delivery moves into history and the chat runs with last_error
-// cleared. Otherwise the head is under edit and the chat keeps its
-// status.
+// cleared. Otherwise a message under edit holds the delivery and the
+// chat keeps its status.
 func (tx *Tx) sendMessageE1(chat database.Chat, input SendMessageInput) (SendMessageResult, error) {
 	queued, err := tx.insertQueuedMessage(chat.OwnerID, input.Message, database.ChatBusyBehavior(input.BusyBehavior))
 	if err != nil {
@@ -772,42 +765,6 @@ func (tx *Tx) keepStatusAfterQueue(chat database.Chat) error {
 		return xerrors.Errorf("update status: %w", err)
 	}
 	return nil
-}
-
-func (tx *Tx) sendMessageInterrupt(chat database.Chat, input SendMessageInput) (SendMessageResult, error) {
-	queued, err := tx.insertQueuedMessage(chat.OwnerID, input.Message, database.ChatBusyBehaviorSteer)
-	if err != nil {
-		return SendMessageResult{}, xerrors.Errorf("insert queued: %w", err)
-	}
-	if _, err := tx.applyExecutionState(executionStateUpdate{
-		Status:                   database.ChatStatusInterrupting,
-		Archived:                 false,
-		WorkerID:                 chat.WorkerID,
-		RunnerID:                 chat.RunnerID,
-		LastError:                chat.LastError,
-		RequiresActionDeadlineAt: chat.RequiresActionDeadlineAt,
-		CompactionRequestedAt:    chat.CompactionRequestedAt,
-	}); err != nil {
-		return SendMessageResult{}, xerrors.Errorf("update status: %w", err)
-	}
-	if chat.WorkerID.Valid {
-		return SendMessageResult{QueuedMessage: &queued}, nil
-	}
-	finished, err := tx.finishUnownedInterruption(chat, "Tool execution interrupted by new user message")
-	if err != nil {
-		return SendMessageResult{}, err
-	}
-	result := SendMessageResult{
-		InsertedMessages:     finished.InsertedMessages,
-		PromotedQueuedAt:     finished.PromotedQueuedAt,
-		FinishedInterruption: true,
-	}
-	if !slices.ContainsFunc(finished.PromotedMessages, func(m database.ChatMessage) bool {
-		return m.QueuedMessageID.Int64 == queued.ID
-	}) {
-		result.QueuedMessage = &queued
-	}
-	return result, nil
 }
 
 // EditMessageInput configures [Tx.EditMessage].
@@ -1146,8 +1103,8 @@ type EditQueuedMessageResult struct {
 
 // EditQueuedMessage changes a queued row's content, edit marker, or
 // both. Beginning an edit on a row ends any other row's edit. From P,
-// ending the head's edit leaves paused once the head is ready (see
-// leavePaused); beginning an edit on a different row is refused with
+// ending the edit that holds the queue leaves paused (see leavePaused);
+// beginning an edit on a different row is refused with
 // [ErrPausedQueuedHeadUnderEdit].
 func (tx *Tx) EditQueuedMessage(input EditQueuedMessageInput) (EditQueuedMessageResult, error) {
 	chat, from, err := tx.requireQueuedMessageTransition(TransitionEditQueuedMessage, input.QueuedMessageID)
@@ -1257,8 +1214,8 @@ func (tx *Tx) leavePaused(chat database.Chat) (*database.Chat, time.Time, error)
 
 // advanceQueue moves the chat on by its queue when a turn or an
 // interruption ends, or when P may resume: an empty queue sets W, a
-// blocked head sets P, and a non-empty next delivery is promoted and the
-// chat runs. A chat already in the resulting status is
+// held delivery sets P, and a non-empty next delivery is promoted and
+// the chat runs. A chat already in the resulting status is
 // not written.
 func (tx *Tx) advanceQueue(chat database.Chat) (database.Chat, queuedDelivery, error) {
 	queued, err := tx.store.GetChatQueuedMessages(tx.ctx, tx.chatID)
@@ -1395,6 +1352,9 @@ type InterruptInput struct {
 
 // InterruptResult is returned by [Tx.Interrupt].
 type InterruptResult struct {
+	// Interrupted is false when the chat had nothing to interrupt and
+	// the call left it unchanged.
+	Interrupted          bool
 	CancellationMessages []database.ChatMessage
 	// PromotedQueuedAt is zero when no queue head was promoted.
 	PromotedQueuedAt time.Time
@@ -1405,32 +1365,37 @@ type InterruptResult struct {
 
 // Interrupt requests interruption of an active or requires-action
 // chat. It also finishes the pending interruption of an unowned
-// interrupting chat.
+// interrupting chat. An idle or errored chat, or an interrupting chat
+// that its runner is already finishing, has nothing to interrupt, so
+// the call succeeds without changing it.
 func (tx *Tx) Interrupt(input InterruptInput) (InterruptResult, error) {
 	chat, from, err := tx.requireFromAllowed(TransitionInterrupt)
+	if err != nil {
+		return InterruptResult{}, err
+	}
 	reason := input.Reason
 	if reason == "" {
 		reason = "Tool execution interrupted by user"
 	}
-	if err != nil {
-		// The matrix rejects Interrupt from I*, because an owned
-		// interrupting chat is already being finished by its runner.
-		// An unowned one has no runner, and a worker would need a
-		// capacity slot to finish it, so finish it here instead.
-		if !errors.Is(err, ErrTransitionNotAllowed) || (from != StateI0 && from != StateI1 && from != StateI1P) || chat.WorkerID.Valid {
-			return InterruptResult{}, err
+	switch from {
+	case StateW, StateE0, StateE1, StateE1P, StateP:
+		return InterruptResult{}, nil
+	case StateI0, StateI1, StateI1P:
+		if chat.WorkerID.Valid {
+			return InterruptResult{}, nil
 		}
+		// An unowned interrupting chat has no runner, and a worker would
+		// need a capacity slot to finish it, so finish it here instead.
 		finished, err := tx.finishUnownedInterruption(chat, reason)
 		if err != nil {
 			return InterruptResult{}, err
 		}
 		return InterruptResult{
+			Interrupted:          true,
 			CancellationMessages: finished.cancellations,
 			PromotedQueuedAt:     finished.PromotedQueuedAt,
 			FinishedInterruption: true,
 		}, nil
-	}
-	switch from {
 	case StateR0, StateR1, StateR1P:
 		if _, err := tx.applyExecutionState(executionStateUpdate{
 			Status:                   database.ChatStatusInterrupting,
@@ -1443,13 +1408,14 @@ func (tx *Tx) Interrupt(input InterruptInput) (InterruptResult, error) {
 			return InterruptResult{}, xerrors.Errorf("set interrupting: %w", err)
 		}
 		if chat.WorkerID.Valid {
-			return InterruptResult{}, nil
+			return InterruptResult{Interrupted: true}, nil
 		}
 		finished, err := tx.finishUnownedInterruption(chat, reason)
 		if err != nil {
 			return InterruptResult{}, err
 		}
 		return InterruptResult{
+			Interrupted:          true,
 			CancellationMessages: finished.cancellations,
 			PromotedQueuedAt:     finished.PromotedQueuedAt,
 			FinishedInterruption: true,
@@ -1474,6 +1440,7 @@ func (tx *Tx) Interrupt(input InterruptInput) (InterruptResult, error) {
 			return InterruptResult{}, xerrors.Errorf("set running: %w", err)
 		}
 		return InterruptResult{
+			Interrupted:          true,
 			CancellationMessages: inserted,
 		}, nil
 	default:
@@ -1724,8 +1691,9 @@ type DeliverSteerMessagesResult struct {
 }
 
 // DeliverSteerMessages moves the steer lane into history in position
-// order at a step boundary of a running turn. It stops at the first row
-// under edit. Queue rows stay queued and the status does not change.
+// order at a step boundary of a running turn. A steer row under edit
+// holds the whole lane. Queue rows stay queued and the status does not
+// change.
 func (tx *Tx) DeliverSteerMessages(_ DeliverSteerMessagesInput) (DeliverSteerMessagesResult, error) {
 	chat, from, err := tx.requireFromAllowed(TransitionDeliverSteerMessages)
 	if err != nil {

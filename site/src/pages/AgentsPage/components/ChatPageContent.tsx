@@ -59,7 +59,6 @@ import {
 	useChatMessages,
 	useChatSelector,
 	type useChatStore,
-	useUndeliveredQueuedMessages,
 } from "./ChatConversation/chatStore";
 import {
 	LiveStreamTailContent,
@@ -87,6 +86,7 @@ import {
 import { isAsyncAnswerPrompt } from "./ChatElements/tools/asyncAnswer";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ChatMessageScroller } from "./ChatMessageScroller";
+import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 import { getWorkspaceOptionsWithLinkedWorkspace } from "./workspaceOptions";
 
 type ChatStoreHandle = ReturnType<typeof useChatStore>["store"];
@@ -138,6 +138,8 @@ type ChatPageTimelineProps = {
 	urlTransform: UrlTransform;
 	mcpServers: readonly TypesGen.MCPServerConfig[];
 	footer?: React.ReactNode;
+	/** Fork: the chat whose descendant questions ForkDescendantQuestionDock shows. */
+	chat?: Pick<TypesGen.Chat, "id" | "parent_chat_id">;
 };
 
 export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
@@ -159,6 +161,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 	urlTransform,
 	mcpServers,
 	footer,
+	chat,
 }) => {
 	const [chatFullWidth] = useChatFullWidth();
 	const messagesByID = useChatSelector(store, selectMessagesByID);
@@ -176,7 +179,10 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		store,
 		selectSubagentStatusOverrides,
 	);
-	const undeliveredQueuedMessages = useUndeliveredQueuedMessages(store);
+	const undeliveredQueuedMessages = useChatSelector(
+		store,
+		selectQueuedMessages,
+	);
 	const isChatCompleted = !hasStream;
 
 	const liveStreamState =
@@ -293,6 +299,15 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 						}
 					/>
 				)}
+				{(!dockedQuestion || queuedAnswerText !== undefined) && chat && (
+					<ForkDescendantQuestionDock
+						chat={chat}
+						isReadOnly={isReadOnly}
+						// The page withholds the root answer handler while the chat
+						// cannot take a turn, for example without the AI Gateway.
+						canAnswer={onSendAskUserQuestionResponse !== undefined}
+					/>
+				)}
 			</Profiler>
 		</ACPContext>
 	);
@@ -317,6 +332,7 @@ export type SendChatMessageOptions = {
 	message: string;
 	attachments?: readonly PendingAttachment[];
 	workspaceUploads?: readonly PendingWorkspaceUpload[];
+	busyBehavior?: TypesGen.ChatBusyBehavior;
 };
 
 type ChatPageInputProps = {
@@ -742,7 +758,7 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 
 	const inputElement = (
 		<AgentChatInput
-			onSend={(message) => {
+			onSend={(message, busyBehavior) => {
 				void (async () => {
 					const hasActiveUploads =
 						attachments.some((file) =>
@@ -808,6 +824,7 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 							message,
 							attachments: attachmentsArg,
 							workspaceUploads: workspaceUploadsArg,
+							busyBehavior,
 						});
 					} catch {
 						// Attachments preserved for retry on failure.

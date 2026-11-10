@@ -2201,13 +2201,19 @@ export interface Chat {
 	 */
 	readonly inline_mcp_servers?: readonly InlineMCPServer[];
 	/**
-	 * Children holds child (subagent) chats nested under this root
-	 * chat. Always initialized to an empty slice so the JSON field
-	 * is present as []. Child chats cannot create their own
-	 * subagents, so nesting depth is capped at 1 and this slice is
-	 * always empty for child chats.
+	 * Children holds the descendant (subagent) chats of this root chat,
+	 * flat: each entry's parent_chat_id gives its place in the tree.
+	 * Without fork-nested-subagents descendants are only direct
+	 * children. Always initialized to an empty slice so the JSON field
+	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
+	/**
+	 * AgentType is the subagent type of a child chat, such as explore or a
+	 * custom agent definition name. Only set with the
+	 * fork-agent-definitions experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/chats.go
@@ -2316,9 +2322,9 @@ export interface ChatAutoArchiveDaysResponse {
 }
 
 // From codersdk/chats.go
-export type ChatBusyBehavior = "interrupt" | "queue";
+export type ChatBusyBehavior = "queue" | "steer";
 
-export const ChatBusyBehaviors: ChatBusyBehavior[] = ["interrupt", "queue"];
+export const ChatBusyBehaviors: ChatBusyBehavior[] = ["queue", "steer"];
 
 // From codersdk/chats.go
 export type ChatClientType = "api" | "ui";
@@ -2695,6 +2701,20 @@ export const ChatDebugStepOperations: ChatDebugStepOperation[] = [
 	"generate",
 	"stream",
 ];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatDescendantQuestion is an unanswered ask_user_question call of a
+ * descendant chat. The user answers it with a message to that chat.
+ */
+export interface ChatDescendantQuestion {
+	readonly chat_id: string;
+	readonly parent_chat_id: string;
+	readonly chat_title: string;
+	readonly tool_call_id: string;
+	readonly questions: readonly ChatQuestion[];
+	readonly created_at: string;
+}
 
 // From codersdk/chats.go
 /**
@@ -3141,6 +3161,10 @@ export interface ChatMessagesPaginationOptions {
  */
 export interface ChatMessagesResponse {
 	readonly messages: readonly ChatMessage[];
+	/**
+	 * QueuedMessages lists the queued messages in delivery order: steer
+	 * messages first, then queue messages.
+	 */
 	readonly queued_messages: readonly ChatQueuedMessage[];
 	readonly has_more: boolean;
 	/**
@@ -3738,6 +3762,24 @@ export const ChatProviderConfigSources: ChatProviderConfigSource[] = [
 	"supported",
 ];
 
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestion is one question of an ask_user_question call.
+ */
+export interface ChatQuestion {
+	readonly header: string;
+	readonly question: string;
+	readonly options: readonly ChatQuestionOption[];
+}
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestionOption is an answer the user can pick for a ChatQuestion.
+ */
+export interface ChatQuestionOption {
+	readonly label: string;
+}
+
 // From codersdk/chats.go
 /**
  * ChatQueuedMessage represents a queued message waiting to be processed.
@@ -3747,12 +3789,19 @@ export interface ChatQueuedMessage {
 	readonly chat_id: string;
 	readonly model_config_id?: string;
 	readonly content: readonly ChatMessagePart[];
+	/**
+	 * BusyBehavior is the lane of the message. Steer messages go in
+	 * before the next model call, and queue messages go in after the
+	 * turn ends.
+	 */
+	readonly busy_behavior: ChatBusyBehavior;
 	readonly created_at: string;
 	readonly reasoning_effort?: string;
 	/**
 	 * EditingSince is set while the owner edits the message. A message
-	 * under edit and every message behind it wait until the edit ends; a
-	 * turn that ends at a message under edit pauses the chat.
+	 * under edit and every message behind it wait until the edit ends. A
+	 * steer message under edit also holds the steer messages ahead of
+	 * it. A turn that ends at a message under edit pauses the chat.
 	 */
 	readonly editing_since?: string;
 }
@@ -3879,6 +3928,10 @@ export interface ChatStreamEvent {
 	readonly status?: ChatStreamStatus;
 	readonly error?: ChatError;
 	readonly retry?: ChatStreamRetry;
+	/**
+	 * QueuedMessages lists the queued messages in delivery order: steer
+	 * messages first, then queue messages.
+	 */
 	readonly queued_messages?: readonly ChatQueuedMessage[];
 	readonly action_required?: ChatStreamActionRequired;
 }
@@ -4451,6 +4504,11 @@ export interface CreateChatMessageRequest {
 	 * nil: no change, empty: remove all.
 	 */
 	readonly inline_mcp_servers?: InlineMCPServerRequest[];
+	/**
+	 * BusyBehavior controls when the message reaches the agent if the
+	 * chat is busy. "steer", the default, delivers it before the next
+	 * model call. "queue" delivers it after the active turn ends.
+	 */
 	readonly busy_behavior?: ChatBusyBehavior;
 	/**
 	 * PlanMode switches the chat's persistent plan mode.
@@ -4468,8 +4526,11 @@ export interface CreateChatMessageResponse {
 	readonly message?: ChatMessage;
 	/**
 	 * Messages contains all user-visible messages inserted by the send, in
-	 * insertion order. A queued send on an errored chat may promote the
-	 * previous queue head, so clients must upsert the full batch.
+	 * insertion order. A send to an errored or paused chat can also insert
+	 * queued messages: a steer send inserts the queued steer messages
+	 * before the new message, and a queue send to an errored chat inserts
+	 * the steer lane, or the first queue message when that lane is empty.
+	 * Clients must upsert the full batch.
 	 */
 	readonly messages?: readonly ChatMessage[];
 	readonly queued_message?: ChatQueuedMessage;
@@ -6302,6 +6363,31 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+}
+
+// From codersdk/fork_chat_family.go
+/**
+ * ForkChatFamilyCapacity is the subagent capacity of the family under a root
+ * chat. It is computed without a lock, so it may be stale when read.
+ */
+export interface ForkChatFamilyCapacity {
+	/**
+	 * LiveSubagents counts the unarchived subagents that have not finished:
+	 * status running, interrupting, requires_action or paused.
+	 */
+	readonly live_subagents: number;
+	/**
+	 * MaxLiveSubagents is the family's live subagent limit in force. 0 means
+	 * no limit. A spawn, or a message_agent that resumes a finished
+	 * subagent, fails while LiveSubagents is at the limit.
+	 */
+	readonly max_live_subagents: number;
+	/**
+	 * WaitingForCapacity lists the running subagents that no worker owns
+	 * because a deployment, organization or family concurrency limit is
+	 * full.
+	 */
+	readonly waiting_for_capacity: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go

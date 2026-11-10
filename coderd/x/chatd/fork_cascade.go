@@ -3,8 +3,8 @@ package chatd
 // This file is fork code: it implements the interrupt cascade and the archive
 // of an active family behind the fork-nested-subagents experiment. Upstream's
 // InterruptChat and setChatFamilyArchived call the hooks in this file
-// (forkInterruptDescendants, forkInterruptResult and forkArchiveActiveFamily),
-// which do nothing when the experiment is off.
+// (forkInterruptDescendants and forkArchiveActiveFamily), which do nothing
+// when the experiment is off.
 
 import (
 	"context"
@@ -66,29 +66,18 @@ func (p *Server) forkInterruptDescendants(ctx context.Context, chat database.Cha
 		if !isActiveChatStatus(descendant.Status) {
 			continue
 		}
-		if _, err := p.InterruptChat(cascadeCtx, descendant); err != nil {
+		_, descendantInterrupted, err := p.InterruptChat(cascadeCtx, descendant)
+		if err != nil {
 			if !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
 				logger.Warn(ctx, "interrupt cascade: interrupt descendant", slog.F("descendant_id", row.ID), slog.Error(err))
 			}
 			continue
 		}
-		interrupted = true
+		// Interrupt succeeds unchanged for a descendant its worker is
+		// already interrupting, so only a real transition counts.
+		interrupted = interrupted || descendantInterrupted
 	}
 	return interrupted
-}
-
-// forkInterruptResult makes interrupting an idle chat succeed when its
-// descendants were interrupted, so that stopping an idle parent stops its
-// running children.
-func (p *Server) forkInterruptResult(ctx context.Context, chat database.Chat, descendantsInterrupted bool, err error) (database.Chat, error) {
-	if !descendantsInterrupted || !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
-		return chat, err
-	}
-	refreshed, getErr := p.db.GetChatByID(ctx, chat.ID)
-	if getErr != nil {
-		return chat, xerrors.Errorf("reload chat: %w", getErr)
-	}
-	return refreshed, nil
 }
 
 // forkArchiveActiveFamily interrupts the active family of root and waits up
@@ -134,7 +123,7 @@ func (p *Server) forkArchiveActiveFamily(ctx context.Context, root database.Chat
 	for {
 		// A requires_action member returns to running when interrupted,
 		// so each wake interrupts the family again.
-		if _, err := p.InterruptChat(ctx, root); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
+		if _, _, err := p.InterruptChat(ctx, root); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
 			return xerrors.Errorf("interrupt chat family: %w", err)
 		}
 		active, err = p.activeChatIDs(ctx, ids)
