@@ -148,7 +148,11 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 		return p.deliverEventsWakeup(ctx, fdb, chat, wakeup, now)
 	}
 
-	delivery := wakeupDelivery{text: wakeup.Prompt, runKey: wakeupRunKey(wakeup), finish: nextWakeupRun(wakeup, now, 1)}
+	delivery := wakeupDelivery{
+		text:   wakeup.Prompt,
+		runKey: wakeupRunKey(wakeup),
+		finish: func(admittedAt time.Time) wakeupFinish { return nextWakeupRun(wakeup, admittedAt, 1) },
+	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	return p.finishWakeupSend(ctx, fdb, wakeup, now, delivery.runKey, err)
 }
@@ -166,30 +170,34 @@ func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, wakeup 
 		return p.finishWakeupClaim(ctx, fdb, wakeup, now, nextWakeupRun(wakeup, now, 0))
 	}
 
-	runStatus, finish := p.wakeupFailure(ctx, wakeup, now, err)
-	// End the claim first: a worker whose lease ran out during the send must
-	// not record a run for an occurrence that another worker now owns.
-	_, finishErr := fdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, finish))
-	if errors.Is(finishErr, sql.ErrNoRows) {
+	sendErr := err
+	runStatus, finish := p.wakeupFailure(ctx, wakeup, now, sendErr)
+	err = forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
+		// End the claim first: a worker whose lease ran out during the send
+		// must not record a run for an occurrence that another worker now
+		// owns.
+		if _, err := ftx.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, finish)); err != nil {
+			return err
+		}
+		_, err := ftx.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeup.ID,
+			RunKey:    runKey,
+			Status:    runStatus,
+			Error:     sql.NullString{String: sendErr.Error(), Valid: true},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}, nil)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	if finishErr != nil {
-		return xerrors.Errorf("finish wake-up claim: %w", finishErr)
-	}
-	_, insertErr := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
-		ID:        uuid.New(),
-		WakeupID:  wakeup.ID,
-		RunKey:    runKey,
-		Status:    runStatus,
-		Error:     sql.NullString{String: err.Error(), Valid: true},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	if insertErr != nil && !errors.Is(insertErr, sql.ErrNoRows) {
-		p.logger.Warn(ctx, "chat wake-up run record failed",
-			slog.F("wakeup_id", wakeup.ID),
-			slog.Error(insertErr),
-		)
+	if err != nil {
+		return xerrors.Errorf("record failed wake-up run: %w", err)
 	}
 	return nil
 }
@@ -212,12 +220,12 @@ func wakeupRunKey(wakeup forkdb.ChatWakeup) string {
 }
 
 // wakeupDelivery is one occurrence of a wake-up: the message text, the run
-// key that keeps it from being delivered twice, and how a delivery ends the
-// claim.
+// key that keeps it from being delivered twice, and how a delivery admitted
+// at a given time ends the claim.
 type wakeupDelivery struct {
 	text   string
 	runKey string
-	finish wakeupFinish
+	finish func(admittedAt time.Time) wakeupFinish
 }
 
 // sendWakeupPrompt sends the text of delivery as the chat owner. The delivered
@@ -231,6 +239,10 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 	}
 	//nolint:gocritic // A wake-up prompt is sent as the chat owner.
 	ownerCtx := dbauthz.As(ctx, owner)
+	// A wake-up resumes a finished child on its own, like message_agent, so
+	// it counts against the family live subagent limit.
+	ownerCtx = withSubagentResume(ownerCtx)
+	sendStart := p.clock.Now("chatd", "wakeups")
 	_, err = p.SendMessage(ownerCtx, SendMessageOptions{
 		ChatID:    chat.ID,
 		CreatedBy: chat.OwnerID,
@@ -246,6 +258,9 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			if err != nil {
 				return err
 			}
+			// Hooks and the chat lock can delay admission past the next
+			// slot, so the schedule continues from the admission time.
+			admittedAt := now.Add(p.clock.Since(sendStart, "chatd", "wakeups"))
 			//nolint:gocritic // The wake-up worker records its own bookkeeping.
 			ctx = dbauthz.AsChatd(ctx)
 			_, err = txdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
@@ -253,8 +268,8 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 				WakeupID:  wakeup.ID,
 				RunKey:    delivery.runKey,
 				Status:    forkdb.ChatWakeupRunStatusDelivered,
-				CreatedAt: now,
-				UpdatedAt: now,
+				CreatedAt: admittedAt,
+				UpdatedAt: admittedAt,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
 				return errWakeupOccurrenceRan
@@ -262,7 +277,7 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			if err != nil {
 				return xerrors.Errorf("insert wake-up run: %w", err)
 			}
-			_, err = txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, delivery.finish))
+			_, err = txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, admittedAt, delivery.finish(admittedAt)))
 			if errors.Is(err, sql.ErrNoRows) {
 				return errWakeupClaimLost
 			}

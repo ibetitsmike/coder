@@ -406,6 +406,31 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		require.False(t, got.LeaseExpiresAt.Valid)
 	})
 
+	t.Run("AdmittedAfterNextSlot", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		clock := quartz.NewMock(t)
+		worker.server.clock = clock
+		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+			// The hook holds admission past the following slot.
+			clock.Advance(2 * time.Minute)
+			_, _ = rw.Write([]byte(`{}`))
+		})
+
+		start := wakeupTestSlot.Add(time.Second)
+		worker.wakeupOnce(ctx, start)
+		require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
+		got := f.wakeup(t, wakeup.ID)
+		require.WithinDuration(t, start.Add(3*time.Minute), got.NextRunAt.Time, time.Second, "one interval after admission")
+	})
+
 	t.Run("LeaseTakenOverThenFailed", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
@@ -430,6 +455,35 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		require.True(t, otherLease.Equal(got.LeaseExpiresAt.Time), "the new owner keeps its lease: %s", got.LeaseExpiresAt.Time)
 		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
 	})
+}
+
+// A wake-up resumes a finished child like message_agent does, so the family
+// live subagent limit holds it back.
+func TestWakeupResumeCountsAgainstFamilyLiveLimit(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	root := f.createWakeupChat(t)
+	busyChild := f.createWakeupChild(t, root, database.ChatStatusRunning)
+	child := f.createWakeupChild(t, root, database.ChatStatusWaiting)
+	wakeup := f.insertWakeup(t, child, forkdb.InsertChatWakeupParams{
+		Kind:            forkdb.ChatWakeupKindInterval,
+		IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	worker.server.experiments = codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}
+	worker.server.chatLimits.Fork.MaxLiveSubagentsPerFamily = 1
+
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	require.Zero(t, f.countPromptMessages(t, child, wakeup.Prompt))
+	require.Equal(t, []string{"failed"}, f.wakeupRunStatuses(t, wakeup.ID))
+	got, err := f.db.GetChatByID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, database.ChatStatusWaiting, got.Status)
+
+	forceExecutionState(t, f, busyChild.ID, database.ChatStatusWaiting, false)
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Minute+time.Second))
+	require.Equal(t, 1, f.countPromptMessages(t, child, wakeup.Prompt), "a free slot lets the next occurrence resume the child")
 }
 
 // Chats that would queue a new message are not claimed, so a full batch of
@@ -656,6 +710,25 @@ func (f *workerTestFixture) createWakeupChat(t *testing.T) database.Chat {
 		Title:             "wake-up",
 		ClientType:        database.ChatClientTypeApi,
 		InitialStatus:     database.ChatStatusWaiting,
+		InitialMessages: []chatstate.Message{
+			userTextMessage(t, "hello", f.user.ID, f.model.ID),
+		},
+	})
+	require.NoError(t, err)
+	return res.Chat
+}
+
+func (f *workerTestFixture) createWakeupChild(t *testing.T, root database.Chat, status database.ChatStatus) database.Chat {
+	t.Helper()
+	res, err := chatstate.CreateChat(testutil.Context(t, testutil.WaitShort), f.db, f.pubsub, chatstate.CreateChatInput{
+		OrganizationID:    f.org.ID,
+		OwnerID:           f.user.ID,
+		LastModelConfigID: f.model.ID,
+		ParentChatID:      uuid.NullUUID{UUID: root.ID, Valid: true},
+		RootChatID:        uuid.NullUUID{UUID: root.ID, Valid: true},
+		Title:             "wake-up child",
+		ClientType:        database.ChatClientTypeApi,
+		InitialStatus:     status,
 		InitialMessages: []chatstate.Message{
 			userTextMessage(t, "hello", f.user.ID, f.model.ID),
 		},

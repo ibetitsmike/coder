@@ -240,7 +240,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	delivery := wakeupDelivery{
 		text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, next.Title, next.ID, next.Status),
 		runKey: childDoneRunKey(next.ID),
-		finish: eventsWakeupFinish(wakeup, now, 1, pending),
+		finish: func(admittedAt time.Time) wakeupFinish { return eventsWakeupFinish(wakeup, admittedAt, 1, pending) },
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	return p.finishWakeupSend(ctx, fdb, wakeup, now, delivery.runKey, err)
