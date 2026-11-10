@@ -405,11 +405,25 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 	return f.db.InsertUserAgentDefinition(ctx, arg)
 }
 
+func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionRead, wakeupID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatWakeupRunKeys(ctx, wakeupID)
+}
+
 func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.ListChatWakeupsByChatID(ctx, chatID)
+}
+
+func (f *forkQuerier) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, parentChatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
 }
 
 func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
