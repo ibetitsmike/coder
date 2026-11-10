@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -291,7 +292,19 @@ func TestScrubSecretAnswers(t *testing.T) {
 	require.Equal(t, `$'{{secret:call_c}}' $'{{secret:call_c}}'`,
 		scrubSecretAnswers(`$'abc\001def\tg\'h\\i\Ej-kä' $'abc\001def\tg\'h\\i\Ej-k\303\244'`, control),
 		"Bash writes a word with a control character in $'...'")
+	shell := []forkdb.ChatSecretAnswer{{ToolCallID: "call_b", Value: "ab cd$efg"}, {ToolCallID: "call_t", Value: "~/x=~y z#"}}
+	require.Equal(t, `{{secret:call_b}} x="{{secret:call_b}}" {{secret:call_t}} {{secret:call_t}}`,
+		scrubSecretAnswers(`ab\ cd\$efg x="ab cd\$efg" ~/x=~y\ z# \~/x=\~y\ z#`, shell),
+		"Bash's printf %q and declare -p escape a shell character with a backslash")
 	if bash, err := exec.LookPath("bash"); err == nil {
+		for _, answer := range shell {
+			//nolint:gosec // The test quotes a fixed value.
+			out, err := exec.CommandContext(chatdTestContext(t), bash, "-c", `x=$1; printf '%q\n' "$x"; declare -p x`, "_", answer.Value).CombinedOutput()
+			require.NoError(t, err)
+			scrubbed := scrubSecretAnswers(string(out), shell)
+			require.Equal(t, 2, strings.Count(scrubbed, secretPlaceholder(answer.ToolCallID)), string(out))
+		}
+
 		//nolint:gosec // The test traces a fixed command.
 		trace, err := exec.CommandContext(chatdTestContext(t), bash, "-c", `set -x; : "$1"`, "_", control[0].Value).CombinedOutput()
 		require.NoError(t, err)
@@ -417,4 +430,19 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "call_on", row.ToolCallID)
 	require.True(t, row.Secret())
+
+	// The end of the turn would deliver the queued report of the answer
+	// after an ordinary question of the same step, and the report would
+	// answer that question.
+	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call call_on:\nThe user gave a secret answer."}]`),
+	})
+	require.NoError(t, err)
+	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_ordinary", Input: descendantQuestionInput})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Equal(t, errSecretAnswerQueued.Error(), resp.Content)
+	row, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, "call_on", row.ToolCallID)
 }

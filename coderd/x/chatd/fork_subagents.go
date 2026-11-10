@@ -226,7 +226,9 @@ func validateFamilyLiveSubagents(ctx context.Context, fdb forkdb.Store, rootChat
 // isolation, it also records the child's chat_subagents row in the same
 // transaction, with the custom agent's tool policy and the child's worktree.
 // Nested subagents also recheck the depth and live subagent limits there. A
-// worktree is created before the transaction and removed if it fails.
+// worktree is created before the transaction and removed if it fails. A
+// child's own workspace is created after it, before the child gets its
+// prompt.
 func (p *Server) createSubagentChatWithID(
 	ctx context.Context,
 	publisher chatstate.Publisher,
@@ -261,7 +263,21 @@ func (p *Server) createSubagentChatWithID(
 	}
 	subagent := forkdb.InsertChatSubagentParams{Isolation: subagentIsolationShared, ToolPolicy: toolPolicy}
 	committed := false
-	if isolated {
+	var workspaceSource subagentWorkspaceSource
+	var workspacePrompt chatstate.Message
+	switch {
+	case isolated && isolation.isolation == subagentIsolationWorkspace:
+		var err error
+		workspaceSource, err = p.subagentWorkspaceSourceOf(ctx, parent, input)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+		input, workspacePrompt, err = withDeferredSubagentPrompt(input)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+		subagent.Isolation = subagentIsolationWorkspace
+	case isolated:
 		worktree, done, err := p.createSubagentWorktree(ctx, chatID, parent, input, isolation)
 		if err != nil {
 			return chatstate.CreateChatResult{}, err
@@ -336,7 +352,16 @@ func (p *Server) createSubagentChatWithID(
 		return chatstate.CreateChatResult{}, err
 	}
 	committed = true
-	return result, buffer.Flush()
+	if err := buffer.Flush(); err != nil {
+		return result, err
+	}
+	if subagent.Isolation == subagentIsolationWorkspace {
+		result.Chat, err = p.startSubagentWorkspace(ctx, result.Chat, workspaceSource, workspacePrompt)
+		if err != nil {
+			return chatstate.CreateChatResult{}, err
+		}
+	}
+	return result, nil
 }
 
 // subagentCanSpawn reports whether chat may spawn children: explore and

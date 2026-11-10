@@ -177,7 +177,11 @@ func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) 
 	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
 		return fantasy.NewTextErrorResponse("decode questions: " + err.Error()), nil
 	}
-	if err := t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, result.Questions, false); err != nil {
+	err = t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, result.Questions, false)
+	if errors.Is(err, errSecretAnswerQueued) {
+		return fantasy.NewTextErrorResponse(errSecretAnswerQueued.Error()), nil
+	}
+	if err != nil {
 		t.server.logger.Error(ctx, "record descendant question", slog.F("chat_id", t.chat.ID), slog.Error(err))
 		return fantasy.NewTextErrorResponse("failed to record the question; try again"), nil
 	}
@@ -192,23 +196,38 @@ func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) 
 // question, and the first one would answer it without the value.
 var errSecretQuestionQueued = xerrors.New("messages wait in the queue of this chat, and they would answer a secret question without the value; end your turn to read them, then ask again")
 
+// errSecretAnswerQueued refuses a question that would replace a pending
+// secret question while the report of its answer waits in the queue of the
+// chat. The end of the turn would deliver the report, which would answer the
+// new question.
+var errSecretAnswerQueued = xerrors.New("the user answered your secret question, and the message that says so waits in the queue of this chat; end your turn to read it, then ask again")
+
 // recordDescendantQuestion replaces the question of chatID and drops the
-// secret answers of its earlier questions. A secret question takes the row
-// lock of the chat, which SendMessage holds while it refuses messages to a
-// chat with a pending secret question, so no message can reach the queue
-// between the check and the question.
+// secret answers of its earlier questions. It takes the row lock of the
+// chat, which SendMessage holds while it refuses messages to a chat with a
+// pending secret question, so no message can reach the queue between the
+// check of the queue and the question. Only the report of an answer can
+// reach the queue while a secret question is pending, so a queued message
+// then refuses any new question.
 func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage, secret bool) error {
 	return forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
-		if secret {
-			if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
-				return xerrors.Errorf("lock chat: %w", err)
+		if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
+			return xerrors.Errorf("lock chat: %w", err)
+		}
+		queued, err := tx.CountChatQueuedMessages(ctx, chatID)
+		if err != nil {
+			return xerrors.Errorf("count queued messages: %w", err)
+		}
+		if queued > 0 && secret {
+			return errSecretQuestionQueued
+		}
+		if queued > 0 {
+			pending, err := ftx.GetPendingChatDescendantQuestion(ctx, chatID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return xerrors.Errorf("get pending question: %w", err)
 			}
-			queued, err := tx.CountChatQueuedMessages(ctx, chatID)
-			if err != nil {
-				return xerrors.Errorf("count queued messages: %w", err)
-			}
-			if queued > 0 {
-				return errSecretQuestionQueued
+			if err == nil && pending.Secret() {
+				return errSecretAnswerQueued
 			}
 		}
 		if _, err := ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
