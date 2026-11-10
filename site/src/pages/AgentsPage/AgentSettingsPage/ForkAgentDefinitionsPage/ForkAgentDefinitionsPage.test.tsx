@@ -347,6 +347,126 @@ describe("ForkAgentDefinitionsPage", () => {
 		});
 	});
 
+	it("treats a failed create as done when the refetched list newly has it", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "release-notes");
+		await user.type(
+			within(dialog).getByLabelText("Body"),
+			"Write release notes.",
+		);
+		getDefinitions.mockResolvedValue([
+			MockForkAgentDefinitionMetadata,
+			{
+				...MockForkAgentDefinitionMetadata,
+				id: "agent-definition-release-notes",
+				name: "release-notes",
+			},
+		]);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+	});
+
+	it("keeps a rejected create failed when the name was already listed", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockRejectedValue(
+			mockApiError({ message: "An agent definition with this name exists." }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() => expect(getDefinitions).toHaveBeenCalledTimes(2));
+		await waitFor(() =>
+			expect(
+				within(dialog).getByRole("button", { name: "Create agent definition" }),
+			).toBeEnabled(),
+		);
+		expect(toastSuccess).not.toHaveBeenCalled();
+	});
+
+	it("edits a reopened definition from cached data when its refetch fails", async () => {
+		const user = userEvent.setup();
+		const { queryClient } = renderPage();
+		// The test client drops unobserved queries at once; the app keeps them.
+		queryClient.setQueryDefaults(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			{ gcTime: Number.POSITIVE_INFINITY },
+		);
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\n---\nReview the diff.\n",
+			})
+			.mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+		const openEditor = async () => {
+			await user.click(
+				await screen.findByRole("button", {
+					name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+				}),
+			);
+			await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		};
+
+		await openEditor();
+		await screen.findByLabelText("Description");
+		await user.keyboard("{Escape}");
+		await openEditor();
+		await waitFor(() => expect(getDefinition).toHaveBeenCalledTimes(2));
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkAgentDefinitionMetadata.name,
+				{
+					content:
+						'---\nname: "code-reviewer"\ndescription: "Reviews diffs for bugs."\n---\nReview the diff.\n',
+				},
+			),
+		);
+	});
+
 	it("keeps the tool list of an edited definition", async () => {
 		const user = userEvent.setup();
 		renderPage();
