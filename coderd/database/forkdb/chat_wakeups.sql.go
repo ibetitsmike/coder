@@ -89,6 +89,12 @@ WHERE id IN (
     WHERE cw.status = 'active'
         AND cw.next_run_at <= $2::timestamptz
         AND (cw.lease_expires_at IS NULL OR cw.lease_expires_at <= $2::timestamptz)
+        AND NOT EXISTS (
+            SELECT 1
+            FROM chats c
+            WHERE c.id = cw.chat_id
+                AND c.status IN ('running', 'interrupting', 'requires_action')
+        )
     ORDER BY cw.next_run_at, cw.id
     LIMIT $3::int
     FOR UPDATE SKIP LOCKED
@@ -103,7 +109,8 @@ type ClaimDueChatWakeupsParams struct {
 }
 
 // Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-// workers from blocking on, or claiming, the same rows.
+// workers from blocking on, or claiming, the same rows. Rows of busy chats stay
+// unclaimed, so they cannot fill the batch and starve the rows of idle chats.
 func (q *Queries) ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error) {
 	rows, err := q.db.QueryContext(ctx, claimDueChatWakeups, arg.LeaseExpiresAt, arg.Now, arg.LimitCount)
 	if err != nil {
