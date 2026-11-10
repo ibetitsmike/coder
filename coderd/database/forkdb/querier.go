@@ -42,6 +42,7 @@ type Querier interface {
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
