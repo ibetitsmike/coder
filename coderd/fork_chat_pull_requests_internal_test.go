@@ -74,7 +74,7 @@ func TestForkChatPullRequestActivity(t *testing.T) {
 	since := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
-	activity, err := api.forkChatPullRequestActivity(ctx, linked.ID, pullRequestURL, since)
+	activity, err := api.forkChatPullRequestActivity(ctx, linked.ID, pullRequestURL, since, true)
 	require.NoError(t, err)
 	require.Equal(t, gitprovider.PRStateOpen, activity.State)
 	require.Equal(t, "abc", activity.HeadSHA)
@@ -82,12 +82,12 @@ func TestForkChatPullRequestActivity(t *testing.T) {
 	require.Equal(t, "alice", activity.Reviews[0].Author)
 
 	for _, owner := range []database.User{unlinked, linkedElsewhere} {
-		_, err = api.forkChatPullRequestActivity(ctx, owner.ID, pullRequestURL, since)
+		_, err = api.forkChatPullRequestActivity(ctx, owner.ID, pullRequestURL, since, true)
 		require.ErrorContains(t, err, "the chat owner has no linked account for "+host)
 	}
-	_, err = api.forkChatPullRequestActivity(ctx, linked.ID, github.URL+"/org/repo/issues/7", since)
+	_, err = api.forkChatPullRequestActivity(ctx, linked.ID, github.URL+"/org/repo/issues/7", since, true)
 	require.ErrorContains(t, err, "is not a pull request URL")
 	other := "https://gitlab.example.com/org/repo/pull/7"
-	_, err = api.forkChatPullRequestActivity(ctx, linked.ID, other, since)
+	_, err = api.forkChatPullRequestActivity(ctx, linked.ID, other, since, true)
 	require.ErrorContains(t, err, "no git provider is configured for "+other)
 }
