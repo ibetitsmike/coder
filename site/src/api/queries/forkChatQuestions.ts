@@ -91,7 +91,8 @@ export const answerChatDescendantSecretQuestion = (
 			question: ChatDescendantQuestion;
 			value: string;
 		}) =>
-			answerChatSecretQuestion(question.chat_id, question.tool_call_id, {
+			answerChatSecretQuestion(question.chat_id, {
+				tool_call_id: question.tool_call_id,
 				value,
 			}),
 		onSuccess: (_, { question }) =>

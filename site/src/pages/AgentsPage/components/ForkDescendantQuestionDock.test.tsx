@@ -239,18 +239,13 @@ describe("ForkDescendantQuestionDock", () => {
 			],
 		};
 		const { questionRequests, sentMessages } = serveQuestions([secretQuestion]);
-		const secretAnswers: Array<{
-			chatId: string;
-			toolCallId: string;
-			body: unknown;
-		}> = [];
+		const secretAnswers: Array<{ chatId: string; body: unknown }> = [];
 		server.use(
-			http.post<{ chatId: string; toolCallId: string }>(
-				"/api/v2/chats/fork/:chatId/questions/:toolCallId/secret-answer",
+			http.post<{ chatId: string }>(
+				"/api/v2/chats/fork/:chatId/questions/secret-answer",
 				async ({ params, request }) => {
 					secretAnswers.push({
 						chatId: params.chatId,
-						toolCallId: params.toolCallId,
 						body: await request.json(),
 					});
 					return new HttpResponse(null, { status: 204 });
@@ -270,8 +265,7 @@ describe("ForkDescendantQuestionDock", () => {
 		expect(secretAnswers).toEqual([
 			{
 				chatId: secretQuestion.chat_id,
-				toolCallId: "call-secret",
-				body: { value: "hunter2-secret-value" },
+				body: { tool_call_id: "call-secret", value: "hunter2-secret-value" },
 			},
 		]);
 		expect(sentMessages).toEqual([]);

@@ -20,16 +20,15 @@ export const getChatDescendantQuestions = async (
 };
 
 /**
- * Answers the pending secret question toolCallId of chatId. The server keeps
- * the value out of the chat's messages.
+ * Answers the pending secret question req.tool_call_id of chatId. The server
+ * keeps the value out of the chat's messages.
  */
 export const answerChatSecretQuestion = async (
 	chatId: string,
-	toolCallId: string,
 	req: ChatSecretAnswerRequest,
 ): Promise<void> => {
 	await API.getAxiosInstance().post(
-		`/api/v2/chats/fork/${chatId}/questions/${encodeURIComponent(toolCallId)}/secret-answer`,
+		`/api/v2/chats/fork/${chatId}/questions/secret-answer`,
 		req,
 	);
 };
