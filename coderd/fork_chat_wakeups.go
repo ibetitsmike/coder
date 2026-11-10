@@ -143,6 +143,7 @@ func (api *API) patchChatWakeup(rw http.ResponseWriter, r *http.Request) {
 		httpapi.ResourceNotFound(rw)
 		return
 	case errors.Is(err, chatd.ErrChatWakeupFinished):
+		auditFields.OldStatus = codersdk.ChatWakeupStatus(before.Status)
 		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
 			Message: "This wake-up has already finished.",
 		})

@@ -224,6 +224,18 @@ func TestForkChatWakeupStatus(t *testing.T) {
 			},
 		},
 		{
+			// An hourly wake-up resumed 10 minutes after its run time runs an
+			// hour after the resume, not 50 minutes after it.
+			name:   "ResumeOverdueIntervalSchedulesFromNow",
+			seed:   paused("paused_by_user", sql.NullTime{Time: dbtime.Now().Add(-10 * time.Minute), Valid: true}),
+			status: codersdk.ChatWakeupStatusActive,
+			check: func(t *testing.T, _ forkdb.ChatWakeup, got codersdk.ChatWakeup, start time.Time) {
+				require.Equal(t, codersdk.ChatWakeupStatusActive, got.Status)
+				require.NotNil(t, got.NextRunAt)
+				require.WithinDuration(t, start.Add(time.Hour), *got.NextRunAt, testutil.WaitShort)
+			},
+		},
+		{
 			name: "ResumeOverdueDelayRunsNow",
 			seed: func(p *forkdb.InsertChatWakeupParams) {
 				p.Kind = forkdb.ChatWakeupKindDelay
@@ -407,7 +419,7 @@ func TestForkChatWakeupAudit(t *testing.T) {
 		fields     string
 	}{
 		{http.StatusOK, `{"wakeup_id":"` + wakeup.ID.String() + `","old_status":"active","new_status":"canceled"}`},
-		{http.StatusConflict, `{"wakeup_id":"` + wakeup.ID.String() + `","new_status":"active"}`},
+		{http.StatusConflict, `{"wakeup_id":"` + wakeup.ID.String() + `","old_status":"canceled","new_status":"active"}`},
 	} {
 		require.Equal(t, database.ResourceTypeChat, entries[i].ResourceType)
 		require.Equal(t, database.AuditActionWrite, entries[i].Action)

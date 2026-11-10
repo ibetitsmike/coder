@@ -6,6 +6,7 @@ package chatd
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,7 +31,8 @@ const (
 // before and after the change. Setting the status a wake-up already has
 // changes nothing, and resuming a wake-up with no run left completes it.
 // It returns sql.ErrNoRows when chat has no wake-up wakeupID, and
-// ErrChatWakeupFinished when the wake-up already completed or was canceled.
+// ErrChatWakeupFinished with the finished wake-up as before when the wake-up
+// already completed or was canceled.
 func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wakeupID uuid.UUID, status forkdb.ChatWakeupStatus) (before, after forkdb.ChatWakeup, err error) {
 	// The row lock makes a worker that finishes its claim in between wait,
 	// and the update clears the lease, so the worker's finish then changes
@@ -64,6 +66,9 @@ func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wa
 		})
 		return err
 	}, nil)
+	if errors.Is(err, ErrChatWakeupFinished) {
+		return before, forkdb.ChatWakeup{}, err
+	}
 	if err != nil {
 		return forkdb.ChatWakeup{}, forkdb.ChatWakeup{}, err
 	}
@@ -94,6 +99,8 @@ func resumedWakeupRun(wakeup forkdb.ChatWakeup, now time.Time) wakeupFinish {
 		return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: wakeup.NextRunAt}
 	}
 	if wakeup.Kind != forkdb.ChatWakeupKindDelay {
+		// An interval counts from its last run time, which is overdue here.
+		wakeup.NextRunAt = sql.NullTime{Time: now, Valid: true}
 		return nextWakeupRun(wakeup, now, 0)
 	}
 	switch {
