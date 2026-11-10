@@ -69,18 +69,21 @@ func TestNestedInterruptCascade(t *testing.T) {
 		f.setStatus(t, f.root, database.ChatStatusWaiting, uuid.NullUUID{})
 		f.requireStatus(t, database.ChatStatusRunning, child, sibling, grandchild)
 
-		_, err = f.server.InterruptChat(ctx, child)
+		_, _, err = f.server.InterruptChat(ctx, child)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, child, grandchild)
 		f.requireStatus(t, database.ChatStatusRunning, sibling)
 
 		// Stopping an idle root stops its running descendants.
-		_, err = f.server.InterruptChat(ctx, f.root)
+		_, _, err = f.server.InterruptChat(ctx, f.root)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, sibling)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
-		require.ErrorIs(t, err, chatstate.ErrTransitionNotAllowed)
+		// Upstream's Interrupt succeeds and changes nothing when there is
+		// nothing left to interrupt.
+		_, _, err = f.server.InterruptChat(ctx, f.root)
+		require.NoError(t, err)
+		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 	})
 
 	// interrupt_agent on an idle child still stops the child's running
@@ -100,6 +103,53 @@ func TestNestedInterruptCascade(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, interrupted)
 		f.requireStatus(t, database.ChatStatusWaiting, child, grandchild)
+	}) // A descendant whose worker is already interrupting it transitions
+	// nothing, so the cascade must not report the interrupt as taken.
+	t.Run("IdleTargetAlreadyInterruptingDescendant", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+		ctx := chatdTestContext(t)
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		owned := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+		f.setStatus(t, f.root, database.ChatStatusWaiting, uuid.NullUUID{})
+		f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
+		f.setStatus(t, grandchild, database.ChatStatusInterrupting, owned)
+
+		_, interrupted, err := f.server.interruptSubagent(ctx, f.root.ID, child.ID)
+		require.NoError(t, err)
+		require.False(t, interrupted)
+		f.requireStatus(t, database.ChatStatusInterrupting, grandchild)
+	})
+
+	// An errored target transitions nothing itself, but the cascade
+	// still stops its running descendants and the result must report
+	// that.
+	t.Run("ErroredTargetRunningDescendant", func(t *testing.T) {
+		t.Parallel()
+		f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+		ctx := chatdTestContext(t)
+
+		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+		require.NoError(t, err)
+		grandchild, err := f.spawn(t, child, childSubagentChatOptions{})
+		require.NoError(t, err)
+		f.setStatus(t, f.root, database.ChatStatusWaiting, uuid.NullUUID{})
+		f.setStatus(t, child, database.ChatStatusError, uuid.NullUUID{})
+
+		_, interrupted, err := f.server.interruptSubagent(ctx, f.root.ID, child.ID)
+		require.NoError(t, err)
+		require.True(t, interrupted)
+		f.requireStatus(t, database.ChatStatusWaiting, grandchild)
+
+		// With no active descendants left, the same request reports
+		// that nothing transitioned.
+		_, interrupted, err = f.server.interruptSubagent(ctx, f.root.ID, child.ID)
+		require.NoError(t, err)
+		require.False(t, interrupted)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {
@@ -110,13 +160,16 @@ func TestNestedInterruptCascade(t *testing.T) {
 		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
 		require.NoError(t, err)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
+		_, _, err = f.server.InterruptChat(ctx, f.root)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 		f.requireStatus(t, database.ChatStatusRunning, child)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
-		require.ErrorIs(t, err, chatstate.ErrTransitionNotAllowed)
+		// Upstream's Interrupt succeeds and changes nothing when there is
+		// nothing left to interrupt.
+		_, _, err = f.server.InterruptChat(ctx, f.root)
+		require.NoError(t, err)
+		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 	})
 }
 

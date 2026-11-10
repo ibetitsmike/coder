@@ -53,6 +53,7 @@ import { getParentChatID } from "./ChatConversation/chatHelpers";
 import { ChatSharingPopoverContent } from "./ChatSharingPopover";
 import { useEmbedContext } from "./EmbedContext";
 import { ForkAgentTypeBadge } from "./ForkAgentTypeBadge";
+import { ForkSubagentSlotBadge } from "./ForkSubagentSlotBadge";
 import { PrStateIcon } from "./GitPanel/GitPanel";
 import { PRMenuLinks, prMenuContentClassName } from "./PRMenuLinks";
 
@@ -277,6 +278,12 @@ export const ChatTopBar: React.FC<ChatTopBarProps> = ({
 							{chatTitle}
 						</span>
 						{chat && <ForkAgentTypeBadge chat={chat} />}
+						{chat && (
+							<ForkSubagentSlotBadge
+								chat={chat}
+								status={liveChatStatus ?? chat.status}
+							/>
+						)}
 						{isSharedChat && (
 							<UsersIcon
 								className="size-3.5 shrink-0 text-content-secondary"

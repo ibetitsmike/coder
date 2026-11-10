@@ -1,11 +1,16 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { useState } from "react";
 import { Outlet, useParams } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import { archiveAndDeleteChatKey, chatEntityKey } from "#/api/queries/chats";
-import type { Chat, WorkspaceBuild } from "#/api/typesGenerated";
+import type {
+	Chat,
+	ForkChatFamilyCapacity,
+	WorkspaceBuild,
+} from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import { MockChat, MockChatDiffStatus } from "#/testHelpers/chatEntities";
 import { createDeferred } from "#/testHelpers/deferred";
@@ -14,6 +19,7 @@ import {
 	MockWorkspaceBuildDelete,
 } from "#/testHelpers/entities";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
+import { server } from "#/testHelpers/server";
 import { rightPanelTabStorageKeyPrefix } from "../utils/rightPanelTabStorage";
 import {
 	getPersistedSidebarTabId,
@@ -475,5 +481,42 @@ describe("ChatTopBar PR chip", () => {
 			"href",
 			"https://github.com/coder/other-project/pull/123",
 		);
+	});
+});
+
+describe("ChatTopBar nested subagent slot", () => {
+	it("reads the capacity of the family root for a running subagent", async () => {
+		const familyRequests: string[] = [];
+		server.use(
+			http.get("/api/v2/experiments", () =>
+				HttpResponse.json(["fork-nested-subagents"]),
+			),
+			http.get("/api/v2/chats/fork/:rootChatId/family", ({ params }) => {
+				familyRequests.push(String(params.rootChatId));
+				return HttpResponse.json({
+					live_subagents: 1,
+					max_live_subagents: 2,
+					waiting_for_capacity: ["grandchild-chat"],
+				} satisfies ForkChatFamilyCapacity);
+			}),
+		);
+		vi.spyOn(API, "checkAuthorization").mockResolvedValue({});
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue({
+			...chat,
+			id: "child-chat",
+		});
+
+		renderTopBar(
+			{
+				...chat,
+				id: "grandchild-chat",
+				parent_chat_id: "child-chat",
+				root_chat_id: "root-chat",
+				status: "running",
+			},
+			"running",
+		);
+
+		await waitFor(() => expect(familyRequests).toEqual(["root-chat"]));
 	});
 });

@@ -429,7 +429,9 @@ export const InterruptingShowsBusyComposer: Story = {
 		expect(canvas.getByRole("status")).toHaveTextContent(
 			"Interrupting. Waiting for the agent to stop.",
 		);
-		expect(canvas.queryByRole("button", { name: "Queue" })).toBeNull();
+		expect(
+			canvas.queryByRole("button", { name: "Send during turn" }),
+		).toBeNull();
 		expect(canvas.getByText("Interrupting")).toBeInTheDocument();
 		expect(canvas.queryByText("Thinking")).toBeNull();
 
@@ -836,14 +838,15 @@ export const AsyncQuestionFromStreamAnswerQueued: Story = {
 	},
 };
 
-// Send now takes the answer out of the queue before the transcript has it,
-// and the dock stays hidden until then.
+// Send now moves the answer to the steer lane while the turn runs; the dock
+// stays hidden until the transcript has the answer.
 export const AsyncQuestionAnswerPromoting: Story = {
 	render: () => {
 		const store = buildAsyncQuestionStore();
 		store.setChatStatus("running");
-		store.suppressQueuedMessageID(MockQueuedQuestionAnswer.id);
-		store.holdPromotingQueuedMessage(MockQueuedQuestionAnswer);
+		store.setQueuedMessages([
+			{ ...MockQueuedQuestionAnswer, busy_behavior: "steer" },
+		]);
 		return (
 			<AsyncQuestionChatPage
 				store={store}
