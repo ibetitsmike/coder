@@ -31,6 +31,9 @@ func TestWaitForEventsTool(t *testing.T) {
 	paused := f.createChildAgent(t, coordinator, "paused", database.ChatStatusPaused)
 	waiting := f.createChildAgent(t, coordinator, "waiting", database.ChatStatusWaiting)
 	stranger := f.createWakeupChat(t)
+	// Watches nothing yet, so the arguments decide whether a call is refused.
+	fresh := f.createWakeupChat(t)
+	f.createChildAgent(t, fresh, "fresh", database.ChatStatusRunning)
 
 	mClock := quartz.NewMock(t)
 	mClock.Set(wakeupTestSlot)
@@ -85,13 +88,14 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.True(t, wakeupTestSlot.Add(24*time.Hour).Equal(row.ExpiresAt.Time), "expires %s", row.ExpiresAt.Time)
 	require.True(t, row.ExpiresAt.Time.Equal(def.ExpiresAt))
 
-	// Named children may be done already; duplicates are watched once.
+	// Named children may be done already; duplicates are watched once, and
+	// children that def still watches are left out.
 	named, _ := wait(coordinator, waitForEventsArgs{
 		ChildChatIDs:     []string{waiting.ID.String(), waiting.ID.String(), running.ID.String()},
 		Prompt:           "  check the children  ",
 		ExpiresInSeconds: new(600),
 	}, false)
-	require.Equal(t, []uuid.UUID{waiting.ID, running.ID}, childIDs(named))
+	require.Equal(t, []uuid.UUID{waiting.ID}, childIDs(named))
 	got := f.wakeup(t, named.ID)
 	require.Equal(t, "check the children", got.Prompt)
 	require.True(t, wakeupTestSlot.Add(10*time.Minute).Equal(got.ExpiresAt.Time), "expires %s", got.ExpiresAt.Time)
@@ -104,10 +108,11 @@ func TestWaitForEventsTool(t *testing.T) {
 		"NotAChild":      {coordinator, waitForEventsArgs{ChildChatIDs: []string{stranger.ID.String()}}, "is not a child of this chat"},
 		"UnknownChat":    {coordinator, waitForEventsArgs{ChildChatIDs: []string{uuid.NewString()}}, "is not a child of this chat"},
 		"NoChildren":     {stranger, waitForEventsArgs{}, "no running child agents to wait for"},
-		"ExpiryTooLong":  {coordinator, waitForEventsArgs{ExpiresInSeconds: new(31 * 24 * 3600)}, "expires_in_seconds"},
-		"ExpiryTooShort": {coordinator, waitForEventsArgs{ExpiresInSeconds: new(30)}, "expires_in_seconds"},
-		"LoopPrompt":     {coordinator, waitForEventsArgs{Prompt: "/loop 5m poll"}, "must not start with /loop"},
+		"ExpiryTooLong":  {fresh, waitForEventsArgs{ExpiresInSeconds: new(31 * 24 * 3600)}, "expires_in_seconds"},
+		"ExpiryTooShort": {fresh, waitForEventsArgs{ExpiresInSeconds: new(30)}, "expires_in_seconds"},
+		"LoopPrompt":     {fresh, waitForEventsArgs{Prompt: "/loop 5m poll"}, "must not start with /loop"},
 		"InvalidChildID": {coordinator, waitForEventsArgs{ChildChatIDs: []string{"not-a-uuid"}}, "invalid child chat ID"},
+		"AlreadyWatched": {coordinator, waitForEventsArgs{}, "already watched by wake-up " + def.ID.String()},
 	} {
 		t.Logf("case %s", name)
 		_, content := wait(tc.chat, tc.args, true)
@@ -115,6 +120,20 @@ func TestWaitForEventsTool(t *testing.T) {
 	}
 	require.Len(t, wakeups(coordinator), 2, "refused calls create nothing")
 	require.Empty(t, wakeups(stranger))
+	require.Empty(t, wakeups(fresh))
+
+	// A child that its wake-up delivered can be watched again.
+	_, err = fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+		ID:        uuid.New(),
+		WakeupID:  def.ID,
+		RunKey:    childDoneRunKey(running.ID),
+		Status:    forkdb.ChatWakeupRunStatusDelivered,
+		CreatedAt: wakeupTestSlot,
+		UpdatedAt: wakeupTestSlot,
+	})
+	require.NoError(t, err)
+	again, _ := wait(coordinator, waitForEventsArgs{ChildChatIDs: []string{running.ID.String(), paused.ID.String()}}, false)
+	require.Equal(t, []uuid.UUID{running.ID}, childIDs(again))
 
 	// Only children that are done: nothing to wait for.
 	forceExecutionState(t, f, running.ID, database.ChatStatusWaiting, false)
@@ -127,7 +146,7 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.Equal(t, def.ID, replayed.ID)
 	require.Equal(t, []uuid.UUID{running.ID, paused.ID}, childIDs(replayed))
 	require.Equal(t, database.ChatStatusWaiting, replayed.Children[0].Status)
-	require.Len(t, wakeups(coordinator), 2)
+	require.Len(t, wakeups(coordinator), 3)
 
 	// A settled child is still watched while it waits for events of its own
 	// children or for an answer.
@@ -262,6 +281,7 @@ func TestWakeupEventsWaitsForBusyChat(t *testing.T) {
 }
 
 // A failed send leaves the child undelivered, so a later poll retries it.
+// Repeated failures share one failed run.
 func TestWakeupEventsRetriesFailedSend(t *testing.T) {
 	t.Parallel()
 	f := newWorkerTestFixture(t)
@@ -275,19 +295,24 @@ func TestWakeupEventsRetriesFailedSend(t *testing.T) {
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	var prompts atomic.Int32
 	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
-		if prompts.Add(1) == 1 {
+		if prompts.Add(1) <= 2 {
 			rw.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		_, _ = rw.Write([]byte(`{}`))
 	})
 
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+	now := wakeupTestSlot.Add(time.Second)
+	for range 2 {
+		worker.wakeupOnce(ctx, now)
+		now = now.Add(wakeupPollInterval + time.Second)
+	}
+	require.EqualValues(t, 2, prompts.Load())
 	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
 	require.Equal(t, []string{"failed"}, f.wakeupRunStatuses(t, wakeup.ID))
 	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
 
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second+wakeupPollInterval+time.Second))
+	worker.wakeupOnce(ctx, now)
 	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
 	require.Contains(t, f.wakeupRunKeys(t, wakeup.ID), childDoneRunKey(child.ID))
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
