@@ -585,6 +585,47 @@ func TestWakeupPullRequestReadDeadline(t *testing.T) {
 	require.Less(t, pullRequestReadTimeout, wakeupLease)
 }
 
+// A pull request read that could take the rest of the claim's lease waits
+// for the next tick, so stalled reads cannot hold back the rest of a batch.
+func TestWakeupPullRequestReadNearLeaseEnd(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:   forkdb.ChatWakeupKindEvents,
+		Events: pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending),
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	merged := openPullRequest(gitprovider.CheckStatePending)
+	merged.State = gitprovider.PRStateMerged
+	fake := &fakePullRequestActivity{}
+	fake.set(merged, nil)
+	worker.server.forkPullRequestActivity = fake.fetch
+	fdb, err := forkdb.From(worker.opts.Store)
+	require.NoError(t, err)
+
+	now := wakeupTestSlot.Add(time.Second)
+	rows, err := fdb.ClaimDueChatWakeups(dbauthz.AsChatd(ctx), forkdb.ClaimDueChatWakeupsParams{
+		Now:            now,
+		LeaseExpiresAt: now.Add(wakeupLease),
+		LimitCount:     1,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	late := rows[0].LeaseExpiresAt.Time.Add(-2*pullRequestReadTimeout + time.Second)
+	require.NoError(t, worker.server.deliverWakeup(dbauthz.AsChatd(ctx), fdb, rows[0], late))
+	require.Zero(t, fake.callCount())
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+	require.True(t, wakeup.NextRunAt.Time.Equal(got.NextRunAt.Time), "stays due: %s", got.NextRunAt.Time)
+	require.False(t, got.LeaseExpiresAt.Valid, "the claim ends")
+
+	worker.wakeupOnce(ctx, now.Add(time.Second))
+	require.Equal(t, 1, fake.callCount())
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+}
+
 // A watch whose next poll would land after its expiry polls once more at the
 // expiry, then completes. That poll runs late here, and reports only what
 // happened until the expiry.
