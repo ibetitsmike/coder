@@ -206,8 +206,8 @@ func FetchPullRequestActivity(
 
 	// GitHub keeps every run of a commit, so a check that was cancelled and
 	// then run again appears twice. Only the newest run of each check name
-	// and app counts, which matches GitHub's status rollup, but two
-	// workflows with a job of the same name also count as one check.
+	// in each check suite counts, which matches GitHub's status rollup. A
+	// suite belongs to one app, and two workflows are two suites.
 	totalRuns := 0
 	checkRuns, err := fetchAllPages(ctx, g, commitEndpoint+"/check-runs?", token, func(page githubCheckRunsPage) []githubCheckRun {
 		totalRuns = page.TotalCount
@@ -217,12 +217,13 @@ func FetchPullRequestActivity(
 		return nil, xerrors.Errorf("fetch commit check runs: %w", err)
 	}
 	type checkKey struct {
-		appID int64
-		name  string
+		appID   int64
+		suiteID int64
+		name    string
 	}
 	latest := make(map[checkKey]int, len(checkRuns))
 	for i, run := range checkRuns {
-		key := checkKey{appID: run.App.ID, name: run.Name}
+		key := checkKey{appID: run.App.ID, suiteID: run.CheckSuite.ID, name: run.Name}
 		if j, ok := latest[key]; !ok || run.ID > checkRuns[j].ID {
 			latest[key] = i
 		}
@@ -322,6 +323,9 @@ type githubCheckRun struct {
 	App         struct {
 		ID int64 `json:"id"`
 	} `json:"app"`
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
 }
 
 type githubCheckRunsPage struct {

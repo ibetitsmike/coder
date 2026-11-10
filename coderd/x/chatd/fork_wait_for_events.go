@@ -330,6 +330,8 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// A child's status has no time it became done, so a final poll that
 	// runs well after the expiry cannot tell whether the child was done by
 	// then and leaves children out.
+	// A child whose send failed was done before the cutoff, so a retry
+	// still delivers it.
 	childrenCutOff := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
 	for _, event := range events {
 		switch event.Type {
@@ -343,7 +345,8 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				continue
 			}
 			child := rows[index].Chat
-			if next == nil && !childrenCutOff && childDone(child, waiting) {
+			sendFailed := slices.Contains(keys, failedRunKey(childDoneRunKey(child.ID)))
+			if next == nil && (!childrenCutOff || sendFailed) && childDone(child, waiting) {
 				next = &wakeupDelivery{
 					text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, child.Title, child.ID, child.Status),
 					runKey: childDoneRunKey(child.ID),
@@ -398,8 +401,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	// A failed send keeps the entry's own key free, so a later poll retries
 	// it. Its failures share one run, which only the first one records.
-	failedRunKey := delivery.runKey + ":failed"
-	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey, err)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey(delivery.runKey), err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched entry still
@@ -454,6 +456,12 @@ func eventsFinalRetry(wakeup forkdb.ChatWakeup, now, next time.Time) (wakeupFini
 		return wakeupFinish{}, false
 	}
 	return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}}, true
+}
+
+// failedRunKey names the run that the failed sends of the entry with runKey
+// share, so they leave runKey free for a retry.
+func failedRunKey(runKey string) string {
+	return runKey + ":failed"
 }
 
 // childDoneRunKey names the run of a child_done event, so each child wakes

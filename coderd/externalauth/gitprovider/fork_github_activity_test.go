@@ -246,6 +246,12 @@ func TestFetchPullRequestActivity(t *testing.T) {
 			status:    `{"state":"pending","total_count":0}`,
 			want:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 2, UpdatedAt: at("06:20:00")},
 		}, {
+			// Two workflows with a job of the same name are two suites.
+			name:      "SameNameInTwoSuites",
+			checkRuns: `[{"id":40,"name":"test","app":{"id":1},"check_suite":{"id":7},"status":"in_progress","conclusion":null},{"id":41,"name":"test","app":{"id":1},"check_suite":{"id":8},"status":"completed","conclusion":"success"}]`,
+			status:    `{"state":"pending","total_count":0}`,
+			want:      gitprovider.CheckSummary{State: gitprovider.CheckStatePending, Total: 2},
+		}, {
 			name:      "RerunInProgress",
 			checkRuns: `[{"id":21,"name":"test","status":"in_progress","conclusion":null},{"id":20,"name":"test","status":"completed","conclusion":"failure"}]`,
 			status:    `{"state":"pending","total_count":0}`,
