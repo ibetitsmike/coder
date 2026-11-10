@@ -45,7 +45,8 @@ export type SkillSubmitHandler = (
 	onSettled: () => void,
 ) => void;
 
-type SkillEditorMode = "create" | "edit";
+/** Create mode also validates that the name is unused. */
+export type SkillEditorMode = "create" | "edit";
 
 type SkillEditorContextValue = {
 	form: FormikContextType<SkillFormValues>;

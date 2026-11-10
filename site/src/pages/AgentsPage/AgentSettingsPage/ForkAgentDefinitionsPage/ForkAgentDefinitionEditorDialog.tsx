@@ -26,6 +26,7 @@ import {
 	SkillEditorDescriptionField,
 	SkillEditorFields,
 	SkillEditorForm,
+	type SkillEditorMode,
 	SkillEditorNameField,
 	SkillEditorSubmitError,
 	type SkillErrorDisplay,
@@ -44,7 +45,7 @@ import {
  * save is reported only as submitError here.
  */
 export type ForkAgentDefinitionEditorState = {
-	mode: "create" | "edit";
+	mode: SkillEditorMode;
 	/** Unset while an edited definition loads or after it fails to load. */
 	initialValues?: AgentDefinitionFormValues;
 	isLoading?: boolean;
@@ -128,7 +129,7 @@ export const ForkAgentDefinitionEditorDialog: React.FC<
 	return (
 		<Dialog open onOpenChange={handleOpenChange}>
 			<DialogContent
-				className="flex max-h-[90vh] max-w-2xl flex-col gap-0 overflow-hidden p-0"
+				className="flex max-w-2xl flex-col gap-0 overflow-hidden p-0"
 				onCloseAutoFocus={onCloseAutoFocus}
 				onEscapeKeyDown={dismissWithCancel}
 				onInteractOutside={dismissWithCancel}
@@ -156,10 +157,8 @@ type AgentDefinitionEditorFormProps = Pick<
 };
 
 /**
- * The skill form owns the name, description, and body. The model and the
- * other front-matter live here and join them in the saved markdown. Every
- * field keeps the values the form opened with as its baseline, so refreshed
- * initialValues cannot reset some fields and leave others stale.
+ * Every field keeps the values the form opened with as its baseline, so
+ * refreshed initialValues cannot reset some fields and leave others stale.
  */
 const AgentDefinitionEditorForm: React.FC<AgentDefinitionEditorFormProps> = ({
 	mode,
@@ -270,13 +269,16 @@ const AgentDefinitionModelField: React.FC<AgentDefinitionModelFieldProps> = ({
 // Outside the component: the React Compiler cannot compile this try/catch.
 const readAgentDefinitionFile = async (
 	file: File,
-): Promise<{ values?: AgentDefinitionFormValues; error?: string }> => {
+): Promise<
+	{ ok: true; values: AgentDefinitionFormValues } | { ok: false; error: string }
+> => {
 	try {
 		const values = parseAgentDefinitionMarkdown(
 			await readAgentAttachmentText(file),
 		);
 		// Like the workspace agent's loader, fall back to the file name.
 		return {
+			ok: true,
 			values: {
 				...values,
 				name: values.name || file.name.replace(/\.[^.]*$/, ""),
@@ -284,6 +286,7 @@ const readAgentDefinitionFile = async (
 		};
 	} catch (error) {
 		return {
+			ok: false,
 			error:
 				error instanceof Error ? error.message : "Could not read the file.",
 		};
@@ -319,9 +322,13 @@ const AgentDefinitionImport: React.FC<AgentDefinitionImportProps> = ({
 			);
 			return;
 		}
-		setIsReadingFile(true);
-		const { values, error } = await readAgentDefinitionFile(file);
-		if (values) {
+		const applyFile = async () => {
+			const result = await readAgentDefinitionFile(file);
+			if (!result.ok) {
+				setImportError(result.error);
+				return;
+			}
+			const { values } = result;
 			// Render the imported model first, so setValues validates the
 			// size with it.
 			flushSync(() => onImport(values));
@@ -336,9 +343,9 @@ const AgentDefinitionImport: React.FC<AgentDefinitionImportProps> = ({
 				{ name: mode === "create", description: true, body: true },
 				false,
 			);
-		}
-		setImportError(error);
-		setIsReadingFile(false);
+		};
+		setIsReadingFile(true);
+		await applyFile().finally(() => setIsReadingFile(false));
 	};
 
 	return (

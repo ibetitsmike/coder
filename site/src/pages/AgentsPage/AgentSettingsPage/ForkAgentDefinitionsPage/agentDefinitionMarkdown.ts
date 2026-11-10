@@ -14,9 +14,8 @@ import {
 import { isValidSkillDescription } from "../../utils/skills";
 
 /**
- * The editor's fields. frontMatter holds the definition's original YAML
- * front-matter, so saving rewrites only the owned keys and keeps every
- * other key and comment.
+ * frontMatter holds the definition's original YAML front-matter, so saving
+ * rewrites only the owned keys and keeps every other key and comment.
  */
 export type AgentDefinitionFormValues = {
 	name: string;
@@ -26,7 +25,7 @@ export type AgentDefinitionFormValues = {
 	frontMatter: string;
 };
 
-/** The editor's fields for a new agent definition. */
+/** An empty model means the definition uses the chat's model. */
 export const emptyAgentDefinitionFormValues: AgentDefinitionFormValues = {
 	name: "",
 	description: "",
@@ -98,7 +97,11 @@ const scalarFor = (value: unknown, replaced: Node) => {
 	return scalar;
 };
 
-/** Splits agent definition markdown into the editor's fields. */
+/**
+ * Throws when the content does not start with `---` front-matter. The
+ * returned frontMatter is the original text, so buildAgentDefinitionMarkdown
+ * keeps the keys and comments the editor does not own.
+ */
 export const parseAgentDefinitionMarkdown = (
 	content: string,
 ): AgentDefinitionFormValues => {
@@ -155,7 +158,10 @@ const readsBackAsString = (value: string) => {
 	}
 };
 
-/** Builds agent definition markdown from the editor's fields. */
+/**
+ * Rewrites only the name, description, and model in the front-matter, and
+ * keeps every other key, comment, and alias.
+ */
 export const buildAgentDefinitionMarkdown = (
 	values: AgentDefinitionFormValues,
 ): string => {
