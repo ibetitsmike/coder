@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -61,7 +62,7 @@ func (l *forkLoop) schedule(ctx context.Context, store database.Store, chat data
 	if l == nil {
 		return nil
 	}
-	_, err := l.server.createChatWakeup(ctx, store, chat, l.spec, now)
+	_, err := l.server.createChatWakeup(ctx, store, chat, uuid.New(), l.spec, now)
 	return err
 }
 

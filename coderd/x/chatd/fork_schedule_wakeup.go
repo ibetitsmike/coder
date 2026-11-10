@@ -77,12 +77,15 @@ func (p *Server) scheduleWakeupTool(chat database.Chat) fantasy.AgentTool {
 			"Optionally stop after max_runs runs or after expires_in_seconds. "+
 			"A wake-up never interrupts a running turn: it waits until the "+
 			"chat is idle. Returns the wake-up ID and its first run time.",
-		func(ctx context.Context, args scheduleWakeupArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, args scheduleWakeupArgs, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			spec, err := scheduleWakeupSpec(args)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-			wakeup, err := p.createChatWakeup(ctx, p.db, chat, spec, p.clock.Now())
+			// A tool call replayed after a worker restart must not create a
+			// second wake-up, so the ID derives from the call.
+			id := uuid.NewSHA1(chat.ID, []byte(call.ID))
+			wakeup, err := p.createChatWakeup(ctx, p.db, chat, id, spec, p.clock.Now())
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
@@ -186,9 +189,10 @@ func (spec wakeupSpec) validate() (wakeupSpec, error) {
 	return spec, nil
 }
 
-// createChatWakeup validates spec and creates an active wake-up of chat on
-// behalf of its owner. store may be a transaction.
-func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat database.Chat, spec wakeupSpec, now time.Time) (forkdb.ChatWakeup, error) {
+// createChatWakeup validates spec and creates an active wake-up of chat with
+// id on behalf of its owner. It returns the existing wake-up when chat already
+// has one with id. store may be a transaction.
+func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat database.Chat, id uuid.UUID, spec wakeupSpec, now time.Time) (forkdb.ChatWakeup, error) {
 	spec, err := spec.validate()
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
@@ -222,6 +226,9 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 	}
 	pending := 0
 	for _, wakeup := range existing {
+		if wakeup.ID == id {
+			return wakeup, nil
+		}
 		if wakeup.Status == forkdb.ChatWakeupStatusActive || wakeup.Status == forkdb.ChatWakeupStatusPaused {
 			pending++
 		}
@@ -231,7 +238,7 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 	}
 
 	wakeup, err := fdb.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
-		ID:              uuid.New(),
+		ID:              id,
 		ChatID:          chat.ID,
 		CreatedBy:       chat.OwnerID,
 		Source:          spec.source,

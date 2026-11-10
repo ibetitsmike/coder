@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -75,7 +77,20 @@ func TestScheduleWakeupTool(t *testing.T) {
 	}
 	require.Len(t, wakeups(), 2, "refused calls create nothing")
 
-	for i := range maxChatWakeups - 2 {
+	// A replayed tool call returns the wake-up it created the first time.
+	tool := findToolByName(tools, scheduleWakeupToolName)
+	call := fantasy.ToolCall{ID: uuid.NewString(), Name: scheduleWakeupToolName, Input: `{"prompt":"replayed","interval_seconds":60}`}
+	var replayed [2]scheduleWakeupResult
+	for i := range replayed {
+		resp, err := tool.Run(ctx, call)
+		require.NoError(t, err)
+		require.False(t, resp.IsError, resp.Content)
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &replayed[i]))
+	}
+	require.Equal(t, replayed[0].ID, replayed[1].ID)
+	require.Len(t, wakeups(), 3)
+
+	for i := range maxChatWakeups - 3 {
 		schedule(scheduleWakeupArgs{Prompt: fmt.Sprintf("poll %d", i), IntervalSeconds: new(60)}, false)
 	}
 	schedule(scheduleWakeupArgs{Prompt: "one too many", IntervalSeconds: new(60)}, true)
