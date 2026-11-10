@@ -206,6 +206,34 @@ func TestSubstituteExecuteSecretAnswers(t *testing.T) {
 	require.Contains(t, scrubSecretAnswers(decoded.Command, answers), "CODER_SECRET_ANSWER_2={{secret:call_s}}; ",
 		"the assignment the wrapper writes is scrubbed")
 
+	// The command cannot change the variable the wrapper assigns.
+	input, err = substituteExecuteSecretAnswers(
+		`{"command":"CODER_SECRET_ANSWER_2=other; unset CODER_SECRET_ANSWER_2_; printf '%s' {{secret:call_s}}","workdir":"/tmp/{{secret:call_s}}"}`, answers)
+	require.NoError(t, err)
+	var withWorkdir struct {
+		Command string `json:"command"`
+		Workdir string `json:"workdir"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(input), &withWorkdir))
+	require.Equal(t, "/tmp/"+value, withWorkdir.Workdir, "a placeholder in another parameter gets the value")
+	//nolint:gosec // The test runs the command the wrapper wrote.
+	out, err = exec.CommandContext(chatdTestContext(t), "sh", "-c", withWorkdir.Command).Output()
+	require.NoError(t, err, withWorkdir.Command)
+	require.Equal(t, value, string(out))
+
+	input, err = substituteExecuteSecretAnswers(`{"command":"echo hi","workdir":"{{secret:call_other}}"}`, answers)
+	require.NoError(t, err)
+	require.Equal(t, `{"command":"echo hi","workdir":"unused-value"}`, input)
+
+	// Bash runs the subscript of an array reference in a value that it
+	// evaluates as arithmetic, as in $(( )).
+	arithmetic := []forkdb.ChatSecretAnswer{{ToolCallID: "call_a", Value: "a[$(echo INJECTED)0]"}, {ToolCallID: "call_b", Value: "p[w]$d"}}
+	_, err = substituteExecuteSecretAnswers(`{"command":"echo $(( {{secret:call_a}} ))"}`, arithmetic)
+	require.ErrorContains(t, err, "the value of {{secret:call_a}} holds [ and then $ or a backtick")
+	_, err = substituteExecuteSecretAnswers(`{"command":"echo {{secret:call_b}}"}`, arithmetic)
+	require.Error(t, err)
+	require.False(t, secretArithmeticUnsafe("p$w[d]"), "a $ before the subscript is not expanded")
+
 	unchanged := `{"command":"echo hi"}`
 	input, err = substituteExecuteSecretAnswers(unchanged, answers)
 	require.NoError(t, err)

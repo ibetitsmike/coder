@@ -194,7 +194,9 @@ func substituteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) st
 // substituteExecuteSecretAnswers rewrites the command of an execute input
 // so the shell never parses a value as code: the command starts with a
 // shell-quoted assignment of each value it uses, and each placeholder
-// becomes an expansion of that variable.
+// becomes an expansion of that variable. Placeholders in the other
+// parameters, such as workdir, get the value as substituteSecretAnswers
+// writes it.
 func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAnswer) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
@@ -211,19 +213,44 @@ func substituteExecuteSecretAnswers(input string, answers []forkdb.ChatSecretAns
 		if !strings.Contains(command, placeholder) {
 			continue
 		}
-		name := fmt.Sprintf("CODER_SECRET_ANSWER_%d", i+1)
+		if secretArithmeticUnsafe(answer.Value) {
+			return "", xerrors.Errorf("the value of %s holds [ and then $ or a backtick, which Bash runs as code where it evaluates a variable as arithmetic, so execute does not take it; "+
+				"write it to a file with write_file and read it from there", placeholder)
+		}
+		name := secretShellVariableName(command, i+1)
 		vars = append(vars, secretShellVariable{placeholder: placeholder, name: name})
 		_, _ = fmt.Fprintf(&assignments, "%s=%s; ", name, shellQuote(answer.Value))
 	}
 	if len(vars) == 0 {
-		return input, nil
+		return substituteSecretAnswers(input, answers), nil
 	}
 	args["command"] = assignments.String() + expandSecretShellVariables(command, vars)
 	data, err := json.Marshal(args)
 	if err != nil {
 		return "", xerrors.Errorf("encode the execute input: %w", err)
 	}
-	return string(data), nil
+	return substituteSecretAnswers(string(data), answers), nil
+}
+
+// secretArithmeticUnsafe reports whether Bash can run part of value as code
+// when it evaluates a variable that holds value as arithmetic, for example
+// in $(( )), (( )), let or [[ -eq ]]. Such an evaluation expands only the
+// subscripts of array references in value, so a value is safe unless a $
+// or a backtick follows a [.
+func secretArithmeticUnsafe(value string) bool {
+	i := strings.IndexByte(value, '[')
+	return i >= 0 && strings.ContainsAny(value[i:], "$`")
+}
+
+// secretShellVariableName returns the variable for the nth answer, with
+// underscores added until command does not hold the name, so the command
+// cannot assign or unset it.
+func secretShellVariableName(command string, n int) string {
+	name := fmt.Sprintf("CODER_SECRET_ANSWER_%d", n)
+	for strings.Contains(command, name) {
+		name += "_"
+	}
+	return name
 }
 
 type secretShellVariable struct {
