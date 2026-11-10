@@ -142,10 +142,11 @@ A definition whose effort isn't a valid reasoning effort fails every spawn.
 A custom type starts with the tools of its base type, which is `general` unless the definition sets `base_type: explore`.
 Coder Agents then removes tools by the definition's `tools`, `disallowed_tools`, `readonly`, and `mcp` fields, as [Custom agent tool policy](#custom-agent-tool-policy) describes.
 Coder Agents ignores a definition named `general`, `explore`, or `computer_use`.
-With the experiment, the API also stores definitions for one user in an organization and for a whole organization.
-`spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization and the enabled organization definitions that the owner can read.
-A name that only one of the workspace, personal, and organization sources defines keeps its bare name.
-A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, or `org/<name>`.
+With the experiment, the API also stores definitions for one user in an organization, for a whole organization, and for a chat project.
+`spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
+It offers project definitions only when the chat owner owns the project or the project is shared with them, and a child chat uses its root chat's project.
+A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
+A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
 Without the experiment, a custom type fails with `type must be one of:` and the built-in types.
 
