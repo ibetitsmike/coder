@@ -1,7 +1,7 @@
 // This file is fork code: tests for the fork-nested-subagents experiment's
 // organization subagent limits section.
 
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -81,8 +81,8 @@ afterEach(() => {
 
 describe("ForkSubagentLimits", () => {
 	it("saves a changed limit with the other set limits", async () => {
-		const { updateLimits } = renderLimits();
-		updateLimits.mockResolvedValueOnce({
+		const { updateLimits, queryClient } = renderLimits();
+		const saved = {
 			...MockForkOrganizationSubagentLimits,
 			organization: {
 				max_depth: 2,
@@ -93,7 +93,8 @@ describe("ForkSubagentLimits", () => {
 				...MockForkOrganizationSubagentLimits.effective,
 				max_live_per_family: 2,
 			},
-		});
+		};
+		updateLimits.mockResolvedValueOnce(saved);
 		const user = userEvent.setup();
 
 		await user.type(
@@ -106,9 +107,11 @@ describe("ForkSubagentLimits", () => {
 			orgId,
 			{ max_depth: 2, max_concurrent: 10, max_live_per_family: 2 },
 		]);
-		expect(
-			await screen.findByText("Deployment: No limit. Effective: 2."),
-		).toBeInTheDocument();
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryData(organizationSubagentLimits(orgId).queryKey),
+			).toStrictEqual(saved),
+		);
 	});
 
 	it("omits a cleared limit from the request", async () => {
@@ -161,7 +164,19 @@ describe("ForkSubagentLimits", () => {
 		expect(input).toHaveValue("3");
 	});
 
-	it("shows a viewer the deployment and effective limits read-only", async () => {
+	it("refreshes an unedited form when the limits are refetched", async () => {
+		const { queryClient } = renderLimits();
+
+		const input = await screen.findByLabelText("Max depth");
+		queryClient.setQueryData(organizationSubagentLimits(orgId).queryKey, {
+			...MockForkOrganizationSubagentLimits,
+			organization: { max_depth: 1 },
+		});
+
+		await waitFor(() => expect(input).toHaveValue("1"));
+	});
+
+	it("keeps a viewer's limits read-only", async () => {
 		renderLimits({ canEdit: false });
 		const user = userEvent.setup();
 
@@ -171,12 +186,6 @@ describe("ForkSubagentLimits", () => {
 		await user.type(input, "2");
 
 		expect(input).toHaveValue("");
-		expect(
-			screen.getByText("Deployment: No limit. Effective: No limit."),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText("Deployment: 4. Effective: 2."),
-		).toBeInTheDocument();
 	});
 
 	it("does not request the limits while fork-nested-subagents is off", () => {

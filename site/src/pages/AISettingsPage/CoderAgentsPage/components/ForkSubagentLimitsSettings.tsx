@@ -2,6 +2,8 @@
 // subagent limits form on the Coder Agents settings page.
 
 import { useFormik } from "formik";
+import isEqual from "lodash/isEqual";
+import { useState } from "react";
 import { getErrorMessage } from "#/api/errors";
 import {
 	type ForkOrganizationSubagentLimits,
@@ -146,9 +148,10 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 	saveError,
 }) => {
 	const { isSavedVisible, showSavedState } = useTemporarySavedState();
+	const [hasDraft, setHasDraft] = useState(false);
 	const form = useFormik<FormValues>({
-		// No enableReinitialize: a refetch must not discard in-progress edits.
-		// Saving resets the form, and a new organization remounts it.
+		// A refetch updates an unedited form but must not discard a draft.
+		enableReinitialize: !hasDraft,
 		validateOnMount: true,
 		initialValues: toFormValues(limits.organization),
 		validate,
@@ -158,11 +161,18 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 				onSuccess: () => {
 					showSavedState();
 					resetForm({ values: toFormValues(request) });
+					setHasDraft(false);
 				},
 			});
 		},
 	});
 	const getFieldHelpers = getFormHelpers(form, saveError);
+	const changeValue = (field: LimitField, value: string) => {
+		setHasDraft(
+			!isEqual({ ...form.values, [field]: value }, form.initialValues),
+		);
+		void form.setFieldValue(field, value);
+	};
 
 	return (
 		<AgentSettingLayout
@@ -194,6 +204,7 @@ const SubagentLimitsForm: React.FC<SubagentLimitsFormProps> = ({
 					<FormField
 						key={field}
 						field={getFieldHelpers(field)}
+						onChange={(event) => changeValue(field, event.target.value)}
 						label={label}
 						description={
 							<>
