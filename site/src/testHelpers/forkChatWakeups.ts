@@ -56,6 +56,7 @@ export const MockChatWakeupEvents: ChatWakeup = {
 		},
 	],
 	status: "active",
+	next_run_at: "2099-01-01T09:01:00Z",
 	run_count: 0,
 	created_at: "2026-11-10T08:00:00Z",
 	updated_at: "2026-11-10T08:00:00Z",

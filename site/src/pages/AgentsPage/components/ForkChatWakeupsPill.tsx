@@ -186,10 +186,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 	errorMessage,
 }) => {
 	const schedule = formatWakeupSchedule(wakeup);
-	const now = useTime(() => Date.now(), {
-		disabled: !wakeup.next_run_at,
-		interval: 30_000,
-	});
+	const now = useTime(() => Date.now(), { interval: 30_000 });
 	const toggleLabel = wakeup.status === "active" ? "Pause" : "Resume";
 	const statusParts: string[] = [];
 	if (wakeup.status === "active" && wakeup.next_run_at) {
