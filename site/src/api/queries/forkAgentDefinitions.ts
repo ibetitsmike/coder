@@ -79,15 +79,20 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			req,
 		}: UpdateUserAgentDefinitionArgs) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
-		// Writing the result keeps an accepted change visible even if the
-		// reconciling refetch below fails.
-		onSuccess: ({ content: _content, ...updated }, { organizationId }) => {
+		// Writing the result keeps an accepted change visible, in the list and
+		// in a reopened editor, even if the reconciling refetch below fails.
+		onSuccess: (definition, { organizationId, name }) => {
+			const { content: _content, ...updated } = definition;
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
 				(definitions) =>
-					definitions?.map((definition) =>
-						definition.id === updated.id ? updated : definition,
+					definitions?.map((listed) =>
+						listed.id === updated.id ? updated : listed,
 					),
+			);
+			queryClient.setQueryData(
+				userAgentDefinition(organizationId, name).queryKey,
+				definition,
 			);
 		},
 		// Not exact, so a reopened editor refetches the definition it saved.

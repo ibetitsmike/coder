@@ -467,6 +467,112 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 	});
 
+	it("reopens a saved definition with its saved content when the refetch fails", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		queryClient.setQueryDefaults(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			{ gcTime: Number.POSITIVE_INFINITY },
+		);
+		const content = (description: string) =>
+			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
+		const saved = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+		};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: content("Reviews diffs."),
+			})
+			.mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue({
+			...saved,
+			content: content("Reviews diffs for bugs."),
+		});
+		const toastSuccess = vi.spyOn(toast, "success");
+		const openEditor = async () => {
+			await user.click(
+				await screen.findByRole("button", {
+					name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+				}),
+			);
+			await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		};
+
+		await openEditor();
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		getDefinitions.mockResolvedValue([saved]);
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+		await openEditor();
+
+		expect(await screen.findByLabelText("Description")).toHaveValue(
+			"Reviews diffs for bugs.",
+		);
+	});
+
+	it.each([
+		{
+			change: "recreated",
+			current: { id: "agent-definition-recreated" },
+		},
+		{
+			change: "edited elsewhere",
+			current: { updated_at: "2030-01-01T00:00:00Z" },
+		},
+	])(
+		"waits for a definition $change instead of opening its old cached content",
+		async ({ current }) => {
+			const user = userEvent.setup();
+			const { getDefinitions, queryClient } = renderPage();
+			const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+			queryClient.setQueryDefaults(listKey, {
+				gcTime: Number.POSITIVE_INFINITY,
+			});
+			const listed = { ...MockForkAgentDefinitionMetadata, ...current };
+			vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+				.mockResolvedValueOnce({
+					...MockForkAgentDefinitionMetadata,
+					content:
+						"---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+				})
+				.mockResolvedValue({
+					...listed,
+					content:
+						"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
+				});
+			const openEditor = async () => {
+				await user.click(
+					await screen.findByRole("button", {
+						name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+					}),
+				);
+				await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+			};
+
+			await openEditor();
+			await screen.findByLabelText("Description");
+			getDefinitions.mockResolvedValue([listed]);
+			await queryClient.refetchQueries({ queryKey: listKey, exact: true });
+			await user.keyboard("{Escape}");
+			await openEditor();
+
+			expect(await screen.findByLabelText("Description")).toHaveValue(
+				"Current.",
+			);
+		},
+	);
+
 	it("keeps the tool list of an edited definition", async () => {
 		const user = userEvent.setup();
 		renderPage();

@@ -163,9 +163,20 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onClose: () => closeEditor(createMutation.isPending),
 		};
 	} else if (editorTarget?.mode === "edit") {
-		const loaded = definitionQuery.data
-			? editFormValues(definitionQuery.data)
-			: undefined;
+		const detail = definitionQuery.data;
+		const listed = definitionsQuery.data?.find(
+			(definition) => definition.name === editorTarget.name,
+		);
+		// Cached content can predate a save, delete, or recreate that the
+		// list already shows, so it seeds the editor only when it is as new
+		// as the listed definition or a fetch just returned it.
+		const isCurrent =
+			detail !== undefined &&
+			(!listed ||
+				(detail.id === listed.id &&
+					new Date(detail.updated_at) >= new Date(listed.updated_at)) ||
+				(definitionQuery.isSuccess && !definitionQuery.isFetching));
+		const loaded = isCurrent ? editFormValues(detail) : undefined;
 		// The editor keeps the first values it gets, cached or fetched, so a
 		// later refetch cannot reset the user's edits.
 		if (loaded?.values && !editorTarget.values) {
