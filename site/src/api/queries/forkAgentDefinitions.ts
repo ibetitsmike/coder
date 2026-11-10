@@ -206,9 +206,10 @@ type DeleteAgentDefinitionArgs = {
 };
 
 /**
- * Mutation options that delete an agent definition. The list is invalidated after failures too, because a 404 or a lost
- * response can mean the definition is already gone. A success also removes
- * the row from the cache so a failed refetch cannot leave it actionable.
+ * Mutation options that delete an agent definition. The list is invalidated
+ * after failures too, because a 404 or a lost response can mean the
+ * definition is already gone. A success also removes the row from the cache
+ * so a failed refetch cannot leave it actionable.
  */
 export const deleteAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({

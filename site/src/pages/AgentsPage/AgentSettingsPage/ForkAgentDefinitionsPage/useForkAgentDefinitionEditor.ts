@@ -27,8 +27,8 @@ import {
 } from "./agentDefinitionMarkdown";
 import type { ForkAgentDefinitionEditorState } from "./ForkAgentDefinitionEditorDialog";
 
-// Targets keep the organization they were opened in, so a change of the
-// selected organization closes them instead of sending their input there.
+// Targets keep the scope they were opened in, so a change of the selected
+// organization closes them instead of sending their input there.
 type EditorTarget = { scope: AgentDefinitionScope } & (
 	| { mode: "create" }
 	| {

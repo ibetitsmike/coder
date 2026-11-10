@@ -35,6 +35,9 @@ const copy = {
 	{ description: string; emptyMessage: string }
 >;
 
+const scopeKey = ({ tier, organizationId }: AgentDefinitionScope) =>
+	`${tier}/${organizationId}`;
+
 type ForkAgentDefinitionsTableProps = {
 	scope: AgentDefinitionScope;
 	access?: SkillAccess;
@@ -45,11 +48,13 @@ export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
 > = ({ scope, access, action }) => {
 	const queryClient = useQueryClient();
-	const [selectedDeleteTarget, setDeleteTarget] =
-		useState<ForkAgentDefinitionMetadata>();
+	const [selectedDeleteTarget, setDeleteTarget] = useState<{
+		definition: ForkAgentDefinitionMetadata;
+		scope: AgentDefinitionScope;
+	}>();
 	const deleteTarget =
-		selectedDeleteTarget?.organization_id === scope.organizationId
-			? selectedDeleteTarget
+		selectedDeleteTarget && isSameScope(selectedDeleteTarget.scope, scope)
+			? selectedDeleteTarget.definition
 			: undefined;
 	if (selectedDeleteTarget && !deleteTarget) {
 		setDeleteTarget(undefined);
@@ -58,22 +63,23 @@ export const ForkAgentDefinitionsTable: React.FC<
 	const { editorState, openCreate, openEdit } =
 		useForkAgentDefinitionEditor(scope);
 
-	// Pending toggles are keyed by organization, then name, so a second
-	// toggle, or a switch to another organization with the same names, does
-	// not hide or borrow a pending value while its request runs. Callbacks
-	// read the organization from the variables because TanStack Query runs
-	// the latest options when an earlier request settles.
+	// Pending toggles are keyed by scope, then name, so a second toggle, or a
+	// switch to another organization with the same names, does not hide or
+	// borrow a pending value while its request runs. Callbacks read the scope
+	// from the variables because TanStack Query runs the latest options when
+	// an earlier request settles.
 	const [pendingToggles, setPendingToggles] = useState<
 		Readonly<Record<string, Readonly<Record<string, boolean>>>>
 	>({});
 	const updateOptions = updateAgentDefinition(queryClient);
 	const toggleMutation = useMutation({
 		...updateOptions,
-		onMutate: ({ scope: { organizationId: orgId }, name, req }) => {
+		onMutate: ({ scope: requestScope, name, req }) => {
+			const key = scopeKey(requestScope);
 			setPendingToggles((current) => ({
 				...current,
-				[orgId]: {
-					...current[orgId],
+				[key]: {
+					...current[key],
 					[name]: Boolean(req.enabled),
 				},
 			}));
@@ -85,14 +91,14 @@ export const ForkAgentDefinitionsTable: React.FC<
 		},
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
-			const {
-				scope: { organizationId: orgId },
-				name,
-			} = args[2];
+			const { scope: requestScope, name } = args[2];
+			const key = scopeKey(requestScope);
 			setPendingToggles((current) => ({
 				...current,
-				[orgId]: Object.fromEntries(
-					Object.entries(current[orgId] ?? {}).filter(([key]) => key !== name),
+				[key]: Object.fromEntries(
+					Object.entries(current[key] ?? {}).filter(
+						([pendingName]) => pendingName !== name,
+					),
 				),
 			}));
 		},
@@ -153,7 +159,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onRetry={() => {
 				void definitionsQuery.refetch();
 			}}
-			pendingToggles={pendingToggles[scope.organizationId]}
+			pendingToggles={pendingToggles[scopeKey(scope)]}
 			onToggleEnabled={(name, enabled) =>
 				toggleMutation.mutate({ scope, name, req: { enabled } })
 			}
@@ -162,7 +168,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 			editorState={editorState}
 			onDelete={(definition) => {
 				deleteMutation.reset();
-				setDeleteTarget(definition);
+				setDeleteTarget({ definition, scope });
 			}}
 			deleteState={deleteState}
 		/>
