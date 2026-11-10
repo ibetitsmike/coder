@@ -48,6 +48,6 @@ describe("ask_user_question rows", () => {
 
 		expect(screen.getByText("Paste the token.")).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
-		expect(screen.queryByRole("textbox")).toBeNull();
+		expect(screen.getByRole("textbox")).toBeDisabled();
 	});
 });
