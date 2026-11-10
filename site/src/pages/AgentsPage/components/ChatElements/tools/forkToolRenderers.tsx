@@ -5,6 +5,8 @@ import type React from "react";
 import { useContext } from "react";
 import type { Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
+import { ForkChatTranscriptToolRenderer } from "./ForkChatTranscriptTool";
+import { ForkSearchChatsToolRenderer } from "./ForkSearchChatsTool";
 import { ForkTodoToolRenderer } from "./ForkTodoTool";
 import type { toolRenderers } from "./Tool";
 
@@ -43,8 +45,20 @@ export const createForkToolRenderers = (
 	fallback: ToolRenderer,
 ): Record<string, ToolRenderer> => {
 	const todoRenderer = gate("fork-chat-todos", ForkTodoToolRenderer, fallback);
+	const searchChatsRenderer = gate(
+		"fork-chat-todos",
+		ForkSearchChatsToolRenderer,
+		fallback,
+	);
+	const chatTranscriptRenderer = gate(
+		"fork-chat-todos",
+		ForkChatTranscriptToolRenderer,
+		fallback,
+	);
 	return {
 		todo_write: todoRenderer,
 		todo_read: todoRenderer,
+		search_chats: searchChatsRenderer,
+		read_chat_transcript: chatTranscriptRenderer,
 	};
 };
