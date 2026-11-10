@@ -29,6 +29,7 @@ import { Input } from "#/components/Input/Input";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { passwordManagerIgnoreProps } from "#/utils/formUtils";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
+import { Response } from "./ChatElements/Response";
 import { AskUserQuestionForm } from "./ChatElements/tools/AskUserQuestionTool";
 import { getQuestionCallKey } from "./ChatElements/tools/questionDraft";
 
@@ -197,8 +198,10 @@ const SecretQuestionForm: React.FC<{
 	secretQuestion: ChatQuestion;
 	canAnswer: boolean;
 }> = ({ rootChatId, question, secretQuestion, canAnswer }) => {
-	const inputId = useId();
-	const helperId = useId();
+	const idPrefix = useId();
+	const headerId = `${idPrefix}-header`;
+	const textId = `${idPrefix}-text`;
+	const helperId = `${idPrefix}-helper`;
 	const queryClient = useQueryClient();
 	const [value, setValue] = useState("");
 	const answerMutation = useMutation(
@@ -206,10 +209,21 @@ const SecretQuestionForm: React.FC<{
 	);
 	const isSubmitting = answerMutation.isPending;
 
-	// The question stays in the dock until the questions reload.
+	// The question stays in the dock until the questions reload. The status
+	// takes the focus of the submit button it replaces, so the section still
+	// holds focus when the next question replaces it.
 	if (answerMutation.isSuccess) {
 		return (
-			<p role="status" className="text-[13px] text-content-secondary">
+			<p
+				ref={(status) => {
+					if (status && document.activeElement === document.body) {
+						status.focus({ preventScroll: true });
+					}
+				}}
+				role="status"
+				tabIndex={-1}
+				className="text-[13px] text-content-secondary focus:outline-hidden"
+			>
 				Secret answer sent.
 			</p>
 		);
@@ -228,18 +242,19 @@ const SecretQuestionForm: React.FC<{
 				);
 			}}
 		>
-			<label htmlFor={inputId} className="block text-[13px]">
-				<span className="block font-medium text-content-primary">
-					{secretQuestion.header}
-				</span>
-				<span className="mt-1 block text-content-secondary">
-					{secretQuestion.question}
-				</span>
-			</label>
+			<p
+				id={headerId}
+				className="m-0 text-[13px] font-medium text-content-primary"
+			>
+				{secretQuestion.header}
+			</p>
+			<Response id={textId} className="mt-1 text-[13px] text-content-secondary">
+				{secretQuestion.question}
+			</Response>
 			<Input
-				id={inputId}
 				type="password"
 				{...passwordManagerIgnoreProps}
+				aria-labelledby={`${headerId} ${textId}`}
 				aria-describedby={helperId}
 				spellCheck={false}
 				className="mt-2"

@@ -261,7 +261,8 @@ describe("ForkDescendantQuestionDock", () => {
 		await user.type(field, "hunter2-secret-value");
 		await user.click(screen.getByRole("button", { name: "Submit" }));
 
-		await screen.findByText("Secret answer sent.");
+		// The status keeps the dock's focus, so the next question takes it.
+		expect(await screen.findByRole("status")).toHaveFocus();
 		expect(secretAnswers).toEqual([
 			{
 				chatId: secretQuestion.chat_id,

@@ -89,7 +89,7 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 	if !t.secretAllowed() {
 		return info
 	}
-	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
+	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and an empty options list. " +
 		"The answer never reaches you: write " + secretPlaceholder("<this call's ID>") + " in execute, write_file or edit_files input where the value belongs. " +
 		"Those tools get the value, and tool output shows the placeholder instead of it."
 	if questions, ok := info.Parameters["questions"].(map[string]any); ok {
@@ -97,10 +97,9 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 			if properties, ok := items["properties"].(map[string]any); ok {
 				properties["secret"] = map[string]any{
 					"type":        "boolean",
-					"description": "Ask for a secret value. A secret question is the only question of its call and has no options.",
+					"description": "Ask for a secret value. A secret question is the only question of its call, and its options list is empty.",
 				}
 			}
-			items["required"] = []string{"header", "question"}
 		}
 	}
 	return info

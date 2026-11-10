@@ -702,7 +702,7 @@ const AskUserQuestionRenderer: React.FC<ToolRendererProps> = ({
 			isError={isError}
 			errorMessage={errorMessage || undefined}
 			onSubmitAnswer={
-				hasSecretQuestion(args) ? undefined : onSendAskUserQuestionResponse
+				hasSecretQuestion(args, result) ? undefined : onSendAskUserQuestionResponse
 			}
 			isChatCompleted={isChatCompleted}
 			isLatestAskUserQuestion={isLatestAskUserQuestion}
