@@ -364,8 +364,10 @@ When Coder Agents can't read the workspace, the result has `workspace_error` ins
 `isolation: "workspace"` fails for a `computer_use` child with `isolation workspace is not supported for computer use agents`, and in a chat without a workspace with `isolation workspace copies this chat's workspace, and this chat has none`.
 `repo_path` or `base_branch` with it fails with `repo_path and base_branch need isolation worktree`.
 When the build fails, or the agent or its startup scripts don't get ready, `spawn_agent` fails with `create the child's workspace: <result>`, where `<result>` is the `create_workspace` result.
-Coder Agents then archives the child and stops the workspace, if it created one.
-Otherwise Coder Agents doesn't stop or delete the child's workspace, not even after you archive the chats.
+It fails the same way before any build when the parent workspace's template doesn't allow Coder Agents or has an externally managed agent, so spawn the child with `isolation: "shared"` or `isolation: "worktree"` in such a workspace.
+After a failed spawn, Coder Agents archives the child and tries once to stop the workspace, if it created one, but it doesn't retry a failed archive or stop and never deletes the workspace.
+So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
+When the spawn succeeds, Coder Agents doesn't stop or delete the child's workspace, not even after you archive the chats.
 Delete it on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
 
 ## Models
@@ -481,7 +483,8 @@ Checked against fork `main` at `5f6b636911`:
   Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
 - Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:42-46`, `:82-89`, checks, `:108-111`, result fields, `:135-141`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:209-219`, `:298-303`.
-  Archived and stopped on failure, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
+  The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`.
+  Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
   No other stop or delete: `stopWorkspaceFn` has no other caller in `coderd/x/chatd` than the root chat's `stop_workspace`, `coderd/x/chatd/turn_environment.go:2616-2622`, and the workspace tools are root-only, `:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
