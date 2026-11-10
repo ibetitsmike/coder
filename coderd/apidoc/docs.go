@@ -24604,6 +24604,12 @@ const docTemplate = `{
         "codersdk.ChatModelCallConfig": {
             "type": "object",
             "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "frequency_penalty": {
                     "type": "number"
                 },

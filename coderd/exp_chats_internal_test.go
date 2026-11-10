@@ -599,6 +599,7 @@ func TestIsZeroChatModelCallConfigCoversEveryField(t *testing.T) {
 		ProviderOptions: &codersdk.ChatModelProviderOptions{
 			OpenAI: &codersdk.ChatModelOpenAIProviderOptions{},
 		},
+		Aliases: []string{"fast"},
 	}
 
 	require.True(t, isZeroChatModelCallConfig(nil))
