@@ -74,6 +74,29 @@ describe("agent definition markdown", () => {
 		);
 	});
 
+	it("puts owned keys the file lacks before its other keys", () => {
+		const parsed = parseAgentDefinitionMarkdown(
+			"---\nmodel: sonnet\ntools: Read\n---\nWrite release notes.",
+		);
+		const rebuilt = buildAgentDefinitionMarkdown({
+			...parsed,
+			name: "release-notes",
+			description: "Writes release notes.",
+		});
+		expect(rebuilt).toBe(
+			[
+				"---",
+				"name: release-notes",
+				"description: Writes release notes.",
+				"model: sonnet",
+				"tools: Read",
+				"---",
+				"Write release notes.",
+				"",
+			].join("\n"),
+		);
+	});
+
 	it("quotes values YAML would read as another type", () => {
 		const rebuilt = buildAgentDefinitionMarkdown({
 			...emptyAgentDefinitionFormValues,
