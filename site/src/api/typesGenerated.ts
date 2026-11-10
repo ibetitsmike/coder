@@ -2208,6 +2208,12 @@ export interface Chat {
 	 * is present as []. Always empty for child chats.
 	 */
 	readonly children: readonly Chat[];
+	/**
+	 * AgentType is the subagent type of a child chat, such as explore or a
+	 * custom agent definition name. Only set with the
+	 * fork-agent-definitions experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/chats.go
@@ -6302,6 +6308,31 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+}
+
+// From codersdk/fork_chat_family.go
+/**
+ * ForkChatFamilyCapacity is the subagent capacity of the family under a root
+ * chat. It is computed without a lock, so it may be stale when read.
+ */
+export interface ForkChatFamilyCapacity {
+	/**
+	 * LiveSubagents counts the unarchived subagents that have not finished:
+	 * status running, interrupting, requires_action or paused.
+	 */
+	readonly live_subagents: number;
+	/**
+	 * MaxLiveSubagents is the family's live subagent limit in force. 0 means
+	 * no limit. A spawn, or a message_agent that resumes a finished
+	 * subagent, fails while LiveSubagents is at the limit.
+	 */
+	readonly max_live_subagents: number;
+	/**
+	 * WaitingForCapacity lists the running subagents that no worker owns
+	 * because a deployment, organization or family concurrency limit is
+	 * full.
+	 */
+	readonly waiting_for_capacity: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go

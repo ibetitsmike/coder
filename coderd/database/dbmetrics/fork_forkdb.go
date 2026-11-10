@@ -157,6 +157,11 @@ func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chat
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
+	defer f.observe(ctx, "GetChatSubagentTypesByChatIDs", time.Now())
+	return f.s.GetChatSubagentTypesByChatIDs(ctx, chatIDs)
+}
+
 func (f forkQueryMetricsStore) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "GetChatSubagentsByParentChatID", time.Now())
 	return f.s.GetChatSubagentsByParentChatID(ctx, parentChatID)
@@ -180,6 +185,11 @@ func (f forkQueryMetricsStore) GetPendingChatDescendantQuestion(ctx context.Cont
 func (f forkQueryMetricsStore) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "GetChatWakeupByID", time.Now())
 	return f.s.GetChatWakeupByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
+	defer f.observe(ctx, "GetFamilySubagentsAwaitingWorker", time.Now())
+	return f.s.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
