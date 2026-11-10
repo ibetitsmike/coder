@@ -248,7 +248,7 @@ func TestForkSpawnIsolationWorktree(t *testing.T) {
 		require.True(t, ok, info.Parameters)
 		enum, ok := isolation["enum"].([]any)
 		require.True(t, ok, isolation)
-		require.ElementsMatch(t, []any{"shared", "worktree"}, enum)
+		require.ElementsMatch(t, []any{"shared", "worktree", "workspace"}, enum)
 		require.Contains(t, info.Parameters, "repo_path")
 		require.Contains(t, info.Parameters, "base_branch")
 		require.Contains(t, info.Parameters, "prompt")
@@ -367,13 +367,19 @@ func TestForkSpawnIsolationErrors(t *testing.T) {
 		{
 			name:    "UnknownIsolation",
 			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
-			args:    map[string]any{"isolation": "workspace"},
-			wantErr: "isolation must be one of: shared, worktree",
+			args:    map[string]any{"isolation": "container"},
+			wantErr: "isolation must be one of: shared, worktree, workspace",
 		},
 		{
 			name:    "RepoPathWithoutWorktree",
 			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
 			args:    map[string]any{"repo_path": "/src/other"},
+			wantErr: "repo_path and base_branch need isolation worktree",
+		},
+		{
+			name:    "RepoPathWithWorkspace",
+			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
+			args:    map[string]any{"isolation": "workspace", "repo_path": "/src/other"},
 			wantErr: "repo_path and base_branch need isolation worktree",
 		},
 		{
