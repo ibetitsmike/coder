@@ -48,6 +48,7 @@ There is other data that is held in the database and is associated with a chat, 
 - file links.
 
 <!-- TODO(fork-chat-todos): classify the chat todo list in `chatd.chat_todos` (fork-chat-todos experiment) as execution state or metadata. -->
+<!-- TODO(ibetitsmike): classify the descendant question in `chatd.chat_descendant_questions` (fork-nested-subagents experiment) as execution state or metadata. -->
 <!-- TODO(ibetitsmike): classify chat wake-ups in `chatd.chat_wakeups` and their runs in `chatd.chat_wakeup_runs` (fork-chat-wakeups experiment) as execution state or metadata, and describe how a due wake-up sends its prompt to the chat. -->
 
 We call it **metadata**. The core state machine concerns itself with **execution state**. As a general guideline, a piece of data is execution state if the core state machine needs it to decide what the next state transition may be, or if it's directly modified by a state transition. For example, a queued message is part of the execution state because it impacts what the next action of the agent loop can be. If the agent loop finishes processing a user message and would otherwise stop, but there's a queued message, the agent loop will start processing the queued message instead. On the other hand, a chat's title does not impact the agent loop at all - it's just a label that helps the user identify the chat.
@@ -875,6 +876,8 @@ The chat worker is responsible for:
 - maintaining in-memory buffers of in-flight message parts for each chat;
 - cleaning up runners when a chat is no longer owned by the runner, which it detects by inspecting `chat:update:{chat_id}` notifications and database sync results.
 
+<!-- TODO(ibetitsmike): describe the fork-chat-wakeups loop (fork_wakeups.go): it claims due chatd.chat_wakeups rows with a lease, skips busy chats until the next tick, and sends the prompt through SendMessage as the owner. -->
+
 A chat worker is identified by a **worker ID**, which is regenerated on worker startup.
 
 ## Organization-local model selection and fallback
@@ -1205,6 +1208,7 @@ The generation goroutine supports:
   <!-- TODO(fork-chat-todos): document search_chats and the include_tool_calls option that fork-chat-todos adds to wait_agent. -->
   <!-- TODO(ibetitsmike): mention fork tools that `appendForkTools` adds when their fork experiment is enabled. -->
   <!-- TODO(ibetitsmike): describe nested subagents (fork-nested-subagents): non-root general chats get the subagent tools below the maximum depth, and the subagent tools act on direct children only. -->
+  <!-- TODO(ibetitsmike): describe the descendant ask_user_question (fork-nested-subagents): a non-root chat that is not an explore subagent gets a blocking ask_user_question that records the question in `chatd.chat_descendant_questions` and ends the turn; the answer is the next user message. wait_agent reports needs_input while a child's question is unanswered and waits for the answer when called while it is pending. -->
   <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
 - file links
 - workspace binding
