@@ -29,11 +29,14 @@ func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *s
 	}
 	target := sql.NullString{String: cryptDB.primaryCipherDigest, Valid: cryptDB.primaryCipherDigest != ""}
 	log.Info(ctx, "re-encrypting chat secret answers")
-	var count int
-	// A recrypted answer leaves the filter, so each page starts at the
-	// first answer that is left.
+	var (
+		count int
+		after forkdb.ChatSecretAnswer
+	)
+	// Each page starts after the last answer of the previous one, so no
+	// page rescans the answers that are already recrypted.
 	for {
-		answers, err := chatSecretAnswersNotEncryptedWith(ctx, sqlDB, target)
+		answers, err := chatSecretAnswersNotEncryptedWith(ctx, sqlDB, target, after)
 		if err != nil {
 			return err
 		}
@@ -59,17 +62,21 @@ func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *s
 		if len(answers) < chatSecretAnswersPageSize {
 			break
 		}
+		after = answers[len(answers)-1]
 	}
 	log.Info(ctx, "re-encrypted chat secret answers", slog.F("answer_count", count))
 	return nil
 }
 
 // chatSecretAnswersNotEncryptedWith returns up to chatSecretAnswersPageSize
-// answers whose key is not keyID.
-func chatSecretAnswersNotEncryptedWith(ctx context.Context, sqlDB *sql.DB, keyID sql.NullString) ([]forkdb.ChatSecretAnswer, error) {
+// answers whose key is not keyID, in key order after the answer after. The
+// zero answer comes before every answer.
+func chatSecretAnswersNotEncryptedWith(ctx context.Context, sqlDB *sql.DB, keyID sql.NullString, after forkdb.ChatSecretAnswer) ([]forkdb.ChatSecretAnswer, error) {
 	rows, err := sqlDB.QueryContext(ctx,
-		`SELECT chat_id, tool_call_id, value, value_key_id FROM chat_secret_answers WHERE value_key_id IS DISTINCT FROM $1 ORDER BY chat_id, tool_call_id LIMIT $2`,
-		keyID, chatSecretAnswersPageSize)
+		`SELECT chat_id, tool_call_id, value, value_key_id FROM chat_secret_answers
+		WHERE value_key_id IS DISTINCT FROM $1 AND (chat_id, tool_call_id) > ($3, $4)
+		ORDER BY chat_id, tool_call_id LIMIT $2`,
+		keyID, chatSecretAnswersPageSize, after.ChatID, after.ToolCallID)
 	if err != nil {
 		return nil, xerrors.Errorf("get chat secret answers: %w", err)
 	}
