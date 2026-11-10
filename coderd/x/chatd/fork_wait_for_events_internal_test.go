@@ -146,7 +146,9 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
-	require.True(t, now.Add(wakeupPollInterval).Equal(got.NextRunAt.Time), "polls again: %s", got.NextRunAt.Time)
+	// The worker adds the time it spent since the claim to now.
+	require.WithinDuration(t, now.Add(wakeupPollInterval), got.NextRunAt.Time, time.Second, "polls again")
+	require.False(t, got.NextRunAt.Time.Before(now.Add(wakeupPollInterval)))
 
 	forceExecutionState(t, f, one.ID, database.ChatStatusWaiting, false)
 	tick()
