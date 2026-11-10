@@ -77,6 +77,12 @@ func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Reque
 				slog.F("chat_id", row.ChatID), slog.Error(err))
 			continue
 		}
+		// Secret questions have no options; clients iterate them.
+		for i := range items {
+			if items[i].Options == nil {
+				items[i].Options = []codersdk.ChatQuestionOption{}
+			}
+		}
 		questions = append(questions, codersdk.ChatDescendantQuestion{
 			ChatID:       row.ChatID,
 			ParentChatID: row.ParentChatID.UUID,
@@ -89,7 +95,7 @@ func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Reque
 	httpapi.Write(ctx, rw, http.StatusOK, questions)
 }
 
-// @Summary Answer a secret descendant question
+// @Summary Answer secret descendant question
 // @ID answer-secret-descendant-question
 // @Security CoderSessionToken
 // @Accept json
@@ -192,20 +198,12 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusNoContent)
 }
 
-// rejectSecretQuestionAnswer refuses a message that answers the pending
-// secret question of chat: only postChatSecretAnswer keeps the value out of
-// the chat's messages. Errors implement httperror.Responder.
-func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Chat, req codersdk.CreateChatMessageRequest) error {
+// rejectSecretQuestionAnswer refuses every message to a chat whose pending
+// question is secret. Any user message answers the pending question, and
+// only postChatSecretAnswer keeps the value out of the chat's messages.
+// Errors implement httperror.Responder.
+func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Chat) error {
 	if !chat.ParentChatID.Valid {
-		return nil
-	}
-	var text strings.Builder
-	for _, part := range req.Content {
-		if part.Type == codersdk.ChatInputPartTypeText {
-			text.WriteString(part.Text)
-		}
-	}
-	if !strings.HasPrefix(strings.TrimSpace(text.String()), questionAnswerPrefix) {
 		return nil
 	}
 	fdb, err := forkdb.From(api.Database)

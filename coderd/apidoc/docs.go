@@ -5615,7 +5615,7 @@ const docTemplate = `{
                 "tags": [
                     "Chats"
                 ],
-                "summary": "Answer a secret descendant question",
+                "summary": "Answer secret descendant question",
                 "operationId": "answer-secret-descendant-question",
                 "parameters": [
                     {

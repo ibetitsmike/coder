@@ -159,7 +159,7 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	})
 	user := coderdtest.CreateFirstUser(t, client.Client)
 	modelConfig := createChatModel(t, client)
-	_, child, grandchild := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	root, child, grandchild := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
 	sysCtx := dbauthz.AsSystemRestricted(ctx)
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
@@ -184,8 +184,23 @@ func TestForkChatSecretAnswer(t *testing.T) {
 		require.Equal(t, want, sdkErr.StatusCode())
 	}
 
-	// The normal answer path cannot carry a secret answer into the chat.
+	listed, err := client.ChatDescendantQuestions(ctx, root.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 2)
+	for _, q := range listed {
+		for _, item := range q.Questions {
+			require.NotNil(t, item.Options, "options serialize as an array, not null")
+		}
+	}
+
+	// The normal answer path cannot carry a secret answer into the chat,
+	// with or without the answer prefix.
 	_, err = client.CreateChatMessage(ctx, child.ID, answerText("call-secret", secret))
+	requireStatus(t, http.StatusConflict, err)
+	_, err = client.CreateChatMessage(ctx, child.ID, codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+		Type: codersdk.ChatInputPartTypeText,
+		Text: secret,
+	}}})
 	requireStatus(t, http.StatusConflict, err)
 
 	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-other", codersdk.ChatSecretAnswerRequest{Value: secret})

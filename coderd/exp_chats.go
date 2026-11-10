@@ -3159,7 +3159,7 @@ func (api *API) postChatMessages(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
-	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat, req)) {
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
