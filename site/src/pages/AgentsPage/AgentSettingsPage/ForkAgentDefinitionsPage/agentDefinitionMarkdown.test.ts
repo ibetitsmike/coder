@@ -127,7 +127,7 @@ describe("agent definition markdown", () => {
 				"description: &summary Reviews diffs.",
 				"model: &default sonnet",
 				"reasoning_effort: *default",
-				"summary: *summary",
+				"summary: *summary # keep this explanation",
 				"---",
 				"Review the diff.",
 			].join("\n"),
@@ -143,11 +143,57 @@ describe("agent definition markdown", () => {
 				"name: reviewer",
 				"description: &summary Finds bugs.",
 				"reasoning_effort: sonnet",
-				"summary: Reviews diffs.",
+				"summary: Reviews diffs. # keep this explanation",
 				"---",
 				"Review the diff.",
 				"",
 			].join("\n"),
+		);
+	});
+
+	it("reads and keeps an owned field set through an alias", () => {
+		const content = [
+			"---",
+			"default_name: &agent_name reviewer",
+			"name: *agent_name",
+			"description: Reviews diffs.",
+			"---",
+			"Review the diff.",
+			"",
+		].join("\n");
+		const parsed = parseAgentDefinitionMarkdown(content);
+		expect(parsed.name).toBe("reviewer");
+		expect(
+			buildAgentDefinitionMarkdown({ ...parsed, description: "Finds bugs." }),
+		).toBe(content.replace("Reviews diffs.", "Finds bugs."));
+	});
+
+	it("quotes values YAML would read as an alias", () => {
+		expect(
+			buildAgentDefinitionMarkdown({
+				...emptyAgentDefinitionFormValues,
+				name: "reviewer",
+				model: "*sonnet",
+				body: "Review the diff.",
+			}),
+		).toBe('---\nname: reviewer\nmodel: "*sonnet"\n---\nReview the diff.\n');
+	});
+
+	it("shows a multiline description on one line and keeps it as written", () => {
+		const content = [
+			"---",
+			"name: reviewer",
+			"description: |",
+			"  Reviews diffs.",
+			"  Finds bugs.",
+			"---",
+			"Review the diff.",
+			"",
+		].join("\n");
+		const parsed = parseAgentDefinitionMarkdown(content);
+		expect(parsed.description).toBe("Reviews diffs. Finds bugs.");
+		expect(buildAgentDefinitionMarkdown({ ...parsed, model: "sonnet" })).toBe(
+			content.replace("---\nname", "---\nmodel: sonnet\nname"),
 		);
 	});
 

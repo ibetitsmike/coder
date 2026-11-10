@@ -156,6 +156,28 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 		await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
 	});
 
+	it("reports a size error on the untouched body when the model grows", async () => {
+		const user = userEvent.setup();
+		const header = "---\nname: reviewer\n---\n";
+		const body = "a".repeat(64 * 1024 - header.length - 2);
+		renderDialog({
+			mode: "edit",
+			initialValues: {
+				...emptyAgentDefinitionFormValues,
+				name: "reviewer",
+				body,
+			},
+		});
+
+		await user.type(screen.getByLabelText("Model"), "opus");
+
+		await waitFor(() =>
+			expect(screen.getByLabelText("Body")).toHaveAccessibleDescription(
+				/Content must be .* or smaller\./,
+			),
+		);
+	});
+
 	it("does not submit a body that is only an HTML comment", async () => {
 		const user = userEvent.setup();
 		const { onSubmit } = renderDialog({});
