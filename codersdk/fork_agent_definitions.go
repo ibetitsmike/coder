@@ -121,3 +121,15 @@ func (c *Client) UpdateForkOrganizationAgentDefinition(ctx context.Context, orga
 func (c *Client) DeleteForkOrganizationAgentDefinition(ctx context.Context, organizationID uuid.UUID, name string) error {
 	return requestNoContent(ctx, c, http.MethodDelete, forkOrganizationAgentDefinitionPath(organizationID, name), nil)
 }
+
+// ForkOrganizationAgentDefinitionACL returns the users and groups that an
+// organization agent definition is shared with.
+func (c *Client) ForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string) (OrganizationSkillACL, error) {
+	return requestJSON[OrganizationSkillACL](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", http.StatusOK, nil)
+}
+
+// UpdateForkOrganizationAgentDefinitionACL grants or revokes read access to
+// an organization agent definition for organization members and groups.
+func (c *Client) UpdateForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string, req UpdateOrganizationSkillACLRequest) error {
+	return requestNoContent(ctx, c, http.MethodPatch, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", req)
+}

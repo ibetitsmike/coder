@@ -95,6 +95,13 @@ func (f *forkQuerier) DeletePluginUserLink(ctx context.Context, arg forkdb.Delet
 	return f.db.DeletePluginUserLink(ctx, arg)
 }
 
+func (f *forkQuerier) DeleteProjectAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.DeleteProjectAgentDefinitionByName(ctx, arg)
+}
+
 func (f *forkQuerier) DeleteUserAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionDelete, arg.OrganizationID, arg.UserID); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -151,6 +158,10 @@ func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, 
 	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByName)(ctx, arg)
 }
 
+func (f *forkQuerier) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams) (forkdb.AgentDefinition, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByNameForUpdate)(ctx, arg)
+}
+
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginByID)(ctx, id)
 }
@@ -197,6 +208,13 @@ func (f *forkQuerier) GetPluginsByOrganizationID(ctx context.Context, organizati
 	return f.db.GetPluginsByOrganizationID(ctx, organizationID)
 }
 
+func (f *forkQuerier) GetProjectAgentDefinitionByName(ctx context.Context, arg forkdb.GetProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionRead, arg.ProjectID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.GetProjectAgentDefinitionByName(ctx, arg)
+}
+
 func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb.GetUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -238,6 +256,13 @@ func (f *forkQuerier) InsertPluginLinkCode(ctx context.Context, arg forkdb.Inser
 	return f.db.InsertPluginLinkCode(ctx, arg)
 }
 
+func (f *forkQuerier) InsertProjectAgentDefinition(ctx context.Context, arg forkdb.InsertProjectAgentDefinitionParams) (forkdb.AgentDefinition, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.InsertProjectAgentDefinition(ctx, arg)
+}
+
 func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionCreate, arg.OrganizationID, arg.UserID); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -247,6 +272,13 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 
 func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
+}
+
+func (f *forkQuerier) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionRead, projectID); err != nil {
+		return nil, err
+	}
+	return f.db.ListProjectAgentDefinitionMetadata(ctx, projectID)
 }
 
 func (f *forkQuerier) ListUserAgentDefinitionMetadata(ctx context.Context, arg forkdb.ListUserAgentDefinitionMetadataParams) ([]forkdb.ListUserAgentDefinitionMetadataRow, error) {
@@ -288,6 +320,16 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
+		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionShare, fetch, f.db.UpdateOrganizationAgentDefinitionACLByName)(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -333,6 +375,13 @@ func (f *forkQuerier) UpdatePluginLastError(ctx context.Context, arg forkdb.Upda
 		return err
 	}
 	return f.db.UpdatePluginLastError(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateProjectAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
+		return forkdb.AgentDefinition{}, err
+	}
+	return f.db.UpdateProjectAgentDefinitionByName(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateUserAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {

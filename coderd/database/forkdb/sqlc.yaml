@@ -14,6 +14,8 @@ sql:
       - "../migrations/chatdmig/nodes/01a1bfc4-13ba-78b6-8668-4cc368ed96cc_chat_organization_subagent_limits.up.sql"
       - "../migrations/chatdmig/nodes/01a1c08d-32ae-7003-94bf-3e43983154d7_chat_subagent_tool_policy.up.sql"
       - "../migrations/chatdmig/nodes/01a1c18d-027a-7d4a-a2ad-e823d1e3ca6c_agent_definitions.up.sql"
+      - "../migrations/chatdmig/nodes/01a1c242-decb-7db2-b52e-38c2843c434c_agent_definition_acl_org_member_delete.up.sql"
+      - "../migrations/chatdmig/nodes/01a1c246-5dca-70a7-a0f9-63c3d58c0a60_agent_definition_project_organization.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
