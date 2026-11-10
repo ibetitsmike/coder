@@ -219,9 +219,9 @@ WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organ
 -- Counts the notifications of one template that were enqueued for a user
 -- about a chat. One enqueue stores a row per delivery method, all with the
 -- same payload, and the enqueuer's dedupe rejects a second identical payload
--- on the same day, so distinct payloads count enqueues.
+-- on the same UTC day, so distinct payloads per UTC day count enqueues.
 -- name: CountChatUserNotificationsSince :one
-SELECT COUNT(DISTINCT payload)
+SELECT COUNT(DISTINCT (payload, DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')))
 FROM notification_messages
 WHERE user_id = @user_id::uuid
     AND notification_template_id = @notification_template_id::uuid
