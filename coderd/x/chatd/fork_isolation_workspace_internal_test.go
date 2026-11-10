@@ -224,7 +224,7 @@ func TestForkSpawnIsolationWorkspace(t *testing.T) {
 
 			children := f.children(t, root)
 			require.Len(t, children, 1)
-			child, err := f.db.GetChatByID(ctx, children[0].ID)
+			child, err := f.db.GetChatByID(ctx, children[0].Chat.ID)
 			require.NoError(t, err)
 			require.True(t, child.Archived)
 			require.Equal(t, database.ChatStatusWaiting, child.Status)
