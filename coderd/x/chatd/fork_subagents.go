@@ -24,6 +24,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -121,9 +122,23 @@ func WithSecretAnswerReport(ctx context.Context, toolCallID string) context.Cont
 
 // WithSecretAnswerDecline marks ctx as the send of the message that says the
 // user declined the secret question of toolCallID. Unlike a report, it needs
-// no stored answer.
+// no stored answer, and the send deletes one that is stored.
 func WithSecretAnswerDecline(ctx context.Context, toolCallID string) context.Context {
 	return context.WithValue(ctx, secretAnswerReportKey{}, secretAnswerReport{toolCallID: toolCallID, declined: true})
+}
+
+// forkKeepSecretAnswerPrompt drops the prompt override of a
+// user_prompt_submit hook from the send of a secret answer report or decline.
+// The pending question rule finds that message by its text, which coderd
+// writes and which holds no user input, so an override would leave the
+// question pending after the send resumes the chat.
+func forkKeepSecretAnswerPrompt(ctx context.Context, result *chathooks.Result) *chathooks.Result {
+	if _, isReport := ctx.Value(secretAnswerReportKey{}).(secretAnswerReport); !isReport || result == nil {
+		return result
+	}
+	kept := *result
+	kept.InputOverride = nil
+	return &kept
 }
 
 // forkValidateSubagentResume returns an error when a message_agent send would
@@ -162,6 +177,16 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 			return ErrSecretAnswerNotPending
 		}
 		if report.declined {
+			if !inTx {
+				return nil
+			}
+			// An answer can be stored whose report failed or was deleted
+			// from the queue. Placeholders must not resolve to the value
+			// of a question the user declined.
+			err := fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: target.ID, ToolCallID: report.toolCallID})
+			if err != nil {
+				return xerrors.Errorf("delete secret answer of chat %s: %w", target.ID, err)
+			}
 			return nil
 		}
 		answers, err := fdb.GetChatSecretAnswersByChatID(ctx, target.ID)
