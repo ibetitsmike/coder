@@ -4,7 +4,9 @@ package coderd_test
 // fork-nested-subagents experiment.
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -207,6 +209,8 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	requireStatus(t, http.StatusConflict, err)
 	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "  "})
 	requireStatus(t, http.StatusBadRequest, err)
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "before\x00after"})
+	requireStatus(t, http.StatusBadRequest, err)
 	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, "call-normal", codersdk.ChatSecretAnswerRequest{Value: secret})
 	requireStatus(t, http.StatusBadRequest, err)
 	other, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID)
@@ -231,6 +235,37 @@ func TestForkChatSecretAnswer(t *testing.T) {
 	require.True(t, answered, "the chat gets a user message without the value")
 	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret})
 	requireStatus(t, http.StatusConflict, err)
+
+	// A busy chat queues the message that reports the answer. Once the
+	// owner deletes that message, the user can answer again.
+	_, busy, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	ask(busy, "call-busy", `[{"header": "Token", "question": "Paste the API token.", "secret": true}]`)
+	_, err = db.UpdateChatStatus(sysCtx, database.UpdateChatStatusParams{
+		ID:          busy.ID,
+		Status:      database.ChatStatusRunning,
+		WorkerID:    uuid.NullUUID{UUID: uuid.New(), Valid: true},
+		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
+		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	require.NoError(t, err)
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "first"}))
+	err = client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "second"})
+	requireStatus(t, http.StatusConflict, err)
+	queued, err := db.GetChatQueuedMessages(sysCtx, busy.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1)
+	res, err := client.Request(ctx, http.MethodDelete, fmt.Sprintf("/api/v2/chats/%s/queue/%d", busy.ID, queued[0].ID), nil)
+	require.NoError(t, err)
+	_ = res.Body.Close()
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, "call-busy", codersdk.ChatSecretAnswerRequest{Value: "second"}))
+	answers, err = fdb.GetChatSecretAnswersByChatID(sysCtx, busy.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.Equal(t, "second", answers[0].Value)
+	queued, err = db.GetChatQueuedMessages(sysCtx, busy.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1, "the answer is reported again")
 
 	// A normal question still takes a normal answer.
 	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
