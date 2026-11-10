@@ -8,7 +8,6 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -122,9 +121,9 @@ func (db *forkCrypt) UpdatePluginEnabled(ctx context.Context, params forkdb.Upda
 	return plugin, nil
 }
 
-func (db *forkCrypt) InsertChatSecretAnswer(ctx context.Context, params forkdb.InsertChatSecretAnswerParams) (time.Time, error) {
+func (db *forkCrypt) InsertChatSecretAnswer(ctx context.Context, params forkdb.InsertChatSecretAnswerParams) error {
 	if err := db.crypt.encryptField(&params.Value, &params.ValueKeyID); err != nil {
-		return time.Time{}, err
+		return err
 	}
 	return db.Store.InsertChatSecretAnswer(ctx, params)
 }
