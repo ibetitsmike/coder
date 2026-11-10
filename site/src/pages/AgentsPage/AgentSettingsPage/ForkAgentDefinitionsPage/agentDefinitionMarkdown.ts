@@ -127,10 +127,14 @@ export const parseAgentDefinitionMarkdown = (
 	};
 };
 
-// An owned value can be an anchor that other keys alias. Copy the value into
-// those aliases first, so changing or removing it leaves them as they were.
-const inlineOwnedAliases = (document: Document) => {
-	const owned = new Set(ownedKeys.map((key) => document.get(key, true)));
+// A changed owned value can be an anchor that other keys alias. Copy the value
+// into those aliases first, so changing or removing it leaves them as they
+// were. Aliases of unchanged values stay aliases.
+const inlineAliasesOf = (
+	document: Document,
+	keys: readonly (typeof ownedKeys)[number][],
+) => {
+	const owned = new Set(keys.map((key) => document.get(key, true)));
 	visit(document, {
 		Alias(_, alias) {
 			const target = alias.resolve(document);
@@ -167,14 +171,17 @@ export const buildAgentDefinitionMarkdown = (
 ): string => {
 	const document = parseFrontMatter(values.frontMatter);
 	const original = stringFields(document);
-	inlineOwnedAliases(document);
+	const changed = ownedKeys.filter(
+		(key) => values[key].trim() !== original[key],
+	);
+	inlineAliasesOf(document, changed);
 	let inserted = 0;
 	for (const key of ownedKeys) {
 		const value = values[key].trim();
 		const contents = document.contents;
 		// An unchanged field keeps its node as written, such as a multiline
 		// description the editor shows on one line.
-		if (value !== original[key]) {
+		if (changed.includes(key)) {
 			if (!value) {
 				if (isMap(contents)) {
 					contents.delete(key);
