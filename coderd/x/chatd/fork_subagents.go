@@ -178,7 +178,7 @@ func (p *Server) createSubagentChatWithID(
 	input chatstate.CreateChatInput,
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
-	isolation, isolated := subagentIsolationFromContext(ctx)
+	isolation, isolated := p.subagentIsolationOf(ctx, customAgent)
 	if !isolated && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		worktree, bound, err := p.chatWorktree(ctx, parent)
 		if err != nil {

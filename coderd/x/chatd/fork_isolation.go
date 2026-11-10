@@ -7,6 +7,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,9 +56,22 @@ type subagentIsolationRequest struct {
 	baseBranch string
 }
 
-func subagentIsolationFromContext(ctx context.Context) (subagentIsolationRequest, bool) {
-	req, ok := ctx.Value(subagentIsolationKey{}).(subagentIsolationRequest)
-	return req, ok
+// subagentIsolationOf returns the isolation of a spawn: the one the
+// spawn_agent call asked for, else the custom agent definition's. ok is false
+// for a shared child.
+func (p *Server) subagentIsolationOf(ctx context.Context, customAgent *workspacesdk.AgentDefinition) (req subagentIsolationRequest, ok bool) {
+	if req, asked := ctx.Value(subagentIsolationKey{}).(subagentIsolationRequest); asked {
+		return req, req.isolation != subagentIsolationShared
+	}
+	if customAgent == nil || !p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		return subagentIsolationRequest{}, false
+	}
+	switch customAgent.Isolation {
+	case subagentIsolationWorktree, subagentIsolationWorkspace:
+		return subagentIsolationRequest{isolation: customAgent.Isolation}, true
+	default:
+		return subagentIsolationRequest{}, false
+	}
 }
 
 // forkSpawnAgentTool is spawn_agent with the isolation option. It passes
@@ -82,7 +96,8 @@ func (p *Server) withForkSpawnIsolation(tools []fantasy.AgentTool, chat database
 func (t forkSpawnAgentTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
 	info.Description += " Set isolation to worktree to give the child its own git worktree and branch in this chat's workspace," +
-		" or to workspace to give it its own new workspace."
+		" or to workspace to give it its own new workspace." +
+		" A custom agent type's definition can set the isolation its spawns use when this call sets none."
 	info.Parameters = maps.Clone(info.Parameters)
 	maps.Copy(info.Parameters, schema.ToParameters(schema.Generate(reflect.TypeFor[forkSpawnIsolationArgs]())))
 	return info
@@ -103,7 +118,10 @@ func (t forkSpawnAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		if req.repoPath != "" || req.baseBranch != "" {
 			return fantasy.NewTextErrorResponse("repo_path and base_branch need isolation worktree"), nil
 		}
-		return t.AgentTool.Run(ctx, call)
+		if req.isolation == subagentIsolationShared {
+			// An explicit shared wins over the agent definition's isolation.
+			return t.AgentTool.Run(context.WithValue(ctx, subagentIsolationKey{}, req), call)
+		}
 	case subagentIsolationWorktree:
 	case subagentIsolationWorkspace:
 		if req.repoPath != "" || req.baseBranch != "" {
@@ -113,7 +131,11 @@ func (t forkSpawnAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("isolation must be one of: %s, %s, %s",
 			subagentIsolationShared, subagentIsolationWorktree, subagentIsolationWorkspace)), nil
 	}
-	resp, err := t.AgentTool.Run(context.WithValue(ctx, subagentIsolationKey{}, req), call)
+	runCtx := ctx
+	if req.isolation != "" {
+		runCtx = context.WithValue(ctx, subagentIsolationKey{}, req)
+	}
+	resp, err := t.AgentTool.Run(runCtx, call)
 	if err != nil || resp.IsError {
 		return resp, err
 	}
@@ -128,8 +150,15 @@ func (t forkSpawnAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	}
 	row, err := t.server.subagentRow(ctx, childID)
 	if err != nil {
-		t.server.logger.Warn(ctx, "read isolation of spawned subagent",
-			slog.F("chat_id", t.chat.ID), slog.F("child_chat_id", childID), slog.Error(err))
+		// A shared child without nested subagents or a custom agent has
+		// no row.
+		if req.isolation != "" || !errors.Is(err, sql.ErrNoRows) {
+			t.server.logger.Warn(ctx, "read isolation of spawned subagent",
+				slog.F("chat_id", t.chat.ID), slog.F("child_chat_id", childID), slog.Error(err))
+		}
+		return resp, nil
+	}
+	if row.Isolation == subagentIsolationShared {
 		return resp, nil
 	}
 	result["isolation"] = row.Isolation
