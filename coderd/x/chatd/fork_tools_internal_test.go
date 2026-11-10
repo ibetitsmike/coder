@@ -23,6 +23,7 @@ func TestAppendForkTools(t *testing.T) {
 		forkToolsTestTool("read_file"),
 		forkToolsTestTool("execute"),
 		forkToolsTestTool("ask_user_question"),
+		forkToolsTestTool("wait_agent"),
 	}
 	ctx := context.Background()
 	// The Server has no database, so a fork hook that reaches the store

@@ -41,6 +41,21 @@ func (f *forkQuerier) AcquirePluginLeases(ctx context.Context, arg forkdb.Acquir
 	return f.db.AcquirePluginLeases(ctx, arg)
 }
 
+func (f *forkQuerier) CancelChatWakeupsByChatID(ctx context.Context, arg forkdb.CancelChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return nil, err
+	}
+	return f.db.CancelChatWakeupsByChatID(ctx, arg)
+}
+
+// ClaimDueChatWakeups spans chats, so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimDueChatWakeupsParams) ([]forkdb.ChatWakeup, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.ClaimDueChatWakeups(ctx, arg)
+}
+
 func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return forkdb.PluginLinkCode{}, err
@@ -55,12 +70,34 @@ func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg f
 	return f.db.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
+func (f *forkQuerier) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.CountChatWakeupRunsSinceParams) (int64, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
+		return 0, err
+	}
+	return f.db.CountChatWakeupRunsSince(ctx, arg)
+}
+
 // CountLiveSubagentsInFamily authorizes through the family's root chat.
 func (f *forkQuerier) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
 	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
 		return 0, err
 	}
 	return f.db.CountLiveSubagentsInFamily(ctx, rootChatID)
+}
+
+// CountOrganizationChatWakeupRunsSince spans chats, so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg forkdb.CountOrganizationChatWakeupRunsSinceParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return 0, err
+	}
+	return f.db.CountOrganizationChatWakeupRunsSince(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
+		return err
+	}
+	return f.db.DeleteChatWakeupByID(ctx, id)
 }
 
 func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
@@ -116,6 +153,13 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
+func (f *forkQuerier) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.ID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.FinishChatWakeupClaim(ctx, arg)
+}
+
 func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
 		return false, err
@@ -136,6 +180,15 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 		return forkdb.ChatSubagent{}, err
 	}
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
+}
+
+// GetChatSubagentTypesByChatIDs is system-only: it reads many chats at once,
+// so callers must already have read the chats they pass.
+func (f *forkQuerier) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatSubagentTypesByChatIDs(ctx, chatIDs)
 }
 
 // GetChatSubagentsByParentChatID authorizes through the parent chat.
@@ -160,6 +213,26 @@ func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.GetChatTodosByChatID(ctx, chatID)
+}
+
+// GetPendingChatDescendantQuestion authorizes through the owning chat.
+func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (forkdb.ChatDescendantQuestion, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	return f.db.GetPendingChatDescendantQuestion(ctx, chatID)
+}
+
+func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	return f.authorizeChatWakeup(ctx, policy.ActionRead, id)
+}
+
+// GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
+func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.RootChatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
 func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -243,6 +316,20 @@ func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertC
 	return f.db.InsertChatSubagent(ctx, arg)
 }
 
+func (f *forkQuerier) InsertChatWakeup(ctx context.Context, arg forkdb.InsertChatWakeupParams) (forkdb.ChatWakeup, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.InsertChatWakeup(ctx, arg)
+}
+
+func (f *forkQuerier) InsertChatWakeupRun(ctx context.Context, arg forkdb.InsertChatWakeupRunParams) (forkdb.ChatWakeupRun, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return forkdb.ChatWakeupRun{}, err
+	}
+	return f.db.InsertChatWakeupRun(ctx, arg)
+}
+
 func (f *forkQuerier) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -278,8 +365,24 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 	return f.db.InsertUserAgentDefinition(ctx, arg)
 }
 
+func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatWakeupsByChatID(ctx, chatID)
+}
+
 func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
 	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationAgentDefinitionMetadata)(ctx, organizationID)
+}
+
+// ListPendingChatDescendantQuestionsByRoot authorizes through the family's
+// root chat.
+func (f *forkQuerier) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID)
 }
 
 func (f *forkQuerier) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
@@ -328,6 +431,21 @@ func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, ar
 		return err
 	}
 	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
+}
+
+// UpdateChatWakeupRunStatus is worker-only, so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return forkdb.ChatWakeupRun{}, err
+	}
+	return f.db.UpdateChatWakeupRunStatus(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {
+	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.ID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.UpdateChatWakeupStatus(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg forkdb.UpdateOrganizationAgentDefinitionACLByNameParams) (forkdb.AgentDefinition, error) {
@@ -399,6 +517,18 @@ func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg f
 	return f.db.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
+// UpsertChatDescendantQuestion authorizes as an update of the owning chat.
+func (f *forkQuerier) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
+	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+		return forkdb.ChatDescendantQuestion{}, err
+	}
+	return f.db.UpsertChatDescendantQuestion(ctx, arg)
+}
+
 func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChatModelConfig.InOrg(arg.OrganizationID)); err != nil {
 		return forkdb.ChatOrganizationSubagentLimit{}, err
@@ -424,6 +554,29 @@ func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.Upser
 		return forkdb.PluginUserLink{}, err
 	}
 	return f.db.UpsertPluginUserLink(ctx, arg)
+}
+
+// authorizeChat authorizes action on the chat that owns a fork row, like
+// UpsertChatTodos.
+func (f *forkQuerier) authorizeChat(ctx context.Context, action policy.Action, chatID uuid.UUID) error {
+	chat, err := f.q.db.GetChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	return f.q.authorizeContext(ctx, action, chat)
+}
+
+// authorizeChatWakeup authorizes action on the chat that owns wake-up id and
+// returns the wake-up.
+func (f *forkQuerier) authorizeChatWakeup(ctx context.Context, action policy.Action, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	wakeup, err := f.db.GetChatWakeupByID(ctx, id)
+	if err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	if err := f.authorizeChat(ctx, action, wakeup.ChatID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return wakeup, nil
 }
 
 // authorizeUserAgentDefinition authorizes action on the user-tier agent
