@@ -130,6 +130,9 @@ func (p *Server) SendMessage(
 		if err != nil {
 			return SendMessageResult{}, err
 		}
+		if err := forkLoop.applyHookOverride(promptResult); err != nil {
+			return SendMessageResult{}, err
+		}
 	}
 
 	content, err := chatprompt.MarshalParts(contentParts)
