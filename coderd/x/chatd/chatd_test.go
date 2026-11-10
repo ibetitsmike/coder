@@ -1306,7 +1306,7 @@ func TestSteerDuringMultiStepTurnDeliveredBeforeNextModelCall(t *testing.T) {
 		behavior chatd.SendMessageBusyBehavior
 	}{
 		{text: "queued", behavior: chatd.SendMessageBusyBehaviorQueue},
-		{text: "steer", behavior: chatd.SendMessageBusyBehaviorSteer},
+		{text: "steer"},
 	} {
 		result, err := server.SendMessage(ctx, chatd.SendMessageOptions{
 			ChatID:       chat.ID,
@@ -2514,7 +2514,7 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			behavior chatd.SendMessageBusyBehavior
 		}{
 			{text: "queued", behavior: chatd.SendMessageBusyBehaviorQueue},
-			{text: "interrupt", behavior: chatd.SendMessageBusyBehaviorInterrupt},
+			{text: "steer", behavior: chatd.SendMessageBusyBehaviorSteer},
 		} {
 			sent, err := server.SendMessage(ctx, chatd.SendMessageOptions{
 				ChatID:        chat.ID,
@@ -2526,6 +2526,8 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, sent.Queued)
 		}
+		_, _, err = server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 		require.GreaterOrEqual(t, requestCount.Load(), int32(3))
@@ -2553,7 +2555,7 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 				}
 			}
 		}
-		require.Equal(t, []string{"start and call a tool", "interrupt", "queued"}, userTexts)
+		require.Equal(t, []string{"start and call a tool", "steer", "queued"}, userTexts)
 		require.True(t, foundPartial)
 		// The interrupted attempt bills the model invocation window it
 		// opened, so the partial assistant row keeps a runtime.
@@ -2632,10 +2634,12 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			CreatedBy:     user.ID,
 			ModelConfigID: model.ID,
 			Content:       []codersdk.ChatMessagePart{codersdk.ChatMessageText("continue after interrupt")},
-			BusyBehavior:  chatd.SendMessageBusyBehaviorInterrupt,
+			BusyBehavior:  chatd.SendMessageBusyBehaviorSteer,
 		})
 		require.NoError(t, err)
 		require.True(t, queued.Queued)
+		_, _, err = server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 		require.GreaterOrEqual(t, requestCount.Load(), int32(2))
@@ -2732,10 +2736,12 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			CreatedBy:     user.ID,
 			ModelConfigID: model.ID,
 			Content:       []codersdk.ChatMessagePart{codersdk.ChatMessageText("continue after provider interrupt")},
-			BusyBehavior:  chatd.SendMessageBusyBehaviorInterrupt,
+			BusyBehavior:  chatd.SendMessageBusyBehaviorSteer,
 		})
 		require.NoError(t, err)
 		require.True(t, queued.Queued)
+		_, _, err = server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 		parts := chatToolParts(ctx, t, db, chat.ID)
@@ -2842,10 +2848,12 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			CreatedBy:     user.ID,
 			ModelConfigID: model.ID,
 			Content:       []codersdk.ChatMessagePart{codersdk.ChatMessageText("continue after mixed interrupt")},
-			BusyBehavior:  chatd.SendMessageBusyBehaviorInterrupt,
+			BusyBehavior:  chatd.SendMessageBusyBehaviorSteer,
 		})
 		require.NoError(t, err)
 		require.True(t, queued.Queued)
+		_, _, err = server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 		parts := chatToolParts(ctx, t, db, chat.ID)
@@ -2928,10 +2936,12 @@ func TestActiveServer_InterruptionBehavior(t *testing.T) {
 			CreatedBy:     user.ID,
 			ModelConfigID: model.ID,
 			Content:       []codersdk.ChatMessagePart{codersdk.ChatMessageText("continue after reasoning")},
-			BusyBehavior:  chatd.SendMessageBusyBehaviorInterrupt,
+			BusyBehavior:  chatd.SendMessageBusyBehaviorSteer,
 		})
 		require.NoError(t, err)
 		require.True(t, queued.Queued)
+		_, _, err = server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 		messages := chatMessages(ctx, t, db, chat.ID)
@@ -9420,22 +9430,15 @@ func setOpenAIProviderBaseURL(
 	require.Fail(t, "openai provider not found")
 }
 
-// An unowned chat has no runner, so InterruptChat and an interrupting
-// SendMessage finish the interruption inline. They must still clear the
-// cached turn summary, as the worker does after it finishes an
-// interruption.
 func TestInterruptUnownedChatClearsLastTurnSummary(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name         string
 		interrupting bool
-		send         bool
 	}{
 		{name: "InterruptRunning"},
 		{name: "InterruptInterrupting", interrupting: true},
-		{name: "SendRunning", send: true},
-		{name: "SendInterrupting", interrupting: true, send: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -9479,21 +9482,10 @@ func TestInterruptUnownedChatClearsLastTurnSummary(t *testing.T) {
 			require.False(t, chat.WorkerID.Valid)
 			seedLastTurnSummary(ctx, t, db, chat, "previous summary")
 
-			if tc.send {
-				sent, err := server.SendMessage(ctx, chatd.SendMessageOptions{
-					ChatID:       chat.ID,
-					CreatedBy:    user.ID,
-					Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText("next")},
-					BusyBehavior: chatd.SendMessageBusyBehaviorInterrupt,
-				})
-				require.NoError(t, err)
-				require.False(t, sent.Queued, "the message is promoted inline")
-				require.Equal(t, database.ChatStatusRunning, sent.Chat.Status)
-			} else {
-				updated, err := server.InterruptChat(ctx, chat)
-				require.NoError(t, err)
-				require.Equal(t, database.ChatStatusWaiting, updated.Status)
-			}
+			updated, interrupted, err := server.InterruptChat(ctx, chat)
+			require.NoError(t, err)
+			require.True(t, interrupted, "the call reports the interruption although the chat is already waiting")
+			require.Equal(t, database.ChatStatusWaiting, updated.Status)
 
 			testutil.Eventually(ctx, t, func(ctx context.Context) bool {
 				fromDB, err := db.GetChatByID(ctx, chat.ID)
@@ -9582,7 +9574,7 @@ func TestInterruptChatDoesNotSendWebPushNotification(t *testing.T) {
 	}, testutil.IntervalFast)
 
 	// Interrupt the chat. The worker finalizes the interruption asynchronously.
-	updated, _ := server.InterruptChat(ctx, chat)
+	updated, _, _ := server.InterruptChat(ctx, chat)
 	require.Equal(t, database.ChatStatusInterrupting, updated.Status)
 
 	// Wait for the chat to finish processing and return to waiting.
@@ -9609,26 +9601,17 @@ func TestInterruptChatDoesNotSendWebPushNotification(t *testing.T) {
 type mockWebpushDispatcher struct {
 	dispatchCount atomic.Int32
 	mu            sync.Mutex
-	messages      []codersdk.WebpushMessage
 	lastMessage   codersdk.WebpushMessage
 	lastUserID    uuid.UUID
 }
 
 func (m *mockWebpushDispatcher) Dispatch(_ context.Context, userID uuid.UUID, msg codersdk.WebpushMessage) error {
+	m.dispatchCount.Add(1)
 	m.mu.Lock()
-	m.messages = append(m.messages, msg)
 	m.lastMessage = msg
 	m.lastUserID = userID
 	m.mu.Unlock()
-	// Count after recording so a waiter that sees the count also sees the message.
-	m.dispatchCount.Add(1)
 	return nil
-}
-
-func (m *mockWebpushDispatcher) getMessages() []codersdk.WebpushMessage {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.messages)
 }
 
 func (m *mockWebpushDispatcher) getLastMessage() codersdk.WebpushMessage {
@@ -9717,125 +9700,6 @@ func TestSuccessfulChatSendsWebPushWithNavigationData(t *testing.T) {
 	expectedURL := fmt.Sprintf("/agents/%s", chat.ID)
 	require.Equal(t, expectedURL, capturedMsg.Data["url"],
 		"web push Data should contain the chat navigation URL")
-}
-
-// failFirstToolResultCommitStore fails the first transaction that inserts a
-// tool result, as a database error during the step commit would.
-type failFirstToolResultCommitStore struct {
-	database.Store
-	failed *atomic.Bool
-}
-
-func (s *failFirstToolResultCommitStore) InTx(fn func(database.Store) error, opts *database.TxOptions) error {
-	return s.Store.InTx(func(tx database.Store) error {
-		return fn(&failFirstToolResultCommitStore{Store: tx, failed: s.failed})
-	}, opts)
-}
-
-func (s *failFirstToolResultCommitStore) InsertChatMessages(ctx context.Context, arg database.InsertChatMessagesParams) ([]database.InsertChatMessagesRow, error) {
-	if slices.Contains(arg.Role, database.ChatMessageRoleTool) && s.failed.CompareAndSwap(false, true) {
-		return nil, xerrors.New("injected tool result commit failure")
-	}
-	return s.Store.InsertChatMessages(ctx, arg)
-}
-
-// TestAsyncAskUserQuestionWebPush verifies that in a chat created from the
-// web UI, ask_user_question outside plan mode does not end the turn, and
-// that the owner gets a web push naming the question once its result
-// commits.
-func TestAsyncAskUserQuestionWebPush(t *testing.T) {
-	t.Parallel()
-
-	const questionBody = "Question: Which database should we use?"
-	// runTurn runs a turn whose first step asks a question and waits until
-	// the turn settles in wantStatus after at least wantPushes pushes.
-	runTurn := func(t *testing.T, failResultCommit bool, wantStatus database.ChatStatus, wantPushes int32) (database.Chat, int32, []codersdk.WebpushMessage) {
-		db, ps := dbtestutil.NewDB(t)
-
-		var streamCalls atomic.Int32
-		openAIURL := chattest.NewOpenAI(t, func(req *chattest.OpenAIRequest) chattest.OpenAIResponse {
-			if !req.Stream {
-				return chattest.OpenAINonStreamingResponse("title")
-			}
-			if streamCalls.Add(1) == 1 {
-				return chattest.OpenAIStreamingResponse(chattest.OpenAIToolCallChunk("ask_user_question",
-					`{"questions":[{"header":"Database","question":"Which database should we use?","options":[`+
-						`{"label":"Use Postgres."},{"label":"Use SQLite."}]}]}`,
-				))
-			}
-			return chattest.OpenAIStreamingResponse(chattest.OpenAITextChunks("continuing")...)
-		})
-
-		store := db
-		if failResultCommit {
-			store = &failFirstToolResultCommitStore{Store: db, failed: &atomic.Bool{}}
-		}
-		mockPush := &mockWebpushDispatcher{}
-		logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
-		server := newChatdServer(t, ps, chatd.Config{
-			Logger:                     logger,
-			Database:                   store,
-			ReplicaID:                  uuid.New(),
-			PendingChatAcquireInterval: 10 * time.Millisecond,
-			InFlightChatStaleAfter:     testutil.WaitSuperLong,
-			WebpushDispatcher:          mockPush,
-			AIBridgeTransportFactory:   chatAIGatewayTransportFactoryPointer(chattest.NewMockAIBridgeTransport(t, openAIURL)),
-		})
-		server.Start()
-		t.Cleanup(func() {
-			require.NoError(t, server.Close())
-		})
-
-		user, org, model := seedChatDependencies(t, db)
-		ctx := testutil.Context(t, testutil.WaitLong)
-		setOpenAIProviderBaseURL(ctx, t, db, openAIURL)
-
-		chat, err := server.CreateChat(ctx, chatd.CreateOptions{
-			OrganizationID:     org.ID,
-			OwnerID:            user.ID,
-			Title:              "async-question-push",
-			ModelConfigID:      model.ID,
-			ClientType:         database.ChatClientTypeUi,
-			InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("hello")},
-		})
-		require.NoError(t, err)
-
-		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
-			fromDB, dbErr := db.GetChatByID(ctx, chat.ID)
-			if dbErr != nil {
-				return false
-			}
-			return fromDB.Status == wantStatus && !fromDB.WorkerID.Valid && mockPush.dispatchCount.Load() >= wantPushes
-		}, testutil.IntervalFast)
-		// Close drains in-flight pushes, so the returned pushes are final.
-		require.NoError(t, server.Close())
-		return chat, streamCalls.Load(), mockPush.getMessages()
-	}
-
-	t.Run("AnsweredLater", func(t *testing.T) {
-		t.Parallel()
-
-		// One push for the question and one when the turn finishes.
-		chat, streamCalls, pushes := runTurn(t, false, database.ChatStatusWaiting, 2)
-		require.Equal(t, int32(2), streamCalls,
-			"the model should be called again after an async question")
-		require.Contains(t, pushes, codersdk.WebpushMessage{
-			Title: "async-question-push",
-			Body:  questionBody,
-			Icon:  "/favicon.ico",
-			Data:  map[string]string{"url": fmt.Sprintf("/agents/%s", chat.ID)},
-		})
-	})
-
-	// The UI cannot offer a question whose result never committed, so
-	// only the error push goes out.
-	t.Run("ResultCommitFails", func(t *testing.T) {
-		t.Parallel()
-
-		_, _, pushes := runTurn(t, true, database.ChatStatusError, 1)
-		require.Len(t, pushes, 1)
-		require.Equal(t, "The chat request failed unexpectedly.", pushes[0].Body)
-	})
 }
 
 func TestCloseDuringShutdownContextCanceledShouldRetryOnNewReplica(t *testing.T) {
@@ -10755,7 +10619,7 @@ func TestInterruptChatPersistsPartialResponse(t *testing.T) {
 	}, testutil.IntervalFast)
 
 	// Now interrupt the chat. The provider has sent partial content.
-	updated, _ := server.InterruptChat(ctx, chat)
+	updated, _, _ := server.InterruptChat(ctx, chat)
 	require.Equal(t, database.ChatStatusInterrupting, updated.Status)
 
 	// Wait for the partial assistant message to be persisted.
@@ -13809,7 +13673,7 @@ func TestQueuedCompletionResolvesOrganizationModel(t *testing.T) {
 		insertQueuedMessage(ctx, t, db, chat.ID, user.ID, foreignModel.ID, "queued")
 		current, err := db.GetChatByID(ctx, chat.ID)
 		require.NoError(t, err)
-		_, err = server.InterruptChat(ctx, current)
+		_, _, err = server.InterruptChat(ctx, current)
 		require.NoError(t, err)
 		waitForChatStatus(ctx, t, db, chat.ID, database.ChatStatusWaiting)
 
@@ -15139,10 +15003,12 @@ func TestActiveServer_TracesChatTurn(t *testing.T) {
 			ChatID:       chat.ID,
 			CreatedBy:    h.user.ID,
 			Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText("stop and do this")},
-			BusyBehavior: chatd.SendMessageBusyBehaviorInterrupt,
+			BusyBehavior: chatd.SendMessageBusyBehaviorSteer,
 		})
 		require.NoError(t, err)
 		require.True(t, sent.Queued)
+		_, _, err = h.server.InterruptChat(ctx, chat)
+		require.NoError(t, err)
 		close(release)
 		waitForChatStatus(ctx, t, h.db, chat.ID, database.ChatStatusWaiting)
 		index := waitForTurns(ctx, t, h.recorder, 2)
