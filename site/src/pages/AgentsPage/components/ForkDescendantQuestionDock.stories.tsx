@@ -148,6 +148,29 @@ export const SecretAnswerSent: Story = {
 	},
 };
 
+export const SecretAnswerSubmitting: Story = {
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [mockSecretQuestion],
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockReturnValue(new Promise(() => {}));
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.type(
+			canvas.getByLabelText(/API token/),
+			"staging-token-value",
+		);
+		await userEvent.click(canvas.getByRole("button", { name: "Submit" }));
+		await canvas.findByText("Submitting...");
+	},
+};
+
 export const SecretAnswerFailed: Story = {
 	parameters: {
 		queries: [

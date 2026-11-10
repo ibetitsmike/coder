@@ -262,11 +262,17 @@ const SecretQuestionForm: React.FC<{
 				spellCheck={false}
 				className="mt-2"
 				value={value}
-				onChange={(event) => setValue(event.target.value)}
+				onChange={(event) => {
+					setValue(event.target.value);
+					if (answerMutation.isError) {
+						answerMutation.reset();
+					}
+				}}
 				disabled={!canAnswer || isSubmitting}
 			/>
 			<p id={helperId} className="mt-1 text-xs text-content-secondary">
 				The subagent's tools get this value, but the model never sees it.
+				{!canAnswer && " You can answer once the chat is ready for a message."}
 			</p>
 			{answerMutation.isError && (
 				<div

@@ -321,4 +321,42 @@ describe("ForkDescendantQuestionDock", () => {
 		]);
 		expect(sentMessages).toEqual([]);
 	});
+
+	it("clears a secret answer error once the value changes", async () => {
+		const mockSecretQuestion: ChatDescendantQuestion = {
+			...mockOldestQuestion,
+			tool_call_id: "call-pin",
+			questions: [
+				{
+					header: "PIN",
+					question: "Enter the PIN.",
+					options: [],
+					secret: true,
+				},
+			],
+		};
+		serveQuestions([mockSecretQuestion]);
+		server.use(
+			http.post("/api/v2/chats/fork/:chatId/questions/secret-answer", () =>
+				HttpResponse.json(
+					{ message: "The answer must be at least 8 bytes." },
+					{ status: 400 },
+				),
+			),
+		);
+		const user = userEvent.setup();
+
+		renderDock();
+
+		const field = await screen.findByLabelText(/Enter the PIN/);
+		await user.type(field, "1234");
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"The answer must be at least 8 bytes.",
+		);
+
+		await user.type(field, "5678");
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
 });
