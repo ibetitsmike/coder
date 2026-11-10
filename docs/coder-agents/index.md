@@ -247,7 +247,7 @@ The agent has access to a set of workspace tools that it uses to accomplish task
 | `start_workspace`                           | Start a stopped workspace for the current chat                                                                                                                                                    |
 | `stop_workspace`                            | Stop the current chat's workspace and wait for the stop build to finish                                                                                                                           |
 | `propose_plan`                              | Present a Markdown plan file for user review                                                                                                                                                      |
-| `ask_user_question`                          | Ask the user structured clarification questions in plan mode, or outside plan mode without stopping work in chats created from the Coder dashboard                                                 |
+| `ask_user_question`                         | Ask the user structured clarification questions in plan mode, or outside plan mode without stopping work in chats created from the Coder dashboard                                                 |
 | `read_file`                                 | Read file contents from the workspace                                                                                                                                                             |
 | `write_file`                                | Write a file to the workspace                                                                                                                                                                     |
 | `edit_files`                                | Replace `old_text` with `new_text` across files                                                                                                                                                   |
@@ -313,14 +313,13 @@ In chats created from the Coder dashboard, the agent can also call `ask_user_que
 A chat you start on the **Agents** page in the Coder dashboard is a dashboard chat.
 The question doesn't stop the agent, which keeps working on anything that doesn't depend on the answer.
 You can answer while the agent runs, or after it ends its turn.
-While the agent runs, your answer joins the end of the message queue.
-The agent reads it in a later turn, after the current turn and any messages queued before it.
-After the agent ends its turn, your answer starts a new turn right away.
+While the agent runs, your answer is held like a message under **Next step** and delivered before the agent's next model call.
+If the agent is not working, your answer starts a new turn right away.
 If the agent can't continue without the answer, the tool's instructions tell it to finish what it can and end its turn with a short note of what is blocked.
 
 While the question is open, its answer form appears in an **Open question** panel above the chat input.
-Sending an answer removes the panel, even while the answer waits in the queue.
-Removing the queued answer brings the panel back.
+Sending an answer removes the panel, even while the answer is still held.
+Removing the held answer brings the panel back.
 While you edit an earlier message, the panel is read-only, and **Submit** is hidden.
 The panel keeps your draft, so you can submit it after the edit if the question is still open.
 A newer question replaces an earlier unanswered one, and the earlier question shows as closed.
