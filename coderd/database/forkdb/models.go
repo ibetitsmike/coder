@@ -229,6 +229,14 @@ type AgentDefinition struct {
 	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
 }
 
+// The latest question each descendant chat asked the user with ask_user_question. The question is pending until a user message reaches that chat after created_at.
+type ChatDescendantQuestion struct {
+	ChatID     uuid.UUID       `db:"chat_id" json:"chat_id"`
+	ToolCallID string          `db:"tool_call_id" json:"tool_call_id"`
+	Questions  json.RawMessage `db:"questions" json:"questions"`
+	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
+}
+
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
 	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`
@@ -237,6 +245,16 @@ type ChatOrganizationSubagentLimit struct {
 	MaxConcurrentPerFamily sql.NullInt32 `db:"max_concurrent_per_family" json:"max_concurrent_per_family"`
 	MaxLivePerFamily       sql.NullInt32 `db:"max_live_per_family" json:"max_live_per_family"`
 	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
+}
+
+// Answers the user gave to secret ask_user_question calls of descendant chats. Tools of the asking chat read them; they are never written to chat messages.
+type ChatSecretAnswer struct {
+	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
+	ToolCallID string    `db:"tool_call_id" json:"tool_call_id"`
+	// Encrypted by dbcrypt when value_key_id is set.
+	Value      string         `db:"value" json:"value"`
+	ValueKeyID sql.NullString `db:"value_key_id" json:"value_key_id"`
+	CreatedAt  time.Time      `db:"created_at" json:"created_at"`
 }
 
 type ChatSubagent struct {

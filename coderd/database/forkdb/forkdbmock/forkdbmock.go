@@ -162,6 +162,34 @@ func (mr *MockStoreMockRecorder) CountOrganizationChatWakeupRunsSince(ctx, arg a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountOrganizationChatWakeupRunsSince", reflect.TypeOf((*MockStore)(nil).CountOrganizationChatWakeupRunsSince), ctx, arg)
 }
 
+// DeleteChatSecretAnswer mocks base method.
+func (m *MockStore) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.DeleteChatSecretAnswerParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatSecretAnswer", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatSecretAnswer indicates an expected call of DeleteChatSecretAnswer.
+func (mr *MockStoreMockRecorder) DeleteChatSecretAnswer(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswer", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswer), ctx, arg)
+}
+
+// DeleteChatSecretAnswersByChatID mocks base method.
+func (m *MockStore) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatSecretAnswersByChatID", ctx, chatID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatSecretAnswersByChatID indicates an expected call of DeleteChatSecretAnswersByChatID.
+func (mr *MockStoreMockRecorder) DeleteChatSecretAnswersByChatID(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswersByChatID", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswersByChatID), ctx, chatID)
+}
+
 // DeleteChatWakeupByID mocks base method.
 func (m *MockStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -188,6 +216,21 @@ func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
 func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx)
+}
+
+// DeleteOldChatSecretAnswers mocks base method.
+func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldChatSecretAnswers", ctx, limitCount)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldChatSecretAnswers indicates an expected call of DeleteOldChatSecretAnswers.
+func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, limitCount any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatSecretAnswers", reflect.TypeOf((*MockStore)(nil).DeleteOldChatSecretAnswers), ctx, limitCount)
 }
 
 // DeleteOrganizationAgentDefinitionByName mocks base method.
@@ -336,6 +379,21 @@ func (mr *MockStoreMockRecorder) GetChatOrganizationSubagentLimits(ctx, organiza
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatOrganizationSubagentLimits", reflect.TypeOf((*MockStore)(nil).GetChatOrganizationSubagentLimits), ctx, organizationID)
 }
 
+// GetChatSecretAnswersByChatID mocks base method.
+func (m *MockStore) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatSecretAnswersByChatID", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.ChatSecretAnswer)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatSecretAnswersByChatID indicates an expected call of GetChatSecretAnswersByChatID.
+func (mr *MockStoreMockRecorder) GetChatSecretAnswersByChatID(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSecretAnswersByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSecretAnswersByChatID), ctx, chatID)
+}
+
 // GetChatSubagentByChatID mocks base method.
 func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	m.ctrl.T.Helper()
@@ -349,6 +407,21 @@ func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUI
 func (mr *MockStoreMockRecorder) GetChatSubagentByChatID(ctx, chatID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentByChatID), ctx, chatID)
+}
+
+// GetChatSubagentTypesByChatIDs mocks base method.
+func (m *MockStore) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatSubagentTypesByChatIDs", ctx, chatIds)
+	ret0, _ := ret[0].([]forkdb.GetChatSubagentTypesByChatIDsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatSubagentTypesByChatIDs indicates an expected call of GetChatSubagentTypesByChatIDs.
+func (mr *MockStoreMockRecorder) GetChatSubagentTypesByChatIDs(ctx, chatIds any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentTypesByChatIDs", reflect.TypeOf((*MockStore)(nil).GetChatSubagentTypesByChatIDs), ctx, chatIds)
 }
 
 // GetChatSubagentsByParentChatID mocks base method.
@@ -411,6 +484,21 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByID", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByID), ctx, id)
 }
 
+// GetFamilySubagentsAwaitingWorker mocks base method.
+func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFamilySubagentsAwaitingWorker", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetFamilySubagentsAwaitingWorkerRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFamilySubagentsAwaitingWorker indicates an expected call of GetFamilySubagentsAwaitingWorker.
+func (mr *MockStoreMockRecorder) GetFamilySubagentsAwaitingWorker(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFamilySubagentsAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetFamilySubagentsAwaitingWorker), ctx, arg)
+}
+
 // GetOrganizationAgentDefinitionByName mocks base method.
 func (m *MockStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	m.ctrl.T.Helper()
@@ -439,6 +527,21 @@ func (m *MockStore) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Co
 func (mr *MockStoreMockRecorder) GetOrganizationAgentDefinitionByNameForUpdate(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationAgentDefinitionByNameForUpdate", reflect.TypeOf((*MockStore)(nil).GetOrganizationAgentDefinitionByNameForUpdate), ctx, arg)
+}
+
+// GetPendingChatDescendantQuestion mocks base method.
+func (m *MockStore) GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (forkdb.ChatDescendantQuestion, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPendingChatDescendantQuestion", ctx, chatID)
+	ret0, _ := ret[0].(forkdb.ChatDescendantQuestion)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPendingChatDescendantQuestion indicates an expected call of GetPendingChatDescendantQuestion.
+func (mr *MockStoreMockRecorder) GetPendingChatDescendantQuestion(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPendingChatDescendantQuestion", reflect.TypeOf((*MockStore)(nil).GetPendingChatDescendantQuestion), ctx, chatID)
 }
 
 // GetPluginByID mocks base method.
@@ -574,6 +677,20 @@ func (m *MockStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb
 func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetUserAgentDefinitionByName), ctx, arg)
+}
+
+// InsertChatSecretAnswer mocks base method.
+func (m *MockStore) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatSecretAnswer", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertChatSecretAnswer indicates an expected call of InsertChatSecretAnswer.
+func (mr *MockStoreMockRecorder) InsertChatSecretAnswer(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatSecretAnswer", reflect.TypeOf((*MockStore)(nil).InsertChatSecretAnswer), ctx, arg)
 }
 
 // InsertChatSubagent mocks base method.
@@ -723,6 +840,21 @@ func (m *MockStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context,
 func (mr *MockStoreMockRecorder) ListOrganizationAgentDefinitionMetadata(ctx, organizationID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOrganizationAgentDefinitionMetadata", reflect.TypeOf((*MockStore)(nil).ListOrganizationAgentDefinitionMetadata), ctx, organizationID)
+}
+
+// ListPendingChatDescendantQuestionsByRoot mocks base method.
+func (m *MockStore) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPendingChatDescendantQuestionsByRoot", ctx, rootChatID)
+	ret0, _ := ret[0].([]forkdb.ListPendingChatDescendantQuestionsByRootRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPendingChatDescendantQuestionsByRoot indicates an expected call of ListPendingChatDescendantQuestionsByRoot.
+func (mr *MockStoreMockRecorder) ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingChatDescendantQuestionsByRoot", reflect.TypeOf((*MockStore)(nil).ListPendingChatDescendantQuestionsByRoot), ctx, rootChatID)
 }
 
 // ListProjectAgentDefinitionMetadata mocks base method.
@@ -972,6 +1104,21 @@ func (m *MockStore) UpdateUserAgentDefinitionByName(ctx context.Context, arg for
 func (mr *MockStoreMockRecorder) UpdateUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).UpdateUserAgentDefinitionByName), ctx, arg)
+}
+
+// UpsertChatDescendantQuestion mocks base method.
+func (m *MockStore) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChatDescendantQuestion", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatDescendantQuestion)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChatDescendantQuestion indicates an expected call of UpsertChatDescendantQuestion.
+func (mr *MockStoreMockRecorder) UpsertChatDescendantQuestion(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatDescendantQuestion", reflect.TypeOf((*MockStore)(nil).UpsertChatDescendantQuestion), ctx, arg)
 }
 
 // UpsertChatOrganizationSubagentLimits mocks base method.

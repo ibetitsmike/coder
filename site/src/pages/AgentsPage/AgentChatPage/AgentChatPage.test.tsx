@@ -1,5 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { defaultScheduler, notifyManager } from "react-query";
 import { Outlet } from "react-router";
 import {
@@ -29,7 +30,9 @@ import {
 	MockUserPreferenceSettings,
 	mockApiError,
 } from "#/testHelpers/entities";
+import { MockChatDescendantQuestion } from "#/testHelpers/forkChatQuestions";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
+import { server } from "#/testHelpers/server";
 import { MockSkill } from "#/testHelpers/skills";
 import {
 	createMockWebSocket,
@@ -593,5 +596,42 @@ describe("AgentChatPage", () => {
 				skill_name: "triage",
 			},
 		]);
+	});
+
+	it("sends a subagent's answer while the root chat runs", async () => {
+		vi.spyOn(API, "getExperiments").mockResolvedValue([
+			"fork-nested-subagents",
+		]);
+		server.use(
+			http.get("/api/v2/chats/fork/:chatId/questions", () =>
+				HttpResponse.json([MockChatDescendantQuestion]),
+			),
+		);
+		const createChatMessage = vi
+			.spyOn(API.experimental, "createChatMessage")
+			.mockResolvedValue({ queued: false });
+		const { user } = renderQueuedChat({
+			queuedMessages: [],
+			chat: { ...MockChat, status: "running" },
+		});
+
+		await user.click(
+			await screen.findByRole("radio", { name: /Skip old rows/ }),
+		);
+		await user.click(screen.getByRole("button", { name: "Submit" }));
+
+		await waitFor(() =>
+			expect(createChatMessage).toHaveBeenCalledWith(
+				MockChatDescendantQuestion.chat_id,
+				{
+					content: [
+						{
+							type: "text",
+							text: "Answer to ask_user_question call call-1:\nSkip old rows",
+						},
+					],
+				},
+			),
+		);
 	});
 });

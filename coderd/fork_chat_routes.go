@@ -42,6 +42,17 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		)
 		chatTodos.Get("/{chat}/todos", api.getChatTodos)
 		chatTodos.Get("/{chat}/todos/watch", api.watchChatTodos)
+		r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkNestedSubagents),
+			httpmw.ExtractChatParam(api.Database),
+		).Get("/{chat}/family", api.getForkChatFamilyCapacity)
+
+		chatQuestions := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkNestedSubagents),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatQuestions.Get("/{chat}/questions", api.getChatDescendantQuestions)
+		chatQuestions.Post("/{chat}/questions/secret-answer", api.postChatSecretAnswer)
 
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)

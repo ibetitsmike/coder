@@ -17,7 +17,11 @@ type Querier interface {
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-	// workers from blocking on, or claiming, the same rows.
+	// workers from blocking on, or claiming, the same rows. Rows of chats that
+	// would queue a new message stay unclaimed, so they cannot fill the batch and
+	// starve the rows of idle chats. Those are the busy and paused chats, and the
+	// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
+	// Archived chats are always claimed so the worker cancels their wake-ups.
 	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
@@ -31,8 +35,13 @@ type Querier interface {
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
+	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
+	DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredPluginLinkCodes(ctx context.Context) error
+	// Deletes a batch of answers past the 24 hour TTL of
+	// GetChatSecretAnswersByChatID, on the same clock.
+	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
@@ -52,15 +61,29 @@ type Querier interface {
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
+	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
+	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	// Returns the agent type of each child chat in @chat_ids. A child spawned
+	// without a chat_subagents row gets its type from its mode, as
+	// subagentTypeFromChat in coderd/x/chatd derives it.
+	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Returns the unarchived running subagent chats under @root_chat_id that no
+	// worker with a fresh heartbeat owns, with the predicate of
+	// GetChatAwaitingWorker. Each row carries the counts of
+	// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
+	// own active lineage, so one query answers for the whole family without
+	// pairing each chat with every active subagent.
+	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
+	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
@@ -72,6 +95,7 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	// The organization comes from the chat.
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)
@@ -86,6 +110,10 @@ type Querier interface {
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
+	// Lists the unanswered questions of the unarchived descendants of
+	// @root_chat_id, oldest first, with the pending rule of
+	// GetPendingChatDescendantQuestion.
+	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
 	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
@@ -108,6 +136,7 @@ type Querier interface {
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	// Relinking an external identity to another user clears the active chat so

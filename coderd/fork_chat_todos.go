@@ -163,6 +163,10 @@ func (api *API) watchChatTodos(rw http.ResponseWriter, r *http.Request) {
 		}
 		list, err := readForkChatTodos(ctx, api.Database, chat.ID)
 		if err != nil {
+			// A client that leaves while a wake-up is pending cancels the read.
+			if ctx.Err() != nil {
+				return
+			}
 			logger.Error(ctx, "read chat todo list", slog.F("chat_id", chat.ID), slog.Error(err))
 			continue
 		}

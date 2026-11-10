@@ -2,10 +2,11 @@
 // renderers, so an upstream sync of Tool.tsx stays clean.
 
 import type React from "react";
-import { useContext } from "react";
 import type { Experiment } from "#/api/typesGenerated";
-import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
+import { ForkChatTranscriptToolRenderer } from "./ForkChatTranscriptTool";
+import { ForkSearchChatsToolRenderer } from "./ForkSearchChatsTool";
 import { ForkTodoToolRenderer } from "./ForkTodoTool";
+import { useForkExperiment } from "./forkToolUtils";
 import type { toolRenderers } from "./Tool";
 
 type ToolRendererProps = React.ComponentProps<(typeof toolRenderers)[string]>;
@@ -23,10 +24,7 @@ const gate = (
 	Fallback: ToolRenderer,
 ): ToolRenderer => {
 	const GatedRenderer: ToolRenderer = (props) => {
-		// Tool also renders outside DashboardProvider, as in upstream's tool
-		// stories, where fork renderers stay off.
-		const dashboard = useContext(DashboardContext);
-		if (!dashboard?.experiments.includes(experiment)) {
+		if (!useForkExperiment(experiment)) {
 			return <Fallback {...props} />;
 		}
 		return <Renderer {...props} fallback={Fallback} />;
@@ -46,5 +44,15 @@ export const createForkToolRenderers = (
 	return {
 		todo_write: todoRenderer,
 		todo_read: todoRenderer,
+		search_chats: gate(
+			"fork-chat-todos",
+			ForkSearchChatsToolRenderer,
+			fallback,
+		),
+		read_chat_transcript: gate(
+			"fork-chat-todos",
+			ForkChatTranscriptToolRenderer,
+			fallback,
+		),
 	};
 };

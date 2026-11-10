@@ -2374,11 +2374,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+  "agent_type": "string",
   "archived": true,
   "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
   "children": [
     {
       "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+      "agent_type": "string",
       "archived": true,
       "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
       "children": [],
@@ -2679,47 +2681,48 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                    | Type                                                            | Required | Restrictions | Description                                                                                                                                                                                                                                                                |
-|-------------------------|-----------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `archived`              | boolean                                                         | false    |              |                                                                                                                                                                                                                                                                            |
-| `build_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `children`              | array of [codersdk.Chat](#codersdkchat)                         | false    |              | Children holds child (subagent) chats nested under this root chat. Always initialized to an empty slice so the JSON field is present as []. Child chats cannot create their own subagents, so nesting depth is capped at 1 and this slice is always empty for child chats. |
-| `client_type`           | [codersdk.ChatClientType](#codersdkchatclienttype)              | false    |              |                                                                                                                                                                                                                                                                            |
-| `context`               | [codersdk.ChatContext](#codersdkchatcontext)                    | false    |              | Context reports the chat's pinned workspace-context state and whether it has drifted from the agent's latest pushed snapshot. Nil when the chat has no pinned context yet.                                                                                                 |
-| `created_at`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `diff_status`           | [codersdk.ChatDiffStatus](#codersdkchatdiffstatus)              | false    |              | Diff status is the primary pull request. It is the ref with the most recent git report.                                                                                                                                                                                    |
-| `diff_statuses`         | array of [codersdk.ChatDiffStatus](#codersdkchatdiffstatus)     | false    |              | Diff statuses lists every ref the chat tracks. The order is stable and follows the first report of each ref. DiffStatus marks the primary.                                                                                                                                 |
-| `files`                 | array of [codersdk.ChatFileMetadata](#codersdkchatfilemetadata) | false    |              |                                                                                                                                                                                                                                                                            |
-| `has_unread`            | boolean                                                         | false    |              | Has unread is true when assistant messages exist beyond the owner's read cursor, which updates on stream connect and disconnect and via UpdateChatRequest.Read.                                                                                                            |
-| `id`                    | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `inline_mcp_servers`    | array of [codersdk.InlineMCPServer](#codersdkinlinemcpserver)   | false    |              | Inline mcp servers lists the inline MCP servers declared on the chat, without headers. Only the single-chat GET sets it. Experimental.                                                                                                                                     |
-| `labels`                | object                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| » `[any property]`      | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `last_error`            | [codersdk.ChatError](#codersdkchaterror)                        | false    |              |                                                                                                                                                                                                                                                                            |
-| `last_model_config_id`  | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `last_reasoning_effort` | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `last_turn_summary`     | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `mcp_server_ids`        | array of string                                                 | false    |              |                                                                                                                                                                                                                                                                            |
-| `organization_id`       | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `owner_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `owner_name`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `owner_username`        | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `parent_chat_id`        | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `pin_order`             | integer                                                         | false    |              |                                                                                                                                                                                                                                                                            |
-| `plan_mode`             | [codersdk.ChatPlanMode](#codersdkchatplanmode)                  | false    |              |                                                                                                                                                                                                                                                                            |
-| `project_id`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `queued_for_capacity`   | boolean                                                         | false    |              | Queued for capacity reports that the chat is waiting for a concurrent agent slot. Single-chat reads derive it; list responses leave it false.                                                                                                                              |
-| `root_chat_id`          | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `shared`                | boolean                                                         | false    |              | Shared is true when this chat's root chat has explicit user or group ACL entries.                                                                                                                                                                                          |
-| `status`                | [codersdk.ChatStatus](#codersdkchatstatus)                      | false    |              |                                                                                                                                                                                                                                                                            |
-| `summary`               | string                                                          | false    |              | Summary is the persisted whole-chat summary, generated in the background. It is nil until the first summary has been produced.                                                                                                                                             |
-| `title`                 | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `title_source`          | [codersdk.ChatTitleSource](#codersdkchattitlesource)            | false    |              | Title source is where Title came from. A title write applies only when the current source ranks the same as or lower than the incoming one, in the order fallback, generated, user.                                                                                        |
-| `title_updated_at`      | string                                                          | false    |              | Title updated at orders title changes. Title writes do not change UpdatedAt.                                                                                                                                                                                               |
-| `updated_at`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
-| `warnings`              | array of string                                                 | false    |              |                                                                                                                                                                                                                                                                            |
-| `workspace_id`          | string                                                          | false    |              |                                                                                                                                                                                                                                                                            |
+| Name                    | Type                                                            | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                 |
+|-------------------------|-----------------------------------------------------------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `agent_type`            | string                                                          | false    |              | Agent type is the subagent type of a child chat, such as explore or a custom agent definition name. Only set with the fork-agent-definitions experiment.                                                                                                                                                    |
+| `archived`              | boolean                                                         | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `build_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `children`              | array of [codersdk.Chat](#codersdkchat)                         | false    |              | Children holds the descendant (subagent) chats of this root chat, flat: each entry's parent_chat_id gives its place in the tree. Without fork-nested-subagents descendants are only direct children. Always initialized to an empty slice so the JSON field is present as []. Always empty for child chats. |
+| `client_type`           | [codersdk.ChatClientType](#codersdkchatclienttype)              | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `context`               | [codersdk.ChatContext](#codersdkchatcontext)                    | false    |              | Context reports the chat's pinned workspace-context state and whether it has drifted from the agent's latest pushed snapshot. Nil when the chat has no pinned context yet.                                                                                                                                  |
+| `created_at`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `diff_status`           | [codersdk.ChatDiffStatus](#codersdkchatdiffstatus)              | false    |              | Diff status is the primary pull request. It is the ref with the most recent git report.                                                                                                                                                                                                                     |
+| `diff_statuses`         | array of [codersdk.ChatDiffStatus](#codersdkchatdiffstatus)     | false    |              | Diff statuses lists every ref the chat tracks. The order is stable and follows the first report of each ref. DiffStatus marks the primary.                                                                                                                                                                  |
+| `files`                 | array of [codersdk.ChatFileMetadata](#codersdkchatfilemetadata) | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `has_unread`            | boolean                                                         | false    |              | Has unread is true when assistant messages exist beyond the owner's read cursor, which updates on stream connect and disconnect and via UpdateChatRequest.Read.                                                                                                                                             |
+| `id`                    | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `inline_mcp_servers`    | array of [codersdk.InlineMCPServer](#codersdkinlinemcpserver)   | false    |              | Inline mcp servers lists the inline MCP servers declared on the chat, without headers. Only the single-chat GET sets it. Experimental.                                                                                                                                                                      |
+| `labels`                | object                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| » `[any property]`      | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `last_error`            | [codersdk.ChatError](#codersdkchaterror)                        | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `last_model_config_id`  | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `last_reasoning_effort` | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `last_turn_summary`     | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `mcp_server_ids`        | array of string                                                 | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `organization_id`       | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `owner_id`              | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `owner_name`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `owner_username`        | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `parent_chat_id`        | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `pin_order`             | integer                                                         | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `plan_mode`             | [codersdk.ChatPlanMode](#codersdkchatplanmode)                  | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `project_id`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `queued_for_capacity`   | boolean                                                         | false    |              | Queued for capacity reports that the chat is waiting for a concurrent agent slot. Single-chat reads derive it; list responses leave it false.                                                                                                                                                               |
+| `root_chat_id`          | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `shared`                | boolean                                                         | false    |              | Shared is true when this chat's root chat has explicit user or group ACL entries.                                                                                                                                                                                                                           |
+| `status`                | [codersdk.ChatStatus](#codersdkchatstatus)                      | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `summary`               | string                                                          | false    |              | Summary is the persisted whole-chat summary, generated in the background. It is nil until the first summary has been produced.                                                                                                                                                                              |
+| `title`                 | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `title_source`          | [codersdk.ChatTitleSource](#codersdkchattitlesource)            | false    |              | Title source is where Title came from. A title write applies only when the current source ranks the same as or lower than the incoming one, in the order fallback, generated, user.                                                                                                                         |
+| `title_updated_at`      | string                                                          | false    |              | Title updated at orders title changes. Title writes do not change UpdatedAt.                                                                                                                                                                                                                                |
+| `updated_at`            | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `warnings`              | array of string                                                 | false    |              |                                                                                                                                                                                                                                                                                                             |
+| `workspace_id`          | string                                                          | false    |              |                                                                                                                                                                                                                                                                                                             |
 
 ## codersdk.ChatACL
 
@@ -2895,16 +2898,16 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatBusyBehavior
 
 ```json
-"queue"
+"steer"
 ```
 
 ### Properties
 
 #### Enumerated Values
 
-| Value(s)             |
-|----------------------|
-| `interrupt`, `queue` |
+| Value(s)         |
+|------------------|
+| `queue`, `steer` |
 
 ## codersdk.ChatClientType
 
@@ -3164,6 +3167,40 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name                   | Type    | Required | Restrictions | Description |
 |------------------------|---------|----------|--------------|-------------|
 | `debug_retention_days` | integer | false    |              |             |
+
+## codersdk.ChatDescendantQuestion
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "chat_title": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "parent_chat_id": "c3609ee6-3b11-4a93-b9ae-e4fabcc99359",
+  "questions": [
+    {
+      "header": "string",
+      "options": [
+        {
+          "label": "string"
+        }
+      ],
+      "question": "string"
+    }
+  ],
+  "tool_call_id": "string"
+}
+```
+
+### Properties
+
+| Name             | Type                                                    | Required | Restrictions | Description |
+|------------------|---------------------------------------------------------|----------|--------------|-------------|
+| `chat_id`        | string                                                  | false    |              |             |
+| `chat_title`     | string                                                  | false    |              |             |
+| `created_at`     | string                                                  | false    |              |             |
+| `parent_chat_id` | string                                                  | false    |              |             |
+| `questions`      | array of [codersdk.ChatQuestion](#codersdkchatquestion) | false    |              |             |
+| `tool_call_id`   | string                                                  | false    |              |             |
 
 ## codersdk.ChatDiffContents
 
@@ -3776,6 +3813,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   ],
   "queued_messages": [
     {
+      "busy_behavior": "steer",
       "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
       "content": [
         {
@@ -3848,7 +3886,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |-------------------|-------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `has_more`        | boolean                                                           | false    |              |                                                                                                                                                                                        |
 | `messages`        | array of [codersdk.ChatMessage](#codersdkchatmessage)             | false    |              |                                                                                                                                                                                        |
-| `queued_messages` | array of [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage) | false    |              |                                                                                                                                                                                        |
+| `queued_messages` | array of [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage) | false    |              | Queued messages lists the queued messages in delivery order: steer messages first, then queue messages.                                                                                |
 | `turn_start_id`   | integer                                                           | false    |              | Turn start ID is the ID of the user prompt that starts the turn containing the page's oldest message. Omitted for after_id-only polls and when no prompt is at or before that message. |
 
 ## codersdk.ChatModel
@@ -3866,6 +3904,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
@@ -4153,6 +4194,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "aliases": [
+    "string"
+  ],
   "frequency_penalty": 0,
   "max_output_tokens": 0,
   "openai_config": {
@@ -4313,6 +4357,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name                | Type                                                                               | Required | Restrictions | Description |
 |---------------------|------------------------------------------------------------------------------------|----------|--------------|-------------|
+| `aliases`           | array of string                                                                    | false    |              |             |
 | `frequency_penalty` | number                                                                             | false    |              |             |
 | `max_output_tokens` | integer                                                                            | false    |              |             |
 | `openai_config`     | [codersdk.ChatModelOpenAIConfig](#codersdkchatmodelopenaiconfig)                   | false    |              |             |
@@ -5359,10 +5404,47 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |-----------|-----------------------------------------------------|----------|--------------|-------------|
 | `prompts` | array of [codersdk.ChatPrompt](#codersdkchatprompt) | false    |              |             |
 
+## codersdk.ChatQuestion
+
+```json
+{
+  "header": "string",
+  "options": [
+    {
+      "label": "string"
+    }
+  ],
+  "question": "string"
+}
+```
+
+### Properties
+
+| Name       | Type                                                                | Required | Restrictions | Description |
+|------------|---------------------------------------------------------------------|----------|--------------|-------------|
+| `header`   | string                                                              | false    |              |             |
+| `options`  | array of [codersdk.ChatQuestionOption](#codersdkchatquestionoption) | false    |              |             |
+| `question` | string                                                              | false    |              |             |
+
+## codersdk.ChatQuestionOption
+
+```json
+{
+  "label": "string"
+}
+```
+
+### Properties
+
+| Name    | Type   | Required | Restrictions | Description |
+|---------|--------|----------|--------------|-------------|
+| `label` | string | false    |              |             |
+
 ## codersdk.ChatQueuedMessage
 
 ```json
 {
+  "busy_behavior": "steer",
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
   "content": [
     {
@@ -5428,15 +5510,22 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name               | Type                                                          | Required | Restrictions | Description                                                                                                                                                                                  |
-|--------------------|---------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `chat_id`          | string                                                        | false    |              |                                                                                                                                                                                              |
-| `content`          | array of [codersdk.ChatMessagePart](#codersdkchatmessagepart) | false    |              |                                                                                                                                                                                              |
-| `created_at`       | string                                                        | false    |              |                                                                                                                                                                                              |
-| `editing_since`    | string                                                        | false    |              | Editing since is set while the owner edits the message. A message under edit and every message behind it wait until the edit ends; a turn that ends at a message under edit pauses the chat. |
-| `id`               | integer                                                       | false    |              |                                                                                                                                                                                              |
-| `model_config_id`  | string                                                        | false    |              |                                                                                                                                                                                              |
-| `reasoning_effort` | string                                                        | false    |              |                                                                                                                                                                                              |
+| Name               | Type                                                          | Required | Restrictions | Description                                                                                                                                                                                                                                                        |
+|--------------------|---------------------------------------------------------------|----------|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `busy_behavior`    | [codersdk.ChatBusyBehavior](#codersdkchatbusybehavior)        | false    |              | Busy behavior is the lane of the message. Steer messages go in before the next model call, and queue messages go in after the turn ends.                                                                                                                           |
+| `chat_id`          | string                                                        | false    |              |                                                                                                                                                                                                                                                                    |
+| `content`          | array of [codersdk.ChatMessagePart](#codersdkchatmessagepart) | false    |              |                                                                                                                                                                                                                                                                    |
+| `created_at`       | string                                                        | false    |              |                                                                                                                                                                                                                                                                    |
+| `editing_since`    | string                                                        | false    |              | Editing since is set while the owner edits the message. A message under edit and every message behind it wait until the edit ends. A steer message under edit also holds the steer messages ahead of it. A turn that ends at a message under edit pauses the chat. |
+| `id`               | integer                                                       | false    |              |                                                                                                                                                                                                                                                                    |
+| `model_config_id`  | string                                                        | false    |              |                                                                                                                                                                                                                                                                    |
+| `reasoning_effort` | string                                                        | false    |              |                                                                                                                                                                                                                                                                    |
+
+#### Enumerated Values
+
+| Property        | Value(s)         |
+|-----------------|------------------|
+| `busy_behavior` | `queue`, `steer` |
 
 ## codersdk.ChatRetentionDaysResponse
 
@@ -5668,6 +5757,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "queued_messages": [
     {
+      "busy_behavior": "steer",
       "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
       "content": [
         {
@@ -5748,17 +5838,17 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name              | Type                                                                   | Required | Restrictions | Description |
-|-------------------|------------------------------------------------------------------------|----------|--------------|-------------|
-| `action_required` | [codersdk.ChatStreamActionRequired](#codersdkchatstreamactionrequired) | false    |              |             |
-| `chat_id`         | string                                                                 | false    |              |             |
-| `error`           | [codersdk.ChatError](#codersdkchaterror)                               | false    |              |             |
-| `message`         | [codersdk.ChatMessage](#codersdkchatmessage)                           | false    |              |             |
-| `message_part`    | [codersdk.ChatStreamMessagePart](#codersdkchatstreammessagepart)       | false    |              |             |
-| `queued_messages` | array of [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage)      | false    |              |             |
-| `retry`           | [codersdk.ChatStreamRetry](#codersdkchatstreamretry)                   | false    |              |             |
-| `status`          | [codersdk.ChatStreamStatus](#codersdkchatstreamstatus)                 | false    |              |             |
-| `type`            | [codersdk.ChatStreamEventType](#codersdkchatstreameventtype)           | false    |              |             |
+| Name              | Type                                                                   | Required | Restrictions | Description                                                                                             |
+|-------------------|------------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------|
+| `action_required` | [codersdk.ChatStreamActionRequired](#codersdkchatstreamactionrequired) | false    |              |                                                                                                         |
+| `chat_id`         | string                                                                 | false    |              |                                                                                                         |
+| `error`           | [codersdk.ChatError](#codersdkchaterror)                               | false    |              |                                                                                                         |
+| `message`         | [codersdk.ChatMessage](#codersdkchatmessage)                           | false    |              |                                                                                                         |
+| `message_part`    | [codersdk.ChatStreamMessagePart](#codersdkchatstreammessagepart)       | false    |              |                                                                                                         |
+| `queued_messages` | array of [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage)      | false    |              | Queued messages lists the queued messages in delivery order: steer messages first, then queue messages. |
+| `retry`           | [codersdk.ChatStreamRetry](#codersdkchatstreamretry)                   | false    |              |                                                                                                         |
+| `status`          | [codersdk.ChatStreamStatus](#codersdkchatstreamstatus)                 | false    |              |                                                                                                         |
+| `type`            | [codersdk.ChatStreamEventType](#codersdkchatstreameventtype)           | false    |              |                                                                                                         |
 
 ## codersdk.ChatStreamEventType
 
@@ -6070,6 +6160,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   },
   "chat": {
     "agent_id": "2b1e3b65-2c04-4fa2-a2d7-467901e98978",
+    "agent_type": "string",
     "archived": true,
     "build_id": "bfb1f3fa-bf7b-43a5-9e0b-26cc050e44cb",
     "children": [
@@ -6623,7 +6714,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
-  "busy_behavior": "queue",
+  "busy_behavior": "steer",
   "content": [
     {
       "content": "string",
@@ -6671,21 +6762,21 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name                 | Type                                                                        | Required | Restrictions | Description                                                                                                  |
-|----------------------|-----------------------------------------------------------------------------|----------|--------------|--------------------------------------------------------------------------------------------------------------|
-| `busy_behavior`      | [codersdk.ChatBusyBehavior](#codersdkchatbusybehavior)                      | false    |              |                                                                                                              |
-| `content`            | array of [codersdk.ChatInputPart](#codersdkchatinputpart)                   | false    |              |                                                                                                              |
-| `inline_mcp_servers` | array of [codersdk.InlineMCPServerRequest](#codersdkinlinemcpserverrequest) | false    |              | Inline mcp servers replaces the inline MCP servers. nil: no change, empty: remove all.                       |
-| `mcp_server_ids`     | array of string                                                             | false    |              |                                                                                                              |
-| `model_config_id`    | string                                                                      | false    |              |                                                                                                              |
-| `plan_mode`          | [codersdk.ChatPlanMode](#codersdkchatplanmode)                              | false    |              | Plan mode switches the chat's persistent plan mode. nil: no change, ptr to "plan": enable, ptr to "": clear. |
-| `reasoning_effort`   | string                                                                      | false    |              |                                                                                                              |
+| Name                 | Type                                                                        | Required | Restrictions | Description                                                                                                                                                                                  |
+|----------------------|-----------------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `busy_behavior`      | [codersdk.ChatBusyBehavior](#codersdkchatbusybehavior)                      | false    |              | Busy behavior controls when the message reaches the agent if the chat is busy. "steer", the default, delivers it before the next model call. "queue" delivers it after the active turn ends. |
+| `content`            | array of [codersdk.ChatInputPart](#codersdkchatinputpart)                   | false    |              |                                                                                                                                                                                              |
+| `inline_mcp_servers` | array of [codersdk.InlineMCPServerRequest](#codersdkinlinemcpserverrequest) | false    |              | Inline mcp servers replaces the inline MCP servers. nil: no change, empty: remove all.                                                                                                       |
+| `mcp_server_ids`     | array of string                                                             | false    |              |                                                                                                                                                                                              |
+| `model_config_id`    | string                                                                      | false    |              |                                                                                                                                                                                              |
+| `plan_mode`          | [codersdk.ChatPlanMode](#codersdkchatplanmode)                              | false    |              | Plan mode switches the chat's persistent plan mode. nil: no change, ptr to "plan": enable, ptr to "": clear.                                                                                 |
+| `reasoning_effort`   | string                                                                      | false    |              |                                                                                                                                                                                              |
 
 #### Enumerated Values
 
-| Property        | Value(s)             |
-|-----------------|----------------------|
-| `busy_behavior` | `interrupt`, `queue` |
+| Property        | Value(s)         |
+|-----------------|------------------|
+| `busy_behavior` | `queue`, `steer` |
 
 ## codersdk.CreateChatMessageResponse
 
@@ -6839,6 +6930,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   ],
   "queued": true,
   "queued_message": {
+    "busy_behavior": "steer",
     "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
     "content": [
       {
@@ -6908,13 +7000,13 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name             | Type                                                     | Required | Restrictions | Description                                                                                                                                                                                        |
-|------------------|----------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `message`        | [codersdk.ChatMessage](#codersdkchatmessage)             | false    |              |                                                                                                                                                                                                    |
-| `messages`       | array of [codersdk.ChatMessage](#codersdkchatmessage)    | false    |              | Messages contains all user-visible messages inserted by the send, in insertion order. A queued send on an errored chat may promote the previous queue head, so clients must upsert the full batch. |
-| `queued`         | boolean                                                  | false    |              |                                                                                                                                                                                                    |
-| `queued_message` | [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage) | false    |              |                                                                                                                                                                                                    |
-| `warnings`       | array of string                                          | false    |              |                                                                                                                                                                                                    |
+| Name             | Type                                                     | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                                                                                           |
+|------------------|----------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `message`        | [codersdk.ChatMessage](#codersdkchatmessage)             | false    |              |                                                                                                                                                                                                                                                                                                                                                                                       |
+| `messages`       | array of [codersdk.ChatMessage](#codersdkchatmessage)    | false    |              | Messages contains all user-visible messages inserted by the send, in insertion order. A send to an errored or paused chat can also insert queued messages: a steer send inserts the queued steer messages before the new message, and a queue send to an errored chat inserts the steer lane, or the first queue message when that lane is empty. Clients must upsert the full batch. |
+| `queued`         | boolean                                                  | false    |              |                                                                                                                                                                                                                                                                                                                                                                                       |
+| `queued_message` | [codersdk.ChatQueuedMessage](#codersdkchatqueuedmessage) | false    |              |                                                                                                                                                                                                                                                                                                                                                                                       |
+| `warnings`       | array of string                                          | false    |              |                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ## codersdk.CreateChatModelRequest
 
@@ -6928,6 +7020,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
@@ -10133,9 +10228,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-nested-subagents`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-nested-subagents`, `fork-subagent-isolation`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -10537,6 +10632,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat, not counting a subagent's own ancestors. 0 means no limit.                                |
 | `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. 0 means no limit. |
 | `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0.                                                  |
+
+## codersdk.ForkChatFamilyCapacity
+
+```json
+{
+  "live_subagents": 3,
+  "max_live_subagents": 6,
+  "waiting_for_capacity": [
+    "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+  ]
+}
+```
+
+### Properties
+
+| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                 |
+|------------------------|-----------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
+| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
+| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
 
 ## codersdk.ForkOrganizationSubagentLimits
 
@@ -13054,6 +13169,9 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
       "is_default": true,
       "model": "string",
       "model_config": {
+        "aliases": [
+          "string"
+        ],
         "frequency_penalty": 0,
         "max_output_tokens": 0,
         "openai_config": {
@@ -17576,6 +17694,9 @@ Restarts will only happen on weekdays in this list on weeks which line up with W
   "is_default": true,
   "model": "string",
   "model_config": {
+    "aliases": [
+      "string"
+    ],
     "frequency_penalty": 0,
     "max_output_tokens": 0,
     "openai_config": {
