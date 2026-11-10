@@ -381,7 +381,8 @@ func TestForkChatSecretQuestionQueuedMessage(t *testing.T) {
 }
 
 // An answer past its TTL is replaced, even while the message that reports
-// it is still queued: reads skip it before dbpurge deletes it.
+// it is still queued: reads skip it before dbpurge deletes it. The queued
+// message then reports the new answer.
 func TestForkChatSecretAnswerExpired(t *testing.T) {
 	t.Parallel()
 
@@ -427,4 +428,7 @@ func TestForkChatSecretAnswerExpired(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, answers, 1)
 	require.Equal(t, "second-value", answers[0].Value)
+	queued, err := db.GetChatQueuedMessages(sysCtx, busy.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1, "the queued message reports the new answer")
 }
