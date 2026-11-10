@@ -33,16 +33,20 @@ import (
 const isolationTestAgentDirectory = "/home/coder/repo"
 
 // fakeWorktreeConn records the worktree calls chatd makes and answers them
-// with worktree or createErr. Any other AgentConn call panics.
+// with worktree or createErr, and summary or summaryErr. Any other AgentConn
+// call panics.
 type fakeWorktreeConn struct {
 	workspacesdk.AgentConn
-	worktree  workspacesdk.ForkWorktree
-	createErr error
+	worktree   workspacesdk.ForkWorktree
+	createErr  error
+	summary    workspacesdk.ForkWorktreeSummary
+	summaryErr error
 
 	mu              sync.Mutex
 	creates         []workspacesdk.ForkCreateWorktreeRequest
 	deletes         []workspacesdk.ForkDeleteWorktreeRequest
 	deleteDeadlines []time.Time
+	summaries       []workspacesdk.ForkWorktreeSummaryRequest
 }
 
 func (c *fakeWorktreeConn) ForkCreateWorktree(_ context.Context, req workspacesdk.ForkCreateWorktreeRequest) (workspacesdk.ForkWorktree, error) {
@@ -62,6 +66,13 @@ func (c *fakeWorktreeConn) ForkDeleteWorktree(ctx context.Context, req workspace
 	deadline, _ := ctx.Deadline()
 	c.deleteDeadlines = append(c.deleteDeadlines, deadline)
 	return nil
+}
+
+func (c *fakeWorktreeConn) ForkWorktreeSummary(_ context.Context, req workspacesdk.ForkWorktreeSummaryRequest) (workspacesdk.ForkWorktreeSummary, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.summaries = append(c.summaries, req)
+	return c.summary, c.summaryErr
 }
 
 func (c *fakeWorktreeConn) calls() ([]workspacesdk.ForkCreateWorktreeRequest, []workspacesdk.ForkDeleteWorktreeRequest) {

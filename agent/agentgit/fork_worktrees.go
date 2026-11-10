@@ -69,6 +69,7 @@ func (a *worktreeAPI) routes() http.Handler {
 	r.Use(a.extendDeadline)
 	r.Post("/", a.handleCreate)
 	r.Delete("/", a.handleDelete)
+	r.Post("/summary", a.handleSummary)
 	return r
 }
 
@@ -308,12 +309,7 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 
 	// Branches cannot contain glob characters, so the branch name is safe
 	// to use in --exclude.
-	ref, err := a.git(ctx, path, "symbolic-ref", "--quiet", "HEAD")
-	if err != nil || ref != "refs/heads/"+req.Branch {
-		current := "a detached HEAD"
-		if err == nil {
-			current = strings.TrimPrefix(ref, "refs/heads/")
-		}
+	if current, ok := a.onBranch(ctx, path, req.Branch); !ok {
 		writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("worktree %s is on %s, not branch %s; switch back to it before removing the worktree", path, current, req.Branch), nil)
 		return
 	}
@@ -435,6 +431,16 @@ func (a *worktreeAPI) linkedWorktree(ctx context.Context, rw http.ResponseWriter
 		return linkedWorktree{}, false
 	}
 	return linkedWorktree{path: path, gitDir: gitDir, commonDir: commonDir}, true
+}
+
+// onBranch reports whether branch is checked out in the worktree at path.
+// When it is not, current describes what is checked out instead.
+func (a *worktreeAPI) onBranch(ctx context.Context, path, branch string) (current string, ok bool) {
+	ref, err := a.git(ctx, path, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return "a detached HEAD", false
+	}
+	return strings.TrimPrefix(ref, "refs/heads/"), ref == "refs/heads/"+branch
 }
 
 // countModuleLocalCommits counts the commits on no remote in every
