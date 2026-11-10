@@ -52,3 +52,25 @@ SELECT (
 )::boolean AS awaiting_worker
 FROM chats c
 WHERE c.id = @chat_id::uuid;
+
+-- name: GetFamilySubagentsAwaitingWorker :many
+-- Returns the unarchived running subagent chats under @root_chat_id that no
+-- worker with a fresh heartbeat owns, with the predicate of
+-- GetChatAwaitingWorker.
+SELECT c.id
+FROM chats c
+WHERE c.root_chat_id = @root_chat_id::uuid
+	AND c.archived = false
+	AND c.status = 'running'::chat_status
+	AND (
+		c.worker_id IS NULL
+		OR c.runner_id IS NULL
+		OR NOT EXISTS (
+			SELECT 1
+			FROM chat_heartbeats hb
+			WHERE hb.chat_id = c.id
+				AND hb.runner_id = c.runner_id
+				AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+		)
+	)
+ORDER BY c.id;

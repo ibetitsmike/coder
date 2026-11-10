@@ -10538,6 +10538,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. 0 means no limit. |
 | `max_subagent_depth`                  | integer | false    |              | Max subagent depth is the maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled. A root chat is at depth 0.                                                  |
 
+## codersdk.ForkChatFamilyCapacity
+
+```json
+{
+  "live_subagents": 3,
+  "max_live_subagents": 6,
+  "waiting_for_capacity": [
+    "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+  ]
+}
+```
+
+### Properties
+
+| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                 |
+|------------------------|-----------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
+| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
+| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
+
 ## codersdk.ForkOrganizationSubagentLimits
 
 ```json
