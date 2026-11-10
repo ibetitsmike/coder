@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/codersdk"
@@ -109,6 +110,7 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 		dirty := f.spawnChild(t, root, worktree)
 		gone := f.spawnChild(t, root, worktree)
 		oldAgent := f.spawnChild(t, root, worktree)
+		dropped := f.spawnChild(t, root, worktree)
 		f.spawnChild(t, root, map[string]any{})
 
 		path := func(chat database.Chat) string { return "/wt/" + chat.ID.String() }
@@ -117,14 +119,15 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 		}))
 		conn.failDelete(path(gone), codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "worktree " + path(gone) + " does not exist."}))
 		conn.failDelete(path(oldAgent), codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Route not found."}))
+		conn.failDelete(path(dropped), xerrors.New("connection reset by peer"))
 
-		notices := f.archiveAndAwaitNotices(t, root, conn, 4)
+		notices := f.archiveAndAwaitNotices(t, root, conn, 5)
 		deleted := map[string]string{}
 		for _, req := range conn.deleted() {
 			deleted[req.Path] = req.Branch
 		}
-		require.Len(t, deleted, 4)
-		for _, child := range []database.Chat{clean, dirty, gone, oldAgent} {
+		require.Len(t, deleted, 5)
+		for _, child := range []database.Chat{clean, dirty, gone, oldAgent, dropped} {
 			row, err := f.fdb.GetChatSubagentByChatID(chatdTestContext(t), child.ID)
 			require.NoError(t, err)
 			require.Equal(t, row.Branch, deleted[path(child)])
@@ -132,10 +135,12 @@ func TestForkArchiveWorktreeCleanup(t *testing.T) {
 
 		require.Len(t, notices, 1)
 		notice := notices[0]
-		require.Contains(t, notice, "kept 2 subagent git worktree(s)")
+		require.Contains(t, notice, "kept 3 subagent git worktree(s)")
 		require.Contains(t, notice, path(dirty)+" has 2 uncommitted or untracked changes")
 		require.Contains(t, notice, "`"+path(oldAgent)+"`")
 		require.Contains(t, notice, "older than the Coder server")
+		require.Contains(t, notice, "`"+path(dropped)+"` on branch")
+		require.Contains(t, notice, ": agent unreachable")
 		require.NotContains(t, notice, path(clean))
 		require.NotContains(t, notice, path(gone))
 	})
