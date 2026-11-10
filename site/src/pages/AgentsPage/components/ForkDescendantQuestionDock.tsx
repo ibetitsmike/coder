@@ -27,6 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from "#/components/Alert/Alert";
 import { Button } from "#/components/Button/Button";
 import { Input } from "#/components/Input/Input";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
+import { passwordManagerIgnoreProps } from "#/utils/formUtils";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
 import { AskUserQuestionForm } from "./ChatElements/tools/AskUserQuestionTool";
 import { getQuestionCallKey } from "./ChatElements/tools/questionDraft";
@@ -197,6 +198,7 @@ const SecretQuestionForm: React.FC<{
 	canAnswer: boolean;
 }> = ({ rootChatId, question, secretQuestion, canAnswer }) => {
 	const inputId = useId();
+	const helperId = useId();
 	const queryClient = useQueryClient();
 	const [value, setValue] = useState("");
 	const answerMutation = useMutation(
@@ -237,14 +239,15 @@ const SecretQuestionForm: React.FC<{
 			<Input
 				id={inputId}
 				type="password"
-				autoComplete="off"
+				{...passwordManagerIgnoreProps}
+				aria-describedby={helperId}
 				spellCheck={false}
 				className="mt-2"
 				value={value}
 				onChange={(event) => setValue(event.target.value)}
 				disabled={!canAnswer || isSubmitting}
 			/>
-			<p className="mt-1 text-xs text-content-secondary">
+			<p id={helperId} className="mt-1 text-xs text-content-secondary">
 				The subagent's tools get this value, but the model never sees it.
 			</p>
 			{answerMutation.isError && (
