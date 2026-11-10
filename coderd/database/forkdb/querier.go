@@ -17,7 +17,8 @@ type Querier interface {
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-	// workers from blocking on, or claiming, the same rows.
+	// workers from blocking on, or claiming, the same rows. Rows of busy chats stay
+	// unclaimed, so they cannot fill the batch and starve the rows of idle chats.
 	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with

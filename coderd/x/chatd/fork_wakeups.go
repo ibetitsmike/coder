@@ -156,13 +156,23 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 	switch {
 	case err == nil, errors.Is(err, errWakeupClaimLost):
 		return nil
-	case errors.Is(err, errWakeupChatBusy):
+	case errors.Is(err, errWakeupChatBusy), errors.Is(err, chatstate.ErrMessageQueueFull):
+		// The chat turned busy after the status check.
 		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupStaysDue(wakeup))
 	case errors.Is(err, errWakeupOccurrenceRan):
 		return p.finishWakeupClaim(ctx, fdb, wakeup, now, nextWakeupRun(wakeup, now, 0))
 	}
 
 	runStatus, finish := p.wakeupFailure(ctx, wakeup, now, err)
+	// End the claim first: a worker whose lease ran out during the send must
+	// not record a run for an occurrence that another worker now owns.
+	_, finishErr := fdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, finish))
+	if errors.Is(finishErr, sql.ErrNoRows) {
+		return nil
+	}
+	if finishErr != nil {
+		return xerrors.Errorf("finish wake-up claim: %w", finishErr)
+	}
 	_, insertErr := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
 		ID:        uuid.New(),
 		WakeupID:  wakeup.ID,
@@ -173,13 +183,12 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 		UpdatedAt: now,
 	})
 	if insertErr != nil && !errors.Is(insertErr, sql.ErrNoRows) {
-		// Still end the claim so the schedule moves on.
 		p.logger.Warn(ctx, "chat wake-up run record failed",
 			slog.F("wakeup_id", wakeup.ID),
 			slog.Error(insertErr),
 		)
 	}
-	return p.finishWakeupClaim(ctx, fdb, wakeup, now, finish)
+	return nil
 }
 
 var (
@@ -262,8 +271,6 @@ func (p *Server) wakeupFailure(ctx context.Context, wakeup forkdb.ChatWakeup, no
 		return forkdb.ChatWakeupRunStatusFailed, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "hook_denied"}
 	}
 	switch {
-	case errors.Is(sendErr, chatstate.ErrMessageQueueFull):
-		return forkdb.ChatWakeupRunStatusSkipped, nextWakeupRun(wakeup, now, 0)
 	case errors.Is(sendErr, ErrChatArchived), errors.Is(sendErr, chatstate.ErrChatFamilyArchived):
 		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"}
 	default:
