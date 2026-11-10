@@ -19,7 +19,6 @@ import {
 
 const failedLabel = "Failed to wait for events";
 
-/** Names what the chat waits for, like "2 child agents and a pull request". */
 const formatWaitTargets = (childCount: number, hasPullRequest: boolean) => {
 	const targets: string[] = [];
 	if (childCount > 0) {

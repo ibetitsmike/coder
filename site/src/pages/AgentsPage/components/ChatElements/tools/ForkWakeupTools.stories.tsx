@@ -55,12 +55,11 @@ export const ScheduleWakeupCron: Story = {
 		args: {
 			prompt: "Summarize the open pull requests.",
 			cron: "0 9 * * 1-5",
-			timezone: "Europe/Warsaw",
 		},
 		result: {
 			id: MockScheduleWakeupResult.id,
 			kind: "cron",
-			next_run_at: "2099-01-05T08:00:00Z",
+			next_run_at: "2099-01-05T09:00:00Z",
 			expires_at: "2099-02-01T00:00:00Z",
 		},
 	},

@@ -11,7 +11,6 @@ import { asString, parseArgs } from "./utils";
 
 const failedLabel = "Failed to schedule a wake-up";
 
-/** Describes the schedule in the tool args, like "every 5m". */
 const formatSchedule = (args: Record<string, unknown> | null): string => {
 	const interval = asNumber(args?.interval_seconds);
 	if (interval !== undefined) {
