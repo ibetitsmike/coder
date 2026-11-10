@@ -69,18 +69,21 @@ func TestNestedInterruptCascade(t *testing.T) {
 		f.setStatus(t, f.root, database.ChatStatusWaiting, uuid.NullUUID{})
 		f.requireStatus(t, database.ChatStatusRunning, child, sibling, grandchild)
 
-		_, err = f.server.InterruptChat(ctx, child)
+		_, _, err = f.server.InterruptChat(ctx, child)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, child, grandchild)
 		f.requireStatus(t, database.ChatStatusRunning, sibling)
 
 		// Stopping an idle root stops its running descendants.
-		_, err = f.server.InterruptChat(ctx, f.root)
+		_, _, err = f.server.InterruptChat(ctx, f.root)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, sibling)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
-		require.ErrorIs(t, err, chatstate.ErrTransitionNotAllowed)
+		// Upstream's Interrupt succeeds and changes nothing when there is
+		// nothing left to interrupt.
+		_, _, err = f.server.InterruptChat(ctx, f.root)
+		require.NoError(t, err)
+		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 	})
 
 	// interrupt_agent on an idle child still stops the child's running
@@ -110,13 +113,16 @@ func TestNestedInterruptCascade(t *testing.T) {
 		child, err := f.spawn(t, f.root, childSubagentChatOptions{})
 		require.NoError(t, err)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
+		_, _, err = f.server.InterruptChat(ctx, f.root)
 		require.NoError(t, err)
 		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 		f.requireStatus(t, database.ChatStatusRunning, child)
 
-		_, err = f.server.InterruptChat(ctx, f.root)
-		require.ErrorIs(t, err, chatstate.ErrTransitionNotAllowed)
+		// Upstream's Interrupt succeeds and changes nothing when there is
+		// nothing left to interrupt.
+		_, _, err = f.server.InterruptChat(ctx, f.root)
+		require.NoError(t, err)
+		f.requireStatus(t, database.ChatStatusWaiting, f.root)
 	})
 }
 

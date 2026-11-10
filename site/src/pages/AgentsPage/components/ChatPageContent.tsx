@@ -59,7 +59,6 @@ import {
 	useChatMessages,
 	useChatSelector,
 	type useChatStore,
-	useUndeliveredQueuedMessages,
 } from "./ChatConversation/chatStore";
 import {
 	LiveStreamTailContent,
@@ -176,7 +175,7 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 		store,
 		selectSubagentStatusOverrides,
 	);
-	const undeliveredQueuedMessages = useUndeliveredQueuedMessages(store);
+	const undeliveredQueuedMessages = useChatSelector(store, selectQueuedMessages);
 	const isChatCompleted = !hasStream;
 
 	const liveStreamState =
@@ -317,6 +316,7 @@ export type SendChatMessageOptions = {
 	message: string;
 	attachments?: readonly PendingAttachment[];
 	workspaceUploads?: readonly PendingWorkspaceUpload[];
+	busyBehavior?: TypesGen.ChatBusyBehavior;
 };
 
 type ChatPageInputProps = {
@@ -742,7 +742,7 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 
 	const inputElement = (
 		<AgentChatInput
-			onSend={(message) => {
+			onSend={(message, busyBehavior) => {
 				void (async () => {
 					const hasActiveUploads =
 						attachments.some((file) =>
@@ -808,6 +808,7 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 							message,
 							attachments: attachmentsArg,
 							workspaceUploads: workspaceUploadsArg,
+							busyBehavior,
 						});
 					} catch {
 						// Attachments preserved for retry on failure.
