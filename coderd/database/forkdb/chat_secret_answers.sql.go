@@ -8,7 +8,6 @@ package forkdb
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,11 +36,23 @@ func (q *Queries) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uu
 }
 
 const deleteOldChatSecretAnswers = `-- name: DeleteOldChatSecretAnswers :execrows
-DELETE FROM chat_secret_answers WHERE created_at < $1::timestamptz
+WITH expired AS (
+    SELECT chat_id, tool_call_id
+    FROM chat_secret_answers
+    WHERE created_at <= now() - interval '24 hours'
+    ORDER BY created_at
+    LIMIT $1::int
+)
+DELETE FROM chat_secret_answers
+USING expired
+WHERE chat_secret_answers.chat_id = expired.chat_id
+    AND chat_secret_answers.tool_call_id = expired.tool_call_id
 `
 
-func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteOldChatSecretAnswers, beforeTime)
+// Deletes a batch of answers past the 24 hour TTL of
+// GetChatSecretAnswersByChatID, on the same clock.
+func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldChatSecretAnswers, limitCount)
 	if err != nil {
 		return 0, err
 	}
@@ -49,9 +60,12 @@ func (q *Queries) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime tim
 }
 
 const getChatSecretAnswersByChatID = `-- name: GetChatSecretAnswersByChatID :many
-SELECT chat_id, tool_call_id, value, value_key_id, created_at FROM chat_secret_answers WHERE chat_id = $1 ORDER BY created_at
+SELECT chat_id, tool_call_id, value, value_key_id, created_at FROM chat_secret_answers
+WHERE chat_id = $1 AND created_at > now() - interval '24 hours'
+ORDER BY created_at
 `
 
+// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 func (q *Queries) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error) {
 	rows, err := q.db.QueryContext(ctx, getChatSecretAnswersByChatID, chatID)
 	if err != nil {

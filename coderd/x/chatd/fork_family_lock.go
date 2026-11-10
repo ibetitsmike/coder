@@ -17,8 +17,25 @@ import (
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 )
 
-// forkSetFamilyArchived runs chatstate.SetFamilyArchived after it locks the
-// family in an order that cannot deadlock with a member's own transition.
+// forkSetFamilyArchived archives or unarchives a family in
+// setFamilyArchivedInLockOrder. After an archive commits, it schedules the
+// cleanup of the family's subagent worktrees.
+func (p *Server) forkSetFamilyArchived(
+	ctx context.Context,
+	store database.Store,
+	publisher chatstate.Publisher,
+	input chatstate.SetFamilyArchivedInput,
+) ([]database.Chat, error) {
+	familyChats, err := p.setFamilyArchivedInLockOrder(ctx, store, publisher, input)
+	if err == nil && input.Archived {
+		p.scheduleArchivedWorktreeCleanup(ctx, input.RootID, familyChats)
+	}
+	return familyChats, err
+}
+
+// setFamilyArchivedInLockOrder runs chatstate.SetFamilyArchived after it
+// locks the family in an order that cannot deadlock with a member's own
+// transition.
 //
 // A transition updates its chat row twice in one transaction, and the second
 // update rechecks the foreign keys, which takes FOR KEY SHARE on the parent
@@ -33,7 +50,7 @@ import (
 // member is locked only after every transition of its descendants has
 // committed, so no transition waits for a parent that is locked here.
 // chatstate.SetFamilyArchived then finds every row locked.
-func (p *Server) forkSetFamilyArchived(
+func (p *Server) setFamilyArchivedInLockOrder(
 	ctx context.Context,
 	store database.Store,
 	publisher chatstate.Publisher,
