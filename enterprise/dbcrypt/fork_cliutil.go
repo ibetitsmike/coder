@@ -38,6 +38,7 @@ func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *s
 			return err
 		}
 		for _, answer := range answers {
+			readValue, readKeyID := answer.Value, answer.ValueKeyID
 			if err := cryptDB.decryptField(&answer.Value, answer.ValueKeyID); err != nil {
 				return xerrors.Errorf("decrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
 			}
@@ -45,10 +46,12 @@ func forkRecryptChatSecretAnswers(ctx context.Context, log slog.Logger, sqlDB *s
 			if err := cryptDB.encryptField(&answer.Value, &keyID); err != nil {
 				return xerrors.Errorf("encrypt chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
 			}
-			// An answer that was deleted meanwhile updates no row.
+			// An answer that was deleted or answered again meanwhile updates
+			// no row, so a retry's new value is never replaced by the old one.
 			if _, err := sqlDB.ExecContext(ctx,
-				`UPDATE chat_secret_answers SET value = $1, value_key_id = $2 WHERE chat_id = $3 AND tool_call_id = $4`,
-				answer.Value, keyID, answer.ChatID, answer.ToolCallID); err != nil {
+				`UPDATE chat_secret_answers SET value = $1, value_key_id = $2
+				WHERE chat_id = $3 AND tool_call_id = $4 AND value = $5 AND value_key_id IS NOT DISTINCT FROM $6`,
+				answer.Value, keyID, answer.ChatID, answer.ToolCallID, readValue, readKeyID); err != nil {
 				return xerrors.Errorf("update chat secret answer chat_id=%s tool_call_id=%s: %w", answer.ChatID, answer.ToolCallID, err)
 			}
 		}
