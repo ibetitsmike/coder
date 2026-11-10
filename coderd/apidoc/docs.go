@@ -5264,6 +5264,48 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/{chat}/questions": {
+            "get": {
+                "description": "Returns the unanswered ask_user_question calls of the\nunarchived descendants in the family of the chat, oldest first.\nA child chat lists the same family as its root.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List pending descendant questions",
+                "operationId": "list-pending-descendant-questions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatDescendantQuestion"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -23424,6 +23466,35 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatDescendantQuestion": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "chat_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "parent_chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestion"
+                    }
+                },
+                "tool_call_id": {
+                    "type": "string"
+                }
+            }
+        },
         "codersdk.ChatDiffContents": {
             "type": "object",
             "properties": {
@@ -25013,6 +25084,31 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/codersdk.ChatPrompt"
                     }
+                }
+            }
+        },
+        "codersdk.ChatQuestion": {
+            "type": "object",
+            "properties": {
+                "header": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatQuestionOption"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ChatQuestionOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
                 }
             }
         },

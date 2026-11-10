@@ -1,0 +1,143 @@
+package coderd_test
+
+// This file is fork code: it covers the descendant questions route of the
+// fork-nested-subagents experiment.
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/serpent"
+)
+
+func TestForkChatDescendantQuestions(t *testing.T) {
+	t.Parallel()
+
+	newAPI := func(t *testing.T, enabled bool) (*codersdk.Client, database.Store, codersdk.CreateFirstUserResponse) {
+		db, ps := dbtestutil.NewDB(t)
+		values := coderdtest.DeploymentValues(t)
+		if enabled {
+			values.Experiments = serpent.StringArray{string(codersdk.ExperimentForkNestedSubagents)}
+		}
+		client := coderdtest.New(t, &coderdtest.Options{DeploymentValues: values, Database: db, Pubsub: ps})
+		return client, db, coderdtest.CreateFirstUser(t, client)
+	}
+	newChat := func(t *testing.T, db database.Store, user codersdk.CreateFirstUserResponse, parent *database.Chat) database.Chat {
+		seed := database.Chat{
+			OrganizationID: user.OrganizationID,
+			OwnerID:        user.UserID,
+			LastModelConfigID: dbgen.ChatModelConfig(t, db, database.ChatModelConfig{
+				OrganizationID: user.OrganizationID,
+			}).ID,
+		}
+		if parent != nil {
+			seed.ParentChatID = uuid.NullUUID{UUID: parent.ID, Valid: true}
+			seed.RootChatID = parent.RootChatID
+			if !parent.RootChatID.Valid {
+				seed.RootChatID = seed.ParentChatID
+			}
+		}
+		return dbgen.Chat(t, db, seed)
+	}
+	path := func(chatID uuid.UUID) string {
+		return "/api/v2/chats/fork/" + chatID.String() + "/questions"
+	}
+
+	t.Run("ExperimentOff", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newAPI(t, false)
+		chat := newChat(t, db, user, nil)
+
+		res, err := client.Request(ctx, http.MethodGet, path(chat.ID), nil)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		require.Equal(t, http.StatusForbidden, res.StatusCode)
+	})
+
+	t.Run("Family", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newAPI(t, true)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		root := newChat(t, db, user, nil)
+		child := newChat(t, db, user, &root)
+		grandchild := newChat(t, db, user, &child)
+		ask := func(c database.Chat, callID, questions string) time.Time {
+			row, err := fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+				ChatID:     c.ID,
+				ToolCallID: callID,
+				Questions:  json.RawMessage(questions),
+			})
+			require.NoError(t, err)
+			return row.CreatedAt
+		}
+		grandchildAsked := ask(grandchild, "call-grandchild",
+			`[{"header": "DB", "question": "Which database?", "options": [{"label": "Postgres"}, {"label": "SQLite"}]}]`)
+		childAsked := ask(child, "call-child",
+			`[{"header": "API", "question": "REST or gRPC?", "options": [{"label": "REST"}]}]`)
+		want := []codersdk.ChatDescendantQuestion{{
+			ChatID:       grandchild.ID,
+			ParentChatID: child.ID,
+			ChatTitle:    grandchild.Title,
+			ToolCallID:   "call-grandchild",
+			Questions: []codersdk.ChatQuestion{{
+				Header:   "DB",
+				Question: "Which database?",
+				Options:  []codersdk.ChatQuestionOption{{Label: "Postgres"}, {Label: "SQLite"}},
+			}},
+		}, {
+			ChatID:       child.ID,
+			ParentChatID: root.ID,
+			ChatTitle:    child.Title,
+			ToolCallID:   "call-child",
+			Questions: []codersdk.ChatQuestion{{
+				Header:   "API",
+				Question: "REST or gRPC?",
+				Options:  []codersdk.ChatQuestionOption{{Label: "REST"}},
+			}},
+		}}
+
+		// A child's ID lists the same family as the root's.
+		for _, chatID := range []uuid.UUID{root.ID, child.ID} {
+			got, err := client.ChatDescendantQuestions(ctx, chatID)
+			require.NoError(t, err)
+			require.Len(t, got, 2)
+			require.True(t, grandchildAsked.Equal(got[0].CreatedAt))
+			require.True(t, childAsked.Equal(got[1].CreatedAt))
+			got[0].CreatedAt, got[1].CreatedAt = time.Time{}, time.Time{}
+			require.Equal(t, want, got)
+		}
+
+		// A family without questions answers an empty array, never null.
+		res, err := client.Request(ctx, http.MethodGet, path(newChat(t, db, user, nil).ID), nil)
+		require.NoError(t, err)
+		body, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.JSONEq(t, `[]`, string(body))
+
+		other, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
+		res, err = other.Request(ctx, http.MethodGet, path(root.ID), nil)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		require.Equal(t, http.StatusNotFound, res.StatusCode)
+	})
+}
