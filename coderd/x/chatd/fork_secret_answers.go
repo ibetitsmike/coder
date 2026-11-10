@@ -29,9 +29,9 @@ import (
 // keep the placeholder.
 var secretInputTools = []string{chattool.ExecuteToolName, chattool.WriteFileToolName, chattool.EditFilesToolName}
 
-// secretMediaWithheldNote replaces the image or document of a tool result
-// while the chat holds secret answers.
-const secretMediaWithheldNote = "The media output of this tool is withheld while this chat holds secret answers."
+// secretMediaWithheldNote replaces the image, document or attachments of a
+// tool result while the chat holds secret answers.
+const secretMediaWithheldNote = "The media output and attachments of this tool are withheld while this chat holds secret answers."
 
 // secretPlaceholder is the text the model writes where a secret answer
 // belongs, and the text that replaces the value in tool output.
@@ -147,11 +147,20 @@ func (t secretAnswerTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	resp, err := t.AgentTool.Run(ctx, call)
 	resp.Content = scrubSecretAnswers(resp.Content, answers)
 	resp.Metadata = scrubSecretAnswers(resp.Metadata, answers)
-	if len(resp.Data) > 0 {
-		// An image or a document can show a value that no scrub finds.
+	// An image, a document or an attached file can show a value that no
+	// scrub finds. The prompt of the next step resolves attachments to
+	// their bytes.
+	withheld := len(resp.Data) > 0
+	if withheld {
 		resp.Data = nil
 		resp.Type = "text"
 		resp.MediaType = ""
+	}
+	if attachments, _ := chattool.AttachmentsFromMetadata(resp.Metadata); len(attachments) > 0 {
+		resp.Metadata = ""
+		withheld = true
+	}
+	if withheld {
 		resp.Content = strings.TrimSpace(resp.Content + "\n" + secretMediaWithheldNote)
 	}
 	if err != nil {
