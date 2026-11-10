@@ -210,6 +210,31 @@ describe("ForkAgentDefinitionsPage", () => {
 		expect(queryClient.getQueryData(key)).toEqual([]);
 	});
 
+	it("treats a failed delete as done when the refetched list no longer has it", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"deleteUserAgentDefinition",
+		).mockRejectedValue(
+			mockApiError({ message: "Agent definition not found." }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+		getDefinitions.mockResolvedValue([]);
+		await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
+		);
+	});
+
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();

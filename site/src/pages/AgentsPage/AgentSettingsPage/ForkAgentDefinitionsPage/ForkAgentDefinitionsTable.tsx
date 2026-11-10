@@ -81,9 +81,19 @@ export const ForkAgentDefinitionsTable: React.FC<
 				deleteMutation.mutate(
 					{ organizationId, name: deleteTarget.name },
 					{
-						onSuccess: () => {
-							setDeleteTarget(undefined);
-							toast.success("Agent definition deleted.");
+						// A lost response can still have deleted the definition,
+						// so the refetched list decides whether the delete is done.
+						onSettled: (_data, error, { organizationId: orgId, name }) => {
+							const definitions = queryClient.getQueryData(
+								userAgentDefinitions(orgId).queryKey,
+							);
+							const isGone =
+								definitions !== undefined &&
+								!definitions.some((definition) => definition.name === name);
+							if (!error || isGone) {
+								setDeleteTarget(undefined);
+								toast.success("Agent definition deleted.");
+							}
 						},
 					},
 				),
