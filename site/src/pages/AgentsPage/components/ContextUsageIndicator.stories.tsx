@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, userEvent, within } from "storybook/test";
-import type { ChatContext } from "#/api/typesGenerated";
+import type { ChatContext, ChatContextResource } from "#/api/typesGenerated";
 import {
 	MockChatContextACPHarnesses,
 	MockChatContextACPHarnessIssue,
@@ -322,34 +322,36 @@ export const ResourceIssue: Story = {
 	},
 };
 
+const mockAgentDefinitionResources: ChatContextResource[] = [
+	{
+		source: "/home/coder/project/.agents/agents/reviewer.md",
+		kind: "subagent",
+		size_bytes: 512,
+		status: "ok",
+		subagent_name: "reviewer",
+		subagent_description: "Reviews diffs for correctness.",
+	},
+	{
+		source: "/home/coder/project/.agents/agents/explorer.md",
+		kind: "subagent",
+		size_bytes: 384,
+		status: "ok",
+		subagent_name: "explorer",
+		subagent_description: "Read-only exploration.",
+		error: 'unknown front-matter field "color" ignored',
+	},
+	{
+		source: "/home/coder/project/.agents/agents/Gate-Bad.md",
+		kind: "subagent",
+		size_bytes: 96,
+		status: "invalid",
+		error: 'name "Gate-Bad" is not kebab-case',
+	},
+];
+
 const mockChatContextAgentDefinitions: ChatContext = {
 	dirty: false,
-	resources: [
-		{
-			source: "/home/coder/project/.agents/agents/reviewer.md",
-			kind: "subagent",
-			size_bytes: 512,
-			status: "ok",
-			subagent_name: "reviewer",
-			subagent_description: "Reviews diffs for correctness.",
-		},
-		{
-			source: "/home/coder/project/.agents/agents/explorer.md",
-			kind: "subagent",
-			size_bytes: 384,
-			status: "ok",
-			subagent_name: "explorer",
-			subagent_description: "Read-only exploration.",
-			error: 'unknown front-matter field "color" ignored',
-		},
-		{
-			source: "/home/coder/project/.agents/agents/Gate-Bad.md",
-			kind: "subagent",
-			size_bytes: 96,
-			status: "invalid",
-			error: 'name "Gate-Bad" is not kebab-case',
-		},
-	],
+	resources: mockAgentDefinitionResources,
 };
 
 // Loaded agent definitions are listed with their parse warnings, and a
@@ -367,6 +369,22 @@ export const AgentDefinitions: Story = {
 		await userEvent.click(
 			screen.getByRole("button", { name: /Agent definitions/ }),
 		);
+	},
+};
+
+export const AgentDefinitionFailuresOnly: Story = {
+	...AgentDefinitions,
+	args: {
+		usage: {
+			usedTokens: 12_000,
+			contextLimitTokens: 200_000,
+			context: {
+				dirty: false,
+				resources: mockAgentDefinitionResources.filter(
+					(resource) => resource.status !== "ok",
+				),
+			},
+		},
 	},
 };
 

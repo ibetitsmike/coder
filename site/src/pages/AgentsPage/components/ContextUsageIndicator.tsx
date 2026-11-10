@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type {
 	ChatContext,
+	ChatContextResource,
 	ChatContextResourceKind,
 	ChatContextResourceStatus,
 	ChatContextTool,
@@ -62,7 +63,7 @@ export type AgentContextUsage = {
 // Normalized popover entries, sourced from the chat's pinned context
 // resources.
 type ContextFileItem = { readonly path: string; readonly dir: string };
-type ContextSkillItem = {
+type ContextNamedItem = {
 	readonly source: string;
 	readonly name: string;
 	readonly description?: string;
@@ -233,7 +234,7 @@ const ContextHarnessSection: React.FC<{
 // Agent definitions the backend loaded can still carry non-fatal parse
 // warnings, so they are listed separately from the definitions it dropped.
 const ContextAgentDefinitionsSection: React.FC<{
-	items: readonly ContextSkillItem[];
+	items: readonly ContextNamedItem[];
 	issues: readonly ContextIssueItem[];
 	warnings: readonly ContextIssueItem[];
 }> = ({ items, issues, warnings }) => {
@@ -267,6 +268,46 @@ const ContextAgentDefinitionsSection: React.FC<{
 			</ContextResourceAccordionContent>
 		</ContextResourceAccordion>
 	);
+};
+
+// The agent definitions the backend loaded, and the non-fatal parse warnings
+// some of them still carry.
+const getLoadedAgentDefinitions = (
+	resources: readonly ChatContextResource[],
+): {
+	items: readonly ContextNamedItem[];
+	warnings: readonly ContextIssueItem[];
+} => {
+	const loaded = resources
+		.filter(
+			(resource) => resource.kind === "subagent" && resource.status === "ok",
+		)
+		.map((resource) => ({
+			resource,
+			name: resource.subagent_name || getPathBasename(resource.source),
+		}))
+		.filter(({ name }) => name.trim().length > 0);
+	return {
+		items: loaded.map(({ resource, name }) => ({
+			source: resource.source,
+			name,
+			description: resource.subagent_description,
+			dir: getPathDirname(resource.source),
+		})),
+		warnings: loaded.flatMap(({ resource, name }) =>
+			resource.error
+				? [
+						{
+							name,
+							kind: resource.kind,
+							status: resource.status,
+							error: resource.error,
+							source: resource.source,
+						},
+					]
+				: [],
+		),
+	};
 };
 
 export const ContextUsageIndicator: React.FC<{
@@ -334,7 +375,7 @@ export const ContextUsageIndicator: React.FC<{
 		// Drop entries with no usable path so an empty marker never renders as a
 		// nameless "Context files" row.
 		.filter((file) => file.path.trim().length > 0);
-	const skillItems: readonly ContextSkillItem[] = (pinnedResources ?? [])
+	const skillItems: readonly ContextNamedItem[] = (pinnedResources ?? [])
 		.filter((resource) => resource.kind === "skill" && resource.status === "ok")
 		.map((resource) => ({
 			source: resource.source,
@@ -380,27 +421,7 @@ export const ContextUsageIndicator: React.FC<{
 			dir: resource.source_path ?? "",
 		}))
 		.filter((harness) => harness.slug.trim().length > 0);
-	const okAgentDefinitions = (pinnedResources ?? []).filter(
-		(resource) => resource.kind === "subagent" && resource.status === "ok",
-	);
-	const agentDefinitionItems: readonly ContextSkillItem[] = okAgentDefinitions
-		.map((resource) => ({
-			source: resource.source,
-			name: resource.subagent_name || getPathBasename(resource.source),
-			description: resource.subagent_description,
-			dir: getPathDirname(resource.source),
-		}))
-		.filter((agent) => agent.name.trim().length > 0);
-	const agentDefinitionWarnings: readonly ContextIssueItem[] =
-		okAgentDefinitions
-			.filter((resource) => resource.error)
-			.map((resource) => ({
-				name: resource.subagent_name || getPathBasename(resource.source),
-				kind: resource.kind,
-				status: resource.status,
-				error: resource.error ?? "",
-				source: resource.source,
-			}));
+	const agentDefinitions = getLoadedAgentDefinitions(pinnedResources ?? []);
 	// Pinned resources the agent could not use (invalid skill, unreadable or
 	// oversize file) are surfaced as issues with their error so the failure is
 	// visible rather than a silent omission.
@@ -436,7 +457,7 @@ export const ContextUsageIndicator: React.FC<{
 		skillItems.length > 0 ||
 		hasMcp ||
 		harnessItems.length > 0 ||
-		agentDefinitionItems.length > 0 ||
+		agentDefinitions.items.length > 0 ||
 		issueItems.length > 0;
 
 	const hasResourceIssues = issueItems.length > 0;
@@ -707,12 +728,12 @@ export const ContextUsageIndicator: React.FC<{
 								issues={harnessIssues}
 							/>
 						)}
-						{(agentDefinitionItems.length > 0 ||
+						{(agentDefinitions.items.length > 0 ||
 							agentDefinitionIssues.length > 0) && (
 							<ContextAgentDefinitionsSection
-								items={agentDefinitionItems}
+								items={agentDefinitions.items}
 								issues={agentDefinitionIssues}
-								warnings={agentDefinitionWarnings}
+								warnings={agentDefinitions.warnings}
 							/>
 						)}
 					</div>
