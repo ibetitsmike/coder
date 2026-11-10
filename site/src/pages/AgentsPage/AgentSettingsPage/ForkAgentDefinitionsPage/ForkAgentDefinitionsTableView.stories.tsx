@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
+import { readOnlySkillAccess } from "../../utils/skills";
 import { emptyAgentDefinitionFormValues } from "./agentDefinitionMarkdown";
 import { ForkAgentDefinitionsTableView } from "./ForkAgentDefinitionsTableView";
 
@@ -88,7 +89,7 @@ export const EditorOpen: Story = {
 };
 
 export const ReadOnly: Story = {
-	args: { access: { create: false, update: false, delete: false } },
+	args: { access: readOnlySkillAccess },
 };
 
 const deleteMessage = `Your personal definition ${MockForkAgentDefinitionMetadata.name} will be deleted. Organization, project, and workspace definitions with the same name are not affected. This action cannot be undone.`;
