@@ -333,12 +333,12 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `273daf03dd`:
+Checked against fork `main` at `643ba9ab2c`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
-  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:258-275`, `:289-317`.
-  Direct children only, `isSubagentTarget`, `fork_subagents.go:322-334`.
+  Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:270-287`, `:301-329`.
+  Direct children only, `isSubagentTarget`, `fork_subagents.go:334-346`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1459`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
@@ -352,9 +352,9 @@ Checked against fork `main` at `273daf03dd`:
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:353-364`, and the model match, `:389-415`.
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:417-434`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1874-1875`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:615-617`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
-- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:183-191`, `:254`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
-  Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
+  Orchestration guidance dropped, `fork_subagents.go:361-363`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:709-712`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
@@ -379,7 +379,7 @@ Checked against fork `main` at `273daf03dd`:
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:11-23`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:128-137`, and the **Delete** menu item and its dialog, `:158-163`, `:214-221`, calls the user routes, `forkAgentDefinitions.ts:26-48`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:216-219`.
-  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:233-236`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:43`.
+  The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:247-250`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:43`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1934`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:88-92`, `:99-103`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
