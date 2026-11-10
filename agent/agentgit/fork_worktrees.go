@@ -301,7 +301,7 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := a.git(ctx, path, "status", "--porcelain=v1", "--untracked-files=all")
+	status, err := a.git(ctx, path, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree status.", err)
 		return
