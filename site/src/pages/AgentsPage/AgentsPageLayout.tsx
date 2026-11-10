@@ -370,11 +370,9 @@ const AgentsPageLayout: React.FC = () => {
 
 					if (chatEvent.kind === "created") {
 						if (updatedChat.parent_chat_id) {
-							// Child chat: add to the root's flat
-							// children list, where the tree links it
-							// through its own parent_chat_id. If the
-							// root is not in any loaded page, the
-							// child is silently dropped.
+							// Child chat: add to its root's flat
+							// children list. If the root is not in any
+							// loaded page, the child is silently dropped.
 							addChildToParentInCache(
 								queryClient,
 								updatedChat,

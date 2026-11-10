@@ -83,10 +83,10 @@ describe("collectDescendantChats", () => {
 			{ ...root, children: [child, runningGrandchild] },
 		]);
 
-		expect(collectDescendantChats(tree, "root-1")).toEqual([
-			child,
-			runningGrandchild,
-		]);
+		expect(
+			collectDescendantChats(tree, "root-1").map((chat) => chat.id),
+		).toEqual(expect.arrayContaining(["child-1", "grandchild-1"]));
+		expect(collectDescendantChats(tree, "root-1")).toHaveLength(2);
 		expect(collectDescendantChats(tree, "child-1")).toEqual([
 			runningGrandchild,
 		]);

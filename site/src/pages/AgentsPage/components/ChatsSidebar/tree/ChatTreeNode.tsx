@@ -216,9 +216,7 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 		hasWorkspace: Boolean(workspaceId),
 		isArchiving: isArchivingThisChat,
 		isUpdatingReadState,
-		// A node's own `children` field is empty for a non-root chat, so
-		// walk the tree instead: this equals `chat.children` for a root
-		// and reaches the descendants of mid-level nodes.
+		// `chat.children` is empty below the root, so walk the tree.
 		archiveBlockedReason: getArchiveBlockedReason(
 			chat.status,
 			collectDescendantChats(chatTree, chatID),

@@ -43,11 +43,8 @@ export const buildChatTree = (chats: readonly Chat[]): ChatTree => {
 				embedded.add(child.id);
 			}
 			for (const child of chat.children) {
-				// Each descendant carries its own parent_chat_id.
-				// Link to it when the parent is this root or another
-				// descendant of it, and fall back to the root when
-				// the parent is missing so stale cached data still
-				// renders.
+				// Fall back to the root when the parent is not in
+				// this family, so stale cached data still renders.
 				const ownParentID = getParentChatID(child);
 				const parentID =
 					ownParentID && ownParentID !== child.id && embedded.has(ownParentID)
