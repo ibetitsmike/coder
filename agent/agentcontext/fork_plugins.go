@@ -29,8 +29,9 @@ const (
 )
 
 // packManifestBaseName is the base name every plugin manifest shares. It is
-// what coderd matches pack-contributed resources on, so the candidate list
-// here and the marker in fork_plugin_gate.go must stay in sync.
+// what the watcher keys re-resolution on and what coderd matches
+// pack-contributed resources on, so the candidate list here and the marker
+// in fork_plugin_gate.go must stay in sync.
 const packManifestBaseName = "plugin.json"
 
 // Default containers when the manifest declares none, matching the Cursor

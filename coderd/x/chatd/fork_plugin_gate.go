@@ -24,9 +24,15 @@ import (
 const packContributionMarker = "plugin.json"
 
 // isPackContribution reports whether a chat context resource row was
-// contributed by a plugin pack.
+// contributed by a plugin pack. It splits on both separators: the source
+// path is stamped by the workspace agent, which may run on Windows while
+// coderd runs on Linux.
 func isPackContribution(sourcePath string) bool {
-	return filepath.Base(strings.TrimSpace(sourcePath)) == packContributionMarker
+	base := strings.TrimSpace(sourcePath)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return base == packContributionMarker
 }
 
 // filterPackResources drops pack-contributed resources when fork-plugins is

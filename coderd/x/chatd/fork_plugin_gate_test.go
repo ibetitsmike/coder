@@ -25,6 +25,10 @@ func TestIsPackContribution(t *testing.T) {
 	require.True(t, isPackContribution("/home/u/.coder/plugins/pstack/.claude-plugin/plugin.json"))
 	require.True(t, isPackContribution("/home/u/.coder/plugins/pstack/.cursor-plugin/plugin.json"))
 	require.True(t, isPackContribution("/home/u/.coder/plugins/pstack/plugin.json"))
+	// The source path is stamped by the workspace agent, which may run on
+	// Windows while coderd runs on Linux.
+	require.True(t, isPackContribution(`C:\Users\u\.coder\plugins\pstack\plugin.json`))
+	require.True(t, isPackContribution(`C:\Users\u\.coder\plugins\pstack\.cursor-plugin\plugin.json`))
 	require.False(t, isPackContribution(""))
 	require.False(t, isPackContribution("/home/u/project"))
 	require.False(t, isPackContribution("/home/u/.coder/skills/review-pr"))

@@ -153,6 +153,7 @@ func workspaceAgentDefinitions(ctx context.Context, p *Server, chat database.Cha
 			slog.F("chat_id", chat.ID), slog.Error(err))
 		return nil
 	}
+	resources = p.filterPackResources(resources)
 	var defs []workspacesdk.AgentDefinition
 	for _, resource := range resources {
 		if resource.BodyKind != database.WorkspaceAgentContextBodyKindSubagent ||

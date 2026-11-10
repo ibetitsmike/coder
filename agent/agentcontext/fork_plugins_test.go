@@ -60,6 +60,32 @@ func TestResolver_PluginPacks(t *testing.T) {
 	require.Equal(t, skill.SourcePath, agent.SourcePath)
 }
 
+func TestResolver_PluginPacksRootIsPack(t *testing.T) {
+	t.Parallel()
+
+	// A scan root that is itself a pack must stamp everything it emits
+	// with the manifest path, so coderd can drop its resources when
+	// fork-plugins is off. Ordinary container discovery would claim the
+	// same files with the container path as Source and lose the stamp.
+	root := t.TempDir()
+	manifest := `{"name": "pstack"}`
+	mustWriteFile(t, filepath.Join(root, "plugin.json"), manifest)
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "Pack instructions.\n")
+	mustWriteFile(t, filepath.Join(root, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+	mustWriteFile(t, filepath.Join(root, "agents", "comment-sicko.md"), packAgent("comment-sicko"))
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	manifestPath := filepath.Join(root, "plugin.json")
+	for _, res := range snap.Resources {
+		require.Equal(t, manifestPath, res.SourcePath,
+			"every resource of a pack root carries the manifest path, got %v with %q", res.Kind, res.Source)
+	}
+	findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "skills", "review-pr"))
+	findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(root, "agents", "comment-sicko.md"))
+}
+
 func TestResolver_PluginPacksCursorManifestDeclaredDirs(t *testing.T) {
 	t.Parallel()
 
