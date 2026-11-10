@@ -1,32 +1,31 @@
 import { describe, expect, it } from "vitest";
-import type * as TypesGen from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
 import { getArchiveBlockedReason } from "../../ChatActionsMenuItems";
 import { buildChatTree, collectDescendantChats } from "./chatTree";
 
-const chatWith = (overrides: Partial<TypesGen.Chat>): TypesGen.Chat => ({
+const mockRoot = { ...MockChat, id: "root-1", title: "Root" };
+const mockChild = {
 	...MockChat,
-	...overrides,
-});
+	id: "child-1",
+	title: "Coordinator",
+	parent_chat_id: "root-1",
+	root_chat_id: "root-1",
+};
+const mockGrandchild = {
+	...MockChat,
+	id: "grandchild-1",
+	title: "Worker",
+	parent_chat_id: "child-1",
+	root_chat_id: "root-1",
+};
 
 describe("buildChatTree", () => {
 	it("links a three-level family embedded out of order", () => {
-		const root = chatWith({ id: "root-1", title: "Root" });
-		const child = chatWith({
-			id: "child-1",
-			title: "Coordinator",
-			parent_chat_id: "root-1",
-			root_chat_id: "root-1",
-		});
-		const grandchild = chatWith({
-			id: "grandchild-1",
-			title: "Worker",
-			parent_chat_id: "child-1",
-			root_chat_id: "root-1",
-		});
 		// The list response embeds every descendant flat under the
 		// root, and the grandchild can appear before its parent.
-		const tree = buildChatTree([{ ...root, children: [grandchild, child] }]);
+		const tree = buildChatTree([
+			{ ...mockRoot, children: [mockGrandchild, mockChild] },
+		]);
 
 		expect(tree.rootIds).toEqual(["root-1"]);
 		expect(tree.parentById.get("child-1")).toBe("root-1");
@@ -37,13 +36,7 @@ describe("buildChatTree", () => {
 	});
 
 	it("keeps depth-1 input unchanged", () => {
-		const root = chatWith({ id: "root-1", title: "Root" });
-		const child = chatWith({
-			id: "child-1",
-			parent_chat_id: "root-1",
-			root_chat_id: "root-1",
-		});
-		const tree = buildChatTree([{ ...root, children: [child] }]);
+		const tree = buildChatTree([{ ...mockRoot, children: [mockChild] }]);
 
 		expect(tree.rootIds).toEqual(["root-1"]);
 		expect(tree.parentById.get("child-1")).toBe("root-1");
@@ -52,20 +45,9 @@ describe("buildChatTree", () => {
 	});
 
 	it("keeps a nested child list when a stale flat parent entry follows its root", () => {
-		const root = chatWith({ id: "root-1", title: "Root" });
-		const child = chatWith({
-			id: "child-1",
-			parent_chat_id: "root-1",
-			root_chat_id: "root-1",
-		});
-		const grandchild = chatWith({
-			id: "grandchild-1",
-			parent_chat_id: "child-1",
-			root_chat_id: "root-1",
-		});
 		const tree = buildChatTree([
-			{ ...root, children: [grandchild, child] },
-			child,
+			{ ...mockRoot, children: [mockGrandchild, mockChild] },
+			mockChild,
 		]);
 
 		expect(tree.rootIds).toEqual(["root-1"]);
@@ -73,12 +55,8 @@ describe("buildChatTree", () => {
 	});
 
 	it("falls back to the root when an embedded child's parent is missing", () => {
-		const root = chatWith({ id: "root-1", title: "Root" });
-		const staleChild = chatWith({
-			id: "child-1",
-			parent_chat_id: "missing-root",
-		});
-		const tree = buildChatTree([{ ...root, children: [staleChild] }]);
+		const staleChild = { ...mockChild, parent_chat_id: "missing-root" };
+		const tree = buildChatTree([{ ...mockRoot, children: [staleChild] }]);
 
 		expect(tree.rootIds).toEqual(["root-1"]);
 		expect(tree.parentById.get("child-1")).toBe("root-1");
@@ -88,20 +66,9 @@ describe("buildChatTree", () => {
 
 describe("collectDescendantChats", () => {
 	it("collects the descendants of a mid-level node for archive blocking", () => {
-		const root = chatWith({ id: "root-1", title: "Root" });
-		const child = chatWith({
-			id: "child-1",
-			parent_chat_id: "root-1",
-			root_chat_id: "root-1",
-		});
-		const runningGrandchild = chatWith({
-			id: "grandchild-1",
-			parent_chat_id: "child-1",
-			root_chat_id: "root-1",
-			status: "running",
-		});
+		const runningGrandchild = { ...mockGrandchild, status: "running" as const };
 		const tree = buildChatTree([
-			{ ...root, children: [child, runningGrandchild] },
+			{ ...mockRoot, children: [mockChild, runningGrandchild] },
 		]);
 
 		expect(
@@ -113,7 +80,7 @@ describe("collectDescendantChats", () => {
 		]);
 		expect(collectDescendantChats(tree, "grandchild-1")).toEqual([]);
 
-		// The tree walk feeds the archive menu, so a waiting child
+		// The tree walk feeds the archive menu, so a waiting mockChild
 		// whose grandchild is running cannot be archived.
 		expect(
 			getArchiveBlockedReason(
