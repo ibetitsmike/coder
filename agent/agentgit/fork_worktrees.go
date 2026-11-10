@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/xerrors"
@@ -224,10 +225,12 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 
 // discardWorktree undoes a worktree add whose result failed validation.
 func (a *worktreeAPI) discardWorktree(ctx context.Context, top, path, branch string) {
-	if _, err := a.git(ctx, top, "worktree", "remove", "--force", "--", path); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if _, err := a.git(cleanupCtx, top, "worktree", "remove", "--force", "--", path); err != nil {
 		a.logger.Warn(ctx, "failed to discard worktree", slog.F("path", path), slog.Error(err))
 	}
-	if _, err := a.git(ctx, top, "branch", "-D", "--", branch); err != nil {
+	if _, err := a.git(cleanupCtx, top, "branch", "-D", "--", branch); err != nil {
 		a.logger.Warn(ctx, "failed to discard worktree branch", slog.F("branch", branch), slog.Error(err))
 	}
 }
@@ -335,9 +338,16 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	args := []string{"worktree", "remove"}
+	// git refuses to remove a worktree with initialized submodules without
+	// --force; the status check above already proved the tree clean.
+	if _, err := os.Stat(filepath.Join(gitDir, "modules")); err == nil {
+		args = append(args, "--force")
+	}
+	args = append(args, "--", path)
 	// Running from the common git dir works without knowing where the main
 	// working tree lives.
-	if _, err := a.git(ctx, commonDir, "worktree", "remove", "--", path); err != nil {
+	if _, err := a.git(ctx, commonDir, args...); err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to remove the worktree.", err)
 		return
 	}

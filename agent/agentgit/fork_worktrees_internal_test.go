@@ -2,6 +2,7 @@ package agentgit
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -317,6 +318,27 @@ func TestForkWorktreeCreateFailedHookRollsBack(t *testing.T) {
 	assert.Equal(t, "feature", wt.Branch)
 }
 
+func TestForkWorktreeDiscardCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	repo := wtInitRepo(t)
+	path := filepath.Join(filepath.Dir(repo), "discard-me")
+	wtGit(t, repo, "worktree", "add", "-b", "feature", path)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	api := &worktreeAPI{
+		logger: slogtest.Make(t, nil),
+		execer: agentexec.DefaultExecer,
+		gitBin: "git",
+	}
+	api.discardWorktree(ctx, repo, path, "feature")
+
+	assert.NoDirExists(t, path)
+	err := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/feature").Run()
+	require.Error(t, err, "branch feature must not exist")
+}
+
 // Two isolated children edit the same file on their own branches without
 // touching each other or the parent checkout.
 func TestForkWorktreeConcurrentEdits(t *testing.T) {
@@ -515,4 +537,50 @@ func TestForkWorktreeDeleteWrongBranch(t *testing.T) {
 	assert.DirExists(t, wt.Path)
 	assert.NotEmpty(t, wtGit(t, repo, "branch", "--list", "feature"), "branch feature must be kept")
 	assert.NotEmpty(t, wtGit(t, repo, "branch", "--list", "other"), "branch other must be kept")
+}
+
+func wtInitSubmoduleRepo(t *testing.T) string {
+	t.Helper()
+	repo := wtInitRepo(t)
+	sub := filepath.Join(filepath.Dir(repo), "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	wtGit(t, sub, "init")
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "lib.txt"), []byte("lib\n"), 0o600))
+	wtGit(t, sub, "add", "lib.txt")
+	wtGit(t, sub, "commit", "-m", "sub commit")
+	wtGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", sub, "sub")
+	wtGit(t, repo, "commit", "-m", "add submodule")
+	return repo
+}
+
+func TestForkWorktreeDeleteSubmodules(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Clean", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t)
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		assert.NoDirExists(t, wt.Path)
+		assert.Empty(t, wtGit(t, repo, "branch", "--list", "feature"), "branch feature must be deleted")
+	})
+
+	t.Run("DirtySubmodule", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t)
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		require.NoError(t, os.WriteFile(filepath.Join(wt.Path, "sub", "scratch.txt"), []byte("scratch\n"), 0o600))
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.DirExists(t, wt.Path)
+	})
 }
