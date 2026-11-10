@@ -280,6 +280,10 @@ func TestScrubSecretAnswers(t *testing.T) {
 	require.Equal(t, "{{secret:call_x}} {{secret:call_y}} {{secret:call_y}}",
 		scrubSecretAnswers(`abc\u003Cdefg abc\u001Bdefg-\u00E4 abc\u001Bdefg-ä`, upper),
 		"a JSON encoder can write uppercase hex in the escape of an ASCII character")
+	goQuoted := []forkdb.ChatSecretAnswer{{ToolCallID: "call_g", Value: "abc\x01defg-\u00e4"}}
+	require.Equal(t, `open "{{secret:call_g}}": "{{secret:call_g}}"`,
+		scrubSecretAnswers(`open "abc\x01defg-ä": "abc\x01defg-\u00e4"`, goQuoted),
+		"Go's %q and %+q write a control character as a \\x escape")
 	slash := []forkdb.ChatSecretAnswer{{ToolCallID: "call_p", Value: "a/bcdefg"}}
 	require.Equal(t, `{"p":"{{secret:call_p}}"}`, scrubSecretAnswers(`{"p":"a\/bcdefg"}`, slash),
 		"a JSON encoder can escape /")
