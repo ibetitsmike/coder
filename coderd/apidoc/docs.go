@@ -28140,6 +28140,7 @@ const docTemplate = `{
             "enum": [
                 "fork-chat-todos",
                 "fork-nested-subagents",
+                "fork-plugins",
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
                 "fork-chat-wakeups",
@@ -28186,6 +28187,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -28207,6 +28209,7 @@ const docTemplate = `{
             "x-enum-varnames": [
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
+                "ExperimentForkPlugins",
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
                 "ExperimentForkChatWakeups",
