@@ -48,4 +48,24 @@ describe("ContextUsageIndicator", () => {
 			'agent name "Broken" is not kebab-case',
 		);
 	});
+
+	it("flags agent definition warnings on the trigger", () => {
+		render(
+			<ContextUsageIndicator
+				usage={{
+					usedTokens: 12_000,
+					contextLimitTokens: 200_000,
+					context: {
+						...MockChatContextAgentDefinitions,
+						resources: MockChatContextAgentDefinitions.resources?.filter(
+							(resource) => resource.status === "ok",
+						),
+					},
+				}}
+			/>,
+		);
+		expect(
+			screen.getByRole("button", { name: /Context usage/ }),
+		).toHaveAccessibleName(/Some agent definitions have warnings\./);
+	});
 });

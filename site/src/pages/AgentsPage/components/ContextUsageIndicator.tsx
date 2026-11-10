@@ -443,11 +443,18 @@ export const ContextUsageIndicator: React.FC<{
 		issueItems.length > 0;
 
 	const hasResourceIssues = issueItems.length > 0;
-	const needsAttention = isDirty || hasContextError || hasResourceIssues;
+	const hasAgentDefinitionWarnings = agentDefinitionItems.some(
+		(definition) => definition.warnings !== "",
+	);
+	const needsAttention =
+		isDirty ||
+		hasContextError ||
+		hasResourceIssues ||
+		hasAgentDefinitionWarnings;
 	const AttentionIcon = hasContextError ? CircleAlertIcon : TriangleAlertIcon;
 	const toneClassName = hasContextError
 		? "text-content-destructive"
-		: isDirty || hasResourceIssues
+		: isDirty || hasResourceIssues || hasAgentDefinitionWarnings
 			? "text-content-warning"
 			: getIndicatorToneClassName(percentUsed, compactionPercent);
 
@@ -460,6 +467,7 @@ export const ContextUsageIndicator: React.FC<{
 		hasContextError ? "Context error." : "",
 		isDirty ? "Context changed." : "",
 		hasResourceIssues ? "Some context resources failed to load." : "",
+		hasAgentDefinitionWarnings ? "Some agent definitions have warnings." : "",
 	].filter((note) => note !== "");
 	const statusNote = statusNotes.length > 0 ? ` ${statusNotes.join(" ")}` : "";
 	let ariaLabel = "Context usage";
