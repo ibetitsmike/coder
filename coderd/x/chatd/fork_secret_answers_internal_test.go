@@ -5,6 +5,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os/exec"
 	"runtime"
@@ -51,6 +52,19 @@ func (mediaTool) Run(context.Context, fantasy.ToolCall) (fantasy.ToolResponse, e
 	return resp, nil
 }
 
+// attachTool answers with text and an attached file.
+type attachTool struct {
+	fantasy.AgentTool
+}
+
+func (attachTool) Info() fantasy.ToolInfo { return fantasy.ToolInfo{Name: "attach_file"} }
+
+func (attachTool) Run(context.Context, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return chattool.WithAttachments(fantasy.NewTextResponse("attached"), chattool.AttachmentMetadata{
+		FileID: uuid.New(), MediaType: "text/plain", Name: "token.txt",
+	}), nil
+}
+
 type echoMCPTool struct {
 	echoTool
 	id uuid.UUID
@@ -92,6 +106,7 @@ func TestSecretAnswerTools(t *testing.T) {
 		stepTool{echoTool: echoTool{name: "computer", input: new(string)}, observed: &observed},
 		mediaTool{},
 		echoTool{name: chattool.ExecuteToolName, input: &executeInput, output: "ok"},
+		attachTool{},
 	}, child)
 
 	// A tool that passes its input to another model keeps the placeholder,
@@ -130,6 +145,10 @@ func TestSecretAnswerTools(t *testing.T) {
 	require.Empty(t, resp.Data)
 	require.Empty(t, resp.MediaType)
 	require.Equal(t, "captured\n"+secretMediaWithheldNote, resp.Content)
+	resp, err = tools[5].Run(ctx, fantasy.ToolCall{Input: "{}"})
+	require.NoError(t, err)
+	require.Empty(t, resp.Metadata, "the next prompt would show the attached file to the model")
+	require.Equal(t, "attached\n"+secretMediaWithheldNote, resp.Content)
 
 	_, err = tools[4].Run(ctx, fantasy.ToolCall{Input: `{"command":"use {{secret:call_s}}"}`})
 	require.NoError(t, err)
@@ -281,6 +300,20 @@ func TestDescendantSecretQuestion(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, resp.IsError, input)
 	}
+	// The end of the turn would deliver a queued message after the
+	// question, and the message would answer it without the value.
+	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"queued"}]`),
+	})
+	require.NoError(t, err)
+	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_queued", Input: secretInput})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Equal(t, errSecretQuestionQueued.Error(), resp.Content)
+	_, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	require.NoError(t, f.db.DeleteAllChatQueuedMessages(ctx, child.ID))
+
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_on", Input: secretInput})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
