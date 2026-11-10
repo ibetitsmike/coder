@@ -5,8 +5,6 @@ import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { agentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
 import { organizationsPermissions } from "#/api/queries/organizations";
-import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
-import type { OrganizationPermissions } from "#/modules/permissions/organizations";
 import {
 	MockDefaultOrganization,
 	MockNoOrganizationPermissions,
@@ -23,23 +21,6 @@ import {
 import ForkOrganizationAgentDefinitionsPage from "./ForkOrganizationAgentDefinitionsPage";
 
 const path = "/ai/settings/agent-definitions";
-
-const defaultOrganizationPermissions = (
-	permissions: OrganizationPermissions,
-) => ({
-	key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
-	data: { [MockDefaultOrganization.id]: permissions },
-});
-
-const defaultOrganizationDefinitions = (
-	data: readonly ForkAgentDefinitionMetadata[],
-) => ({
-	key: agentDefinitionsKey({
-		tier: "organization",
-		organizationId: MockDefaultOrganization.id,
-	}),
-	data,
-});
 
 const meta = {
 	title: "pages/AISettingsPage/ForkOrganizationAgentDefinitionsPage",
@@ -64,8 +45,17 @@ type Story = StoryObj<typeof meta>;
 export const OrganizationAdmin: Story = {
 	parameters: {
 		queries: [
-			defaultOrganizationPermissions(MockOrganizationPermissions),
-			defaultOrganizationDefinitions([MockForkAgentDefinitionMetadata]),
+			{
+				key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
+				data: { [MockDefaultOrganization.id]: MockOrganizationPermissions },
+			},
+			{
+				key: agentDefinitionsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkAgentDefinitionMetadata],
+			},
 		],
 	},
 };
@@ -73,8 +63,17 @@ export const OrganizationAdmin: Story = {
 export const Empty: Story = {
 	parameters: {
 		queries: [
-			defaultOrganizationPermissions(MockOrganizationPermissions),
-			defaultOrganizationDefinitions([]),
+			{
+				key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
+				data: { [MockDefaultOrganization.id]: MockOrganizationPermissions },
+			},
+			{
+				key: agentDefinitionsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [],
+			},
 		],
 	},
 };
@@ -82,11 +81,22 @@ export const Empty: Story = {
 export const ReadOnly: Story = {
 	parameters: {
 		queries: [
-			defaultOrganizationPermissions({
-				...MockNoOrganizationPermissions,
-				viewOrganizationSkills: true,
-			}),
-			defaultOrganizationDefinitions([MockForkAgentDefinitionMetadata]),
+			{
+				key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
+				data: {
+					[MockDefaultOrganization.id]: {
+						...MockNoOrganizationPermissions,
+						viewOrganizationSkills: true,
+					},
+				},
+			},
+			{
+				key: agentDefinitionsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkAgentDefinitionMetadata],
+			},
 		],
 	},
 };
@@ -116,8 +126,17 @@ export const PermissionsRefetchError: Story = {
 	],
 	parameters: {
 		queries: [
-			defaultOrganizationPermissions(MockOrganizationPermissions),
-			defaultOrganizationDefinitions([MockForkAgentDefinitionMetadata]),
+			{
+				key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
+				data: { [MockDefaultOrganization.id]: MockOrganizationPermissions },
+			},
+			{
+				key: agentDefinitionsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkAgentDefinitionMetadata],
+			},
 		],
 	},
 	beforeEach: () => {

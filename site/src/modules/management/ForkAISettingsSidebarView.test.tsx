@@ -15,14 +15,16 @@ import { renderWithRouter } from "#/testHelpers/renderHelpers";
 import AISettingsSidebarView from "./AISettingsSidebarView";
 
 it.each([
-	["a deployment admin", MockPermissions],
+	["a deployment admin", MockPermissions, [MockDefaultOrganization]],
 	[
 		"an organization auditor",
 		{ ...MockNoPermissions, viewAnyOrganizationSkills: true },
+		[MockDefaultOrganization],
 	],
+	["a deployment admin while organization access loads", MockPermissions, []],
 ])(
 	"links %s to the organization's agent definitions",
-	async (_, permissions) => {
+	async (_, permissions, skillOrganizations) => {
 		const user = userEvent.setup();
 		const router = createMemoryRouter(
 			[
@@ -43,7 +45,7 @@ it.each([
 							<AISettingsSidebarView
 								permissions={permissions}
 								canViewOrganizationInstructions={false}
-								skillOrganizations={[MockDefaultOrganization]}
+								skillOrganizations={skillOrganizations}
 							/>
 						</DashboardContext.Provider>
 					),

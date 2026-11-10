@@ -9,8 +9,10 @@ import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizati
 
 /**
  * Returns the organization agent definitions page link, or undefined while
- * the experiment is off. Like the Skills link, it carries over only an
- * organization the page will show, since the page denies any other one.
+ * the experiment is off. It carries over the selected organization unless
+ * the user is known not to read its skills, since the page denies that
+ * organization. While access is still loading the organization is kept, so
+ * the page never falls back to its default organization instead.
  * Stories render the sidebar outside DashboardProvider, where it is hidden.
  */
 export const useForkAgentDefinitionsPath = (
@@ -27,7 +29,7 @@ export const useForkAgentDefinitionsPath = (
 	return {
 		pathname: "/ai/settings/agent-definitions",
 		search:
-			organizationName && isReadable
+			organizationName && (skillOrganizations.length === 0 || isReadable)
 				? new URLSearchParams({ [orgSearchParam]: organizationName }).toString()
 				: "",
 	};
