@@ -29,6 +29,10 @@ const (
 	descendantQuestionPollInterval = 2 * time.Second
 	descendantQuestionNote         = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
 		"Call wait_agent again to wait until the child resumes and finishes, or answer it yourself with message_agent."
+	// descendantSecretQuestionNote leaves out message_agent: a message
+	// would answer the question without the secret value.
+	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. Only the user can give it, in the root chat. " +
+		"Call wait_agent again to wait until the child resumes and finishes."
 )
 
 // descendantQuestionsEnabled reports whether chat gets the blocking
@@ -71,6 +75,13 @@ func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestio
 	}
 }
 
+// secretAllowed reports whether the tool offers secret questions. A
+// computer-use chat gets none, because its screenshots reach the model
+// without the secret answer scrub.
+func (t descendantQuestionTool) secretAllowed() bool {
+	return t.secret && (!t.chat.Mode.Valid || t.chat.Mode.ChatMode != database.ChatModeComputerUse)
+}
+
 func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
 	info.Description = "Ask the user one or more structured questions. The user sees them in the root chat of this chat's family. " +
@@ -78,7 +89,7 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 		"Ask only for decisions that depend on the user's context or preference; if one option is clearly best, proceed with it and state the assumption. " +
 		"Each question needs a short header, the question itself, and 2-4 options. " +
 		"Write each option as one short, complete answer the user could send as their reply."
-	if !t.secret {
+	if !t.secretAllowed() {
 		return info
 	}
 	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
@@ -123,6 +134,8 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 	}
 	question := args.Questions[0]
 	switch {
+	case !t.secretAllowed():
+		return fantasy.NewTextErrorResponse("a computer-use chat cannot ask secret questions"), true
 	case len(args.Questions) != 1:
 		return fantasy.NewTextErrorResponse("a secret question must be the only question of its call"), true
 	case strings.TrimSpace(question.Header) == "" || strings.TrimSpace(question.Question) == "":
@@ -292,16 +305,19 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	if err := json.Unmarshal([]byte(resp.Content), &result); err != nil {
 		return resp, nil
 	}
-	questions, err = t.server.pendingDescendantQuestion(ctx, childID)
+	pending, err = t.server.pendingDescendantQuestionRow(ctx, childID)
 	if err != nil {
 		return fantasy.NewTextErrorResponse("read the child's question: " + err.Error()), nil
 	}
-	if questions == nil {
+	if pending == nil {
 		return resp, nil
 	}
 	result["needs_input"] = true
-	result["questions"] = questions
+	result["questions"] = pending.Questions
 	result["note"] = descendantQuestionNote
+	if pending.Secret() {
+		result["note"] = descendantSecretQuestionNote
+	}
 	return toolJSONResponse(result), nil
 }
 
