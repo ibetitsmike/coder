@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -409,13 +410,15 @@ func secretScrubMarker(i int) string {
 }
 
 // secretAnswerForms returns value as is, shell-quoted and as Bash writes it
-// in $'...', each also as JSON encoders escape it in a string: with or
-// without HTML escapes, with non-ASCII characters as is or escaped, with
-// lowercase or uppercase hex in escapes, and with / as is and escaped.
+// in $'...', each also as Go's %q and %+q write it in a string, and as JSON
+// encoders escape it in a string: with or without HTML escapes, with
+// non-ASCII characters as is or escaped, with lowercase or uppercase hex in
+// escapes, and with / as is and escaped.
 func secretAnswerForms(value string) []string {
 	var forms []string
 	for _, v := range []string{value, shellQuote(value), bashANSICContent(value, false), bashANSICContent(value, true)} {
-		forms = append(forms, v)
+		quoted, quotedASCII := strconv.Quote(v), strconv.QuoteToASCII(v)
+		forms = append(forms, v, quoted[1:len(quoted)-1], quotedASCII[1:len(quotedASCII)-1])
 		for _, content := range []string{jsonStringContent(v), jsonStringContentNoHTMLEscape(v)} {
 			upper := upperJSONEscapes(content)
 			for _, form := range []string{
