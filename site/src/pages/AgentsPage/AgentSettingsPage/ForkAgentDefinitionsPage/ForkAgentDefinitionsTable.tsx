@@ -148,6 +148,11 @@ export const ForkAgentDefinitionsTable: React.FC<
 		}
 	};
 
+	// A request that settles after its editor was replaced, for example by
+	// one opened in another organization, leaves the newer editor open.
+	const closeEditorTarget = (target: EditorTarget) =>
+		setEditorTarget((current) => (current === target ? undefined : current));
+
 	let editorState: ForkAgentDefinitionEditorState | undefined;
 	if (editorTarget?.mode === "create") {
 		editorState = {
@@ -189,7 +194,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 					{
 						onSettled: async (_data, error) => {
 							if (await isCreated(error)) {
-								setEditorTarget(undefined);
+								closeEditorTarget(editorTarget);
 								toast.success("Agent definition created.");
 							}
 							onSettled();
@@ -269,7 +274,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 								!error ||
 								(isResponseLost(error) && saved?.content === content)
 							) {
-								setEditorTarget(undefined);
+								closeEditorTarget(editorTarget);
 								toast.success("Agent definition saved.");
 							}
 							onSettled();

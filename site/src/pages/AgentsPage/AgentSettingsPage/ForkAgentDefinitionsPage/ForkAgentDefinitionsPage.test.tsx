@@ -916,6 +916,67 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
+	it("keeps an editor opened in another organization when an earlier create succeeds", async () => {
+		const user = userEvent.setup();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinitions",
+		).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+		let resolveCreate: (definition: ForkAgentDefinition) => void = () => {};
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveCreate = resolve;
+				}),
+		);
+		let selectOrganization: (organizationId: string) => void = () => {};
+		const OrganizationSwitch: React.FC = () => {
+			const [organizationId, setOrganizationId] = useState(
+				MockDefaultOrganization.id,
+			);
+			selectOrganization = setOrganizationId;
+			return <ForkAgentDefinitionsTable organizationId={organizationId} />;
+		};
+		render(<OrganizationSwitch />);
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const createDialog = await screen.findByRole("dialog");
+		await user.type(within(createDialog).getByLabelText("Name"), "linter");
+		await user.type(within(createDialog).getByLabelText("Body"), "Lint.");
+		await user.click(
+			within(createDialog).getByRole("button", {
+				name: "Create agent definition",
+			}),
+		);
+		act(() => selectOrganization(MockOrganization2.id));
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await screen.findByLabelText("Description");
+		resolveCreate({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+		expect(screen.getByLabelText("Description")).toBeInTheDocument();
+	});
+
 	it("keeps saved content when an older toggle response arrives later", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();

@@ -92,8 +92,11 @@ describe("updateUserAgentDefinition", () => {
 	it("keeps a newer cached detail of a recreated definition", async () => {
 		const queryClient = createQueryClient();
 		const detailKey = userAgentDefinition(queryClient, org, name).queryKey;
-		const recreated = definitionAt("2030-01-01T00:00:00Z", "recreated");
-		queryClient.setQueryData(detailKey, recreated);
+		const MockRecreatedDefinition = definitionAt(
+			"2030-01-01T00:00:00Z",
+			"recreated",
+		);
+		queryClient.setQueryData(detailKey, MockRecreatedDefinition);
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"updateUserAgentDefinition",
@@ -104,7 +107,9 @@ describe("updateUserAgentDefinition", () => {
 			updateUserAgentDefinition(queryClient),
 		).mutate({ organizationId: org, name, req: { enabled: false } });
 
-		expect(queryClient.getQueryData(detailKey)).toEqual(recreated);
+		expect(queryClient.getQueryData(detailKey)).toEqual(
+			MockRecreatedDefinition,
+		);
 	});
 });
 
@@ -126,5 +131,30 @@ describe("userAgentDefinition", () => {
 		).rejects.toBeDefined();
 
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
+	});
+
+	it("keeps a row a refetch replaced while the 404 was in flight", async () => {
+		const queryClient = createQueryClient();
+		const listKey = userAgentDefinitions(org).queryKey;
+		queryClient.setQueryData(listKey, [MockForkAgentDefinitionMetadata]);
+		const MockRecreatedMetadata = metadataOf(
+			definitionAt("2030-01-01T00:00:00Z", "recreated"),
+		);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockImplementation(async () => {
+			queryClient.setQueryData(listKey, [MockRecreatedMetadata]);
+			throw {
+				isAxiosError: true,
+				response: { status: 404, data: { message: "Not found." } },
+			};
+		});
+
+		await expect(
+			queryClient.fetchQuery(userAgentDefinition(queryClient, org, name)),
+		).rejects.toBeDefined();
+
+		expect(queryClient.getQueryData(listKey)).toEqual([MockRecreatedMetadata]);
 	});
 });

@@ -28,7 +28,8 @@ export const userAgentDefinitions = (organizationId: string) =>
 /**
  * One definition with its markdown content. The key extends the list key, so
  * invalidating the list refreshes an open editor's copy too. A 404 also
- * drops the definition from the cached list, so it is no longer offered.
+ * drops the listed row it was requested for from the cached list, so it is no
+ * longer offered, unless a refetch has replaced that row since.
  */
 export const userAgentDefinition = (
 	queryClient: QueryClient,
@@ -38,14 +39,16 @@ export const userAgentDefinition = (
 	queryOptions({
 		queryKey: [...userAgentDefinitionsKey(organizationId), name] as const,
 		queryFn: async () => {
+			const listKey = userAgentDefinitions(organizationId).queryKey;
+			const listed = queryClient
+				.getQueryData(listKey)
+				?.find((definition) => definition.name === name);
 			try {
 				return await getUserAgentDefinition(organizationId, name);
 			} catch (error) {
-				if (isAxiosError(error) && error.response?.status === 404) {
-					queryClient.setQueryData(
-						userAgentDefinitions(organizationId).queryKey,
-						(definitions) =>
-							definitions?.filter((definition) => definition.name !== name),
+				if (isAxiosError(error) && error.response?.status === 404 && listed) {
+					queryClient.setQueryData(listKey, (definitions) =>
+						definitions?.filter((definition) => definition !== listed),
 					);
 				}
 				throw error;
