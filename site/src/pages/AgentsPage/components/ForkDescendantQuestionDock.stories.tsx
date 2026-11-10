@@ -25,6 +25,15 @@ const meta: Meta<typeof ForkDescendantQuestionDock> = {
 export default meta;
 type Story = StoryObj<typeof ForkDescendantQuestionDock>;
 
+const OtherChildQuestion = {
+	...MockChatDescendantQuestion,
+	chat_id: "other-child-chat",
+	chat_title: "",
+	tool_call_id: "call-2",
+};
+
+const UntitledChatQuestion = { ...MockChatDescendantQuestion, chat_title: "" };
+
 export const OnePending: Story = {
 	parameters: {
 		queries: [
@@ -41,15 +50,7 @@ export const SeveralPending: Story = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [
-					MockChatDescendantQuestion,
-					{
-						...MockChatDescendantQuestion,
-						chat_id: "other-child-chat",
-						chat_title: "",
-						tool_call_id: "call-2",
-					},
-				],
+				data: [MockChatDescendantQuestion, OtherChildQuestion],
 			},
 		],
 	},
@@ -60,7 +61,7 @@ export const UntitledChat: Story = {
 		queries: [
 			{
 				key: chatDescendantQuestionsKey(MockChat.id),
-				data: [{ ...MockChatDescendantQuestion, chat_title: "" }],
+				data: [UntitledChatQuestion],
 			},
 		],
 	},
