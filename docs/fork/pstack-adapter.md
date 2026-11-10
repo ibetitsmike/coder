@@ -96,13 +96,16 @@ API chats outside plan mode don't have it.
 
 With the `fork-nested-subagents` experiment, a child that isn't an `explore` child also has `ask_user_question`, except in plan-mode turns.
 The call ends the child's turn, and the answer arrives as the child's next user message.
-The root chat doesn't show the question.
+In the web UI, the root chat's page shows the oldest unanswered question from any descendant under "Question from" and the asking chat's title, with "1 of N" when more questions wait.
+An answer there goes to the chat that asked, not to the root chat.
+While the root chat has its own unanswered question, the page shows only that one, and a descendant's question appears after the user answers it.
 If the child asks while you wait on it, `wait_agent` returns `needs_input: true` with the questions when the child's turn ends.
 If you call `wait_agent` while the question is unanswered, it waits for the answer and then for the child's reply, and returns `needs_input: true` if its timeout comes first.
-After `needs_input: true`, show the user the questions and end your turn.
-When the user answers, send the answer to the child with `message_agent`, then call `wait_agent` on the child again.
+After `needs_input: true`, tell the user that the question waits on the root chat's page, then call `wait_agent` on the child again.
+If the user answers in your chat instead, send the answer to the child with `message_agent`, then call `wait_agent` on the child again.
 The user can also answer in the child's own chat, which the Agents sidebar lists under its parent.
-That answer resumes only the child, so your chat continues only when the user sends you a message, and then `wait_agent` returns the child's reply.
+An answer on the root chat's page or in the child's chat resumes only the child.
+If your turn has ended, your chat continues only when the user sends you a message, and then `wait_agent` returns the child's reply.
 Without the experiment, child chats don't have `ask_user_question`.
 
 ### Todo list
@@ -329,7 +332,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `2d635ea9a6`:
+Checked against fork `main` at `a9438bd7af`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -382,6 +385,9 @@ Checked against fork `main` at `2d635ea9a6`:
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:34-36`, `fork_tools.go:35-39`, ending the turn, `fork_descendant_questions.go:40-50`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
   Unanswered until the child gets a user message after the question, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-23`.
   `needs_input` and the questions in `wait_agent`, `fork_descendant_questions.go:214-224`, which first waits for the answer when the question is unanswered at the call, `:182-201`, `:230-251`, added with the experiment, `fork_tools.go:40-42`.
+  The family's unanswered questions, oldest first, `chat_descendant_questions.sql:25-45`, from `GET /api/v2/chats/fork/{chat}/questions`, `coderd/fork_chat_routes.go:53`, `coderd/fork_chat_questions.go:29-72`.
+  The root chat page shows the oldest one only with the experiment and only on a root chat the viewer can act on, `site/src/pages/AgentsPage/components/ForkDescendantQuestionDock.tsx:38-46`, `:80-81`, `:123-136`, and posts the answer to the asking chat, `site/src/api/queries/forkChatQuestions.ts:55-57`.
+  The root chat's own open question hides it until that answer is queued, `site/src/pages/AgentsPage/components/ChatPageContent.tsx:222-227`, `:286-300`.
 - Skill roots and containers: `agent/agentcontext/defaults.go:9-21`, `agent/agentcontext/resolve.go:66-71`.
 - Instruction files: `resolve.go:48-52`.
 - Skills one level deep, with `name` equal to the directory: `resolve.go:61-64`, `:632-647`.
