@@ -31,7 +31,8 @@ const editedValues: AgentDefinitionFormValues = {
 	description: "Reviews diffs.",
 	model: "sonnet",
 	body: "Review the diff.",
-	extraFrontMatter: "tools: Read",
+	frontMatter:
+		"name: reviewer\ndescription: Reviews diffs.\nmodel: sonnet\ntools: Read",
 };
 
 const renderDialog = (
@@ -70,11 +71,11 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 			name: "imported",
 			content: [
 				"---",
-				'name: "imported"',
-				'description: "Imported agent"',
-				'model: "sonnet"',
+				"name: imported",
+				"description: Imported agent",
+				"model: sonnet",
 				"tools:",
-				"- Read",
+				"  - Read",
 				"---",
 				"Imported body.",
 				"",
@@ -104,8 +105,8 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 		await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
 		const { name, content } = onSubmit.mock.calls[0][0];
 		expect(name).toBe("reviewer");
-		expect(content).toMatch(/^---\nname: "reviewer"\n/);
-		expect(content).toContain("tools:\n- Read\n");
+		expect(content).toMatch(/^---\nname: reviewer\n/);
+		expect(content).toContain("tools:\n  - Read\n");
 	});
 
 	it("saves a change to only the model", async () => {
@@ -126,13 +127,13 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 
 		await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
 		expect(onSubmit.mock.calls[0][0].content).toBe(
-			'---\nname: "reviewer"\nmodel: "opus"\n---\nReview.\n',
+			"---\nname: reviewer\nmodel: opus\n---\nReview.\n",
 		);
 	});
 
 	it("validates the size again when only the model changes", async () => {
 		const user = userEvent.setup();
-		const header = '---\nname: "reviewer"\n---\n';
+		const header = "---\nname: reviewer\n---\n";
 		// One byte under the limit with the trailing newline, before the edit.
 		const body = "a".repeat(64 * 1024 - header.length - 2);
 		const { onSubmit } = renderDialog({
@@ -216,7 +217,7 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 				...editedValues,
 				description: "Changed in another tab.",
 				model: "opus",
-				extraFrontMatter: "tools: Grep",
+				frontMatter: "name: reviewer\ntools: Grep",
 			}),
 		);
 		await user.click(
@@ -227,9 +228,9 @@ describe("ForkAgentDefinitionEditorDialog", () => {
 		expect(onSubmit.mock.calls[0][0].content).toBe(
 			[
 				"---",
-				'name: "reviewer"',
-				'description: "Reviews diffs."',
-				'model: "sonnet"',
+				"name: reviewer",
+				"description: Reviews diffs.",
+				"model: sonnet",
 				"tools: Read",
 				"---",
 				"Review the diff. Then report.",

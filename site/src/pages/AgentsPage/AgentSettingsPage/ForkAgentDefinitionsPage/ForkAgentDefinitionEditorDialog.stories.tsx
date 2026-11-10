@@ -29,7 +29,8 @@ export const Edit: Story = {
 			description: "Reviews a diff for correctness and test gaps.",
 			model: "gpt-5",
 			body: "Review the diff and report bugs with file and line references.",
-			extraFrontMatter: "tools:\n  - Read\n  - Grep",
+			frontMatter:
+				"name: code-reviewer\ndescription: Reviews a diff.\nmodel: gpt-5\ntools:\n  - Read\n  - Grep",
 		},
 	},
 };
