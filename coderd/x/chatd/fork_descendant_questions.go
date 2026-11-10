@@ -154,7 +154,7 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 	}
 	err = t.server.recordDescendantQuestion(ctx, t.chat.ID, call.ID, questions, true)
 	if errors.Is(err, errSecretQuestionQueued) {
-		return fantasy.NewTextErrorResponse(err.Error()), true
+		return fantasy.NewTextErrorResponse(errSecretQuestionQueued.Error()), true
 	}
 	if err != nil {
 		t.server.logger.Error(ctx, "record descendant question", slog.F("chat_id", t.chat.ID), slog.Error(err))
