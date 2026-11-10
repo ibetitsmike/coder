@@ -95,11 +95,11 @@ export const WaitForEvents: Story = {
 	play: expand,
 };
 
-export const WaitForEventsChildrenOnly: Story = {
+export const WaitForEventsPullRequestOnly: Story = {
 	args: {
 		name: "wait_for_events",
-		args: {},
-		result: { ...MockWaitForEventsResult, pull_request: undefined },
+		args: { pull_request_url: MockWaitForEventsResult.pull_request.url },
+		result: { ...MockWaitForEventsResult, children: [] },
 	},
 	play: expand,
 };
@@ -132,7 +132,7 @@ export const NotifyUserFailed: Story = {
 	args: {
 		name: "notify_user",
 		args: MockNotifyUserArgs,
-		result: { error: "this chat sent 10 notifications in the last hour" },
+		result: { error: "you can send at most 10 notifications an hour" },
 		isError: true,
 	},
 	play: expand,

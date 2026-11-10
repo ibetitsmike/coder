@@ -5,34 +5,34 @@ import type React from "react";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
 import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
-import { asString, parseArgs, type ToolStatus } from "./utils";
+import { asString, parseArgs } from "./utils";
 
 const failedLabel = "Failed to send a notification";
 
-type ForkNotifyUserToolProps = {
-	title: string;
-	message: string;
-	status: ToolStatus;
-	isError: boolean;
-	errorMessage?: string;
-};
-
-const ForkNotifyUserTool: React.FC<ForkNotifyUserToolProps> = ({
-	title,
-	message,
-	status,
-	isError,
-	errorMessage,
+/** The notification text comes from the args, the outcome from the result. */
+export const ForkNotifyUserToolRenderer: React.FC<ForkToolRendererProps> = ({
+	fallback: Fallback,
+	...props
 }) => {
-	let label: string;
+	const { status, isError } = props;
+	if (
+		!isError &&
+		status !== "running" &&
+		parseArgs(props.result)?.sent !== true
+	) {
+		return <Fallback {...props} />;
+	}
+	const args = parseArgs(props.args);
+	const title = asString(args?.title).trim();
+	const message = asString(args?.message).trim();
+	const errorMessage = isError ? forkToolErrorMessage(props.result) : "";
+	const errorDetail = errorMessage.trim();
+	let label = "Sent a notification";
 	if (status === "running") {
 		label = "Sending a notification…";
 	} else if (isError) {
 		label = failedLabel;
-	} else {
-		label = "Sent a notification";
 	}
-	const errorDetail = errorMessage?.trim();
 
 	return (
 		<ToolCall.Root
@@ -40,11 +40,11 @@ const ForkNotifyUserTool: React.FC<ForkNotifyUserToolProps> = ({
 			status={status}
 			isError={isError}
 			errorMessage={errorMessage || failedLabel}
-			hasContent={title !== "" || message !== "" || Boolean(errorDetail)}
+			hasContent={title !== "" || message !== "" || errorDetail !== ""}
 		>
 			<ToolCall.Header iconName="fork_notify_user" label={label} />
 			<ToolCall.Content>
-				{errorDetail && (
+				{errorDetail !== "" && (
 					<ToolCall.ErrorDetail>{errorDetail}</ToolCall.ErrorDetail>
 				)}
 				{title !== "" && (
@@ -59,37 +59,5 @@ const ForkNotifyUserTool: React.FC<ForkNotifyUserToolProps> = ({
 				)}
 			</ToolCall.Content>
 		</ToolCall.Root>
-	);
-};
-
-/** The notification text comes from the args, the outcome from the result. */
-export const ForkNotifyUserToolRenderer: React.FC<ForkToolRendererProps> = ({
-	fallback: Fallback,
-	...props
-}) => {
-	const args = parseArgs(props.args);
-	const title = asString(args?.title).trim();
-	const message = asString(args?.message).trim();
-	if (props.isError) {
-		return (
-			<ForkNotifyUserTool
-				title={title}
-				message={message}
-				status={props.status}
-				isError
-				errorMessage={forkToolErrorMessage(props.result)}
-			/>
-		);
-	}
-	if (props.status !== "running" && parseArgs(props.result)?.sent !== true) {
-		return <Fallback {...props} />;
-	}
-	return (
-		<ForkNotifyUserTool
-			title={title}
-			message={message}
-			status={props.status}
-			isError={false}
-		/>
 	);
 };

@@ -5,6 +5,10 @@ import type React from "react";
 import { Link, useLocation } from "react-router";
 import { safeBuildAgentChatPath } from "../../../utils/navigation";
 
+/** Styles a link row of the fork chat tool cards. */
+export const forkLinkRowClassName =
+	"flex w-fit items-center gap-1.5 text-[13px] text-content-secondary opacity-50 transition-opacity hover:opacity-100";
+
 type ForkChatLinkProps = {
 	chatId: string;
 	children: React.ReactNode;
@@ -23,7 +27,7 @@ export const ForkChatLink: React.FC<ForkChatLinkProps> = ({
 	return (
 		<Link
 			to={{ pathname: chatPath, search: location.search }}
-			className="flex w-fit items-center gap-1.5 text-[13px] text-content-secondary opacity-50 transition-opacity hover:opacity-100"
+			className={forkLinkRowClassName}
 		>
 			{children}
 			<ExternalLinkIcon className="size-3 shrink-0" />
