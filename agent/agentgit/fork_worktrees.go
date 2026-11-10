@@ -202,6 +202,9 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := a.git(ctx, top, "worktree", "add", "-b", req.Branch, "--", path, baseCommit); err != nil {
+		if _, statErr := os.Lstat(path); statErr == nil {
+			a.discardWorktree(ctx, top, path, req.Branch)
+		}
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to create the worktree.", err)
 		return
 	}
@@ -269,6 +272,10 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %s is not a worktree directory under %s.", req.Path, a.root), nil)
 		return
 	}
+	if req.Branch == "" || strings.HasPrefix(req.Branch, "-") {
+		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("branch %q must be non-empty and must not start with \"-\".", req.Branch), nil)
+		return
+	}
 
 	top, err := a.git(ctx, path, "rev-parse", "--show-toplevel")
 	if err == nil {
@@ -303,26 +310,28 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 
 	// Branches cannot contain glob characters, so the branch name is safe
 	// to use in --exclude.
-	branch := ""
-	if ref, err := a.git(ctx, path, "symbolic-ref", "--quiet", "HEAD"); err == nil {
-		branch = strings.TrimPrefix(ref, "refs/heads/")
+	ref, err := a.git(ctx, path, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil || ref != "refs/heads/"+req.Branch {
+		current := "a detached HEAD"
+		if err == nil {
+			current = strings.TrimPrefix(ref, "refs/heads/")
+		}
+		writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("worktree %s is on %s, not branch %s; switch back to it before removing the worktree", path, current, req.Branch), nil)
+		return
 	}
-	revList := []string{"rev-list", "--count", "HEAD", "--not"}
-	if branch != "" {
-		revList = append(revList, "--exclude=refs/heads/"+branch)
+	oid, err := a.git(ctx, path, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree HEAD commit.", err)
+		return
 	}
-	revList = append(revList, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--")
+	revList := []string{"rev-list", "--count", oid, "--not", "--exclude=refs/heads/" + req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--"}
 	count, err := a.git(ctx, path, revList...)
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to count unpushed commits.", err)
 		return
 	}
 	if count != "0" {
-		if branch == "" {
-			writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("detached HEAD in worktree %s has %s commits that are not on any branch or remote; push or merge them first", path, count), nil)
-		} else {
-			writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("branch %s has %s commits that are not on any other branch or remote; push or merge them first", branch, count), nil)
-		}
+		writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("branch %s has %s commits that are not on any other branch or remote; push or merge them first", req.Branch, count), nil)
 		return
 	}
 
@@ -332,12 +341,11 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to remove the worktree.", err)
 		return
 	}
-	if branch != "" {
-		// Safe: the unpushed check proved another ref holds every commit.
-		if _, err := a.git(ctx, commonDir, "branch", "-D", "--", branch); err != nil {
-			writeWorktreeError(ctx, rw, http.StatusInternalServerError, fmt.Sprintf("Removed worktree %s but failed to delete branch %s.", path, branch), err)
-			return
-		}
+	// Safe: the unpushed check covered this exact tip, and update-ref only
+	// deletes the branch if its tip is unchanged.
+	if _, err := a.git(ctx, commonDir, "update-ref", "-d", "refs/heads/"+req.Branch, oid); err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, fmt.Sprintf("Removed worktree %s but failed to delete branch %s.", path, req.Branch), err)
+		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
 }

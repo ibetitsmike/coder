@@ -291,6 +291,32 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 	}
 }
 
+func TestForkWorktreeCreateFailedHookRollsBack(t *testing.T) {
+	t.Parallel()
+
+	h, root := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+
+	hooks := filepath.Join(repo, ".git", "hooks", "post-checkout")
+	require.NoError(t, os.WriteFile(hooks, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+
+	req := workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"}
+	rec := doWorktreeRequest(t, h, http.MethodPost, req)
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, wtErrorMessage(t, rec), "Failed to create the worktree")
+
+	path := filepath.Join(root, filepath.Base(repo), "child")
+	assert.NoDirExists(t, path)
+	assert.NotContains(t, wtGit(t, repo, "worktree", "list", "--porcelain"), path)
+	err := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/feature").Run()
+	require.Error(t, err, "branch feature must not exist")
+
+	require.NoError(t, os.Remove(hooks))
+	wt := wtCreate(t, h, req)
+	assert.Equal(t, path, wt.Path)
+	assert.Equal(t, "feature", wt.Branch)
+}
+
 // Two isolated children edit the same file on their own branches without
 // touching each other or the parent checkout.
 func TestForkWorktreeConcurrentEdits(t *testing.T) {
@@ -322,8 +348,6 @@ func TestForkWorktreeDelete(t *testing.T) {
 		setup       func(t *testing.T, repo, root string, wt workspacesdk.ForkWorktree) string
 		wantStatus  int
 		wantMessage string
-		// keepBranch means a 204 must leave branch "feature" in place.
-		keepBranch bool
 	}{
 		{
 			name: "Clean",
@@ -356,8 +380,8 @@ func TestForkWorktreeDelete(t *testing.T) {
 				wtGit(t, wt.Path, "checkout", "--detach")
 				return wt.Path
 			},
-			wantStatus: http.StatusNoContent,
-			keepBranch: true,
+			wantStatus:  http.StatusConflict,
+			wantMessage: "is on a detached HEAD, not branch feature",
 		},
 		{
 			name: "Dirty",
@@ -377,16 +401,6 @@ func TestForkWorktreeDelete(t *testing.T) {
 			},
 			wantStatus:  http.StatusConflict,
 			wantMessage: "branch feature has 1 commits that are not on any other branch or remote",
-		},
-		{
-			name: "DetachedUnpushedCommits",
-			setup: func(t *testing.T, _, _ string, wt workspacesdk.ForkWorktree) string {
-				wtGit(t, wt.Path, "checkout", "--detach")
-				wtCommit(t, wt.Path, "detached\n")
-				return wt.Path
-			},
-			wantStatus:  http.StatusConflict,
-			wantMessage: "has 1 commits that are not on any branch or remote",
 		},
 		{
 			name: "RelativePath",
@@ -470,18 +484,13 @@ func TestForkWorktreeDelete(t *testing.T) {
 			path := tt.setup(t, repo, root, wt)
 			stateAfterSetup := wtWorktreeCount(t, repo)
 
-			rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: path})
+			rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: path, Branch: wt.Branch})
 
 			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus == http.StatusNoContent {
 				assert.NoDirExists(t, wt.Path)
 				assert.Equal(t, before-1, wtWorktreeCount(t, repo))
-				branches := wtGit(t, repo, "branch", "--list", "feature")
-				if tt.keepBranch {
-					assert.NotEmpty(t, branches, "branch feature must be kept")
-				} else {
-					assert.Empty(t, branches, "branch feature must be deleted")
-				}
+				assert.Empty(t, wtGit(t, repo, "branch", "--list", "feature"), "branch feature must be deleted")
 				return
 			}
 			assert.Contains(t, wtErrorMessage(t, rec), tt.wantMessage)
@@ -489,4 +498,21 @@ func TestForkWorktreeDelete(t *testing.T) {
 			assert.Equal(t, stateAfterSetup, wtWorktreeCount(t, repo))
 		})
 	}
+}
+
+func TestForkWorktreeDeleteWrongBranch(t *testing.T) {
+	t.Parallel()
+
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	wtGit(t, wt.Path, "switch", "-c", "other")
+
+	rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Contains(t, wtErrorMessage(t, rec), "is on other, not branch feature")
+	assert.DirExists(t, wt.Path)
+	assert.NotEmpty(t, wtGit(t, repo, "branch", "--list", "feature"), "branch feature must be kept")
+	assert.NotEmpty(t, wtGit(t, repo, "branch", "--list", "other"), "branch other must be kept")
 }

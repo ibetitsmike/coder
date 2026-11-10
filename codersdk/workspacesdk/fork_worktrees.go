@@ -39,6 +39,9 @@ type ForkWorktree struct {
 // ForkDeleteWorktreeRequest asks the agent to remove a worktree it created.
 type ForkDeleteWorktreeRequest struct {
 	Path string `json:"path"`
+	// Branch is the branch create returned for this worktree. The agent
+	// deletes only this branch.
+	Branch string `json:"branch"`
 }
 
 // ForkWorktreeConn is implemented by the AgentConn that DialAgent returns.

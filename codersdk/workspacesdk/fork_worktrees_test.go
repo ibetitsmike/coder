@@ -47,7 +47,7 @@ func TestAgentConnForkWorktrees(t *testing.T) {
 		BaseCommit: "0123456789abcdef0123456789abcdef01234567",
 		RepoRoot:   "/home/coder/repo",
 	}
-	deleteReq := workspacesdk.ForkDeleteWorktreeRequest{Path: created.Path}
+	deleteReq := workspacesdk.ForkDeleteWorktreeRequest{Path: created.Path, Branch: created.Branch}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v0/git/worktrees", func(w http.ResponseWriter, r *http.Request) {
