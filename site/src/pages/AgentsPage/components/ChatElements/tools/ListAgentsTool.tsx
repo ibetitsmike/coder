@@ -2,6 +2,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import type React from "react";
 import { Link, useLocation } from "react-router";
 import { safeBuildAgentChatPath } from "../../../utils/navigation";
+import { ForkListAgentFields } from "./ForkListAgentFields";
 import { ToolCall } from "./ToolCall";
 import { asRecord, asString, type ToolStatus } from "./utils";
 
@@ -54,6 +55,7 @@ export const ListAgentsTool: React.FC<{
 						const row = (
 							<span>
 								{title} ({type}, {chatStatus})
+								<ForkListAgentFields agent={rec} />
 							</span>
 						);
 
