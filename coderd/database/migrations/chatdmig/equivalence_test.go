@@ -128,15 +128,17 @@ func withoutNode(g *chatdmig.Graph, n *chatdmig.Node) *chatdmig.Graph {
 }
 
 // chatdObject matches a dump block that creates or changes an object in
-// chatd. pg_dump names public objects without a schema.
-var chatdObject = regexp.MustCompile(`^(CREATE (TABLE|TYPE|FUNCTION|SEQUENCE|VIEW|(UNIQUE )?INDEX \S+ ON|TRIGGER .+\bON)|ALTER (TABLE( ONLY)?|SEQUENCE)|COMMENT ON \w+) chatd\.`)
+// chatd, or creates a trigger that runs a chatd function. Such a trigger may
+// sit on a core table, like upstream's skill ACL cleanup on
+// organization_members. pg_dump names public objects without a schema.
+var chatdObject = regexp.MustCompile(`^(CREATE (TABLE|TYPE|FUNCTION|SEQUENCE|VIEW|(UNIQUE )?INDEX \S+ ON|TRIGGER .+\bON)|ALTER (TABLE( ONLY)?|SEQUENCE)|COMMENT ON \w+) chatd\.|^CREATE TRIGGER .+ EXECUTE FUNCTION chatd\.`)
 
 // enumBlock matches a dump block that creates an enum type.
 var enumBlock = regexp.MustCompile(`^CREATE TYPE (\S+) AS ENUM \(`)
 
 // TestForkNodesOnlyAddToChatd migrates one database with the routed graph
-// and one with every node. Fork nodes may create objects in chatd and add
-// values to enums, and nothing else. So upstream's dump.sql, and the queries
+// and one with every node. Fork nodes may create objects in chatd, triggers
+// that run chatd functions, and enum values, and nothing else. So upstream's dump.sql, and the queries
 // that sqlc generates from it, still describe every core object.
 func TestForkNodesOnlyAddToChatd(t *testing.T) {
 	t.Parallel()

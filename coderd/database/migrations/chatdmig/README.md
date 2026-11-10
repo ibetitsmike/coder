@@ -38,7 +38,11 @@ Fork nodes add these objects:
   `chat_subagents` (one row per subagent chat the fork tracks).
 
 A fork node may create objects in chatd and add values to an enum, and
-nothing else, so upstream's `dump.sql` still describes every core object.
+nothing else, so upstream's `dump.sql` still describes every core object. The
+one exception is a trigger that runs a chatd function. It may sit on a core
+table: `nodes/01a1c242-…_agent_definition_acl_org_member_delete.up.sql`
+drops agent definition grants on `organization_members` deletes, like
+upstream's skill and chat project triggers.
 `TestForkNodesOnlyAddToChatd` checks this.
 
 ## Every connection needs chatd on its search path

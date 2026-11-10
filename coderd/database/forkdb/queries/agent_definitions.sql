@@ -40,6 +40,12 @@ SELECT *
 FROM agent_definitions
 WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND project_id IS NULL AND name = @name::text;
 
+-- name: GetOrganizationAgentDefinitionByNameForUpdate :one
+SELECT *
+FROM agent_definitions
+WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND project_id IS NULL AND name = @name::text
+FOR UPDATE;
+
 -- name: ListOrganizationAgentDefinitionMetadata :many
 SELECT
     id, organization_id, name, description, enabled, group_acl, user_acl, created_at, updated_at
@@ -54,6 +60,15 @@ SET
     content     = COALESCE(sqlc.narg('content')::text, content),
     enabled     = COALESCE(sqlc.narg('enabled')::boolean, enabled),
     updated_at  = now()
+WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND project_id IS NULL AND name = @name::text
+RETURNING *;
+
+-- name: UpdateOrganizationAgentDefinitionACLByName :one
+UPDATE agent_definitions
+SET
+    group_acl  = @group_acl,
+    user_acl   = @user_acl,
+    updated_at = now()
 WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND project_id IS NULL AND name = @name::text
 RETURNING *;
 

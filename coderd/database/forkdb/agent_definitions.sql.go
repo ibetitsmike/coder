@@ -108,6 +108,38 @@ func (q *Queries) GetOrganizationAgentDefinitionByName(ctx context.Context, arg 
 	return i, err
 }
 
+const getOrganizationAgentDefinitionByNameForUpdate = `-- name: GetOrganizationAgentDefinitionByNameForUpdate :one
+SELECT id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+FROM agent_definitions
+WHERE organization_id = $1::uuid AND user_id IS NULL AND project_id IS NULL AND name = $2::text
+FOR UPDATE
+`
+
+type GetOrganizationAgentDefinitionByNameForUpdateParams struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Name           string    `db:"name" json:"name"`
+}
+
+func (q *Queries) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationAgentDefinitionByNameForUpdate, arg.OrganizationID, arg.Name)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserAgentDefinitionByName = `-- name: GetUserAgentDefinitionByName :one
 SELECT id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
 FROM agent_definitions
@@ -329,6 +361,48 @@ func (q *Queries) ListUserAgentDefinitionMetadata(ctx context.Context, arg ListU
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateOrganizationAgentDefinitionACLByName = `-- name: UpdateOrganizationAgentDefinitionACLByName :one
+UPDATE agent_definitions
+SET
+    group_acl  = $1,
+    user_acl   = $2,
+    updated_at = now()
+WHERE organization_id = $3::uuid AND user_id IS NULL AND project_id IS NULL AND name = $4::text
+RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+`
+
+type UpdateOrganizationAgentDefinitionACLByNameParams struct {
+	GroupAcl       database.ChatACL `db:"group_acl" json:"group_acl"`
+	UserAcl        database.ChatACL `db:"user_acl" json:"user_acl"`
+	OrganizationID uuid.UUID        `db:"organization_id" json:"organization_id"`
+	Name           string           `db:"name" json:"name"`
+}
+
+func (q *Queries) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, updateOrganizationAgentDefinitionACLByName,
+		arg.GroupAcl,
+		arg.UserAcl,
+		arg.OrganizationID,
+		arg.Name,
+	)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateOrganizationAgentDefinitionByName = `-- name: UpdateOrganizationAgentDefinitionByName :one
