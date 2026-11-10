@@ -6,6 +6,7 @@ import { API } from "#/api/api";
 import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatProjectsKey } from "#/api/queries/chatProjects";
 import { chatEntityKey } from "#/api/queries/chats";
+import { forkChatFamilyCapacityKey } from "#/api/queries/forkChatFamily";
 import type * as TypesGen from "#/api/typesGenerated";
 import { MockChat, MockChatDiffStatus } from "#/testHelpers/chatEntities";
 import {
@@ -160,6 +161,35 @@ export const WithAgentType: Story = {
 	},
 };
 
+export const WaitingForSubagentSlot: Story = {
+	args: {
+		chat: {
+			...MockChat,
+			parent_chat_id: mockParentChat.id,
+			root_chat_id: mockParentChat.id,
+			status: "running",
+		},
+		liveChatStatus: "running",
+	},
+	parameters: {
+		experiments: ["fork-nested-subagents"],
+		queries: [
+			{
+				key: chatEntityKey(mockParentChat.id),
+				data: mockParentChat,
+			},
+			{
+				key: forkChatFamilyCapacityKey(mockParentChat.id),
+				data: {
+					live_subagents: 1,
+					max_live_subagents: 2,
+					waiting_for_capacity: [MockChat.id],
+				} satisfies TypesGen.ForkChatFamilyCapacity,
+			},
+		],
+	},
+};
+
 export const SidebarCollapsed: Story = {
 	parameters: {
 		reactRouter: reactRouterParameters({
@@ -291,6 +321,15 @@ const mobileDecorator: Story["decorators"] = [
 		</div>
 	),
 ];
+
+export const MobileWaitingForSubagentSlot: Story = {
+	...WaitingForSubagentSlot,
+	decorators: mobileDecorator,
+	parameters: {
+		...WaitingForSubagentSlot.parameters,
+		pixel: { matrix: { viewports: ["phone"] } },
+	},
+};
 
 export const MobileWithOpenPR: Story = {
 	decorators: mobileDecorator,
