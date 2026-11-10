@@ -112,9 +112,9 @@ func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context)
 	return f.s.DeleteExpiredPluginLinkCodes(ctx)
 }
 
-func (f forkQueryMetricsStore) DeleteOldChatSecretAnswers(ctx context.Context, beforeTime time.Time) (int64, error) {
+func (f forkQueryMetricsStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	defer f.observe(ctx, "DeleteOldChatSecretAnswers", time.Now())
-	return f.s.DeleteOldChatSecretAnswers(ctx, beforeTime)
+	return f.s.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
 func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
