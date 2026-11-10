@@ -56,21 +56,66 @@ WHERE c.id = @chat_id::uuid;
 -- name: GetFamilySubagentsAwaitingWorker :many
 -- Returns the unarchived running subagent chats under @root_chat_id that no
 -- worker with a fresh heartbeat owns, with the predicate of
--- GetChatAwaitingWorker.
-SELECT c.id
-FROM chats c
-WHERE c.root_chat_id = @root_chat_id::uuid
-	AND c.archived = false
-	AND c.status = 'running'::chat_status
-	AND (
-		c.worker_id IS NULL
-		OR c.runner_id IS NULL
-		OR NOT EXISTS (
-			SELECT 1
-			FROM chat_heartbeats hb
-			WHERE hb.chat_id = c.id
-				AND hb.runner_id = c.runner_id
-				AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+-- GetChatAwaitingWorker. Each row carries the counts of
+-- CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
+-- own active lineage, so one query answers for the whole family without
+-- pairing each chat with every active subagent.
+WITH RECURSIVE awaiting AS (
+	SELECT c.id, c.parent_chat_id
+	FROM chats c
+	WHERE c.root_chat_id = @root_chat_id::uuid
+		AND c.archived = false
+		AND c.status = 'running'::chat_status
+		AND (
+			c.worker_id IS NULL
+			OR c.runner_id IS NULL
+			OR NOT EXISTS (
+				SELECT 1
+				FROM chat_heartbeats hb
+				WHERE hb.chat_id = c.id
+					AND hb.runner_id = c.runner_id
+					AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+			)
 		)
-	)
-ORDER BY c.id;
+),
+lineage(candidate_id, id, parent_chat_id, depth) AS (
+	SELECT awaiting.id, awaiting.id, awaiting.parent_chat_id, 0
+	FROM awaiting
+	UNION ALL
+	SELECT lineage.candidate_id, chats.id, chats.parent_chat_id, lineage.depth + 1
+	FROM chats
+	JOIN lineage ON chats.id = lineage.parent_chat_id
+	WHERE lineage.depth < 64
+),
+active AS (
+	SELECT c.id, c.organization_id, c.root_chat_id
+	FROM chat_heartbeats hb
+	JOIN chats c
+		ON c.id = hb.chat_id
+		AND c.runner_id = hb.runner_id
+	WHERE c.worker_id IS NOT NULL
+		AND c.parent_chat_id IS NOT NULL
+		AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * @stale_seconds::int)
+),
+totals AS (
+	SELECT
+		COUNT(*)::bigint AS active_count,
+		(COUNT(*) FILTER (WHERE active.organization_id = @organization_id::uuid))::bigint AS active_organization_count,
+		(COUNT(*) FILTER (WHERE active.root_chat_id = @root_chat_id::uuid))::bigint AS active_family_count
+	FROM active
+),
+excluded AS (
+	SELECT DISTINCT lineage.candidate_id, active.id, active.organization_id, active.root_chat_id
+	FROM lineage
+	JOIN active ON active.id = lineage.id
+)
+SELECT
+	awaiting.id AS chat_id,
+	(totals.active_count - COUNT(excluded.id))::bigint AS active_count,
+	(totals.active_organization_count - COUNT(excluded.id) FILTER (WHERE excluded.organization_id = @organization_id::uuid))::bigint AS active_organization_count,
+	(totals.active_family_count - COUNT(excluded.id) FILTER (WHERE excluded.root_chat_id = @root_chat_id::uuid))::bigint AS active_family_count
+FROM awaiting
+CROSS JOIN totals
+LEFT JOIN excluded ON excluded.candidate_id = awaiting.id
+GROUP BY awaiting.id, totals.active_count, totals.active_organization_count, totals.active_family_count
+ORDER BY awaiting.id;

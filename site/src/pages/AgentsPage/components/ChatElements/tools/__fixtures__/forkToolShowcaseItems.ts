@@ -3,7 +3,11 @@
 // stays clean.
 
 import type React from "react";
-import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
+import {
+	MockChatTodoList,
+	MockChatTranscriptResult,
+	MockSearchChatsResult,
+} from "#/testHelpers/forkChatTodos";
 import type { Tool } from "../Tool";
 
 type ForkToolShowcaseItem = Pick<
@@ -19,4 +23,10 @@ export const forkToolShowcaseItems: readonly ForkToolShowcaseItem[] = [
 		result: MockChatTodoList,
 	},
 	{ name: "todo_read", result: MockChatTodoList },
+	{
+		name: "search_chats",
+		args: { query: "status:waiting" },
+		result: MockSearchChatsResult,
+	},
+	{ name: "read_chat_transcript", result: MockChatTranscriptResult },
 ];

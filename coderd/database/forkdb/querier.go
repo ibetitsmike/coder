@@ -61,10 +61,14 @@ type Querier interface {
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
 	// worker with a fresh heartbeat owns, with the predicate of
-	// GetChatAwaitingWorker.
-	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]uuid.UUID, error)
+	// GetChatAwaitingWorker. Each row carries the counts of
+	// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
+	// own active lineage, so one query answers for the whole family without
+	// pairing each chat with every active subagent.
+	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
+	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
@@ -112,6 +116,7 @@ type Querier interface {
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	// Relinking an external identity to another user clears the active chat so
