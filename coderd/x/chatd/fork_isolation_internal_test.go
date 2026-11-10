@@ -323,12 +323,20 @@ func TestForkSpawnIsolationDefinitionDefault(t *testing.T) {
 		experiments   codersdk.Experiments
 		args          map[string]any
 		wantIsolation string
+		wantRepoPath  string
 	}{
 		{
 			name:          "NoIsolationArg",
 			experiments:   codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions},
 			args:          map[string]any{"type": "personal/fixer", "title": "Fix"},
 			wantIsolation: "worktree",
+		},
+		{
+			name:          "RepoPathWithoutIsolationArg",
+			experiments:   codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions},
+			args:          map[string]any{"type": "personal/fixer", "title": "Fix", "repo_path": "/src/other"},
+			wantIsolation: "worktree",
+			wantRepoPath:  "/src/other",
 		},
 		{
 			name:          "ExplicitShared",
@@ -376,6 +384,9 @@ func TestForkSpawnIsolationDefinitionDefault(t *testing.T) {
 				require.Equal(t, "worktree", result.Isolation)
 				require.Equal(t, returned.Branch, result.Branch)
 				require.Len(t, creates, 1)
+				if tc.wantRepoPath != "" {
+					require.Equal(t, tc.wantRepoPath, creates[0].RepoPath)
+				}
 				return
 			}
 			require.Empty(t, result.Isolation)
