@@ -877,6 +877,7 @@ The chat worker is responsible for:
 - cleaning up runners when a chat is no longer owned by the runner, which it detects by inspecting `chat:update:{chat_id}` notifications and database sync results.
 
 <!-- TODO(ibetitsmike): describe the fork-chat-wakeups loop (fork_wakeups.go): it claims due chatd.chat_wakeups rows with a lease, skips busy chats until the next tick, and sends the prompt through SendMessage as the owner. -->
+<!-- TODO(ibetitsmike): describe the fork-chat-wakeups owner controls (fork_wakeup_controls.go): PATCH /chats/fork/{chat}/wakeups/{wakeup} pauses, resumes or cancels a wake-up in a serializable transaction, which ends any worker lease so an in-flight delivery rolls back. -->
 
 A chat worker is identified by a **worker ID**, which is regenerated on worker startup.
 

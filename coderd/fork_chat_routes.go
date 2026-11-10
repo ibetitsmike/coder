@@ -43,6 +43,13 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		chatTodos.Get("/{chat}/todos", api.getChatTodos)
 		chatTodos.Get("/{chat}/todos/watch", api.watchChatTodos)
 
+		chatWakeups := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatWakeups),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatWakeups.Get("/{chat}/wakeups", api.getChatWakeups)
+		chatWakeups.Patch("/{chat}/wakeups/{wakeup}", api.patchChatWakeup)
+
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})
