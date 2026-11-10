@@ -53,6 +53,10 @@ type CreateChatInput struct {
 	// MaxFileLinks is the maximum number of files linked to the chat. It
 	// must be positive when FileIDs is not empty.
 	MaxFileLinks int
+	// ForkAfterInsert, when set, runs in the transaction that inserts the
+	// chat, after its initial history. Fork features use it to create rows
+	// that must commit or roll back with the chat.
+	ForkAfterInsert func(ctx context.Context, store database.Store, chat database.Chat) error
 }
 
 // CreateChatResult is the value returned by [CreateChat]. It carries
@@ -187,6 +191,11 @@ func insertChat(
 		}
 		if len(input.InlineMCPServers) > 0 {
 			if err := ReplaceInlineMCPServers(ctx, store, chat.ID, input.InlineMCPServers); err != nil {
+				return err
+			}
+		}
+		if input.ForkAfterInsert != nil {
+			if err := input.ForkAfterInsert(ctx, store, chat); err != nil {
 				return err
 			}
 		}
