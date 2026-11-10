@@ -48,7 +48,7 @@ func (p *Server) withForkIsolationReport(tools []fantasy.AgentTool, chat databas
 func (t forkIsolationWaitAgentTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
 	info.Description += " For a child spawned with isolation worktree, the result also names its branch and worktree" +
-		" and summarizes its commits and changes in diff_summary."
+		" and, once the child finishes, summarizes its commits and changes in diff_summary."
 	return info
 }
 
@@ -80,14 +80,18 @@ func (t forkIsolationWaitAgentTool) Run(ctx context.Context, call fantasy.ToolCa
 	result["isolation"] = row.Isolation
 	result["branch"] = row.Branch
 	result["worktree_path"] = row.WorktreePath
-	summary, err := t.server.worktreeSummary(ctx, childID, workspacesdk.ForkWorktreeSummaryRequest{
-		Path:   row.WorktreePath,
-		Branch: row.Branch,
-	})
-	if err != nil {
-		result["diff_summary_error"] = err.Error()
-	} else {
-		result["diff_summary"] = summary
+	// A child that is still running may still change its worktree, and the
+	// summary request would outlast a short wait timeout.
+	if timedOut, _ := result["timed_out"].(bool); !timedOut {
+		summary, err := t.server.worktreeSummary(ctx, childID, workspacesdk.ForkWorktreeSummaryRequest{
+			Path:   row.WorktreePath,
+			Branch: row.Branch,
+		})
+		if err != nil {
+			result["diff_summary_error"] = err.Error()
+		} else {
+			result["diff_summary"] = summary
+		}
 	}
 	content, err := json.Marshal(result)
 	if err != nil {

@@ -30,6 +30,8 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 		name      string
 		conn      *fakeWorktreeConn
 		isolation string
+		// running leaves the child running, so the wait times out.
+		running bool
 		// want is the wait_agent result without its upstream fields.
 		want map[string]any
 	}{
@@ -60,6 +62,18 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 			},
 		},
 		{
+			name:      "TimedOut",
+			conn:      &fakeWorktreeConn{worktree: returned, summary: summary},
+			isolation: subagentIsolationWorktree,
+			running:   true,
+			want: map[string]any{
+				"isolation":     "worktree",
+				"branch":        returned.Branch,
+				"worktree_path": returned.Path,
+				"timed_out":     true,
+			},
+		},
+		{
 			name:      "Shared",
 			conn:      &fakeWorktreeConn{},
 			isolation: subagentIsolationShared,
@@ -79,8 +93,14 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 			childID, err := uuid.Parse(spawned.ChatID)
 			require.NoError(t, err)
 			require.NoError(t, WaitUntilIdleForTest(ctx, f.server))
-			setChatStatus(ctx, t, f.db, childID, database.ChatStatusWaiting, "")
-			insertAssistantMessage(t, f.db, childID, f.model.ID, "task complete")
+			args := map[string]any{"chat_id": childID.String()}
+			if tc.running {
+				setChatStatus(ctx, t, f.db, childID, database.ChatStatusRunning, "")
+				args["timeout_seconds"] = 1
+			} else {
+				setChatStatus(ctx, t, f.db, childID, database.ChatStatusWaiting, "")
+				insertAssistantMessage(t, f.db, childID, f.model.ID, "task complete")
+			}
 
 			tools, err := f.server.subagentTools(ctx, func() database.Chat { return root }, root.LastModelConfigID)
 			require.NoError(t, err)
@@ -88,7 +108,7 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 			require.NoError(t, err)
 			wait := findToolByName(tools, waitAgentToolName)
 			require.NotNil(t, wait)
-			input, err := json.Marshal(map[string]any{"chat_id": childID.String()})
+			input, err := json.Marshal(args)
 			require.NoError(t, err)
 			resp, err = wait.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: waitAgentToolName, Input: string(input)})
 			require.NoError(t, err)
@@ -96,7 +116,9 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(resp.Content), &got))
-			require.Equal(t, "task complete", got["report"])
+			if !tc.running {
+				require.Equal(t, "task complete", got["report"])
+			}
 			for _, key := range []string{"chat_id", "report", "status", "title", "type"} {
 				delete(got, key)
 			}
@@ -104,7 +126,7 @@ func TestForkIsolationWaitAgentReport(t *testing.T) {
 
 			tc.conn.mu.Lock()
 			defer tc.conn.mu.Unlock()
-			if tc.isolation == subagentIsolationWorktree {
+			if tc.isolation == subagentIsolationWorktree && !tc.running {
 				require.Equal(t, []workspacesdk.ForkWorktreeSummaryRequest{{Path: returned.Path, Branch: returned.Branch}}, tc.conn.summaries)
 			} else {
 				require.Empty(t, tc.conn.summaries)
