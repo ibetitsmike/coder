@@ -186,16 +186,19 @@ The check only uses the cost recorded so far, so the run that it lets through ca
 When the chat or its organization has reached a limit, the wake-up pauses without sending its prompt.
 A wake-up also pauses when a prompt hook denies its prompt, or when its cron schedule or its events are invalid.
 A paused wake-up never runs again, and it still counts toward the chat's limit of 10 active or paused wake-ups.
-When a wake-up pauses, Coder Agents sends the chat owner a Coder notification titled `Chat wake-up paused` that names the chat and the reason, at most once per chat and reason each day.
+When a wake-up pauses, Coder Agents sends the chat owner a Coder notification titled `Chat wake-up paused` that names the chat and the reason.
+It sends at most one per chat and reason each UTC day, unless the chat gets a new title in between, because the notification text includes the title.
 It uses the **Custom Notification** template, so the owner doesn't get it after turning that template off, and the wake-up stays paused all the same.
 
 ### Notifications
 
 With the `fork-chat-wakeups` experiment, `notify_user` sends the chat owner a Coder notification.
 The owner gets it in the Coder notifications inbox when the deployment keeps the inbox on, and by email or webhook when the deployment sends notifications that way.
-Pass the text as `message`, up to 2000 bytes, and an optional `title`, up to 120 bytes, which defaults to the chat title.
+Pass the text as `message`, up to 2000 bytes, and an optional `title`, up to 120 bytes.
+When you omit `title` or leave it blank, the notification uses the chat title, cut to its first 120 bytes.
 The result is `{"sent":true}`.
 A chat can send at most 10 notifications in any hour, and the next call fails with `notification limit reached: at most 10 per chat per hour`.
+The wake-up pause notifications of the chat also count toward that limit.
 An empty `message` fails with `message is required`, and a chat that a system user owns fails with `chats owned by a system user cannot send notifications`.
 The result is also `{"sent":true}` when Coder drops the notification, because the owner turned off the **Custom Notification** template or the chat sent the same title and message earlier in the same clock minute.
 
@@ -390,7 +393,8 @@ After a failed spawn, Coder Agents archives the child and tries once to stop the
 So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
 When the spawn succeeds, Coder Agents doesn't stop the child's workspace until you archive the root chat or the deployment archives it as inactive.
 The workspace can still stop earlier on its own schedule, such as the deployment's chat workspace TTL or the template's default autostop.
-If the experiment is still on at the archive, Coder Agents then stops each child's workspace in the background, once it has removed the family's worktrees, but it never deletes the workspace.
+If the experiment is still on at the archive, Coder Agents then stops each child's workspace in the background, after it tries to remove the family's worktrees, but it never deletes the workspace.
+A worktree that it keeps doesn't prevent the stop, even when the worktree is in that workspace.
 It doesn't retry a failed stop, and it skips a child that is bound to another workspace by then.
 Delete the workspace on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
 
@@ -509,7 +513,7 @@ Checked against fork `main` at `bef9c59966`:
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:269-279`, `:358-363`.
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
-  Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktrees are removed, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
+  Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktree cleanup, whatever it keeps, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
   No delete: nothing in `coderd/x/chatd` deletes a workspace, and the workspace tools are root-only, `coderd/x/chatd/turn_environment.go:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
@@ -574,7 +578,7 @@ Checked against fork `main` at `bef9c59966`:
   Done children, `fork_wait_for_events.go:325-338`, with the children that wait for their own `wait_for_events` or for an answer read in one snapshot, `:340-384`.
   No wake-up route or page: `wakeup` has no match in `coderd/*.go` or `site/src/pages`.
   The daily limits, `coderd/x/chatd/fork_wakeup_caps.go:22-38`, `:51-96`, checked before each send, `fork_wakeups.go:150-152`, `fork_wait_for_events.go:295-297`, over delivered runs and every message cost, `coderd/database/forkdb/queries/chat_wakeups.sql:186-219`.
-  The other pauses, `fork_wakeups.go:307-310`, `:339-344`, `fork_wait_for_events.go:262`, and the notification after each pause, `fork_wakeups.go:205-207`, `:299-301`, `:378-380`, with its title and reasons, once per chat and reason a day, `fork_wakeup_caps.go:36-49`, `:98-128`.
+  The other pauses, `fork_wakeups.go:307-310`, `:339-344`, `fork_wait_for_events.go:262`, and the notification after each pause, `fork_wakeups.go:205-207`, `:299-301`, `:378-380`, with its title, reasons, and the chat title in its text, once per chat, reason, and title a UTC day, `fork_wakeup_caps.go:36-49`, `:98-128`, by the dedupe hash, `coderd/database/migrations/000245_notifications_dedupe.up.sql:13-26`.
   No resume or removal of a paused wake-up: nothing in `coderd/x/chatd` calls `UpdateChatWakeupStatus` or `CancelChatWakeupsByChatID`, and the limit of 10 counts paused wake-ups, `fork_schedule_wakeup.go:213-228`.
-- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, `:72-123`, and the send with a dedupe bucket per minute, `:124-143`, counted in `chat_wakeups.sql:222-228`.
+- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-158`, and the send with a dedupe bucket per minute, `:124-143`, counted in `chat_wakeups.sql:222-228`.
   The title and message limits, `codersdk/notifications.go:299-321`, the inbox and the deployment's method, `coderd/notifications/enqueuer.go:104-116`, and the notifications that a turned-off template or the dedupe drops without an error, `:138-165`.
