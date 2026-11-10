@@ -150,7 +150,11 @@ describe("ForkDescendantQuestionDock", () => {
 		const user = userEvent.setup();
 
 		const { queryClient } = renderDock();
-		// The child's chat was opened before, so its entity is cached.
+		// The child's chat was opened before, so its entity is cached. The
+		// test client's gcTime of 0 would drop the unobserved entry.
+		queryClient.setQueryDefaults(chatEntityKey(mockOldestQuestion.chat_id), {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
 		queryClient.setQueryData(chatEntityKey(mockOldestQuestion.chat_id), {
 			...MockChat,
 			id: mockOldestQuestion.chat_id,
