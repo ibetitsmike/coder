@@ -761,13 +761,16 @@ func TestWakeupPullRequestFinalPollRetry(t *testing.T) {
 func TestWakeupFinalPollChildren(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name        string
-		late        time.Duration
-		wantMessage bool
-		wantReason  string
+		name             string
+		late             time.Duration
+		doneBeforeExpiry bool
+		wantMessage      bool
+		wantReason       string
 	}{
 		{name: "OnTime", late: time.Second, wantMessage: true, wantReason: "done"},
 		{name: "Late", late: time.Minute, wantReason: "expired"},
+		// The turn of another child can keep the chat busy past the cutoff.
+		{name: "LateDoneBeforeExpiry", late: time.Minute, doneBeforeExpiry: true, wantMessage: true, wantReason: "done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -775,6 +778,10 @@ func TestWakeupFinalPollChildren(t *testing.T) {
 			ctx := testutil.Context(t, testutil.WaitLong)
 			chat := f.createWakeupChat(t)
 			child := f.createChildAgent(t, chat, "child", database.ChatStatusWaiting)
+			if tc.doneBeforeExpiry {
+				_, err := f.sqlDB.ExecContext(ctx, "UPDATE chats SET updated_at = $1 WHERE id = $2", wakeupTestSlot.Add(-time.Minute), child.ID)
+				require.NoError(t, err)
+			}
 			// insertWakeup schedules the run at wakeupTestSlot, so this is the
 			// final poll.
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
