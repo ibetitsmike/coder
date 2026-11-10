@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,13 +46,16 @@ func (c *Client) ChatDescendantQuestions(ctx context.Context, chatID uuid.UUID) 
 }
 
 // ChatSecretAnswerRequest answers a secret question of a descendant chat.
+// The tool call ID travels in the body because coderd routes on the
+// unescaped path, where an ID with a "/" would not match the route.
 type ChatSecretAnswerRequest struct {
-	Value string `json:"value"`
+	ToolCallID string `json:"tool_call_id"`
+	Value      string `json:"value"`
 }
 
-// AnswerChatSecretQuestion answers the pending secret question toolCallID of
+// AnswerChatSecretQuestion answers the pending secret question req.ToolCallID of
 // chatID. The server keeps the value out of chat messages and tells the chat
 // only that the user answered.
-func (c *Client) AnswerChatSecretQuestion(ctx context.Context, chatID uuid.UUID, toolCallID string, req ChatSecretAnswerRequest) error {
-	return requestNoContent(ctx, c, http.MethodPost, fmt.Sprintf("/api/v2/chats/fork/%s/questions/%s/secret-answer", chatID, url.PathEscape(toolCallID)), req)
+func (c *Client) AnswerChatSecretQuestion(ctx context.Context, chatID uuid.UUID, req ChatSecretAnswerRequest) error {
+	return requestNoContent(ctx, c, http.MethodPost, fmt.Sprintf("/api/v2/chats/fork/%s/questions/secret-answer", chatID), req)
 }
