@@ -21,6 +21,8 @@ const meta = {
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
+		onToggleEnabled: fn(),
+		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkAgentDefinitionsTableView>;
 
@@ -45,6 +47,41 @@ export const LoadError: Story = {
 
 export const Empty: Story = {
 	args: { definitions: [] },
+};
+
+export const TogglePending: Story = {
+	args: {
+		pendingToggle: {
+			name: MockForkAgentDefinitionMetadata.name,
+			enabled: !MockForkAgentDefinitionMetadata.enabled,
+		},
+	},
+};
+
+export const DeleteConfirm: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			isDeleting: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const DeleteFailed: Story = {
+	args: {
+		deleteState: {
+			definition: MockForkAgentDefinitionMetadata,
+			error: mockApiError({
+				message: "Agent definition not found.",
+				detail: "It may have been deleted in another tab.",
+			}),
+			isDeleting: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
 };
 
 export const RefreshError: Story = {
