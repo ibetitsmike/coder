@@ -59,7 +59,7 @@ type SkillEditorContextValue = {
 
 const SkillEditorContext = createContext<SkillEditorContextValue | null>(null);
 
-const useSkillEditorContext = (): SkillEditorContextValue => {
+export const useSkillEditorContext = (): SkillEditorContextValue => {
 	const context = use(SkillEditorContext);
 	if (!context) {
 		throw new Error(
