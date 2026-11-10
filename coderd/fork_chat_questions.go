@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -174,8 +175,12 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		// Without the message the chat never learns of the answer, so the
-		// question stays pending and the user can answer again.
-		if delErr := fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{
+		// question stays pending and the user can answer again. The delete
+		// outlives a canceled request, whose answer row would make every
+		// retry fail with a conflict.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if delErr := fdb.DeleteChatSecretAnswer(cleanupCtx, forkdb.DeleteChatSecretAnswerParams{
 			ChatID:     chat.ID,
 			ToolCallID: toolCallID,
 		}); delErr != nil {
