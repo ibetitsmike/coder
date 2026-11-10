@@ -76,3 +76,35 @@ RETURNING *;
 DELETE FROM agent_definitions
 WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND project_id IS NULL AND name = @name::text
 RETURNING *;
+
+-- name: InsertProjectAgentDefinition :one
+INSERT INTO agent_definitions (organization_id, project_id, name, description, content)
+VALUES (@organization_id::uuid, @project_id::uuid, @name::text, @description::text, @content::text)
+RETURNING *;
+
+-- name: GetProjectAgentDefinitionByName :one
+SELECT *
+FROM agent_definitions
+WHERE project_id = @project_id::uuid AND name = @name::text;
+
+-- name: ListProjectAgentDefinitionMetadata :many
+SELECT
+    id, organization_id, project_id, name, description, enabled, created_at, updated_at
+FROM agent_definitions
+WHERE project_id = @project_id::uuid
+ORDER BY name ASC;
+
+-- name: UpdateProjectAgentDefinitionByName :one
+UPDATE agent_definitions
+SET
+    description = COALESCE(sqlc.narg('description')::text, description),
+    content     = COALESCE(sqlc.narg('content')::text, content),
+    enabled     = COALESCE(sqlc.narg('enabled')::boolean, enabled),
+    updated_at  = now()
+WHERE project_id = @project_id::uuid AND name = @name::text
+RETURNING *;
+
+-- name: DeleteProjectAgentDefinitionByName :one
+DELETE FROM agent_definitions
+WHERE project_id = @project_id::uuid AND name = @name::text
+RETURNING *;
