@@ -387,8 +387,10 @@ When the build fails, or the agent or its startup scripts don't get ready, `spaw
 It fails the same way before any build when the parent workspace's template doesn't allow Coder Agents or has an externally managed agent, so spawn the child with `isolation: "shared"` or `isolation: "worktree"` in such a workspace.
 After a failed spawn, Coder Agents archives the child and tries once to stop the workspace, if it created one, but it doesn't retry a failed archive or stop and never deletes the workspace.
 So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
-When the spawn succeeds, Coder Agents doesn't stop or delete the child's workspace, not even after you archive the chats.
-Delete it on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
+When the spawn succeeds, the child's workspace keeps running until you archive the root chat or the deployment archives it as inactive.
+After the archive, Coder Agents stops each child's workspace in the background, once it has removed the family's worktrees, but it never deletes the workspace.
+It doesn't retry a failed stop, and it skips a child that is bound to another workspace by then.
+Delete the workspace on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
 
 ## Models
 
@@ -464,7 +466,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `d1bb658aa3`:
+Checked against fork `main` at `bef9c59966`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -505,7 +507,8 @@ Checked against fork `main` at `d1bb658aa3`:
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:269-279`, `:358-363`.
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
-  No other stop or delete: `stopWorkspaceFn` has no other caller in `coderd/x/chatd` than the root chat's `stop_workspace`, `coderd/x/chatd/turn_environment.go:2616-2622`, and the workspace tools are root-only, `:732-741`.
+  Stopped after a root archive, also an automatic one, `fork_family_lock.go:23-35`, `auto_archive.go:148-152`, after the worktrees are removed, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:44-61`, `:90-95`, `:124-139`.
+  No delete: nothing in `coderd/x/chatd` deletes a workspace, and the workspace tools are root-only, `coderd/x/chatd/turn_environment.go:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
