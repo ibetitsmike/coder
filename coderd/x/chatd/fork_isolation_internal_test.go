@@ -142,7 +142,9 @@ func (f *isolationFixture) spawnTool(t *testing.T, root database.Chat) fantasy.A
 func (f *isolationFixture) spawn(t *testing.T, root database.Chat, args map[string]any) fantasy.ToolResponse {
 	t.Helper()
 	args["prompt"] = "do the work"
-	args["type"] = subagentTypeGeneral
+	if _, ok := args["type"]; !ok {
+		args["type"] = subagentTypeGeneral
+	}
 	input, err := json.Marshal(args)
 	require.NoError(t, err)
 	resp, err := f.spawnTool(t, root).Run(chatdTestContext(t), fantasy.ToolCall{ID: uuid.NewString(), Name: spawnAgentToolName, Input: string(input)})
@@ -234,6 +236,57 @@ func TestForkSpawnIsolationWorktree(t *testing.T) {
 		require.Contains(t, info.Parameters, "base_branch")
 		require.Contains(t, info.Parameters, "prompt")
 	})
+}
+
+// TestForkSpawnIsolationStoredAgentType checks that, with agent definitions
+// on, the isolation wrapper composes with the stored agent type wrapper: a
+// custom type spawned into a worktree gets its definition, its worktree, and
+// a result that reports both.
+func TestForkSpawnIsolationStoredAgentType(t *testing.T) {
+	t.Parallel()
+
+	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions})
+	ctx := chatdTestContext(t)
+	returned := workspacesdk.ForkWorktree{Path: "/home/coder/.coder/worktrees/child", Branch: "agent/returned-branch"}
+	conn := &fakeWorktreeConn{worktree: returned}
+	root := f.rootChat(t, conn)
+	_, err := f.fdb.InsertUserAgentDefinition(ctx, forkdb.InsertUserAgentDefinitionParams{
+		OrganizationID: root.OrganizationID,
+		UserID:         root.OwnerID,
+		Name:           "planner",
+		Description:    "Plans the work.",
+		Content:        agentDefinitionMarkdown("name: planner", "PLANNER-MARKER"),
+	})
+	require.NoError(t, err)
+
+	resp := f.spawn(t, root, map[string]any{"type": "personal/planner", "isolation": "worktree", "title": "Plan"})
+	require.False(t, resp.IsError, resp.Content)
+	var result struct {
+		ChatID       string `json:"chat_id"`
+		Type         string `json:"type"`
+		Isolation    string `json:"isolation"`
+		WorktreePath string `json:"worktree_path"`
+		Branch       string `json:"branch"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+	childID, err := uuid.Parse(result.ChatID)
+	require.NoError(t, err)
+	require.Equal(t, "planner", result.Type)
+	require.Equal(t, "worktree", result.Isolation)
+	require.Equal(t, returned.Path, result.WorktreePath)
+	require.Equal(t, returned.Branch, result.Branch)
+
+	creates, deletes := conn.calls()
+	require.Len(t, creates, 1)
+	require.Equal(t, childID.String(), creates[0].Name)
+	require.Empty(t, deletes)
+
+	row, err := f.fdb.GetChatSubagentByChatID(ctx, childID)
+	require.NoError(t, err)
+	require.Equal(t, "planner", row.AgentType)
+	require.Equal(t, "worktree", row.Isolation)
+	require.Equal(t, returned.Path, row.WorktreePath)
+	require.Contains(t, agentDefinitionsFixture{db: f.db}.systemPrompt(t, childID), "PLANNER-MARKER")
 }
 
 func TestForkSpawnIsolationErrors(t *testing.T) {
