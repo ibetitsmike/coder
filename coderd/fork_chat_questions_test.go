@@ -306,3 +306,52 @@ func TestForkChatSecretQuestionExperimentOff(t *testing.T) {
 	}}})
 	require.NoError(t, err)
 }
+
+// An answer past its TTL is replaced, even while the message that reports
+// it is still queued: reads skip it before dbpurge deletes it.
+func TestForkChatSecretAnswerExpired(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	client, _ := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
+		opts.Database = db
+		opts.Pubsub = ps
+		opts.DeploymentValues.Experiments = append(
+			opts.DeploymentValues.Experiments,
+			string(codersdk.ExperimentForkNestedSubagents),
+		)
+	})
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	_, busy, _ := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	sysCtx := dbauthz.AsSystemRestricted(ctx)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatDescendantQuestion(sysCtx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     busy.ID,
+		ToolCallID: "call-busy",
+		Questions:  json.RawMessage(`[{"header": "Token", "question": "Paste the API token.", "secret": true}]`),
+	})
+	require.NoError(t, err)
+	_, err = db.UpdateChatStatus(sysCtx, database.UpdateChatStatusParams{
+		ID:          busy.ID,
+		Status:      database.ChatStatusRunning,
+		WorkerID:    uuid.NullUUID{UUID: uuid.New(), Valid: true},
+		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
+		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	require.NoError(t, err)
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Value: "first-value"}))
+	_, err = sqlDB.ExecContext(ctx,
+		"UPDATE chat_secret_answers SET created_at = now() - interval '25 hours' WHERE chat_id = $1",
+		busy.ID,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, busy.ID, codersdk.ChatSecretAnswerRequest{ToolCallID: "call-busy", Value: "second-value"}))
+	answers, err := fdb.GetChatSecretAnswersByChatID(sysCtx, busy.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.Equal(t, "second-value", answers[0].Value)
+}
