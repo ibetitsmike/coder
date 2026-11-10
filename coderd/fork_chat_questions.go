@@ -1,17 +1,34 @@
 package coderd
 
-// This file is fork code: it lists the descendant questions of the
-// fork-nested-subagents experiment. registerForkChatRoutes mounts the handler.
+// This file is fork code: it lists and answers the descendant questions of
+// the fork-nested-subagents experiment. registerForkChatRoutes mounts the
+// handlers.
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"cdr.dev/slog/v3"
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/codersdk"
+)
+
+const (
+	// questionAnswerPrefix starts the user message that answers an
+	// ask_user_question call; the tool tells the model to expect it.
+	questionAnswerPrefix  = "Answer to ask_user_question call "
+	maxSecretAnswerLength = 16 << 10
 )
 
 // @Summary List pending descendant questions
@@ -69,4 +86,144 @@ func (api *API) getChatDescendantQuestions(rw http.ResponseWriter, r *http.Reque
 		})
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, questions)
+}
+
+// @Summary Answer a secret descendant question
+// @ID answer-secret-descendant-question
+// @Security CoderSessionToken
+// @Accept json
+// @Tags Chats
+// @Param chat path string true "Chat ID" format(uuid)
+// @Param tool_call_id path string true "Tool call ID of the question"
+// @Param request body codersdk.ChatSecretAnswerRequest true "Secret answer"
+// @Success 204
+// @Router /api/v2/chats/fork/{chat}/questions/{tool_call_id}/secret-answer [post]
+// @x-apidocgen {"skip": true}
+// @Description Stores the answer to the pending secret question of the chat
+// @Description outside its messages, and sends the chat a user message that
+// @Description says only that the user answered.
+func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	apiKey := httpmw.APIKey(r)
+	chat := httpmw.ChatParam(r)
+	toolCallID := chi.URLParam(r, "tool_call_id")
+
+	if maybeWriteChatError(ctx, rw, api.checkSendChatMessage(ctx, apiKey.UserID, chat)) {
+		return
+	}
+	var req codersdk.ChatSecretAnswerRequest
+	if !httpapi.Read(ctx, rw, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Value) == "" {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{Message: "The answer must not be empty."})
+		return
+	}
+	if len(req.Value) > maxSecretAnswerLength {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: fmt.Sprintf("The answer must be at most %d bytes.", maxSecretAnswerLength),
+		})
+		return
+	}
+
+	fdb, err := forkdb.From(api.Database)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	question, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && question.ToolCallID != toolCallID) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The chat has no pending question with this tool call ID.",
+		})
+		return
+	}
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	if !question.Secret() {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "The question takes a normal answer. Send it as a chat message.",
+		})
+		return
+	}
+
+	// Errors stay out of the responses below: a database error can quote
+	// the value.
+	err = fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		ChatID:     chat.ID,
+		ToolCallID: toolCallID,
+		Value:      req.Value,
+	})
+	if database.IsUniqueViolation(err) {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+		return
+	}
+	if err != nil {
+		api.Logger.Error(ctx, "insert secret answer", slog.F("chat_id", chat.ID))
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{Message: "Failed to store the answer."})
+		return
+	}
+
+	_, err = api.sendChatMessage(ctx, apiKey.UserID, chat, codersdk.CreateChatMessageRequest{
+		Content: []codersdk.ChatInputPart{{
+			Type: codersdk.ChatInputPartTypeText,
+			Text: questionAnswerPrefix + toolCallID + ":\nThe user gave a secret answer.",
+		}},
+	})
+	if err != nil {
+		// Without the message the chat never learns of the answer, so the
+		// question stays pending and the user can answer again.
+		if delErr := fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{
+			ChatID:     chat.ID,
+			ToolCallID: toolCallID,
+		}); delErr != nil {
+			api.Logger.Error(ctx, "delete undelivered secret answer", slog.F("chat_id", chat.ID), slog.Error(delErr))
+		}
+		writeChatError(ctx, rw, err)
+		return
+	}
+	rw.WriteHeader(http.StatusNoContent)
+}
+
+// rejectSecretQuestionAnswer refuses a message that answers the pending
+// secret question of chat: only postChatSecretAnswer keeps the value out of
+// the chat's messages. Errors implement httperror.Responder.
+func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Chat, req codersdk.CreateChatMessageRequest) error {
+	if !chat.ParentChatID.Valid {
+		return nil
+	}
+	var text strings.Builder
+	for _, part := range req.Content {
+		if part.Type == codersdk.ChatInputPartTypeText {
+			text.WriteString(part.Text)
+		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(text.String()), questionAnswerPrefix) {
+		return nil
+	}
+	fdb, err := forkdb.From(api.Database)
+	if err != nil {
+		return httperror.NewResponseError(http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to read the chat's question.",
+			Detail:  err.Error(),
+		})
+	}
+	question, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return httperror.NewResponseError(http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to read the chat's question.",
+			Detail:  err.Error(),
+		})
+	}
+	if !question.Secret() {
+		return nil
+	}
+	return httperror.NewResponseError(http.StatusConflict, codersdk.Response{
+		Message: "The chat's question takes a secret answer, which a chat message cannot carry.",
+	})
 }

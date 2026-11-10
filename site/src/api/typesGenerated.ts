@@ -3760,6 +3760,11 @@ export interface ChatQuestion {
 	readonly header: string;
 	readonly question: string;
 	readonly options: readonly ChatQuestionOption[];
+	/**
+	 * Secret questions take a free-text answer through
+	 * AnswerChatSecretQuestion, which never writes it to a chat message.
+	 */
+	readonly secret?: boolean;
 }
 
 // From codersdk/fork_chat_questions.go
@@ -3825,6 +3830,14 @@ export interface ChatRetentionDaysResponse {
 export type ChatRole = "" | "read";
 
 export const ChatRoles: ChatRole[] = ["", "read"];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatSecretAnswerRequest answers a secret question of a descendant chat.
+ */
+export interface ChatSecretAnswerRequest {
+	readonly value: string;
+}
 
 // From codersdk/chats.go
 export interface ChatSkillInvocationPart {

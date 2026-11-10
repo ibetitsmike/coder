@@ -1,12 +1,13 @@
 package coderd_test
 
-// This file is fork code: it covers the descendant questions route of the
+// This file is fork code: it covers the descendant questions routes of the
 // fork-nested-subagents experiment.
 
 import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -142,4 +144,80 @@ func TestForkChatDescendantQuestions(t *testing.T) {
 		_ = res.Body.Close()
 		require.Equal(t, http.StatusNotFound, res.StatusCode)
 	})
+}
+
+func TestForkChatSecretAnswer(t *testing.T) {
+	t.Parallel()
+
+	const secret = "hunter2-secret-value"
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
+		opts.DeploymentValues.Experiments = append(
+			opts.DeploymentValues.Experiments,
+			string(codersdk.ExperimentForkNestedSubagents),
+		)
+	})
+	user := coderdtest.CreateFirstUser(t, client.Client)
+	modelConfig := createChatModel(t, client)
+	_, child, grandchild := forkChatFamily(t, db, user.OrganizationID, user.UserID, modelConfig.ID)
+	sysCtx := dbauthz.AsSystemRestricted(ctx)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	ask := func(c database.Chat, callID, questions string) {
+		_, err := fdb.UpsertChatDescendantQuestion(sysCtx, forkdb.UpsertChatDescendantQuestionParams{
+			ChatID: c.ID, ToolCallID: callID, Questions: json.RawMessage(questions),
+		})
+		require.NoError(t, err)
+	}
+	ask(child, "call-secret", `[{"header": "Token", "question": "Paste the API token.", "secret": true}]`)
+	ask(grandchild, "call-normal", `[{"header": "DB", "question": "Which database?", "options": [{"label": "Postgres"}]}]`)
+	answerText := func(callID, answer string) codersdk.CreateChatMessageRequest {
+		return codersdk.CreateChatMessageRequest{Content: []codersdk.ChatInputPart{{
+			Type: codersdk.ChatInputPartTypeText,
+			Text: "Answer to ask_user_question call " + callID + ":\n" + answer,
+		}}}
+	}
+	requireStatus := func(t *testing.T, want int, err error) {
+		t.Helper()
+		var sdkErr *codersdk.Error
+		require.ErrorAs(t, err, &sdkErr)
+		require.Equal(t, want, sdkErr.StatusCode())
+	}
+
+	// The normal answer path cannot carry a secret answer into the chat.
+	_, err = client.CreateChatMessage(ctx, child.ID, answerText("call-secret", secret))
+	requireStatus(t, http.StatusConflict, err)
+
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-other", codersdk.ChatSecretAnswerRequest{Value: secret})
+	requireStatus(t, http.StatusConflict, err)
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: "  "})
+	requireStatus(t, http.StatusBadRequest, err)
+	err = client.AnswerChatSecretQuestion(ctx, grandchild.ID, "call-normal", codersdk.ChatSecretAnswerRequest{Value: secret})
+	requireStatus(t, http.StatusBadRequest, err)
+	other, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID)
+	err = codersdk.NewExperimentalClient(other).AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret})
+	requireStatus(t, http.StatusNotFound, err)
+
+	require.NoError(t, client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret}))
+	answers, err := fdb.GetChatSecretAnswersByChatID(sysCtx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.Equal(t, "call-secret", answers[0].ToolCallID)
+	require.Equal(t, secret, answers[0].Value)
+	messages, err := db.GetChatMessagesByChatID(sysCtx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+	require.NoError(t, err)
+	var answered bool
+	for _, msg := range messages {
+		require.NotContains(t, string(msg.Content.RawMessage), secret)
+		if msg.Role == database.ChatMessageRoleUser {
+			answered = answered || strings.Contains(string(msg.Content.RawMessage), "The user gave a secret answer.")
+		}
+	}
+	require.True(t, answered, "the chat gets a user message without the value")
+	err = client.AnswerChatSecretQuestion(ctx, child.ID, "call-secret", codersdk.ChatSecretAnswerRequest{Value: secret})
+	requireStatus(t, http.StatusConflict, err)
+
+	// A normal question still takes a normal answer.
+	_, err = client.CreateChatMessage(ctx, grandchild.ID, answerText("call-normal", "Postgres"))
+	require.NoError(t, err)
 }
