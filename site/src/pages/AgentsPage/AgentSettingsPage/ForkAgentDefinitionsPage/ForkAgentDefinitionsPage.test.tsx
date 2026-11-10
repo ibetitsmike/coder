@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
@@ -178,10 +178,10 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
-		// The deleted row was the only button left to take focus back.
+		// The deleted row took its menu button, so focus moves to New.
 		await waitFor(() =>
 			expect(
-				screen.getByRole("table", { name: "Agent definitions" }),
+				screen.getByRole("button", { name: "New agent definition" }),
 			).toHaveFocus(),
 		);
 	});
@@ -232,6 +232,206 @@ describe("ForkAgentDefinitionsPage", () => {
 
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
+		);
+	});
+
+	it("creates a definition from the form in the selected organization", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "code-reviewer");
+		await user.type(
+			within(dialog).getByLabelText("Description"),
+			"Reviews diffs.",
+		);
+		await user.type(within(dialog).getByLabelText("Model"), "gpt-5");
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
+				content:
+					'---\nname: "code-reviewer"\ndescription: "Reviews diffs."\nmodel: "gpt-5"\n---\nReview the diff.\n',
+			}),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+	});
+
+	it("creates a definition from an imported file with all its front-matter", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.upload(
+			within(dialog).getByLabelText("Upload agent definition file"),
+			new File(
+				["---\nmodel: sonnet\ntools: Read, Grep\n---\nWrite release notes.\n"],
+				"release-notes.md",
+			),
+		);
+		await waitFor(() =>
+			expect(within(dialog).getByLabelText("Name")).toHaveValue(
+				"release-notes",
+			),
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
+				content:
+					'---\nname: "release-notes"\nmodel: "sonnet"\ntools: Read, Grep\n---\nWrite release notes.\n',
+			}),
+		);
+	});
+
+	it("keeps the editor and its input through Escape so a rejected create can be resubmitted", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		let rejectCreate: (error: unknown) => void = () => {};
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectCreate = reject;
+					}),
+			)
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "code-reviewer");
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+		await user.keyboard("{Escape}");
+		rejectCreate(
+			mockApiError({
+				message: "Invalid agent definition content.",
+				detail: 'front-matter field "readonly" must be a boolean',
+			}),
+		);
+
+		const submit = await screen.findByRole("button", {
+			name: "Create agent definition",
+		});
+		await waitFor(() => expect(submit).toBeEnabled());
+		await user.click(submit);
+
+		await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+		expect(create).toHaveBeenLastCalledWith(MockDefaultOrganization.id, {
+			content: '---\nname: "code-reviewer"\n---\nReview the diff.\n',
+		});
+	});
+
+	it("keeps the tool list of an edited definition", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n",
+			});
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		const description = await screen.findByLabelText("Description");
+		expect(getDefinition).toHaveBeenCalledWith(
+			MockDefaultOrganization.id,
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkAgentDefinitionMetadata.name,
+				{
+					content:
+						'---\nname: "code-reviewer"\ndescription: "Reviews diffs for bugs."\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n',
+				},
+			),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+	});
+
+	it("retries a failed load and keeps edits when a failed save refetches", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const content = (description: string) =>
+			`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockRejectedValueOnce(mockApiError({ message: "Upstream timeout." }))
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: content("Reviews diffs."),
+			})
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content: content("Changed in another tab."),
+			});
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockRejectedValue(mockApiError({ message: "Permission denied." }));
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() => expect(getDefinition).toHaveBeenCalledTimes(3));
+		expect(screen.getByLabelText("Description")).toHaveValue(
+			"Reviews diffs for bugs.",
 		);
 	});
 

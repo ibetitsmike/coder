@@ -1,7 +1,6 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
-import { EllipsisVerticalIcon } from "lucide-react";
-import { useRef } from "react";
+import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { Alert, AlertDescription } from "#/components/Alert/Alert";
@@ -29,6 +28,10 @@ import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
 import { formatUpdatedAt } from "../../components/SkillsTableView";
 import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
+import {
+	ForkAgentDefinitionEditorDialog,
+	type ForkAgentDefinitionEditorState,
+} from "./ForkAgentDefinitionEditorDialog";
 
 const title = "Agent definitions";
 
@@ -55,7 +58,10 @@ type ForkAgentDefinitionsTableViewProps = {
 	/** The enabled value each in-flight toggle sends, keyed by name. */
 	pendingToggles?: Readonly<Record<string, boolean>>;
 	onToggleEnabled: (name: string, enabled: boolean) => void;
+	onCreate: () => void;
+	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	editorState?: ForkAgentDefinitionEditorState;
 	deleteState?: ForkAgentDefinitionDeleteState;
 };
 
@@ -70,21 +76,18 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	onRetry,
 	pendingToggles = {},
 	onToggleEnabled,
+	onCreate,
+	onEdit,
 	onDelete,
+	editorState,
 	deleteState,
 }) => {
-	const { rememberTrigger, restoreFocus, setPrimaryFallback } =
-		useDialogFocusReturn();
-	// Deleting the only row removes every button on the page in a
-	// single-organization deployment, so focus falls back to the table.
-	const tableRef = useRef<HTMLTableElement>(null);
-	const restoreDeleteFocus = (event: Event) => {
-		restoreFocus(event);
-		if (!event.defaultPrevented && tableRef.current?.isConnected) {
-			event.preventDefault();
-			tableRef.current.focus();
-		}
-	};
+	const {
+		rememberTrigger,
+		restoreFocus,
+		setPrimaryFallback,
+		setSecondaryFallback,
+	} = useDialogFocusReturn();
 	const deleteErrorDetail = deleteState?.error
 		? getErrorDetail(deleteState.error)
 		: undefined;
@@ -155,6 +158,9 @@ export const ForkAgentDefinitionsTableView: React.FC<
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
+								<DropdownMenuItem onClick={() => onEdit(definition)}>
+									Edit
+								</DropdownMenuItem>
 								<DropdownMenuItem
 									className="text-content-destructive focus:text-content-destructive"
 									onClick={() => onDelete(definition)}
@@ -174,7 +180,23 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			<SectionHeader
 				label={title}
 				description="Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file."
-				action={action}
+				action={
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+						{action}
+						<Button
+							ref={setSecondaryFallback}
+							variant="outline"
+							disabled={isLoading}
+							onClick={(event) => {
+								rememberTrigger(event);
+								onCreate();
+							}}
+						>
+							<PlusIcon />
+							New agent definition
+						</Button>
+					</div>
+				}
 			/>
 
 			{Boolean(error) && (
@@ -188,7 +210,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				/>
 			)}
 
-			<Table ref={tableRef} aria-label={title} tabIndex={-1}>
+			<Table aria-label={title}>
 				<TableHeader>
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>
@@ -205,12 +227,19 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				<TableBody size="lg">{tableBody}</TableBody>
 			</Table>
 
+			{editorState && (
+				<ForkAgentDefinitionEditorDialog
+					{...editorState}
+					onCloseAutoFocus={restoreFocus}
+				/>
+			)}
+
 			{deleteState && (
 				<ConfirmDialog
 					type="delete"
 					open
 					onClose={deleteState.onClose}
-					onCloseAutoFocus={restoreDeleteFocus}
+					onCloseAutoFocus={restoreFocus}
 					title={`Delete ${deleteState.definition.name}?`}
 					confirmText="Delete"
 					description={

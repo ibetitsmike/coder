@@ -38,7 +38,7 @@ import {
 	parseAgentDefinitionMarkdown,
 } from "./agentDefinitionMarkdown";
 
-type ForkAgentDefinitionEditorState = {
+export type ForkAgentDefinitionEditorState = {
 	mode: "create" | "edit";
 	/** Unset while an edited definition loads or after it fails to load. */
 	initialValues?: AgentDefinitionFormValues;

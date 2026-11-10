@@ -2,11 +2,16 @@
 
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
+	createUserAgentDefinition as createUserAgentDefinitionRequest,
 	deleteUserAgentDefinition as deleteUserAgentDefinitionRequest,
+	getUserAgentDefinition,
 	getUserAgentDefinitions,
 	updateUserAgentDefinition as updateUserAgentDefinitionRequest,
 } from "#/api/forkAgentDefinitions";
-import type { UpdateForkAgentDefinitionRequest } from "#/api/typesGenerated";
+import type {
+	CreateForkAgentDefinitionRequest,
+	UpdateForkAgentDefinitionRequest,
+} from "#/api/typesGenerated";
 
 /** Query key for the current user's agent definitions in an organization. */
 export const userAgentDefinitionsKey = (organizationId: string) =>
@@ -17,6 +22,40 @@ export const userAgentDefinitions = (organizationId: string) =>
 	queryOptions({
 		queryKey: userAgentDefinitionsKey(organizationId),
 		queryFn: () => getUserAgentDefinitions(organizationId),
+	});
+
+/** Query options for one of the current user's agent definitions. */
+export const userAgentDefinition = (organizationId: string, name: string) =>
+	queryOptions({
+		queryKey: [...userAgentDefinitionsKey(organizationId), name] as const,
+		queryFn: () => getUserAgentDefinition(organizationId, name),
+	});
+
+type CreateUserAgentDefinitionArgs = {
+	organizationId: string;
+	req: CreateForkAgentDefinitionRequest;
+};
+
+/**
+ * Mutation options that create an agent definition for the current user. The
+ * list is invalidated after failures too, because a lost response can hide a
+ * created definition.
+ */
+export const createUserAgentDefinition = (queryClient: QueryClient) =>
+	mutationOptions({
+		mutationFn: ({ organizationId, req }: CreateUserAgentDefinitionArgs) =>
+			createUserAgentDefinitionRequest(organizationId, req),
+		onSuccess: ({ content: _content, ...created }, { organizationId }) => {
+			queryClient.setQueryData(
+				userAgentDefinitions(organizationId).queryKey,
+				(definitions) => definitions && [...definitions, created],
+			);
+		},
+		onSettled: (_data, _error, { organizationId }) =>
+			queryClient.invalidateQueries({
+				queryKey: userAgentDefinitionsKey(organizationId),
+				exact: true,
+			}),
 	});
 
 type UpdateUserAgentDefinitionArgs = {
@@ -49,10 +88,10 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 					),
 			);
 		},
+		// Not exact, so a reopened editor refetches the definition it saved.
 		onSettled: (_data, _error, { organizationId }) =>
 			queryClient.invalidateQueries({
 				queryKey: userAgentDefinitionsKey(organizationId),
-				exact: true,
 			}),
 	});
 

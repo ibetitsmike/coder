@@ -3,6 +3,7 @@
 
 import { API } from "./api";
 import type {
+	CreateForkAgentDefinitionRequest,
 	ForkAgentDefinition,
 	ForkAgentDefinitionMetadata,
 	UpdateForkAgentDefinitionRequest,
@@ -10,6 +11,12 @@ import type {
 
 const userAgentDefinitionsPath = (organizationId: string, user: string) =>
 	`/api/v2/chats/fork/organizations/${organizationId}/members/${user}/agent-definitions`;
+const userAgentDefinitionPath = (
+	organizationId: string,
+	name: string,
+	user: string,
+) =>
+	`${userAgentDefinitionsPath(organizationId, user)}/${encodeURIComponent(name)}`;
 
 /** Lists a member's personal agent definitions; `user` defaults to the signed-in member. */
 export const getUserAgentDefinitions = async (
@@ -22,6 +29,31 @@ export const getUserAgentDefinitions = async (
 	return response.data;
 };
 
+/** Gets one of a user's personal agent definitions with its content. */
+export const getUserAgentDefinition = async (
+	organizationId: string,
+	name: string,
+	user = "me",
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().get<ForkAgentDefinition>(
+		userAgentDefinitionPath(organizationId, name, user),
+	);
+	return response.data;
+};
+
+/** Creates a personal agent definition for a user. */
+export const createUserAgentDefinition = async (
+	organizationId: string,
+	req: CreateForkAgentDefinitionRequest,
+	user = "me",
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().post<ForkAgentDefinition>(
+		userAgentDefinitionsPath(organizationId, user),
+		req,
+	);
+	return response.data;
+};
+
 /** Updates one of a user's personal agent definitions. */
 export const updateUserAgentDefinition = async (
 	organizationId: string,
@@ -30,7 +62,7 @@ export const updateUserAgentDefinition = async (
 	user = "me",
 ): Promise<ForkAgentDefinition> => {
 	const response = await API.getAxiosInstance().patch<ForkAgentDefinition>(
-		`${userAgentDefinitionsPath(organizationId, user)}/${encodeURIComponent(name)}`,
+		userAgentDefinitionPath(organizationId, name, user),
 		req,
 	);
 	return response.data;
@@ -43,6 +75,6 @@ export const deleteUserAgentDefinition = async (
 	user = "me",
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
-		`${userAgentDefinitionsPath(organizationId, user)}/${encodeURIComponent(name)}`,
+		userAgentDefinitionPath(organizationId, name, user),
 	);
 };

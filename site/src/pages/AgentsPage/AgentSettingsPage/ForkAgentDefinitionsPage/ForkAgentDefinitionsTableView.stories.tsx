@@ -22,6 +22,8 @@ const meta = {
 		isRetrying: false,
 		onRetry: fn(),
 		onToggleEnabled: fn(),
+		onCreate: fn(),
+		onEdit: fn(),
 		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkAgentDefinitionsTableView>;

@@ -4,16 +4,59 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
+	createUserAgentDefinition,
 	deleteUserAgentDefinition,
 	updateUserAgentDefinition,
+	userAgentDefinition,
 	userAgentDefinitions,
 } from "#/api/queries/forkAgentDefinitions";
-import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
+import type {
+	ForkAgentDefinition,
+	ForkAgentDefinitionMetadata,
+} from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
+import type { SkillErrorDisplay } from "../../components/SkillEditor";
+import {
+	type AgentDefinitionFormValues,
+	emptyAgentDefinitionFormValues,
+	parseAgentDefinitionMarkdown,
+} from "./agentDefinitionMarkdown";
+import type { ForkAgentDefinitionEditorState } from "./ForkAgentDefinitionEditorDialog";
 import {
 	type ForkAgentDefinitionDeleteState,
 	ForkAgentDefinitionsTableView,
 } from "./ForkAgentDefinitionsTableView";
+
+type EditorTarget =
+	| { mode: "create" }
+	| { mode: "edit"; name: string; values?: AgentDefinitionFormValues };
+
+const submitError = (
+	error: unknown,
+	fallback: string,
+): SkillErrorDisplay | undefined =>
+	error
+		? {
+				message: getErrorMessage(error, fallback),
+				detail: getErrorDetail(error),
+			}
+		: undefined;
+
+const editFormValues = (
+	definition: ForkAgentDefinition,
+): { values?: AgentDefinitionFormValues; error?: unknown } => {
+	try {
+		return {
+			// The API only accepts content that keeps the stored name.
+			values: {
+				...parseAgentDefinitionMarkdown(definition.content),
+				name: definition.name,
+			},
+		};
+	} catch (error) {
+		return { error };
+	}
+};
 
 type ForkAgentDefinitionsTableProps = {
 	organizationId: string;
@@ -26,7 +69,16 @@ export const ForkAgentDefinitionsTable: React.FC<
 	const queryClient = useQueryClient();
 	const [deleteTarget, setDeleteTarget] =
 		useState<ForkAgentDefinitionMetadata>();
+	const [editorTarget, setEditorTarget] = useState<EditorTarget>();
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
+	const editName = editorTarget?.mode === "edit" ? editorTarget.name : "";
+	const definitionQuery = useQuery({
+		...userAgentDefinition(organizationId, editName),
+		enabled: Boolean(editName),
+	});
+
+	const createMutation = useMutation(createUserAgentDefinition(queryClient));
+	const saveMutation = useMutation(updateUserAgentDefinition(queryClient));
 
 	// Pending toggles are keyed by organization, then name, so a second
 	// toggle, or a switch to another organization with the same names, does
@@ -66,6 +118,80 @@ export const ForkAgentDefinitionsTable: React.FC<
 	});
 
 	const deleteMutation = useMutation(deleteUserAgentDefinition(queryClient));
+
+	// A failed request reports its error in the editor, so the editor stays
+	// open, with the user's input, until the request settles.
+	const closeEditor = (isSubmitting: boolean) => {
+		if (!isSubmitting) {
+			setEditorTarget(undefined);
+		}
+	};
+
+	let editorState: ForkAgentDefinitionEditorState | undefined;
+	if (editorTarget?.mode === "create") {
+		editorState = {
+			mode: "create",
+			initialValues: emptyAgentDefinitionFormValues,
+			submitError: submitError(
+				createMutation.error,
+				"Failed to create agent definition.",
+			),
+			isSubmitting: createMutation.isPending,
+			onSubmit: (content, onSettled) =>
+				createMutation.mutate(
+					{ organizationId, req: { content } },
+					{
+						onSuccess: () => {
+							setEditorTarget(undefined);
+							toast.success("Agent definition created.");
+						},
+						onSettled,
+					},
+				),
+			onClose: () => closeEditor(createMutation.isPending),
+		};
+	} else if (editorTarget?.mode === "edit") {
+		const isFresh = definitionQuery.isSuccess && !definitionQuery.isFetching;
+		const loaded = isFresh ? editFormValues(definitionQuery.data) : undefined;
+		// The editor keeps the first fresh values, so a later refetch cannot
+		// reset the user's edits.
+		if (loaded?.values && !editorTarget.values) {
+			setEditorTarget({ ...editorTarget, values: loaded.values });
+		}
+		const { name, values } = editorTarget;
+		const loadError = values
+			? undefined
+			: (loaded?.error ?? definitionQuery.error);
+		editorState = {
+			mode: "edit",
+			initialValues: values,
+			isLoading: !values && !loadError,
+			loadError,
+			onRetry: definitionQuery.error
+				? () => {
+						void definitionQuery.refetch();
+					}
+				: undefined,
+			isRetrying: definitionQuery.isFetching,
+			submitError: submitError(
+				saveMutation.error,
+				"Failed to save agent definition.",
+			),
+			isSubmitting: saveMutation.isPending,
+			onSubmit: (content, onSettled) =>
+				saveMutation.mutate(
+					{ organizationId, name, req: { content } },
+					{
+						onSuccess: () => {
+							setEditorTarget(undefined);
+							toast.success("Agent definition saved.");
+						},
+						onSettled,
+					},
+				),
+			onClose: () => closeEditor(saveMutation.isPending),
+		};
+	}
 
 	let deleteState: ForkAgentDefinitionDeleteState | undefined;
 	if (deleteTarget) {
@@ -121,6 +247,15 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onToggleEnabled={(name, enabled) =>
 				toggleMutation.mutate({ organizationId, name, req: { enabled } })
 			}
+			onCreate={() => {
+				createMutation.reset();
+				setEditorTarget({ mode: "create" });
+			}}
+			onEdit={(definition) => {
+				saveMutation.reset();
+				setEditorTarget({ mode: "edit", name: definition.name });
+			}}
+			editorState={editorState}
 			onDelete={(definition) => {
 				deleteMutation.reset();
 				setDeleteTarget(definition);
