@@ -411,6 +411,21 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByID", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByID), ctx, id)
 }
 
+// GetFamilySubagentsAwaitingWorker mocks base method.
+func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFamilySubagentsAwaitingWorker", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetFamilySubagentsAwaitingWorkerRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFamilySubagentsAwaitingWorker indicates an expected call of GetFamilySubagentsAwaitingWorker.
+func (mr *MockStoreMockRecorder) GetFamilySubagentsAwaitingWorker(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFamilySubagentsAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetFamilySubagentsAwaitingWorker), ctx, arg)
+}
+
 // GetOrganizationAgentDefinitionByName mocks base method.
 func (m *MockStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	m.ctrl.T.Helper()
