@@ -3840,8 +3840,11 @@ export const ChatRoles: ChatRole[] = ["", "read"];
 // From codersdk/fork_chat_questions.go
 /**
  * ChatSecretAnswerRequest answers a secret question of a descendant chat.
+ * The tool call ID travels in the body because coderd routes on the
+ * unescaped path, where an ID with a "/" would not match the route.
  */
 export interface ChatSecretAnswerRequest {
+	readonly tool_call_id: string;
 	readonly value: string;
 }
 

@@ -52,7 +52,7 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 			httpmw.ExtractChatParam(api.Database),
 		)
 		chatQuestions.Get("/{chat}/questions", api.getChatDescendantQuestions)
-		chatQuestions.Post("/{chat}/questions/{tool_call_id}/secret-answer", api.postChatSecretAnswer)
+		chatQuestions.Post("/{chat}/questions/secret-answer", api.postChatSecretAnswer)
 
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
