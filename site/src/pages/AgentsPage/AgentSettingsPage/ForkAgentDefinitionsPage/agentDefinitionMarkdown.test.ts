@@ -151,6 +151,22 @@ describe("agent definition markdown", () => {
 		);
 	});
 
+	it("keeps aliases of owned values that do not change", () => {
+		const frontMatter = [
+			"---",
+			"name: reviewer",
+			"description: &summary Reviews diffs.",
+			"summary: *summary",
+			"---",
+		].join("\n");
+		const parsed = parseAgentDefinitionMarkdown(
+			`${frontMatter}\nReview the diff.`,
+		);
+		expect(
+			buildAgentDefinitionMarkdown({ ...parsed, body: "Find bugs." }),
+		).toBe(`${frontMatter}\nFind bugs.\n`);
+	});
+
 	it("reads and keeps an owned field set through an alias", () => {
 		const content = [
 			"---",
