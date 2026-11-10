@@ -15,6 +15,7 @@ const meta: Meta<typeof ForkDescendantQuestionDock> = {
 	args: {
 		chat: MockChat,
 		isReadOnly: false,
+		canAnswer: true,
 	},
 	parameters: {
 		experiments: ["fork-nested-subagents"],
@@ -70,5 +71,17 @@ export const LoadError: Story = {
 		spyOn(API.getAxiosInstance(), "get").mockRejectedValue(
 			mockApiError({ message: "Database unavailable." }),
 		);
+	},
+};
+
+export const AnswersDisabled: Story = {
+	args: { canAnswer: false },
+	parameters: {
+		queries: [
+			{
+				key: chatDescendantQuestionsKey(MockChat.id),
+				data: [MockChatDescendantQuestion],
+			},
+		],
 	},
 };

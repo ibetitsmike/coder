@@ -24,6 +24,8 @@ type ForkDescendantQuestionDockProps = {
 	chat: Pick<Chat, "id" | "parent_chat_id">;
 	/** The viewer cannot act on this chat: it is archived, or another user's. */
 	isReadOnly: boolean;
+	/** The page accepts a turn now, so the question takes an answer. */
+	canAnswer: boolean;
 };
 
 /**
@@ -32,7 +34,7 @@ type ForkDescendantQuestionDockProps = {
  */
 export const ForkDescendantQuestionDock: React.FC<
 	ForkDescendantQuestionDockProps
-> = ({ chat, isReadOnly }) => {
+> = ({ chat, isReadOnly, canAnswer }) => {
 	const { experiments } = useDashboard();
 	if (
 		!experiments.includes("fork-nested-subagents") ||
@@ -41,12 +43,13 @@ export const ForkDescendantQuestionDock: React.FC<
 	) {
 		return null;
 	}
-	return <DescendantQuestionDock rootChatId={chat.id} />;
+	return <DescendantQuestionDock rootChatId={chat.id} canAnswer={canAnswer} />;
 };
 
-const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
-	rootChatId,
-}) => {
+const DescendantQuestionDock: React.FC<{
+	rootChatId: string;
+	canAnswer: boolean;
+}> = ({ rootChatId, canAnswer }) => {
 	const [chatFullWidth] = useChatFullWidth();
 	const location = useLocation();
 	const scrollerRef = useRef<HTMLDivElement>(null);
@@ -142,9 +145,13 @@ const DescendantQuestionDock: React.FC<{ rootChatId: string }> = ({
 						asyncToolCallId={question.tool_call_id}
 						draftKey={questionKey}
 						showSubmittedAnswer
-						onSubmitAnswer={async (text) => {
-							await answerMutation.mutateAsync({ question, text });
-						}}
+						onSubmitAnswer={
+							canAnswer
+								? async (text) => {
+										await answerMutation.mutateAsync({ question, text });
+									}
+								: undefined
+						}
 						hasStickyActions
 						onStepChange={() => {
 							if (scrollerRef.current) {

@@ -44,12 +44,14 @@ type RenderOptions = {
 	experiments?: Experiment[];
 	parentChatId?: string;
 	isReadOnly?: boolean;
+	canAnswer?: boolean;
 };
 
 const renderDock = ({
 	experiments = ["fork-nested-subagents"],
 	parentChatId,
 	isReadOnly = false,
+	canAnswer = true,
 }: RenderOptions = {}) => {
 	const router = createMemoryRouter(
 		[
@@ -59,6 +61,7 @@ const renderDock = ({
 					<ForkDescendantQuestionDock
 						chat={{ id: MockChat.id, parent_chat_id: parentChatId }}
 						isReadOnly={isReadOnly}
+						canAnswer={canAnswer}
 					/>
 				),
 			},
@@ -173,7 +176,7 @@ describe("ForkDescendantQuestionDock", () => {
 	});
 
 	it("does not send an answer to a question that is no longer pending", async () => {
-		const { sentMessages } = serveQuestions(
+		const { questionRequests, sentMessages } = serveQuestions(
 			[mockOldestQuestion],
 			[mockNewerQuestion],
 		);
@@ -186,9 +189,10 @@ describe("ForkDescendantQuestionDock", () => {
 		);
 		await user.click(screen.getByRole("button", { name: "Submit" }));
 
-		expect(
-			await screen.findByRole("link", { name: mockNewerQuestion.chat_title }),
-		).toBeInTheDocument();
+		// The first poll, the check before the post, and the reload after it.
+		await waitFor(() =>
+			expect(questionRequests).toEqual([MockChat.id, MockChat.id, MockChat.id]),
+		);
 		expect(sentMessages).toEqual([]);
 	});
 

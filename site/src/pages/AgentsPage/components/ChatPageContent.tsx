@@ -298,7 +298,13 @@ export const ChatPageTimeline: React.FC<ChatPageTimelineProps> = ({
 					/>
 				)}
 				{(!dockedQuestion || queuedAnswerText !== undefined) && chat && (
-					<ForkDescendantQuestionDock chat={chat} isReadOnly={isReadOnly} />
+					<ForkDescendantQuestionDock
+						chat={chat}
+						isReadOnly={isReadOnly}
+						// The page withholds the root answer handler while the chat
+						// cannot take a turn, for example without the AI Gateway.
+						canAnswer={onSendAskUserQuestionResponse !== undefined}
+					/>
 				)}
 			</Profiler>
 		</ACPContext>
