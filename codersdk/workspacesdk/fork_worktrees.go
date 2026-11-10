@@ -90,3 +90,58 @@ func (c *agentConn) ForkDeleteWorktree(ctx context.Context, req ForkDeleteWorktr
 	}
 	return nil
 }
+
+// ForkWorktreeSummaryRequest asks the agent to summarize the work on a
+// worktree it created.
+type ForkWorktreeSummaryRequest struct {
+	Path string `json:"path"`
+	// Branch is the branch create returned for this worktree. Commits on
+	// any other branch or remote do not count as its work.
+	Branch string `json:"branch"`
+}
+
+// ForkWorktreeSummary describes the work on a worktree's branch.
+type ForkWorktreeSummary struct {
+	// Commits counts the commits on HEAD that are on no other branch or
+	// remote.
+	Commits int `json:"commits"`
+	// FilesChanged, Insertions and Deletions describe the diff from the
+	// parent of the oldest such commit, or HEAD without one, to the working
+	// tree. Untracked files are not part of it.
+	FilesChanged int `json:"files_changed"`
+	Insertions   int `json:"insertions"`
+	Deletions    int `json:"deletions"`
+	// UncommittedChanges counts the changed and untracked paths that git
+	// status reports.
+	UncommittedChanges int `json:"uncommitted_changes"`
+}
+
+// ForkWorktreeSummaryConn is implemented by the AgentConn that DialAgent
+// returns. Callers type-assert an AgentConn to it.
+type ForkWorktreeSummaryConn interface {
+	ForkWorktreeSummary(ctx context.Context, req ForkWorktreeSummaryRequest) (ForkWorktreeSummary, error)
+}
+
+var _ ForkWorktreeSummaryConn = (*agentConn)(nil)
+
+// ForkWorktreeSummary summarizes the work on a worktree the agent created.
+// Agents without the summary API answer with a *codersdk.Error carrying
+// status 404.
+func (c *agentConn) ForkWorktreeSummary(ctx context.Context, req ForkWorktreeSummaryRequest) (ForkWorktreeSummary, error) {
+	ctx, span := tracing.StartSpan(ctx)
+	defer span.End()
+
+	res, err := c.apiRequest(ctx, http.MethodPost, "/api/v0/git/worktrees/summary", req)
+	if err != nil {
+		return ForkWorktreeSummary{}, xerrors.Errorf("do request: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return ForkWorktreeSummary{}, readAgentError(res)
+	}
+	var summary ForkWorktreeSummary
+	if err := decodeAgentJSON(res, &summary); err != nil {
+		return ForkWorktreeSummary{}, xerrors.Errorf("decode response body: %w", err)
+	}
+	return summary, nil
+}

@@ -1799,6 +1799,9 @@ func (api *API) createChatError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
+	}
 	if xerrors.Is(err, chatd.ErrInvalidModelConfigID) || database.IsForeignKeyViolation(
 		err,
 		database.ForeignKeyChatsLastModelConfigID,
@@ -3159,6 +3162,9 @@ func (api *API) postChatMessages(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	response, err := api.sendChatMessage(ctx, apiKey.UserID, chat, req)
 	if err != nil {
@@ -3361,6 +3367,12 @@ func (api *API) sendChatMessageError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
+	}
+	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
+		return secretQuestionPendingError(err)
+	}
 	if xerrors.Is(err, chatd.ErrChatArchived) {
 		return httperror.WrapResponseError(http.StatusBadRequest, codersdk.Response{
 			Message: "Cannot send messages to an archived chat.",
@@ -3458,6 +3470,9 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	contentBlocks, _, inputError := createChatInputFromParts(ctx, api.Database, chat.ID, chat.WorkspaceID, req.Content, "content")
 	if inputError != nil {
@@ -3510,6 +3525,8 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		switch {
+		case xerrors.Is(editErr, chatd.ErrSecretQuestionPending):
+			writeChatError(ctx, rw, secretQuestionPendingError(editErr))
 		case xerrors.Is(editErr, chatd.ErrChatArchived):
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: "Cannot edit messages in an archived chat.",
@@ -3798,6 +3815,9 @@ func (api *API) patchChatQueuedMessage(rw http.ResponseWriter, r *http.Request) 
 			Message: "model_config_id and reasoning_effort require content.",
 			Detail:  "The overrides apply to the content they are sent with.",
 		})
+		return
+	}
+	if req.Content != nil && maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 

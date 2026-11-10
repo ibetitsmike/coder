@@ -16,6 +16,8 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
@@ -84,6 +86,43 @@ func TestDescendantQuestionTurnTools(t *testing.T) {
 	require.Equal(t, upstreamStop(offChild), env.StopAfterTools)
 }
 
+// Calls are validated against the tool schema before Run, so the schema has to
+// admit a secret question without options and still require them otherwise.
+func TestDescendantQuestionSchema(t *testing.T) {
+	t.Parallel()
+
+	tool := descendantQuestionTool{AgentTool: chattool.NewAskUserQuestionTool(chattool.AskUserQuestionOptions{})}
+	prepared := turnEnvironment{
+		Tools:            []fantasy.AgentTool{tool},
+		BuiltinToolNames: map[string]bool{askUserQuestionToolName: true},
+	}
+	for _, tt := range []struct {
+		name  string
+		input string
+		valid bool
+	}{
+		{name: "OrdinaryWithOptions", input: descendantQuestionInput, valid: true},
+		{name: "SecretWithoutOptions", input: `{"questions":[{"header":"Token","question":"Paste the token.","secret":true}]}`, valid: true},
+		{name: "SecretWithEmptyOptions", input: `{"questions":[{"header":"Token","question":"Paste the token.","secret":true,"options":[]}]}`, valid: true},
+		{name: "OrdinaryWithoutOptions", input: `{"questions":[{"header":"DB","question":"Which database?"}]}`},
+		{name: "NotSecretWithoutOptions", input: `{"questions":[{"header":"DB","question":"Which database?","secret":false}]}`},
+		{name: "OrdinaryWithOneOption", input: `{"questions":[{"header":"DB","question":"Which database?","options":[{"label":"Use Postgres"}]}]}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			call := fantasy.ToolCallContent{ToolName: askUserQuestionToolName, Input: tt.input}
+			allowed, _, rejected := partitionInvalidToolCalls(prepared, []fantasy.ToolCallContent{call})
+			if tt.valid {
+				require.Len(t, allowed, 1)
+				require.Empty(t, rejected)
+				return
+			}
+			require.Empty(t, allowed)
+			require.Len(t, rejected, 1)
+		})
+	}
+}
+
 func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	t.Parallel()
 
@@ -98,6 +137,9 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.True(t, resp.IsError)
 	_, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
 	require.ErrorIs(t, err, sql.ErrNoRows, "an invalid question is not recorded")
+	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		ChatID: child.ID, ToolCallID: "call-0", Value: "earlier secret",
+	}))
 
 	resp, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: descendantQuestionInput})
 	require.NoError(t, err)
@@ -110,6 +152,10 @@ func TestDescendantQuestionToolRecordsQuestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "call-1", row.ToolCallID)
 	require.JSONEq(t, string(result["questions"]), string(row.Questions))
+	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1, "a new question keeps the secret answers of earlier ones, which still scrub tool output")
+	require.Equal(t, "call-0", answers[0].ToolCallID)
 }
 
 func TestDescendantQuestionWaitAgent(t *testing.T) {
@@ -182,6 +228,7 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	require.Equal(t, string(database.ChatStatusWaiting), result["status"])
 	require.NotEmpty(t, result["questions"])
 	require.Contains(t, result, "tool_calls")
+	require.Equal(t, descendantQuestionNote, result["note"])
 
 	// An answer during the wait lets the call wait on the child for the
 	// rest of the timeout, and the answered question is no longer reported.
@@ -271,4 +318,23 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, true, result["needs_input"])
 	require.NotEmpty(t, result["questions"])
+
+	// The note of a secret question leaves out message_agent, which would
+	// answer it without the value.
+	_, err = f.fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID: child.ID, ToolCallID: uuid.NewString(),
+		Questions: json.RawMessage(`[{"header":"Token","question":"Paste the token.","secret":true}]`),
+	})
+	require.NoError(t, err)
+	done = waitAsync(child.ID, 1)
+	awaitTrap.MustWait(ctx).MustRelease(ctx)
+	pollTrap.MustWait(ctx).MustRelease(ctx)
+	for elapsed := time.Duration(0); elapsed < time.Second; {
+		d, w := mClock.AdvanceNext()
+		w.MustWait(ctx)
+		elapsed += d
+	}
+	result = decode(testutil.RequireReceive(ctx, t, done))
+	require.Equal(t, true, result["needs_input"])
+	require.Equal(t, descendantSecretQuestionNote, result["note"])
 }

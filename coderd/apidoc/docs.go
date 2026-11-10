@@ -5606,6 +5606,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/{chat}/questions/secret-answer": {
+            "post": {
+                "description": "Stores the answer to the pending secret question of the chat\noutside its messages, and sends the chat a user message that\nsays only that the user answered. A declined answer stores\nnothing and says that the user declined.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Answer secret descendant question",
+                "operationId": "answer-secret-descendant-question",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Secret answer",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatSecretAnswerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/todos": {
             "get": {
                 "description": "Returns the todo list that the todo_write tool keeps for this\nchat, or an empty list at version 0 when the chat has none.",
@@ -25422,6 +25467,10 @@ const docTemplate = `{
                 },
                 "question": {
                     "type": "string"
+                },
+                "secret": {
+                    "description": "Secret questions take a free-text answer through\nAnswerChatSecretQuestion, which never writes it to a chat message.",
+                    "type": "boolean"
                 }
             }
         },
@@ -25497,6 +25546,21 @@ const docTemplate = `{
                 "ChatRoleRead",
                 "ChatRoleDeleted"
             ]
+        },
+        "codersdk.ChatSecretAnswerRequest": {
+            "type": "object",
+            "properties": {
+                "declined": {
+                    "description": "Declined answers without a value, for a value the user cannot or\nwill not give as a secret, such as one too short to hide. Value must\nbe empty.",
+                    "type": "boolean"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
         },
         "codersdk.ChatSkillSource": {
             "type": "string",

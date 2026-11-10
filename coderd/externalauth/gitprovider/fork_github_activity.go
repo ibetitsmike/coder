@@ -21,15 +21,19 @@ import (
 type PullRequestActivity struct {
 	// State is open, closed or merged. A merged pull request is merged
 	// even though GitHub reports it as closed.
-	State   PRState
-	HeadSHA string
+	State PRState
+	// ClosedAt is when the pull request was closed or merged, and zero
+	// while it is open.
+	ClosedAt time.Time
+	HeadSHA  string
 	// Reviews are the reviews submitted at or after the time, oldest
 	// first.
 	Reviews []PullRequestEvent
 	// Comments are the issue comments and review comments created at or
 	// after the time, oldest first.
 	Comments []PullRequestEvent
-	// Checks summarizes the CI of HeadSHA.
+	// Checks summarizes the CI of HeadSHA. It is CheckStateNone when the
+	// checks were not read.
 	Checks CheckSummary
 }
 
@@ -69,9 +73,11 @@ type CheckSummary struct {
 	State CheckState
 	// Total counts check runs and commit statuses.
 	Total int
-	// Failed counts failed check runs, plus one when the combined commit
-	// status failed.
+	// Failed counts failed check runs and failed commit statuses.
 	Failed int
+	// UpdatedAt is the newest completion of a check run or update of a
+	// commit status, so a rerun that ends in the same state still moves it.
+	UpdatedAt time.Time
 }
 
 // ErrPullRequestActivityUnsupported is returned by FetchPullRequestActivity
@@ -80,14 +86,17 @@ var ErrPullRequestActivityUnsupported = xerrors.New("pull request activity is on
 
 // FetchPullRequestActivity reads the activity of the pull request ref since
 // since. Reviews and comments by the token's own user are left out, so an
-// agent that acts with the user's token does not see its own activity.
-// Only GitHub is supported. Rate limit errors are *RateLimitError.
+// agent that acts with the user's token does not see its own activity. CI is
+// only read when includeChecks is true, because reading it needs the Checks
+// permission. Only GitHub is supported. Rate limit errors are
+// *RateLimitError.
 func FetchPullRequestActivity(
 	ctx context.Context,
 	p Provider,
 	token string,
 	ref PRRef,
 	since time.Time,
+	includeChecks bool,
 ) (*PullRequestActivity, error) {
 	g, ok := p.(*githubProvider)
 	if !ok {
@@ -113,9 +122,10 @@ func FetchPullRequestActivity(
 	pullEndpoint := fmt.Sprintf("%s/pulls/%d", repoEndpoint, ref.Number)
 
 	var pull struct {
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
-		Head   struct {
+		State    string     `json:"state"`
+		Merged   bool       `json:"merged"`
+		ClosedAt *time.Time `json:"closed_at"`
+		Head     struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
@@ -131,7 +141,7 @@ func FetchPullRequestActivity(
 		return viewer.Login != "" && strings.EqualFold(login, viewer.Login)
 	}
 
-	reviews, err := fetchAllPages[githubActivityReview](ctx, g, pullEndpoint+"/reviews?", token)
+	reviews, err := fetchAllPages(ctx, g, pullEndpoint+"/reviews?", token, listItems[githubActivityReview])
 	if err != nil {
 		return nil, xerrors.Errorf("fetch pull request reviews: %w", err)
 	}
@@ -139,6 +149,9 @@ func FetchPullRequestActivity(
 		State:   state,
 		HeadSHA: pull.Head.SHA,
 		Checks:  CheckSummary{State: CheckStateNone},
+	}
+	if pull.ClosedAt != nil && state != PRStateOpen {
+		activity.ClosedAt = *pull.ClosedAt
 	}
 	for _, r := range reviews {
 		reviewState := strings.ToLower(strings.TrimSpace(r.State))
@@ -166,7 +179,7 @@ func FetchPullRequestActivity(
 		{name: "issue comments", url: fmt.Sprintf("%s/issues/%d/comments", repoEndpoint, ref.Number)},
 		{name: "review comments", url: pullEndpoint + "/comments"},
 	} {
-		comments, err := fetchAllPages[githubActivityComment](ctx, g, endpoint.url+commentsQuery, token)
+		comments, err := fetchAllPages(ctx, g, endpoint.url+commentsQuery, token, listItems[githubActivityComment])
 		if err != nil {
 			return nil, xerrors.Errorf("fetch pull request %s: %w", endpoint.name, err)
 		}
@@ -186,53 +199,56 @@ func FetchPullRequestActivity(
 	}
 	sortPullRequestEvents(activity.Comments)
 
-	if pull.Head.SHA == "" {
+	if !includeChecks || pull.Head.SHA == "" {
 		return activity, nil
 	}
 	commitEndpoint := repoEndpoint + "/commits/" + url.PathEscape(pull.Head.SHA)
 
 	// GitHub keeps every run of a commit, so a check that was canceled and
 	// then run again appears twice. Only the newest run of each check name
-	// and app counts, which matches GitHub's status rollup, but two
-	// workflows with a job of the same name also count as one check. Only
-	// the first 100 runs are read, a known limit.
-	var checkRuns struct {
-		CheckRuns []struct {
-			ID         int64  `json:"id"`
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			App        struct {
-				ID int64 `json:"id"`
-			} `json:"app"`
-		} `json:"check_runs"`
-	}
-	if err := g.decodeJSON(ctx, commitEndpoint+"/check-runs?per_page=100", token, &checkRuns); err != nil {
+	// in each check suite counts, which matches GitHub's status rollup. A
+	// suite belongs to one app, and two workflows are two suites.
+	totalRuns := 0
+	checkRuns, err := fetchAllPages(ctx, g, commitEndpoint+"/check-runs?", token, func(page githubCheckRunsPage) []githubCheckRun {
+		totalRuns = page.TotalCount
+		return page.CheckRuns
+	})
+	if err != nil {
 		return nil, xerrors.Errorf("fetch commit check runs: %w", err)
 	}
 	type checkKey struct {
-		appID int64
-		name  string
+		appID   int64
+		suiteID int64
+		name    string
 	}
-	latest := make(map[checkKey]int, len(checkRuns.CheckRuns))
-	for i, run := range checkRuns.CheckRuns {
-		key := checkKey{appID: run.App.ID, name: run.Name}
-		if j, ok := latest[key]; !ok || run.ID > checkRuns.CheckRuns[j].ID {
+	latest := make(map[checkKey]int, len(checkRuns))
+	for i, run := range checkRuns {
+		key := checkKey{appID: run.App.ID, suiteID: run.CheckSuite.ID, name: run.Name}
+		if j, ok := latest[key]; !ok || run.ID > checkRuns[j].ID {
 			latest[key] = i
 		}
 	}
 	var combined struct {
 		State      string `json:"state"`
 		TotalCount int    `json:"total_count"`
+		Statuses   []struct {
+			State     string    `json:"state"`
+			UpdatedAt time.Time `json:"updated_at"`
+		} `json:"statuses"`
 	}
-	if err := g.decodeJSON(ctx, commitEndpoint+"/status", token, &combined); err != nil {
+	if err := g.decodeJSON(ctx, commitEndpoint+"/status?per_page=100", token, &combined); err != nil {
 		return nil, xerrors.Errorf("fetch commit status: %w", err)
 	}
 
 	checks := CheckSummary{Total: len(latest) + combined.TotalCount}
-	pending := false
+	// Runs past the page cap may still be running or have failed, so CI
+	// does not count as settled.
+	pending := totalRuns > len(checkRuns)
 	for _, i := range latest {
-		run := checkRuns.CheckRuns[i]
+		run := checkRuns[i]
+		if run.CompletedAt.After(checks.UpdatedAt) {
+			checks.UpdatedAt = run.CompletedAt
+		}
 		if !strings.EqualFold(run.Status, "completed") {
 			pending = true
 			continue
@@ -242,12 +258,25 @@ func FetchPullRequestActivity(
 			checks.Failed++
 		}
 	}
+	for _, status := range combined.Statuses {
+		if status.UpdatedAt.After(checks.UpdatedAt) {
+			checks.UpdatedAt = status.UpdatedAt
+		}
+	}
 	// The combined status is pending when the commit has no statuses at
 	// all, so it only counts when there are statuses.
 	if combined.TotalCount > 0 {
 		switch strings.ToLower(combined.State) {
 		case "failure", "error":
-			checks.Failed++
+			failed := 0
+			for _, status := range combined.Statuses {
+				switch strings.ToLower(status.State) {
+				case "failure", "error":
+					failed++
+				}
+			}
+			// The failed statuses may be past the first page.
+			checks.Failed += max(failed, 1)
 		case "pending":
 			pending = true
 		}
@@ -285,25 +314,52 @@ type githubActivityComment struct {
 	} `json:"user"`
 }
 
+type githubCheckRun struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`
+	Conclusion  string    `json:"conclusion"`
+	CompletedAt time.Time `json:"completed_at"`
+	App         struct {
+		ID int64 `json:"id"`
+	} `json:"app"`
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
+}
+
+type githubCheckRunsPage struct {
+	TotalCount int              `json:"total_count"`
+	CheckRuns  []githubCheckRun `json:"check_runs"`
+}
+
 // maxActivityPages bounds how many pages of 100 one list reads, so a pull
 // request with a huge history cannot use up the rate limit.
 const maxActivityPages = 10
 
-// fetchAllPages reads up to maxActivityPages pages of a GitHub list.
-// endpoint must end in "?" or "&".
-func fetchAllPages[T any](ctx context.Context, g *githubProvider, endpoint, token string) ([]T, error) {
+// fetchAllPages reads up to maxActivityPages pages of a GitHub list, taking
+// the entries of each decoded page P with items. endpoint must end in "?" or
+// "&".
+func fetchAllPages[P, T any](ctx context.Context, g *githubProvider, endpoint, token string, items func(P) []T) ([]T, error) {
 	var all []T
 	for page := 1; page <= maxActivityPages; page++ {
-		var items []T
-		if err := g.decodeJSON(ctx, fmt.Sprintf("%sper_page=100&page=%d", endpoint, page), token, &items); err != nil {
+		var decoded P
+		if err := g.decodeJSON(ctx, fmt.Sprintf("%sper_page=100&page=%d", endpoint, page), token, &decoded); err != nil {
 			return nil, err
 		}
-		all = append(all, items...)
-		if len(items) < 100 {
+		entries := items(decoded)
+		all = append(all, entries...)
+		if len(entries) < 100 {
 			break
 		}
 	}
 	return all, nil
+}
+
+// listItems is the items function of fetchAllPages for a list that is a
+// JSON array.
+func listItems[T any](page []T) []T {
+	return page
 }
 
 func sortPullRequestEvents(events []PullRequestEvent) {

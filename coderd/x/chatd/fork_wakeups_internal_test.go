@@ -235,6 +235,7 @@ func TestWakeupEndsSchedule(t *testing.T) {
 			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
 		})
 		worker := f.newArchiveWorker(t, nil, nil, nil)
+		enqueuer := useFakeEnqueuer(worker)
 		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
 			_, _ = rw.Write([]byte(`{"permission": {"decision": "deny", "reason": "blocked"}, "user_message": "not allowed"}`))
 		})
@@ -247,6 +248,31 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.Equal(t, "hook_denied", got.StatusReason.String)
 		require.False(t, got.NextRunAt.Valid)
 		require.Zero(t, got.RunCount)
+		requireWakeupPausedNotification(t, enqueuer.Sent(), chat, "hook_denied")
+	})
+
+	// The send itself commits the invalid_cron pause, so the owner is
+	// notified after the delivered run.
+	t.Run("InvalidCron", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind: forkdb.ChatWakeupKindCron,
+			Cron: sql.NullString{String: "not a schedule", Valid: true},
+		})
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		enqueuer := useFakeEnqueuer(worker)
+
+		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+		require.Equal(t, 1, f.countPromptMessages(t, chat, wakeup.Prompt))
+		require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
+		require.Equal(t, "invalid_cron", got.StatusReason.String)
+		require.False(t, got.NextRunAt.Valid)
+		requireWakeupPausedNotification(t, enqueuer.Sent(), chat, "invalid_cron")
 	})
 
 	t.Run("Delay", func(t *testing.T) {
@@ -289,6 +315,57 @@ func TestWakeupEndsSchedule(t *testing.T) {
 		require.EqualValues(t, 2, got.RunCount)
 		require.False(t, got.NextRunAt.Valid)
 	})
+}
+
+// Archiving a family cancels the wake-ups of every member at once, including
+// paused ones that the worker never claims, and unarchiving does not resume
+// them.
+func TestWakeupsCanceledOnArchive(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		experiments  codersdk.Experiments
+		wantCanceled bool
+	}{
+		{name: "Wakeups", experiments: codersdk.Experiments{codersdk.ExperimentForkChatWakeups}, wantCanceled: true},
+		{name: "WakeupsAndNestedSubagents", experiments: codersdk.Experiments{codersdk.ExperimentForkChatWakeups, codersdk.ExperimentForkNestedSubagents}, wantCanceled: true},
+		{name: "ExperimentOff", experiments: upstreamExperimentsKnown()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := chatdTestContext(t)
+			root := f.createWakeupChat(t)
+			child := f.createWakeupChild(t, root, database.ChatStatusWaiting)
+			active := f.insertWakeup(t, root, forkdb.InsertChatWakeupParams{
+				Kind:            forkdb.ChatWakeupKindInterval,
+				IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+			})
+			paused := f.insertWakeup(t, child, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+			_, err := f.sqlDB.ExecContext(ctx,
+				"UPDATE chat_wakeups SET status = 'paused', status_reason = 'hook_denied', next_run_at = NULL WHERE id = $1", paused.ID)
+			require.NoError(t, err)
+			server := newUnstartedServer(t, f.pubsub, f.db)
+			server.experiments = tc.experiments
+
+			require.NoError(t, server.ArchiveChat(ctx, root))
+			require.NoError(t, server.UnarchiveChat(ctx, root))
+			for id, status := range map[uuid.UUID]forkdb.ChatWakeupStatus{
+				active.ID: forkdb.ChatWakeupStatusActive,
+				paused.ID: forkdb.ChatWakeupStatusPaused,
+			} {
+				got := f.wakeup(t, id)
+				if !tc.wantCanceled {
+					require.Equal(t, status, got.Status)
+					continue
+				}
+				require.Equal(t, forkdb.ChatWakeupStatusCanceled, got.Status)
+				require.Equal(t, wakeupReasonArchived, got.StatusReason.String)
+				require.False(t, got.NextRunAt.Valid)
+			}
+		})
+	}
 }
 
 // The user prompt hook runs after the worker saw an idle chat and before the
@@ -640,6 +717,41 @@ func TestNextWakeupRun(t *testing.T) {
 			wantStatus: forkdb.ChatWakeupStatusCompleted,
 			wantReason: "max_runs",
 		},
+		{
+			name: "EventsPollsAgain",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot, Valid: true},
+				Timezone:  "UTC",
+			},
+			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusActive,
+			wantNext:   slot.Add(10*time.Second + wakeupPollInterval),
+		},
+		{
+			name: "EventsLastPollAtExpiry",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot, Valid: true},
+				Timezone:  "UTC",
+				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+			},
+			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusActive,
+			wantNext:   slot.Add(20 * time.Second),
+		},
+		{
+			name: "EventsExpired",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+				Timezone:  "UTC",
+				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+			},
+			now:        slot.Add(20 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusCompleted,
+			wantReason: "expired",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -715,7 +827,7 @@ func (f *workerTestFixture) createWakeupChild(t *testing.T, root database.Chat, 
 }
 
 // insertWakeup inserts a wake-up of chat that is due at wakeupTestSlot. arg
-// sets the schedule.
+// sets the schedule and, for kind events, the events.
 func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg forkdb.InsertChatWakeupParams) forkdb.ChatWakeup {
 	t.Helper()
 	fdb, err := forkdb.From(f.db)
@@ -726,7 +838,9 @@ func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg f
 	arg.Source = "schedule_wakeup"
 	arg.Prompt = "wake up " + arg.ID.String()
 	arg.Timezone = "UTC"
-	arg.Events = json.RawMessage(`[]`)
+	if arg.Events == nil {
+		arg.Events = json.RawMessage(`[]`)
+	}
 	arg.Status = forkdb.ChatWakeupStatusActive
 	arg.NextRunAt = sql.NullTime{Time: wakeupTestSlot, Valid: true}
 	arg.CreatedAt = wakeupTestSlot.Add(-time.Hour)

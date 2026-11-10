@@ -33,16 +33,20 @@ import (
 const isolationTestAgentDirectory = "/home/coder/repo"
 
 // fakeWorktreeConn records the worktree calls chatd makes and answers them
-// with worktree or createErr. Any other AgentConn call panics.
+// with worktree or createErr, and summary or summaryErr. Any other AgentConn
+// call panics.
 type fakeWorktreeConn struct {
 	workspacesdk.AgentConn
-	worktree  workspacesdk.ForkWorktree
-	createErr error
+	worktree   workspacesdk.ForkWorktree
+	createErr  error
+	summary    workspacesdk.ForkWorktreeSummary
+	summaryErr error
 
 	mu              sync.Mutex
 	creates         []workspacesdk.ForkCreateWorktreeRequest
 	deletes         []workspacesdk.ForkDeleteWorktreeRequest
 	deleteDeadlines []time.Time
+	summaries       []workspacesdk.ForkWorktreeSummaryRequest
 }
 
 func (c *fakeWorktreeConn) ForkCreateWorktree(_ context.Context, req workspacesdk.ForkCreateWorktreeRequest) (workspacesdk.ForkWorktree, error) {
@@ -62,6 +66,13 @@ func (c *fakeWorktreeConn) ForkDeleteWorktree(ctx context.Context, req workspace
 	deadline, _ := ctx.Deadline()
 	c.deleteDeadlines = append(c.deleteDeadlines, deadline)
 	return nil
+}
+
+func (c *fakeWorktreeConn) ForkWorktreeSummary(_ context.Context, req workspacesdk.ForkWorktreeSummaryRequest) (workspacesdk.ForkWorktreeSummary, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.summaries = append(c.summaries, req)
+	return c.summary, c.summaryErr
 }
 
 func (c *fakeWorktreeConn) calls() ([]workspacesdk.ForkCreateWorktreeRequest, []workspacesdk.ForkDeleteWorktreeRequest) {
@@ -237,7 +248,7 @@ func TestForkSpawnIsolationWorktree(t *testing.T) {
 		require.True(t, ok, info.Parameters)
 		enum, ok := isolation["enum"].([]any)
 		require.True(t, ok, isolation)
-		require.ElementsMatch(t, []any{"shared", "worktree"}, enum)
+		require.ElementsMatch(t, []any{"shared", "worktree", "workspace"}, enum)
 		require.Contains(t, info.Parameters, "repo_path")
 		require.Contains(t, info.Parameters, "base_branch")
 		require.Contains(t, info.Parameters, "prompt")
@@ -356,13 +367,19 @@ func TestForkSpawnIsolationErrors(t *testing.T) {
 		{
 			name:    "UnknownIsolation",
 			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
-			args:    map[string]any{"isolation": "workspace"},
-			wantErr: "isolation must be one of: shared, worktree",
+			args:    map[string]any{"isolation": "container"},
+			wantErr: "isolation must be one of: shared, worktree, workspace",
 		},
 		{
 			name:    "RepoPathWithoutWorktree",
 			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
 			args:    map[string]any{"repo_path": "/src/other"},
+			wantErr: "repo_path and base_branch need isolation worktree",
+		},
+		{
+			name:    "RepoPathWithWorkspace",
+			conn:    func(*testing.T) workspacesdk.AgentConn { return &fakeWorktreeConn{} },
+			args:    map[string]any{"isolation": "workspace", "repo_path": "/src/other"},
 			wantErr: "repo_path and base_branch need isolation worktree",
 		},
 		{

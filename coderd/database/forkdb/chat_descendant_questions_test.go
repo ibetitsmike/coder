@@ -3,9 +3,11 @@ package forkdb_test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -85,7 +87,35 @@ func TestGetPendingChatDescendantQuestion(t *testing.T) {
 	_, ok = pending()
 	require.False(t, ok, "a context boundary, such as a clear, retires the question")
 
-	_, err := sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", chat.ID)
+	text := func(text string) {
+		dbgen.ChatMessage(t, db, database.ChatMessage{
+			ChatID:        chat.ID,
+			ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+			Role:          database.ChatMessageRoleUser,
+			Visibility:    database.ChatMessageVisibilityBoth,
+			Content: pqtype.NullRawMessage{
+				RawMessage: json.RawMessage(fmt.Sprintf(`[{"type": "text", "text": %q}]`, text)),
+				Valid:      true,
+			},
+		})
+	}
+	ask("call-secret", `[{"header": "DB"}, {"header": "Token", "secret": true}]`)
+	// The turn's end promotes a message the user queued before the question.
+	text("Also check the staging database.")
+	text("Answer to ask_user_question call call-other:\nThe user gave a secret answer.")
+	got, ok = pending()
+	require.True(t, ok, "only the secret answer's message answers a secret question")
+	require.Equal(t, "call-secret", got.ToolCallID)
+	text("Answer to ask_user_question call call-secret:\nThe user gave a secret answer.")
+	_, ok = pending()
+	require.False(t, ok, "the secret answer's message answers the secret question")
+	// An edit of the secret answer's message soft-deletes it.
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chatd.chat_messages SET deleted = true WHERE chat_id = $1", chat.ID)
+	require.NoError(t, err)
+	_, ok = pending()
+	require.False(t, ok, "a deleted secret answer's message keeps the secret question answered")
+
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", chat.ID)
 	require.NoError(t, err)
 	var count int
 	err = sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.chat_descendant_questions WHERE chat_id = $1", chat.ID).Scan(&count)
@@ -129,6 +159,7 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	answered := chat(&root)
 	archived := chat(&root)
 	cleared := chat(&root)
+	editedSecret := chat(&root)
 	otherRoot := chat(nil)
 	otherChild := chat(&otherRoot)
 	emptyRoot := chat(nil)
@@ -161,6 +192,24 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 		Visibility:    database.ChatMessageVisibilityModel,
 		Compressed:    true,
 	})
+	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     editedSecret.ID,
+		ToolCallID: "edited-secret",
+		Questions:  json.RawMessage(`[{"header": "Token", "secret": true}]`),
+	})
+	require.NoError(t, err)
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        editedSecret.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Content: pqtype.NullRawMessage{
+			RawMessage: json.RawMessage(`[{"type": "text", "text": "Answer to ask_user_question call edited-secret:\nThe user gave a secret answer."}]`),
+			Valid:      true,
+		},
+	})
+	// An edit soft-deletes the message of the secret answer.
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chatd.chat_messages SET deleted = true WHERE chat_id = $1", editedSecret.ID)
+	require.NoError(t, err)
 	ask(otherChild, "other")
 
 	rows, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, root.ID)

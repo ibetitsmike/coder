@@ -3,20 +3,33 @@
 // renders it once, next to AskUserQuestionDock.
 
 import { cn } from "cn";
-import { MessageCircleQuestionIcon } from "lucide-react";
+import {
+	LoaderIcon,
+	MessageCircleQuestionIcon,
+	TriangleAlertIcon,
+} from "lucide-react";
 import type React from "react";
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Link, useLocation } from "react-router";
 import { getErrorMessage } from "#/api/errors";
 import {
 	answerChatDescendantQuestion,
+	answerChatDescendantSecretQuestion,
 	chatDescendantQuestions,
 } from "#/api/queries/forkChatQuestions";
-import type { Chat } from "#/api/typesGenerated";
+import type {
+	Chat,
+	ChatDescendantQuestion,
+	ChatQuestion,
+} from "#/api/typesGenerated";
 import { Alert, AlertDescription, AlertTitle } from "#/components/Alert/Alert";
+import { Button } from "#/components/Button/Button";
+import { Input } from "#/components/Input/Input";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
+import { passwordManagerIgnoreProps } from "#/utils/formUtils";
 import { chatWidthClass, useChatFullWidth } from "../hooks/useChatFullWidth";
+import { Response } from "./ChatElements/Response";
 import { AskUserQuestionForm } from "./ChatElements/tools/AskUserQuestionTool";
 import { getQuestionCallKey } from "./ChatElements/tools/questionDraft";
 
@@ -86,6 +99,7 @@ const DescendantQuestionDock: React.FC<{
 		question.tool_call_id,
 		question.created_at,
 	);
+	const secretQuestion = question.questions.find((item) => item.secret);
 
 	return (
 		<div
@@ -136,31 +150,176 @@ const DescendantQuestionDock: React.FC<{
 					)}
 				</div>
 				<div className="px-3 pb-3">
-					<AskUserQuestionForm
-						questions={question.questions.map((item) => ({
-							header: item.header,
-							question: item.question,
-							options: [...item.options],
-						}))}
-						asyncToolCallId={question.tool_call_id}
-						draftKey={questionKey}
-						showSubmittedAnswer
-						onSubmitAnswer={
-							canAnswer
-								? async (text) => {
-										await answerMutation.mutateAsync({ question, text });
-									}
-								: undefined
-						}
-						hasStickyActions
-						onStepChange={() => {
-							if (scrollerRef.current) {
-								scrollerRef.current.scrollTop = 0;
+					{secretQuestion ? (
+						<SecretQuestionForm
+							rootChatId={rootChatId}
+							question={question}
+							secretQuestion={secretQuestion}
+							canAnswer={canAnswer}
+						/>
+					) : (
+						<AskUserQuestionForm
+							questions={question.questions.map((item) => ({
+								header: item.header,
+								question: item.question,
+								options: [...item.options],
+							}))}
+							asyncToolCallId={question.tool_call_id}
+							draftKey={questionKey}
+							showSubmittedAnswer
+							onSubmitAnswer={
+								canAnswer
+									? async (text) => {
+											await answerMutation.mutateAsync({ question, text });
+										}
+									: undefined
 							}
-						}}
-					/>
+							hasStickyActions
+							onStepChange={() => {
+								if (scrollerRef.current) {
+									scrollerRef.current.scrollTop = 0;
+								}
+							}}
+						/>
+					)}
 				</div>
 			</section>
 		</div>
+	);
+};
+
+/**
+ * Takes the value of a secret question in a masked field. The value never
+ * reaches a draft, local storage or a chat message.
+ */
+const SecretQuestionForm: React.FC<{
+	rootChatId: string;
+	question: ChatDescendantQuestion;
+	secretQuestion: ChatQuestion;
+	canAnswer: boolean;
+}> = ({ rootChatId, question, secretQuestion, canAnswer }) => {
+	const idPrefix = useId();
+	const headerId = `${idPrefix}-header`;
+	const textId = `${idPrefix}-text`;
+	const helperId = `${idPrefix}-helper`;
+	const errorId = `${idPrefix}-error`;
+	const queryClient = useQueryClient();
+	const [value, setValue] = useState("");
+	const answerMutation = useMutation(
+		answerChatDescendantSecretQuestion(queryClient, rootChatId),
+	);
+	const isSubmitting = answerMutation.isPending;
+	const isSendingValue = isSubmitting && !answerMutation.variables.declined;
+
+	// The question stays in the dock until the questions reload. The status
+	// takes the focus of the submit button it replaces, so the section still
+	// holds focus when the next question replaces it.
+	if (answerMutation.isSuccess) {
+		return (
+			<p
+				ref={(status) => {
+					if (status && document.activeElement === document.body) {
+						status.focus({ preventScroll: true });
+					}
+				}}
+				role="status"
+				tabIndex={-1}
+				className="text-[13px] text-content-secondary focus:outline-hidden"
+			>
+				{answerMutation.variables.declined
+					? "Secret question declined."
+					: "Secret answer sent."}
+			</p>
+		);
+	}
+
+	return (
+		<form
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (!canAnswer || isSubmitting || value === "") {
+					return;
+				}
+				answerMutation.mutate(
+					{ question, value },
+					{ onSuccess: () => setValue("") },
+				);
+			}}
+		>
+			<p
+				id={headerId}
+				className="m-0 text-[13px] font-medium text-content-primary"
+			>
+				{secretQuestion.header}
+			</p>
+			<Response id={textId} className="mt-1 text-[13px] text-content-secondary">
+				{secretQuestion.question}
+			</Response>
+			<Input
+				type="password"
+				{...passwordManagerIgnoreProps}
+				aria-labelledby={`${headerId} ${textId}`}
+				aria-describedby={
+					answerMutation.isError ? `${helperId} ${errorId}` : helperId
+				}
+				aria-invalid={answerMutation.isError}
+				spellCheck={false}
+				className="mt-2"
+				value={value}
+				onChange={(event) => {
+					setValue(event.target.value);
+					if (answerMutation.isError) {
+						answerMutation.reset();
+					}
+				}}
+				disabled={!canAnswer || isSubmitting}
+			/>
+			<p id={helperId} className="mt-1 text-xs text-content-secondary">
+				The subagent's tools get this value, but the model never sees it.
+				{!canAnswer && " You can answer once the chat is ready for a message."}
+			</p>
+			{answerMutation.isError && (
+				<div
+					id={errorId}
+					role="alert"
+					className="mt-3 flex items-center gap-1.5 text-[13px] text-content-destructive"
+				>
+					<TriangleAlertIcon className="size-3.5 shrink-0" />
+					<span>
+						{getErrorMessage(
+							answerMutation.error,
+							"The answer failed to send.",
+						)}
+					</span>
+				</div>
+			)}
+			<div className="mt-3 flex items-center gap-2">
+				<Button
+					type="submit"
+					size="sm"
+					variant="outline"
+					disabled={!canAnswer || isSubmitting || value === ""}
+				>
+					{isSendingValue && (
+						<LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+					)}
+					{isSendingValue ? "Submitting..." : "Submit"}
+				</Button>
+				<Button
+					type="button"
+					size="sm"
+					variant="subtle"
+					disabled={!canAnswer || isSubmitting}
+					onClick={() =>
+						answerMutation.mutate(
+							{ question, value: "", declined: true },
+							{ onSuccess: () => setValue("") },
+						)
+					}
+				>
+					Decline
+				</Button>
+			</div>
+		</form>
 	);
 };
