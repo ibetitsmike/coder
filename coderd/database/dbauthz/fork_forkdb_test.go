@@ -136,6 +136,13 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetPendingChatDescendantQuestion(gomock.Any(), chat.ID).Return(question, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(question)
 		},
+		"ListPendingChatDescendantQuestionsByRoot": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			root := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.ListPendingChatDescendantQuestionsByRootRow{testutil.Fake(t, faker, forkdb.ListPendingChatDescendantQuestionsByRootRow{})}
+			db.EXPECT().GetChatByID(gomock.Any(), root.ID).Return(root, nil).AnyTimes()
+			fdb.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), root.ID).Return(rows, nil).AnyTimes()
+			check.Args(root.ID).Asserts(root, policy.ActionRead).Returns(rows)
+		},
 		"UpsertChatDescendantQuestion": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.UpsertChatDescendantQuestionParams{ChatID: chat.ID})

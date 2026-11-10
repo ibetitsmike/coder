@@ -770,6 +770,21 @@ func (mr *MockStoreMockRecorder) ListOrganizationAgentDefinitionMetadata(ctx, or
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOrganizationAgentDefinitionMetadata", reflect.TypeOf((*MockStore)(nil).ListOrganizationAgentDefinitionMetadata), ctx, organizationID)
 }
 
+// ListPendingChatDescendantQuestionsByRoot mocks base method.
+func (m *MockStore) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPendingChatDescendantQuestionsByRoot", ctx, rootChatID)
+	ret0, _ := ret[0].([]forkdb.ListPendingChatDescendantQuestionsByRootRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPendingChatDescendantQuestionsByRoot indicates an expected call of ListPendingChatDescendantQuestionsByRoot.
+func (mr *MockStoreMockRecorder) ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingChatDescendantQuestionsByRoot", reflect.TypeOf((*MockStore)(nil).ListPendingChatDescendantQuestionsByRoot), ctx, rootChatID)
+}
+
 // ListProjectAgentDefinitionMetadata mocks base method.
 func (m *MockStore) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
 	m.ctrl.T.Helper()

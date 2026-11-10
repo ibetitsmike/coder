@@ -8,6 +8,7 @@ package forkdb
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -38,6 +39,68 @@ func (q *Queries) GetPendingChatDescendantQuestion(ctx context.Context, chatID u
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listPendingChatDescendantQuestionsByRoot = `-- name: ListPendingChatDescendantQuestionsByRoot :many
+SELECT q.chat_id, q.tool_call_id, q.questions, q.created_at,
+    c.title AS chat_title, c.parent_chat_id
+FROM chat_descendant_questions q
+JOIN chats c ON c.id = q.chat_id
+WHERE c.root_chat_id = $1::uuid
+    AND c.id <> $1::uuid
+    AND c.archived = false
+    AND NOT EXISTS (
+        SELECT 1
+        FROM chat_messages m
+        WHERE m.chat_id = q.chat_id
+            AND m.role = 'user'
+            AND (m.visibility <> 'model' OR m.compressed)
+            AND NOT m.deleted
+            AND m.created_at > q.created_at
+    )
+ORDER BY q.created_at, q.chat_id
+`
+
+type ListPendingChatDescendantQuestionsByRootRow struct {
+	ChatID       uuid.UUID       `db:"chat_id" json:"chat_id"`
+	ToolCallID   string          `db:"tool_call_id" json:"tool_call_id"`
+	Questions    json.RawMessage `db:"questions" json:"questions"`
+	CreatedAt    time.Time       `db:"created_at" json:"created_at"`
+	ChatTitle    string          `db:"chat_title" json:"chat_title"`
+	ParentChatID uuid.NullUUID   `db:"parent_chat_id" json:"parent_chat_id"`
+}
+
+// Lists the unanswered questions of the unarchived descendants of
+// @root_chat_id, oldest first, with the pending rule of
+// GetPendingChatDescendantQuestion.
+func (q *Queries) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingChatDescendantQuestionsByRoot, rootChatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingChatDescendantQuestionsByRootRow
+	for rows.Next() {
+		var i ListPendingChatDescendantQuestionsByRootRow
+		if err := rows.Scan(
+			&i.ChatID,
+			&i.ToolCallID,
+			&i.Questions,
+			&i.CreatedAt,
+			&i.ChatTitle,
+			&i.ParentChatID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertChatDescendantQuestion = `-- name: UpsertChatDescendantQuestion :one

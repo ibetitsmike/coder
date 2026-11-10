@@ -297,6 +297,11 @@ func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx conte
 	return f.s.ListOrganizationAgentDefinitionMetadata(ctx, organizationID)
 }
 
+func (f forkQueryMetricsStore) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
+	defer f.observe(ctx, "ListPendingChatDescendantQuestionsByRoot", time.Now())
+	return f.s.ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID)
+}
+
 func (f forkQueryMetricsStore) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]forkdb.ListProjectAgentDefinitionMetadataRow, error) {
 	defer f.observe(ctx, "ListProjectAgentDefinitionMetadata", time.Now())
 	return f.s.ListProjectAgentDefinitionMetadata(ctx, projectID)

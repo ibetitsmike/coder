@@ -2702,6 +2702,20 @@ export const ChatDebugStepOperations: ChatDebugStepOperation[] = [
 	"stream",
 ];
 
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatDescendantQuestion is an unanswered ask_user_question call of a
+ * descendant chat. The user answers it with a message to that chat.
+ */
+export interface ChatDescendantQuestion {
+	readonly chat_id: string;
+	readonly parent_chat_id: string;
+	readonly chat_title: string;
+	readonly tool_call_id: string;
+	readonly questions: readonly ChatQuestion[];
+	readonly created_at: string;
+}
+
 // From codersdk/chats.go
 /**
  * ChatDiffContents represents the resolved diff text for a chat.
@@ -3743,6 +3757,24 @@ export const ChatProviderConfigSources: ChatProviderConfigSource[] = [
 	"env_preset",
 	"supported",
 ];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestion is one question of an ask_user_question call.
+ */
+export interface ChatQuestion {
+	readonly header: string;
+	readonly question: string;
+	readonly options: readonly ChatQuestionOption[];
+}
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatQuestionOption is an answer the user can pick for a ChatQuestion.
+ */
+export interface ChatQuestionOption {
+	readonly label: string;
+}
 
 // From codersdk/chats.go
 /**
