@@ -57,11 +57,19 @@ func TestForkChatPullRequestActivity(t *testing.T) {
 			APIBaseURL:   github.URL + "/api/v3",
 			HTTPClient:   github.Client(),
 			RefreshGroup: new(singleflight.Group),
+		}, {
+			ID:           "other",
+			Type:         "github",
+			Regex:        regexp.MustCompile(`other\.example\.com`),
+			RefreshGroup: new(singleflight.Group),
 		}},
 	}}
 	linked := dbgen.User(t, db, database.User{})
 	dbgen.ExternalAuthLink(t, db, database.ExternalAuthLink{ProviderID: "github", UserID: linked.ID, OAuthAccessToken: "linked-token"})
 	unlinked := dbgen.User(t, db, database.User{})
+	// A token for another provider must never reach this provider's host.
+	linkedElsewhere := dbgen.User(t, db, database.User{})
+	dbgen.ExternalAuthLink(t, db, database.ExternalAuthLink{ProviderID: "other", UserID: linkedElsewhere.ID, OAuthAccessToken: "linked-token"})
 	pullRequestURL := github.URL + "/org/repo/pull/7"
 	since := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	ctx := testutil.Context(t, testutil.WaitShort)
@@ -73,8 +81,10 @@ func TestForkChatPullRequestActivity(t *testing.T) {
 	require.Len(t, activity.Reviews, 1)
 	require.Equal(t, "alice", activity.Reviews[0].Author)
 
-	_, err = api.forkChatPullRequestActivity(ctx, unlinked.ID, pullRequestURL, since)
-	require.ErrorContains(t, err, "the chat owner has no linked account for "+host)
+	for _, owner := range []database.User{unlinked, linkedElsewhere} {
+		_, err = api.forkChatPullRequestActivity(ctx, owner.ID, pullRequestURL, since)
+		require.ErrorContains(t, err, "the chat owner has no linked account for "+host)
+	}
 	_, err = api.forkChatPullRequestActivity(ctx, linked.ID, github.URL+"/org/repo/issues/7", since)
 	require.ErrorContains(t, err, "is not a pull request URL")
 	other := "https://gitlab.example.com/org/repo/pull/7"

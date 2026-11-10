@@ -30,8 +30,12 @@ const (
 	// limit of its owner's token.
 	pullRequestPollInterval = time.Minute
 	// pullRequestErrorRetry is the next poll after a failed read that is not
-	// a rate limit.
+	// a rate limit, and the longest wait after a rate limit while child
+	// entries of the same wake-up still need a run.
 	pullRequestErrorRetry = 5 * time.Minute
+	// pullRequestReadTimeout bounds one read by the worker, well within
+	// wakeupLease, so a stalled provider cannot block the worker loop.
+	pullRequestReadTimeout = 30 * time.Second
 	// maxPullRequestSummaryItems caps the review and comment lines of one
 	// wake-up message.
 	maxPullRequestSummaryItems = 20
@@ -84,6 +88,12 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	if activity.State != gitprovider.PRStateOpen {
 		return wakeupEvent{}, xerrors.Errorf("pull request %s is already %s", url, activity.State)
 	}
+	// The provider counts events in the same second as since, so this read
+	// can already list some. Remember them so a poll does not report them.
+	var seen []string
+	for _, e := range slices.Concat(activity.Reviews, activity.Comments) {
+		seen = append(seen, e.URL)
+	}
 	return wakeupEvent{
 		Type:        wakeupEventPullRequest,
 		URL:         url,
@@ -91,6 +101,7 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 		Since:       since,
 		HeadSHA:     activity.HeadSHA,
 		ChecksState: string(activity.Checks.State),
+		Seen:        seen,
 	}, nil
 }
 
@@ -107,10 +118,15 @@ func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, 
 	if p.forkPullRequestActivity == nil {
 		return "", xerrors.New("pull request events are not available")
 	}
+	ctx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
+	defer cancel()
 	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, event.URL, event.Since)
 	if err != nil {
 		return "", err
 	}
+	isSeen := func(e gitprovider.PullRequestEvent) bool { return slices.Contains(event.Seen, e.URL) }
+	activity.Reviews = slices.DeleteFunc(activity.Reviews, isSeen)
+	activity.Comments = slices.DeleteFunc(activity.Comments, isSeen)
 	if !pullRequestReady(event, activity) {
 		return "", nil
 	}
@@ -174,12 +190,16 @@ func pullRequestSummary(event wakeupEvent, activity *gitprovider.PullRequestActi
 
 // pullRequestReadFailed ends the claim of wakeup after its pull request could
 // not be read: it polls again later and never pauses or completes early. A
-// rate limit waits until the limit resets.
-func (p *Server) pullRequestReadFailed(ctx context.Context, wakeup forkdb.ChatWakeup, now time.Time, url string, err error) wakeupFinish {
+// rate limit waits until the limit resets, or at most pullRequestErrorRetry
+// while childrenPending, so the children are still polled.
+func (p *Server) pullRequestReadFailed(ctx context.Context, wakeup forkdb.ChatWakeup, now time.Time, url string, childrenPending bool, err error) wakeupFinish {
 	if rateLimit, ok := errors.AsType[*gitprovider.RateLimitError](err); ok {
 		next := now.Add(pullRequestPollInterval)
 		if rateLimit.RetryAfter.After(next) {
 			next = rateLimit.RetryAfter
+		}
+		if latest := now.Add(pullRequestErrorRetry); childrenPending && next.After(latest) {
+			next = latest
 		}
 		return eventsWakeupRunAt(wakeup, now, 0, next)
 	}
