@@ -640,6 +640,29 @@ func TestNextWakeupRun(t *testing.T) {
 			wantStatus: forkdb.ChatWakeupStatusCompleted,
 			wantReason: "max_runs",
 		},
+		{
+			name: "EventsPollsAgain",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot, Valid: true},
+				Timezone:  "UTC",
+			},
+			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusActive,
+			wantNext:   slot.Add(10*time.Second + wakeupPollInterval),
+		},
+		{
+			name: "EventsExpired",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot, Valid: true},
+				Timezone:  "UTC",
+				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+			},
+			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusCompleted,
+			wantReason: "expired",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -715,7 +738,7 @@ func (f *workerTestFixture) createWakeupChild(t *testing.T, root database.Chat, 
 }
 
 // insertWakeup inserts a wake-up of chat that is due at wakeupTestSlot. arg
-// sets the schedule.
+// sets the schedule and, for kind events, the events.
 func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg forkdb.InsertChatWakeupParams) forkdb.ChatWakeup {
 	t.Helper()
 	fdb, err := forkdb.From(f.db)
@@ -726,7 +749,9 @@ func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg f
 	arg.Source = "schedule_wakeup"
 	arg.Prompt = "wake up " + arg.ID.String()
 	arg.Timezone = "UTC"
-	arg.Events = json.RawMessage(`[]`)
+	if arg.Events == nil {
+		arg.Events = json.RawMessage(`[]`)
+	}
 	arg.Status = forkdb.ChatWakeupStatusActive
 	arg.NextRunAt = sql.NullTime{Time: wakeupTestSlot, Valid: true}
 	arg.CreatedAt = wakeupTestSlot.Add(-time.Hour)

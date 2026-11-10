@@ -108,7 +108,12 @@ type Querier interface {
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
+	// Failed runs are left out, so a failed attempt never blocks a later run.
+	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
+	// Lists the children of @parent_chat_id that wait for events of their own,
+	// so a caller checks every child in one read.
+	ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
 	// @root_chat_id, oldest first, with the pending rule of

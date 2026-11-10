@@ -41,16 +41,18 @@ func (db *forkCrypt) decryptPlugins(plugins []forkdb.Plugin) error {
 	return nil
 }
 
-func (db *forkCrypt) encryptPluginConfig(config *string, keyID *sql.NullString) error {
+// encryptPluginConfig encrypts config unless it is blank, which stays
+// plaintext with no key.
+func (db *dbCrypt) encryptPluginConfig(config *string, keyID *sql.NullString) error {
 	if strings.TrimSpace(*config) == "" {
 		*keyID = sql.NullString{}
 		return nil
 	}
-	return db.crypt.encryptField(config, keyID)
+	return db.encryptField(config, keyID)
 }
 
 func (db *forkCrypt) InsertPlugin(ctx context.Context, params forkdb.InsertPluginParams) (forkdb.Plugin, error) {
-	if err := db.encryptPluginConfig(&params.Config, &params.ConfigKeyID); err != nil {
+	if err := db.crypt.encryptPluginConfig(&params.Config, &params.ConfigKeyID); err != nil {
 		return forkdb.Plugin{}, err
 	}
 	plugin, err := db.Store.InsertPlugin(ctx, params)
@@ -97,7 +99,7 @@ func (db *forkCrypt) AcquirePluginLeases(ctx context.Context, params forkdb.Acqu
 }
 
 func (db *forkCrypt) UpdatePluginConfig(ctx context.Context, params forkdb.UpdatePluginConfigParams) (forkdb.Plugin, error) {
-	if err := db.encryptPluginConfig(&params.Config, &params.ConfigKeyID); err != nil {
+	if err := db.crypt.encryptPluginConfig(&params.Config, &params.ConfigKeyID); err != nil {
 		return forkdb.Plugin{}, err
 	}
 	plugin, err := db.Store.UpdatePluginConfig(ctx, params)

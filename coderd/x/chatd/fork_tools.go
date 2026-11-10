@@ -34,6 +34,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkChatWakeups) {
 		tools = append(tools, p.scheduleWakeupTool(chat))
+		tools = append(tools, p.waitForEventsTool(chat))
 	}
 	if p.descendantQuestionsEnabled(chat) && !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
 		return tool.Info().Name == askUserQuestionToolName
@@ -46,6 +47,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
 	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		tools = p.withForkSpawnIsolation(tools, chat)
+		tools = p.withForkIsolationReport(tools, chat)
 		if tools, err = p.withForkWorktreeBinding(ctx, tools, chat); err != nil {
 			return nil, err
 		}

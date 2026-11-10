@@ -259,7 +259,7 @@ func Rotate(ctx context.Context, log slog.Logger, sqlDB *sql.DB, ciphers []Ciphe
 		return err
 	}
 
-	if err := forkRecryptChatSecretAnswers(ctx, log, sqlDB, cryptDB); err != nil {
+	if err := forkRecryptSecrets(ctx, log, sqlDB, cryptDB); err != nil {
 		return err
 	}
 
@@ -507,7 +507,7 @@ func Decrypt(ctx context.Context, log slog.Logger, sqlDB *sql.DB, ciphers []Ciph
 		return err
 	}
 
-	if err := forkRecryptChatSecretAnswers(ctx, log, sqlDB, cryptDB); err != nil {
+	if err := forkRecryptSecrets(ctx, log, sqlDB, cryptDB); err != nil {
 		return err
 	}
 
