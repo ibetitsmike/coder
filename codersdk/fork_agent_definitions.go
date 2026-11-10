@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// ChatContextResourceKindSubagent is a custom agent definition file found in
+// the workspace.
+const ChatContextResourceKindSubagent ChatContextResourceKind = "subagent"
+
 // ForkAgentDefinitionMetadata describes a stored custom agent definition
 // without its content.
 type ForkAgentDefinitionMetadata struct {
