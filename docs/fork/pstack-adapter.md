@@ -398,7 +398,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `5a47dc7bed`:
+Checked against fork `main` at `77b20734d2`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:731-740`.
@@ -418,6 +418,7 @@ Checked against fork `main` at `5a47dc7bed`:
   A model alias as the last match, preferring the parent chat's AI provider, `coderd/x/chatd/fork_model_aliases.go`, listed by `list_subagent_models`, `subagent.go:409-411`.
   Aliases are set in a model config's `aliases`, `codersdk/chats.go:1952`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:414-431`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1874-1875`, and custom types only from `ok` files, `fork_agent_definitions.go:158-161`.
+  Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:183-191`, `:254`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
