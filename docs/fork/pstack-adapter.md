@@ -310,7 +310,7 @@ Checked against fork `main` at `54351e1e1f`:
   The definition's body becomes the child's system prompt, `fork_agent_definitions.go:379`.
   The parent's model unless the definition sets `model`, an explicit `model_config_id` first, `:350-361`, and the model match, `:386-409`.
   A model alias as the last match, preferring the parent chat's AI provider, `coderd/x/chatd/fork_model_aliases.go`, listed by `list_subagent_models`, `subagent.go:410-412`.
-  Aliases are set in a model config's `aliases`, `codersdk/chats.go:1937`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
+  Aliases are set in a model config's `aliases`, `codersdk/chats.go:1941`, and checked on create and update, `coderd/fork_chat_model_aliases.go`.
 - Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:181-188`, `:242`, loaded for child chats only, `coderd/x/chatd/fork_agent_tool_policy.go:175-178`, and applied in `buildTurnEnvironment`, `turn_environment.go:753-756`, `:945-947`.
   The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:139-170`, Claude Code aliases, `:48-61`, MCP IDs, `:76-89`, and MCP servers, `:95-114`.
   Orchestration guidance dropped, `fork_subagents.go:349-351`, `fork_agent_tool_policy.go:123-127`, and the skill index dropped, `turn_environment.go:757-759`.
