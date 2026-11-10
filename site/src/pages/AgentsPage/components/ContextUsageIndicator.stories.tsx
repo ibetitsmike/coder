@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, userEvent, within } from "storybook/test";
 import type { ChatContext, ChatContextResource } from "#/api/typesGenerated";
 import {
+	MockAgentDefinitionResource,
+	MockAgentDefinitionResourceInvalid,
+	MockAgentDefinitionResourceWarning,
 	MockChatContextACPHarnesses,
 	MockChatContextACPHarnessIssue,
 	MockChatContextClean,
@@ -322,46 +325,12 @@ export const ResourceIssue: Story = {
 	},
 };
 
-const mockAgentDefinitionResources: ChatContextResource[] = [
-	{
-		source: "/home/coder/project/.agents/agents/reviewer.md",
-		kind: "subagent",
-		size_bytes: 512,
-		status: "ok",
-		subagent_name: "reviewer",
-		subagent_description: "Reviews diffs for correctness.",
-	},
-	{
-		source: "/home/coder/project/.agents/agents/explorer.md",
-		kind: "subagent",
-		size_bytes: 384,
-		status: "ok",
-		subagent_name: "explorer",
-		subagent_description: "Read-only exploration.",
-		error: 'unknown front-matter field "color" ignored',
-	},
-	{
-		source: "/home/coder/project/.agents/agents/Gate-Bad.md",
-		kind: "subagent",
-		size_bytes: 96,
-		status: "invalid",
-		error: 'name "Gate-Bad" is not kebab-case',
-	},
-];
-
-const mockChatContextAgentDefinitions: ChatContext = {
-	dirty: false,
-	resources: mockAgentDefinitionResources,
-};
-
-// Loaded agent definitions are listed with their parse warnings, and a
-// definition that failed to load appears as an issue in the same section.
-export const AgentDefinitions: Story = {
+const agentDefinitionStory = (resources: ChatContextResource[]): Story => ({
 	args: {
 		usage: {
 			usedTokens: 12_000,
 			contextLimitTokens: 200_000,
-			context: mockChatContextAgentDefinitions,
+			context: { dirty: false, resources },
 		},
 	},
 	play: async ({ canvasElement }) => {
@@ -370,23 +339,25 @@ export const AgentDefinitions: Story = {
 			screen.getByRole("button", { name: /Agent definitions/ }),
 		);
 	},
-};
+});
 
-export const AgentDefinitionFailuresOnly: Story = {
-	...AgentDefinitions,
-	args: {
-		usage: {
-			usedTokens: 12_000,
-			contextLimitTokens: 200_000,
-			context: {
-				dirty: false,
-				resources: mockAgentDefinitionResources.filter(
-					(resource) => resource.status !== "ok",
-				),
-			},
-		},
-	},
-};
+// Loaded agent definitions are listed with their parse warnings, and a
+// definition that failed to load appears as an issue in the same section.
+export const AgentDefinitions = agentDefinitionStory([
+	MockAgentDefinitionResource,
+	MockAgentDefinitionResourceWarning,
+	MockAgentDefinitionResourceInvalid,
+]);
+
+// Parse warnings alone keep the trigger's normal tone.
+export const AgentDefinitionWarningsOnly = agentDefinitionStory([
+	MockAgentDefinitionResource,
+	MockAgentDefinitionResourceWarning,
+]);
+
+export const AgentDefinitionFailuresOnly = agentDefinitionStory([
+	MockAgentDefinitionResourceInvalid,
+]);
 
 // Multiple context roots: files and skills are pulled from several
 // directories, so each list groups by its parent directory. Without grouping

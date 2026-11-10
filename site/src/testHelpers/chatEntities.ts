@@ -182,6 +182,33 @@ export const MockChatContextACPHarnessIssue: ChatContext = {
 	],
 };
 
+export const MockAgentDefinitionResource: ChatContextResource = {
+	source: "/home/coder/project/.agents/agents/reviewer.md",
+	kind: "subagent",
+	size_bytes: 512,
+	status: "ok",
+	subagent_name: "reviewer",
+	subagent_description: "Reviews diffs for correctness.",
+};
+
+export const MockAgentDefinitionResourceWarning: ChatContextResource = {
+	source: "/home/coder/project/.agents/agents/explorer.md",
+	kind: "subagent",
+	size_bytes: 384,
+	status: "ok",
+	subagent_name: "explorer",
+	subagent_description: "Read-only exploration.",
+	error: 'unknown front-matter field "color" ignored',
+};
+
+export const MockAgentDefinitionResourceInvalid: ChatContextResource = {
+	source: "/home/coder/project/.agents/agents/Gate-Bad.md",
+	kind: "subagent",
+	size_bytes: 96,
+	status: "invalid",
+	error: 'name "Gate-Bad" is not kebab-case',
+};
+
 export const MockAdvisorConfig: AdvisorConfig = {
 	enabled: true,
 	max_uses_per_run: 5,

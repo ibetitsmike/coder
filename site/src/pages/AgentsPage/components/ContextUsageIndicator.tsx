@@ -3,6 +3,7 @@ import {
 	BotIcon,
 	CircleAlertIcon,
 	FileIcon,
+	type LucideIcon,
 	PlugIcon,
 	TriangleAlertIcon,
 	ZapIcon,
@@ -231,18 +232,18 @@ const ContextHarnessSection: React.FC<{
 	</ContextResourceAccordion>
 );
 
-// Agent definitions the backend loaded can still carry non-fatal parse
-// warnings, so they are listed separately from the definitions it dropped.
-const ContextAgentDefinitionsSection: React.FC<{
+const ContextNamedResourceSection: React.FC<{
+	label: string;
+	icon: LucideIcon;
 	items: readonly ContextNamedItem[];
 	issues: readonly ContextIssueItem[];
-	warnings: readonly ContextIssueItem[];
-}> = ({ items, issues, warnings }) => {
+	warnings?: readonly ContextIssueItem[];
+}> = ({ label, icon, items, issues, warnings = [] }) => {
 	const groups = groupByDirectory(items);
 	return (
 		<ContextResourceAccordion>
 			<ContextResourceAccordionTrigger detail={`${items.length} available`}>
-				Agent definitions
+				{label}
 				<ContextIssueIndicator count={issues.length + warnings.length} />
 			</ContextResourceAccordionTrigger>
 			<ContextResourceAccordionContent>
@@ -250,12 +251,12 @@ const ContextAgentDefinitionsSection: React.FC<{
 					<ContextResourceTree>
 						{groups.map((group) => (
 							<ContextResourceTreeDirectory key={group.dir} dir={group.dir}>
-								{group.items.map((agent) => (
+								{group.items.map((item) => (
 									<ContextResourceTreeItem
-										key={agent.source}
-										icon={group.dir === "" ? BotIcon : undefined}
-										name={agent.name}
-										description={agent.description}
+										key={item.source}
+										icon={group.dir === "" ? icon : undefined}
+										name={item.name}
+										description={item.description}
 										className="text-content-primary"
 									/>
 								))}
@@ -270,8 +271,8 @@ const ContextAgentDefinitionsSection: React.FC<{
 	);
 };
 
-// The agent definitions the backend loaded, and the non-fatal parse warnings
-// some of them still carry.
+// Agent definitions the backend loaded can still carry non-fatal parse
+// warnings, so they are listed separately from the definitions it dropped.
 const getLoadedAgentDefinitions = (
 	resources: readonly ChatContextResource[],
 ): {
@@ -472,7 +473,6 @@ export const ContextUsageIndicator: React.FC<{
 	// Group files and skills by directory so every context root is labeled,
 	// keeping resources pulled from different directories distinguishable.
 	const fileGroups = groupByDirectory(fileItems);
-	const skillGroups = groupByDirectory(skillItems);
 
 	const statusNotes = [
 		hasContextError ? "Context error." : "",
@@ -648,37 +648,12 @@ export const ContextUsageIndicator: React.FC<{
 							</ContextResourceAccordion>
 						)}
 						{(skillItems.length > 0 || skillIssues.length > 0) && (
-							<ContextResourceAccordion>
-								<ContextResourceAccordionTrigger
-									detail={`${skillItems.length} available`}
-								>
-									Skills
-									<ContextIssueIndicator count={skillIssues.length} />
-								</ContextResourceAccordionTrigger>
-								<ContextResourceAccordionContent>
-									{skillItems.length > 0 && (
-										<ContextResourceTree>
-											{skillGroups.map((group) => (
-												<ContextResourceTreeDirectory
-													key={group.dir}
-													dir={group.dir}
-												>
-													{group.items.map((skill) => (
-														<ContextResourceTreeItem
-															key={skill.source}
-															icon={group.dir === "" ? ZapIcon : undefined}
-															name={skill.name}
-															description={skill.description}
-															className="text-content-primary"
-														/>
-													))}
-												</ContextResourceTreeDirectory>
-											))}
-										</ContextResourceTree>
-									)}
-									<ContextResourceIssues issues={skillIssues} />
-								</ContextResourceAccordionContent>
-							</ContextResourceAccordion>
+							<ContextNamedResourceSection
+								label="Skills"
+								icon={ZapIcon}
+								items={skillItems}
+								issues={skillIssues}
+							/>
 						)}
 						{(hasMcp || mcpIssues.length > 0) && (
 							<ContextResourceAccordion>
@@ -730,7 +705,9 @@ export const ContextUsageIndicator: React.FC<{
 						)}
 						{(agentDefinitions.items.length > 0 ||
 							agentDefinitionIssues.length > 0) && (
-							<ContextAgentDefinitionsSection
+							<ContextNamedResourceSection
+								label="Agent definitions"
+								icon={BotIcon}
 								items={agentDefinitions.items}
 								issues={agentDefinitionIssues}
 								warnings={agentDefinitions.warnings}
