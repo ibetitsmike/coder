@@ -62,8 +62,9 @@ type Querier interface {
 	// Returns the unarchived running subagent chats under @root_chat_id that no
 	// worker with a fresh heartbeat owns, with the predicate of
 	// GetChatAwaitingWorker. Each row carries the counts of
-	// CountActiveSubagentsForCapacity for that chat, so one query answers for the
-	// whole family.
+	// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
+	// own active lineage, so one query answers for the whole family without
+	// pairing each chat with every active subagent.
 	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)

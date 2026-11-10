@@ -150,20 +150,28 @@ active AS (
 	WHERE c.worker_id IS NOT NULL
 		AND c.parent_chat_id IS NOT NULL
 		AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+),
+totals AS (
+	SELECT
+		COUNT(*)::bigint AS active_count,
+		(COUNT(*) FILTER (WHERE active.organization_id = $1::uuid))::bigint AS active_organization_count,
+		(COUNT(*) FILTER (WHERE active.root_chat_id = $2::uuid))::bigint AS active_family_count
+	FROM active
+),
+excluded AS (
+	SELECT DISTINCT lineage.candidate_id, active.id, active.organization_id, active.root_chat_id
+	FROM lineage
+	JOIN active ON active.id = lineage.id
 )
 SELECT
 	awaiting.id AS chat_id,
-	COUNT(active.id)::bigint AS active_count,
-	(COUNT(active.id) FILTER (WHERE active.organization_id = $1::uuid))::bigint AS active_organization_count,
-	(COUNT(active.id) FILTER (WHERE active.root_chat_id = $2::uuid))::bigint AS active_family_count
+	(totals.active_count - COUNT(excluded.id))::bigint AS active_count,
+	(totals.active_organization_count - COUNT(excluded.id) FILTER (WHERE excluded.organization_id = $1::uuid))::bigint AS active_organization_count,
+	(totals.active_family_count - COUNT(excluded.id) FILTER (WHERE excluded.root_chat_id = $2::uuid))::bigint AS active_family_count
 FROM awaiting
-LEFT JOIN active ON NOT EXISTS (
-	SELECT 1
-	FROM lineage
-	WHERE lineage.candidate_id = awaiting.id
-		AND lineage.id = active.id
-)
-GROUP BY awaiting.id
+CROSS JOIN totals
+LEFT JOIN excluded ON excluded.candidate_id = awaiting.id
+GROUP BY awaiting.id, totals.active_count, totals.active_organization_count, totals.active_family_count
 ORDER BY awaiting.id
 `
 
@@ -183,8 +191,9 @@ type GetFamilySubagentsAwaitingWorkerRow struct {
 // Returns the unarchived running subagent chats under @root_chat_id that no
 // worker with a fresh heartbeat owns, with the predicate of
 // GetChatAwaitingWorker. Each row carries the counts of
-// CountActiveSubagentsForCapacity for that chat, so one query answers for the
-// whole family.
+// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
+// own active lineage, so one query answers for the whole family without
+// pairing each chat with every active subagent.
 func (q *Queries) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error) {
 	rows, err := q.db.QueryContext(ctx, getFamilySubagentsAwaitingWorker, arg.OrganizationID, arg.RootChatID, arg.StaleSeconds)
 	if err != nil {
