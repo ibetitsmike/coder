@@ -129,10 +129,9 @@ func TestSecretAnswerReachesToolsNotModel(t *testing.T) {
 		Questions: json.RawMessage(`[{"header":"Token","question":"Paste the token.","secret":true}]`),
 	})
 	require.NoError(t, err)
-	_, err = fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+	require.NoError(t, fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: callID, Value: secret,
-	})
-	require.NoError(t, err)
+	}))
 
 	_, err = server.SendMessage(ctx, chatd.SendMessageOptions{
 		ChatID:    child.ID,

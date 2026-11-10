@@ -63,10 +63,9 @@ func TestSecretAnswerTools(t *testing.T) {
 	ctx := chatdTestContext(t)
 	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
 	require.NoError(t, err)
-	_, err = f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: "call_s", Value: value,
-	})
-	require.NoError(t, err)
+	}))
 
 	var spawnInput, mcpInput string
 	var observed []string
