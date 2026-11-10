@@ -175,8 +175,10 @@ export const ForkAgentDefinitionsTable: React.FC<
 						?.some((definition) => definition.name === name);
 				// A lost response can hide a create that committed, which the
 				// refetched list then shows with this content. A name listed
-				// before the request, or an unknown list, means it did not.
-				const existedBefore = isListed() ?? true;
+				// before the request means it did not. With the list unknown,
+				// the content match decides: a definition that already had
+				// this content holds what the user submitted.
+				const existedBefore = isListed() ?? false;
 				const isCreated = async (error: unknown) => {
 					if (!error) {
 						return true;
@@ -241,15 +243,16 @@ export const ForkAgentDefinitionsTable: React.FC<
 			});
 		}
 		const { name, values, loadedFrom } = editorTarget;
-		// Saving by name would overwrite a definition edited or recreated
-		// since the editor loaded it, so the user keeps the draft instead. An
-		// older listed row, such as one a recreate replaced before the editor
-		// opened, is not a change.
+		// Saving by name would overwrite a definition deleted, edited, or
+		// recreated since the editor loaded it, so the user keeps the draft
+		// instead. An older listed row, such as one a recreate replaced before
+		// the editor opened, is not a change.
 		const isChanged =
 			loadedFrom !== undefined &&
-			[listed, detail].some(
-				(current) => current !== undefined && isNewer(current, loadedFrom),
-			);
+			(isGone ||
+				[listed, detail].some(
+					(current) => current !== undefined && isNewer(current, loadedFrom),
+				));
 		const loadError = values
 			? undefined
 			: (loaded?.error ??
@@ -278,7 +281,8 @@ export const ForkAgentDefinitionsTable: React.FC<
 			isRetrying: definitionQuery.isFetching,
 			submitError: isChanged
 				? {
-						message: "This agent definition changed after you opened it.",
+						message:
+							"This agent definition changed or was deleted after you opened it.",
 						detail:
 							"Saving would overwrite the newer version. Copy your changes, then close and reopen the editor.",
 					}
