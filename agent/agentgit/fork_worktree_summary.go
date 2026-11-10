@@ -26,7 +26,7 @@ func (a *worktreeAPI) handleSummary(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, "Invalid request body.", err)
 		return
 	}
-	wt, ok := a.linkedWorktree(ctx, rw, req.Path, req.Branch)
+	wt, ok := a.checkLinkedWorktree(ctx, rw, req.Path, req.Branch)
 	if !ok {
 		return
 	}

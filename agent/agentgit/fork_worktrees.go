@@ -291,7 +291,7 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, "Invalid request body.", err)
 		return
 	}
-	wt, ok := a.linkedWorktree(ctx, rw, req.Path, req.Branch)
+	wt, ok := a.checkLinkedWorktree(ctx, rw, req.Path, req.Branch)
 	if !ok {
 		return
 	}
@@ -383,10 +383,10 @@ type linkedWorktree struct {
 	commonDir string
 }
 
-// linkedWorktree checks that reqPath is the top of a linked worktree under
-// the worktree root and that branch is a usable branch name. On failure it
-// writes the error response and returns false.
-func (a *worktreeAPI) linkedWorktree(ctx context.Context, rw http.ResponseWriter, reqPath, branch string) (linkedWorktree, bool) {
+// checkLinkedWorktree checks that reqPath is the top of a linked worktree
+// under the worktree root and that branch is a usable branch name. On
+// failure it writes the error response and returns false.
+func (a *worktreeAPI) checkLinkedWorktree(ctx context.Context, rw http.ResponseWriter, reqPath, branch string) (linkedWorktree, bool) {
 	if !filepath.IsAbs(reqPath) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("path %q must be an absolute path.", reqPath), nil)
 		return linkedWorktree{}, false
