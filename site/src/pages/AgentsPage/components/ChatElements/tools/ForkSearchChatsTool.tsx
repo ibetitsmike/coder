@@ -1,11 +1,10 @@
 // This file is fork code: it renders the search_chats tool of the
 // fork-chat-todos experiment.
 
-import { ExternalLinkIcon } from "lucide-react";
 import type React from "react";
-import { Link, useLocation } from "react-router";
-import { safeBuildAgentChatPath } from "../../../utils/navigation";
+import { ForkChatLink } from "./ForkChatLink";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
+import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
 import {
 	asRecord,
@@ -14,6 +13,8 @@ import {
 	parseArray,
 	type ToolStatus,
 } from "./utils";
+
+const failedLabel = "Failed to search chats";
 
 type SearchChatsEntry = {
 	chatId: string;
@@ -52,12 +53,11 @@ const ForkSearchChatsTool: React.FC<ForkSearchChatsToolProps> = ({
 	isError,
 	errorMessage,
 }) => {
-	const location = useLocation();
 	let label: string;
 	if (status === "running") {
 		label = "Searching chats…";
 	} else if (isError) {
-		label = "Failed to search chats";
+		label = failedLabel;
 	} else if (chats.length === 0) {
 		label = "No chats found";
 	} else if (chats.length === 1) {
@@ -72,7 +72,7 @@ const ForkSearchChatsTool: React.FC<ForkSearchChatsToolProps> = ({
 			className="w-full"
 			status={status}
 			isError={isError}
-			errorMessage={errorMessage || "Failed to search chats"}
+			errorMessage={errorMessage || failedLabel}
 			hasContent={chats.length > 0 || query !== "" || Boolean(errorDetail)}
 		>
 			<ToolCall.Header iconName="fork_search_chats" label={label} />
@@ -87,36 +87,11 @@ const ForkSearchChatsTool: React.FC<ForkSearchChatsToolProps> = ({
 				)}
 				{chats.length > 0 && (
 					<div className="mt-1.5">
-						{chats.map((chat) => {
-							const chatPath = safeBuildAgentChatPath({
-								chatId: chat.chatId,
-							});
-							const row = `${chat.title || "Untitled"} (${chat.status}${chat.shared ? ", shared" : ""})`;
-							if (chatPath === null) {
-								return (
-									<div
-										key={chat.chatId}
-										className="text-[13px] text-content-secondary"
-									>
-										{row}
-									</div>
-								);
-							}
-							return (
-								<div key={chat.chatId} className="flex items-center gap-1.5">
-									<Link
-										to={{
-											pathname: chatPath,
-											search: location.search,
-										}}
-										className="flex items-center gap-1.5 text-[13px] text-content-secondary opacity-50 transition-opacity hover:opacity-100"
-									>
-										{row}
-										<ExternalLinkIcon className="size-3 shrink-0" />
-									</Link>
-								</div>
-							);
-						})}
+						{chats.map((chat) => (
+							<ForkChatLink key={chat.chatId} chatId={chat.chatId}>
+								{`${chat.title || "Untitled"} (${chat.status}${chat.shared ? ", shared" : ""})`}
+							</ForkChatLink>
+						))}
 						{hasMore && (
 							<div className="text-[13px] text-content-secondary">
 								More chats available
@@ -138,11 +113,7 @@ export const ForkSearchChatsToolRenderer: React.FC<ForkToolRendererProps> = ({
 	...props
 }) => {
 	const query = asString(parseArgs(props.args)?.query);
-	const resultRecord = parseArgs(props.result);
 	if (props.isError) {
-		const errorMessage = resultRecord
-			? asString(resultRecord.error || resultRecord.message)
-			: asString(props.result);
 		return (
 			<ForkSearchChatsTool
 				query={query}
@@ -150,10 +121,11 @@ export const ForkSearchChatsToolRenderer: React.FC<ForkToolRendererProps> = ({
 				hasMore={false}
 				status={props.status}
 				isError
-				errorMessage={errorMessage}
+				errorMessage={forkToolErrorMessage(props.result)}
 			/>
 		);
 	}
+	const resultRecord = parseArgs(props.result);
 	if (!resultRecord) {
 		if (props.status === "running") {
 			return (

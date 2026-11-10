@@ -45,20 +45,18 @@ export const createForkToolRenderers = (
 	fallback: ToolRenderer,
 ): Record<string, ToolRenderer> => {
 	const todoRenderer = gate("fork-chat-todos", ForkTodoToolRenderer, fallback);
-	const searchChatsRenderer = gate(
-		"fork-chat-todos",
-		ForkSearchChatsToolRenderer,
-		fallback,
-	);
-	const chatTranscriptRenderer = gate(
-		"fork-chat-todos",
-		ForkChatTranscriptToolRenderer,
-		fallback,
-	);
 	return {
 		todo_write: todoRenderer,
 		todo_read: todoRenderer,
-		search_chats: searchChatsRenderer,
-		read_chat_transcript: chatTranscriptRenderer,
+		search_chats: gate(
+			"fork-chat-todos",
+			ForkSearchChatsToolRenderer,
+			fallback,
+		),
+		read_chat_transcript: gate(
+			"fork-chat-todos",
+			ForkChatTranscriptToolRenderer,
+			fallback,
+		),
 	};
 };

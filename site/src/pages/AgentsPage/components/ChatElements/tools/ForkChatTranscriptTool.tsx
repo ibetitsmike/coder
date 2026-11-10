@@ -1,11 +1,10 @@
 // This file is fork code: it renders the read_chat_transcript tool of the
 // fork-chat-todos experiment.
 
-import { ExternalLinkIcon } from "lucide-react";
 import type React from "react";
-import { Link, useLocation } from "react-router";
-import { safeBuildAgentChatPath } from "../../../utils/navigation";
+import { ForkChatLink } from "./ForkChatLink";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
+import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
 import {
 	asNumber,
@@ -16,10 +15,23 @@ import {
 	type ToolStatus,
 } from "./utils";
 
+const failedLabel = "Failed to read chat transcript";
+
 type TranscriptMessage = {
 	role: string;
 	preview: string;
 	omittedParts: number;
+};
+
+const partPreview = (part: Record<string, unknown> | null): string => {
+	const type = asString(part?.type);
+	if (type === "text" || type === "reasoning") {
+		return asString(part?.text);
+	}
+	if (type === "tool-call" || type === "tool-result") {
+		return asString(part?.tool_name);
+	}
+	return type;
 };
 
 const parseTranscriptMessage = (item: unknown): TranscriptMessage | null => {
@@ -27,26 +39,17 @@ const parseTranscriptMessage = (item: unknown): TranscriptMessage | null => {
 	if (!record || typeof record.role !== "string") {
 		return null;
 	}
-	const firstPart = Array.isArray(record.parts)
-		? asRecord(record.parts[0])
-		: null;
-	const type = firstPart === null ? "" : asString(firstPart.type);
-	const preview =
-		type === "text" || type === "reasoning"
-			? asString(firstPart?.text)
-			: type === "tool-call" || type === "tool-result"
-				? asString(firstPart?.tool_name)
-				: type;
+	const parts = Array.isArray(record.parts) ? record.parts : [];
 	return {
 		role: record.role,
-		preview,
+		preview: partPreview(asRecord(parts[0])),
 		omittedParts: asNumber(record.omitted_parts) ?? 0,
 	};
 };
 
 type ForkChatTranscriptToolProps = {
-	chatId: string;
-	title: string;
+	chatId?: string;
+	title?: string;
 	messages: readonly TranscriptMessage[];
 	hasMore: boolean;
 	status: ToolStatus;
@@ -63,52 +66,36 @@ const ForkChatTranscriptTool: React.FC<ForkChatTranscriptToolProps> = ({
 	isError,
 	errorMessage,
 }) => {
-	const location = useLocation();
+	const chatTitle = title || "Untitled";
 	let label: string;
 	if (status === "running") {
 		label = "Reading chat transcript…";
 	} else if (isError) {
-		label = "Failed to read chat transcript";
+		label = failedLabel;
 	} else {
 		const noun = messages.length === 1 ? "message" : "messages";
-		label = `Read ${messages.length} ${noun} from ${title || "Untitled"}`;
+		label = `Read ${messages.length} ${noun} from ${chatTitle}`;
 	}
 	const errorDetail = errorMessage?.trim();
-	const chatPath = chatId === "" ? null : safeBuildAgentChatPath({ chatId });
 
 	return (
 		<ToolCall.Root
 			className="w-full"
 			status={status}
 			isError={isError}
-			errorMessage={errorMessage || "Failed to read chat transcript"}
-			hasContent={messages.length > 0 || chatId !== "" || Boolean(errorDetail)}
+			errorMessage={errorMessage || failedLabel}
+			hasContent={
+				messages.length > 0 || Boolean(chatId) || Boolean(errorDetail)
+			}
 		>
 			<ToolCall.Header iconName="fork_chat_transcript" label={label} />
 			<ToolCall.Content>
 				{errorDetail && (
 					<ToolCall.ErrorDetail>{errorDetail}</ToolCall.ErrorDetail>
 				)}
-				{chatId !== "" && (
+				{chatId && (
 					<div className="mt-1.5">
-						{chatPath === null ? (
-							<div className="text-[13px] text-content-secondary">
-								{title || "Untitled"}
-							</div>
-						) : (
-							<div className="flex items-center gap-1.5">
-								<Link
-									to={{
-										pathname: chatPath,
-										search: location.search,
-									}}
-									className="flex items-center gap-1.5 text-[13px] text-content-secondary opacity-50 transition-opacity hover:opacity-100"
-								>
-									{title || "Untitled"}
-									<ExternalLinkIcon className="size-3 shrink-0" />
-								</Link>
-							</div>
-						)}
+						<ForkChatLink chatId={chatId}>{chatTitle}</ForkChatLink>
 					</div>
 				)}
 				{messages.length > 0 && (
@@ -124,7 +111,7 @@ const ForkChatTranscriptTool: React.FC<ForkChatTranscriptToolProps> = ({
 								</span>
 								{message.omittedParts > 0 && (
 									<span className="shrink-0">
-										{`(+${message.omittedParts} parts omitted)`}
+										{`(+${message.omittedParts} ${message.omittedParts === 1 ? "part" : "parts"} omitted)`}
 									</span>
 								)}
 							</div>
@@ -148,29 +135,22 @@ const ForkChatTranscriptTool: React.FC<ForkChatTranscriptToolProps> = ({
 export const ForkChatTranscriptToolRenderer: React.FC<
 	ForkToolRendererProps
 > = ({ fallback: Fallback, ...props }) => {
-	const resultRecord = parseArgs(props.result);
 	if (props.isError) {
-		const errorMessage = resultRecord
-			? asString(resultRecord.error || resultRecord.message)
-			: asString(props.result);
 		return (
 			<ForkChatTranscriptTool
-				chatId=""
-				title=""
 				messages={[]}
 				hasMore={false}
 				status={props.status}
 				isError
-				errorMessage={errorMessage}
+				errorMessage={forkToolErrorMessage(props.result)}
 			/>
 		);
 	}
+	const resultRecord = parseArgs(props.result);
 	if (!resultRecord) {
 		if (props.status === "running") {
 			return (
 				<ForkChatTranscriptTool
-					chatId=""
-					title=""
 					messages={[]}
 					hasMore={false}
 					status={props.status}

@@ -1,33 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
+import { MockSearchChatsResult } from "#/testHelpers/forkChatTodos";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { Tool } from "./Tool";
 
-const mockSearchChatsResult = {
-	chats: [
-		{
-			chat_id: "11111111-1111-4111-8111-111111111111",
-			title: "Fix flaky e2e suite",
-			status: "waiting",
-			shared: true,
-		},
-		{
-			chat_id: "22222222-2222-4222-8222-222222222222",
-			title: "Migrate chat sidebar to Tailwind",
-			status: "running",
-		},
-		{
-			chat_id: "33333333-3333-4333-8333-333333333333",
-			title: "",
-			status: "error",
-		},
-	],
-	has_more: false,
-};
-
 const mockPagedSearchChatsResult = {
-	chats: mockSearchChatsResult.chats.slice(0, 2),
+	chats: MockSearchChatsResult.chats.slice(0, 2),
 	has_more: true,
 };
 
@@ -40,7 +19,7 @@ const meta: Meta<typeof Tool> = {
 		name: "search_chats",
 		status: "completed",
 		args: { query: "status:waiting" },
-		result: mockSearchChatsResult,
+		result: MockSearchChatsResult,
 		isError: false,
 		organizationId: "organization-id",
 		mcpServers: [],

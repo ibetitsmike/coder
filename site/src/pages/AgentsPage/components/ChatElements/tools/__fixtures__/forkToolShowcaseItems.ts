@@ -3,7 +3,11 @@
 // stays clean.
 
 import type React from "react";
-import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
+import {
+	MockChatTodoList,
+	MockChatTranscriptResult,
+	MockSearchChatsResult,
+} from "#/testHelpers/forkChatTodos";
 import type { Tool } from "../Tool";
 
 type ForkToolShowcaseItem = Pick<
@@ -22,42 +26,7 @@ export const forkToolShowcaseItems: readonly ForkToolShowcaseItem[] = [
 	{
 		name: "search_chats",
 		args: { query: "status:waiting" },
-		result: {
-			chats: [
-				{
-					chat_id: "11111111-1111-4111-8111-111111111111",
-					title: "Fix flaky e2e suite",
-					status: "waiting",
-					shared: true,
-				},
-				{
-					chat_id: "22222222-2222-4222-8222-222222222222",
-					title: "Migrate chat sidebar to Tailwind",
-					status: "running",
-				},
-			],
-			has_more: false,
-		},
+		result: MockSearchChatsResult,
 	},
-	{
-		name: "read_chat_transcript",
-		result: {
-			chat_id: "11111111-1111-4111-8111-111111111111",
-			title: "Fix flaky e2e suite",
-			messages: [
-				{
-					role: "user",
-					parts: [
-						{ type: "text", text: "Why is the e2e suite flaky on main?" },
-					],
-				},
-				{
-					role: "assistant",
-					parts: [{ type: "tool-call", tool_name: "execute" }],
-					omitted_parts: 3,
-				},
-			],
-			has_more: true,
-		},
-	},
+	{ name: "read_chat_transcript", result: MockChatTranscriptResult },
 ];

@@ -1,43 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
+import { MockChatTranscriptResult } from "#/testHelpers/forkChatTodos";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { Tool } from "./Tool";
 
-const mockChatTranscriptResult = {
-	chat_id: "11111111-1111-4111-8111-111111111111",
-	title: "Fix flaky e2e suite",
-	messages: [
-		{
-			role: "user",
-			parts: [{ type: "text", text: "Why is the e2e suite flaky on main?" }],
-		},
-		{
-			role: "assistant",
-			parts: [
-				{
-					type: "reasoning",
-					text: "Compare the last green run with this one",
-				},
-			],
-			omitted_parts: 2,
-		},
-		{
-			role: "tool",
-			parts: [{ type: "tool-result", tool_name: "execute" }],
-		},
-	],
-	has_more: false,
-};
-
 const mockPagedChatTranscriptResult = {
-	...mockChatTranscriptResult,
-	messages: mockChatTranscriptResult.messages.slice(0, 1),
+	...MockChatTranscriptResult,
+	messages: MockChatTranscriptResult.messages.slice(0, 1),
 	has_more: true,
 };
 
 const mockEmptyChatTranscriptResult = {
-	...mockChatTranscriptResult,
+	...MockChatTranscriptResult,
 	messages: [],
 };
 
@@ -47,7 +22,7 @@ const meta: Meta<typeof Tool> = {
 	args: {
 		name: "read_chat_transcript",
 		status: "completed",
-		result: mockChatTranscriptResult,
+		result: MockChatTranscriptResult,
 		isError: false,
 		organizationId: "organization-id",
 		mcpServers: [],
