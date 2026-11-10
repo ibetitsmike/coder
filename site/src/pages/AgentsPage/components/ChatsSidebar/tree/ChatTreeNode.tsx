@@ -38,6 +38,10 @@ import { ForkAgentTypeBadge } from "../../ForkAgentTypeBadge";
 import { normalizeLocationSearch } from "../locationSearch";
 import { useChatTree } from "./ChatTreeContext";
 import { collectDescendantChats, getParentChatID } from "./chatTree";
+import {
+	ForkFamilyLiveLimitChip,
+	useForkFamilyCapacity,
+} from "./ForkFamilyCapacity";
 import { getModelDisplayName } from "./modelDisplayName";
 import { getChatDisplayConfig } from "./statusConfig";
 
@@ -134,14 +138,26 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 	}, [isStaleTurnSummary]);
 	const displayedTurnSummary = isStaleTurnSummary ? undefined : lastTurnSummary;
 	const isSharedChat = chat.shared;
+	const isExpanded = normalizedSearch ? true : (expandedById[chatID] ?? false);
+	const familyCapacity = useForkFamilyCapacity(
+		chat,
+		isExpanded,
+		chatTree,
+		currentUserId,
+	);
 	const subtitle =
-		errorReason || streamingSubtitle || displayedTurnSummary || modelName;
+		errorReason ||
+		familyCapacity.status?.label ||
+		streamingSubtitle ||
+		displayedTurnSummary ||
+		modelName;
+	const displayConfig = getChatDisplayConfig(chat);
 	const {
 		icon: StatusIcon,
 		className: statusClassName,
 		label: statusLabel,
-		prStatuses,
-	} = getChatDisplayConfig(chat);
+	} = familyCapacity.status ?? displayConfig;
+	const { prStatuses } = displayConfig;
 	const workspaceId = chat.workspace_id;
 	const queryClient = useQueryClient();
 	const mutationKey = chatArchiveMutationKey(chat.id);
@@ -207,7 +223,6 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 		},
 	});
 	const isArchivingThisChat = useIsMutating({ mutationKey }) > 0;
-	const isExpanded = normalizedSearch ? true : (expandedById[chatID] ?? false);
 
 	const canManage = canManageChat(chat, currentUserId);
 
@@ -329,6 +344,9 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 										{chat.title}
 									</span>
 									<ForkAgentTypeBadge chat={chat} />
+									<ForkFamilyLiveLimitChip
+										liveLimit={familyCapacity.liveLimit}
+									/>
 									{chat.has_unread && !isActiveChat && (
 										<span className="sr-only">(unread)</span>
 									)}

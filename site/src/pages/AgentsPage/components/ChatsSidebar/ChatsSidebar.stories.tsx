@@ -23,6 +23,7 @@ import {
 	toChatListParams,
 	userChatProviderConfigsKey,
 } from "#/api/queries/chats";
+import { forkChatFamilyCapacityKey } from "#/api/queries/forkChatFamily";
 import type * as TypesGen from "#/api/typesGenerated";
 import type { Chat } from "#/api/typesGenerated";
 import { MockChat, MockChatDiffStatus } from "#/testHelpers/chatEntities";
@@ -798,6 +799,54 @@ export const NestedSubagentFamily: Story = {
 			location: {
 				path: "/agents/nested-grandchild",
 				pathParams: { agentId: "nested-grandchild" },
+			},
+			routing: agentsRouting,
+		}),
+	},
+};
+
+export const NestedSubagentFamilyAtCapacity: Story = {
+	args: {
+		chats: [
+			buildChat({
+				id: "capacity-root",
+				title: "Capacity root",
+				status: "running",
+				children: [
+					buildChat({
+						id: "capacity-worker-a",
+						title: "Worker A",
+						status: "running",
+						parent_chat_id: "capacity-root",
+						root_chat_id: "capacity-root",
+					}),
+					buildChat({
+						id: "capacity-worker-b",
+						title: "Worker B",
+						status: "running",
+						parent_chat_id: "capacity-root",
+						root_chat_id: "capacity-root",
+					}),
+				],
+			}),
+		],
+	},
+	parameters: {
+		experiments: ["fork-nested-subagents"],
+		queries: [
+			{
+				key: forkChatFamilyCapacityKey("capacity-root"),
+				data: {
+					live_subagents: 2,
+					max_live_subagents: 2,
+					waiting_for_capacity: ["capacity-worker-b"],
+				} satisfies TypesGen.ForkChatFamilyCapacity,
+			},
+		],
+		reactRouter: reactRouterParameters({
+			location: {
+				path: "/agents/capacity-worker-a",
+				pathParams: { agentId: "capacity-worker-a" },
 			},
 			routing: agentsRouting,
 		}),

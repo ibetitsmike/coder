@@ -98,17 +98,19 @@ const buildChat = (overrides: Partial<Chat> = {}): Chat => ({
 type WrapperProps = React.PropsWithChildren<{
 	organizations?: TypesGen.Organization[];
 	initialEntry?: string;
+	experiments?: TypesGen.Experiment[];
 }>;
 
 const Wrapper: React.FC<WrapperProps> = ({
 	children,
 	organizations = [MockDefaultOrganization],
 	initialEntry = "/agents",
+	experiments = [],
 }) => {
 	const queryClient = createTestQueryClient();
 	const dashboardValue = {
 		entitlements: MockEntitlements,
-		experiments: [],
+		experiments,
 		appearance: MockAppearanceConfig,
 		buildInfo: MockBuildInfo,
 		organizations,
@@ -1777,6 +1779,55 @@ describe("ChatsSidebar nested subagents", () => {
 				"/agents/grandchild-1",
 			),
 		);
+	});
+});
+
+describe("ChatsSidebar nested subagent capacity", () => {
+	it("reads the family capacity once the root is expanded", async () => {
+		const user = userEvent.setup();
+		let familyRequests = 0;
+		server.use(
+			http.get("/api/experimental/chats/projects", () => HttpResponse.json([])),
+			http.get("/api/v2/chats/fork/capacity-root/family", () => {
+				familyRequests++;
+				return HttpResponse.json({
+					live_subagents: 2,
+					max_live_subagents: 2,
+					waiting_for_capacity: ["worker-b"],
+				} satisfies TypesGen.ForkChatFamilyCapacity);
+			}),
+		);
+		const workerA = buildChat({
+			id: "worker-a",
+			title: "Worker A",
+			status: "running",
+			parent_chat_id: "capacity-root",
+			root_chat_id: "capacity-root",
+		});
+		const workerB = buildChat({
+			...workerA,
+			id: "worker-b",
+			title: "Worker B",
+		});
+		render(
+			<Wrapper experiments={["fork-nested-subagents"]}>
+				<ChatsSidebar
+					{...defaultProps}
+					chats={[
+						buildChat({
+							id: "capacity-root",
+							title: "Capacity root",
+							children: [workerA, workerB],
+						}),
+					]}
+				/>
+			</Wrapper>,
+		);
+
+		const expand = await screen.findByRole("button", { name: "Expand" });
+		expect(familyRequests).toBe(0);
+		await user.click(expand);
+		await waitFor(() => expect(familyRequests).toBe(1));
 	});
 });
 
