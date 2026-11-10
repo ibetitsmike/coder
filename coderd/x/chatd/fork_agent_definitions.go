@@ -50,6 +50,9 @@ func forkSubagentDefinitions(ctx context.Context, p *Server, chat database.Chat)
 // its tier-qualified name, such as personal/reviewer.
 func forkLookupSubagentDefinition(ctx context.Context, p *Server, chat database.Chat, id string) (subagentDefinition, bool) {
 	if def, ok := lookupSubagentDefinition(id); ok {
+		if def.id == subagentTypeComputerUse && p.agentDefinitionsEnabled() {
+			def = computerUseDefinitionWithExplicitModel(def)
+		}
 		return def, true
 	}
 	types := customAgentTypes(ctx, p, chat)
