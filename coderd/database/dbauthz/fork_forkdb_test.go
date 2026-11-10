@@ -145,6 +145,38 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().UpsertChatDescendantQuestion(gomock.Any(), arg).Return(question, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(question)
 		},
+		"InsertChatSecretAnswer": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := testutil.Fake(t, faker, forkdb.InsertChatSecretAnswerParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().InsertChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"GetChatSecretAnswersByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			answers := []forkdb.ChatSecretAnswer{testutil.Fake(t, faker, forkdb.ChatSecretAnswer{ChatID: chat.ID})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatSecretAnswersByChatID(gomock.Any(), chat.ID).Return(answers, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns(answers)
+		},
+		"DeleteChatSecretAnswer": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: "call_1"}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().DeleteChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"DeleteChatSecretAnswersByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().DeleteChatSecretAnswersByChatID(gomock.Any(), chat.ID).Return(nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"DeleteOldChatSecretAnswers": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			before := dbtime.Now()
+			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), before).Return(int64(1), nil).AnyTimes()
+			check.Args(before).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(1))
+		},
 		"LockChatForNoKeyUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
