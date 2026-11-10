@@ -473,6 +473,63 @@ func TestWakeupPullRequestAfterChild(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }
 
+// A final poll that delivers a done child reads the pull request once more
+// after that turn, and reports only what happened until the expiry.
+func TestWakeupFinalPollAfterChild(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		closedAt    time.Duration
+		wantMessage bool
+		wantReason  string
+	}{
+		{name: "ClosedBeforeExpiry", closedAt: -time.Minute, wantMessage: true, wantReason: "done"},
+		{name: "ClosedAfterExpiry", closedAt: time.Second, wantReason: "expired"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			coordinator := f.createWakeupChat(t)
+			child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
+			events := strings.TrimSuffix(string(childDoneEvents(child)), "]") + "," +
+				strings.TrimPrefix(string(pullRequestEvents([]string{"closed"}, testHeadSHA, gitprovider.CheckStatePending)), "[")
+			// insertWakeup schedules the run at wakeupTestSlot, so this is the
+			// final poll.
+			wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				Events:    json.RawMessage(events),
+				ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+			closed := openPullRequest(gitprovider.CheckStatePending)
+			closed.State, closed.ClosedAt = gitprovider.PRStateClosed, wakeupTestSlot.Add(tc.closedAt)
+			fake := &fakePullRequestActivity{}
+			fake.set(closed, nil)
+			worker.server.forkPullRequestActivity = fake.fetch
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
+			require.Equal(t, []string{childDoneRunKey(child.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+			got := f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+
+			forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
+			worker.wakeupOnce(ctx, got.NextRunAt.Time.Add(time.Second))
+			require.Equal(t, 1, fake.callCount())
+			messages := f.wakeMessages(t, coordinator, wakeup.Prompt)
+			if tc.wantMessage {
+				require.Len(t, messages, 2)
+				require.True(t, strings.HasSuffix(messages[1], "\n- state: closed"), messages[1])
+			} else {
+				require.Len(t, messages, 1)
+			}
+			got = f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+			require.Equal(t, tc.wantReason, got.StatusReason.String)
+		})
+	}
+}
+
 // A pull request with activity pauses a wake-up at the daily run cap instead
 // of sending.
 func TestWakeupPullRequestCap(t *testing.T) {

@@ -395,12 +395,22 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched entry still
-// needs a run, and otherwise polls again after interval.
+// needs a run, and otherwise polls again after interval. One tick delivers at
+// most one entry, so a final poll that delivers one polls the others once
+// more after that turn.
 func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, pending int, interval time.Duration) wakeupFinish {
 	if pending == 0 {
 		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "done", runDelta: runDelta}
 	}
-	return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(interval))
+	next := now.Add(interval)
+	finish := eventsWakeupRunAt(wakeup, now, runDelta, next)
+	if runDelta > 0 && finish.reason == "expired" {
+		if retry, ok := eventsFinalRetry(wakeup, now, next); ok {
+			retry.runDelta = runDelta
+			return retry
+		}
+	}
+	return finish
 }
 
 // eventsWakeupRunAt schedules the next poll of an events wake-up at next. A
