@@ -44,5 +44,9 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	if p.nestedSubagentsEnabled() {
 		tools = p.withDescendantQuestionWait(tools, chat)
 	}
-	return p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat), nil
+	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
+	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		tools = p.withForkSpawnIsolation(tools, chat)
+	}
+	return tools, nil
 }
