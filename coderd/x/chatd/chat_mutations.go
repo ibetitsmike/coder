@@ -84,6 +84,10 @@ func (p *Server) SendMessage(
 	if err != nil {
 		return SendMessageResult{}, err
 	}
+	contentParts, forkLoop, err := p.forkLoopCommand(contentParts)
+	if err != nil {
+		return SendMessageResult{}, err
+	}
 	var (
 		chat           database.Chat
 		requestedModel uuid.NullUUID
@@ -209,6 +213,9 @@ func (p *Server) SendMessage(
 			MaxFileLinks: p.chatLimits.MaxAttachmentsPerChat,
 		})
 		if err != nil {
+			return err
+		}
+		if err := forkLoop.schedule(ctx, store, lockedChat, p.clock.Now()); err != nil {
 			return err
 		}
 
