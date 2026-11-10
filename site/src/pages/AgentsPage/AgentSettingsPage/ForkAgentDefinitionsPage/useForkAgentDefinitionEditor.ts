@@ -37,7 +37,7 @@ type EditorTarget = { organizationId: string } & (
 	  }
 );
 
-const submitError = (
+const toErrorDisplay = (
 	error: unknown,
 	fallback: string,
 ): SkillErrorDisplay | undefined =>
@@ -106,7 +106,7 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 		editorState = {
 			mode: "create",
 			initialValues: emptyAgentDefinitionFormValues,
-			submitError: submitError(
+			submitError: toErrorDisplay(
 				createMutation.error,
 				"Failed to create agent definition.",
 			),
@@ -230,7 +230,10 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 						detail:
 							"Saving would overwrite the newer version. Copy your changes, then close and reopen the editor.",
 					}
-				: submitError(saveMutation.error, "Failed to save agent definition."),
+				: toErrorDisplay(
+						saveMutation.error,
+						"Failed to save agent definition.",
+					),
 			isSubmitting: saveMutation.isPending,
 			onSubmit: ({ content }, onSettled) => {
 				if (isChanged) {
