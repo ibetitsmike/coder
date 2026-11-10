@@ -96,17 +96,19 @@ func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) 
 	}), nil
 }
 
+// recordDescendantQuestion replaces the question of chatID and drops the
+// secret answers of its earlier questions.
 func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage) error {
-	fdb, err := forkdb.From(p.db)
-	if err != nil {
-		return err
-	}
-	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
-		ChatID:     chatID,
-		ToolCallID: callID,
-		Questions:  questions,
-	})
-	return err
+	return forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
+		if _, err := ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+			ChatID:     chatID,
+			ToolCallID: callID,
+			Questions:  questions,
+		}); err != nil {
+			return err
+		}
+		return ftx.DeleteChatSecretAnswersByChatID(ctx, chatID)
+	}, nil)
 }
 
 // pendingDescendantQuestion returns the unanswered question of chatID, or

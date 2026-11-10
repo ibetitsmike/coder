@@ -3159,6 +3159,9 @@ func (api *API) postChatMessages(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	response, err := api.sendChatMessage(ctx, apiKey.UserID, chat, req)
 	if err != nil {
@@ -3456,6 +3459,9 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 
 	var req codersdk.EditChatMessageRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
+		return
+	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
@@ -3798,6 +3804,9 @@ func (api *API) patchChatQueuedMessage(rw http.ResponseWriter, r *http.Request) 
 			Message: "model_config_id and reasoning_effort require content.",
 			Detail:  "The overrides apply to the content they are sent with.",
 		})
+		return
+	}
+	if req.Content != nil && maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
@@ -8848,6 +8857,9 @@ func (api *API) createChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 		if err := validateChatModelConfigProviderModel(lockedAIProvider, insertParams.Model, req.ModelConfig); err != nil {
 			return err
 		}
+		if err := validateChatModelAliases(ctx, tx, insertParams.OrganizationID, inserted.ID, insertParams.AIProviderID, insertParams.Options); err != nil {
+			return err
+		}
 		providerType = lockedAIProvider.Type
 
 		transition, err := ensureDefaultChatModelConfig(ctx, tx, insertParams.OrganizationID)
@@ -9041,6 +9053,9 @@ func (api *API) updateChatModelConfig(rw http.ResponseWriter, r *http.Request) {
 			if err := validateChatModelConfigProviderModel(aiProvider, updateParams.Model, unmarshalChatModelCallConfig(modelConfigRaw)); err != nil {
 				return err
 			}
+		}
+		if err := validateChatModelAliases(ctx, tx, lockedExisting.OrganizationID, lockedExisting.ID, updateParams.AIProviderID, updateParams.Options); err != nil {
+			return err
 		}
 
 		setAsDefault := updateParams.IsDefault && !lockedExisting.IsDefault
@@ -9424,7 +9439,8 @@ func isZeroChatModelCallConfig(config *codersdk.ChatModelCallConfig) bool {
 		config.FrequencyPenalty == nil &&
 		config.ReasoningEffort == nil &&
 		isZeroChatModelOpenAIConfig(config.OpenAIConfig) &&
-		isZeroChatModelProviderOptions(config.ProviderOptions)
+		isZeroChatModelProviderOptions(config.ProviderOptions) &&
+		len(config.Aliases) == 0
 }
 
 func isZeroChatModelOpenAIConfig(config *codersdk.ChatModelOpenAIConfig) bool {
