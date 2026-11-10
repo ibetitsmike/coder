@@ -38,6 +38,17 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			req,
 		}: UpdateUserAgentDefinitionArgs) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
+		// Writing the result keeps an accepted change visible even if the
+		// reconciling refetch below fails.
+		onSuccess: ({ content: _content, ...updated }, { organizationId }) => {
+			queryClient.setQueryData(
+				userAgentDefinitions(organizationId).queryKey,
+				(definitions) =>
+					definitions?.map((definition) =>
+						definition.id === updated.id ? updated : definition,
+					),
+			);
+		},
 		onSettled: (_data, _error, { organizationId }) =>
 			queryClient.invalidateQueries({
 				queryKey: userAgentDefinitionsKey(organizationId),
@@ -53,12 +64,20 @@ type DeleteUserAgentDefinitionArgs = {
 /**
  * Mutation options that delete one of the current user's agent definitions.
  * The list is invalidated after failures too, because a 404 or a lost
- * response can mean the definition is already gone.
+ * response can mean the definition is already gone. A success also removes
+ * the row from the cache so a failed refetch cannot leave it actionable.
  */
 export const deleteUserAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ organizationId, name }: DeleteUserAgentDefinitionArgs) =>
 			deleteUserAgentDefinitionRequest(organizationId, name),
+		onSuccess: (_data, { organizationId, name }) => {
+			queryClient.setQueryData(
+				userAgentDefinitions(organizationId).queryKey,
+				(definitions) =>
+					definitions?.filter((definition) => definition.name !== name),
+			);
+		},
 		onSettled: (_data, _error, { organizationId }) =>
 			queryClient.invalidateQueries({
 				queryKey: userAgentDefinitionsKey(organizationId),

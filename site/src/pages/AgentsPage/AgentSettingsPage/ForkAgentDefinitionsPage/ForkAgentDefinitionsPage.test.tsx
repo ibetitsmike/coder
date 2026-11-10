@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import { userAgentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
 import type {
 	Experiment,
 	ForkAgentDefinition,
@@ -32,12 +33,12 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	const getDefinitions = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
 		.mockResolvedValue([MockForkAgentDefinitionMetadata]);
-	const { router } = renderWithAuth(<ForkAgentDefinitionsPage />, {
+	const { queryClient, router } = renderWithAuth(<ForkAgentDefinitionsPage />, {
 		path: "/agents/settings/agent-definitions",
 		route: "/agents/settings/agent-definitions",
 		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
 	});
-	return { getDefinitions, router };
+	return { getDefinitions, queryClient, router };
 };
 
 afterEach(() => {
@@ -104,6 +105,28 @@ describe("ForkAgentDefinitionsPage", () => {
 		);
 	});
 
+	it("keeps an accepted toggle when the list refetch fails", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const updated = { ...MockForkAgentDefinitionMetadata, enabled: false };
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue({ ...updated, content: "" });
+
+		const toggle = await screen.findByRole("switch", {
+			name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+		});
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(toggle);
+
+		await waitFor(() =>
+			expect(queryClient.getQueryState(key)?.status).toBe("error"),
+		);
+		expect(queryClient.getQueryData(key)).toEqual([updated]);
+	});
+
 	it("reports a failed toggle with the server message", async () => {
 		const user = userEvent.setup();
 		renderPage();
@@ -161,6 +184,30 @@ describe("ForkAgentDefinitionsPage", () => {
 				screen.getByRole("table", { name: "Agent definitions" }),
 			).toHaveFocus(),
 		);
+	});
+
+	it("drops a deleted definition when the list refetch fails", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"deleteUserAgentDefinition",
+		).mockResolvedValue();
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+		await waitFor(() =>
+			expect(queryClient.getQueryState(key)?.status).toBe("error"),
+		);
+		expect(queryClient.getQueryData(key)).toEqual([]);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
