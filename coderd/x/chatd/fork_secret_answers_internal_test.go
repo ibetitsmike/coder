@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"os/exec"
 	"runtime"
-	"strings"
 	"testing"
 
 	"charm.land/fantasy"

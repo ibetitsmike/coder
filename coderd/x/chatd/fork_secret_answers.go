@@ -353,3 +353,26 @@ func scrubSecretFragments(text, form, placeholder string) string {
 	}
 	return out.String()
 }
+
+// jsonStringContent returns value as json.Marshal writes it inside a JSON
+// string.
+func jsonStringContent(value string) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	return string(data[1 : len(data)-1])
+}
+
+// jsonStringContentNoHTMLEscape is jsonStringContent for an encoder that
+// leaves <, > and & as they are.
+func jsonStringContentNoHTMLEscape(value string) string {
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		return value
+	}
+	data := strings.TrimSuffix(buf.String(), "\n")
+	return data[1 : len(data)-1]
+}
