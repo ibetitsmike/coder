@@ -93,6 +93,7 @@ WHERE id IN (
             SELECT 1
             FROM chats c
             WHERE c.id = cw.chat_id
+                AND NOT c.archived
                 AND (
                     c.status IN ('running', 'interrupting', 'requires_action', 'paused')
                     OR (
@@ -119,6 +120,7 @@ type ClaimDueChatWakeupsParams struct {
 // would queue a new message stay unclaimed, so they cannot fill the batch and
 // starve the rows of idle chats. Those are the busy and paused chats, and the
 // errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
+// Archived chats are always claimed so the worker cancels their wake-ups.
 func (q *Queries) ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error) {
 	rows, err := q.db.QueryContext(ctx, claimDueChatWakeups, arg.LeaseExpiresAt, arg.Now, arg.LimitCount)
 	if err != nil {
