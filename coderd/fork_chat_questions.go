@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/db2sdk"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpapi/httperror"
@@ -162,14 +164,32 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 
 	// Errors stay out of the responses below: a database error can quote
 	// the value.
-	err = fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+	insert := forkdb.InsertChatSecretAnswerParams{
 		ChatID:     chat.ID,
 		ToolCallID: toolCallID,
 		Value:      req.Value,
-	})
+	}
+	err = fdb.InsertChatSecretAnswer(ctx, insert)
 	if database.IsUniqueViolation(err) {
-		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
-		return
+		// The owner can delete the queued message that reports an answer,
+		// so the question stays pending with an answer the chat never
+		// learns of. Only an answer whose message is still queued counts.
+		var queued bool
+		queued, err = secretAnswerQueued(ctx, api.Database, chat.ID, toolCallID)
+		if err == nil && queued {
+			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+			return
+		}
+		if err == nil {
+			err = fdb.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: toolCallID})
+		}
+		if err == nil {
+			err = fdb.InsertChatSecretAnswer(ctx, insert)
+		}
+		if database.IsUniqueViolation(err) {
+			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
+			return
+		}
 	}
 	if err != nil {
 		api.Logger.Error(ctx, "insert secret answer", slog.F("chat_id", chat.ID))
@@ -200,6 +220,24 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// secretAnswerQueued reports whether a queued message of the chat reports
+// the answer to the question of toolCallID.
+func secretAnswerQueued(ctx context.Context, db database.Store, chatID uuid.UUID, toolCallID string) (bool, error) {
+	messages, err := db.GetChatQueuedMessages(ctx, chatID)
+	if err != nil {
+		return false, err
+	}
+	prefix := questionAnswerPrefix + toolCallID + ":"
+	for _, message := range messages {
+		for _, part := range db2sdk.ChatQueuedMessage(message).Content {
+			if part.Type == codersdk.ChatMessagePartTypeText && strings.HasPrefix(part.Text, prefix) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // rejectSecretQuestionAnswer refuses every message to a chat whose pending
