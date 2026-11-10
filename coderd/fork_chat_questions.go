@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -169,31 +170,8 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 	}
 	err = fdb.InsertChatSecretAnswer(ctx, insert)
 	if database.IsUniqueViolation(err) {
-		// The owner can delete the queued message that reports an answer,
-		// so the question stays pending with an answer the chat never
-		// learns of. Only an answer whose message is still queued counts.
-		var queued bool
-		queued, err = secretAnswerQueued(ctx, api.Database, chat.ID, toolCallID)
-		if err == nil && queued {
-			// Reads skip an answer past its TTL before dbpurge deletes
-			// it, so an expired answer is replaced like an unreported one.
-			queued, err = secretAnswerLive(ctx, fdb, chat.ID, toolCallID)
-		}
-		if err == nil && queued {
-			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
-			return
-		}
-		if err == nil {
-			// One transaction, so a concurrent request never sees the
-			// question without an answer.
-			err = forkdb.InTx(api.Database, func(_ database.Store, ftx forkdb.Store) error {
-				if delErr := ftx.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: toolCallID}); delErr != nil {
-					return delErr
-				}
-				return ftx.InsertChatSecretAnswer(ctx, insert)
-			}, nil)
-		}
-		if database.IsUniqueViolation(err) {
+		err = replaceUnreportedSecretAnswer(ctx, api.Database, insert)
+		if errors.Is(err, errSecretAnswerReported) || database.IsUniqueViolation(err) {
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{Message: "The question already has an answer."})
 			return
 		}
@@ -217,6 +195,50 @@ func (api *API) postChatSecretAnswer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// errSecretAnswerReported means that a queued or delivered message
+// reports the stored answer.
+var errSecretAnswerReported = xerrors.New("the secret answer is reported")
+
+// replaceUnreportedSecretAnswer replaces the stored answer to the question
+// of arg.ToolCallID when no message reports it: the owner can delete the
+// queued message that reports an answer, and a failed send leaves none.
+// The chat row lock serializes it with the queue's promotion, so the
+// message cannot be delivered between the check and the replacement.
+func replaceUnreportedSecretAnswer(ctx context.Context, db database.Store, arg forkdb.InsertChatSecretAnswerParams) error {
+	return forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
+		if _, err := tx.GetChatByIDForUpdate(ctx, arg.ChatID); err != nil {
+			return err
+		}
+		// A delivered message answers the question.
+		question, err := ftx.GetPendingChatDescendantQuestion(ctx, arg.ChatID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && question.ToolCallID != arg.ToolCallID) {
+			return errSecretAnswerReported
+		}
+		if err != nil {
+			return err
+		}
+		queued, err := secretAnswerQueued(ctx, tx, arg.ChatID, arg.ToolCallID)
+		if err != nil {
+			return err
+		}
+		if queued {
+			// Reads skip an answer past its TTL before dbpurge deletes
+			// it, so an expired answer is replaced like an unreported one.
+			queued, err = secretAnswerLive(ctx, ftx, arg.ChatID, arg.ToolCallID)
+			if err != nil {
+				return err
+			}
+		}
+		if queued {
+			return errSecretAnswerReported
+		}
+		if err := ftx.DeleteChatSecretAnswer(ctx, forkdb.DeleteChatSecretAnswerParams{ChatID: arg.ChatID, ToolCallID: arg.ToolCallID}); err != nil {
+			return err
+		}
+		return ftx.InsertChatSecretAnswer(ctx, arg)
+	}, nil)
 }
 
 // secretAnswerQueued reports whether a queued message of the chat reports
@@ -249,8 +271,8 @@ func secretAnswerLive(ctx context.Context, fdb forkdb.Store, chatID uuid.UUID, t
 	}), nil
 }
 
-// rejectSecretQuestionAnswer refuses every message to a chat whose pending
-// question is secret. Any user message answers the pending question, and
+// rejectSecretQuestionAnswer refuses every message, new or edited, to a chat
+// whose pending question is secret. Any user message answers the pending question, and
 // only postChatSecretAnswer keeps the value out of the chat's messages.
 // Errors implement httperror.Responder.
 func (api *API) rejectSecretQuestionAnswer(ctx context.Context, chat database.Chat) error {
