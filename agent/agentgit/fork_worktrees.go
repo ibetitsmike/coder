@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,10 @@ import (
 )
 
 const maxWorktreeNameBytes = 128
+
+// worktreeRequestTimeout bounds a worktree request. Checking out or removing
+// a large tree can outlast the agent API server's 20 second WriteTimeout.
+const worktreeRequestTimeout = 10 * time.Minute
 
 // worktreeAPI creates and removes git worktrees under root, laid out as
 // <root>/<repo>/<name>.
@@ -60,9 +66,21 @@ func newWorktreeAPI(logger slog.Logger, opts ...Option) *worktreeAPI {
 
 func (a *worktreeAPI) routes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(a.extendDeadline)
 	r.Post("/", a.handleCreate)
 	r.Delete("/", a.handleDelete)
 	return r
+}
+
+func (a *worktreeAPI) extendDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if err := http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(worktreeRequestTimeout)); err != nil {
+			a.logger.Warn(r.Context(), "extend worktree request write deadline", slog.Error(err))
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), worktreeRequestTimeout)
+		defer cancel()
+		next.ServeHTTP(rw, r.WithContext(ctx))
+	})
 }
 
 // gitError carries git's trimmed stderr so responses can explain failures.
@@ -82,7 +100,12 @@ func (e *gitError) Error() string {
 func (e *gitError) Unwrap() error { return e.err }
 
 func (a *worktreeAPI) git(ctx context.Context, dir string, args ...string) (string, error) {
+	return a.gitWithInput(ctx, dir, nil, args...)
+}
+
+func (a *worktreeAPI) gitWithInput(ctx context.Context, dir string, stdin io.Reader, args ...string) (string, error) {
 	cmd := a.execer.CommandContext(ctx, a.gitBin, append([]string{"-C", dir}, args...)...)
+	cmd.Stdin = stdin
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -189,6 +212,11 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusBadRequest, fmt.Sprintf("repository %s contains the worktree root %s; worktrees must live outside the repository", top, root), nil)
 		return
 	}
+	// MkdirAll keeps the mode of an existing root.
+	if err := os.Chmod(root, 0o700); err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to restrict the worktree root permissions.", err)
+		return
+	}
 	parent := filepath.Join(root, repoName)
 	path := filepath.Join(parent, req.Name)
 	if _, err := os.Lstat(path); err == nil {
@@ -230,7 +258,7 @@ func (a *worktreeAPI) handleCreate(rw http.ResponseWriter, r *http.Request) {
 
 // discardWorktree undoes a worktree add whose result failed validation.
 func (a *worktreeAPI) discardWorktree(ctx context.Context, top, path, branch string) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), worktreeRequestTimeout)
 	defer cancel()
 	if _, err := a.git(cleanupCtx, top, "worktree", "remove", "--force", "--", path); err != nil {
 		a.logger.Warn(ctx, "failed to discard worktree", slog.F("path", path), slog.Error(err))
@@ -332,8 +360,17 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree HEAD commit.", err)
 		return
 	}
-	revList := []string{"rev-list", "--count", oid, "--not", "--exclude=refs/heads/" + req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--"}
-	count, err := a.git(ctx, path, revList...)
+	// Removing the worktree deletes the HEAD and branch reflogs, the last
+	// refs to commits a reset moved the branch away from.
+	logged, err := a.git(ctx, path, "log", "--walk-reflogs", "--format=%H", "HEAD", "refs/heads/"+req.Branch, "--")
+	if err != nil {
+		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to read the worktree reflogs.", err)
+		return
+	}
+	// Reflogs can outgrow argv, so the commits go through --stdin, which
+	// reads them as positive revisions ahead of --not.
+	count, err := a.gitWithInput(ctx, path, strings.NewReader(oid+"\n"+logged),
+		"rev-list", "--count", "--stdin", "--not", "--exclude=refs/heads/"+req.Branch, "--glob=refs/heads/*", "--glob=refs/remotes/*", "--")
 	if err != nil {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to count unpushed commits.", err)
 		return
@@ -346,24 +383,11 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 	args := []string{"worktree", "remove"}
 	// git refuses to remove a worktree with initialized submodules without
 	// --force; the status check above already proved the tree clean.
-	if _, err := os.Stat(filepath.Join(gitDir, "modules")); err == nil {
-		out, err := a.git(ctx, path, "submodule", "foreach", "--quiet", "--recursive", "git rev-list --count --all --not --remotes")
+	if modules := filepath.Join(gitDir, "modules"); dirExists(modules) {
+		sum, err := a.countModuleLocalCommits(ctx, modules)
 		if err != nil {
 			writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
 			return
-		}
-		sum := 0
-		for _, line := range strings.Split(out, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			n, err := strconv.Atoi(line)
-			if err != nil {
-				writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
-				return
-			}
-			sum += n
 		}
 		if sum > 0 {
 			writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("worktree %s has %d submodule commits that are not on any remote; push them first", path, sum), nil)
@@ -384,7 +408,69 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		writeWorktreeError(ctx, rw, http.StatusInternalServerError, fmt.Sprintf("Removed worktree %s but failed to delete branch %s.", path, req.Branch), err)
 		return
 	}
+	// update-ref leaves the upstream settings that git branch -d would
+	// remove, and a later branch with the same name would inherit them.
+	if _, err := a.git(ctx, commonDir, "config", "--local", "--get-regexp", `^branch\.`+regexp.QuoteMeta(req.Branch)+`\.`); err == nil {
+		if _, err := a.git(ctx, commonDir, "config", "--local", "--remove-section", "branch."+req.Branch); err != nil {
+			a.logger.Warn(ctx, "remove config of deleted worktree branch", slog.F("branch", req.Branch), slog.Error(err))
+		}
+	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// countModuleLocalCommits counts the commits on no remote in every
+// repository under modules. It walks the directory instead of using git
+// submodule foreach, which skips deinitialized submodules whose repositories
+// --force would still delete.
+func (a *worktreeAPI) countModuleLocalCommits(ctx context.Context, modules string) (int, error) {
+	entries, err := os.ReadDir(modules)
+	if err != nil {
+		return 0, xerrors.Errorf("read %s: %w", modules, err)
+	}
+	sum := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		p := filepath.Join(modules, entry.Name())
+		// A directory that is not a git dir is a path segment of a
+		// submodule name with slashes. Inside a git dir only its own
+		// modules directory holds nested submodules.
+		next := p
+		if isGitDir(p) {
+			// --reflog keeps commits made on a detached HEAD that was then
+			// moved back to the recorded commit.
+			out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--reflog", "--not", "--remotes")
+			if err != nil {
+				return 0, err
+			}
+			n, err := strconv.Atoi(out)
+			if err != nil {
+				return 0, xerrors.Errorf("parse commit count of %s: %w", p, err)
+			}
+			sum += n
+			next = filepath.Join(p, "modules")
+			if !dirExists(next) {
+				continue
+			}
+		}
+		n, err := a.countModuleLocalCommits(ctx, next)
+		if err != nil {
+			return 0, err
+		}
+		sum += n
+	}
+	return sum, nil
+}
+
+func isGitDir(p string) bool {
+	_, err := os.Stat(filepath.Join(p, "HEAD"))
+	return err == nil && dirExists(filepath.Join(p, "objects"))
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
 func absGitPath(dir, p string) string {

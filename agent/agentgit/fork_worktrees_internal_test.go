@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -308,6 +309,44 @@ func TestForkWorktreeCreateRejects(t *testing.T) {
 	}
 }
 
+func TestForkWorktreeCreateTightensExistingRoot(t *testing.T) {
+	t.Parallel()
+
+	h, root := newTestWorktreeAPI(t)
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.Chmod(root, 0o755))
+
+	wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: wtInitRepo(t), Name: "child", Branch: "feature"})
+
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
+// The agent API server's WriteTimeout is shorter than a checkout of a large
+// repository, so a slow post-checkout hook stands in for one.
+func TestForkWorktreeCreateOutlastsWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	hook := filepath.Join(repo, ".git", "hooks", "post-checkout")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nsleep 1\n"), 0o755))
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config.WriteTimeout = 200 * time.Millisecond
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	data, err := json.Marshal(workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(testutil.Context(t, testutil.WaitLong), http.MethodPost, srv.URL, bytes.NewReader(data))
+	require.NoError(t, err)
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
 func TestForkWorktreeCreateFailedHookRollsBack(t *testing.T) {
 	t.Parallel()
 
@@ -441,6 +480,16 @@ func TestForkWorktreeDelete(t *testing.T) {
 			wantMessage: "branch feature has 1 commits that are not on any other branch or remote",
 		},
 		{
+			name: "CommitOnlyInReflog",
+			setup: func(t *testing.T, _, _ string, wt workspacesdk.ForkWorktree) string {
+				wtCommit(t, wt.Path, "reset away\n")
+				wtGit(t, wt.Path, "reset", "--hard", "HEAD~1")
+				return wt.Path
+			},
+			wantStatus:  http.StatusConflict,
+			wantMessage: "branch feature has 1 commits that are not on any other branch or remote",
+		},
+		{
 			name: "RelativePath",
 			setup: func(t *testing.T, _, root string, wt workspacesdk.ForkWorktree) string {
 				rel, err := filepath.Rel(root, wt.Path)
@@ -538,6 +587,39 @@ func TestForkWorktreeDelete(t *testing.T) {
 	}
 }
 
+func TestForkWorktreeDeleteRemovesBranchConfig(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	wtGit(t, repo, "config", "branch.feature.remote", "origin")
+	wtGit(t, repo, "config", "branch.feature.merge", "refs/heads/feature")
+
+	rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	err := exec.Command("git", "-C", repo, "config", "--get-regexp", `^branch\.feature\.`).Run()
+	require.Error(t, err, "branch feature config must be removed")
+}
+
+// More reflog entries than fit in one argv must not break the unpushed
+// check.
+func TestForkWorktreeDeleteLongReflog(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestWorktreeAPI(t)
+	repo := wtInitRepo(t)
+	wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+	oid := wtGit(t, wt.Path, "rev-parse", "HEAD")
+	entry := oid + " " + oid + " Test <test@example.com> 1700000000 +0000\tcheckout: moving\n"
+	logs := filepath.Join(wtGit(t, wt.Path, "rev-parse", "--absolute-git-dir"), "logs", "HEAD")
+	require.NoError(t, os.WriteFile(logs, []byte(strings.Repeat(entry, 80000)), 0o600))
+
+	rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.NoDirExists(t, wt.Path)
+}
+
 func TestForkWorktreeDeleteWrongBranch(t *testing.T) {
 	t.Parallel()
 
@@ -555,7 +637,7 @@ func TestForkWorktreeDeleteWrongBranch(t *testing.T) {
 	assert.NotEmpty(t, wtGit(t, repo, "branch", "--list", "other"), "branch other must be kept")
 }
 
-func wtInitSubmoduleRepo(t *testing.T) string {
+func wtInitSubmoduleRepo(t *testing.T, path string) string {
 	t.Helper()
 	repo := wtInitRepo(t)
 	sub := filepath.Join(filepath.Dir(repo), "sub")
@@ -564,7 +646,7 @@ func wtInitSubmoduleRepo(t *testing.T) string {
 	require.NoError(t, os.WriteFile(filepath.Join(sub, "lib.txt"), []byte("lib\n"), 0o600))
 	wtGit(t, sub, "add", "lib.txt")
 	wtGit(t, sub, "commit", "-m", "sub commit")
-	wtGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", sub, "sub")
+	wtGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", sub, path)
 	wtGit(t, repo, "commit", "-m", "add submodule")
 	return repo
 }
@@ -575,7 +657,7 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 	t.Run("Clean", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newTestWorktreeAPI(t)
-		repo := wtInitSubmoduleRepo(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
 		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
 		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
 
@@ -589,7 +671,7 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 	t.Run("DirtySubmodule", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newTestWorktreeAPI(t)
-		repo := wtInitSubmoduleRepo(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
 		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
 		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
 		require.NoError(t, os.WriteFile(filepath.Join(wt.Path, "sub", "scratch.txt"), []byte("scratch\n"), 0o600))
@@ -603,7 +685,7 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 	t.Run("DirtySubmoduleIgnoredByConfig", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newTestWorktreeAPI(t)
-		repo := wtInitSubmoduleRepo(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
 		wtGit(t, repo, "config", "submodule.sub.ignore", "all")
 		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
 		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
@@ -618,7 +700,7 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 	t.Run("SubmoduleLocalCommits", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newTestWorktreeAPI(t)
-		repo := wtInitSubmoduleRepo(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
 		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
 		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
 		sub := filepath.Join(wt.Path, "sub")
@@ -626,6 +708,79 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 		wtGit(t, sub, "switch", "-c", "local")
 		wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
 		wtGit(t, sub, "checkout", "--detach", r)
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.DirExists(t, wt.Path)
+	})
+
+	t.Run("SubmoduleReflogOnlyCommit", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		sub := filepath.Join(wt.Path, "sub")
+		r := wtGit(t, sub, "rev-parse", "HEAD")
+		wtGit(t, sub, "commit", "--allow-empty", "-m", "detached")
+		wtGit(t, sub, "checkout", "--detach", r)
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.DirExists(t, wt.Path)
+	})
+
+	for _, path := range []string{"refs", "libs/sub"} {
+		t.Run("LocalCommitsInSubmoduleAt_"+strings.ReplaceAll(path, "/", "_"), func(t *testing.T) {
+			t.Parallel()
+			h, _ := newTestWorktreeAPI(t)
+			repo := wtInitSubmoduleRepo(t, path)
+			wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+			wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+			sub := filepath.Join(wt.Path, path)
+			r := wtGit(t, sub, "rev-parse", "HEAD")
+			wtGit(t, sub, "switch", "-c", "local")
+			wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
+			wtGit(t, sub, "checkout", "--detach", r)
+
+			rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+			assert.DirExists(t, wt.Path)
+		})
+	}
+
+	// Only a git dir's modules directory holds nested submodules, so a
+	// repository elsewhere in its metadata, such as a cache, is not one.
+	t.Run("RepositoryInSubmoduleMetadata", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		cache := filepath.Join(wtGit(t, filepath.Join(wt.Path, "sub"), "rev-parse", "--absolute-git-dir"), "cache", "repo")
+		require.NoError(t, os.MkdirAll(cache, 0o755))
+		wtGit(t, cache, "init", "--bare")
+		wtGit(t, repo, "push", cache, "HEAD:refs/heads/main")
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		assert.NoDirExists(t, wt.Path)
+	})
+
+	t.Run("DeinitializedSubmoduleLocalCommits", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t, "sub")
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		sub := filepath.Join(wt.Path, "sub")
+		wtGit(t, sub, "switch", "-c", "local")
+		wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
+		wtGit(t, wt.Path, "submodule", "deinit", "-f", "sub")
 
 		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
 
