@@ -33,7 +33,7 @@ func TestForkChatOrganizationSubagentLimits(t *testing.T) {
 
 		got, err := orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
-		require.Equal(t, codersdk.ForkOrganizationSubagentLimits{}, got, "an organization without limits uses the deployment values")
+		require.Equal(t, codersdk.ForkOrganizationSubagentLimits{}, got.Organization, "an organization without limits uses the deployment values")
 
 		want := codersdk.ForkOrganizationSubagentLimits{
 			MaxDepth:               ptr.Ref[int32](3),
@@ -43,10 +43,10 @@ func TestForkChatOrganizationSubagentLimits(t *testing.T) {
 		}
 		updated, err := orgAdmin.UpdateForkOrganizationSubagentLimits(ctx, orgID, want)
 		require.NoError(t, err)
-		require.Equal(t, want, updated)
+		require.Equal(t, want, updated.Organization)
 		got, err = orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
-		require.Equal(t, want, got)
+		require.Equal(t, want, got.Organization)
 
 		for _, invalid := range []codersdk.ForkOrganizationSubagentLimits{
 			{MaxDepth: ptr.Ref[int32](0)},
@@ -66,13 +66,88 @@ func TestForkChatOrganizationSubagentLimits(t *testing.T) {
 
 		got, err = auditor.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
-		require.Equal(t, want, got)
+		require.Equal(t, want, got.Organization)
 		_, err = auditor.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{})
 		_ = requireSDKError(t, err, http.StatusForbidden)
 
 		got, err = orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
 		require.NoError(t, err)
-		require.Equal(t, want, got, "rejected writes change nothing")
+		require.Equal(t, want, got.Organization, "rejected writes change nothing")
+	})
+
+	t.Run("DeploymentAndEffective", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := coderdtest.New(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkNestedSubagents)}
+				dv.AI.Chat.Fork.MaxSubagentDepth = 4
+				dv.AI.Chat.Fork.MaxConcurrentSubagents = 0
+				dv.AI.Chat.Fork.MaxConcurrentSubagentsPerFamily = 3
+				dv.AI.Chat.Fork.MaxLiveSubagentsPerFamily = 5
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		orgAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(orgID))
+		auditor, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAuditor(orgID))
+
+		deployment := codersdk.ForkSubagentLimitValues{MaxDepth: 4, MaxConcurrent: 0, MaxConcurrentPerFamily: 3, MaxLivePerFamily: 5}
+		got, err := orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ForkOrganizationSubagentLimitsResponse{
+			Deployment: deployment,
+			Effective:  deployment,
+		}, got, "an organization without limits is under the deployment limits")
+
+		orgLimits := codersdk.ForkOrganizationSubagentLimits{
+			MaxDepth:               ptr.Ref[int32](2),
+			MaxConcurrent:          ptr.Ref[int32](7),
+			MaxConcurrentPerFamily: ptr.Ref[int32](6),
+			MaxLivePerFamily:       ptr.Ref[int32](2),
+		}
+		want := codersdk.ForkOrganizationSubagentLimitsResponse{
+			Organization: orgLimits,
+			Deployment:   deployment,
+			Effective: codersdk.ForkSubagentLimitValues{
+				// The organization's depth is lower.
+				MaxDepth: 2,
+				// The deployment sets no limit, so the organization's applies.
+				MaxConcurrent: 7,
+				// The deployment's limit is lower.
+				MaxConcurrentPerFamily: 3,
+				// The organization's limit is lower.
+				MaxLivePerFamily: 2,
+			},
+		}
+		updated, err := orgAdmin.UpdateForkOrganizationSubagentLimits(ctx, orgID, orgLimits)
+		require.NoError(t, err)
+		require.Equal(t, want, updated)
+		got, err = orgAdmin.ForkOrganizationSubagentLimits(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		got, err = auditor.ForkOrganizationSubagentLimits(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("DefaultDepth", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := coderdtest.New(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkNestedSubagents)}
+				dv.AI.Chat.Fork.MaxSubagentDepth = 0
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+
+		got, err := client.ForkOrganizationSubagentLimits(ctx, owner.OrganizationID)
+		require.NoError(t, err)
+		require.EqualValues(t, codersdk.DefaultChatMaxSubagentDepth, got.Deployment.MaxDepth)
+		require.EqualValues(t, codersdk.DefaultChatMaxSubagentDepth, got.Effective.MaxDepth)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {

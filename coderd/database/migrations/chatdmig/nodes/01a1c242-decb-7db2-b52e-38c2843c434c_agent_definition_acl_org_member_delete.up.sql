@@ -11,7 +11,12 @@ BEGIN
     SET
         user_acl = user_acl - OLD.user_id::text,
         updated_at = now()
-    WHERE organization_id = OLD.organization_id AND user_acl ? OLD.user_id::text;
+    -- Only organization-tier rows carry ACLs, and this filter uses their
+    -- partial index.
+    WHERE organization_id = OLD.organization_id
+        AND user_id IS NULL
+        AND project_id IS NULL
+        AND user_acl ? OLD.user_id::text;
     RETURN OLD;
 END;
 $$;
@@ -33,4 +38,4 @@ SET user_acl = (
             AND organization_members.user_id::text = entry.key
     )
 )
-WHERE user_acl <> '{}'::jsonb;
+WHERE user_id IS NULL AND project_id IS NULL AND user_acl <> '{}'::jsonb;
