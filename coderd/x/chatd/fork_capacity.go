@@ -30,34 +30,18 @@ type forkSubagentLimits struct {
 // subagentLimits returns the subagent limits of chats in the organization:
 // the deployment values, lowered by the organization's where it sets them.
 func (p *Server) subagentLimits(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID) (forkSubagentLimits, error) {
-	deployment := p.chatLimits.Fork
 	//nolint:gocritic // Chat creators cannot read organization config, so chatd reads it.
 	org, err := fdb.GetChatOrganizationSubagentLimits(dbauthz.AsChatd(ctx), organizationID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return forkSubagentLimits{}, xerrors.Errorf("get subagent limits of organization %s: %w", organizationID, err)
 	}
-	limits := forkSubagentLimits{
-		maxDepth:               deployment.MaxSubagentDepth,
-		maxConcurrent:          effectiveCapacityLimit(deployment.MaxConcurrentSubagents, org.MaxConcurrent),
-		maxConcurrentPerFamily: effectiveCapacityLimit(deployment.MaxConcurrentSubagentsPerFamily, org.MaxConcurrentPerFamily),
-		maxLivePerFamily:       effectiveCapacityLimit(deployment.MaxLiveSubagentsPerFamily, org.MaxLivePerFamily),
-	}
-	if org.MaxDepth.Valid {
-		limits.maxDepth = min(limits.maxDepth, int(org.MaxDepth.Int32))
-	}
-	return limits, nil
-}
-
-// effectiveCapacityLimit lowers the deployment limit to the organization's.
-// 0 means no limit.
-func effectiveCapacityLimit(deployment int, org sql.NullInt32) int {
-	if !org.Valid {
-		return deployment
-	}
-	if deployment == 0 {
-		return int(org.Int32)
-	}
-	return min(deployment, int(org.Int32))
+	limits := EffectiveSubagentLimits(p.chatLimits.Fork, org)
+	return forkSubagentLimits{
+		maxDepth:               limits.MaxSubagentDepth,
+		maxConcurrent:          limits.MaxConcurrentSubagents,
+		maxConcurrentPerFamily: limits.MaxConcurrentSubagentsPerFamily,
+		maxLivePerFamily:       limits.MaxLiveSubagentsPerFamily,
+	}, nil
 }
 
 // subagentRootChatID returns the root chat of the family that chat belongs

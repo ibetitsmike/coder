@@ -4615,6 +4615,319 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/agent-definitions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List organization agent definitions",
+                "operationId": "list-organization-agent-definitions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ForkAgentDefinitionMetadata"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Create an organization agent definition",
+                "operationId": "create-an-organization-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.CreateForkAgentDefinitionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get an organization agent definition",
+                "operationId": "get-an-organization-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Delete an organization agent definition",
+                "operationId": "delete-an-organization-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update an organization agent definition",
+                "operationId": "update-an-organization-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateForkAgentDefinitionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get an organization agent definition ACL",
+                "operationId": "get-an-organization-agent-definition-acl",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.OrganizationSkillACL"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update an organization agent definition ACL",
+                "operationId": "update-an-organization-agent-definition-acl",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateOrganizationSkillACLRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions": {
             "get": {
                 "produces": [
@@ -4871,6 +5184,267 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/projects/{project}/agent-definitions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List project agent definitions",
+                "operationId": "list-project-agent-definitions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat project ID",
+                        "name": "project",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ForkAgentDefinitionMetadata"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Create a project agent definition",
+                "operationId": "create-a-project-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat project ID",
+                        "name": "project",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.CreateForkAgentDefinitionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/organizations/{organization}/projects/{project}/agent-definitions/{agentDefinition}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a project agent definition",
+                "operationId": "get-a-project-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat project ID",
+                        "name": "project",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Delete a project agent definition",
+                "operationId": "delete-a-project-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat project ID",
+                        "name": "project",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update a project agent definition",
+                "operationId": "update-a-project-agent-definition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat project ID",
+                        "name": "project",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateForkAgentDefinitionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkAgentDefinition"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/subagent-limits": {
             "get": {
                 "produces": [
@@ -4895,7 +5469,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimitsResponse"
                         }
                     }
                 },
@@ -4940,7 +5514,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimitsResponse"
                         }
                     }
                 },
@@ -23018,6 +23592,13 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "subagent_description": {
+                    "type": "string"
+                },
+                "subagent_name": {
+                    "description": "SubagentName and SubagentDescription are populated only for OK\nsubagent kinds.",
+                    "type": "string"
+                },
                 "tools": {
                     "description": "Tools lists the tools exposed by an MCP server. Populated only for the\nmcp_server kind; nil otherwise.",
                     "type": "array",
@@ -23030,6 +23611,7 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
@@ -23037,6 +23619,7 @@ const docTemplate = `{
                 "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
@@ -27338,6 +27921,7 @@ const docTemplate = `{
                 "fork-nested-subagents",
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
+                "fork-chat-wakeups",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -27379,6 +27963,8 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -27402,6 +27988,7 @@ const docTemplate = `{
                 "ExperimentForkNestedSubagents",
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
+                "ExperimentForkChatWakeups",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -27866,6 +28453,60 @@ const docTemplate = `{
                 },
                 "max_live_per_family": {
                     "description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat, checked when a subagent is spawned or when message_agent\nresumes a finished one. A live subagent has status running,\ninterrupting, requires_action or paused and is not archived. A finished\none is waiting or error and does not count.",
+                    "type": "integer",
+                    "example": 6
+                }
+            }
+        },
+        "codersdk.ForkOrganizationSubagentLimitsResponse": {
+            "type": "object",
+            "properties": {
+                "deployment": {
+                    "description": "Deployment holds the deployment limits.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSubagentLimitValues"
+                        }
+                    ]
+                },
+                "effective": {
+                    "description": "Effective holds the limits in force in the organization.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSubagentLimitValues"
+                        }
+                    ]
+                },
+                "organization": {
+                    "description": "Organization holds the stored organization limits. A nil limit is\nunset.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
+                        }
+                    ]
+                }
+            }
+        },
+        "codersdk.ForkSubagentLimitValues": {
+            "type": "object",
+            "properties": {
+                "max_concurrent": {
+                    "description": "MaxConcurrent is the maximum number of running subagent chats.",
+                    "type": "integer",
+                    "example": 8
+                },
+                "max_concurrent_per_family": {
+                    "description": "MaxConcurrentPerFamily is the maximum number of running subagent chats\nunder one root chat.",
+                    "type": "integer",
+                    "example": 4
+                },
+                "max_depth": {
+                    "description": "MaxDepth is the maximum depth of nested subagent chats.",
+                    "type": "integer",
+                    "example": 2
+                },
+                "max_live_per_family": {
+                    "description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat.",
                     "type": "integer",
                     "example": 6
                 }

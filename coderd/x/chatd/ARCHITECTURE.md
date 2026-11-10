@@ -48,6 +48,7 @@ There is other data that is held in the database and is associated with a chat, 
 - file links.
 
 <!-- TODO(fork-chat-todos): classify the chat todo list in `chatd.chat_todos` (fork-chat-todos experiment) as execution state or metadata. -->
+<!-- TODO(ibetitsmike): classify chat wake-ups in `chatd.chat_wakeups` and their runs in `chatd.chat_wakeup_runs` (fork-chat-wakeups experiment) as execution state or metadata, and describe how a due wake-up sends its prompt to the chat. -->
 
 We call it **metadata**. The core state machine concerns itself with **execution state**. As a general guideline, a piece of data is execution state if the core state machine needs it to decide what the next state transition may be, or if it's directly modified by a state transition. For example, a queued message is part of the execution state because it impacts what the next action of the agent loop can be. If the agent loop finishes processing a user message and would otherwise stop, but there's a queued message, the agent loop will start processing the queued message instead. On the other hand, a chat's title does not impact the agent loop at all - it's just a label that helps the user identify the chat.
 
@@ -147,6 +148,8 @@ Queued messages wait in two lanes. These rules apply to every transition that qu
   <!-- TODO(ibetitsmike): describe the fork live subagent cap per family, checked when a child spawns and when message_agent resumes a finished child, each in its own transaction under one per-family advisory lock. -->
   <!-- TODO(ibetitsmike): describe how a subagent held by a fork concurrency cap reports queued_for_capacity and the list_agents waiting_for_capacity field. -->
   <!-- TODO(ibetitsmike): describe fork-agent-definitions: spawn_agent resolves custom agent types from the chat's pinned subagent context resources after the built-in types, and records the custom type in the child's chat_subagents row. -->
+  <!-- TODO(ibetitsmike): describe fork-agent-definitions stored tiers: spawn_agent also offers the chat owner's personal agent definitions and the organization agent definitions shared with the owner, read as the owner through dbauthz. A name that several tiers define is only reachable by its tier-qualified alias (personal/, org/, workspace/), as with skills. -->
+  <!-- TODO(ibetitsmike): describe how, with fork-agent-definitions on, the subagent tool results (spawn_agent, wait_agent, message_agent, interrupt_agent, list_agents) report each child's stored chat_subagents agent type instead of the type its chat mode implies. -->
   <!-- TODO(ibetitsmike): describe fork-agent-definitions tool policy: spawn stores the custom agent's readonly, tools, disallowed_tools and mcp policy on its chat_subagents row, and every child turn filters its tools and deferred MCP tools by that policy. -->
   <!-- TODO(ibetitsmike): describe fork-subagent-isolation worktree mode: spawn_agent with isolation worktree creates a git worktree on a new branch through the parent's workspace agent before the child chat transaction, records isolation, worktree_path and branch on the child's chat_subagents row, and removes the worktree if the transaction fails. -->
   <!-- TODO(ibetitsmike): describe fork-subagent-isolation binding: a worktree child, and every shared descendant below it, gets a system message naming the worktree and branch, its file tools resolve relative paths against the worktree, execute and the workspace context use it as the working directory, and a worktree grandchild branches from its parent's worktree. -->
@@ -604,6 +607,8 @@ If the request sets `title`, the chat is created with a `user` title and automat
 When archiving or unarchiving a root chat, the operation applies `SetArchived(archived)` to the root and all descendants atomically. If any chat in the family cannot apply the requested archived-state transition, the whole operation fails without changing any chat. Unarchiving an individual child chat remains guarded: it must fail while its parent is archived
 
 The family update locks the root chat row first, and creating a child chat takes a shared lock on the same row. A concurrent child creation therefore either commits first and is included in the family update, or waits for it and fails if the root is now archived.
+
+<!-- TODO(ibetitsmike): describe the fork-nested-subagents lock order of a family archive: the root FOR NO KEY UPDATE, then each descendant leaves first, so a member transition whose second row update takes FOR KEY SHARE on its parent and the root cannot deadlock with the archive (issue 79). -->
 
 For `archived` updates, the supported input and output states are:
 
