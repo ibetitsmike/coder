@@ -193,6 +193,12 @@ func (t worktreeBoundTool) resolveRawPath(raw json.RawMessage, emptyIsDir bool) 
 			return raw
 		}
 		p = t.dir
+	case isWindowsAbs(t.dir):
+		// The agent returns native paths, so a Windows worktree needs
+		// Windows path rules: path.IsAbs treats C:\x as relative.
+		if !isWindowsAbs(p) && !strings.HasPrefix(p, "/") {
+			p = t.dir + `\` + p
+		}
 	case !path.IsAbs(p):
 		p = path.Join(t.dir, p)
 	}
@@ -201,4 +207,17 @@ func (t worktreeBoundTool) resolveRawPath(raw json.RawMessage, emptyIsDir bool) 
 		return raw
 	}
 	return resolved
+}
+
+// isWindowsAbs reports whether p is an absolute Windows path: a drive path
+// such as C:\x or C:/x, or a UNC or rooted path starting with a backslash.
+func isWindowsAbs(p string) bool {
+	if strings.HasPrefix(p, `\`) {
+		return true
+	}
+	if len(p) < 3 || p[1] != ':' || (p[2] != '\\' && p[2] != '/') {
+		return false
+	}
+	letter := p[0] | 0x20
+	return 'a' <= letter && letter <= 'z'
 }
