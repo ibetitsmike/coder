@@ -156,6 +156,9 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 		noFunc   bool
 		args     waitForEventsArgs
 		wantErr  string
+		// local marks an argument error that is found before the pull
+		// request read, which costs the owner's quota.
+		local bool
 	}{
 		"Closed":              {activity: closed, args: waitForEventsArgs{PullRequestURL: testPullRequestURL}, wantErr: "pull request " + testPullRequestURL + " is already closed"},
 		"Merged":              {activity: merged, args: waitForEventsArgs{PullRequestURL: testPullRequestURL}, wantErr: "is already merged"},
@@ -163,7 +166,8 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 		"NotAvailable":        {noFunc: true, args: waitForEventsArgs{PullRequestURL: testPullRequestURL}, wantErr: "pull request events are not available"},
 		"UnknownEvent":        {args: waitForEventsArgs{PullRequestURL: testPullRequestURL, PullRequestEvents: []string{"review", "merged"}}, wantErr: `unknown pull_request_events value "merged", valid values are review, comment, checks, closed`},
 		"EventsWithoutURL":    {args: waitForEventsArgs{PullRequestEvents: []string{"review"}}, wantErr: "pull_request_events requires pull_request_url"},
-		"UnknownChildWithURL": {activity: openPullRequest(gitprovider.CheckStateNone), args: waitForEventsArgs{PullRequestURL: testPullRequestURL, ChildChatIDs: []string{uuid.NewString()}}, wantErr: "is not a child of this chat"},
+		"UnknownChildWithURL": {activity: openPullRequest(gitprovider.CheckStateNone), args: waitForEventsArgs{PullRequestURL: testPullRequestURL, ChildChatIDs: []string{uuid.NewString()}}, wantErr: "is not a child of this chat", local: true},
+		"BadExpiryWithURL":    {activity: openPullRequest(gitprovider.CheckStateNone), args: waitForEventsArgs{PullRequestURL: testPullRequestURL, ExpiresInSeconds: new(30)}, wantErr: "expires_in_seconds", local: true},
 	} {
 		t.Logf("case %s", name)
 		fake.set(tc.activity, tc.err)
@@ -171,8 +175,12 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 		if tc.noFunc {
 			server.forkPullRequestActivity = nil
 		}
+		calls := fake.callCount()
 		_, content := waitCall(uuid.New(), tc.args, true)
 		require.Contains(t, content, tc.wantErr)
+		if tc.local {
+			require.Equal(t, calls, fake.callCount(), "the pull request is not read")
+		}
 	}
 	server.forkPullRequestActivity = fake.fetch
 
