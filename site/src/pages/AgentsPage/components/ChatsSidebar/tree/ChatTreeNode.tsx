@@ -34,6 +34,7 @@ import {
 } from "../../ChatActionsMenuItems";
 import { asNonEmptyString } from "../../ChatConversation/blockUtils";
 import { ChatDiffStats } from "../../ChatDiffStats";
+import { ForkAgentTypeBadge } from "../../ForkAgentTypeBadge";
 import { normalizeLocationSearch } from "../locationSearch";
 import { useChatTree } from "./ChatTreeContext";
 import { collectDescendantChats, getParentChatID } from "./chatTree";
@@ -327,6 +328,7 @@ export const ChatTreeNode: React.FC<ChatTreeNodeProps> = ({
 									>
 										{chat.title}
 									</span>
+									<ForkAgentTypeBadge chat={chat} />
 									{chat.has_unread && !isActiveChat && (
 										<span className="sr-only">(unread)</span>
 									)}

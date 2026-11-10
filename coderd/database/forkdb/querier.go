@@ -58,6 +58,10 @@ type Querier interface {
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	// Returns the agent type of each child chat in @chat_ids. A child spawned
+	// without a chat_subagents row gets its type from its mode, as
+	// subagentTypeFromChat in coderd/x/chatd derives it.
+	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
