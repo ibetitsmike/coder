@@ -49,6 +49,16 @@ SELECT * FROM chat_wakeups WHERE id = @id;
 -- name: ListChatWakeupsByChatID :many
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
 
+-- name: ListChildChatIDsWithActiveEventsWakeups :many
+-- Lists the children of @parent_chat_id that wait for events of their own,
+-- so a caller checks every child in one read.
+SELECT DISTINCT w.chat_id
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE c.parent_chat_id = @parent_chat_id::uuid
+    AND w.kind = 'events'
+    AND w.status = 'active';
+
 -- Pauses, resumes, cancels or completes a wake-up. The caller computes
 -- next_run_at. Any claim on the row ends.
 -- name: UpdateChatWakeupStatus :one
@@ -159,6 +169,10 @@ FROM chat_wakeups w
 WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
+
+-- name: ListChatWakeupRunKeys :many
+-- Failed runs are left out, so a failed attempt never blocks a later run.
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid AND status <> 'failed' ORDER BY created_at, id;
 
 -- name: UpdateChatWakeupRunStatus :one
 UPDATE chat_wakeup_runs
