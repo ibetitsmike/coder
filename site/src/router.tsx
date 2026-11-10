@@ -11,6 +11,7 @@ import {
 import { GlobalErrorBoundary } from "./components/ErrorBoundary/GlobalErrorBoundary";
 import { Loader } from "./components/Loader/Loader";
 import { RequireAuth } from "./contexts/auth/RequireAuth";
+import { forkAgentSettingsRoutes } from "./forkRoutes";
 import { DashboardLayout } from "./modules/dashboard/DashboardLayout";
 import { AISettingsIndexRedirect } from "./pages/AISettingsPage/AISettingsIndexRedirect";
 import { ModelDefaultsRedirect } from "./pages/AISettingsPage/ModelsPage/ModelDefaultsRedirect";
@@ -888,6 +889,7 @@ export const router = createBrowserRouter(
 							element={<AgentSettingsUserAgentsPage />}
 						/>
 						<Route path="skills" element={<AgentSettingsSkillsPage />} />
+						{forkAgentSettingsRoutes}
 						<Route
 							path="mcp-connections"
 							element={<AgentSettingsMCPConnectionsPage />}

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Link, type Location } from "react-router";
 import { Button } from "#/components/Button/Button";
+import { ForkSettingsNavItems } from "./ForkSettingsNavItems";
 import { SettingsNavItem } from "./SettingsNavItem";
 
 type SettingsPanelProps = {
@@ -95,6 +96,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 					label="Skills"
 					active={settingsSection === "skills"}
 					to="/agents/settings/skills"
+					state={location.state}
+				/>
+				<ForkSettingsNavItems
+					settingsSection={settingsSection}
 					state={location.state}
 				/>
 				<SettingsNavItem
