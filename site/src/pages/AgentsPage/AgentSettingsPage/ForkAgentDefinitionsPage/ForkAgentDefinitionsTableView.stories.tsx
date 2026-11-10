@@ -18,6 +18,9 @@ const meta = {
 	component: ForkAgentDefinitionsTableView,
 	args: {
 		definitions: [MockForkAgentDefinitionMetadata, MockReleaseNotesDefinition],
+		description:
+			"Custom agent types your chats can spawn with spawn_agent in this organization.",
+		emptyMessage: "No personal agent definitions in this organization yet.",
 		error: undefined,
 		isLoading: false,
 		isRetrying: false,
@@ -82,6 +85,10 @@ export const EditorOpen: Story = {
 			onClose: fn(),
 		},
 	},
+};
+
+export const ReadOnly: Story = {
+	args: { access: { create: false, update: false, delete: false } },
 };
 
 export const DeleteConfirm: Story = {

@@ -28,6 +28,7 @@ import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
 import { formatUpdatedAt } from "../../components/SkillsTableView";
 import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
+import { fullSkillAccess, type SkillAccess } from "../../utils/skills";
 import {
 	ForkAgentDefinitionEditorDialog,
 	type ForkAgentDefinitionEditorState,
@@ -49,6 +50,10 @@ export type ForkAgentDefinitionDeleteState = {
 
 type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
+	description: string;
+	emptyMessage: string;
+	/** Hides the controls for actions the user is not allowed to take. */
+	access?: SkillAccess;
 	/** Rendered in the section header, for example an organization picker. */
 	action?: React.ReactNode;
 	error: unknown;
@@ -69,6 +74,9 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	ForkAgentDefinitionsTableViewProps
 > = ({
 	definitions,
+	description,
+	emptyMessage,
+	access = fullSkillAccess,
 	action,
 	error,
 	isLoading,
@@ -109,9 +117,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			/>
 		);
 	} else if (definitions.length === 0) {
-		tableBody = (
-			<TableEmpty message="No personal agent definitions in this organization yet." />
-		);
+		tableBody = <TableEmpty message={emptyMessage} />;
 	} else {
 		tableBody = definitions.map((definition, index) => {
 			const pendingEnabled = pendingToggles[definition.name];
@@ -132,7 +138,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						<Switch
 							aria-label={`Enable ${definition.name}`}
 							checked={pendingEnabled ?? definition.enabled}
-							disabled={pendingEnabled !== undefined}
+							disabled={!access.update || pendingEnabled !== undefined}
 							onCheckedChange={(enabled) =>
 								onToggleEnabled(definition.name, enabled)
 							}
@@ -142,33 +148,39 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						{formatUpdatedAt(definition.updated_at)}
 					</TableCell>
 					<TableCell className="text-right">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									size="icon"
-									variant="subtle"
-									aria-label={`More actions for ${definition.name}`}
-									// A deleted row takes its menu button with it, so focus
-									// returns to the first remaining row's button.
-									ref={index === 0 ? setPrimaryFallback : undefined}
-									onPointerDown={rememberTrigger}
-									onKeyDown={rememberTrigger}
-								>
-									<EllipsisVerticalIcon aria-hidden="true" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								<DropdownMenuItem onClick={() => onEdit(definition)}>
-									Edit
-								</DropdownMenuItem>
-								<DropdownMenuItem
-									className="text-content-destructive focus:text-content-destructive"
-									onClick={() => onDelete(definition)}
-								>
-									Delete&hellip;
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
+						{(access.update || access.delete) && (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										size="icon"
+										variant="subtle"
+										aria-label={`More actions for ${definition.name}`}
+										// A deleted row takes its menu button with it, so focus
+										// returns to the first remaining row's button.
+										ref={index === 0 ? setPrimaryFallback : undefined}
+										onPointerDown={rememberTrigger}
+										onKeyDown={rememberTrigger}
+									>
+										<EllipsisVerticalIcon aria-hidden="true" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end">
+									{access.update && (
+										<DropdownMenuItem onClick={() => onEdit(definition)}>
+											Edit
+										</DropdownMenuItem>
+									)}
+									{access.delete && (
+										<DropdownMenuItem
+											className="text-content-destructive focus:text-content-destructive"
+											onClick={() => onDelete(definition)}
+										>
+											Delete&hellip;
+										</DropdownMenuItem>
+									)}
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
 					</TableCell>
 				</TableRow>
 			);
@@ -179,21 +191,23 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		<div className="flex flex-col gap-8">
 			<SectionHeader
 				label={title}
-				description="Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file."
+				description={description}
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
-						<Button
-							ref={setSecondaryFallback}
-							variant="outline"
-							onClick={(event) => {
-								rememberTrigger(event);
-								onCreate();
-							}}
-						>
-							<PlusIcon aria-hidden="true" />
-							New agent definition
-						</Button>
+						{access.create && (
+							<Button
+								ref={setSecondaryFallback}
+								variant="outline"
+								onClick={(event) => {
+									rememberTrigger(event);
+									onCreate();
+								}}
+							>
+								<PlusIcon aria-hidden="true" />
+								New agent definition
+							</Button>
+						)}
 					</div>
 				}
 			/>

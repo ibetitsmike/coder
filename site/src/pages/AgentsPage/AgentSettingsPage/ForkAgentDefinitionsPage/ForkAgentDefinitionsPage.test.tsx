@@ -24,6 +24,7 @@ import {
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { render, renderWithAuth } from "#/testHelpers/renderHelpers";
+import type { SkillAccess } from "../../utils/skills";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
 import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
 
@@ -1232,5 +1233,63 @@ describe("ForkAgentDefinitionsPage", () => {
 			MockForkAgentDefinitionMetadata.name,
 			{ enabled: false },
 		);
+	});
+
+	describe("organization tier", () => {
+		const renderOrganizationTable = (access?: SkillAccess) => {
+			vi.spyOn(
+				forkAgentDefinitionsApi,
+				"getOrganizationAgentDefinitions",
+			).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+			const update = vi
+				.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinition")
+				.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+			render(
+				<ForkAgentDefinitionsTable
+					scope={{
+						tier: "organization",
+						organizationId: MockDefaultOrganization.id,
+					}}
+					access={access}
+				/>,
+			);
+			return { update };
+		};
+
+		it("toggles an organization definition through the organization route", async () => {
+			const user = userEvent.setup();
+			const { update } = renderOrganizationTable();
+
+			await user.click(
+				await screen.findByRole("switch", {
+					name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+				}),
+			);
+
+			await waitFor(() =>
+				expect(update).toHaveBeenCalledWith(
+					MockDefaultOrganization.id,
+					MockForkAgentDefinitionMetadata.name,
+					{ enabled: false },
+				),
+			);
+		});
+
+		it("does not toggle without update access", async () => {
+			const user = userEvent.setup();
+			const { update } = renderOrganizationTable({
+				create: false,
+				update: false,
+				delete: false,
+			});
+
+			await user.click(
+				await screen.findByRole("switch", {
+					name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+				}),
+			);
+
+			expect(update).not.toHaveBeenCalled();
+		});
 	});
 });

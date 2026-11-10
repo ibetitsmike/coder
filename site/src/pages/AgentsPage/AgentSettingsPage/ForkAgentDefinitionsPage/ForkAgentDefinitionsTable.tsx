@@ -12,20 +12,38 @@ import {
 } from "#/api/queries/forkAgentDefinitions";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
+import type { SkillAccess } from "../../utils/skills";
 import {
 	type ForkAgentDefinitionDeleteState,
 	ForkAgentDefinitionsTableView,
 } from "./ForkAgentDefinitionsTableView";
 import { useForkAgentDefinitionEditor } from "./useForkAgentDefinitionEditor";
 
+const copy = {
+	user: {
+		description:
+			"Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file.",
+		emptyMessage: "No personal agent definitions in this organization yet.",
+	},
+	organization: {
+		description:
+			"Custom agent types that chats in this organization can spawn with spawn_agent. Each definition is a Claude Code or Cursor agent markdown file and is shared with everyone in the organization by default.",
+		emptyMessage: "No organization agent definitions yet.",
+	},
+} satisfies Record<
+	AgentDefinitionScope["tier"],
+	{ description: string; emptyMessage: string }
+>;
+
 type ForkAgentDefinitionsTableProps = {
 	scope: AgentDefinitionScope;
+	access?: SkillAccess;
 	action?: React.ReactNode;
 };
 
 export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
-> = ({ scope, action }) => {
+> = ({ scope, access, action }) => {
 	const queryClient = useQueryClient();
 	const [selectedDeleteTarget, setDeleteTarget] =
 		useState<ForkAgentDefinitionMetadata>();
@@ -126,6 +144,8 @@ export const ForkAgentDefinitionsTable: React.FC<
 	return (
 		<ForkAgentDefinitionsTableView
 			definitions={definitionsQuery.data ?? []}
+			{...copy[scope.tier]}
+			access={access}
 			action={action}
 			error={definitionsQuery.error}
 			isLoading={definitionsQuery.isLoading}
