@@ -14,7 +14,7 @@ export const chatWakeups = (chatId: string) =>
 	queryOptions({
 		queryKey: chatWakeupsKey(chatId),
 		queryFn: ({ signal }) => getChatWakeups(chatId, signal),
-		// Wake-ups have no watch socket, so poll to notice worker changes.
+		// Wake-ups have no watch socket, so poll to see worker-made changes.
 		refetchInterval: 30_000,
 	});
 
@@ -23,14 +23,15 @@ type UpdateChatWakeupVariables = {
 	status: ChatWakeup["status"];
 };
 
-/** Mutation options to pause, resume or cancel one of the chat's wake-ups. */
+/**
+ * Pauses, resumes or cancels a wake-up: writes the returned wake-up into the
+ * cached list and refetches to pick up worker-made changes.
+ */
 export const updateChatWakeup = (queryClient: QueryClient, chatId: string) =>
 	mutationOptions({
 		mutationFn: ({ wakeupId, status }: UpdateChatWakeupVariables) =>
 			updateChatWakeupApi(chatId, wakeupId, { status }),
 		onSuccess: (wakeup) => {
-			// Write the returned wake-up so the row flips without waiting for
-			// the refetch, then invalidate to pull in worker-made changes.
 			queryClient.setQueryData<ChatWakeup[]>(chatWakeupsKey(chatId), (old) =>
 				old?.map((oldWakeup) =>
 					oldWakeup.id === wakeup.id ? wakeup : oldWakeup,
