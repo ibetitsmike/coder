@@ -23216,7 +23216,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "children": {
-                    "description": "Children holds child (subagent) chats nested under this root\nchat. Always initialized to an empty slice so the JSON field\nis present as []. Child chats cannot create their own\nsubagents, so nesting depth is capped at 1 and this slice is\nalways empty for child chats.",
+                    "description": "Children holds the descendant (subagent) chats of this root chat,\nflat: each entry's parent_chat_id gives its place in the tree.\nWithout fork-nested-subagents descendants are only direct\nchildren. Always initialized to an empty slice so the JSON field\nis present as []. Always empty for child chats.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.Chat"
