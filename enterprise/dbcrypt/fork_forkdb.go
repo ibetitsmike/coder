@@ -25,8 +25,8 @@ func (db *dbCrypt) ForkWrap(s forkdb.Store) forkdb.Store {
 	return &forkCrypt{crypt: db, Store: s}
 }
 
-// forkCrypt encrypts plugins.config. Queries that return no secret pass
-// through the embedded store.
+// forkCrypt encrypts plugins.config and chat_secret_answers.value. Queries
+// that return no secret pass through the embedded store.
 type forkCrypt struct {
 	crypt *dbCrypt
 	forkdb.Store
@@ -119,4 +119,24 @@ func (db *forkCrypt) UpdatePluginEnabled(ctx context.Context, params forkdb.Upda
 		return forkdb.Plugin{}, err
 	}
 	return plugin, nil
+}
+
+func (db *forkCrypt) InsertChatSecretAnswer(ctx context.Context, params forkdb.InsertChatSecretAnswerParams) error {
+	if err := db.crypt.encryptField(&params.Value, &params.ValueKeyID); err != nil {
+		return err
+	}
+	return db.Store.InsertChatSecretAnswer(ctx, params)
+}
+
+func (db *forkCrypt) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
+	answers, err := db.Store.GetChatSecretAnswersByChatID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range answers {
+		if err := db.crypt.decryptField(&answers[i].Value, answers[i].ValueKeyID); err != nil {
+			return nil, err
+		}
+	}
+	return answers, nil
 }

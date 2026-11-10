@@ -3159,6 +3159,9 @@ func (api *API) postChatMessages(rw http.ResponseWriter, r *http.Request) {
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
+		return
+	}
 
 	response, err := api.sendChatMessage(ctx, apiKey.UserID, chat, req)
 	if err != nil {
@@ -3456,6 +3459,9 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 
 	var req codersdk.EditChatMessageRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
+		return
+	}
+	if maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 
@@ -3798,6 +3804,9 @@ func (api *API) patchChatQueuedMessage(rw http.ResponseWriter, r *http.Request) 
 			Message: "model_config_id and reasoning_effort require content.",
 			Detail:  "The overrides apply to the content they are sent with.",
 		})
+		return
+	}
+	if req.Content != nil && maybeWriteChatError(ctx, rw, api.rejectSecretQuestionAnswer(ctx, chat)) {
 		return
 	}
 

@@ -176,3 +176,40 @@ func requirePluginDecrypted(t *testing.T, plugin forkdb.Plugin, ciphers []Cipher
 	require.Equal(t, want, plugin.Config)
 	require.Equal(t, ciphers[0].HexDigest(), plugin.ConfigKeyID.String)
 }
+
+func TestChatSecretAnswers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const value = "chat-secret-answer"
+	db, crypt, ciphers := setup(t)
+	raw, err := forkdb.From(db)
+	require.NoError(t, err)
+	fcrypt, err := forkdb.From(crypt)
+	require.NoError(t, err)
+
+	org, err := db.GetDefaultOrganization(ctx)
+	require.NoError(t, err)
+	owner := dbgen.User(t, db, database.User{})
+	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: org.ID})
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: owner.ID, LastModelConfigID: model.ID})
+
+	err = fcrypt.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
+		ChatID:     chat.ID,
+		ToolCallID: "call_1",
+		Value:      value,
+	})
+	require.NoError(t, err)
+
+	stored, err := raw.GetChatSecretAnswersByChatID(ctx, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, ciphers[0].HexDigest(), stored[0].ValueKeyID.String)
+	requireEncryptedEquals(t, ciphers[0], stored[0].Value, value)
+
+	answers, err := fcrypt.GetChatSecretAnswersByChatID(ctx, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+	require.Equal(t, value, answers[0].Value)
+	require.Equal(t, "call_1", answers[0].ToolCallID)
+}
