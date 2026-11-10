@@ -606,6 +606,8 @@ When archiving or unarchiving a root chat, the operation applies `SetArchived(ar
 
 The family update locks the root chat row first, and creating a child chat takes a shared lock on the same row. A concurrent child creation therefore either commits first and is included in the family update, or waits for it and fails if the root is now archived.
 
+<!-- TODO(ibetitsmike): describe the fork-nested-subagents lock order of a family archive: the root FOR NO KEY UPDATE, then each descendant leaves first, so a member transition whose second row update takes FOR KEY SHARE on its parent and the root cannot deadlock with the archive (issue 79). -->
+
 For `archived` updates, the supported input and output states are:
 
 - `W -> SetArchived(true) -> XW`

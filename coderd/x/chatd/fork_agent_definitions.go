@@ -1,9 +1,9 @@
 package chatd
 
 // This file is fork code: it resolves custom agent types for spawn_agent from
-// the chat's pinned subagent context resources and the stored personal and
-// organization agent definitions behind the fork-agent-definitions
-// experiment. Upstream's subagent_catalog.go calls
+// the chat's pinned subagent context resources and the stored personal,
+// organization and project agent definitions behind the
+// fork-agent-definitions experiment. Upstream's subagent_catalog.go calls
 // forkSubagentDefinitions and forkLookupSubagentDefinition, which return only
 // the built-in types when the experiment is off.
 
@@ -93,11 +93,12 @@ func customSubagentDefinitions(ctx context.Context, p *Server, chat database.Cha
 }
 
 // customAgentTypes merges the custom agent types pinned to the chat's
-// workspace with the chat owner's personal types and the organization types
-// shared with the owner, using the skill alias rules: a name defined in
-// several tiers is only reachable by its tier-qualified name. Built-in type
-// names are reserved in every tier. Custom types are optional, so read and
-// parse failures drop types instead of failing the turn.
+// workspace with the chat owner's personal types, the organization types
+// shared with the owner and the types of the chat's project, using the skill
+// alias rules: a name defined in several tiers is only reachable by its
+// tier-qualified name. Built-in type names are reserved in every tier. Custom
+// types are optional, so read and parse failures drop types instead of
+// failing the turn.
 func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []customAgentType {
 	if !p.agentDefinitionsEnabled() || chat.ID == uuid.Nil {
 		return nil
@@ -127,6 +128,7 @@ func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []cust
 	merged := skillspkg.MergeSkills(
 		skillspkg.SourceSkills{Source: skillspkg.SourcePersonal, Skills: tiers[skillspkg.SourcePersonal]},
 		skillspkg.SourceSkills{Source: skillspkg.SourceOrganization, Skills: tiers[skillspkg.SourceOrganization]},
+		skillspkg.SourceSkills{Source: skillspkg.SourceProject, Skills: tiers[skillspkg.SourceProject]},
 		skillspkg.SourceSkills{Source: skillspkg.SourceWorkspace, Skills: tiers[skillspkg.SourceWorkspace]},
 	)
 	out := make([]customAgentType, 0, len(merged))
@@ -177,9 +179,12 @@ type tierAgentType struct {
 }
 
 // storedAgentTypes returns the chat owner's enabled personal agent
-// definitions in the chat's organization and the enabled organization agent
-// definitions shared with the owner. Reads run as the owner, so dbauthz
-// applies organization membership and the definitions' ACLs.
+// definitions in the chat's organization, the enabled organization agent
+// definitions shared with the owner, and the enabled agent definitions of
+// the chat's project. Personal and organization reads run as the owner, so
+// dbauthz applies organization membership and the definitions' ACLs.
+// Project reads run as chatd once the owner passes the usable-project check,
+// like project skills, so role grants do not expose a project's types.
 func (p *Server) storedAgentTypes(ctx context.Context, chat database.Chat) []tierAgentType {
 	logger := p.logger.With(slog.F("chat_id", chat.ID))
 	fdb, err := forkdb.From(p.db)
@@ -242,6 +247,34 @@ func (p *Server) storedAgentTypes(ctx context.Context, chat database.Chat) []tie
 				stored, err := fdb.GetOrganizationAgentDefinitionByName(asOwner(ctx), forkdb.GetOrganizationAgentDefinitionByNameParams{
 					OrganizationID: chat.OrganizationID,
 					Name:           row.Name,
+				})
+				if err != nil {
+					return workspacesdk.AgentDefinition{}, xerrors.Errorf("load agent %q: %w", row.Name, err)
+				}
+				return parseStoredAgentDefinition(stored)
+			},
+		})
+	}
+	projectID := p.resolveUsableChatProjectID(ctx, logger, chat)
+	if !projectID.Valid {
+		return out
+	}
+	project, err := fdb.ListProjectAgentDefinitionMetadata(ctx, projectID.UUID)
+	if err != nil {
+		logger.Warn(ctx, "failed to list project agent definitions", slog.F("project_id", projectID.UUID), slog.Error(err))
+	}
+	for _, row := range project {
+		if !row.Enabled {
+			continue
+		}
+		out = append(out, tierAgentType{
+			source:      skillspkg.SourceProject,
+			name:        row.Name,
+			description: row.Description,
+			load: func(ctx context.Context) (workspacesdk.AgentDefinition, error) {
+				stored, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{
+					ProjectID: projectID.UUID,
+					Name:      row.Name,
 				})
 				if err != nil {
 					return workspacesdk.AgentDefinition{}, xerrors.Errorf("load agent %q: %w", row.Name, err)
