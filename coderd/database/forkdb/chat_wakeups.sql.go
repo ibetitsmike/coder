@@ -527,9 +527,11 @@ func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupR
 }
 
 const listChatWakeupRunKeys = `-- name: ListChatWakeupRunKeys :many
-SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = $1::uuid ORDER BY created_at, id
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = $1::uuid AND status <> 'failed' ORDER BY created_at, id
 `
 
+// Failed runs are left out: their keys are unique per attempt and never
+// block a run, and a long outage would add one per poll.
 func (q *Queries) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listChatWakeupRunKeys, wakeupID)
 	if err != nil {
