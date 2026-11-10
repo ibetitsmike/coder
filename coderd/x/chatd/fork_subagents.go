@@ -96,16 +96,35 @@ func withSubagentResume(ctx context.Context) context.Context {
 	return context.WithValue(ctx, subagentResumeKey{}, true)
 }
 
+// ErrSecretQuestionPending means that the chat waits for a secret answer, so
+// a message would answer its question without the value.
+var ErrSecretQuestionPending = xerrors.New("the chat waits for a secret answer, which a chat message cannot carry")
+
+type secretAnswerReportKey struct{}
+
+// WithSecretAnswerReport marks ctx as the send of the message that reports a
+// stored secret answer, the one message that may answer a secret question.
+func WithSecretAnswerReport(ctx context.Context) context.Context {
+	return context.WithValue(ctx, secretAnswerReportKey{}, true)
+}
+
 // forkValidateSubagentResume returns an error when a message_agent send would
 // resume the finished subagent target while its family already has the
 // maximum number of live subagents. sendSubagentMessage calls it before
 // SendMessage runs the prompt hooks, and SendMessage calls it again with inTx
 // in the transaction that resumes target. That call takes the lock that
 // serializes the family's spawns, so a concurrent spawn cannot pass the same
-// count. It also refuses any such send to a target whose pending question is
+// count. It also refuses a send to a target whose pending question is
 // secret, because the message would answer the question without the value.
+// In the transaction it refuses every such send but the report of the
+// answer, because a question can be recorded after the caller's own check.
 func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.Store, target database.Chat, inTx bool) error {
-	if resume, _ := ctx.Value(subagentResumeKey{}).(bool); !resume || !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid {
+	if !p.nestedSubagentsEnabled() || !target.ParentChatID.Valid {
+		return nil
+	}
+	resume, _ := ctx.Value(subagentResumeKey{}).(bool)
+	report, _ := ctx.Value(secretAnswerReportKey{}).(bool)
+	if !resume && (!inTx || report) {
 		return nil
 	}
 	fdb, err := forkdb.From(store)
@@ -117,8 +136,13 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return xerrors.Errorf("get pending question of chat %s: %w", target.ID, err)
-	case question.Secret():
+	case question.Secret() && resume:
 		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat")
+	case question.Secret():
+		return ErrSecretQuestionPending
+	}
+	if !resume {
+		return nil
 	}
 	if target.Status != database.ChatStatusWaiting && target.Status != database.ChatStatusError {
 		return nil

@@ -319,6 +319,45 @@ func matchSecretShellVariable(text string, vars []secretShellVariable) (secretSh
 	return secretShellVariable{}, false
 }
 
+// bashANSICContent returns value as Bash writes it between $' and ' when
+// it quotes a word with a control character, as set -x and ${v@Q} do. Bash
+// keeps a printable UTF-8 character in a UTF-8 locale and writes each
+// non-ASCII byte in octal in the C locale; octalNonASCII picks the latter.
+func bashANSICContent(value string, octalNonASCII bool) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch c {
+		case 0x1b:
+			out.WriteString(`\E`)
+		case '\a':
+			out.WriteString(`\a`)
+		case '\b':
+			out.WriteString(`\b`)
+		case '\f':
+			out.WriteString(`\f`)
+		case '\n':
+			out.WriteString(`\n`)
+		case '\r':
+			out.WriteString(`\r`)
+		case '\t':
+			out.WriteString(`\t`)
+		case '\v':
+			out.WriteString(`\v`)
+		case '\\', '\'':
+			out.WriteByte('\\')
+			out.WriteByte(c)
+		default:
+			if c < 0x20 || c == 0x7f || (c >= 0x80 && octalNonASCII) {
+				_, _ = fmt.Fprintf(&out, `\%03o`, c)
+				continue
+			}
+			out.WriteByte(c)
+		}
+	}
+	return out.String()
+}
+
 // shellQuote returns value as one single-quoted POSIX shell word.
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
@@ -369,11 +408,12 @@ func secretScrubMarker(i int) string {
 	return fmt.Sprintf("\x00%d\x00", i)
 }
 
-// secretAnswerForms returns value as is and shell-quoted, each also as JSON
-// encoders escape it in a string, with / as is and escaped.
+// secretAnswerForms returns value as is, shell-quoted and as Bash writes it
+// in $'...', each also as JSON encoders escape it in a string, with / as is
+// and escaped.
 func secretAnswerForms(value string) []string {
 	var forms []string
-	for _, v := range []string{value, shellQuote(value)} {
+	for _, v := range []string{value, shellQuote(value), bashANSICContent(value, false), bashANSICContent(value, true)} {
 		forms = append(forms, v)
 		for _, form := range []string{
 			jsonStringContent(v), jsonStringContentNoHTMLEscape(v),

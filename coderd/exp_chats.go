@@ -3363,6 +3363,9 @@ func (api *API) sendChatMessageError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
+		return secretQuestionPendingError(err)
+	}
 	if xerrors.Is(err, chatd.ErrChatArchived) {
 		return httperror.WrapResponseError(http.StatusBadRequest, codersdk.Response{
 			Message: "Cannot send messages to an archived chat.",
