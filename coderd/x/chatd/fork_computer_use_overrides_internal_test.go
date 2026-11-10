@@ -51,6 +51,7 @@ func TestForkComputerUseSpawnOverrides(t *testing.T) {
 		t.Helper()
 		args.Type = subagentTypeComputerUse
 		args.Prompt = "take a screenshot"
+		ctx := chatdTestContext(t)
 		result := requireSpawnAgentResponse(t, runSpawnAgentTool(ctx, t, server, parentChat, args))
 		childID, err := uuid.Parse(result.ChatID)
 		require.NoError(t, err)
@@ -83,7 +84,7 @@ func TestForkComputerUseSpawnOverrides(t *testing.T) {
 
 	t.Run("RejectsModelWithoutComputerUse", func(t *testing.T) {
 		t.Parallel()
-		resp := runSpawnAgentTool(ctx, t, server, parentChat, spawnAgentArgs{
+		resp := runSpawnAgentTool(chatdTestContext(t), t, server, parentChat, spawnAgentArgs{
 			Type:          subagentTypeComputerUse,
 			Prompt:        "take a screenshot",
 			ModelConfigID: incapableModel.ID.String(),
@@ -95,7 +96,7 @@ func TestForkComputerUseSpawnOverrides(t *testing.T) {
 
 	t.Run("RejectsOpenAIModelWithoutResponsesAPI", func(t *testing.T) {
 		t.Parallel()
-		resp := runSpawnAgentTool(ctx, t, server, parentChat, spawnAgentArgs{
+		resp := runSpawnAgentTool(chatdTestContext(t), t, server, parentChat, spawnAgentArgs{
 			Type:          subagentTypeComputerUse,
 			Prompt:        "take a screenshot",
 			ModelConfigID: chatCompletionsModel.ID.String(),
