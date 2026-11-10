@@ -364,6 +364,38 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
+// bashBackslashQuote returns value as Bash's printf %q writes a word with no
+// control character: each character that the shell would expand or split
+// on, with a backslash before it. Bash 3 leaves each ~ as is, and later
+// versions escape a ~ that starts a word or follows = or :, which
+// escapeTilde selects.
+func bashBackslashQuote(value string, escapeTilde bool) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if strings.IndexByte(" \t\n'\"\\|&;()<>!{}*[?]^$`,", c) >= 0 ||
+			(c == '~' && escapeTilde && (i == 0 || value[i-1] == '=' || value[i-1] == ':')) ||
+			(c == '#' && i == 0) {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+// bashDoubleQuoteContent returns value as Bash's declare -p writes it in
+// "...": with a backslash before each ", $, ` and \.
+func bashDoubleQuoteContent(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if strings.IndexByte("\"$`\\", value[i]) >= 0 {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(value[i])
+	}
+	return out.String()
+}
+
 // secretFragmentMinBytes is the shortest prefix or suffix of a value that
 // scrubSecretAnswers replaces. Tools that cap their output can cut a value,
 // so the whole value no longer matches.
@@ -409,14 +441,19 @@ func secretScrubMarker(i int) string {
 	return fmt.Sprintf("\x00%d\x00", i)
 }
 
-// secretAnswerForms returns value as is, shell-quoted and as Bash writes it
-// in $'...', each also as Go's %q and %+q write it in a string, and as JSON
+// secretAnswerForms returns value as is, shell-quoted, as Bash's printf %q
+// escapes it with backslashes, as Bash writes it in "..." and in $'...', each
+// also as Go's %q and %+q write it in a string, and as JSON
 // encoders escape it in a string: with or without HTML escapes, with
 // non-ASCII characters as is or escaped, with lowercase or uppercase hex in
 // escapes, and with / as is and escaped.
 func secretAnswerForms(value string) []string {
 	var forms []string
-	for _, v := range []string{value, shellQuote(value), bashANSICContent(value, false), bashANSICContent(value, true)} {
+	for _, v := range []string{
+		value, shellQuote(value), bashBackslashQuote(value, false), bashBackslashQuote(value, true),
+		bashDoubleQuoteContent(value),
+		bashANSICContent(value, false), bashANSICContent(value, true),
+	} {
 		quoted, quotedASCII := strconv.Quote(v), strconv.QuoteToASCII(v)
 		forms = append(forms, v, quoted[1:len(quoted)-1], quotedASCII[1:len(quotedASCII)-1])
 		for _, content := range []string{jsonStringContent(v), jsonStringContentNoHTMLEscape(v)} {
