@@ -346,24 +346,11 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 	args := []string{"worktree", "remove"}
 	// git refuses to remove a worktree with initialized submodules without
 	// --force; the status check above already proved the tree clean.
-	if _, err := os.Stat(filepath.Join(gitDir, "modules")); err == nil {
-		out, err := a.git(ctx, path, "submodule", "foreach", "--quiet", "--recursive", "git rev-list --count --all --not --remotes")
+	if modules := filepath.Join(gitDir, "modules"); dirExists(modules) {
+		sum, err := a.countModuleLocalCommits(ctx, modules)
 		if err != nil {
 			writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
 			return
-		}
-		sum := 0
-		for _, line := range strings.Split(out, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			n, err := strconv.Atoi(line)
-			if err != nil {
-				writeWorktreeError(ctx, rw, http.StatusInternalServerError, "Failed to check submodules for unpushed commits.", err)
-				return
-			}
-			sum += n
 		}
 		if sum > 0 {
 			writeWorktreeError(ctx, rw, http.StatusConflict, fmt.Sprintf("worktree %s has %d submodule commits that are not on any remote; push them first", path, sum), nil)
@@ -385,6 +372,44 @@ func (a *worktreeAPI) handleDelete(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// countModuleLocalCommits counts the commits on no remote in every
+// repository under modules. It walks the directory instead of using git
+// submodule foreach, which skips deinitialized submodules whose repositories
+// --force would still delete.
+func (a *worktreeAPI) countModuleLocalCommits(ctx context.Context, modules string) (int, error) {
+	sum := 0
+	err := filepath.WalkDir(modules, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if d.Name() == "objects" || d.Name() == "refs" || d.Name() == "logs" {
+			return fs.SkipDir
+		}
+		if _, err := os.Stat(filepath.Join(p, "HEAD")); err != nil || !dirExists(filepath.Join(p, "objects")) {
+			return nil
+		}
+		out, err := a.git(ctx, p, "rev-list", "--count", "--all", "--not", "--remotes")
+		if err != nil {
+			return err
+		}
+		n, err := strconv.Atoi(out)
+		if err != nil {
+			return xerrors.Errorf("parse commit count of %s: %w", p, err)
+		}
+		sum += n
+		return nil
+	})
+	return sum, err
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
 func absGitPath(dir, p string) string {

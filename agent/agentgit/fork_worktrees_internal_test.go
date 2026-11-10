@@ -632,4 +632,21 @@ func TestForkWorktreeDeleteSubmodules(t *testing.T) {
 		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 		assert.DirExists(t, wt.Path)
 	})
+
+	t.Run("DeinitializedSubmoduleLocalCommits", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newTestWorktreeAPI(t)
+		repo := wtInitSubmoduleRepo(t)
+		wt := wtCreate(t, h, workspacesdk.ForkCreateWorktreeRequest{RepoPath: repo, Name: "child", Branch: "feature"})
+		wtGit(t, wt.Path, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+		sub := filepath.Join(wt.Path, "sub")
+		wtGit(t, sub, "switch", "-c", "local")
+		wtGit(t, sub, "commit", "--allow-empty", "-m", "local")
+		wtGit(t, wt.Path, "submodule", "deinit", "-f", "sub")
+
+		rec := doWorktreeRequest(t, h, http.MethodDelete, workspacesdk.ForkDeleteWorktreeRequest{Path: wt.Path, Branch: wt.Branch})
+
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.DirExists(t, wt.Path)
+	})
 }
