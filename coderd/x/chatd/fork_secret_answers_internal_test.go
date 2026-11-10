@@ -347,8 +347,10 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	require.NoError(t, f.fdb.InsertChatSecretAnswer(ctx, forkdb.InsertChatSecretAnswerParams{
 		ChatID: child.ID, ToolCallID: callID, Value: "a-secret-value",
 	}))
-	require.ErrorIs(t, send(WithSecretAnswerReport(ctx, uuid.NewString())), ErrSecretAnswerNotPending)
 	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
+	// A late report of the answer must not answer a newer question.
+	ask(`[{"header":"Key","question":"Paste the key.","secret":true}]`)
+	require.ErrorIs(t, send(WithSecretAnswerReport(ctx, callID)), ErrSecretAnswerNotPending)
 
 	ask(`[{"header":"DB","question":"Which one?","options":[{"label":"a"},{"label":"b"}]}]`)
 	_, err = f.server.sendSubagentMessage(ctx, f.root.ID, child.ID, "a")
