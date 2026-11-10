@@ -604,6 +604,40 @@ func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID)
 	return items, nil
 }
 
+const listChildChatIDsWithActiveEventsWakeups = `-- name: ListChildChatIDsWithActiveEventsWakeups :many
+SELECT DISTINCT w.chat_id
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE c.parent_chat_id = $1::uuid
+    AND w.kind = 'events'
+    AND w.status = 'active'
+`
+
+// Lists the children of @parent_chat_id that wait for events of their own,
+// so a caller checks every child in one read.
+func (q *Queries) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listChildChatIDsWithActiveEventsWakeups, parentChatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var chat_id uuid.UUID
+		if err := rows.Scan(&chat_id); err != nil {
+			return nil, err
+		}
+		items = append(items, chat_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const sumChatCostMicrosSince = `-- name: SumChatCostMicrosSince :one
 SELECT COALESCE(SUM(total_cost_micros), 0)::bigint
 FROM chat_messages
