@@ -114,6 +114,7 @@
 		"unified": "11.0.5",
 		"unique-names-generator": "4.7.1",
 		"websocket-ts": "2.3.0",
+		"yaml": "2.8.3",
 		"yup": "1.7.1"
 	},
 	"devDependencies": {
