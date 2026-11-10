@@ -38,6 +38,7 @@ WHERE c.root_chat_id = @root_chat_id::uuid
         FROM chat_messages m
         WHERE m.chat_id = q.chat_id
             AND m.role = 'user'
+            AND m.visibility <> 'model'
             AND NOT m.deleted
             AND m.created_at > q.created_at
     )

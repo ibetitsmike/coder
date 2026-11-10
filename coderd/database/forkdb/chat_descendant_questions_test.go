@@ -126,6 +126,13 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	ask(root, "root")
 	ask(grandchild, "grandchild")
 	ask(child, "child")
+	// A model-only user row is not the user's answer.
+	dbgen.ChatMessage(t, db, database.ChatMessage{
+		ChatID:        child.ID,
+		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
+		Role:          database.ChatMessageRoleUser,
+		Visibility:    database.ChatMessageVisibilityModel,
+	})
 	ask(answered, "answered")
 	dbgen.ChatMessage(t, db, database.ChatMessage{
 		ChatID:        answered.ID,
