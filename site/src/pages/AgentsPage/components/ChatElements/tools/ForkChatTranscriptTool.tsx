@@ -116,11 +116,11 @@ const ForkChatTranscriptTool: React.FC<ForkChatTranscriptToolProps> = ({
 								)}
 							</div>
 						))}
-						{hasMore && (
-							<div className="text-[13px] text-content-secondary">
-								More messages available
-							</div>
-						)}
+					</div>
+				)}
+				{hasMore && (
+					<div className="text-[13px] text-content-secondary">
+						More messages available
 					</div>
 				)}
 			</ToolCall.Content>

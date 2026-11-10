@@ -65,6 +65,11 @@ export const Empty: Story = {
 	args: { result: mockEmptyChatTranscriptResult },
 };
 
+export const EmptyPageHasMore: Story = {
+	args: { result: { ...mockEmptyChatTranscriptResult, has_more: true } },
+	play: expand,
+};
+
 export const HasMore: Story = {
 	args: { result: mockPagedChatTranscriptResult },
 	play: expand,
