@@ -179,7 +179,7 @@ type ChatTodoChecklistProps = {
 	className?: string;
 };
 
-/** Renders todos in their given order; className merges onto the list. */
+/** Cancelled items still render, struck through, though progress excludes them. */
 export const ChatTodoChecklist: React.FC<ChatTodoChecklistProps> = ({
 	todos,
 	className,
