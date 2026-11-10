@@ -45,6 +45,37 @@ func (q *Queries) DeleteOrganizationAgentDefinitionByName(ctx context.Context, a
 	return i, err
 }
 
+const deleteProjectAgentDefinitionByName = `-- name: DeleteProjectAgentDefinitionByName :one
+DELETE FROM agent_definitions
+WHERE project_id = $1::uuid AND name = $2::text
+RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+`
+
+type DeleteProjectAgentDefinitionByNameParams struct {
+	ProjectID uuid.UUID `db:"project_id" json:"project_id"`
+	Name      string    `db:"name" json:"name"`
+}
+
+func (q *Queries) DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, deleteProjectAgentDefinitionByName, arg.ProjectID, arg.Name)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteUserAgentDefinitionByName = `-- name: DeleteUserAgentDefinitionByName :one
 DELETE FROM agent_definitions
 WHERE organization_id = $1::uuid AND user_id = $2::uuid AND name = $3::text
@@ -90,6 +121,69 @@ type GetOrganizationAgentDefinitionByNameParams struct {
 
 func (q *Queries) GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error) {
 	row := q.db.QueryRowContext(ctx, getOrganizationAgentDefinitionByName, arg.OrganizationID, arg.Name)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOrganizationAgentDefinitionByNameForUpdate = `-- name: GetOrganizationAgentDefinitionByNameForUpdate :one
+SELECT id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+FROM agent_definitions
+WHERE organization_id = $1::uuid AND user_id IS NULL AND project_id IS NULL AND name = $2::text
+FOR UPDATE
+`
+
+type GetOrganizationAgentDefinitionByNameForUpdateParams struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Name           string    `db:"name" json:"name"`
+}
+
+func (q *Queries) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationAgentDefinitionByNameForUpdate, arg.OrganizationID, arg.Name)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getProjectAgentDefinitionByName = `-- name: GetProjectAgentDefinitionByName :one
+SELECT id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+FROM agent_definitions
+WHERE project_id = $1::uuid AND name = $2::text
+`
+
+type GetProjectAgentDefinitionByNameParams struct {
+	ProjectID uuid.UUID `db:"project_id" json:"project_id"`
+	Name      string    `db:"name" json:"name"`
+}
+
+func (q *Queries) GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, getProjectAgentDefinitionByName, arg.ProjectID, arg.Name)
 	var i AgentDefinition
 	err := row.Scan(
 		&i.ID,
@@ -163,6 +257,46 @@ func (q *Queries) InsertOrganizationAgentDefinition(ctx context.Context, arg Ins
 		arg.Content,
 		arg.GroupAcl,
 		arg.UserAcl,
+	)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertProjectAgentDefinition = `-- name: InsertProjectAgentDefinition :one
+INSERT INTO agent_definitions (organization_id, project_id, name, description, content)
+VALUES ($1::uuid, $2::uuid, $3::text, $4::text, $5::text)
+RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+`
+
+type InsertProjectAgentDefinitionParams struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	ProjectID      uuid.UUID `db:"project_id" json:"project_id"`
+	Name           string    `db:"name" json:"name"`
+	Description    string    `db:"description" json:"description"`
+	Content        string    `db:"content" json:"content"`
+}
+
+func (q *Queries) InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, insertProjectAgentDefinition,
+		arg.OrganizationID,
+		arg.ProjectID,
+		arg.Name,
+		arg.Description,
+		arg.Content,
 	)
 	var i AgentDefinition
 	err := row.Scan(
@@ -275,6 +409,57 @@ func (q *Queries) ListOrganizationAgentDefinitionMetadata(ctx context.Context, o
 	return items, nil
 }
 
+const listProjectAgentDefinitionMetadata = `-- name: ListProjectAgentDefinitionMetadata :many
+SELECT
+    id, organization_id, project_id, name, description, enabled, created_at, updated_at
+FROM agent_definitions
+WHERE project_id = $1::uuid
+ORDER BY name ASC
+`
+
+type ListProjectAgentDefinitionMetadataRow struct {
+	ID             uuid.UUID     `db:"id" json:"id"`
+	OrganizationID uuid.UUID     `db:"organization_id" json:"organization_id"`
+	ProjectID      uuid.NullUUID `db:"project_id" json:"project_id"`
+	Name           string        `db:"name" json:"name"`
+	Description    string        `db:"description" json:"description"`
+	Enabled        bool          `db:"enabled" json:"enabled"`
+	CreatedAt      time.Time     `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time     `db:"updated_at" json:"updated_at"`
+}
+
+func (q *Queries) ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectAgentDefinitionMetadata, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectAgentDefinitionMetadataRow
+	for rows.Next() {
+		var i ListProjectAgentDefinitionMetadataRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Description,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserAgentDefinitionMetadata = `-- name: ListUserAgentDefinitionMetadata :many
 SELECT
     id, organization_id, user_id, name, description, enabled, created_at, updated_at
@@ -331,6 +516,48 @@ func (q *Queries) ListUserAgentDefinitionMetadata(ctx context.Context, arg ListU
 	return items, nil
 }
 
+const updateOrganizationAgentDefinitionACLByName = `-- name: UpdateOrganizationAgentDefinitionACLByName :one
+UPDATE agent_definitions
+SET
+    group_acl  = $1,
+    user_acl   = $2,
+    updated_at = now()
+WHERE organization_id = $3::uuid AND user_id IS NULL AND project_id IS NULL AND name = $4::text
+RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+`
+
+type UpdateOrganizationAgentDefinitionACLByNameParams struct {
+	GroupAcl       database.ChatACL `db:"group_acl" json:"group_acl"`
+	UserAcl        database.ChatACL `db:"user_acl" json:"user_acl"`
+	OrganizationID uuid.UUID        `db:"organization_id" json:"organization_id"`
+	Name           string           `db:"name" json:"name"`
+}
+
+func (q *Queries) UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, updateOrganizationAgentDefinitionACLByName,
+		arg.GroupAcl,
+		arg.UserAcl,
+		arg.OrganizationID,
+		arg.Name,
+	)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateOrganizationAgentDefinitionByName = `-- name: UpdateOrganizationAgentDefinitionByName :one
 UPDATE agent_definitions
 SET
@@ -356,6 +583,51 @@ func (q *Queries) UpdateOrganizationAgentDefinitionByName(ctx context.Context, a
 		arg.Content,
 		arg.Enabled,
 		arg.OrganizationID,
+		arg.Name,
+	)
+	var i AgentDefinition
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Enabled,
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateProjectAgentDefinitionByName = `-- name: UpdateProjectAgentDefinitionByName :one
+UPDATE agent_definitions
+SET
+    description = COALESCE($1::text, description),
+    content     = COALESCE($2::text, content),
+    enabled     = COALESCE($3::boolean, enabled),
+    updated_at  = now()
+WHERE project_id = $4::uuid AND name = $5::text
+RETURNING id, organization_id, user_id, project_id, name, description, content, enabled, group_acl, user_acl, created_at, updated_at
+`
+
+type UpdateProjectAgentDefinitionByNameParams struct {
+	Description sql.NullString `db:"description" json:"description"`
+	Content     sql.NullString `db:"content" json:"content"`
+	Enabled     sql.NullBool   `db:"enabled" json:"enabled"`
+	ProjectID   uuid.UUID      `db:"project_id" json:"project_id"`
+	Name        string         `db:"name" json:"name"`
+}
+
+func (q *Queries) UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error) {
+	row := q.db.QueryRowContext(ctx, updateProjectAgentDefinitionByName,
+		arg.Description,
+		arg.Content,
+		arg.Enabled,
+		arg.ProjectID,
 		arg.Name,
 	)
 	var i AgentDefinition

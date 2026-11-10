@@ -37,6 +37,7 @@ type Querier interface {
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
 	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
+	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	// Binds every top-level, unarchived chat of a linked user in the plugin's
 	// organization. Chats created after the link start at cursor 0 so their whole
@@ -52,12 +53,14 @@ type Querier interface {
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
@@ -67,6 +70,7 @@ type Querier interface {
 	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
+	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	// The organization comes from the chat.
@@ -78,9 +82,11 @@ type Querier interface {
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
+	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
+	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
@@ -89,12 +95,14 @@ type Querier interface {
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)
+	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
 	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
 	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
+	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)

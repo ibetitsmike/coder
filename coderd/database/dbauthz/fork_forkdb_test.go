@@ -94,6 +94,13 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(sub, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(sub)
 		},
+		"GetChatSubagentsByParentChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			subs := []forkdb.ChatSubagent{testutil.Fake(t, faker, forkdb.ChatSubagent{})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatSubagentsByParentChatID(gomock.Any(), chat.ID).Return(subs, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(subs)
+		},
 		"GetChatSubtreeIDs": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.GetChatSubtreeIDsRow{testutil.Fake(t, faker, forkdb.GetChatSubtreeIDsRow{})}
@@ -417,6 +424,19 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns(def)
 		},
+		"GetOrganizationAgentDefinitionByNameForUpdate": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.GetOrganizationAgentDefinitionByNameForUpdateParams{OrganizationID: def.OrganizationID, Name: def.Name}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByNameForUpdate(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionRead).Returns(def)
+		},
+		"UpdateOrganizationAgentDefinitionACLByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			def := organizationAgentDefinition(uuid.New(), "reviewer")
+			arg := forkdb.UpdateOrganizationAgentDefinitionACLByNameParams{OrganizationID: def.OrganizationID, Name: def.Name, GroupAcl: database.ChatACL{}, UserAcl: def.UserAcl}
+			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: def.OrganizationID, Name: def.Name}).Return(def, nil).AnyTimes()
+			fdb.EXPECT().UpdateOrganizationAgentDefinitionACLByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionShare).Returns(def)
+		},
 		// The NotAuthorized subtest gets no rows back: the post-filter drops
 		// every row that the actor cannot read.
 		"ListOrganizationAgentDefinitionMetadata": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
@@ -438,6 +458,47 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetOrganizationAgentDefinitionByName(gomock.Any(), forkdb.GetOrganizationAgentDefinitionByNameParams(arg)).Return(def, nil).AnyTimes()
 			fdb.EXPECT().DeleteOrganizationAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(organizationAgentDefinitionObject(def), policy.ActionDelete).Returns(def)
+		},
+		"InsertProjectAgentDefinition": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.InsertProjectAgentDefinitionParams{OrganizationID: project.OrganizationID, ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().InsertProjectAgentDefinition(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
+		},
+		"GetProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.GetProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().GetProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionRead).Returns(def)
+		},
+		"ListProjectAgentDefinitionMetadata": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			rows := []forkdb.ListProjectAgentDefinitionMetadataRow{
+				testutil.Fake(t, faker, forkdb.ListProjectAgentDefinitionMetadataRow{ProjectID: uuid.NullUUID{UUID: project.ID, Valid: true}}),
+			}
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().ListProjectAgentDefinitionMetadata(gomock.Any(), project.ID).Return(rows, nil).AnyTimes()
+			check.Args(project.ID).Asserts(project, policy.ActionRead).Returns(rows)
+		},
+		"UpdateProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.UpdateProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().UpdateProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
+		},
+		"DeleteProjectAgentDefinitionByName": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.DeleteProjectAgentDefinitionByNameParams{ProjectID: project.ID, Name: "reviewer"}
+			def := projectAgentDefinition(project, arg.Name)
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().DeleteProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
 		},
 	}
 
@@ -544,6 +605,17 @@ func organizationAgentDefinition(organizationID uuid.UUID, name string) forkdb.A
 	}
 }
 
+func projectAgentDefinition(project database.ChatProject, name string) forkdb.AgentDefinition {
+	return forkdb.AgentDefinition{
+		ID:             uuid.New(),
+		OrganizationID: project.OrganizationID,
+		ProjectID:      uuid.NullUUID{UUID: project.ID, Valid: true},
+		Name:           name,
+		Content:        "---\nname: " + name + "\n---\nReview the change.",
+		Enabled:        true,
+	}
+}
+
 func organizationAgentDefinitionObject(def forkdb.AgentDefinition) rbac.Object {
 	return rbac.ResourceOrganizationSkill.WithID(def.ID).InOrg(def.OrganizationID).
 		WithGroupACL(def.GroupAcl.RBACACL()).
@@ -636,6 +708,69 @@ func TestUserAgentDefinitionOrganizationMembership(t *testing.T) {
 					require.True(t, dbauthz.IsNotAuthorizedError(err), "%s: expected authorization failure, got: %v", op.name, err)
 				}
 			}
+		})
+	}
+}
+
+// TestOrganizationAgentDefinitionOrganizationMembership runs the
+// organization-tier reads against the real authorizer: RBAC applies ACL
+// grants only to organization members, so a direct grant stops working once
+// its user leaves the organization.
+func TestOrganizationAgentDefinitionOrganizationMembership(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	store, _ := dbtestutil.NewDB(t)
+	db := dbauthz.New(store, rbac.NewAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, &slogtest.Options{
+		IgnoreErrors: true,
+	}), coderdtest.AccessControlStorePointer())
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	rawFDB, err := forkdb.From(store)
+	require.NoError(t, err)
+
+	org := dbgen.Organization(t, store, database.Organization{})
+	grantee := dbgen.User(t, store, database.User{})
+	_, err = rawFDB.InsertOrganizationAgentDefinition(ctx, forkdb.InsertOrganizationAgentDefinitionParams{
+		OrganizationID: org.ID,
+		Name:           "shared",
+		Content:        "Review the change.",
+		GroupAcl:       database.ChatACL{},
+		UserAcl:        database.ChatACL{grantee.ID.String(): {Permissions: []policy.Action{policy.ActionRead}}},
+	})
+	require.NoError(t, err)
+	subject := func(roles ...rbac.RoleIdentifier) rbac.Subject {
+		return rbac.Subject{
+			ID:     grantee.ID.String(),
+			Roles:  must(rolestore.Expand(ctx, store, roles)),
+			Groups: []string{},
+			Scope:  rbac.ExpandableScope(rbac.ScopeAll),
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		subject rbac.Subject
+		allowed bool
+	}{
+		{name: "member", subject: subject(rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID)), allowed: true},
+		{name: "removed-member", subject: subject(rbac.RoleMember()), allowed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := dbauthz.As(testutil.Context(t, testutil.WaitLong), tc.subject)
+			_, getErr := fdb.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams{OrganizationID: org.ID, Name: "shared"})
+			rows, listErr := fdb.ListOrganizationAgentDefinitionMetadata(ctx, org.ID)
+			if tc.allowed {
+				require.NoError(t, getErr)
+				require.NoError(t, listErr)
+				require.Len(t, rows, 1)
+				return
+			}
+			require.True(t, dbauthz.IsNotAuthorizedError(getErr), "get: %v", getErr)
+			require.NoError(t, listErr)
+			require.Empty(t, rows)
 		})
 	}
 }
