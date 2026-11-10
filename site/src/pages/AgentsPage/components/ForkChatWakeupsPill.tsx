@@ -10,7 +10,8 @@ import type {
 	ChatWakeupStatus,
 } from "#/api/typesGenerated";
 import { Button } from "#/components/Button/Button";
-import { humanDurationShort, relativeTime } from "#/utils/time";
+import { useTime } from "#/hooks/useTime";
+import { humanDurationShort, timeFrom } from "#/utils/time";
 import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 
 // This file is fork code: the composer pill for the fork-chat-wakeups
@@ -185,10 +186,17 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 	errorMessage,
 }) => {
 	const schedule = formatWakeupSchedule(wakeup);
+	const now = useTime(() => Date.now(), {
+		disabled: !wakeup.next_run_at,
+		interval: 30_000,
+	});
 	const toggleLabel = wakeup.status === "active" ? "Pause" : "Resume";
 	const statusParts: string[] = [];
 	if (wakeup.status === "active" && wakeup.next_run_at) {
-		statusParts.push(`Next run ${relativeTime(wakeup.next_run_at)}`);
+		// An events wake-up polls at next_run_at; the agent runs only once
+		// an event arrives.
+		const label = wakeup.kind === "events" ? "Next check" : "Next run";
+		statusParts.push(`${label} ${timeFrom(wakeup.next_run_at, now)}`);
 	}
 	if (wakeup.status === "paused") {
 		const reason = wakeup.status_reason
@@ -209,7 +217,7 @@ const ForkChatWakeupRow: React.FC<ForkChatWakeupRowProps> = ({
 					{wakeup.events.map((event, index) => (
 						<li
 							key={`${event.type}-${index}`}
-							className="text-content-secondary"
+							className="wrap-break-word text-content-secondary"
 						>
 							{formatWakeupEvent(event)}
 						</li>

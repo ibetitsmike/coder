@@ -52,6 +52,7 @@ export const MockChatWakeupEvents: ChatWakeup = {
 		{
 			type: "pull_request",
 			url: "https://github.com/example/repo/pull/1",
+			on: ["review", "checks"],
 		},
 	],
 	status: "active",
