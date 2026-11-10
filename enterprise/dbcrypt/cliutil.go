@@ -259,6 +259,10 @@ func Rotate(ctx context.Context, log slog.Logger, sqlDB *sql.DB, ciphers []Ciphe
 		return err
 	}
 
+	if err := forkRecryptSecrets(ctx, log, sqlDB, cryptDB); err != nil {
+		return err
+	}
+
 	// Revoke old keys
 	for _, c := range ciphers[1:] {
 		if err := db.RevokeDBCryptKey(ctx, c.HexDigest()); err != nil {
@@ -503,6 +507,10 @@ func Decrypt(ctx context.Context, log slog.Logger, sqlDB *sql.DB, ciphers []Ciph
 		return err
 	}
 
+	if err := forkRecryptSecrets(ctx, log, sqlDB, cryptDB); err != nil {
+		return err
+	}
+
 	// Revoke _all_ keys
 	for _, c := range ciphers {
 		if err := db.RevokeDBCryptKey(ctx, c.HexDigest()); err != nil {
@@ -590,6 +598,9 @@ func Delete(ctx context.Context, log slog.Logger, sqlDB *sql.DB) error {
 		return xerrors.Errorf("delete encrypted tokens and AI provider keys: %w", err)
 	}
 	log.Info(ctx, "deleted encrypted user tokens and AI provider API keys")
+	if err := forkDeleteEncryptedSecrets(ctx, sqlDB); err != nil {
+		return err
+	}
 
 	log.Info(ctx, "revoking all active keys")
 	keys, err := store.GetDBCryptKeys(ctx)

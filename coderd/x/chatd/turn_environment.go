@@ -465,6 +465,7 @@ func (p *Server) buildTurnEnvironment(
 		// pinned context is read below.
 		p.ensureChatContextPinnedOnFirstTurn(ctx, workspaceCtx.currentChatSnapshot())
 
+		agent = p.forkWorktreeAgent(ctx, chat, agent)
 		var resolveErr error
 		instruction, workspaceSkills, resolveErr = p.resolveTurnWorkspaceContext(ctx, chat, agent)
 		if resolveErr != nil {
@@ -995,6 +996,7 @@ func (p *Server) buildTurnEnvironment(
 		builtinToolNames[chattool.FindToolsName] = true
 	}
 
+	tools = p.withSecretAnswers(ctx, tools, chat)
 	toolDefinitions := chatloop.BuildToolDefinitions(tools, activeToolNames, providerTools)
 	toolNameToConfigID := make(map[string]uuid.UUID)
 	for _, t := range tools {

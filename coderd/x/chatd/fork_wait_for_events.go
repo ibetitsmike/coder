@@ -340,8 +340,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// Whether one of them is a pull request, which is polled less often.
 	pullRequestPending := false
 	// A child's status has no time it became done, so a final poll that
-	// runs well after the expiry cannot tell whether the child was done by
-	// then and leaves children out.
+	// runs well after the expiry leaves out the children updated after the
+	// expiry: they may have finished after it. A status change updates the
+	// chat, so a child last updated by the expiry was done by then.
 	// A child whose send failed was done before the cutoff, so a retry
 	// still delivers it.
 	childrenCutOff := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
@@ -357,8 +358,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				continue
 			}
 			child := rows[index].Chat
-			sendFailed := slices.Contains(keys, failedRunKey(childDoneRunKey(child.ID)))
-			if next == nil && (!childrenCutOff || sendFailed) && childDone(child, waiting) {
+			cutOff := childrenCutOff && child.UpdatedAt.After(wakeup.ExpiresAt.Time) &&
+				!slices.Contains(keys, failedRunKey(childDoneRunKey(child.ID)))
+			if next == nil && !cutOff && childDone(child, waiting) {
 				next = &wakeupDelivery{
 					text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, child.Title, child.ID, child.Status),
 					runKey: childDoneRunKey(child.ID),
@@ -543,9 +545,10 @@ func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]da
 	return rows, waiting, nil
 }
 
-// watchedRunKeys maps the run key of each entry that an active events
-// wake-up of chat watches and has not delivered yet to the ID of that
-// wake-up.
+// watchedRunKeys maps the run key of each entry that an active, unexpired
+// events wake-up of chat watches and has not delivered yet to the ID of that
+// wake-up. An expired wake-up stays active while its chat is busy, but the
+// worker then finishes it without a delivery, so it watches nothing.
 func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[string]uuid.UUID, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -555,9 +558,13 @@ func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[st
 	if err != nil {
 		return nil, xerrors.Errorf("list chat wake-ups: %w", err)
 	}
+	now := p.clock.Now()
 	watching := make(map[string]uuid.UUID)
 	for _, wakeup := range wakeups {
 		if wakeup.Kind != forkdb.ChatWakeupKindEvents || wakeup.Status != forkdb.ChatWakeupStatusActive {
+			continue
+		}
+		if wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) {
 			continue
 		}
 		var events []wakeupEvent

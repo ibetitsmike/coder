@@ -247,6 +247,16 @@ type ChatOrganizationSubagentLimit struct {
 	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
 }
 
+// Answers the user gave to secret ask_user_question calls of descendant chats. Tools of the asking chat read them; they are never written to chat messages.
+type ChatSecretAnswer struct {
+	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
+	ToolCallID string    `db:"tool_call_id" json:"tool_call_id"`
+	// Encrypted by dbcrypt when value_key_id is set.
+	Value      string         `db:"value" json:"value"`
+	ValueKeyID sql.NullString `db:"value_key_id" json:"value_key_id"`
+	CreatedAt  time.Time      `db:"created_at" json:"created_at"`
+}
+
 type ChatSubagent struct {
 	ChatID       uuid.UUID             `db:"chat_id" json:"chat_id"`
 	AgentType    string                `db:"agent_type" json:"agent_type"`

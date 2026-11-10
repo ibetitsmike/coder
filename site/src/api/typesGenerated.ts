@@ -3252,6 +3252,7 @@ export interface ChatModelCallConfig {
 	readonly reasoning_effort?: ChatModelReasoningEffortConfig;
 	readonly openai_config?: ChatModelOpenAIConfig;
 	readonly provider_options?: ChatModelProviderOptions;
+	readonly aliases?: readonly string[];
 }
 
 // From codersdk/chats.go
@@ -3770,6 +3771,11 @@ export interface ChatQuestion {
 	readonly header: string;
 	readonly question: string;
 	readonly options: readonly ChatQuestionOption[];
+	/**
+	 * Secret questions take a free-text answer through
+	 * AnswerChatSecretQuestion, which never writes it to a chat message.
+	 */
+	readonly secret?: boolean;
 }
 
 // From codersdk/fork_chat_questions.go
@@ -3842,6 +3848,17 @@ export interface ChatRetentionDaysResponse {
 export type ChatRole = "" | "read";
 
 export const ChatRoles: ChatRole[] = ["", "read"];
+
+// From codersdk/fork_chat_questions.go
+/**
+ * ChatSecretAnswerRequest answers a secret question of a descendant chat.
+ * The tool call ID travels in the body because coderd routes on the
+ * unescaped path, where an ID with a "/" would not match the route.
+ */
+export interface ChatSecretAnswerRequest {
+	readonly tool_call_id: string;
+	readonly value: string;
+}
 
 // From codersdk/chats.go
 export interface ChatSkillInvocationPart {

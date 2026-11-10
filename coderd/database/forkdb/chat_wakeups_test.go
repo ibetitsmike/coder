@@ -269,6 +269,21 @@ func TestCountChatUserNotificationsSince(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, count, "one enqueue counts once across its delivery methods")
+
+	// The dedupe resets each UTC day, so the same payload enqueued again
+	// after midnight is a second notification.
+	midnight := now.UTC().Truncate(24 * time.Hour)
+	otherChatID := uuid.New()
+	enqueue(custom, otherChatID, "same", midnight.Add(-time.Minute), database.NotificationMethodInbox)
+	enqueue(custom, otherChatID, "same", midnight.Add(time.Minute), database.NotificationMethodInbox)
+	count, err = fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
+		UserID:                 chat.OwnerID,
+		NotificationTemplateID: custom,
+		ChatID:                 otherChatID.String(),
+		Since:                  midnight.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count, "an identical payload on another UTC day counts again")
 }
 
 // insertCostMessage inserts a message of chat that cost costMicros at
