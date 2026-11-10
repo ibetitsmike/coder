@@ -91,7 +91,9 @@ func TestLoopCommandCreateChat(t *testing.T) {
 	require.Equal(t, "check CI", chat.Title, "the fallback title comes from the loop prompt")
 
 	_, err = create("/loop 30s check CI", uuid.NullUUID{})
-	require.Error(t, err, "an invalid loop refuses the chat")
+	var invalid *chatd.InvalidLoopCommandError
+	require.ErrorAs(t, err, &invalid, "an invalid loop refuses the chat")
+	require.Contains(t, invalid.Reason, "interval must be between")
 
 	child, err := create("/loop 5m check CI", uuid.NullUUID{UUID: chat.ID, Valid: true})
 	require.NoError(t, err)

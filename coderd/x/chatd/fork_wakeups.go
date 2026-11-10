@@ -28,6 +28,8 @@ const (
 	wakeupPollInterval = 15 * time.Second
 	wakeupLease        = 2 * time.Minute
 	wakeupClaimBatch   = 20
+
+	wakeupReasonArchived = "archived"
 )
 
 // startForkLoops starts the worker loops of fork experiments.
@@ -132,7 +134,7 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 
 	switch {
 	case chat.Archived:
-		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"})
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived})
 	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now):
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
 	case chat.Status == database.ChatStatusRunning,
@@ -310,7 +312,7 @@ func (p *Server) wakeupFailure(ctx context.Context, wakeup forkdb.ChatWakeup, no
 	}
 	switch {
 	case errors.Is(sendErr, ErrChatArchived), errors.Is(sendErr, chatstate.ErrChatFamilyArchived):
-		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"}
+		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived}
 	default:
 		// Includes hook dispatch failures, which are transient: the next
 		// occurrence tries again.
@@ -377,6 +379,22 @@ func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, chat d
 	}
 	if finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish.reason)
+	}
+	return nil
+}
+
+// cancelArchivedWakeups cancels the active and paused wake-ups of the chats of
+// an archived family.
+func cancelArchivedWakeups(ctx context.Context, fdb forkdb.Store, chats []database.Chat, now time.Time) error {
+	for _, chat := range chats {
+		_, err := fdb.CancelChatWakeupsByChatID(ctx, forkdb.CancelChatWakeupsByChatIDParams{
+			ChatID:    chat.ID,
+			Reason:    wakeupReasonArchived,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			return xerrors.Errorf("cancel wake-ups of archived chat %s: %w", chat.ID, err)
+		}
 	}
 	return nil
 }
