@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import {
@@ -44,6 +44,10 @@ beforeEach(() => {
 	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
 		MockForkPluginPack,
 	]);
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
 });
 
 it("lists the packs of the organization the URL names", async () => {
