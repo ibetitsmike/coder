@@ -139,6 +139,14 @@ func (policy customAgentToolPolicy) keepsWorkspaceCreation() bool {
 	return !policy.ReadOnly && policy.allowsNonMCPTool("list_templates") && policy.allowsNonMCPTool("create_workspace")
 }
 
+// keepsWorkspaceFileTools reports whether policy leaves the tools that the
+// attached workspace guidance names.
+func (policy customAgentToolPolicy) keepsWorkspaceFileTools() bool {
+	return !policy.ReadOnly && !slices.ContainsFunc([]string{"execute", "read_file", "write_file"}, func(name string) bool {
+		return !policy.allowsNonMCPTool(name)
+	})
+}
+
 // keepsACPTools reports whether tools, as policy filters them, hold every
 // ACP tool that the ACP subagent guidance names. A nil policy keeps tools.
 // It knows no MCP server slugs, so it only checks non-MCP tools, which the
