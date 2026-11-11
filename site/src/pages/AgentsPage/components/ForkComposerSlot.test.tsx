@@ -1,9 +1,16 @@
-import { act, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
+import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
-import type { ChatTodoList, Experiment } from "#/api/typesGenerated";
+import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
+import type {
+	ChatTodoList,
+	ChatWakeup,
+	Experiment,
+} from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { MockChat } from "#/testHelpers/chatEntities";
 import {
@@ -13,6 +20,10 @@ import {
 	MockEntitlements,
 } from "#/testHelpers/entities";
 import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
+import {
+	MockChatWakeupCron,
+	MockChatWakeupInterval,
+} from "#/testHelpers/forkChatWakeups";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -27,6 +38,7 @@ import { ForkComposerSlot } from "./ForkComposerSlot";
 const renderSlot = (
 	experiments: Experiment[],
 	queryClient = createTestQueryClient(),
+	isDisabled = false,
 ) => {
 	const { unmount } = renderComponent(
 		<QueryClientProvider client={queryClient}>
@@ -41,7 +53,7 @@ const renderSlot = (
 					canViewOrganizationSettings: false,
 				}}
 			>
-				<ForkComposerSlot chatId={MockChat.id} isDisabled={false} />
+				<ForkComposerSlot chatId={MockChat.id} isDisabled={isDisabled} />
 			</DashboardContext.Provider>
 		</QueryClientProvider>,
 	);
@@ -161,5 +173,142 @@ describe("ForkComposerSlot todo list", () => {
 			),
 		);
 		expect(watch).toHaveBeenCalledTimes(1);
+	});
+});
+
+// Serves wake-ups from a list that a PATCH updates, so the refetch after an
+// update returns the new status like the server would.
+const mockWakeupsServer = (initial: ChatWakeup[]) => {
+	let wakeups = initial;
+	vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockImplementation(
+		async () => wakeups,
+	);
+	return vi
+		.spyOn(forkChatWakeupsApi, "updateChatWakeup")
+		.mockImplementation(async (_chatId, wakeupId, req) => {
+			wakeups = wakeups.map((wakeup) =>
+				wakeup.id === wakeupId ? { ...wakeup, status: req.status } : wakeup,
+			);
+			const updated = wakeups.find((wakeup) => wakeup.id === wakeupId);
+			if (!updated) {
+				throw new Error(`Unknown wake-up: ${wakeupId}`);
+			}
+			return updated;
+		});
+};
+
+describe("ForkComposerSlot wake-ups", () => {
+	it("does not request wake-ups while fork-chat-wakeups is off", () => {
+		const getWakeups = vi
+			.spyOn(forkChatWakeupsApi, "getChatWakeups")
+			.mockResolvedValue([]);
+
+		renderSlot([]);
+
+		expect(getWakeups).not.toHaveBeenCalled();
+	});
+
+	it("loads todos and wake-ups when both experiments are on", async () => {
+		const getTodos = vi
+			.spyOn(forkChatTodosApi, "getChatTodos")
+			.mockResolvedValue(MockChatTodoList);
+		mockTodoWatchSocket();
+		const getWakeups = vi
+			.spyOn(forkChatWakeupsApi, "getChatWakeups")
+			.mockResolvedValue([]);
+
+		renderSlot(["fork-chat-todos", "fork-chat-wakeups"]);
+
+		await waitFor(() => {
+			expect(getTodos).toHaveBeenCalledWith(MockChat.id, expect.anything());
+			expect(getWakeups).toHaveBeenCalledWith(MockChat.id, expect.anything());
+		});
+	});
+
+	it("pauses an active wake-up", async () => {
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
+		const user = userEvent.setup();
+
+		const { queryClient } = renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
+
+		await waitFor(() =>
+			expect(queryClient.getQueryData(chatWakeupsKey(MockChat.id))).toEqual([
+				{ ...MockChatWakeupInterval, status: "paused" },
+			]),
+		);
+		expect(updateWakeup).toHaveBeenCalledWith(
+			MockChat.id,
+			MockChatWakeupInterval.id,
+			{ status: "paused" },
+		);
+	});
+
+	it("cancels a wake-up", async () => {
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
+		const user = userEvent.setup();
+
+		const { queryClient } = renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(
+			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
+		);
+
+		await waitFor(() =>
+			expect(queryClient.getQueryData(chatWakeupsKey(MockChat.id))).toEqual([
+				{ ...MockChatWakeupInterval, status: "canceled" },
+			]),
+		);
+		expect(updateWakeup).toHaveBeenCalledWith(
+			MockChat.id,
+			MockChatWakeupInterval.id,
+			{ status: "canceled" },
+		);
+	});
+
+	it("blocks other updates while one is running", async () => {
+		vi.spyOn(forkChatWakeupsApi, "getChatWakeups").mockResolvedValue([
+			MockChatWakeupInterval,
+			MockChatWakeupCron,
+		]);
+		const updateWakeup = vi
+			.spyOn(forkChatWakeupsApi, "updateChatWakeup")
+			.mockReturnValue(new Promise(() => {}));
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"]);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 2 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
+
+		const cancelCron = screen.getByRole("button", { name: /^Cancel Cron/ });
+		await waitFor(() => expect(cancelCron).toBeDisabled());
+		await user.click(cancelCron);
+		expect(updateWakeup).toHaveBeenCalledTimes(1);
+	});
+
+	it("disables wake-up actions while the composer is disabled", async () => {
+		const updateWakeup = mockWakeupsServer([MockChatWakeupInterval]);
+		const user = userEvent.setup();
+
+		renderSlot(["fork-chat-wakeups"], createTestQueryClient(), true);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Wake-ups, 1 open" }),
+		);
+		await user.click(screen.getByRole("button", { name: /^Pause Every 5m: / }));
+		await user.click(
+			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
+		);
+		expect(updateWakeup).not.toHaveBeenCalled();
 	});
 });
