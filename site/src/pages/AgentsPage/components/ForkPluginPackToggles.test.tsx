@@ -39,9 +39,7 @@ it("enables an installed pack for the target and refetches the chat", async () =
 		/>,
 	);
 
-	queryClient.setQueryData(chatEntityKey(target.chatId), {
-		id: target.chatId,
-	});
+	const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 	const toggle = await screen.findByRole("switch", {
 		name: `Enable ${MockForkPluginPack.name}`,
 	});
@@ -55,9 +53,10 @@ it("enables an installed pack for the target and refetches the chat", async () =
 		),
 	);
 	await waitFor(() =>
-		expect(
-			queryClient.getQueryState(chatEntityKey(target.chatId))?.isInvalidated,
-		).toBe(true),
+		expect(invalidateQueries).toHaveBeenCalledWith({
+			queryKey: chatEntityKey(target.chatId),
+			exact: true,
+		}),
 	);
 });
 

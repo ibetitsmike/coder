@@ -373,9 +373,7 @@ it("keeps the row menu reachable and starts no second update while one is pendin
 	expect(menu).toBeEnabled();
 
 	await user.click(menu);
-	await user.click(
-		await screen.findByRole("menuitem", { name: "Updating…" }),
-	);
+	await user.click(await screen.findByRole("menuitem", { name: "Updating…" }));
 	expect(update).toHaveBeenCalledTimes(1);
 
 	finishUpdate(MockForkPluginPack);
