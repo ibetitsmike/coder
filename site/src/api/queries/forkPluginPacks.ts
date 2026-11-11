@@ -101,7 +101,7 @@ const withPluginPack = (
 	pack: ForkPluginPack,
 ) =>
 	packs
-		.filter((cached) => cached.id !== pack.id)
+		.filter((cached) => cached.id !== pack.id && cached.name !== pack.name)
 		.concat(pack)
 		.sort((a, b) => a.name.localeCompare(b.name));
 

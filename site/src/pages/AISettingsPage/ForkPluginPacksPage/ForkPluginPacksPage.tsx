@@ -28,20 +28,18 @@ import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { RequirePermission } from "#/modules/permissions/RequirePermission";
 import { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
+import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
 import { pageTitle } from "#/utils/page";
 import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
 import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkillsOrganization";
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
 import { ForkDeletePluginPackDialog } from "./ForkDeletePluginPackDialog";
 import { ForkInstallPluginPackDialog } from "./ForkInstallPluginPackDialog";
-import {
-	type ForkPluginPacksAccess,
-	ForkPluginPacksTableView,
-} from "./ForkPluginPacksTableView";
+import { ForkPluginPacksTableView } from "./ForkPluginPacksTableView";
 
 type OrganizationPluginPacksProps = {
 	organization: Organization;
-	access: ForkPluginPacksAccess;
+	access: SkillAccess;
 	picker: React.ReactNode;
 };
 
@@ -240,6 +238,7 @@ const ForkPluginPacksPage: React.FC = () => {
 				)}
 				{organization && (
 					<OrganizationPluginPacks
+						key={organization.id}
 						organization={organization}
 						access={{
 							create: Boolean(organizationPermissions?.createOrganizationSkill),
