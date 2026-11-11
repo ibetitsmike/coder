@@ -126,6 +126,13 @@ type Resolver struct {
 	MCPResources func() []Resource
 	// ACPResources returns cached harness metadata; it must never launch processes.
 	ACPResources func() []Resource
+	// PackRowsAdvertised, when non-nil, gates plugin-pack emission: packs are
+	// discovered only while it returns true, which the Manager wires to the
+	// server's push-response capability. Nil means the resolver is used
+	// without a push negotiation (tests, or a server that never advertises);
+	// emission stays off so a newer agent cannot persist pack rows on an
+	// older coderd during a rolling upgrade.
+	PackRowsAdvertised func() bool
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -1059,14 +1066,15 @@ func driftResources(resources []Resource) []Resource {
 		case KindMCPConfig, KindMCPServer, KindACPHarness:
 			continue
 		default:
-			// Pack rows are dropped by chatd while fork-plugins is
+			// Pack rows are dropped by chatd while fork-plugin-packs is
 			// off, so they must not read as prompt drift either:
 			// installing or editing a pack cannot look like a prompt
 			// change to hash-comparing subscribers. The agent has no
 			// experiment knowledge, so the exclusion is unconditional
 			// here; chatd re-derives the drift hash from the pushed
 			// rows (coderd/x/chatd/fork_plugin_drift.go) and keeps
-			// pack rows drift-relevant while the experiment is on.
+			// pack rows drift-relevant while the experiments that
+			// surface them are on.
 			if isPackContribution(r) {
 				continue
 			}

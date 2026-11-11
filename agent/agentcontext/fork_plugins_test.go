@@ -48,6 +48,7 @@ func TestResolver_PluginPacks(t *testing.T) {
 	writePack(t, root, ".claude-plugin/plugin.json", manifest, "skills", "agents")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -67,7 +68,7 @@ func TestResolver_PluginPacksRootIsPack(t *testing.T) {
 
 	// A scan root that is itself a pack must stamp everything it emits
 	// with the manifest path, so coderd can drop its resources when
-	// fork-plugins is off. Ordinary container discovery would claim the
+	// fork-plugin-packs is off. Ordinary container discovery would claim the
 	// same files with the container path as Source and lose the stamp.
 	root := t.TempDir()
 	manifest := `{"name": "pstack"}`
@@ -77,6 +78,7 @@ func TestResolver_PluginPacksRootIsPack(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "agents", "comment-sicko.md"), packAgent("comment-sicko"))
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	manifestPath := filepath.Join(root, "plugin.json")
@@ -96,6 +98,7 @@ func TestResolver_PluginPacksCursorManifestDeclaredDirs(t *testing.T) {
 	writePack(t, root, ".cursor-plugin/plugin.json", manifest, "skills", "agents")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -112,6 +115,7 @@ func TestResolver_PluginPacksRootManifestDefaults(t *testing.T) {
 	writePack(t, root, "plugin.json", manifest, "skills", "agents")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -130,6 +134,7 @@ func TestResolver_PluginPacksRejectsEscapingPaths(t *testing.T) {
 	writePack(t, root, "plugin.json", manifest, "", "")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -145,6 +150,7 @@ func TestResolver_PluginPacksInvalidManifest(t *testing.T) {
 	writePack(t, root, "plugin.json", `{"name": broken`, "skills", "agents")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	require.Empty(t, snap.Resources, "a pack whose manifest does not parse contributes nothing")
@@ -162,6 +168,7 @@ func TestResolver_PluginPacksYieldToUserSkills(t *testing.T) {
 	// The built-in roots order user config before the plugin cache, so the
 	// user's skill must win the name collision.
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{
 		{Path: userRoot},
 		{Path: packRoot},
@@ -188,6 +195,7 @@ func TestResolver_PluginPacksDirectChildrenOnly(t *testing.T) {
 	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "")
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -215,6 +223,7 @@ func TestResolver_PluginPacksSymlinkEscape(t *testing.T) {
 	}
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -235,6 +244,7 @@ func TestResolver_PluginPacksManifestTooLarge(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -260,6 +270,7 @@ func TestResolver_PluginPacksSortedLastAtCaps(t *testing.T) {
 	}
 
 	r := &agentcontext.Resolver{MaxResources: len(names) + 1}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{
 		{Path: filepath.Join(root, "user")},
 		{Path: filepath.Join(root, "pstack")},
@@ -310,6 +321,7 @@ func TestResolver_PluginPacksManifestSymlinkRejected(t *testing.T) {
 	}
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -335,6 +347,7 @@ func TestResolver_PluginPacksNamelessManifest(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -350,7 +363,7 @@ func TestResolver_PluginPacksExcludedFromDrift(t *testing.T) {
 	t.Parallel()
 
 	// Installing or editing a pack must not change the drift hash
-	// while fork-plugins is off: pack rows are filtered from the
+	// while fork-plugin-packs is off: pack rows are filtered from the
 	// prompt by chatd, so they cannot read as prompt drift. Resolve
 	// the same directory before and after the pack appears: the
 	// hash covers absolute sources, so only a same-root comparison
@@ -359,10 +372,76 @@ func TestResolver_PluginPacksExcludedFromDrift(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 
 	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
 	h1 := r.Resolve([]agentcontext.ScanRoot{{Path: root}}).AggregateHash
 
 	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
 
 	h2 := r.Resolve([]agentcontext.ScanRoot{{Path: root}}).AggregateHash
 	require.Equal(t, h1, h2, "a pack must not change the drift hash")
+}
+
+func TestResolver_PluginPacksRequireAdvertisedCapability(t *testing.T) {
+	t.Parallel()
+
+	// Pack rows reach shared tables only after the server advertised the
+	// push-response capability. A resolver without the advertisement (an
+	// older coderd replica, or the experiment off) must discover nothing
+	// from packs, even with one fully laid out on disk.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "Root instructions.\n")
+	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	for name, advertised := range map[string]func() bool{
+		"nil callback":   nil,
+		"not advertised": func() bool { return false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = advertised
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+			require.NotEmpty(t, snap.Resources, "ordinary discovery must still run")
+			for _, res := range snap.Resources {
+				require.Empty(t, res.SourcePath,
+					"no resource may carry the pack marker without the server capability")
+				require.NotContains(t, res.Source, filepath.Join(root, "pstack"),
+					"nothing from a pack may be discovered without the server capability")
+			}
+			findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "AGENTS.md"))
+		})
+	}
+}
+
+func TestResolver_PluginPacksFollowCapabilityFlips(t *testing.T) {
+	t.Parallel()
+
+	// The advertised value is re-read on every resolve: losing the
+	// capability (a deployment restart with the experiment off) stops
+	// pack emission without an agent restart.
+	root := t.TempDir()
+	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	advertised := false
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return advertised }
+
+	packRows := func() int {
+		snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+		count := 0
+		for _, res := range snap.Resources {
+			if res.SourcePath != "" {
+				count++
+			}
+		}
+		return count
+	}
+
+	require.Zero(t, packRows(), "a pack must not be discovered before the capability")
+	advertised = true
+	require.Positive(t, packRows(), "a pack must be discovered once the capability is advertised")
+	advertised = false
+	require.Zero(t, packRows(), "losing the capability must stop pack discovery")
 }

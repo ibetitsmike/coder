@@ -347,6 +347,104 @@ func TestRunPush_WaitsForReady(t *testing.T) {
 	require.ErrorIs(t, <-pushDone, context.Canceled)
 }
 
+func TestRunPush_AdvertisedPacksTriggerResync(t *testing.T) {
+	t.Parallel()
+
+	// The first push runs before the server advertised the fork-plugin-packs
+	// capability, so its snapshot carries no pack rows. A response that flips
+	// the capability on must trigger an immediate resync whose push includes
+	// the pack, instead of waiting for an unrelated filesystem event. A
+	// later false response must retract the capability: the next resolve
+	// drops the pack rows again.
+	dir := t.TempDir()
+	writePack(t, dir, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	m := newTestManager(t, agentcontext.ManagerOptions{
+		WorkingDir: func() string { return dir },
+	})
+
+	p := newFakePusher()
+	p.mu.Lock()
+	p.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	defer cancel()
+
+	// The advertise-triggered resync lands on the Run goroutine's select;
+	// Trigger is a no-op without it, so run the loop as production does.
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.Run(ctx) }()
+
+	pushDone := make(chan error, 1)
+	go func() {
+		pushDone <- m.RunPush(ctx, p, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push"),
+		})
+	}()
+
+	// Initial push: no advertisement has been seen yet, so the snapshot
+	// must not carry pack rows.
+	<-p.signal
+	var packRows int
+	for _, req := range p.snapshot() {
+		for _, res := range req.Resources {
+			if res.SourcePath != "" {
+				packRows++
+			}
+		}
+	}
+	require.Zero(t, packRows, "pack rows stay hidden before the server advertises")
+
+	// The first push's response advertised; the triggered resync must
+	// produce a push whose snapshot includes the pack.
+	select {
+	case <-p.signal:
+	case <-time.After(testutil.WaitShort):
+		t.Fatalf("expected a resync push after the capability was advertised")
+	}
+	require.Eventually(t, func() bool {
+		reqs := p.snapshot()
+		if len(reqs) < 2 {
+			return false
+		}
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the post-advertisement push must include pack rows")
+
+	// Flip the capability off: the next resolve must drop the pack rows.
+	p.mu.Lock()
+	p.resp = &agentcontext.PushResponse{Accepted: true}
+	p.mu.Unlock()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("v2"), 0o600))
+	select {
+	case <-p.signal:
+	case <-time.After(testutil.WaitShort):
+		t.Fatalf("expected a push after the file change")
+	}
+	require.Eventually(t, func() bool {
+		reqs := p.snapshot()
+		if len(reqs) < 3 {
+			return false
+		}
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return false
+			}
+		}
+		return true
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"losing the capability must drop pack rows from the next push")
+
+	cancel()
+	require.ErrorIs(t, <-pushDone, context.Canceled)
+}
+
 func TestRunPush_NilPusherErrors(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, agentcontext.ManagerOptions{

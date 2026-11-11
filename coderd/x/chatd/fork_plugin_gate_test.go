@@ -1,6 +1,6 @@
 package chatd
 
-// This file is fork code: it tests the fork-plugins gate on pack-contributed
+// This file is fork code: it tests the fork-plugin-packs gate on pack-contributed
 // context resources.
 
 import (
@@ -46,9 +46,9 @@ func TestFilterPackResources(t *testing.T) {
 	}
 
 	off := (&Server{experiments: codersdk.Experiments{}}).filterPackResources(append([]database.ChatContextResource{}, resources...))
-	require.Len(t, off, 1, "with fork-plugins off only the user skill survives")
+	require.Len(t, off, 1, "with fork-plugin-packs off only the user skill survives")
 	require.Equal(t, "/home/u/.coder/skills/review-pr", off[0].Source)
 
-	on := (&Server{experiments: codersdk.Experiments{codersdk.ExperimentForkPlugins}}).filterPackResources(append([]database.ChatContextResource{}, resources...))
-	require.Len(t, on, 3, "with fork-plugins on the pack skills and agents survive")
+	on := (&Server{experiments: codersdk.Experiments{codersdk.ExperimentForkPluginPacks}}).filterPackResources(append([]database.ChatContextResource{}, resources...))
+	require.Len(t, on, 3, "with fork-plugin-packs on the pack skills and agents survive")
 }

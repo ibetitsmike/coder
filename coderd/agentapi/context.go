@@ -75,6 +75,11 @@ type ContextAPI struct {
 	// deployment-wide kill switch for context sync write load
 	// (CODER_DISABLE_WORKSPACE_AGENT_CONTEXT_SYNC).
 	Disabled bool
+	// ForkPluginPacks mirrors the fork-plugin-packs experiment. It is
+	// advertised in every PushContextStateResponse so the agent emits
+	// plugin-pack rows only to replicas that know them: an older replica
+	// leaves the field false and the agent never persists pack rows there.
+	ForkPluginPacks bool
 }
 
 // ContextDirtyMarker hydrates chats from, and marks chats dirty against, a
@@ -101,7 +106,7 @@ type ContextDirtyMarker interface {
 // it on the snapshot row, and hydrates and dirties chats against it, so
 // the create-time and refresh pinning paths (which re-read the snapshot
 // row) stay consistent with the push path by construction. chatd uses
-// this to keep deployment-side filters such as fork-plugins in control
+// this to keep deployment-side filters such as fork-plugin-packs in control
 // of what counts as prompt drift.
 type ContextDriftHasher interface {
 	// DriftHash maps the just-validated resource rows (exactly the set
@@ -153,7 +158,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 
 	// The drift hash chats pin against. A marker that implements
 	// ContextDriftHasher re-derives it from the rows so deployment-side
-	// filters (fork-plugins) decide what counts as prompt drift; the
+	// filters (fork-plugin-packs) decide what counts as prompt drift; the
 	// agent's own aggregate remains authoritative on the wire and in the
 	// agent's local snapshot.
 	driftHash := req.AggregateHash
@@ -267,7 +272,10 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			slog.F("version", req.Version),
 			slog.F("initial", req.Initial),
 		)
-		return &agentproto.PushContextStateResponse{Accepted: false}, nil
+		return &agentproto.PushContextStateResponse{
+			Accepted:        false,
+			ForkPluginPacks: a.ForkPluginPacks,
+		}, nil
 	}
 
 	// The snapshot committed; fan out dirty watch events to chats whose
@@ -282,7 +290,10 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		slog.F("initial", req.Initial),
 		slog.F("resources", len(rows)),
 	)
-	return &agentproto.PushContextStateResponse{Accepted: true}, nil
+	return &agentproto.PushContextStateResponse{
+		Accepted:        true,
+		ForkPluginPacks: a.ForkPluginPacks,
+	}, nil
 }
 
 // validateContextPushRequest enforces the request-level caps: counts

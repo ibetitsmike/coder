@@ -31,6 +31,11 @@ type PushRequest struct {
 // a push.
 type PushResponse struct {
 	Accepted bool
+	// ForkPluginPacks mirrors the server's push-response capability: the
+	// serving coderd knows the fork-plugin-packs experiment and will
+	// treat pack-contributed rows accordingly. Servers that predate the
+	// capability leave it false, and pack emission stays off.
+	ForkPluginPacks bool
 }
 
 // Pusher delivers snapshots to coderd. Concrete implementations
@@ -80,6 +85,12 @@ type PushOptions struct {
 //
 // The first push is always sent with Initial=true so coderd can
 // distinguish a fresh boot from a drift event.
+//
+// Each response also updates the Manager's pack-rows-advertised flag
+// (fork_plugin_packs): the resolver emits plugin-pack rows only while the
+// server advertises the capability, and a false-to-true transition triggers
+// an immediate resync so packs join the very next snapshot instead of
+// waiting for a filesystem event.
 func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error {
 	if p == nil {
 		return xerrors.New("agentcontext: Pusher is required")
@@ -101,6 +112,20 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	changes, unsub := m.SubscribeChanges()
 	defer unsub()
 
+	// advertise records the capability the server last reported and triggers
+	// a resync when it flips in either direction, so pack rows join the next
+	// snapshot after advertisement and leave it promptly on retraction.
+	advertise := func(resp *PushResponse) {
+		if resp == nil {
+			return
+		}
+		was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
+		if resp.ForkPluginPacks != was {
+			logger.Debug(ctx, "server flipped plugin-pack advertisement; re-resolving")
+			m.Trigger()
+		}
+	}
+
 	// Until SetReady the snapshot is version 0: wait, don't push it.
 	initial := true
 	for {
@@ -117,10 +142,11 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 		}
 		req := snapshotToPushRequest(snap, initial)
 
-		err := pushWithRetry(ctx, p, req, initialBackoff, maxBackoff, clock, logger)
+		resp, err := pushWithRetry(ctx, p, req, initialBackoff, maxBackoff, clock, logger)
 		switch {
 		case err == nil:
 			initial = false
+			advertise(resp)
 		case errors.Is(err, ErrPushUnimplemented):
 			logger.Warn(ctx, "coderd peer does not implement PushContextState; stopping")
 			return nil
@@ -146,7 +172,8 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 }
 
 // pushWithRetry retries transient errors with exponential
-// backoff capped at maxBackoff. The retry loop exits when:
+// backoff capped at maxBackoff. It returns the successful attempt's response
+// (nil when no attempt succeeded). The retry loop exits when:
 //
 //   - ctx is canceled (returns ctx.Err()).
 //   - The Pusher returns nil (success).
@@ -158,7 +185,7 @@ func pushWithRetry(
 	initialBackoff, maxBackoff time.Duration,
 	clock quartz.Clock,
 	logger slog.Logger,
-) error {
+) (*PushResponse, error) {
 	backoff := initialBackoff
 	for {
 		resp, err := p.PushContextState(ctx, req)
@@ -170,13 +197,13 @@ func pushWithRetry(
 				logger.Debug(ctx, "push rejected, awaiting next change",
 					slog.F("version", req.Version))
 			}
-			return nil
+			return resp, nil
 		}
 		if errors.Is(err, ErrPushUnimplemented) {
-			return err
+			return nil, err
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
+			return nil, err
 		}
 		logger.Warn(ctx, "push failed, retrying",
 			slog.F("version", req.Version),
@@ -186,7 +213,7 @@ func pushWithRetry(
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-timer.C:
 		}
 		backoff *= 2

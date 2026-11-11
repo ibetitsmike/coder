@@ -1,7 +1,7 @@
 package chatd
 
 // This file is fork code: it derives the drift hash chats pin against for
-// the fork-plugins experiment (PRD 6.7). The agent excludes pack rows from
+// the fork-plugin-packs experiment (PRD 6.7). The agent excludes pack rows from
 // its pushed aggregate unconditionally (agent/agentcontext/resolve.go
 // driftResources) because it has no experiment knowledge; with the
 // experiment on, pack rows ARE pinned prompt content, so chatd re-derives
@@ -23,11 +23,16 @@ import (
 // DriftHash implements agentapi.ContextDriftHasher: it rebuilds the
 // agentcontext resources the rows encode and hashes them with the agent's
 // scheme, minus MCP and ACP rows (live-synced on every push, never drift)
-// and, while fork-plugins is off, minus pack-contributed rows (invisible
-// to chats). Unknown body kinds or statuses cannot occur today (the push
-// validator rejects them); they are skipped rather than mis-hashed.
+// and, while fork-plugin-packs is off, minus pack-contributed rows (invisible
+// to chats). Pack subagent rows are also skipped while fork-agent-definitions
+// is off: nothing consumes them then (custom agent types are disabled and the
+// context listing hides subagents), so editing a pack agent definition would
+// otherwise dirty every chat without changing anything it can see. Unknown
+// body kinds or statuses cannot occur today (the push validator rejects
+// them); they are skipped rather than mis-hashed.
 func (p *Server) DriftHash(rows []database.UpsertWorkspaceAgentContextResourceParams, _ []byte) []byte {
-	pluginsOn := p.experiments.Enabled(codersdk.ExperimentForkPlugins)
+	pluginsOn := p.experiments.Enabled(codersdk.ExperimentForkPluginPacks)
+	definitionsOn := p.experiments.Enabled(codersdk.ExperimentForkAgentDefinitions)
 	resources := make([]agentcontext.Resource, 0, len(rows))
 	for _, row := range rows {
 		kind, ok := agentResourceKind(row.BodyKind)
@@ -38,7 +43,11 @@ func (p *Server) DriftHash(rows []database.UpsertWorkspaceAgentContextResourcePa
 		case agentcontext.KindMCPConfig, agentcontext.KindMCPServer, agentcontext.KindACPHarness:
 			continue
 		}
-		if !pluginsOn && isPackContribution(row.SourcePath) {
+		packRow := isPackContribution(row.SourcePath)
+		if !pluginsOn && packRow {
+			continue
+		}
+		if kind == agentcontext.KindSubagent && packRow && !definitionsOn {
 			continue
 		}
 		status, ok := agentResourceStatus(row.Status)

@@ -9,10 +9,19 @@ package agentcontext
 //
 // Pack-contributed resources carry the pack's manifest path in SourcePath so
 // coderd can drop them from the prompt and the context popup when the
-// fork-plugins experiment is off (coderd/x/chatd/fork_plugin_gate.go). The
+// fork-plugin-packs experiment is off (coderd/x/chatd/fork_plugin_gate.go). The
 // KindPlugin manifest resource itself stays agent-local: neither the DRPC
 // body nor the workspace agent context body kinds carry a plugin payload
 // yet, so PR1 pushes nothing for the manifest.
+//
+// Pack rows are emitted only once the server advertises the push-response
+// capability (agent/proto/agent.proto fork_plugin_packs). During a rolling
+// upgrade a newer agent can otherwise push pack rows to a pre-fork-plugin-packs
+// coderd replica, whose prompt builder consumes every pinned skill without
+// inspecting source_path and would serve pack content while the feature is
+// disabled there. The advertised value is also re-checked on every resolve,
+// so losing the capability (a deployment restart with the experiment off)
+// stops emission without an agent restart.
 
 import (
 	"encoding/json"
@@ -197,8 +206,15 @@ func inPackContainers(p packRoot, rel string) []string {
 
 // emitPacks appends the pack-contributed resources of a scan root after the
 // ordinary discovery, so a pack skill sharing a name with an ordinary skill
-// or an earlier pack's skill loses the usual first-wins dedup.
+// or an earlier pack's skill loses the usual first-wins dedup. Emission waits
+// for the server's push-response capability: an upgrade window with a newer
+// agent and an older coderd replica must not persist pack rows, because the
+// older replica serves pinned skills without a pack gate. The callback is
+// re-read per root, so a capability flip applies to the next resolve.
 func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]int) {
+	if r.PackRowsAdvertised == nil || !r.PackRowsAdvertised() {
+		return
+	}
 	for _, pack := range packRootsFor(root.Path) {
 		r.emitPackSkills(pack, root, out, seenID)
 		r.emitPackAgents(pack, root, out, seenID)

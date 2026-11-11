@@ -1,6 +1,6 @@
 package chatd
 
-// This file is fork code: with the fork-plugins experiment off, resources
+// This file is fork code: with the fork-plugin-packs experiment off, resources
 // contributed by a plugin pack must not reach the prompt or the context
 // popup, so a deployment with the flag off matches upstream, whose resolver
 // ignores plugin manifests. The agentcontext resolver stamps every
@@ -34,11 +34,11 @@ func isPackContribution(sourcePath string) bool {
 	return base == packContributionMarker
 }
 
-// filterPackResources drops pack-contributed resources when fork-plugins is
+// filterPackResources drops pack-contributed resources when fork-plugin-packs is
 // off. The prompt builder and the context resource listing both call it, so
 // the flag gates every consumer of the pinned rows.
 func (p *Server) filterPackResources(resources []database.ChatContextResource) []database.ChatContextResource {
-	if p.experiments.Enabled(codersdk.ExperimentForkPlugins) {
+	if p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
 		return resources
 	}
 	return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {

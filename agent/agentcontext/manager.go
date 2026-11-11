@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/xerrors"
@@ -117,6 +118,11 @@ type Manager struct {
 	runDoneCh    chan struct{}
 	runStartedCh chan struct{}
 
+	// packRowsAdvertised mirrors the server's push-response capability the
+	// push loop last saw; the resolver reads it through PackRowsAdvertised.
+	// The atomic keeps resolve passes lock-free while RunPush updates it.
+	packRowsAdvertised atomic.Bool
+
 	watcher *Watcher
 }
 
@@ -169,6 +175,13 @@ func NewManager(opts ManagerOptions) *Manager {
 		resolver.MCPResources = func() []Resource {
 			return buildMCPServerResources(opts.MCPCatalog())
 		}
+	}
+
+	// Pack emission follows the server's advertised push-response
+	// capability; the push loop flips this flag when it changes, and the
+	// resolver consults it on every pass (see push.go RunPush).
+	resolver.PackRowsAdvertised = func() bool {
+		return m.packRowsAdvertised.Load()
 	}
 
 	for _, s := range opts.InitialSources {

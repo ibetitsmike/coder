@@ -276,11 +276,22 @@ func TestChatContextDirtyFromAgentPush(t *testing.T) {
 	require.Equal(t, codersdk.ChatContextResourceKindSkill, refreshedResources[skillSource].Kind)
 	require.Equal(t, "example", refreshedResources[skillSource].SkillName)
 
-	// Re-pushing the now-pinned hash proves the refresh advanced the pin to
-	// hashB: a matching hash must not re-dirty the chat.
+	// Re-pushing the now-pinned snapshot proves the refresh advanced the
+	// pin: an unchanged snapshot must not re-dirty the chat. The push
+	// carries the same rows as the pinned snapshot, mirroring a real
+	// agent's no-op re-push: the server derives the drift hash from the
+	// persisted rows (coderd/x/chatd/fork_plugin_drift.go), so only a row
+	// change can drift. A hash-only push with no rows would describe an
+	// emptied snapshot, and dirtying on it is correct: the pushed rows are
+	// what gets persisted, so such a push empties the snapshot the chat
+	// would refresh into.
 	resp, err = aAPI.PushContextState(ctx, &agentproto.PushContextStateRequest{
 		Version:       3,
 		AggregateHash: hashB,
+		Resources: []*agentproto.ContextResource{
+			instructionResource(agentsSource, "hello-v2", agentsV2Hash),
+			skillResource(skillSource, skillHash),
+		},
 	})
 	require.NoError(t, err)
 	require.True(t, resp.GetAccepted())
@@ -288,7 +299,7 @@ func TestChatContextDirtyFromAgentPush(t *testing.T) {
 	got, err = expClient.GetChat(ctx, chat.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got.Context)
-	require.False(t, got.Context.Dirty, "re-push of the pinned hash stays clean")
+	require.False(t, got.Context.Dirty, "re-push of the pinned snapshot stays clean")
 }
 
 // TestChatContextLiveSyncFromAgentPush verifies that agent pushes live-sync MCP

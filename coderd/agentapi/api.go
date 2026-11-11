@@ -111,7 +111,11 @@ type Options struct {
 	ContextDirtyMarker ContextDirtyMarker
 	// ContextSyncDisabled makes PushContextState reject pushes with a dRPC
 	// Unimplemented code so agents stop sending context snapshots.
-	ContextSyncDisabled               bool
+	ContextSyncDisabled bool
+	// ForkPluginPacks is advertised to agents in every PushContextState
+	// response so they hold back plugin-pack rows from replicas that
+	// predate the fork-plugin-packs experiment (rolling upgrades).
+	ForkPluginPacks                   bool
 	ConnectionLogger                  *atomic.Pointer[connectionlog.ConnectionLogger]
 	DerpMapFn                         func() *tailcfg.DERPMap
 	TailnetCoordinator                *atomic.Pointer[tailnet.Coordinator]
@@ -283,13 +287,14 @@ func New(opts Options, workspace database.Workspace, agent database.WorkspaceAge
 	}
 
 	api.ContextAPI = &ContextAPI{
-		AgentID:     agent.ID,
-		Workspace:   api.cachedWorkspaceFields,
-		Log:         opts.Log,
-		Clock:       opts.Clock,
-		Database:    opts.Database,
-		DirtyMarker: opts.ContextDirtyMarker,
-		Disabled:    opts.ContextSyncDisabled,
+		AgentID:         agent.ID,
+		Workspace:       api.cachedWorkspaceFields,
+		Log:             opts.Log,
+		Clock:           opts.Clock,
+		Database:        opts.Database,
+		DirtyMarker:     opts.ContextDirtyMarker,
+		Disabled:        opts.ContextSyncDisabled,
+		ForkPluginPacks: opts.ForkPluginPacks,
 	}
 
 	// Start background cache refresh loop to handle workspace changes

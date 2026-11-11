@@ -28140,7 +28140,7 @@ const docTemplate = `{
             "enum": [
                 "fork-chat-todos",
                 "fork-nested-subagents",
-                "fork-plugins",
+                "fork-plugin-packs",
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
                 "fork-chat-wakeups",
@@ -28209,7 +28209,7 @@ const docTemplate = `{
             "x-enum-varnames": [
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
-                "ExperimentForkPlugins",
+                "ExperimentForkPluginPacks",
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
                 "ExperimentForkChatWakeups",

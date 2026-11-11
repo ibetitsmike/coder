@@ -25659,7 +25659,7 @@
 			"enum": [
 				"fork-chat-todos",
 				"fork-nested-subagents",
-				"fork-plugins",
+				"fork-plugin-packs",
 				"fork-agent-definitions",
 				"fork-subagent-isolation",
 				"fork-chat-wakeups",

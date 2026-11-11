@@ -45,7 +45,10 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		}
 		return nil, err
 	}
-	return &PushResponse{Accepted: resp.GetAccepted()}, nil
+	return &PushResponse{
+		Accepted:        resp.GetAccepted(),
+		ForkPluginPacks: resp.GetForkPluginPacks(),
+	}, nil
 }
 
 // pushRequestToProto converts the Go push payload to its

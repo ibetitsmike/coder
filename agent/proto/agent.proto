@@ -725,6 +725,12 @@ message PushContextStateRequest {
 
 message PushContextStateResponse {
 	bool accepted = 1;
+	// Fork: fork_plugin_packs advertises that the serving coderd knows
+	// the fork-plugin-packs experiment and will treat pack-contributed
+	// context rows accordingly. Agents emit plugin-pack rows only after
+	// a response set this, so a newer agent connected to an older
+	// replica (which leaves the field false) never persists pack rows.
+	bool fork_plugin_packs = 100;
 }
 
 service Agent {

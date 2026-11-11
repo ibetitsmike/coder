@@ -110,6 +110,46 @@ func TestPushContextState(t *testing.T) {
 		require.True(t, resp.GetAccepted())
 	})
 
+	t.Run("AdvertisesForkPluginPacks", func(t *testing.T) {
+		t.Parallel()
+
+		// The capability flag flows from the deployment experiment into
+		// every response; agents hold pack rows back until they see it.
+		ctrl := gomock.NewController(t)
+		dbm := dbmock.NewMockStore(ctrl)
+		api := &agentapi.ContextAPI{
+			AgentID:         agentID,
+			Log:             slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}).Leveled(slog.LevelDebug),
+			Clock:           clock,
+			Database:        dbm,
+			ForkPluginPacks: true,
+		}
+		expectInTx(dbm)
+
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextSnapshot{}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), database.DeleteStaleWorkspaceAgentContextResourcesParams{
+			WorkspaceAgentID: agentID,
+			ActiveSources:    []string{"/home/coder/AGENTS.md"},
+		}).Return(nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       1,
+			AggregateHash: []byte{0x01, 0x02, 0x03},
+			Initial:       true,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.True(t, resp.GetForkPluginPacks(), "the response must advertise the pack capability when enabled")
+	})
+
 	t.Run("DirtyMarkerInvokedAfterCommit", func(t *testing.T) {
 		t.Parallel()
 
