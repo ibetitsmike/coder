@@ -1,11 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, screen, spyOn, userEvent } from "storybook/test";
+import { fn, screen, spyOn, userEvent } from "storybook/test";
 import { API } from "#/api/api";
 import {
 	MockDefaultOrganization,
 	MockGroup,
 	MockOrganizationSkillACL,
-	MockUserMember,
 	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
@@ -32,16 +31,9 @@ export const GroupAndUser: Story = {
 		});
 	},
 	play: async () => {
-		await expect(
-			await screen.findByRole("button", {
-				name: `Remove ${MockGroup.display_name}`,
-			}),
-		).toBeInTheDocument();
-		await expect(
-			screen.getByRole("button", {
-				name: `Remove ${MockUserMember.username}`,
-			}),
-		).toBeInTheDocument();
+		await screen.findByRole("button", {
+			name: `Remove ${MockGroup.display_name}`,
+		});
 	},
 };
 

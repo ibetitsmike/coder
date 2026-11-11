@@ -51,12 +51,12 @@ type ForkAgentDefinitionsTableProps = {
 	scope: AgentDefinitionScope;
 	access?: SkillAccess;
 	action?: React.ReactNode;
-	onShare?: ForkAgentDefinitionsTableViewProps["onShare"];
+	onManagePermissions?: ForkAgentDefinitionsTableViewProps["onManagePermissions"];
 };
 
 export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
-> = ({ scope, access, action, onShare }) => {
+> = ({ scope, access, action, onManagePermissions }) => {
 	const queryClient = useQueryClient();
 	const [selectedDeleteTarget, setDeleteTarget] = useState<{
 		definition: ForkAgentDefinitionMetadata;
@@ -183,7 +183,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 				setDeleteTarget({ definition, scope });
 			}}
 			deleteState={deleteState}
-			onShare={onShare}
+			onManagePermissions={onManagePermissions}
 		/>
 	);
 };

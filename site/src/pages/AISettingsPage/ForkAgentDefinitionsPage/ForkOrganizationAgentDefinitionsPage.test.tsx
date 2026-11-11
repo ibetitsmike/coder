@@ -127,7 +127,9 @@ it("opens the sharing dialog and returns focus to the row menu", async () => {
 		name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
 	});
 	await user.click(menuButton);
-	await user.click(await screen.findByRole("menuitem", { name: "Share" }));
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Manage permissions" }),
+	);
 
 	const dialog = await screen.findByRole("dialog", {
 		name: "Agent definition permissions",
@@ -140,7 +142,7 @@ it("opens the sharing dialog and returns focus to the row menu", async () => {
 	await waitFor(() => expect(menuButton).toHaveFocus());
 });
 
-it("hides Share from members who cannot share", async () => {
+it("hides Manage permissions from members who cannot share", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
 		Object.fromEntries(
@@ -167,6 +169,6 @@ it("hides Share from members who cannot share", async () => {
 		await screen.findByRole("menuitem", { name: "Edit" }),
 	).toBeInTheDocument();
 	expect(
-		screen.queryByRole("menuitem", { name: "Share" }),
+		screen.queryByRole("menuitem", { name: "Manage permissions" }),
 	).not.toBeInTheDocument();
 });

@@ -95,7 +95,7 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 									organizationPermissions?.deleteOrganizationSkill,
 								),
 							}}
-							onShare={
+							onManagePermissions={
 								canShare
 									? (definition, onCloseAutoFocus) =>
 											setSharing({
