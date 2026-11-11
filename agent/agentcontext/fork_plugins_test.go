@@ -445,3 +445,41 @@ func TestResolver_PluginPacksFollowCapabilityFlips(t *testing.T) {
 	advertised = false
 	require.Zero(t, packRows(), "losing the capability must stop pack discovery")
 }
+
+func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
+	t.Parallel()
+
+	// A scan root that is itself a pack is wholly pack content. Before
+	// the server advertises the capability nothing may be discovered
+	// from it, top-level files included: an older replica pins unmarked
+	// rows as ordinary context, so the marker alone cannot protect them.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "Pack instructions.\n")
+	mustWriteFile(t, filepath.Join(root, "plugin.json"), `{"name": "pstack"}`)
+	mustWriteFile(t, filepath.Join(root, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+	mustWriteFile(t, filepath.Join(root, "agents", "comment-sicko.md"), packAgent("comment-sicko"))
+
+	for name, advertised := range map[string]func() bool{
+		"nil callback":   nil,
+		"not advertised": func() bool { return false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = advertised
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+			require.Empty(t, snap.Resources, "a pack root must yield nothing before the capability")
+		})
+	}
+
+	// Once the capability is advertised the root-pack flow runs: the
+	// top-level files are stamped with the manifest path and the pack
+	// containers are discovered.
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+	instruction := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "AGENTS.md"))
+	require.Equal(t, filepath.Join(root, "plugin.json"), instruction.SourcePath)
+	findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "skills", "review-pr"))
+}

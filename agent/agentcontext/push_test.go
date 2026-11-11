@@ -445,6 +445,91 @@ func TestRunPush_AdvertisedPacksTriggerResync(t *testing.T) {
 	require.ErrorIs(t, <-pushDone, context.Canceled)
 }
 
+func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
+	t.Parallel()
+
+	// The capability is per connection: a reconnect to a replica that
+	// does not advertise must not lead its initial push with the pack
+	// rows the previous connection's snapshot still carries.
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+	writePack(t, dir, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	m := newTestManager(t, agentcontext.ManagerOptions{
+		WorkingDir: func() string { return dir },
+	})
+
+	// Run the loop so advertise-triggered resyncs land, as production does.
+	runCtx, runCancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	defer runCancel()
+	go func() { _ = m.Run(runCtx) }()
+
+	p1 := newFakePusher()
+	p1.mu.Lock()
+	p1.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p1.mu.Unlock()
+
+	ctx1, cancel1 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- m.RunPush(ctx1, p1, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push1"),
+		})
+	}()
+
+	<-p1.signal
+	require.Eventually(t, func() bool {
+		reqs := p1.snapshot()
+		if len(reqs) < 2 {
+			return false
+		}
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the advertised connection must push pack rows")
+
+	cancel1()
+	require.ErrorIs(t, <-done1, context.Canceled)
+
+	// Reconnect to a replica that does not advertise: the initial push
+	// must be pack-free even though the Manager kept the advertised
+	// flag from the previous connection.
+	p2 := newFakePusher()
+	p2.mu.Lock()
+	p2.resp = &agentcontext.PushResponse{Accepted: true}
+	p2.mu.Unlock()
+
+	ctx2, cancel2 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- m.RunPush(ctx2, p2, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push2"),
+		})
+	}()
+
+	<-p2.signal
+	require.Eventually(t, func() bool {
+		reqs := p2.snapshot()
+		if len(reqs) < 1 {
+			return false
+		}
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return false
+			}
+		}
+		return true
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the reconnected initial push must not carry pack rows")
+
+	cancel2()
+	require.ErrorIs(t, <-done2, context.Canceled)
+}
+
 func TestRunPush_NilPusherErrors(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, agentcontext.ManagerOptions{

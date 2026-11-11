@@ -88,9 +88,9 @@ type PushOptions struct {
 //
 // Each response also updates the Manager's pack-rows-advertised flag
 // (fork_plugin_packs): the resolver emits plugin-pack rows only while the
-// server advertises the capability, and a false-to-true transition triggers
-// an immediate resync so packs join the very next snapshot instead of
-// waiting for a filesystem event.
+// server advertises the capability, a flip in either direction triggers
+// an immediate resync, and every new connection starts unadvertised so a
+// reconnect to an older replica never leads with a pack-bearing snapshot.
 func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error {
 	if p == nil {
 		return xerrors.New("agentcontext: Pusher is required")
@@ -107,6 +107,17 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	clock := opts.Clock
 	if clock == nil {
 		clock = m.clock
+	}
+
+	// Every connection starts unadvertised: the capability the previous
+	// peer reported says nothing about the peer now answering, and a
+	// snapshot that still carries pack rows must not lead this
+	// connection's initial push to a replica that never asked for them.
+	// Re-resolve first so the dropped rows are out of the snapshot.
+	if m.packRowsAdvertised.Swap(false) {
+		if _, err := m.Resync(ctx); err != nil {
+			logger.Warn(ctx, "resync after capability reset failed", slog.Error(err))
+		}
 	}
 
 	changes, unsub := m.SubscribeChanges()

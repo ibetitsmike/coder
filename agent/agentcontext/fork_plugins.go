@@ -204,6 +204,13 @@ func inPackContainers(p packRoot, rel string) []string {
 	return []string{container}
 }
 
+// packRowsAdvertised reports whether the server's push-response
+// capability is known on. A nil callback (unwired resolver, or an older
+// embedder that never learned the option) counts as not advertised.
+func (r *Resolver) packRowsAdvertised() bool {
+	return r.PackRowsAdvertised != nil && r.PackRowsAdvertised()
+}
+
 // emitPacks appends the pack-contributed resources of a scan root after the
 // ordinary discovery, so a pack skill sharing a name with an ordinary skill
 // or an earlier pack's skill loses the usual first-wins dedup. Emission waits
@@ -212,7 +219,7 @@ func inPackContainers(p packRoot, rel string) []string {
 // older replica serves pinned skills without a pack gate. The callback is
 // re-read per root, so a capability flip applies to the next resolve.
 func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	if r.PackRowsAdvertised == nil || !r.PackRowsAdvertised() {
+	if !r.packRowsAdvertised() {
 		return
 	}
 	for _, pack := range packRootsFor(root.Path) {

@@ -312,7 +312,10 @@ func isPackContribution(resource Resource) bool {
 // discoverIn inspects a single scan root. A root that points at a
 // file is classified directly. A directory root contributes its
 // top-level instruction files and .mcp.json plus skills from the
-// fixed container locations under it. The walk goes no deeper.
+// fixed container locations under it. The walk goes no deeper. A
+// root that is itself a pack is discovered only while the server's
+// push capability is advertised; without it nothing is discovered
+// from that root, top-level files included.
 func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	info, err := os.Stat(root.Path)
 	if err != nil {
@@ -328,20 +331,28 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 		return
 	}
 	pack, rootIsPack := readPluginManifest(root.Path)
-	topLevelStart := len(*out)
-	r.discoverTopLevelFiles(root, out, seenID)
 	if rootIsPack {
+		// A pack root is wholly pack content. Without the advertised
+		// capability nothing may be discovered from it, top-level files
+		// included: an older replica pins unmarked rows as ordinary
+		// context, so the marker alone cannot protect them.
+		if !r.packRowsAdvertised() {
+			return
+		}
 		// The scan root is itself a pack. Its resources must carry the
 		// manifest path so the fork-plugin gate can drop them, so the
 		// pack walk owns skills and agents (ordinary container
 		// discovery would claim the same files unstamped), and the
 		// root's own instruction files are stamped with it too.
+		topLevelStart := len(*out)
+		r.discoverTopLevelFiles(root, out, seenID)
 		for i := topLevelStart; i < len(*out); i++ {
 			(*out)[i].SourcePath = pack.ManifestPath
 		}
 		r.emitPacks(root, out, seenID)
 		return
 	}
+	r.discoverTopLevelFiles(root, out, seenID)
 	for _, container := range skillContainersFor(root.Path) {
 		r.emitSkillsFromContainer(container, root, out, seenID)
 	}

@@ -25728,7 +25728,7 @@
 			"x-enum-varnames": [
 				"ExperimentForkChatTodos",
 				"ExperimentForkNestedSubagents",
-				"ExperimentForkPlugins",
+				"ExperimentForkPluginPacks",
 				"ExperimentForkAgentDefinitions",
 				"ExperimentForkSubagentIsolation",
 				"ExperimentForkChatWakeups",
