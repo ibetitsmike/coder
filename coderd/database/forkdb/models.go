@@ -369,6 +369,13 @@ type PluginPackResource struct {
 	ContentHash string `db:"content_hash" json:"content_hash"`
 }
 
+// Git hosts that organization admins allow plugin packs to be installed from. An organization without a row allows none.
+type PluginPackSource struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Hosts          []string  `db:"hosts" json:"hosts"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
+}
+
 type PluginUserLink struct {
 	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
 	// Identity of the user on the external service, for example a phone number.

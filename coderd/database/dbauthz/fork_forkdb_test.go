@@ -373,6 +373,17 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetPluginPackResources(gomock.Any(), pack.ID).Return(resources, nil).AnyTimes()
 			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionRead).Returns(resources)
 		},
+		"GetPluginPackSources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			row := testutil.Fake(t, faker, forkdb.PluginPackSource{})
+			fdb.EXPECT().GetPluginPackSources(gomock.Any(), row.OrganizationID).Return(row, nil).AnyTimes()
+			check.Args(row.OrganizationID).Asserts(rbac.ResourceOrganizationSkill.InOrg(row.OrganizationID), policy.ActionRead).Returns(row)
+		},
+		"UpsertPluginPackSources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			row := testutil.Fake(t, faker, forkdb.PluginPackSource{})
+			arg := forkdb.UpsertPluginPackSourcesParams{OrganizationID: row.OrganizationID, Hosts: []string{"github.com"}}
+			fdb.EXPECT().UpsertPluginPackSources(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceOrganizationSkill.InOrg(row.OrganizationID), policy.ActionUpdate).Returns(row)
+		},
 		"InsertPlugin": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
 			arg := forkdb.InsertPluginParams{ID: plugin.ID, OrganizationID: plugin.OrganizationID, Name: plugin.Name}
