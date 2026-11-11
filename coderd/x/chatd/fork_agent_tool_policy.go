@@ -133,16 +133,45 @@ func (policy customAgentToolPolicy) keepsSkillTools() bool {
 	return policy.allowsNonMCPTool("read_skill")
 }
 
-// keptTools returns tools as policy filters them, or tools when policy is
-// nil. It knows no MCP server slugs, so only its non-MCP tools are exact.
-// The system prompt is built before the policy filters the turn's tools,
-// so a prompt block that names a tool checks it here.
-func (policy *customAgentToolPolicy) keptTools(tools []fantasy.AgentTool) []fantasy.AgentTool {
-	if policy == nil {
-		return tools
+// keepsWorkspaceCreation reports whether policy leaves the tools that the
+// detached workspace guidance tells a root chat to call.
+func (policy customAgentToolPolicy) keepsWorkspaceCreation() bool {
+	return !policy.ReadOnly && policy.allowsNonMCPTool("list_templates") && policy.allowsNonMCPTool("create_workspace")
+}
+
+// keepsWorkspaceFileTools reports whether policy leaves the tools that the
+// attached workspace guidance names.
+func (policy customAgentToolPolicy) keepsWorkspaceFileTools() bool {
+	return !policy.ReadOnly && !slices.ContainsFunc([]string{"execute", "read_file", "write_file"}, func(name string) bool {
+		return !policy.allowsNonMCPTool(name)
+	})
+}
+
+// keepsACPTools reports whether tools, as policy filters them, hold every
+// ACP tool that the ACP subagent guidance names. A nil policy keeps tools.
+// It knows no MCP server slugs, so it only checks non-MCP tools, which the
+// system prompt must check before the policy filters the turn's tools.
+func (policy *customAgentToolPolicy) keepsACPTools(tools []fantasy.AgentTool) bool {
+	if policy != nil {
+		tools, _, _ = policy.filter(tools, nil, nil, nil)
 	}
-	kept, _, _ := policy.filter(tools, nil, nil, nil)
-	return kept
+	return !slices.ContainsFunc([]string{"acp_spawn_agent", "acp_wait_agent", "acp_message_agent", "acp_interrupt_agent"}, func(name string) bool {
+		return !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool { return tool.Info().Name == name })
+	})
+}
+
+// keepDynamicToolNames deletes from names each dynamic tool that policy
+// removed from tools, so that a call to it fails as an unknown tool instead
+// of waiting for the client to run it. A nil policy keeps names.
+func (policy *customAgentToolPolicy) keepDynamicToolNames(names map[string]bool, tools []fantasy.AgentTool) {
+	if policy == nil {
+		return
+	}
+	for name := range names {
+		if !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool { return tool.Info().Name == name }) {
+			delete(names, name)
+		}
+	}
 }
 
 // filter returns the tools, deferred MCP candidates and provider tools that
