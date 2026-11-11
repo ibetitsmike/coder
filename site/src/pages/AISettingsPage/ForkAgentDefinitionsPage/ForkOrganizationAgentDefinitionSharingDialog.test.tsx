@@ -4,6 +4,7 @@ import { HttpResponse, http, type PathParams } from "msw";
 import { QueryClientProvider } from "react-query";
 import { describe, expect, it, vi } from "vitest";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import { organizationAgentDefinitionACL } from "#/api/queries/forkAgentDefinitions";
 import type { UpdateOrganizationSkillACLRequest } from "#/api/typesGenerated";
 import {
 	MockGroup,
@@ -124,5 +125,46 @@ describe("ForkOrganizationAgentDefinitionSharingDialog", () => {
 			group_roles: { [MockGroup.id]: "" },
 		});
 		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("edits the refetched ACL rather than a cached one", async () => {
+		server.use(
+			http.get(aclPath, () => HttpResponse.json(MockOrganizationSkillACL)),
+		);
+		const updateACL = vi
+			.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinitionACL")
+			.mockResolvedValue();
+		const queryClient = createTestQueryClient();
+		const { queryKey } = organizationAgentDefinitionACL(
+			MockOrganization.id,
+			"reviewer",
+		);
+		queryClient.setQueryDefaults(queryKey, {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		queryClient.setQueryData(queryKey, { users: [], groups: [] });
+		const user = userEvent.setup();
+		renderComponent(
+			<QueryClientProvider client={queryClient}>
+				<ForkOrganizationAgentDefinitionSharingDialog
+					organizationId={MockOrganization.id}
+					definitionName="reviewer"
+					onClose={vi.fn()}
+				/>
+			</QueryClientProvider>,
+		);
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `Remove ${MockGroup.display_name}`,
+			}),
+		);
+		await user.click(screen.getByRole("button", { name: "Save permissions" }));
+
+		await waitFor(() =>
+			expect(updateACL).toHaveBeenCalledWith(MockOrganization.id, "reviewer", {
+				group_roles: { [MockGroup.id]: "" },
+			}),
+		);
 	});
 });

@@ -29,7 +29,12 @@ export const ForkOrganizationAgentDefinitionSharingDialog: React.FC<
 	);
 	const aclQuery = useQuery({ ...aclOptions, refetchOnMount: "always" });
 	const updateMutation = useMutation(updateAgentDefinitionACL(queryClient));
-	const data = aclQuery.data ? sharingDialogData(aclQuery.data) : undefined;
+	// The editor copies its first data into draft state, so a cached ACL
+	// from an earlier mount must not seed it before the refetch settles.
+	const data =
+		aclQuery.data && aclQuery.isFetchedAfterMount
+			? sharingDialogData(aclQuery.data)
+			: undefined;
 
 	const close = () => {
 		onClose();

@@ -330,7 +330,8 @@ A name that only one of the workspace, personal, organization, and project sourc
 A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
-On the **AI settings** > **Agent definitions** page, such a member selects **Manage permissions** in a row's menu, adds members or groups in **Agent definition permissions**, and selects **Save permissions**; `GET .../acl/available` lists the members and groups the dialog offers.
+On the **AI settings** > **Agent definitions** page, such a member selects **Manage permissions** in a row's menu, adds members or groups in **Agent definition permissions**, and selects **Save permissions**.
+The dialog offers the members and groups that `GET .../acl/available` lists.
 `spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` report a custom child's definition name in `type`, not `general`.
 The chat list, `GET /api/v2/chats/{chat}`, and the `created` event of `GET /api/v2/chats/watch` report each child chat's type in `agent_type`, and the Agents page shows it as a badge next to the child's title, except for `general`.
 In the conversation, the `spawn_agent` card of a custom child shows **Agent type:** and the name.

@@ -65,6 +65,11 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 		? organizationPermissionsQuery.data?.[organization.id]
 		: undefined;
 	const canShare = Boolean(organizationPermissions?.shareOrganizationSkill);
+	// Back and Forward can change the organization while the dialog is open,
+	// and a save must not land in an organization the page no longer shows.
+	if (sharing && sharing.organizationId !== organization?.id) {
+		setSharing(undefined);
+	}
 
 	return (
 		<RequirePermission isFeatureVisible={permissions.viewAnyOrganizationSkills}>

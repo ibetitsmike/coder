@@ -142,33 +142,37 @@ it("opens the sharing dialog and returns focus to the row menu", async () => {
 	await waitFor(() => expect(menuButton).toHaveFocus());
 });
 
-it("hides Manage permissions from members who cannot share", async () => {
+it("closes the sharing dialog when navigation changes the organization", async () => {
 	const user = userEvent.setup();
-	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
-		Object.fromEntries(
-			Object.keys(checks).map((key) => [
-				key,
-				key.endsWith(".viewOrganizationSkills") ||
-					key.endsWith(".updateOrganizationSkill"),
-			]),
-		),
-	);
 	vi.spyOn(
 		forkAgentDefinitionsApi,
 		"getOrganizationAgentDefinitions",
 	).mockResolvedValue([MockForkAgentDefinitionMetadata]);
-	renderPage(`?org=${MockOrganization.name}`);
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitionACL",
+	).mockResolvedValue(MockOrganizationSkillACL);
+	const updateACL = vi
+		.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinitionACL")
+		.mockResolvedValue();
+	const router = renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
 		await screen.findByRole("button", {
 			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
 		}),
 	);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Manage permissions" }),
+	);
+	await screen.findByRole("dialog", { name: "Agent definition permissions" });
 
-	expect(
-		await screen.findByRole("menuitem", { name: "Edit" }),
-	).toBeInTheDocument();
-	expect(
-		screen.queryByRole("menuitem", { name: "Manage permissions" }),
-	).not.toBeInTheDocument();
+	await router.navigate(`${path}?org=${MockOrganization.name}`);
+
+	await waitFor(() =>
+		expect(
+			screen.queryByRole("dialog", { name: "Agent definition permissions" }),
+		).toBeNull(),
+	);
+	expect(updateACL).not.toHaveBeenCalled();
 });
