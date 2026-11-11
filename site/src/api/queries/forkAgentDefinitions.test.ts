@@ -14,7 +14,9 @@ import {
 	createAgentDefinition,
 	deleteAgentDefinition,
 	isNewer,
+	organizationAgentDefinitionACL,
 	updateAgentDefinition,
+	updateAgentDefinitionACL,
 } from "./forkAgentDefinitions";
 
 const scope: AgentDefinitionScope = {
@@ -438,5 +440,50 @@ describe("organization scope", () => {
 		expect(queryClient.getQueryData(agentDefinitions(scope).queryKey)).toEqual([
 			metadataOf(listed),
 		]);
+	});
+});
+
+describe("updateAgentDefinitionACL", () => {
+	it("marks the saved definition's ACL, list, and detail stale", async () => {
+		const queryClient = new QueryClient();
+		const organizationScope: AgentDefinitionScope = {
+			tier: "organization",
+			organizationId: scope.organizationId,
+		};
+		const aclKey = organizationAgentDefinitionACL(
+			scope.organizationId,
+			name,
+		).queryKey;
+		const listKey = agentDefinitions(organizationScope).queryKey;
+		const detailKey = agentDefinition(
+			queryClient,
+			organizationScope,
+			name,
+		).queryKey;
+		const userListKey = agentDefinitions(scope).queryKey;
+		queryClient.setQueryData(aclKey, { users: [], groups: [] });
+		queryClient.setQueryData(listKey, [MockForkAgentDefinitionMetadata]);
+		queryClient.setQueryData(detailKey, definitionAt("2030-01-01T00:00:00Z"));
+		queryClient.setQueryData(userListKey, [MockForkAgentDefinitionMetadata]);
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinitionACL")
+			.mockResolvedValue();
+
+		await new MutationObserver(
+			queryClient,
+			updateAgentDefinitionACL(queryClient),
+		).mutate({
+			organizationId: scope.organizationId,
+			name,
+			req: { group_roles: { group: "read" } },
+		});
+
+		expect(update).toHaveBeenCalledWith(scope.organizationId, name, {
+			group_roles: { group: "read" },
+		});
+		for (const key of [aclKey, listKey, detailKey]) {
+			expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+		}
+		expect(queryClient.getQueryState(userListKey)?.isInvalidated).toBe(false);
 	});
 });

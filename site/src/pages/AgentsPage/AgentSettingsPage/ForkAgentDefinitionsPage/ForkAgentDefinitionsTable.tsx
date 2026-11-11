@@ -16,6 +16,7 @@ import type { SkillAccess } from "../../utils/skills";
 import {
 	type ForkAgentDefinitionDeleteState,
 	ForkAgentDefinitionsTableView,
+	type ForkAgentDefinitionsTableViewProps,
 } from "./ForkAgentDefinitionsTableView";
 import { useForkAgentDefinitionEditor } from "./useForkAgentDefinitionEditor";
 
@@ -50,11 +51,12 @@ type ForkAgentDefinitionsTableProps = {
 	scope: AgentDefinitionScope;
 	access?: SkillAccess;
 	action?: React.ReactNode;
+	onManagePermissions?: ForkAgentDefinitionsTableViewProps["onManagePermissions"];
 };
 
 export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
-> = ({ scope, access, action }) => {
+> = ({ scope, access, action, onManagePermissions }) => {
 	const queryClient = useQueryClient();
 	const [selectedDeleteTarget, setDeleteTarget] = useState<{
 		definition: ForkAgentDefinitionMetadata;
@@ -181,6 +183,7 @@ export const ForkAgentDefinitionsTable: React.FC<
 				setDeleteTarget({ definition, scope });
 			}}
 			deleteState={deleteState}
+			onManagePermissions={onManagePermissions}
 		/>
 	);
 };
