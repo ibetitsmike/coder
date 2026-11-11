@@ -44,7 +44,6 @@ type ForkPluginPacksTableViewProps = {
 	access: ForkPluginPacksAccess;
 	action?: React.ReactNode;
 	error: unknown;
-	/** True when the first load failed, so no cached packs exist. */
 	isLoadingError: boolean;
 	isLoading: boolean;
 	isRetrying: boolean;
@@ -66,10 +65,8 @@ type ForkPluginPacksTableViewProps = {
 };
 
 /**
- * Lists an organization's installed plugin packs. It shows a loader while
- * `isLoading`, a retryable empty state when the first load fails, and a
- * retryable alert above the cached rows, even an empty list, when a later
- * refetch fails.
+ * A failed refetch keeps the cached rows, even an empty list, and shows the
+ * alert above them.
  */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps

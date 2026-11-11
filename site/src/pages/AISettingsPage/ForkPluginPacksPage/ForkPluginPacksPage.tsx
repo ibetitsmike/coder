@@ -203,7 +203,6 @@ const ForkPluginPacksPage: React.FC = () => {
 		enabled: isEnabled && permissions.viewAnyOrganizationSkills,
 	});
 
-	// Plugin packs share the organization skill permissions on the server.
 	const readableOrganizations = readableSkillsOrganizations(
 		organizations,
 		organizationPermissionsQuery.data,

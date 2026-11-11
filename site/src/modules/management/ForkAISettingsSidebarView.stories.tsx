@@ -12,7 +12,7 @@ import { withDashboardProvider } from "#/testHelpers/storybook";
 import AISettingsSidebarView from "./AISettingsSidebarView";
 
 const meta: Meta<typeof AISettingsSidebarView> = {
-	title: "modules/management/AISettingsSidebarView/ForkAgentDefinitions",
+	title: "modules/management/AISettingsSidebarView/ForkExperiments",
 	component: AISettingsSidebarView,
 	decorators: [withDashboardProvider],
 	args: {
