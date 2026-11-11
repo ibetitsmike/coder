@@ -339,12 +339,17 @@ func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
 func claudeCacheLiveVersions(pluginDir string) []string {
 	var out []string
 	for _, versionDir := range childDirs(pluginDir) {
-		if _, err := os.Lstat(filepath.Join(versionDir, claudeOrphanedMarker)); err == nil {
+		if claudeVersionOrphaned(versionDir) {
 			continue
 		}
 		out = append(out, versionDir)
 	}
 	return out
+}
+
+func claudeVersionOrphaned(versionDir string) bool {
+	_, err := os.Lstat(filepath.Join(versionDir, claudeOrphanedMarker))
+	return err == nil
 }
 
 // childDirs returns the paths of dir's immediate subdirectories. Symlinked
@@ -656,14 +661,19 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 	if isClaudePluginCache(rootPath) {
 		// Watching every level down to the version directories
 		// fires the events for a new install, a new version, and
-		// an orphan marker, which all change the chosen pack.
+		// an orphan marker, which all change the chosen pack. An
+		// orphaned version stays watched so removing its marker is
+		// noticed; only live versions get their nested manifest
+		// directories watched.
 		for _, marketplace := range childDirs(rootPath) {
 			out[marketplace] = struct{}{}
 			for _, plugin := range childDirs(marketplace) {
 				out[plugin] = struct{}{}
-				for _, version := range claudeCacheLiveVersions(plugin) {
+				for _, version := range childDirs(plugin) {
 					out[version] = struct{}{}
-					dirs = append(dirs, packManifestCandidateDirs(version)...)
+					if !claudeVersionOrphaned(version) {
+						dirs = append(dirs, packManifestCandidateDirs(version)...)
+					}
 				}
 			}
 		}

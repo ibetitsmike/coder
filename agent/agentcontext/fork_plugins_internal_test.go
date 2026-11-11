@@ -60,10 +60,11 @@ func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
 	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: cache}})
 	// A new marketplace, plugin, or version, the manifest of a version
 	// created before it, and an orphan marker each fire in one of these.
-	for _, dir := range []string{cache, filepath.Join(cache, "market"), plugin, live, filepath.Join(live, ".claude-plugin")} {
+	// The orphaned version stays watched, so removing its marker
+	// re-resolves.
+	for _, dir := range []string{cache, filepath.Join(cache, "market"), plugin, live, filepath.Join(live, ".claude-plugin"), orphaned} {
 		require.Contains(t, dirs, dir)
 	}
-	require.NotContains(t, dirs, orphaned)
 }
 
 //nolint:paralleltest,tparallel // Uses t.Setenv.
