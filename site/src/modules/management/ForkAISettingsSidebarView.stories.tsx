@@ -1,5 +1,5 @@
 // This file is fork code: stories for the AI settings sidebar's
-// fork-agent-definitions entry.
+// fork-agent-definitions and fork-plugin-packs entries.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
@@ -39,4 +39,24 @@ export const ForOrganizationAuditor: Story = {
 	args: {
 		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
 	},
+};
+
+const pluginPacksParameters = {
+	experiments: ["fork-agent-definitions", "fork-plugin-packs"],
+	reactRouter: reactRouterParameters({
+		location: { path: "/ai/settings/plugin-packs" },
+		routing: { path: "/ai/settings/plugin-packs" },
+	}),
+};
+
+export const WithPluginPacksForDeploymentAdmin: Story = {
+	args: { permissions: MockPermissions },
+	parameters: pluginPacksParameters,
+};
+
+export const WithPluginPacksForOrganizationAuditor: Story = {
+	args: {
+		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
+	},
+	parameters: pluginPacksParameters,
 };
