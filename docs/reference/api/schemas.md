@@ -10819,6 +10819,59 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `effective`    | [codersdk.ForkSubagentLimitValues](#codersdkforksubagentlimitvalues)               | false    |              | Effective holds the limits in force in the organization.                 |
 | `organization` | [codersdk.ForkOrganizationSubagentLimits](#codersdkforkorganizationsubagentlimits) | false    |              | Organization holds the stored organization limits. A nil limit is unset. |
 
+## codersdk.ForkOrganizationWakeupCaps
+
+```json
+{
+  "max_chat_runs_per_day": 288,
+  "max_chat_spend_micros_per_day": 20000000,
+  "max_organization_runs_per_day": 2880,
+  "max_organization_spend_micros_per_day": 200000000
+}
+```
+
+### Properties
+
+| Name                                    | Type    | Required | Restrictions | Description                                                                                                                                  |
+|-----------------------------------------|---------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_chat_runs_per_day`                 | integer | false    |              | Max chat runs per day is the maximum number of wake-up runs of one chat.                                                                     |
+| `max_chat_spend_micros_per_day`         | integer | false    |              | Max chat spend micros per day is the maximum model spend of one chat with a wake-up, in millionths of a dollar.                              |
+| `max_organization_runs_per_day`         | integer | false    |              | Max organization runs per day is the maximum number of wake-up runs of all chats in the organization.                                        |
+| `max_organization_spend_micros_per_day` | integer | false    |              | Max organization spend micros per day is the maximum model spend of all chats with a wake-up in the organization, in millionths of a dollar. |
+
+## codersdk.ForkOrganizationWakeupCapsResponse
+
+```json
+{
+  "default": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "effective": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "organization": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  }
+}
+```
+
+### Properties
+
+| Name           | Type                                                                       | Required | Restrictions | Description                                                          |
+|----------------|----------------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------|
+| `default`      | [codersdk.ForkWakeupCapValues](#codersdkforkwakeupcapvalues)               | false    |              | Default holds the built-in caps.                                     |
+| `effective`    | [codersdk.ForkWakeupCapValues](#codersdkforkwakeupcapvalues)               | false    |              | Effective holds the caps in force in the organization.               |
+| `organization` | [codersdk.ForkOrganizationWakeupCaps](#codersdkforkorganizationwakeupcaps) | false    |              | Organization holds the stored organization caps. A nil cap is unset. |
+
 ## codersdk.ForkSubagentLimitValues
 
 ```json
@@ -10838,6 +10891,26 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
 | `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats.                                       |
 | `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of live subagent chats under one root chat.          |
+
+## codersdk.ForkWakeupCapValues
+
+```json
+{
+  "max_chat_runs_per_day": 288,
+  "max_chat_spend_micros_per_day": 20000000,
+  "max_organization_runs_per_day": 2880,
+  "max_organization_spend_micros_per_day": 200000000
+}
+```
+
+### Properties
+
+| Name                                    | Type    | Required | Restrictions | Description |
+|-----------------------------------------|---------|----------|--------------|-------------|
+| `max_chat_runs_per_day`                 | integer | false    |              |             |
+| `max_chat_spend_micros_per_day`         | integer | false    |              |             |
+| `max_organization_runs_per_day`         | integer | false    |              |             |
+| `max_organization_spend_micros_per_day` | integer | false    |              |             |
 
 ## codersdk.FriendlyDiagnostic
 
