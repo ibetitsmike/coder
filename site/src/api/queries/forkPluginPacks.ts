@@ -14,7 +14,10 @@ import type {
 } from "#/api/typesGenerated";
 import { invalidateList, isResponseLost } from "./forkAgentDefinitions";
 
-/** The query key of the plugin packs installed in an organization. */
+/**
+ * The query key of an organization's plugin pack list. It also prefixes the
+ * keys of the organization's projects' enabled pack lists.
+ */
 export const pluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId] as const;
 

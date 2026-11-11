@@ -9,7 +9,10 @@ import {
 } from "#/api/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 
-/** The query key of the plugin packs a project or chat enables directly. */
+/**
+ * The query key of the plugin packs a project or chat enables directly. A
+ * project's key extends pluginPacksKey of its organization.
+ */
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
@@ -27,16 +30,14 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 		queryFn: () => getEnabledPluginPacks(target),
 	});
 
-/** A pack's requested enabled state for a target. */
 export type PluginPackToggle = {
 	pack: ForkEnabledPluginPack;
 	enabled: boolean;
 };
 
 /**
- * Enables or disables a pack for a target. On success the cached enabled
- * list changes to match, so a failed refetch cannot revert the switch. The
- * list is then invalidated.
+ * Writes the new state into the cached enabled list on success, so a failed
+ * refetch cannot revert the switch.
  */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
