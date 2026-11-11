@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import {
 	MockNoPermissions,
 	MockOrganization,
 	MockOrganization2,
+	MockOrganizationSkillACL,
 	MockUserOwner,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
@@ -109,4 +110,63 @@ it("redirects to AI settings while the experiment is off", async () => {
 		expect(router.state.location.pathname).toBe("/ai/settings"),
 	);
 	expect(list).not.toHaveBeenCalled();
+});
+
+it("opens the sharing dialog and returns focus to the row menu", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitions",
+	).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+	const getACL = vi
+		.spyOn(forkAgentDefinitionsApi, "getOrganizationAgentDefinitionACL")
+		.mockResolvedValue(MockOrganizationSkillACL);
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	const menuButton = await screen.findByRole("button", {
+		name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+	});
+	await user.click(menuButton);
+	await user.click(await screen.findByRole("menuitem", { name: "Share" }));
+
+	const dialog = await screen.findByRole("dialog", {
+		name: "Agent definition permissions",
+	});
+	expect(getACL).toHaveBeenCalledWith(
+		MockOrganization2.id,
+		MockForkAgentDefinitionMetadata.name,
+	);
+	await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+	await waitFor(() => expect(menuButton).toHaveFocus());
+});
+
+it("hides Share from members who cannot share", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
+		Object.fromEntries(
+			Object.keys(checks).map((key) => [
+				key,
+				key.endsWith(".viewOrganizationSkills") ||
+					key.endsWith(".updateOrganizationSkill"),
+			]),
+		),
+	);
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitions",
+	).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+	renderPage(`?org=${MockOrganization.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		}),
+	);
+
+	expect(
+		await screen.findByRole("menuitem", { name: "Edit" }),
+	).toBeInTheDocument();
+	expect(
+		screen.queryByRole("menuitem", { name: "Share" }),
+	).not.toBeInTheDocument();
 });

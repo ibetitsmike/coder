@@ -8,16 +8,22 @@ import {
 	deleteOrganizationAgentDefinition,
 	deleteUserAgentDefinition,
 	getOrganizationAgentDefinition,
+	getOrganizationAgentDefinitionACL,
+	getOrganizationAgentDefinitionACLAvailable,
 	getOrganizationAgentDefinitions,
 	getUserAgentDefinition,
 	getUserAgentDefinitions,
 	updateOrganizationAgentDefinition,
+	updateOrganizationAgentDefinitionACL,
 	updateUserAgentDefinition,
 } from "#/api/forkAgentDefinitions";
 import { compareUpdatedAtInstants } from "#/api/queries/chats";
 import type {
+	ACLAvailable,
 	CreateForkAgentDefinitionRequest,
 	UpdateForkAgentDefinitionRequest,
+	UpdateOrganizationSkillACLRequest,
+	UsersRequest,
 } from "#/api/typesGenerated";
 
 /**
@@ -40,6 +46,9 @@ export const agentDefinitionsKey = ({
 }: AgentDefinitionScope) =>
 	["chats", "fork-agent-definitions", tier, organizationId] as const;
 
+const agentDefinitionKey = (scope: AgentDefinitionScope, name: string) =>
+	[...agentDefinitionsKey(scope), name] as const;
+
 /** Query options for the agent definitions in a scope. */
 export const agentDefinitions = (scope: AgentDefinitionScope) =>
 	queryOptions({
@@ -61,7 +70,7 @@ export const agentDefinition = (
 	name: string,
 ) =>
 	queryOptions({
-		queryKey: [...agentDefinitionsKey(scope), name] as const,
+		queryKey: agentDefinitionKey(scope, name),
 		queryFn: async () => {
 			const listKey = agentDefinitions(scope).queryKey;
 			const listed = queryClient
@@ -231,4 +240,84 @@ export const deleteAgentDefinition = (queryClient: QueryClient) =>
 					isResponseLost(error) ||
 					(isAxiosError(error) && error.response?.status === 404),
 			}),
+	});
+
+const organizationAgentDefinitionACLKey = (
+	organizationId: string,
+	name: string,
+) =>
+	[
+		...agentDefinitionKey({ tier: "organization", organizationId }, name),
+		"acl",
+	] as const;
+
+/** Query options for who can read an organization agent definition. */
+export const organizationAgentDefinitionACL = (
+	organizationId: string,
+	name: string,
+) =>
+	queryOptions({
+		queryKey: organizationAgentDefinitionACLKey(organizationId, name),
+		queryFn: () => getOrganizationAgentDefinitionACL(organizationId, name),
+	});
+
+/**
+ * Query options for the members and groups matching a sharing search. Plain
+ * options, not queryOptions(), so ACLPrincipalAutocomplete accepts them.
+ */
+export const organizationAgentDefinitionACLAvailable = (
+	organizationId: string,
+	name: string,
+	options: UsersRequest,
+) => ({
+	queryKey: [
+		...organizationAgentDefinitionACLKey(organizationId, name),
+		"available",
+		options,
+	] as const,
+	queryFn: (): Promise<ACLAvailable> =>
+		getOrganizationAgentDefinitionACLAvailable(organizationId, name, options),
+});
+
+type UpdateOrganizationAgentDefinitionACLArgs = {
+	organizationId: string;
+	name: string;
+	req: UpdateOrganizationSkillACLRequest;
+};
+
+/**
+ * Saves a sparse ACL change to an organization definition, the only tier
+ * with an ACL. The organization and name travel in the variables, as in the
+ * other mutations here.
+ */
+export const updateAgentDefinitionACL = (queryClient: QueryClient) =>
+	mutationOptions({
+		mutationFn: ({
+			organizationId,
+			name,
+			req,
+		}: UpdateOrganizationAgentDefinitionACLArgs) =>
+			updateOrganizationAgentDefinitionACL(organizationId, name, req),
+		// Saving an ACL bumps the definition's updated_at, so its metadata is
+		// stale.
+		onSuccess: (_data, { organizationId, name }) => {
+			const scope: AgentDefinitionScope = {
+				tier: "organization",
+				organizationId,
+			};
+			return Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: organizationAgentDefinitionACLKey(organizationId, name),
+					exact: true,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: agentDefinitionsKey(scope),
+					exact: true,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: agentDefinitionKey(scope, name),
+					exact: true,
+				}),
+			]);
+		},
 	});

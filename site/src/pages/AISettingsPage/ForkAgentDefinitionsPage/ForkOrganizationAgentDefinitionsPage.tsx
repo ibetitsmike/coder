@@ -1,6 +1,7 @@
 // This file is fork code: the fork-agent-definitions experiment's
 // organization agent definitions page in AI settings.
 
+import { useState } from "react";
 import { useQuery } from "react-query";
 import { Navigate, useSearchParams } from "react-router";
 import { organizationsPermissions } from "#/api/queries/organizations";
@@ -17,6 +18,7 @@ import {
 	selectOrganization,
 } from "../MCPServersPage/organizationParam";
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
+import { ForkOrganizationAgentDefinitionSharingDialog } from "./ForkOrganizationAgentDefinitionSharingDialog";
 
 const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 	const { permissions } = useAuthenticated();
@@ -29,6 +31,11 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 		),
 		enabled: isEnabled && permissions.viewAnyOrganizationSkills,
 	});
+	const [sharing, setSharing] = useState<{
+		organizationId: string;
+		name: string;
+		onCloseAutoFocus: (event: Event) => void;
+	}>();
 
 	if (!isEnabled) {
 		return <Navigate to="/ai/settings" replace />;
@@ -57,6 +64,7 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 	const organizationPermissions = organization
 		? organizationPermissionsQuery.data?.[organization.id]
 		: undefined;
+	const canShare = Boolean(organizationPermissions?.shareOrganizationSkill);
 
 	return (
 		<RequirePermission isFeatureVisible={permissions.viewAnyOrganizationSkills}>
@@ -87,6 +95,16 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 									organizationPermissions?.deleteOrganizationSkill,
 								),
 							}}
+							onShare={
+								canShare
+									? (definition, onCloseAutoFocus) =>
+											setSharing({
+												organizationId: organization.id,
+												name: definition.name,
+												onCloseAutoFocus,
+											})
+									: undefined
+							}
 							action={
 								<OrganizationPicker
 									id="agent-definitions-organization"
@@ -103,6 +121,14 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 									showLabel={false}
 								/>
 							}
+						/>
+					)}
+					{sharing && (
+						<ForkOrganizationAgentDefinitionSharingDialog
+							organizationId={sharing.organizationId}
+							definitionName={sharing.name}
+							onClose={() => setSharing(undefined)}
+							onCloseAutoFocus={sharing.onCloseAutoFocus}
 						/>
 					)}
 				</RequirePermission>

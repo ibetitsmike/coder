@@ -50,7 +50,7 @@ export type ForkAgentDefinitionDeleteState = {
 	onClose: () => void;
 };
 
-type ForkAgentDefinitionsTableViewProps = {
+export type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
 	description: string;
 	emptyMessage: string;
@@ -71,6 +71,14 @@ type ForkAgentDefinitionsTableViewProps = {
 	onCreate: () => void;
 	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	/**
+	 * Shows a Share row action when set. The caller opens its own dialog and
+	 * passes onCloseAutoFocus to it so focus returns to the row's menu.
+	 */
+	onShare?: (
+		definition: ForkAgentDefinitionMetadata,
+		onCloseAutoFocus: (event: Event) => void,
+	) => void;
 	editorState?: ForkAgentDefinitionEditorState;
 	deleteState?: ForkAgentDefinitionDeleteState;
 };
@@ -118,6 +126,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	onCreate,
 	onEdit,
 	onDelete,
+	onShare,
 	editorState,
 	deleteState,
 }) => {
@@ -131,7 +140,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		? getErrorDetail(deleteState.error)
 		: undefined;
 
-	const hasRowActions = access.update || access.delete;
+	const hasRowActions = access.update || access.delete || Boolean(onShare);
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
@@ -199,6 +208,13 @@ export const ForkAgentDefinitionsTableView: React.FC<
 									{access.update && (
 										<DropdownMenuItem onClick={() => onEdit(definition)}>
 											Edit
+										</DropdownMenuItem>
+									)}
+									{onShare && (
+										<DropdownMenuItem
+											onClick={() => onShare(definition, restoreFocus)}
+										>
+											Share
 										</DropdownMenuItem>
 									)}
 									{access.delete && (
