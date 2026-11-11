@@ -747,14 +747,11 @@ func (p *Server) buildTurnEnvironment(
 	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID); err != nil {
 		return turnEnvironment{}, err
 	}
-	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
-		_, ok := tool.(acpSpawnTool)
-		return ok
-	})
 	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
 	if err != nil {
 		return turnEnvironment{}, err
 	}
+	acpSubagentsAvailable := !isExploreSubagent && customAgentPolicy.keepsACPTools(tools)
 	if customAgentPolicy != nil && !customAgentPolicy.keepsSkillTools() {
 		initialResolvedSkills = nil
 	}
@@ -886,8 +883,8 @@ func (p *Server) buildTurnEnvironment(
 	tools = mcpclient.AppendTools(ctx, logger, tools, inlineMCPTools)
 	tools = filterToolsForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)
 	// chatloop reads an empty active tool list as every tool, so Explore
-	// children also drop the tools their allowlist blocks.
-	if isExploreSubagent && !isRootChat {
+	// chats also drop the tools their allowlist blocks.
+	if isExploreSubagent {
 		tools = slices.DeleteFunc(tools, func(tool fantasy.AgentTool) bool {
 			return !exploreToolAllowed(tool)
 		})
@@ -946,6 +943,7 @@ func (p *Server) buildTurnEnvironment(
 	if tools, deferredCandidates, providerTools, err = p.applyCustomAgentToolPolicy(ctx, chat, customAgentPolicy, tools, deferredCandidates, providerTools); err != nil {
 		return turnEnvironment{}, err
 	}
+	customAgentPolicy.keepDynamicToolNames(dynamicToolNames, tools)
 
 	activeToolNames := activeToolNamesForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)
 	if isExploreSubagent {
