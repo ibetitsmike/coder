@@ -296,10 +296,12 @@ func TestResolver_PluginPacksManifestSymlinkRejected(t *testing.T) {
 
 	// A manifest that is itself a symlink is not a pack: Lstat must
 	// reject it before any read, however small the target reports
-	// itself. Ordinary discovery still applies to the directory.
+	// itself. The pack-style skills container must stay undiscovered:
+	// if the symlinked manifest were accepted, the directory would
+	// classify as a pack and its skill would come back stamped.
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "real.json"), `{"name": "pstack"}`)
-	mustWriteFile(t, filepath.Join(root, "pstack", "AGENTS.md"), "Pack instructions.\n")
+	mustWriteFile(t, filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 	if err := os.Symlink(
 		filepath.Join(root, "real.json"),
 		filepath.Join(root, "pstack", "plugin.json"),
@@ -313,6 +315,8 @@ func TestResolver_PluginPacksManifestSymlinkRejected(t *testing.T) {
 	for _, res := range snap.Resources {
 		require.NotEqual(t, filepath.Join(root, "pstack", "plugin.json"), res.SourcePath,
 			"a symlinked manifest must not classify the directory as a pack")
+		require.NotContains(t, res.Source, filepath.Join(root, "pstack"),
+			"nothing from a pack with a symlinked manifest may be discovered")
 	}
 }
 
@@ -321,10 +325,14 @@ func TestResolver_PluginPacksNamelessManifest(t *testing.T) {
 
 	// A plugin.json that parses but declares no name is not a pack:
 	// the directory keeps ordinary discovery and nothing is stamped
-	// with the pack marker.
+	// with the pack marker. Ordinary discovery never reaches a child
+	// directory's files, so the pack-style skill under pstack must
+	// stay undiscovered too; if a nameless manifest were accepted,
+	// that skill would come back stamped.
 	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "Root instructions.\n")
 	mustWriteFile(t, filepath.Join(root, "pstack", "plugin.json"), `{}`)
-	mustWriteFile(t, filepath.Join(root, "pstack", "AGENTS.md"), "Ordinary instructions.\n")
+	mustWriteFile(t, filepath.Join(root, "pstack", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 
 	r := &agentcontext.Resolver{}
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
@@ -332,8 +340,10 @@ func TestResolver_PluginPacksNamelessManifest(t *testing.T) {
 	for _, res := range snap.Resources {
 		require.Empty(t, res.SourcePath,
 			"a nameless manifest must not classify the directory as a pack")
+		require.NotContains(t, res.Source, filepath.Join(root, "pstack"),
+			"nothing from a pack with a nameless manifest may be discovered")
 	}
-	findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "pstack", "AGENTS.md"))
+	findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "AGENTS.md"))
 }
 
 func TestResolver_PluginPacksExcludedFromDrift(t *testing.T) {
@@ -341,16 +351,18 @@ func TestResolver_PluginPacksExcludedFromDrift(t *testing.T) {
 
 	// Installing or editing a pack must not change the drift hash
 	// while fork-plugins is off: pack rows are filtered from the
-	// prompt by chatd, so they cannot read as prompt drift.
-	base := t.TempDir()
-	mustWriteFile(t, filepath.Join(base, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
-
-	withPack := t.TempDir()
-	mustWriteFile(t, filepath.Join(withPack, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
-	writePack(t, withPack, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+	// prompt by chatd, so they cannot read as prompt drift. Resolve
+	// the same directory before and after the pack appears: the
+	// hash covers absolute sources, so only a same-root comparison
+	// can be equal.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
 
 	r := &agentcontext.Resolver{}
-	h1 := r.Resolve([]agentcontext.ScanRoot{{Path: base}}).AggregateHash
-	h2 := r.Resolve([]agentcontext.ScanRoot{{Path: withPack}}).AggregateHash
+	h1 := r.Resolve([]agentcontext.ScanRoot{{Path: root}}).AggregateHash
+
+	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	h2 := r.Resolve([]agentcontext.ScanRoot{{Path: root}}).AggregateHash
 	require.Equal(t, h1, h2, "a pack must not change the drift hash")
 }
