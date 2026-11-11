@@ -110,7 +110,7 @@ func (p *Server) agentRowDefinitions(ctx context.Context, chat database.Chat, ro
 	resources := make([]database.ChatContextResource, 0, len(rows))
 	for _, row := range rows {
 		resources = append(resources, database.ChatContextResource{
-			BodyKind: row.BodyKind, Body: row.Body, Status: row.Status, SourcePath: row.SourcePath,
+			Source: row.Source, BodyKind: row.BodyKind, Body: row.Body, Status: row.Status, SourcePath: row.SourcePath,
 		})
 	}
 	return parseAgentDefinitionResources(p.filterPackResources(ctx, chat, resources))

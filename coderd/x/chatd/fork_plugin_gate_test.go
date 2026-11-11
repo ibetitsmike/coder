@@ -108,9 +108,9 @@ func TestFilterPackResources(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
 				PackID:        pack.ID,
-				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md", "skills/assets-only/run.sh"},
-				Contents:      [][]byte{[]byte("{}"), []byte("skill"), []byte("script")},
-				ContentHashes: []string{"hash", "hash", "hash"},
+				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md", "skills/assets-only/run.sh", "agents/pack-reviewer.md"},
+				Contents:      [][]byte{[]byte("{}"), []byte("skill"), []byte("script"), []byte("agent")},
+				ContentHashes: []string{"hash", "hash", "hash", "hash"},
 			}))
 			return pack.ID
 		}
@@ -157,6 +157,23 @@ func TestFilterPackResources(t *testing.T) {
 		}
 		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), stale...))),
 			"a row whose SKILL.md or manifest is not in the pack's current commit is dropped")
+		agentBody, err := protojson.Marshal(&agentproto.SubagentBody{
+			Definition: []byte(agentDefinitionMarkdown("name: pack-reviewer\ndescription: Test agent.", "Body.")),
+			Name:       "pack-reviewer",
+		})
+		require.NoError(t, err)
+		agentRow := func(name string) database.WorkspaceAgentContextResource {
+			return database.WorkspaceAgentContextResource{
+				Source:     "/home/u/.coder/plugins/" + name + "/agents/pack-reviewer.md",
+				SourcePath: "/home/u/.coder/plugins/" + name + "/.claude-plugin/plugin.json",
+				BodyKind:   database.WorkspaceAgentContextBodyKindSubagent,
+				Body:       agentBody,
+				Status:     database.WorkspaceAgentContextResourceStatusOk,
+			}
+		}
+		catalog := server.agentRowDefinitions(ctx, root, []database.WorkspaceAgentContextResource{agentRow("chat-pack"), agentRow("disabled-pack")})
+		require.Len(t, catalog, 1, "the catalog lists the agent of an enabled managed pack only")
+		require.Equal(t, "pack-reviewer", catalog[0].Name)
 		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
 			sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
 			"a subagent sees the packs of its root chat and its own")
