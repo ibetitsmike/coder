@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, screen, userEvent } from "storybook/test";
 import {
 	MockOrganization,
 	MockOrganization2,
@@ -34,6 +34,17 @@ export default meta;
 type Story = StoryObj<typeof ForkPluginPacksTableView>;
 
 export const Populated: Story = {};
+
+export const RowMenuOpen: Story = {
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: /Delete/ });
+	},
+};
 
 export const ReadOnly: Story = {
 	args: { access: { create: false, update: false, delete: false } },

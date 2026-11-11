@@ -30,13 +30,33 @@ const invalidatePluginPacks = (
 ) =>
 	queryClient.invalidateQueries({ queryKey: pluginPacksKey(organizationId) });
 
+/**
+ * Invalidates the pack list after a create or update. A lost response leaves
+ * the outcome unknown, so the mutation then stays pending until the refetch
+ * settles and callers can reconcile against cachedPluginPacks.
+ */
+const settlePluginPackChange = (
+	queryClient: QueryClient,
+	organizationId: string,
+	error: unknown,
+) => {
+	const refetch = invalidatePluginPacks(queryClient, organizationId);
+	return isResponseLost(error) ? refetch : undefined;
+};
+
+/** The organization's cached pack list, if it has loaded. */
+export const cachedPluginPacks = (
+	queryClient: QueryClient,
+	organizationId: string,
+) => queryClient.getQueryData(pluginPacks(organizationId).queryKey);
+
 /** Whether an organization's cached pack list no longer lists the pack. */
 export const isPluginPackGone = (
 	queryClient: QueryClient,
 	organizationId: string,
 	packId: string,
 ) => {
-	const packs = queryClient.getQueryData(pluginPacks(organizationId).queryKey);
+	const packs = cachedPluginPacks(queryClient, organizationId);
 	return packs !== undefined && !packs.some((pack) => pack.id === packId);
 };
 
@@ -47,7 +67,8 @@ export const createPluginPackMutation = (
 	mutationOptions({
 		mutationFn: (req: CreateForkPluginPackRequest) =>
 			createPluginPack(organizationId, req),
-		onSuccess: () => invalidatePluginPacks(queryClient, organizationId),
+		onSettled: (_data, error) =>
+			settlePluginPackChange(queryClient, organizationId, error),
 	});
 
 export const updatePluginPackMutation = (
@@ -57,7 +78,8 @@ export const updatePluginPackMutation = (
 	mutationOptions({
 		mutationFn: (pack: ForkPluginPack) =>
 			updatePluginPack(organizationId, pack.id, {}),
-		onSuccess: () => invalidatePluginPacks(queryClient, organizationId),
+		onSettled: (_data, error) =>
+			settlePluginPackChange(queryClient, organizationId, error),
 	});
 
 export const deletePluginPackMutation = (

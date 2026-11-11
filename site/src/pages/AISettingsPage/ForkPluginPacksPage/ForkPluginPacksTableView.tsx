@@ -28,7 +28,11 @@ import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDial
 
 const title = "Plugin packs";
 
-/** The plugin pack actions the user may take in the organization. */
+/**
+ * Which plugin pack actions to offer. The server checks plugin packs against
+ * the organization skill permissions, so each field mirrors the matching
+ * organization skill permission.
+ */
 export type ForkPluginPacksAccess = {
 	create: boolean;
 	update: boolean;
