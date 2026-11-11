@@ -2,13 +2,8 @@
 // experiment.
 
 import { MenuOption } from "@lexical/react/LexicalTypeaheadMenuPlugin";
+import { cn } from "cn";
 import type { ChatSkillSource } from "#/api/typesGenerated";
-import {
-	Command,
-	CommandEmpty,
-	CommandItem,
-	CommandList,
-} from "#/components/Command/Command";
 import {
 	Popover,
 	PopoverAnchor,
@@ -49,7 +44,10 @@ export const ForkAgentMentionMenu: React.FC<ForkAgentMentionMenuProps> = ({
 }) => (
 	<Popover open={anchor !== null}>
 		{anchor && <PopoverAnchor virtualRef={{ current: anchor }} />}
+		{/* The editor's aria-activedescendant names these option ids. */}
 		<PopoverContent
+			disablePortal
+			role="presentation"
 			align="start"
 			side="top"
 			sideOffset={8}
@@ -58,39 +56,46 @@ export const ForkAgentMentionMenu: React.FC<ForkAgentMentionMenuProps> = ({
 			onOpenAutoFocus={(event) => event.preventDefault()}
 			onCloseAutoFocus={(event) => event.preventDefault()}
 		>
-			<Command
-				shouldFilter={false}
-				value={selectedIndex === null ? "" : String(selectedIndex)}
-				onValueChange={(value) => {
-					if (/^\d+$/.test(value)) {
-						onHighlight(Number(value));
-					}
-				}}
-			>
-				<CommandList className="max-h-72 border-t-0 mobile-full-width-dropdown-scroll-area">
-					{options.map((option, index) => (
-						<CommandItem
-							key={option.key}
-							ref={option.setRefElement}
-							value={String(index)}
-							className="flex-col items-stretch gap-1"
-							onSelect={() => onSelect(option)}
-						>
-							<div className="flex items-center gap-2 text-xs">
-								<span className="truncate font-mono">@{option.agent.name}</span>
-								<span className="ml-auto text-content-secondary">
-									{option.agent.source}
-								</span>
-							</div>
-							<div className="line-clamp-2 text-content-secondary text-xs">
-								{option.agent.description}
-							</div>
-						</CommandItem>
-					))}
-					{status && <CommandItem disabled>{status}</CommandItem>}
-					<CommandEmpty>No agents match that query.</CommandEmpty>
-				</CommandList>
-			</Command>
+			<div className="max-h-72 min-h-0 overflow-y-auto mobile-full-width-dropdown-scroll-area">
+				{options.map((option, index) => (
+					<button
+						type="button"
+						key={option.key}
+						ref={option.setRefElement}
+						id={`typeahead-item-${index}`}
+						role="option"
+						tabIndex={-1}
+						aria-selected={selectedIndex === index}
+						className={cn(
+							"flex w-full cursor-default select-none flex-col gap-1 rounded-sm border-0 bg-transparent px-2 py-2 text-left font-medium text-content-secondary text-sm",
+							selectedIndex === index &&
+								"bg-surface-secondary text-content-primary ring-2 ring-content-link ring-inset",
+						)}
+						onMouseEnter={() => onHighlight(index)}
+						onClick={() => onSelect(option)}
+					>
+						<div className="flex items-center gap-2 text-xs">
+							<span className="truncate font-mono">@{option.agent.name}</span>
+							<span className="ml-auto text-content-secondary">
+								{option.agent.source}
+							</span>
+						</div>
+						<div className="line-clamp-2 text-content-secondary text-xs">
+							{option.agent.description}
+						</div>
+					</button>
+				))}
+				{status && (
+					<div className="px-2 py-2 text-content-secondary text-sm opacity-50">
+						{status}
+					</div>
+				)}
+				{options.length === 0 && !status && (
+					<div className="py-6 text-center text-sm">
+						No agents match that query.
+					</div>
+				)}
+			</div>
 		</PopoverContent>
 	</Popover>
 );

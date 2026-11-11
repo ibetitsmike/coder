@@ -1,12 +1,18 @@
 // This file is fork code: the "@" agent menu of the fork-agent-definitions
 // experiment, so ChatMessageInput.tsx, an upstream file, needs one line.
 
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
 	LexicalTypeaheadMenuPlugin,
 	type TriggerFn,
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
-import { COMMAND_PRIORITY_CRITICAL, type TextNode } from "lexical";
-import { useState } from "react";
+import {
+	COMMAND_PRIORITY_CRITICAL,
+	KEY_ENTER_COMMAND,
+	type TextNode,
+} from "lexical";
+import { useEffect, useEffectEvent, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueries, useQuery } from "react-query";
 import { useParams } from "react-router";
 import { chat } from "#/api/queries/chats";
@@ -36,6 +42,11 @@ const builtinAgentTypes = [
 
 // chatd reserves the built-in names, computer_use included, in every tier.
 const reservedAgentTypeNames = new Set(["general", "explore", "computer_use"]);
+
+// chatd never gives spawn_agent to a child of these types, and gives it to
+// other children only with fork-nested-subagents (nestedSubagentTools in
+// coderd/x/chatd/fork_subagents.go).
+const nonSpawningAgentTypes = new Set(["explore", "computer_use"]);
 
 // Only an "@" at the start of a line or after whitespace opens the menu, so
 // email addresses stay plain text.
@@ -115,32 +126,53 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	anchor,
 }) => {
 	const isEnabled = useForkExperiment("fork-agent-definitions");
+	const isNestingEnabled = useForkExperiment("fork-nested-subagents");
+	const [editor] = useLexicalComposerContext();
 	const [query, setQuery] = useState<string | null>(null);
+	const isMenuOpen = query !== null;
+	// The chat page loads the chat; the menu only reads its cached copy.
+	const { agentId } = useParams();
+	const currentChat = useQuery({ ...chat(agentId ?? ""), enabled: false }).data;
+	const isChildChat = currentChat?.parent_chat_id !== undefined;
+	const canSpawn =
+		!isChildChat ||
+		(isNestingEnabled &&
+			!nonSpawningAgentTypes.has(currentChat?.agent_type ?? ""));
+	// A child chat has no project of its own; chatd offers it the agents of
+	// its root chat's project.
+	const rootChatId = isChildChat ? currentChat?.root_chat_id : undefined;
+	const rootChat = useQuery({
+		...chat(rootChatId ?? ""),
+		enabled: isMenuOpen && rootChatId !== undefined,
+	});
+	const chatProjectId = rootChatId ? rootChat.data?.project_id : projectId;
 	const project = { source: "project", tier: "project" } as const;
 	const scopes = [
 		{ source: "personal", tier: "user", organizationId },
 		{ source: "org", tier: "organization", organizationId },
-		...(projectId ? [{ ...project, organizationId, projectId }] : []),
+		...(chatProjectId
+			? [{ ...project, organizationId, projectId: chatProjectId }]
+			: []),
 	] as const;
 	const storedQueries = useQueries({
 		queries: scopes.map(({ source: _, ...scope }) => ({
 			...agentDefinitions(scope),
-			enabled: query !== null && organizationId !== "",
+			enabled: isMenuOpen && organizationId !== "",
 			staleTime: 60_000,
 		})),
 	});
-	// The chat page loads the chat; the menu only reads its pinned context.
-	const { agentId } = useParams();
-	const resources = useQuery({ ...chat(agentId ?? ""), enabled: false }).data
-		?.context?.resources;
+	const isRootProjectUnknown = rootChatId !== undefined && !rootChat.data;
 	const mentions = resolveAgentMentions([
 		...scopes.map(({ source }, index) => ({
 			source,
 			agents: storedQueries[index].data?.filter((agent) => agent.enabled),
 		})),
+		...(isRootProjectUnknown
+			? [{ source: "project" as const, agents: undefined }]
+			: []),
 		{
 			source: "workspace",
-			agents: (resources ?? [])
+			agents: (currentChat?.context?.resources ?? [])
 				.filter(({ kind, status }) => kind === "subagent" && status === "ok")
 				.map((resource) => ({
 					name: resource.subagent_name ?? "",
@@ -155,9 +187,32 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 				.includes((query ?? "").toLocaleLowerCase("en-US")),
 		)
 		.map((mention) => new AgentMentionOption(mention));
-	const unresolved = storedQueries.filter((result) => !result.data);
+	const unresolved = [
+		...storedQueries,
+		...(isRootProjectUnknown ? [rootChat] : []),
+	].filter((result) => !result.data);
+	const isLoading = unresolved.some((result) => result.isFetching);
 
-	if (!isEnabled) {
+	// Lexical's menu lets Enter through when nothing is selectable, which
+	// would send the unfinished mention while agents still load.
+	const handleEnter = useEffectEvent((event: KeyboardEvent | null) => {
+		if (!isMenuOpen || options.length > 0 || !isLoading) {
+			return false;
+		}
+		event?.preventDefault();
+		return true;
+	});
+	useEffect(
+		() =>
+			editor.registerCommand(
+				KEY_ENTER_COMMAND,
+				handleEnter,
+				COMMAND_PRIORITY_CRITICAL,
+			),
+		[editor],
+	);
+
+	if (!isEnabled || !canSpawn) {
 		return null;
 	}
 
@@ -168,22 +223,27 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			onQueryChange={setQuery}
 			onSelectOption={handleSelect}
 			commandPriority={COMMAND_PRIORITY_CRITICAL}
-			menuRenderFn={(_, menu) => (
-				<ForkAgentMentionMenu
-					anchor={anchor}
-					options={options}
-					selectedIndex={menu.selectedIndex}
-					status={
-						unresolved.some((result) => result.isError)
-							? "Could not load some agents. Close and type @ again to retry."
-							: unresolved.some((result) => result.isFetching)
-								? "Loading agents..."
-								: undefined
-					}
-					onSelect={menu.selectOptionAndCleanUp}
-					onHighlight={menu.setHighlightedIndex}
-				/>
-			)}
+			menuRenderFn={(menuContainer, menu) =>
+				menuContainer.current &&
+				// Lexical points the editor's aria-controls at this container.
+				createPortal(
+					<ForkAgentMentionMenu
+						anchor={anchor}
+						options={options}
+						selectedIndex={menu.selectedIndex}
+						status={
+							unresolved.some((result) => result.isError)
+								? "Could not load some agents. Close and type @ again to retry."
+								: isLoading
+									? "Loading agents..."
+									: undefined
+						}
+						onSelect={menu.selectOptionAndCleanUp}
+						onHighlight={menu.setHighlightedIndex}
+					/>,
+					menuContainer.current,
+				)
+			}
 		/>
 	);
 };
