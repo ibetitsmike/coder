@@ -6,6 +6,7 @@ import { getPluginPacks } from "#/api/forkPluginPacks";
 const pluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId] as const;
 
+/** Query options for the plugin packs installed in an organization. */
 export const pluginPacks = (organizationId: string) =>
 	queryOptions({
 		queryKey: pluginPacksKey(organizationId),

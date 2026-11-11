@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import { createMemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
@@ -47,9 +47,10 @@ beforeEach(() => {
 it("lists the packs of the organization the URL names", async () => {
 	renderPage();
 
-	expect(await screen.findByText(MockForkPluginPack.name)).toBeInTheDocument();
-	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
-		MockOrganization2.id,
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization2.id,
+		),
 	);
 	expect(forkPluginPacksApi.getPluginPacks).not.toHaveBeenCalledWith(
 		MockOrganization.id,

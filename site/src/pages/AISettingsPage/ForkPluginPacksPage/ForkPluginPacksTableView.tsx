@@ -28,6 +28,11 @@ type ForkPluginPacksTableViewProps = {
 	onRetry: () => void;
 };
 
+/**
+ * Lists an organization's installed plugin packs. It shows a loader while
+ * `isLoading`, a retryable empty state when the first load fails, and a
+ * retryable alert above the cached rows when a later refetch fails.
+ */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
 > = ({ packs, action, error, isLoading, isRetrying, onRetry }) => {

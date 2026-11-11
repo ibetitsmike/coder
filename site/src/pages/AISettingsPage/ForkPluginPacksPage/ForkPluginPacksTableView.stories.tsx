@@ -35,6 +35,14 @@ export const LoadError: Story = {
 	},
 };
 
+export const Retrying: Story = {
+	args: {
+		packs: [],
+		error: mockApiError({ message: "Failed to list plugin packs." }),
+		isRetrying: true,
+	},
+};
+
 export const Loading: Story = {
 	args: { packs: [], isLoading: true },
 };
