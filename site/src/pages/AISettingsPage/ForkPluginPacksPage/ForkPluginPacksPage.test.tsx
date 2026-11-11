@@ -224,7 +224,7 @@ it("reports an update as done when a lost response did update the pack", async (
 
 	await waitFor(() =>
 		expect(toastSuccess).toHaveBeenCalledWith(
-			`${MockForkPluginPack.name} is at fedcba9876.`,
+			`${MockForkPluginPack.name} updated to commit fedcba9876.`,
 		),
 	);
 	expect(toastError).not.toHaveBeenCalled();
@@ -377,7 +377,7 @@ it("keeps the row menu reachable and starts no second update while one is pendin
 	finishUpdate(MockForkPluginPack);
 	await waitFor(() =>
 		expect(toastSuccess).toHaveBeenCalledWith(
-			`${MockForkPluginPack.name} is at 0123456789.`,
+			`${MockForkPluginPack.name} updated to commit 0123456789.`,
 		),
 	);
 });

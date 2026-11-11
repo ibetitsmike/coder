@@ -77,7 +77,7 @@ const InstallPluginPackButton: React.FC<InstallPluginPackButtonProps> = ({
 	</Button>
 );
 
-type ForkPluginPackRowProps = {
+type ForkPluginPackEntryProps = {
 	pack: ForkPluginPack;
 	access: SkillAccess;
 	isUpdating: boolean;
@@ -87,7 +87,7 @@ type ForkPluginPackRowProps = {
 	onDelete: (pack: ForkPluginPack) => void;
 };
 
-const ForkPluginPackActions: React.FC<ForkPluginPackRowProps> = ({
+const ForkPluginPackActions: React.FC<ForkPluginPackEntryProps> = ({
 	pack,
 	access,
 	isUpdating,
@@ -137,7 +137,7 @@ const ForkPluginPackActions: React.FC<ForkPluginPackRowProps> = ({
 	</DropdownMenu>
 );
 
-const ForkPluginPackRow: React.FC<ForkPluginPackRowProps> = ({
+const ForkPluginPackRow: React.FC<ForkPluginPackEntryProps> = ({
 	pack,
 	access,
 	isUpdating,

@@ -61,7 +61,9 @@ const toastUpdateResult = (
 		return;
 	}
 
-	toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
+	toast.success(
+		`${pack.name} updated to commit ${updated.commit_sha.slice(0, 10)}.`,
+	);
 };
 
 const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
