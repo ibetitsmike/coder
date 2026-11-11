@@ -24,23 +24,31 @@ vi.mock("#/hooks/useAuthenticated", () => ({
 		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
 	}),
 }));
+const dashboard = vi.hoisted((): { experiments: string[] } => ({
+	experiments: [],
+}));
 vi.mock("#/modules/dashboard/useDashboard", () => ({
 	useDashboard: () => ({
-		experiments: ["fork-plugin-packs"],
+		experiments: dashboard.experiments,
 		organizations: [MockOrganization, MockOrganization2],
 	}),
 }));
 
 const path = "/ai/settings/plugin-packs";
 
-const renderPage = () =>
+const renderPage = (search = `?org=${MockOrganization2.name}`) =>
 	renderWithRouter(
-		createMemoryRouter([{ path, element: <ForkPluginPacksPage /> }], {
-			initialEntries: [`${path}?org=${MockOrganization2.name}`],
-		}),
+		createMemoryRouter(
+			[
+				{ path, element: <ForkPluginPacksPage /> },
+				{ path: "/ai/settings", element: null },
+			],
+			{ initialEntries: [`${path}${search}`] },
+		),
 	);
 
 beforeEach(() => {
+	dashboard.experiments = ["fork-plugin-packs"];
 	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
 		Object.fromEntries(Object.keys(checks).map((key) => [key, true])),
 	);
@@ -54,7 +62,7 @@ afterEach(() => {
 });
 
 it("lists the packs of the organization the URL names", async () => {
-	renderPage();
+	renderPage(`?org=${MockOrganization2.name}`);
 
 	await waitFor(() =>
 		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
@@ -143,7 +151,7 @@ it("requests the packs again when Retry is clicked after a failed load", async (
 			mockApiError({ message: "Failed to list plugin packs." }),
 		)
 		.mockResolvedValueOnce([MockForkPluginPack]);
-	renderPage();
+	renderPage(`?org=${MockOrganization2.name}`);
 
 	await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
 
@@ -376,4 +384,39 @@ it("keeps the row menu reachable and starts no second update while one is pendin
 			`${MockForkPluginPack.name} is at 0123456789.`,
 		),
 	);
+});
+
+it("switches the organization through the picker", async () => {
+	const user = userEvent.setup();
+	const { router } = renderPage("");
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization.id,
+		),
+	);
+
+	await user.click(await screen.findByRole("combobox"));
+	await user.click(
+		await screen.findByRole("option", { name: /My Organization 2/ }),
+	);
+
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization2.id,
+		),
+	);
+	expect(new URLSearchParams(router.state.location.search).get("org")).toBe(
+		MockOrganization2.name,
+	);
+});
+
+it("redirects to AI settings while the experiment is off", async () => {
+	dashboard.experiments = [];
+	const { router } = renderPage(`?org=${MockOrganization.name}`);
+
+	await waitFor(() =>
+		expect(router.state.location.pathname).toBe("/ai/settings"),
+	);
+	expect(API.checkAuthorization).not.toHaveBeenCalled();
+	expect(forkPluginPacksApi.getPluginPacks).not.toHaveBeenCalled();
 });
