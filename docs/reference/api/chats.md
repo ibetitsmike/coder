@@ -1697,6 +1697,127 @@ curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
+## Get organization wake-up caps
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/wakeup-caps \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`GET /api/v2/chats/fork/organizations/{organization}/wakeup-caps`
+
+### Parameters
+
+| Name           | In   | Type         | Required | Description     |
+|----------------|------|--------------|----------|-----------------|
+| `organization` | path | string(uuid) | true     | Organization ID |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "default": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "effective": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "organization": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  }
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                               |
+|--------|---------------------------------------------------------|-------------|------------------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationWakeupCapsResponse](schemas.md#codersdkforkorganizationwakeupcapsresponse) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Update organization wake-up caps
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/wakeup-caps \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`PUT /api/v2/chats/fork/organizations/{organization}/wakeup-caps`
+
+> Body parameter
+
+```json
+{
+  "max_chat_runs_per_day": 288,
+  "max_chat_spend_micros_per_day": 20000000,
+  "max_organization_runs_per_day": 2880,
+  "max_organization_spend_micros_per_day": 200000000
+}
+```
+
+### Parameters
+
+| Name           | In   | Type                                                                                 | Required | Description     |
+|----------------|------|--------------------------------------------------------------------------------------|----------|-----------------|
+| `organization` | path | string(uuid)                                                                         | true     | Organization ID |
+| `body`         | body | [codersdk.ForkOrganizationWakeupCaps](schemas.md#codersdkforkorganizationwakeupcaps) | true     | Request body    |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "default": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "effective": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  },
+  "organization": {
+    "max_chat_runs_per_day": 288,
+    "max_chat_spend_micros_per_day": 20000000,
+    "max_organization_runs_per_day": 2880,
+    "max_organization_spend_micros_per_day": 200000000
+  }
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                               |
+|--------|---------------------------------------------------------|-------------|------------------------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationWakeupCapsResponse](schemas.md#codersdkforkorganizationwakeupcapsresponse) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
 ## Watch chat events for a user via WebSockets
 
 ### Code samples
