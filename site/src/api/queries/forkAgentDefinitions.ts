@@ -8,12 +8,14 @@ import {
 	queryOptions,
 } from "react-query";
 import {
+	type AgentTypesParams,
 	createOrganizationAgentDefinition,
 	createProjectAgentDefinition,
 	createUserAgentDefinition,
 	deleteOrganizationAgentDefinition,
 	deleteProjectAgentDefinition,
 	deleteUserAgentDefinition,
+	getAgentTypes,
 	getOrganizationAgentDefinition,
 	getOrganizationAgentDefinitionACL,
 	getOrganizationAgentDefinitionACLAvailable,
@@ -374,4 +376,11 @@ export const updateAgentDefinitionACL = (queryClient: QueryClient) =>
 				}),
 			]);
 		},
+	});
+
+/** Query options for the agent types a new chat in an organization can start as. */
+export const agentTypes = (organizationId: string, params: AgentTypesParams) =>
+	queryOptions({
+		queryKey: ["chats", "fork-agent-types", organizationId, params] as const,
+		queryFn: () => getAgentTypes(organizationId, params),
 	});
