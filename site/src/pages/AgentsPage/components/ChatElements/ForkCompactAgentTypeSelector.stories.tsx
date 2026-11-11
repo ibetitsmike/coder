@@ -3,7 +3,7 @@ import { expect, fn, screen, userEvent, within } from "storybook/test";
 import type { ForkAgentType } from "#/api/typesGenerated";
 import { ForkCompactAgentTypeSelector } from "./ForkCompactAgentTypeSelector";
 
-const agentType = (
+const mockAgentType = (
 	name: string,
 	source: string,
 	description: string,
@@ -17,13 +17,13 @@ const agentType = (
 	root_unavailable_reason: unavailableReason,
 });
 
-const agentTypes: ForkAgentType[] = [
-	agentType("general", "builtin", "Does the task with the full tool set."),
-	agentType("explore", "builtin", "Reads the code and reports, read-only."),
-	agentType("personal/reviewer", "personal", "Reviews the diff."),
-	agentType("org/reviewer", "org", "Reviews the diff against team rules."),
-	agentType("deployer", "project", "Deploys.", "Its model is unavailable."),
-	agentType("tester", "workspace", "Runs the test suite."),
+const mockAgentTypes: ForkAgentType[] = [
+	mockAgentType("general", "builtin", "Does the task with the full tool set."),
+	mockAgentType("explore", "builtin", "Reads the code and reports, read-only."),
+	mockAgentType("personal/reviewer", "personal", "Reviews the diff."),
+	mockAgentType("org/reviewer", "org", "Reviews the diff against team rules."),
+	mockAgentType("deployer", "project", "Deploys.", "Its model is unavailable."),
+	mockAgentType("tester", "workspace", "Runs the test suite."),
 ];
 
 const meta: Meta<typeof ForkCompactAgentTypeSelector> = {
@@ -31,7 +31,7 @@ const meta: Meta<typeof ForkCompactAgentTypeSelector> = {
 	component: ForkCompactAgentTypeSelector,
 	args: {
 		value: null,
-		agentTypes,
+		agentTypes: mockAgentTypes,
 		onChange: fn(),
 		onRetry: fn(),
 	},
@@ -56,9 +56,10 @@ export const Open: Story = {
 	args: { value: "explore" },
 	play: async (context) => {
 		await openSelector(context);
-		await expect(
-			screen.getByRole("option", { name: /deployer/ }),
-		).toHaveAttribute("aria-disabled", "true");
+		// The disabled row has pointer-events: none; click it anyway.
+		const user = userEvent.setup({ pointerEventsCheck: 0 });
+		await user.click(screen.getByRole("option", { name: /deployer/ }));
+		await expect(context.args.onChange).not.toHaveBeenCalled();
 	},
 };
 
