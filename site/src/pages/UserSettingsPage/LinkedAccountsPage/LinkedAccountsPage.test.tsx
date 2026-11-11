@@ -34,6 +34,42 @@ describe("LinkedAccountsPage", () => {
 		);
 	});
 
+	it("keeps polling for the new link after a failed fetch", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+		try {
+			const user = userEvent.setup({
+				advanceTimers: vi.advanceTimersByTime,
+			});
+			const getLinkablePlugins = vi
+				.spyOn(API.experimental, "getLinkablePlugins")
+				.mockResolvedValue([MockLinkablePlugin]);
+			vi.spyOn(API.experimental, "createPluginLinkCode").mockResolvedValue(
+				MockPluginLinkCode,
+			);
+
+			renderWithAuth(<LinkedAccountsPage />);
+
+			const section = await screen.findByRole("region", {
+				name: MockLinkablePlugin.name,
+			});
+			await user.click(
+				within(section).getByRole("button", { name: "Get link code" }),
+			);
+			await screen.findByText(MockPluginLinkCode.code);
+
+			getLinkablePlugins.mockRejectedValueOnce(new Error("network blip"));
+			const callsBeforeError = getLinkablePlugins.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(getLinkablePlugins).toHaveBeenCalledTimes(callsBeforeError + 1);
+
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(getLinkablePlugins).toHaveBeenCalledTimes(callsBeforeError + 2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("unlinks an account after confirmation", async () => {
 		const user = userEvent.setup();
 		const getLinkablePlugins = vi
