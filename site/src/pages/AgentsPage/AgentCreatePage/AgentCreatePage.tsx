@@ -293,6 +293,7 @@ const AgentCreatePageContent: React.FC<AgentCreatePageContentProps> = ({
 		organizationId,
 		projectId: formProjectId,
 		planMode,
+		agentType,
 		uploadWorkspaceFiles,
 	}: CreateChatOptions) => {
 		const content = buildChatInputContent({ message, composerParts }).content;
@@ -315,6 +316,7 @@ const AgentCreatePageContent: React.FC<AgentCreatePageContentProps> = ({
 			...(model ? { model_config_id: model } : {}),
 			...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
 			...(formProjectId ? { project_id: formProjectId } : {}),
+			...(agentType ? { agent_type: agentType } : {}),
 		};
 		const createdChat = await createMutation.mutateAsync(createRequest);
 
