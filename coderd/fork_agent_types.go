@@ -70,13 +70,15 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 	}
 	opts.ModelConfigID, opts.ExplicitModel = rootModelID, createReq.ModelConfigID != nil
 	if workspaceID != uuid.Nil {
-		workspace, err := api.Database.GetWorkspaceByID(ctx, workspaceID)
-		if httpapi.Is404Error(err) || (err == nil && workspace.OrganizationID != organization.ID) {
-			httpapi.ResourceNotFound(rw)
+		// Workspace definitions come from the workspace agent, so the
+		// caller needs the access that attaching a chat to it needs.
+		_, workspace, status, resp := api.validateChatWorkspaceSelection(ctx, &workspaceID)
+		if resp != nil {
+			httpapi.Write(ctx, rw, status, *resp)
 			return
 		}
-		if err != nil {
-			httpapi.InternalServerError(rw, err)
+		if workspace.OrganizationID != organization.ID {
+			httpapi.ResourceNotFound(rw)
 			return
 		}
 		agents, err := api.Database.GetWorkspaceAgentsInLatestBuildByWorkspaceID(ctx, workspace.ID)
