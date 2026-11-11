@@ -229,7 +229,8 @@ A change to a completed or canceled wake-up fails with status 409, `This wake-up
 A pause keeps the next run time and sets `status_reason` to `paused_by_user`, a cancel sets it to `canceled_by_user`, and a resume keeps a run time that is still ahead.
 Otherwise a resumed interval or cron wake-up continues its schedule from now, and a resumed delay runs at once, or completes when it has no run left.
 While the experiment is on, the composer of a chat with active or paused wake-ups shows a pill with their number.
-Selecting the pill lists each one with its schedule, its prompt, its next run or pause reason, and its run count, with **Pause** or **Resume** and **Cancel** buttons that make the same changes as the API.
+Selecting the pill lists each one with its schedule, its prompt, its next run or check or **Paused**, and its run count, with **Pause** or **Resume** and **Cancel** buttons that make the same changes as the API.
+A wake-up that a limit, a prompt hook, or an invalid cron schedule or events paused also shows the reason, such as **Paused: daily run limit reached**.
 The pill reads the list again every 30&nbsp;seconds, so a change that a run makes can take that long to show.
 When the list fails to load, the composer shows a warning pill instead.
 While the experiment is on, the conversation shows each `schedule_wakeup`, `wait_for_events`, and `notify_user` call as a card.
@@ -237,7 +238,7 @@ The title of a `schedule_wakeup` card names the schedule, such as **Scheduled a 
 The card lists the prompt, the next run, and the run limit and expiry when the call sets them.
 The title of a `wait_for_events` card names what the call waits for, such as **Waiting for 2 child agents and a pull request**.
 The card links each child with its title and status, and the pull request with its watched events, and shows when the wait stops.
-A `notify_user` card shows **Sent a notification** with the title and the message.
+A `notify_user` card shows **Sent a notification** with the message, and the title when the call sets one.
 A failed call shows **Failed to schedule a wake-up**, **Failed to wait for events**, or **Failed to send a notification** with the tool's error.
 A result that a card can't read shows the generic tool card.
 While the experiment is on, archiving a chat cancels the active and paused wake-ups of every chat in its family, and unarchiving doesn't resume them.
@@ -319,7 +320,8 @@ The page lists each definition's name and description, and its **Enabled** switc
 An empty **Model** runs the definition on the chat's model.
 **Import file** fills the fields from a Claude Code or Cursor agent markdown file and keeps its other front matter, such as `tools` or `isolation`, which the dialog has no field for.
 **Edit** in a row's menu opens the same dialog with the saved definition, where **Name** can't change, and **Save agent definition** keeps every front matter key except the name, description, and model as the file has them.
-If the definition changed or was deleted after the dialog opened, the dialog doesn't save and asks you to copy your changes and reopen it.
+If the page already shows that the definition changed or was deleted after the dialog opened, the dialog doesn't save and asks you to copy your changes and reopen it.
+The save itself has no version check, so it can overwrite a change from another tab or the API that the page hasn't loaded.
 The dialog shows the server's errors, such as `Invalid agent definition content.` or `An agent definition with this name already exists.`
 The page doesn't list the workspace's definition files, such as the pstack agents that Setup copies to `~/.coder/agents/`.
 `spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
@@ -620,7 +622,7 @@ Checked against fork `main` at `4bb7562026`:
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:187-311`, and for a project the owner owns or that is shared with them, `:264-268`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
   The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-51`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:12-30`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:131-140`, the **Edit** and **Delete** menu items and the delete dialog, `:161-169`, `:236-249`, and **New agent definition**, `:186-196`, calls the user routes, `forkAgentDefinitions.ts:12-80`.
-  The editor dialog, `ForkAgentDefinitionsTableView.tsx:229-234`, with its title, fields, import, and buttons, `ForkAgentDefinitionEditorDialog.tsx:197-217`, `:242-264`, `:351-387`, `:405-418`, the read-only name of an edit, `site/src/pages/AgentsPage/components/SkillEditor.tsx:482-484`, the other front matter kept, `agentDefinitionMarkdown.ts:165-216`, and the create, the refused save over a changed definition, and the save, `useForkAgentDefinitionEditor.ts:108-159`, `:160-269`.
+  The editor dialog, `ForkAgentDefinitionsTableView.tsx:229-234`, with its title, fields, import, and buttons, `ForkAgentDefinitionEditorDialog.tsx:197-217`, `:242-264`, `:351-387`, `:405-418`, the read-only name of an edit, `site/src/pages/AgentsPage/components/SkillEditor.tsx:482-484`, the other front matter kept, `agentDefinitionMarkdown.ts:165-216`, and the create, the refused save over a changed definition, and the save, `useForkAgentDefinitionEditor.ts:108-159`, `:160-269`, with no version in the update request, `codersdk/fork_agent_definitions.go:52-55`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:219-222`.
   The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:378-381`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1937`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
