@@ -930,6 +930,11 @@ type CreateChatRequest struct {
 	InlineMCPServers []InlineMCPServerRequest `json:"inline_mcp_servers,omitempty"`
 	PlanMode         ChatPlanMode             `json:"plan_mode,omitempty"`
 	ClientType       ChatClientType           `json:"client_type,omitempty"`
+	// AgentType starts the chat as an agent type, like spawn_agent's
+	// type: general, explore, or a personal, organization or project
+	// agent definition. It requires the fork-agent-definitions
+	// experiment.
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // InlineMCPServerRequest declares a streamable HTTP MCP server by value on

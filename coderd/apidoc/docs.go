@@ -26654,6 +26654,10 @@ const docTemplate = `{
         "codersdk.CreateChatRequest": {
             "type": "object",
             "properties": {
+                "agent_type": {
+                    "description": "AgentType starts the chat as an agent type, like spawn_agent's\ntype: general, explore, or a personal, organization or project\nagent definition. It requires the fork-agent-definitions\nexperiment.",
+                    "type": "string"
+                },
                 "client_type": {
                     "$ref": "#/definitions/codersdk.ChatClientType"
                 },

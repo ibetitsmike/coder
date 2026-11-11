@@ -7344,6 +7344,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ```json
 {
+  "agent_type": "string",
   "client_type": "ui",
   "content": [
     {
@@ -7411,6 +7412,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 | Name                   | Type                                                                        | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                                           |
 |------------------------|-----------------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent_type`           | string                                                                      | false    |              | Agent type starts the chat as an agent type, like spawn_agent's type: general, explore, or a personal, organization or project agent definition. It requires the fork-agent-definitions experiment.                                                                                                                                   |
 | `client_type`          | [codersdk.ChatClientType](#codersdkchatclienttype)                          | false    |              |                                                                                                                                                                                                                                                                                                                                       |
 | `content`              | array of [codersdk.ChatInputPart](#codersdkchatinputpart)                   | false    |              | Content is the initial user message. It is optional: when empty, the chat is created idle with no initial user message and generation starts with the first message POSTed to /chats/{chat}/messages.                                                                                                                                 |
 | `inline_mcp_servers`   | array of [codersdk.InlineMCPServerRequest](#codersdkinlinemcpserverrequest) | false    |              | Inline mcp servers declares MCP servers by value on this chat, next to the org-configured servers selected by MCPServerIDs. Experimental.                                                                                                                                                                                             |

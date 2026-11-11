@@ -390,6 +390,7 @@ curl -X POST http://coder-server:8080/api/v2/chats \
 
 ```json
 {
+  "agent_type": "string",
   "client_type": "ui",
   "content": [
     {
