@@ -27,7 +27,7 @@ type ForkPluginPackTogglesViewProps = {
 	onRetry: () => void;
 	canEdit: boolean;
 	pending: PluginPackToggle | undefined;
-	onToggle: (packId: string, enabled: boolean) => void;
+	onToggle: (pack: ForkEnabledPluginPack, enabled: boolean) => void;
 };
 
 export const ForkPluginPackTogglesView: React.FC<
@@ -53,7 +53,7 @@ export const ForkPluginPackTogglesView: React.FC<
 		);
 	}
 	const isEnabled = (packId: string) =>
-		pending?.packId === packId
+		pending?.pack.id === packId
 			? pending.enabled
 			: enabled.some((pack) => pack.id === packId);
 	// Packs enabled here stay listed even when the user cannot list the
@@ -88,7 +88,7 @@ export const ForkPluginPackTogglesView: React.FC<
 									aria-label={`Enable ${pack.name}`}
 									checked={isEnabled(pack.id)}
 									disabled={pending !== undefined}
-									onCheckedChange={(checked) => onToggle(pack.id, checked)}
+									onCheckedChange={(checked) => onToggle(pack, checked)}
 								/>
 							) : (
 								<SkillEnabledStatus enabled={isEnabled(pack.id)} />
@@ -126,9 +126,16 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 		...pluginPacks(organizationId),
 		retry: false,
 	});
-	const toggleMutation = useMutation(
-		setPluginPackEnabledMutation(queryClient, target),
-	);
+	// The error toast is a mutation-level callback, so it still shows when
+	// the dialog closes while the request is in flight.
+	const toggleMutation = useMutation({
+		...setPluginPackEnabledMutation(queryClient, target),
+		onError: (error) =>
+			toast.error(
+				getErrorMessage(error, "Failed to update the plugin pack."),
+				{ description: getErrorDetail(error) },
+			),
+	});
 	// Cached packs stay usable when a background refetch fails.
 	const installedError =
 		installedQuery.data || getErrorStatus(installedQuery.error) === 403
@@ -150,18 +157,7 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}
-			onToggle={(packId, enabled) =>
-				toggleMutation.mutate(
-					{ packId, enabled },
-					{
-						onError: (error) =>
-							toast.error(
-								getErrorMessage(error, "Failed to update the plugin pack."),
-								{ description: getErrorDetail(error) },
-							),
-					},
-				)
-			}
+			onToggle={(pack, enabled) => toggleMutation.mutate({ pack, enabled })}
 		/>
 	);
 };
