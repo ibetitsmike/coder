@@ -64,8 +64,8 @@ const LinkedAccountsPage: React.FC = () => {
 		...linkablePlugins(),
 		// Poll while a code waits to be sent so the new link shows up and the
 		// code hides on its own. Keep polling after a failed fetch: queries
-		// neither retry nor refetch on focus, so stopping would leave the page
-		// stale.
+		// don't retry, so stopping would leave the page stale until the user
+		// leaves and returns to the tab.
 		refetchInterval: ({ state }) =>
 			Object.values(getUnusedLinkCodes(state.data, issuedCodes)).some(
 				(linkCode) =>
