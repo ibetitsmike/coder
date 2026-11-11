@@ -5,6 +5,7 @@ package agentcontext_test
 // SourcePath so coderd's fork-plugin gate can identify them.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -840,4 +841,206 @@ func TestResolver_PluginPacksClaudeCacheEnabledPlugins(t *testing.T) {
 			require.ElementsMatch(t, tc.want, skills)
 		})
 	}
+}
+
+// resolveSkillSources resolves a single scan root with pack rows advertised
+// and returns the source of every skill it emitted.
+func resolveSkillSources(root string) []string {
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
+	var sources []string
+	for _, res := range r.Resolve([]agentcontext.ScanRoot{{Path: root}}).Resources {
+		if res.Kind == agentcontext.KindSkill {
+			sources = append(sources, res.Source)
+		}
+	}
+	return sources
+}
+
+func TestResolver_PluginPacksClaudeSettingsSymlink(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	cache := filepath.Join(home, ".claude", "plugins", "cache")
+	for _, plugin := range []string{"alpha", "beta"} {
+		version := filepath.Join(cache, "market", plugin, "1.0.0")
+		mustWriteFile(t, filepath.Join(version, ".claude-plugin", "plugin.json"), `{"name": "`+plugin+`"}`)
+		mustWriteFile(t, filepath.Join(version, "skills", plugin, "SKILL.md"), skillName(plugin))
+	}
+	// Dotfile managers link settings.json to a file elsewhere.
+	target := filepath.Join(home, "dotfiles", "settings.json")
+	mustWriteFile(t, target, `{"enabledPlugins": {"alpha@market": false}}`)
+	if err := os.Symlink(target, filepath.Join(home, ".claude", "settings.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	require.Equal(t, []string{filepath.Join(cache, "market", "beta", "1.0.0", "skills", "beta")}, resolveSkillSources(cache))
+}
+
+func TestResolver_PluginPacksClaudeCacheWithoutManifest(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code loads a cached plugin without a manifest from the
+	// standard layout, naming it after its directory.
+	cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
+	version := filepath.Join(cache, "market", "bare", "1.0.0")
+	mustWriteFile(t, filepath.Join(version, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+	mustWriteFile(t, filepath.Join(version, "agents", "reviewer.md"), packAgent("reviewer"))
+
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: cache}})
+
+	marker := filepath.Join(version, ".claude-plugin", "plugin.json")
+	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(version, "skills", "review-pr"))
+	require.Equal(t, marker, skill.SourcePath)
+	agent := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(version, "agents", "reviewer.md"))
+	require.Equal(t, marker, agent.SourcePath)
+
+	// Outside the Claude cache a directory without a manifest is no pack.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "bare", "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+	require.Empty(t, resolveSkillSources(root))
+}
+
+func TestResolver_PluginPacksCursorSkillsReplaceDefault(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	packDir := filepath.Join(root, "pstack")
+	mustWriteFile(t, filepath.Join(packDir, ".cursor-plugin", "plugin.json"), `{"name": "pstack", "skills": "./extra-skills"}`)
+	mustWriteFile(t, filepath.Join(packDir, "skills", "default-skill", "SKILL.md"), skillName("default-skill"))
+	mustWriteFile(t, filepath.Join(packDir, "extra-skills", "extra-skill", "SKILL.md"), skillName("extra-skill"))
+
+	require.Equal(t, []string{filepath.Join(packDir, "extra-skills", "extra-skill")}, resolveSkillSources(root))
+}
+
+func TestResolver_PluginPacksClaudeInstallRecord(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		registry func(older, newer, outside string) string
+		wantOld  bool
+	}{
+		{
+			name: "user-scope record in an array",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "user", "installPath": older}}})
+			},
+			wantOld: true,
+		},
+		{
+			name: "record without a scope",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"installPath": older}}})
+			},
+			wantOld: true,
+		},
+		{
+			name: "single record object",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string]map[string]string{"pstack@market": {"scope": "user", "installPath": older}})
+			},
+			wantOld: true,
+		},
+		{
+			name: "user record after a project record",
+			registry: func(older, newer, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {
+					{"scope": "project", "installPath": newer},
+					{"scope": "user", "installPath": older},
+				}})
+			},
+			wantOld: true,
+		},
+		{
+			name: "project-only record falls back to the newest version",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "project", "installPath": older}}})
+			},
+		},
+		{
+			name: "record outside the cache falls back",
+			registry: func(_, _, outside string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "user", "installPath": outside}}})
+			},
+		},
+		{
+			name: "record for another plugin falls back",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"other@market": {{"scope": "user", "installPath": older}}})
+			},
+		},
+		{
+			name: "relative record falls back",
+			registry: func(_, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "user", "installPath": "market/pstack/1.0.0"}}})
+			},
+		},
+		{
+			name:     "malformed registry falls back",
+			registry: func(_, _, _ string) string { return `{"plugins": ` },
+		},
+		{
+			name:     "no registry falls back",
+			registry: func(_, _, _ string) string { return "" },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			cache := filepath.Join(home, ".claude", "plugins", "cache")
+			plugin := filepath.Join(cache, "market", "pstack")
+			now := time.Now()
+			versions := map[string]time.Time{"1.0.0": now.Add(-time.Hour), "2.0.0": now}
+			for version, modTime := range versions {
+				dir := filepath.Join(plugin, version)
+				mustWriteFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"), `{"name": "pstack"}`)
+				mustWriteFile(t, filepath.Join(dir, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+				require.NoError(t, os.Chtimes(dir, modTime, modTime))
+			}
+			older, newer := filepath.Join(plugin, "1.0.0"), filepath.Join(plugin, "2.0.0")
+			if registry := tc.registry(older, newer, t.TempDir()); registry != "" {
+				mustWriteFile(t, filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), registry)
+			}
+
+			want := newer
+			if tc.wantOld {
+				want = older
+			}
+			require.Equal(t, []string{filepath.Join(want, "skills", "review-pr")}, resolveSkillSources(cache))
+		})
+	}
+}
+
+func TestResolver_PluginPacksClaudeInstallRecordIgnoresOrphaned(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	cache := filepath.Join(home, ".claude", "plugins", "cache")
+	plugin := filepath.Join(cache, "market", "pstack")
+	now := time.Now()
+	for version, modTime := range map[string]time.Time{"1.0.0": now, "2.0.0": now.Add(-time.Hour)} {
+		dir := filepath.Join(plugin, version)
+		mustWriteFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"), `{"name": "pstack"}`)
+		mustWriteFile(t, filepath.Join(dir, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+		require.NoError(t, os.Chtimes(dir, modTime, modTime))
+	}
+	// The record names a version Claude Code has since orphaned.
+	mustWriteFile(t, filepath.Join(plugin, "1.0.0", ".orphaned_at"), "1794430000000")
+	mustWriteFile(t, filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
+		installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "user", "installPath": filepath.Join(plugin, "1.0.0")}}}))
+
+	require.Equal(t, []string{filepath.Join(plugin, "2.0.0", "skills", "review-pr")}, resolveSkillSources(cache))
+}
+
+// installRecords renders an installed_plugins.json holding plugins.
+func installRecords(plugins any) string {
+	data, _ := json.Marshal(map[string]any{"version": 2, "plugins": plugins})
+	return string(data)
 }

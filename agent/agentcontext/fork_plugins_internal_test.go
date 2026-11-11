@@ -6,6 +6,7 @@ package agentcontext
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
@@ -34,6 +35,7 @@ func TestWatcherEventRelevant(t *testing.T) {
 		{"manifest create re-resolves", fsnotify.Event{Name: "/p/pstack/plugin.json", Op: fsnotify.Create}, true},
 		{"cursor manifest write re-resolves", fsnotify.Event{Name: "/p/pstack/.cursor-plugin/plugin.json", Op: fsnotify.Write}, true},
 		{"skill edit re-resolves", fsnotify.Event{Name: "/p/pstack/skills/x/SKILL.md", Op: fsnotify.Write}, true},
+		{"install record write re-resolves", fsnotify.Event{Name: "/h/.claude/plugins/installed_plugins.json", Op: fsnotify.Write}, true},
 		{"ordinary write ignored", fsnotify.Event{Name: "/p/pstack/README.md", Op: fsnotify.Write}, false},
 		{"declared agent container write re-resolves", fsnotify.Event{Name: "/p/pstack/definitions/reviewer.md", Op: fsnotify.Write}, true},
 		{"non-markdown write in agent container ignored", fsnotify.Event{Name: "/p/pstack/definitions/notes.txt", Op: fsnotify.Write}, false},
@@ -154,4 +156,85 @@ func TestClaudeUserSettingsPathConfigDir(t *testing.T) {
 	got, ok = claudeUserSettingsPath(filepath.Join(t.TempDir(), "cache"))
 	require.True(t, ok)
 	require.Equal(t, filepath.Join(configDir, "settings.json"), got)
+}
+
+//nolint:paralleltest,tparallel // Uses t.Setenv.
+func TestIsClaudePluginCacheThroughSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need elevated privileges on Windows")
+	}
+	cases := []struct {
+		name string
+		link func(t *testing.T, home string) string
+		env  func(t *testing.T, home string)
+	}{
+		{
+			name: "symlinked .claude",
+			link: func(t *testing.T, home string) string {
+				actual := filepath.Join(t.TempDir(), "dotfiles-claude")
+				require.NoError(t, os.MkdirAll(filepath.Join(actual, "plugins", "cache"), 0o755))
+				require.NoError(t, os.Symlink(actual, filepath.Join(home, ".claude")))
+				return filepath.Join(actual, "plugins", "cache")
+			},
+		},
+		{
+			name: "symlinked plugins directory",
+			link: func(t *testing.T, home string) string {
+				actual := filepath.Join(t.TempDir(), "plugins-data")
+				require.NoError(t, os.MkdirAll(filepath.Join(actual, "cache"), 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+				require.NoError(t, os.Symlink(actual, filepath.Join(home, ".claude", "plugins")))
+				return filepath.Join(actual, "cache")
+			},
+		},
+		{
+			name: "symlinked cache directory",
+			link: func(t *testing.T, home string) string {
+				actual := filepath.Join(t.TempDir(), "cache-data")
+				require.NoError(t, os.MkdirAll(actual, 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
+				require.NoError(t, os.Symlink(actual, filepath.Join(home, ".claude", "plugins", "cache")))
+				return actual
+			},
+		},
+		{
+			name: "symlinked CLAUDE_CONFIG_DIR",
+			link: func(t *testing.T, home string) string {
+				actual := filepath.Join(t.TempDir(), "config-data")
+				require.NoError(t, os.MkdirAll(filepath.Join(actual, "plugins", "cache"), 0o755))
+				require.NoError(t, os.Symlink(actual, filepath.Join(home, "config")))
+				return filepath.Join(actual, "plugins", "cache")
+			},
+			env: func(t *testing.T, home string) {
+				t.Setenv(claudeConfigDirEnv, filepath.Join(home, "config"))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv(claudePluginCacheDirEnv, "")
+			t.Setenv(claudeConfigDirEnv, "")
+			target := tc.link(t, home)
+			if tc.env != nil {
+				tc.env(t, home)
+			}
+			resolved, err := filepath.EvalSymlinks(target)
+			require.NoError(t, err)
+			require.True(t, isClaudePluginCache(resolved))
+			require.False(t, isClaudePluginCache(filepath.Join(filepath.Dir(resolved), "other")))
+		})
+	}
+}
+
+func TestCollectDirsWatchesClaudeInstallRecordDir(t *testing.T) {
+	t.Parallel()
+	plugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+	cache := filepath.Join(plugins, "cache")
+	require.NoError(t, os.MkdirAll(cache, 0o755))
+
+	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: cache}})
+	require.Contains(t, dirs, plugins)
 }

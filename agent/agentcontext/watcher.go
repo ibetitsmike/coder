@@ -286,7 +286,7 @@ func (w *Watcher) run() {
 func (w *Watcher) eventRelevant(ev fsnotify.Event) bool {
 	name := filepath.Base(ev.Name)
 	if recognizedInstructionFile(name) || name == mcpConfigFileName || name == skillMetaFileName ||
-		name == packManifestBaseName || isAgentDefinitionPath(ev.Name) || w.inPackAgentDir(ev.Name) {
+		name == packManifestBaseName || name == claudeInstalledPluginsFile || isAgentDefinitionPath(ev.Name) || w.inPackAgentDir(ev.Name) {
 		return true
 	}
 	// Directory create/remove flips re-resolve so new subtrees

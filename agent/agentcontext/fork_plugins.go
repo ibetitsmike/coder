@@ -25,6 +25,7 @@ package agentcontext
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,6 +102,10 @@ type packRoot struct {
 	Dir          string
 	ManifestPath string
 	Manifest     pluginManifest
+	// Claude marks a Claude Code pack: one with a Claude manifest, or a
+	// cached plugin without any manifest. Its declared skills add to the
+	// default skills directory, where Cursor's replace it.
+	Claude bool
 }
 
 // findPackManifest returns the first manifest candidate that exists in dir,
@@ -141,7 +146,8 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 		// then filters.
 		return packRoot{}, false
 	}
-	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest}, true
+	claude := manifestPath == filepath.Join(packDir, claudePluginManifestRelPath)
+	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest, Claude: claude}, true
 }
 
 // readCappedRegularFile reads a file only when it is a regular file of at
@@ -154,6 +160,28 @@ func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// readCappedFollowingSymlink is readCappedRegularFile for user-owned files
+// that dotfile managers commonly symlink (settings.json,
+// installed_plugins.json): it accepts a symlink that resolves to a regular
+// file of at most maxBytes. The target is checked before it is opened, so a
+// FIFO or device never blocks or streams, and the read stays bounded even if
+// the file grows in between.
+func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
+		return nil, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil || int64(len(data)) > maxBytes {
 		return nil, false
 	}
 	return data, true
@@ -187,6 +215,10 @@ func packRootsFor(rootPath string) []packRoot {
 var claudePluginCacheRel = filepath.Join(".claude", "plugins", "cache")
 
 const claudeOrphanedMarker = ".orphaned_at"
+
+// claudeInstalledPluginsFile is Claude Code's install record, kept in the
+// plugins directory next to the cache.
+const claudeInstalledPluginsFile = "installed_plugins.json"
 
 // claudePluginCacheDirEnv replaces the ~/.claude/plugins directory, so the
 // cache moves to $CLAUDE_CODE_PLUGIN_CACHE_DIR/cache.
@@ -225,21 +257,47 @@ func claudePluginCacheRoot() string {
 	return "~/" + filepath.ToSlash(claudePluginCacheRel)
 }
 
-func isClaudePluginCache(rootPath string) bool {
-	clean := filepath.Clean(rootPath)
+// claudePluginsDirs returns the plugins directories Claude Code may keep its
+// cache and install records in, most specific first: the cache variable's
+// directory, the configuration directory's plugins, and ~/.claude/plugins.
+func claudePluginsDirs() []string {
+	var out []string
+	if dir := strings.TrimSpace(os.Getenv(claudePluginCacheDirEnv)); dir != "" {
+		out = append(out, filepath.Clean(dir))
+	}
+	if dir := claudeConfigDir(); dir != "" {
+		out = append(out, filepath.Join(dir, "plugins"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		out = append(out, filepath.Join(home, ".claude", "plugins"))
+	}
+	return out
+}
+
+// claudePluginsDirFor returns the plugins directory whose cache is cacheDir,
+// or "" when cacheDir is not a Claude Code plugin cache. The built-in roots
+// are canonicalized, so a cache reached through a symlinked ~/.claude or
+// plugins directory arrives as its target: each candidate is compared both
+// as written and symlink-resolved.
+func claudePluginsDirFor(cacheDir string) string {
+	clean := filepath.Clean(cacheDir)
 	if strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
-		return true
+		return filepath.Dir(clean)
 	}
-	override := claudePluginCacheOverride()
-	if override == "" {
-		return false
+	for _, dir := range claudePluginsDirs() {
+		cache := filepath.Join(dir, "cache")
+		if clean == cache {
+			return dir
+		}
+		if resolved, err := filepath.EvalSymlinks(cache); err == nil && clean == resolved {
+			return dir
+		}
 	}
-	// The built-in root is canonicalized, so compare the resolved path too.
-	if clean == filepath.Clean(override) {
-		return true
-	}
-	resolved, err := filepath.EvalSymlinks(override)
-	return err == nil && clean == resolved
+	return ""
+}
+
+func isClaudePluginCache(rootPath string) bool {
+	return claudePluginsDirFor(rootPath) != ""
 }
 
 // claudeUserSettingsPath returns the user settings file next to the plugins
@@ -271,7 +329,7 @@ func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
 	if !ok {
 		return nil
 	}
-	data, ok := readCappedRegularFile(path, maxSettingsBytes)
+	data, ok := readCappedFollowingSymlink(path, maxSettingsBytes)
 	if !ok {
 		return nil
 	}
@@ -290,18 +348,24 @@ func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
 	return disabled
 }
 
-// claudeCachePackRoots returns one pack root per cached plugin: its newest
-// version directory that is not orphaned and holds a manifest. Emitting
-// every cached version would serve a removed or superseded copy next to
-// the current one. A plugin the user settings disable stays in the cache, so
-// it is skipped by id.
+// claudeCachePackRoots returns one pack root per cached plugin: the version
+// directory Claude Code's install record names, else the newest version
+// directory that is not orphaned and loads as a pack. Emitting every cached
+// version would serve a removed or superseded copy next to the current one.
+// A plugin the user settings disable stays in the cache, so it is skipped by
+// id.
 func claudeCachePackRoots(cacheDir string) []packRoot {
 	var out []packRoot
 	disabled := claudeDisabledPlugins(cacheDir)
+	installed := claudeInstalledPaths(cacheDir)
 	for _, marketplace := range childDirs(cacheDir) {
 		for _, plugin := range childDirs(marketplace) {
 			id := filepath.Base(plugin) + "@" + filepath.Base(marketplace)
 			if _, off := disabled[id]; off {
+				continue
+			}
+			if pack, ok := installedClaudeCacheVersion(plugin, installed[id]); ok {
+				out = append(out, pack)
 				continue
 			}
 			if pack, ok := currentClaudeCacheVersion(plugin); ok {
@@ -310,6 +374,100 @@ func claudeCachePackRoots(cacheDir string) []packRoot {
 		}
 	}
 	return out
+}
+
+// claudeInstalledPlugins is the part of installed_plugins.json the resolver
+// reads. Each plugin id maps to its install records, one per scope; an older
+// layout holds a single record object instead of an array, so the value stays
+// raw until claudeInstalledPaths decodes either shape.
+type claudeInstalledPlugins struct {
+	Plugins map[string]json.RawMessage `json:"plugins"`
+}
+
+type claudeInstallRecord struct {
+	Scope       string `json:"scope"`
+	InstallPath string `json:"installPath"`
+}
+
+// claudeInstalledPaths returns the install path Claude Code recorded for each
+// plugin id in installed_plugins.json, next to the cache. Only user-scope
+// records count: project and local installs belong to a project the agent
+// cannot identify. A missing, oversized or malformed file yields nothing.
+func claudeInstalledPaths(cacheDir string) map[string]string {
+	pluginsDir := claudePluginsDirFor(cacheDir)
+	if pluginsDir == "" {
+		return nil
+	}
+	data, ok := readCappedFollowingSymlink(filepath.Join(pluginsDir, claudeInstalledPluginsFile), maxSettingsBytes)
+	if !ok {
+		return nil
+	}
+	var file claudeInstalledPlugins
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(file.Plugins))
+	for id, raw := range file.Plugins {
+		var records []claudeInstallRecord
+		if err := json.Unmarshal(raw, &records); err != nil {
+			var one claudeInstallRecord
+			if json.Unmarshal(raw, &one) != nil {
+				continue
+			}
+			records = []claudeInstallRecord{one}
+		}
+		for _, record := range records {
+			if (record.Scope == "" || record.Scope == "user") && record.InstallPath != "" {
+				out[id] = record.InstallPath
+				break
+			}
+		}
+	}
+	return out
+}
+
+// installedClaudeCacheVersion returns the pack at the version directory an
+// install record names. The record is trusted only when that directory is a
+// direct child of pluginDir (so it lies inside the cache and belongs to this
+// plugin), is not orphaned, and loads as a pack. ok is false otherwise and
+// the caller falls back to the newest-version rule.
+func installedClaudeCacheVersion(pluginDir, installPath string) (packRoot, bool) {
+	if installPath == "" || !filepath.IsAbs(installPath) {
+		return packRoot{}, false
+	}
+	clean := filepath.Clean(installPath)
+	parent, err := filepath.EvalSymlinks(filepath.Dir(clean))
+	if err != nil {
+		return packRoot{}, false
+	}
+	if plugin, err := filepath.EvalSymlinks(pluginDir); err != nil || parent != plugin {
+		return packRoot{}, false
+	}
+	versionDir := filepath.Join(pluginDir, filepath.Base(clean))
+	if info, err := os.Stat(versionDir); err != nil || !info.IsDir() || claudeVersionOrphaned(versionDir) {
+		return packRoot{}, false
+	}
+	return readClaudeCacheVersion(versionDir)
+}
+
+// readClaudeCacheVersion reads a cached plugin version as a pack. A Claude
+// Code plugin needs no manifest: it loads the components in the standard
+// layout and takes its name from the directory, so a version directory with
+// no manifest of any kind is a Claude pack with the default component paths.
+// A manifest that exists but does not load still rejects the version.
+func readClaudeCacheVersion(versionDir string) (packRoot, bool) {
+	if pack, ok := readPluginManifest(versionDir); ok {
+		return pack, true
+	}
+	if findPackManifest(versionDir) != "" {
+		return packRoot{}, false
+	}
+	return packRoot{
+		Dir:          versionDir,
+		ManifestPath: filepath.Join(versionDir, claudePluginManifestRelPath),
+		Manifest:     pluginManifest{Name: filepath.Base(filepath.Dir(versionDir))},
+		Claude:       true,
+	}, true
 }
 
 func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
@@ -323,7 +481,7 @@ func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
 		if err != nil {
 			continue
 		}
-		pack, ok := readPluginManifest(versionDir)
+		pack, ok := readClaudeCacheVersion(versionDir)
 		if !ok {
 			continue
 		}
@@ -406,12 +564,17 @@ func declaredRels(declared manifestPaths, fallback string) []string {
 	return out
 }
 
-// skillRels returns the default skills directory followed by the manifest's
-// declared skills paths. Declared paths add to the default directory (Claude
-// Code scans both), so declaring one never hides skills/.
+// skillRels returns the pack's skills paths. A Claude pack scans the default
+// skills directory and then its declared paths: Claude Code adds declared
+// paths to the default, so declaring one never hides skills/. Any other
+// manifest's declaration replaces the default.
 func (p packRoot) skillRels() []string {
+	declared := declaredRels(p.Manifest.Skills, defaultPackSkillsDir)
+	if !p.Claude {
+		return declared
+	}
 	out := []string{defaultPackSkillsDir}
-	for _, rel := range declaredRels(p.Manifest.Skills, defaultPackSkillsDir) {
+	for _, rel := range declared {
 		if !slices.Contains(out, rel) {
 			out = append(out, rel)
 		}
@@ -652,7 +815,10 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		// changes would stay stale until an unrelated event. The
 		// manifest exists, so its parent does too.
 		if parent := filepath.Dir(pack.ManifestPath); parent != pack.Dir {
-			out[parent] = struct{}{}
+			// A manifestless Claude cache entry has no manifest directory.
+			if info, err := os.Stat(parent); err == nil && info.IsDir() {
+				out[parent] = struct{}{}
+			}
 		}
 		containers, folders := pack.skillPaths()
 		for _, container := range containers {
@@ -692,6 +858,11 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		dirs = append(dirs, packManifestCandidateDirs(child)...)
 	}
 	if isClaudePluginCache(rootPath) {
+		// The install record picks the current version, so its directory
+		// is watched too.
+		if pluginsDir := claudePluginsDirFor(rootPath); pluginsDir != "" {
+			dirs = append(dirs, pluginsDir)
+		}
 		// Watching every level down to the version directories
 		// fires the events for a new install, a new version, and
 		// an orphan marker, which all change the chosen pack. An
