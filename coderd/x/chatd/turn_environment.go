@@ -883,8 +883,8 @@ func (p *Server) buildTurnEnvironment(
 	tools = mcpclient.AppendTools(ctx, logger, tools, inlineMCPTools)
 	tools = filterToolsForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)
 	// chatloop reads an empty active tool list as every tool, so Explore
-	// children also drop the tools their allowlist blocks.
-	if isExploreSubagent && !isRootChat {
+	// chats also drop the tools their allowlist blocks.
+	if isExploreSubagent {
 		tools = slices.DeleteFunc(tools, func(tool fantasy.AgentTool) bool {
 			return !exploreToolAllowed(tool)
 		})

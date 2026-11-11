@@ -12,6 +12,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -144,6 +145,18 @@ func TestForkCreateChatAgentType(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, sdkErr.StatusCode(), tc.name)
 		require.Contains(t, sdkErr.Detail, tc.detail, tc.name)
 	}
+
+	// Without a default model, the definition's model still starts a chat.
+	_, err = client.UpdateAIProvider(ctx, defaultModel.AIProviderID.String(), codersdk.UpdateAIProviderRequest{Enabled: ptr.Ref(false)})
+	require.NoError(t, err)
+	noDefault, err := create(client, codersdk.CreateChatRequest{AgentType: "reviewer"})
+	require.NoError(t, err)
+	require.Equal(t, definitionModel.ID, noDefault.LastModelConfigID)
+	_, err = create(client, codersdk.CreateChatRequest{AgentType: "explore"})
+	var sdkErr *codersdk.Error
+	require.ErrorAs(t, err, &sdkErr)
+	require.Equal(t, http.StatusBadRequest, sdkErr.StatusCode())
+	require.Equal(t, "No chat model is available in this organization.", sdkErr.Message)
 }
 
 func TestForkCreateChatAgentTypeExperimentOff(t *testing.T) {
