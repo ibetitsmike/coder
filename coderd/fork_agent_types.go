@@ -64,19 +64,25 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 		createReq.ModelConfigID = &modelConfigID
 	}
 	rootModelID, _, status, resp := api.resolveCreateChatModelConfigID(ctx, opts.OwnerID, createReq)
-	if resp != nil {
+	// Chat creation lets a definition's model replace a missing default
+	// model, so only the types without one become unavailable.
+	if resp != nil && resp.Message == noLocalChatModelResponse().Message {
+		opts.NoModelReason = resp.Message
+	} else if resp != nil {
 		httpapi.Write(ctx, rw, status, *resp)
 		return
 	}
 	opts.ModelConfigID, opts.ExplicitModel = rootModelID, createReq.ModelConfigID != nil
 	if workspaceID != uuid.Nil {
-		workspace, err := api.Database.GetWorkspaceByID(ctx, workspaceID)
-		if httpapi.Is404Error(err) || (err == nil && workspace.OrganizationID != organization.ID) {
-			httpapi.ResourceNotFound(rw)
+		// Workspace definitions come from the workspace agent, so the
+		// caller needs the access that attaching a chat to it needs.
+		_, workspace, status, resp := api.validateChatWorkspaceSelection(ctx, &workspaceID)
+		if resp != nil {
+			httpapi.Write(ctx, rw, status, *resp)
 			return
 		}
-		if err != nil {
-			httpapi.InternalServerError(rw, err)
+		if workspace.OrganizationID != organization.ID {
+			httpapi.ResourceNotFound(rw)
 			return
 		}
 		agents, err := api.Database.GetWorkspaceAgentsInLatestBuildByWorkspaceID(ctx, workspace.ID)

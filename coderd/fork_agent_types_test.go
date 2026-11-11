@@ -16,6 +16,8 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/coderd/x/chatd/agentselect"
 	"github.com/coder/coder/v2/codersdk"
 	sdkproto "github.com/coder/coder/v2/provisionersdk/proto"
@@ -142,6 +144,8 @@ func TestForkAgentTypes(t *testing.T) {
 
 	memberProject, err := memberClient.CreateChatProject(ctx, user.OrganizationID, codersdk.CreateChatProjectRequest{Name: "member"})
 	require.NoError(t, err)
+	orgAdminRaw, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID, rbac.ScopedRoleOrgAdmin(user.OrganizationID))
+	orgAdminClient := codersdk.NewExperimentalClient(orgAdminRaw)
 	twoChatAgents := dbfake.WorkspaceBuild(t, db, database.WorkspaceTable{
 		OrganizationID: user.OrganizationID,
 		OwnerID:        user.UserID,
@@ -157,7 +161,8 @@ func TestForkAgentTypes(t *testing.T) {
 		req    codersdk.ForkAgentTypesRequest
 		status int
 	}{
-		{name: "WorkspaceNotReadable", client: memberClient, req: codersdk.ForkAgentTypesRequest{WorkspaceID: workspace.Workspace.ID}, status: http.StatusNotFound},
+		{name: "WorkspaceNotReadable", client: memberClient, req: codersdk.ForkAgentTypesRequest{WorkspaceID: workspace.Workspace.ID}, status: http.StatusBadRequest},
+		{name: "WorkspaceNoSSH", client: orgAdminClient, req: codersdk.ForkAgentTypesRequest{WorkspaceID: workspace.Workspace.ID}, status: http.StatusBadRequest},
 		{name: "ProjectNotFound", client: client, req: codersdk.ForkAgentTypesRequest{ProjectID: uuid.New()}, status: http.StatusNotFound},
 		{name: "ProjectNotUsable", client: client, req: codersdk.ForkAgentTypesRequest{ProjectID: memberProject.ID}, status: http.StatusNotFound},
 		{name: "MultipleChatAgents", client: client, req: codersdk.ForkAgentTypesRequest{WorkspaceID: twoChatAgents.Workspace.ID}, status: http.StatusConflict},
@@ -167,6 +172,17 @@ func TestForkAgentTypes(t *testing.T) {
 		require.ErrorAs(t, err, &sdkErr, tc.name)
 		require.Equal(t, tc.status, sdkErr.StatusCode(), tc.name)
 	}
+
+	// Without a default model, only a type that sets its own model can
+	// start a chat.
+	_, err = client.UpdateAIProvider(ctx, defaultModel.AIProviderID.String(), codersdk.UpdateAIProviderRequest{Enabled: ptr.Ref(false)})
+	require.NoError(t, err)
+	got = byName(client, codersdk.ForkAgentTypesRequest{})
+	for _, name := range []string{"general", "explore", "org/reviewer"} {
+		require.Equal(t, "No chat model is available in this organization.", got[name].RootUnavailableReason, name)
+		require.False(t, got[name].RootAvailable, name)
+	}
+	require.True(t, got["personal/reviewer"].RootAvailable, got["personal/reviewer"].RootUnavailableReason)
 }
 
 func TestForkAgentTypesExperimentOff(t *testing.T) {
