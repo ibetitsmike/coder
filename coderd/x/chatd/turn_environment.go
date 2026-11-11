@@ -464,6 +464,7 @@ func (p *Server) buildTurnEnvironment(
 		// agent's next push. Idempotent and snapshot-gated; runs before the
 		// pinned context is read below.
 		p.ensureChatContextPinnedOnFirstTurn(ctx, workspaceCtx.currentChatSnapshot())
+		p.materializePluginPacks(ctx, logger, chat, agent.ID, p.agentConnFn)
 
 		agent = p.forkWorktreeAgent(ctx, chat, agent)
 		var resolveErr error

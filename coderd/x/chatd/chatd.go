@@ -213,6 +213,7 @@ type Server struct {
 	chatLimits             Limits
 
 	forkPullRequestActivity ForkPullRequestActivityFunc
+	forkPacks               forkPackState
 }
 
 // stripAdvisorGuidanceBlock removes any system message whose text content
