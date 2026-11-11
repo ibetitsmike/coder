@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -223,12 +224,14 @@ func (r *Resolver) PackAgentDefinitionsOn() bool {
 }
 
 // emitPacks appends the pack-contributed resources of a scan root after the
-// ordinary discovery, so a pack skill sharing a name with an ordinary skill
-// or an earlier pack's skill loses the usual first-wins dedup. Emission waits
-// for the server's push-response capability: an upgrade window with a newer
-// agent and an older coderd replica must not persist pack rows, because the
-// older replica serves pinned skills without a pack gate. The callback is
-// re-read per root, so a capability flip applies to the next resolve.
+// ordinary discovery. A pack skill or agent sharing a name with an ordinary
+// one is dropped by dropShadowedPackResources; packs never shadow each other
+// here, because coderd filters per chat and commit before it dedupes the
+// pack rows that remain. Emission waits for the server's push-response
+// capability: an upgrade window with a newer agent and an older coderd replica
+// must not persist pack rows, because the older replica serves pinned skills
+// without a pack gate. The callback is re-read per root, so a capability flip
+// applies to the next resolve.
 func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	if !r.packRowsAdvertised() {
 		return
@@ -316,13 +319,39 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 			// when the target stays inside the enclosing scan
 			// root.
 			res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
-			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
+			if !ok || hasSource(*out, res.Source) {
 				continue
 			}
 			res.SourcePath = pack.ManifestPath
 			appendResource(out, seenID, res)
 		}
 	}
+}
+
+// dropShadowedPackResources drops pack skills and agents whose name an
+// ordinary resource of the same kind already uses, so workspace skills and
+// agents win over packs whatever the scan-root order. Two packs with the same
+// name are both kept: the on-disk packs include ones disabled for a chat or
+// removed from a commit, so only coderd knows which pack row is live.
+func dropShadowedPackResources(resources []Resource) []Resource {
+	type nameKey struct {
+		kind ResourceKind
+		name string
+	}
+	ordinary := make(map[nameKey]struct{})
+	for _, resource := range resources {
+		if resource.Status == StatusOK && !isPackContribution(resource) &&
+			(resource.Kind == KindSkill || resource.Kind == KindSubagent) {
+			ordinary[nameKey{resource.Kind, resource.Name}] = struct{}{}
+		}
+	}
+	return slices.DeleteFunc(resources, func(resource Resource) bool {
+		if resource.Status != StatusOK || !isPackContribution(resource) {
+			return false
+		}
+		_, shadowed := ordinary[nameKey{resource.Kind, resource.Name}]
+		return shadowed
+	})
 }
 
 // addPackWatchDirs adds every pack root and its declared skill and agent

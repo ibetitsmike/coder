@@ -178,6 +178,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 		return Snapshot{SnapshotError: err.Error()}
 	}
 	resources = deduplicateSkills(resources)
+	resources = dropShadowedPackResources(resources)
 	resources, totalBytes := res.applyCaps(resources)
 
 	// Append discovered resources after the filesystem caps so providers
@@ -288,14 +289,15 @@ func (r *Resolver) walk(ctx context.Context, roots []ScanRoot) (resources []Reso
 	return resources, snapErrs
 }
 
-// deduplicateSkills keeps the first valid skill with each name. walk returns
-// resources in scan-root order, so this selects the winner before deterministic
-// sorting and persistence discard root ordering.
+// deduplicateSkills keeps the first valid ordinary skill with each name. walk
+// returns resources in scan-root order, so this selects the winner before
+// deterministic sorting and persistence discard root ordering. Pack skills
+// are exempt: see dropShadowedPackResources.
 func deduplicateSkills(resources []Resource) []Resource {
 	seen := make(map[string]struct{})
 	out := resources[:0]
 	for _, resource := range resources {
-		if resource.Kind == KindSkill && resource.Status == StatusOK {
+		if resource.Kind == KindSkill && resource.Status == StatusOK && !isPackContribution(resource) {
 			if _, ok := seen[resource.Name]; ok {
 				continue
 			}

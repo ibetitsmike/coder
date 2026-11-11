@@ -598,3 +598,117 @@ func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
 	require.Equal(t, filepath.Join(root, "plugin.json"), instruction.SourcePath)
 	findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "skills", "review-pr"))
 }
+
+func TestResolver_PluginPacksSameNameAcrossPacks(t *testing.T) {
+	t.Parallel()
+
+	// Packs on disk include ones disabled for a chat or removed from a
+	// commit, so the agent must not pick a winner between packs: coderd
+	// dedupes after its per-chat filtering. Ordinary resources still win.
+	tests := []struct {
+		name         string
+		ordinary     string
+		wantPacks    bool
+		wantOrdinary bool
+	}{
+		{name: "PacksOnly", ordinary: "", wantPacks: true},
+		{name: "OrdinaryRootBeforePacks", ordinary: "before", wantOrdinary: true},
+		{name: "OrdinaryRootAfterPacks", ordinary: "after", wantOrdinary: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			packsRoot := t.TempDir()
+			var manifests []string
+			for _, dir := range []string{"alpha", "beta"} {
+				packDir := filepath.Join(packsRoot, dir)
+				manifest := filepath.Join(packDir, "plugin.json")
+				mustWriteFile(t, manifest, fmt.Sprintf(`{"name": %q}`, dir))
+				mustWriteFile(t, filepath.Join(packDir, "skills", "review", "SKILL.md"), skillName("review"))
+				mustWriteFile(t, filepath.Join(packDir, "agents", "reviewer.md"), packAgent("reviewer"))
+				manifests = append(manifests, manifest)
+			}
+
+			ordinaryRoot := t.TempDir()
+			mustWriteSkill(t, filepath.Join(ordinaryRoot, "skills"), "review", "ordinary skill")
+			mustWriteFile(t, filepath.Join(ordinaryRoot, "agents", "reviewer.md"),
+				"---\nname: reviewer\ndescription: ordinary agent\n---\nOrdinary.")
+
+			roots := []agentcontext.ScanRoot{{Path: packsRoot}}
+			switch tt.ordinary {
+			case "before":
+				roots = []agentcontext.ScanRoot{{Path: ordinaryRoot}, {Path: packsRoot}}
+			case "after":
+				roots = []agentcontext.ScanRoot{{Path: packsRoot}, {Path: ordinaryRoot}}
+			}
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			r.PackAgentDefinitionsAdvertised = func() bool { return true }
+			snap := r.Resolve(roots)
+
+			var packSkills, packAgents, ordinarySkills, ordinaryAgents []string
+			for _, res := range snap.Resources {
+				if res.Status != agentcontext.StatusOK {
+					continue
+				}
+				switch {
+				case res.Kind == agentcontext.KindSkill && res.Name == "review" && res.SourcePath != "":
+					packSkills = append(packSkills, res.SourcePath)
+				case res.Kind == agentcontext.KindSubagent && res.Name == "reviewer" && res.SourcePath != "":
+					packAgents = append(packAgents, res.SourcePath)
+				case res.Kind == agentcontext.KindSkill && res.Name == "review":
+					ordinarySkills = append(ordinarySkills, res.Source)
+				case res.Kind == agentcontext.KindSubagent && res.Name == "reviewer":
+					ordinaryAgents = append(ordinaryAgents, res.Source)
+				}
+			}
+
+			if tt.wantPacks {
+				require.ElementsMatch(t, manifests, packSkills, "every pack keeps its same-named skill")
+				require.ElementsMatch(t, manifests, packAgents, "every pack keeps its same-named agent")
+			} else {
+				require.Empty(t, packSkills, "an ordinary skill shadows pack skills")
+				require.Empty(t, packAgents, "an ordinary agent shadows pack agents")
+			}
+			if tt.wantOrdinary {
+				require.Equal(t, []string{filepath.Join(ordinaryRoot, "skills", "review")}, ordinarySkills)
+				require.Equal(t, []string{filepath.Join(ordinaryRoot, "agents", "reviewer.md")}, ordinaryAgents)
+			} else {
+				require.Empty(t, ordinarySkills)
+				require.Empty(t, ordinaryAgents)
+			}
+		})
+	}
+}
+
+func TestResolver_PluginPacksStaleAgentFileKept(t *testing.T) {
+	t.Parallel()
+
+	// An update that renames agents/a.md to agents/z.md leaves a.md on
+	// disk with the same frontmatter name. Both rows must reach coderd,
+	// which drops the one the commit no longer defines.
+	root := t.TempDir()
+	packDir := filepath.Join(root, "pstack")
+	mustWriteFile(t, filepath.Join(packDir, "plugin.json"), `{"name": "pstack"}`)
+	mustWriteFile(t, filepath.Join(packDir, "agents", "a.md"), packAgent("bar"))
+	mustWriteFile(t, filepath.Join(packDir, "agents", "z.md"), packAgent("bar"))
+
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	var sources []string
+	for _, res := range snap.Resources {
+		if res.Kind == agentcontext.KindSubagent && res.Status == agentcontext.StatusOK && res.Name == "bar" {
+			sources = append(sources, res.Source)
+		}
+	}
+	require.ElementsMatch(t, []string{
+		filepath.Join(packDir, "agents", "a.md"),
+		filepath.Join(packDir, "agents", "z.md"),
+	}, sources)
+}
