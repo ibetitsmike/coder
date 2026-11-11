@@ -58,6 +58,44 @@ func (r *runner) deliver(ctx context.Context) {
 	}
 }
 
+// deliverToActiveLink sends one event for chat b to the link that follows
+// it and reports whether delivery may advance the binding's cursor. A user
+// may link several external identities to one plugin, and each follows its
+// own active chat; broadcasting would push one identity's conversation to
+// all of them.
+func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow, status database.ChatStatus, texts []*pluginproto.ChatText) bool {
+	// Host calls move a link's active chat while an export runs under
+	// callMu, so hold it from the lookup through the event call; otherwise
+	// a concurrent webhook can move the link between the two.
+	r.callMu.Lock()
+	defer r.callMu.Unlock()
+	links, err := r.m.fdb.GetPluginUserLinksByPluginAndUser(sys(ctx), forkdb.GetPluginUserLinksByPluginAndUserParams{
+		PluginID: r.plugin.ID,
+		UserID:   b.ChatOwnerID,
+	})
+	if err != nil {
+		r.logger.Warn(ctx, "list links of chat owner", slog.Error(err))
+		return false
+	}
+	for _, l := range links {
+		if !l.ActiveChatID.Valid || l.ActiveChatID.UUID != b.ChatID {
+			continue
+		}
+		err := r.invokeResultLocked(ctx, "coder_on_event", &pluginproto.ChatEvent{
+			ChatId:     b.ChatID.String(),
+			ExternalId: l.ExternalID,
+			Status:     string(status),
+			Messages:   texts,
+			Title:      b.ChatTitle,
+		})
+		if err != nil {
+			r.deliveryFailed(ctx, b, err)
+			return false
+		}
+	}
+	return true
+}
+
 func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow) {
 	msgs, err := r.chatMessagesAfter(ctx, b)
 	if err != nil {
@@ -87,35 +125,8 @@ func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindings
 
 	send := (len(texts) > 0 && slices.Contains(r.grants.Events, codersdk.PluginEventChatMessagesAdded)) ||
 		(statusChanged && slices.Contains(r.grants.Events, codersdk.PluginEventChatStatusChanged))
-	if send {
-		links, err := r.m.fdb.GetPluginUserLinksByPluginAndUser(sys(ctx), forkdb.GetPluginUserLinksByPluginAndUserParams{
-			PluginID: r.plugin.ID,
-			UserID:   b.ChatOwnerID,
-		})
-		if err != nil {
-			r.logger.Warn(ctx, "list links of chat owner", slog.Error(err))
-			return
-		}
-		// A user may link several external identities to one plugin.
-		// Each identity follows its own active chat, so deliver only to
-		// the links whose active chat is this one; broadcasting would
-		// push one identity's conversation to all of them.
-		for _, l := range links {
-			if !l.ActiveChatID.Valid || l.ActiveChatID.UUID != b.ChatID {
-				continue
-			}
-			err := r.invokeResult(ctx, "coder_on_event", &pluginproto.ChatEvent{
-				ChatId:     b.ChatID.String(),
-				ExternalId: l.ExternalID,
-				Status:     string(status),
-				Messages:   texts,
-				Title:      b.ChatTitle,
-			})
-			if err != nil {
-				r.deliveryFailed(ctx, b, err)
-				return
-			}
-		}
+	if send && !r.deliverToActiveLink(ctx, b, status, texts) {
+		return
 	}
 	sentStatus := b.SentStatus
 	if len(msgs) < messagesPerEvent {
