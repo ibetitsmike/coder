@@ -7,6 +7,7 @@ import type { Chat, Experiment, ForkAgentType } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockDefaultOrganization,
+	MockOrganization2,
 	MockUserMember,
 	MockWorkspace,
 	mockApiError,
@@ -60,21 +61,29 @@ const mockWorkspaceDev = {
 	organization_id: MockDefaultOrganization.id,
 };
 
-const renderPage = (
-	experiments: Experiment[] = ["fork-agent-definitions"],
+type RenderPageOptions = {
+	experiments?: Experiment[];
+	getChats?: () => Promise<Chat[]>;
+	getAgentTypes?: () => Promise<ForkAgentType[]>;
+};
+
+const renderPage = ({
+	experiments = ["fork-agent-definitions"],
 	getChats = async () => [
 		mockDefaultRootChat,
 		mockExploreChat,
 		mockOtherOrgReviewerChat,
 	],
-) => {
+	getAgentTypes = async () => [mockReviewer],
+}: RenderPageOptions = {}) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
 	vi.spyOn(API, "getAuthenticatedUser").mockResolvedValue({
 		...MockUserMember,
-		organization_ids: [MockDefaultOrganization.id],
+		organization_ids: [MockDefaultOrganization.id, MockOrganization2.id],
 	});
 	vi.spyOn(API, "getOrganizations").mockResolvedValue([
 		MockDefaultOrganization,
+		MockOrganization2,
 	]);
 	vi.spyOn(API.experimental, "getChatProjects").mockResolvedValue([]);
 	vi.spyOn(API, "getWorkspaces").mockResolvedValue({
@@ -82,9 +91,9 @@ const renderPage = (
 		count: 1,
 	});
 	vi.spyOn(API.experimental, "getChats").mockImplementation(getChats);
-	const getAgentTypes = vi
+	const getAgentTypesSpy = vi
 		.spyOn(forkAgentDefinitionsApi, "getAgentTypes")
-		.mockResolvedValue([mockReviewer]);
+		.mockImplementation(getAgentTypes);
 	const { router } = renderWithAuth(<ForkAvailableAgentsPage />, {
 		path: "/agents/settings/available-agents",
 		route: "/agents/settings/available-agents",
@@ -93,7 +102,7 @@ const renderPage = (
 			{ path: "/agents/:agentId", element: <div /> },
 		],
 	});
-	return { getAgentTypes, router };
+	return { getAgentTypes: getAgentTypesSpy, router };
 };
 
 afterEach(() => {
@@ -119,9 +128,10 @@ describe("ForkAvailableAgentsPage", () => {
 	it("shows a failed chat list instead of claiming no chats", async () => {
 		// The sidebar's chat list retries with backoff before it fails.
 		vi.useFakeTimers({ shouldAdvanceTime: true });
-		renderPage(undefined, () =>
-			Promise.reject(mockApiError({ message: "Failed to load chats." })),
-		);
+		renderPage({
+			getChats: () =>
+				Promise.reject(mockApiError({ message: "Failed to load chats." })),
+		});
 
 		const row = within(
 			await screen.findByRole("row", { name: /personal\/reviewer/ }),
@@ -136,7 +146,9 @@ describe("ForkAvailableAgentsPage", () => {
 		const user = userEvent.setup();
 
 		await screen.findByText("personal/reviewer");
-		await user.click(screen.getByRole("combobox", { name: "Workspace" }));
+		await user.click(
+			screen.getByRole("combobox", { name: "Workspace: No workspace" }),
+		);
 		await user.click(await screen.findByRole("option", { name: "dev" }));
 
 		await waitFor(() =>
@@ -147,8 +159,53 @@ describe("ForkAvailableAgentsPage", () => {
 		);
 	});
 
+	it("forgets the picked workspace when the organization changes", async () => {
+		renderPage();
+		const user = userEvent.setup();
+		const pickOrganization = async (from: string, to: string) => {
+			await user.click(
+				screen.getByRole("combobox", { name: `Organization ${from}` }),
+			);
+			// The option's name starts with the avatar's initials.
+			await user.click(
+				screen.getByRole("option", { name: new RegExp(`${to}$`) }),
+			);
+		};
+
+		await screen.findByText("personal/reviewer");
+		await user.click(
+			screen.getByRole("combobox", { name: "Workspace: No workspace" }),
+		);
+		await user.click(await screen.findByRole("option", { name: "dev" }));
+		await screen.findByRole("combobox", { name: "Workspace: dev" });
+		await pickOrganization(
+			MockDefaultOrganization.display_name,
+			MockOrganization2.display_name,
+		);
+		await pickOrganization(
+			MockOrganization2.display_name,
+			MockDefaultOrganization.display_name,
+		);
+
+		expect(
+			await screen.findByRole("combobox", { name: "Workspace: No workspace" }),
+		).toBeVisible();
+	});
+
+	it("shows only the error when the agent types fail to load", async () => {
+		renderPage({
+			getAgentTypes: () =>
+				Promise.reject(mockApiError({ message: "Failed to load agents." })),
+		});
+
+		await screen.findByText("Failed to load agents.");
+		expect(
+			screen.queryByText("No agents are available."),
+		).not.toBeInTheDocument();
+	});
+
 	it("redirects to the settings page without the experiment", async () => {
-		const { getAgentTypes, router } = renderPage([]);
+		const { getAgentTypes, router } = renderPage({ experiments: [] });
 
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/agents/settings"),

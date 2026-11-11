@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "react-query";
 import { Link, Navigate } from "react-router";
 import { chatProjects } from "#/api/queries/chatProjects";
-import { infiniteChats } from "#/api/queries/chats";
+import { compareUpdatedAtInstants, infiniteChats } from "#/api/queries/chats";
 import { agentTypes } from "#/api/queries/forkAgentDefinitions";
 import { workspaces } from "#/api/queries/workspaces";
 import type { ForkAgentType } from "#/api/typesGenerated";
@@ -50,7 +50,7 @@ const recentChatLimit = 3;
 const storedAgentType = ({ name, source }: ForkAgentType) =>
 	name.startsWith(`${source}/`) ? name.slice(source.length + 1) : name;
 
-// A pick from another organization is dropped instead of being sent.
+// A pick that is not among the organization's options is not sent.
 const keepPick = (options: readonly { id: string }[], id?: string) =>
 	options.some((option) => option.id === id) ? id : undefined;
 
@@ -66,24 +66,31 @@ const ContextSelect: React.FC<ContextSelectProps> = ({
 	options,
 	value,
 	onChange,
-}) => (
-	<Select
-		value={value ?? noneValue}
-		onValueChange={(next) => onChange(next === noneValue ? undefined : next)}
-	>
-		<SelectTrigger className="w-full sm:w-52" aria-label={label}>
-			<SelectValue />
-		</SelectTrigger>
-		<SelectContent>
-			<SelectItem value={noneValue}>No {label.toLowerCase()}</SelectItem>
-			{options.map((option) => (
-				<SelectItem key={option.id} value={option.id}>
-					{option.name}
-				</SelectItem>
-			))}
-		</SelectContent>
-	</Select>
-);
+}) => {
+	const noneLabel = `No ${label.toLowerCase()}`;
+	const selected = options.find((option) => option.id === value);
+	return (
+		<Select
+			value={value ?? noneValue}
+			onValueChange={(next) => onChange(next === noneValue ? undefined : next)}
+		>
+			<SelectTrigger
+				className="w-full sm:w-52"
+				aria-label={`${label}: ${selected?.name ?? noneLabel}`}
+			>
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				<SelectItem value={noneValue}>{noneLabel}</SelectItem>
+				{options.map((option) => (
+					<SelectItem key={option.id} value={option.id}>
+						{option.name}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+};
 
 const ForkAvailableAgentsPage: React.FC = () => {
 	const { user } = useAuthenticated();
@@ -105,10 +112,12 @@ const ForkAvailableAgentsPage: React.FC = () => {
 		...workspaces({ q: "owner:me", limit: 0 }),
 		enabled: isEnabled,
 	});
-	// The sidebar's default chat list, so the page reuses its cache.
+	// The sidebar's default chat list. The sidebar keeps it fresh, so a cached
+	// list is read as is instead of refetching every loaded page.
 	const chatsQuery = useInfiniteQuery({
 		...infiniteChats(getSidebarChatListInput(DEFAULT_AGENT_SIDEBAR_FILTERS)),
 		enabled: isEnabled,
+		refetchOnMount: false,
 	});
 	const projects = (projectsQuery.data ?? []).filter(
 		(project) => project.organization_id === organizationId,
@@ -135,7 +144,7 @@ const ForkAvailableAgentsPage: React.FC = () => {
 	const chats = (chatsQuery.data?.pages.flat() ?? [])
 		.flatMap((root) => [root, ...root.children])
 		.filter((chat) => chat.organization_id === organizationId)
-		.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+		.sort((a, b) => compareUpdatedAtInstants(b.updated_at, a.updated_at));
 	let tableBody: React.ReactNode;
 	if (agentTypesQuery.isLoading) {
 		tableBody = <TableLoader />;
@@ -195,7 +204,11 @@ const ForkAvailableAgentsPage: React.FC = () => {
 							className="w-full sm:w-60"
 							organizations={memberOrganizations}
 							organization={organization}
-							onChange={(org) => setSelectedOrganizationId(org.id)}
+							onChange={(org) => {
+								setSelectedOrganizationId(org.id);
+								setPickedProjectId(undefined);
+								setPickedWorkspaceId(undefined);
+							}}
 							showLabel={false}
 						/>
 					)

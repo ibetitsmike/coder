@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, spyOn, within } from "storybook/test";
+import { spyOn } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { infiniteChats } from "#/api/queries/chats";
@@ -105,12 +105,5 @@ export const LoadError: Story = {
 		spyOn(API.getAxiosInstance(), "get").mockRejectedValue(
 			mockApiError({ message: "Failed to load the agent types." }),
 		);
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await canvas.findByText("Failed to load the agent types.");
-		await expect(
-			canvas.queryByText("No agents are available."),
-		).not.toBeInTheDocument();
 	},
 };
