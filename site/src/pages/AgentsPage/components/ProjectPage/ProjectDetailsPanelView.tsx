@@ -64,7 +64,7 @@ type ProjectDetailsPanelViewProps = {
 		readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 	};
 	/** Omit to hide the plugin packs row. */
-	readonly pluginPacks?: ProjectDetailsPanelViewProps["agentDefinitions"];
+	readonly pluginPacks?: Omit<CountRowProps, "label" | "noun" | "disabledCount">;
 	/** `undefined` until the instructions load. */
 	readonly instructions: ChatProjectInstructions | undefined;
 	readonly error: unknown;
@@ -174,7 +174,12 @@ export const ProjectDetailsPanelView: React.FC<
 						/>
 					)}
 					{pluginPacks && (
-						<CountRow label="Plugin packs" noun="pack" {...pluginPacks} />
+						<CountRow
+							label="Plugin packs"
+							noun="pack"
+							disabledCount={undefined}
+							{...pluginPacks}
+						/>
 					)}
 				</dl>
 				<section

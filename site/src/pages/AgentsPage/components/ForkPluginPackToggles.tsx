@@ -1,11 +1,12 @@
 // This file is fork code: the fork-plugin-packs experiment's list of plugin
-// pack switches, shared by the project dialog and the chat composer pill.
+// pack switches.
 
 import { useMutation, useQuery, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { getErrorDetail, getErrorMessage, getErrorStatus } from "#/api/errors";
 import type { PluginPackTarget } from "#/api/forkPluginPackEnablement";
 import {
 	enabledPluginPacks,
+	type PluginPackToggle,
 	setPluginPackEnabledMutation,
 } from "#/api/queries/forkPluginPackEnablement";
 import { pluginPacks } from "#/api/queries/forkPluginPacks";
@@ -25,8 +26,7 @@ type ForkPluginPackTogglesViewProps = {
 	isRetrying: boolean;
 	onRetry: () => void;
 	canEdit: boolean;
-	/** The toggle in flight, shown as already applied. */
-	pending: { packId: string; enabled: boolean } | undefined;
+	pending: PluginPackToggle | undefined;
 	onToggle: (packId: string, enabled: boolean) => void;
 };
 
@@ -86,7 +86,7 @@ export const ForkPluginPackTogglesView: React.FC<
 								<Switch
 									aria-label={`Enable ${pack.name}`}
 									checked={isEnabled(pack.id)}
-									disabled={pending?.packId === pack.id}
+									disabled={pending !== undefined}
 									onCheckedChange={(checked) => onToggle(pack.id, checked)}
 								/>
 							) : (
@@ -128,13 +128,24 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	const toggleMutation = useMutation(
 		setPluginPackEnabledMutation(queryClient, target),
 	);
+	const installedError =
+		getErrorStatus(installedQuery.error) === 403
+			? undefined
+			: installedQuery.error;
 	return (
 		<ForkPluginPackTogglesView
 			installed={installedQuery.data}
-			enabled={installedQuery.isPending ? undefined : enabledQuery.data}
-			error={enabledQuery.error}
-			isRetrying={enabledQuery.isFetching}
-			onRetry={() => void enabledQuery.refetch()}
+			enabled={
+				installedQuery.isPending || installedError
+					? undefined
+					: enabledQuery.data
+			}
+			error={enabledQuery.error ?? installedError}
+			isRetrying={enabledQuery.isFetching || installedQuery.isFetching}
+			onRetry={() => {
+				void enabledQuery.refetch();
+				void installedQuery.refetch();
+			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}
 			onToggle={(packId, enabled) =>

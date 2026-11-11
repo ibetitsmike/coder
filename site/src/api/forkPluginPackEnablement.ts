@@ -1,5 +1,4 @@
-// This file is fork code: the fork-plugin-packs experiment's enablement API
-// calls live here so api.ts, an upstream file, stays unchanged.
+// This file is fork code: the fork-plugin-packs experiment's enablement API.
 
 import { API } from "./api";
 import type { ForkEnabledPluginPack } from "./typesGenerated";

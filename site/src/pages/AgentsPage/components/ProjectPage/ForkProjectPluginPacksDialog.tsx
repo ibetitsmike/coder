@@ -32,17 +32,15 @@ export const ForkProjectPluginPacksDialog: React.FC<
 					enabled here.
 				</DialogDescription>
 			</DialogHeader>
-			{open && (
-				<ForkPluginPackToggles
-					target={{
-						kind: "project",
-						organizationId: project.organization_id,
-						projectId: project.id,
-					}}
-					organizationId={project.organization_id}
-					canEdit={project.permissions.update}
-				/>
-			)}
+			<ForkPluginPackToggles
+				target={{
+					kind: "project",
+					organizationId: project.organization_id,
+					projectId: project.id,
+				}}
+				organizationId={project.organization_id}
+				canEdit={project.permissions.update}
+			/>
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>
 					Close

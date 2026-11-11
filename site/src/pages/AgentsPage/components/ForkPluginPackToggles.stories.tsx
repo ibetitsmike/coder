@@ -35,6 +35,10 @@ export const EnabledOnly: Story = {
 	args: { installed: undefined },
 };
 
+export const EnabledOnlyEmpty: Story = {
+	args: { installed: undefined, enabled: [] },
+};
+
 export const Toggling: Story = {
 	args: { pending: { packId: MockForkPluginPackWithoutPath.id, enabled: true } },
 };

@@ -25,12 +25,15 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 		queryFn: () => getEnabledPluginPacks(target),
 	});
 
+/** A pack's requested enabled state for a target. */
+export type PluginPackToggle = { packId: string; enabled: boolean };
+
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
 	target: PluginPackTarget,
 ) =>
 	mutationOptions({
-		mutationFn: ({ packId, enabled }: { packId: string; enabled: boolean }) =>
+		mutationFn: ({ packId, enabled }: PluginPackToggle) =>
 			setPluginPackEnabled(target, packId, enabled),
 		onSettled: () =>
 			queryClient.invalidateQueries({

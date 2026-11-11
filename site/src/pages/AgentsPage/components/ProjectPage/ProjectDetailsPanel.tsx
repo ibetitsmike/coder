@@ -15,8 +15,8 @@ import type { ChatProject, ChatProjectRole } from "#/api/typesGenerated";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { useDialogFocusReturn } from "../useDialogFocusReturn";
-import { ProjectAccessDialog } from "./ProjectAccessDialog";
 import { ForkProjectPluginPacksDialog } from "./ForkProjectPluginPacksDialog";
+import { ProjectAccessDialog } from "./ProjectAccessDialog";
 import { ProjectAgentDefinitionsDialog } from "./ProjectAgentDefinitionsDialog";
 import { ProjectDetailsPanelView } from "./ProjectDetailsPanelView";
 import { ProjectInstructionsDialog } from "./ProjectInstructionsDialog";
@@ -171,7 +171,6 @@ const ProjectDetailsPanelContent: React.FC<ProjectDetailsPanelProps> = ({
 					showPluginPacks
 						? {
 								count: pluginPacksQuery.data?.length,
-								disabledCount: undefined,
 								error: pluginPacksQuery.error,
 								onOpen: (event) => {
 									pluginPacksFocusReturn.rememberTrigger(event);
