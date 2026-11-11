@@ -3,9 +3,31 @@
 
 import { useContext } from "react";
 import type { To } from "react-router";
-import type { Organization } from "#/api/typesGenerated";
+import type { Experiment, Organization } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizationParam";
+
+const useForkOrganizationPagePath = (
+	experiment: Experiment,
+	pathname: string,
+	skillOrganizations: readonly Organization[],
+	organizationName: string | null,
+): To | undefined => {
+	const dashboard = useContext(DashboardContext);
+	if (!dashboard?.experiments.includes(experiment)) {
+		return undefined;
+	}
+	const isReadable = skillOrganizations.some(
+		(organization) => organization.name === organizationName,
+	);
+	return {
+		pathname,
+		search:
+			organizationName && (skillOrganizations.length === 0 || isReadable)
+				? new URLSearchParams({ [orgSearchParam]: organizationName }).toString()
+				: "",
+	};
+};
 
 /**
  * Returns the organization agent definitions page link, or undefined while
@@ -18,19 +40,22 @@ import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizati
 export const useForkAgentDefinitionsPath = (
 	skillOrganizations: readonly Organization[],
 	organizationName: string | null,
-): To | undefined => {
-	const dashboard = useContext(DashboardContext);
-	if (!dashboard?.experiments.includes("fork-agent-definitions")) {
-		return undefined;
-	}
-	const isReadable = skillOrganizations.some(
-		(organization) => organization.name === organizationName,
+): To | undefined =>
+	useForkOrganizationPagePath(
+		"fork-agent-definitions",
+		"/ai/settings/agent-definitions",
+		skillOrganizations,
+		organizationName,
 	);
-	return {
-		pathname: "/ai/settings/agent-definitions",
-		search:
-			organizationName && (skillOrganizations.length === 0 || isReadable)
-				? new URLSearchParams({ [orgSearchParam]: organizationName }).toString()
-				: "",
-	};
-};
+
+/** Returns the organization plugin packs page link, like useForkAgentDefinitionsPath. */
+export const useForkPluginPacksPath = (
+	skillOrganizations: readonly Organization[],
+	organizationName: string | null,
+): To | undefined =>
+	useForkOrganizationPagePath(
+		"fork-plugin-packs",
+		"/ai/settings/plugin-packs",
+		skillOrganizations,
+		organizationName,
+	);
