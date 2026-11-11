@@ -211,6 +211,8 @@ type Server struct {
 	inFlightChatStaleAfter time.Duration
 	streamSilenceTimeout   time.Duration
 	chatLimits             Limits
+
+	forkPullRequestActivity ForkPullRequestActivityFunc
 }
 
 // stripAdvisorGuidanceBlock removes any system message whose text content
@@ -1278,6 +1280,8 @@ type Config struct {
 	Auditor               *atomic.Pointer[audit.Auditor]
 	// Limits are the deployment chat limits.
 	Limits Limits
+	// ForkPullRequestActivity reads pull request activity as a chat owner for wait_for_events.
+	ForkPullRequestActivity ForkPullRequestActivityFunc
 }
 
 // New creates a new chat processor with the required pubsub dependency.
@@ -1387,6 +1391,7 @@ func New(ps pubsub.Pubsub, cfg Config) (*Server, error) {
 		clock:                    clk,
 		recordingSem:             make(chan struct{}, limits.MaxConcurrentRecordingUploads),
 		chatLimits:               limits,
+		forkPullRequestActivity:  cfg.ForkPullRequestActivity,
 	}
 	var chatAutoArchiveRecords prometheus.Counter
 	if cfg.PrometheusRegistry != nil {

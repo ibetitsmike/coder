@@ -48,7 +48,8 @@ func (p *Server) withForkIsolationReport(tools []fantasy.AgentTool, chat databas
 func (t forkIsolationWaitAgentTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
 	info.Description += " For a child spawned with isolation worktree, the result also names its branch and worktree" +
-		" and, once the child finishes, summarizes its commits and changes in diff_summary."
+		" and, once the child finishes, summarizes its commits and changes in diff_summary." +
+		" For a child spawned with isolation workspace, it names the child's workspace."
 	return info
 }
 
@@ -74,6 +75,11 @@ func (t forkIsolationWaitAgentTool) Run(ctx context.Context, call fantasy.ToolCa
 		}
 		return resp, nil
 	}
+	if row.Isolation == subagentIsolationWorkspace {
+		result["isolation"] = row.Isolation
+		t.server.addSubagentWorkspaceName(ctx, result, row)
+		return marshalWaitAgentResult(resp, result), nil
+	}
 	if row.Isolation != subagentIsolationWorktree {
 		return resp, nil
 	}
@@ -93,12 +99,18 @@ func (t forkIsolationWaitAgentTool) Run(ctx context.Context, call fantasy.ToolCa
 			result["diff_summary"] = summary
 		}
 	}
+	return marshalWaitAgentResult(resp, result), nil
+}
+
+// marshalWaitAgentResult returns resp with result as its content, or resp
+// unchanged when result does not marshal.
+func marshalWaitAgentResult(resp fantasy.ToolResponse, result map[string]any) fantasy.ToolResponse {
 	content, err := json.Marshal(result)
 	if err != nil {
-		return resp, nil
+		return resp
 	}
 	resp.Content = string(content)
-	return resp, nil
+	return resp
 }
 
 // worktreeSummary asks the workspace agent of the child chatID to summarize
