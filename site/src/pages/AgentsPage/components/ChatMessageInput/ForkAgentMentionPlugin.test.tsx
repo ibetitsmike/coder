@@ -169,6 +169,15 @@ describe("ForkAgentMentionPlugin", () => {
 		);
 	});
 
+	it("matches a tier-qualified name after the agents load", async () => {
+		const { inputRef } = renderComposer();
+		const user = await typeIntoComposer("@personal/rev");
+		await user.click(await screen.findByRole("option", { name: /^@reviewer/ }));
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the reviewer agent (spawn_agent type reviewer): ",
+		);
+	});
+
 	it("inserts the option the arrow keys highlight", async () => {
 		const { inputRef } = renderComposer();
 		const user = await typeIntoComposer("@");
@@ -238,6 +247,21 @@ describe("ForkAgentMentionPlugin", () => {
 		expect(onEnter).not.toHaveBeenCalled();
 		await user.keyboard("{Escape}{Enter}");
 		expect(onEnter).toHaveBeenCalledTimes(1);
+	});
+
+	it("retries failed agents when an edit reopens the closed menu", async () => {
+		const { getPersonal, inputRef } = renderComposer();
+		getPersonal.mockRejectedValueOnce(new Error("offline"));
+		const user = await typeIntoComposer("@rev");
+		await screen.findByText(
+			"Could not load some agents. Close and type @ again to retry.",
+		);
+		await user.keyboard("{Escape}i");
+		await user.click(await screen.findByRole("option", { name: /^@reviewer/ }));
+		expect(getPersonal).toHaveBeenCalledTimes(2);
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the reviewer agent (spawn_agent type reviewer): ",
+		);
 	});
 
 	it("keeps Enter from sending while agents load", async () => {
