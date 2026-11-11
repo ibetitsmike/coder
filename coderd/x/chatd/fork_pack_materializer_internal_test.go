@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -206,8 +207,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 		})
 		resource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{JobID: job.ID, Transition: database.WorkspaceTransitionStart})
 		agent := dbgen.WorkspaceAgent(t, db, database.WorkspaceAgent{ResourceID: resource.ID})
-		pushSnapshot := func(hash string, sourcePaths ...string) {
-			now := dbtime.Now()
+		pushSnapshot := func(now time.Time, hash string, sourcePaths ...string) {
 			_, err := db.UpsertWorkspaceAgentContextSnapshot(ctx, database.UpsertWorkspaceAgentContextSnapshotParams{
 				WorkspaceAgentID: agent.ID, Version: 1, AggregateHash: []byte(hash), ReceivedAt: now,
 			})
@@ -255,21 +255,21 @@ func TestMaterializePluginPacks(t *testing.T) {
 		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
 		require.Equal(t, "stale", pinnedHash(writer), "a chat the agent has not marked dirty keeps its pin")
 
-		// Other drift marks the chat dirty before the agent pushed the pack,
-		// so the re-pin takes no pack rows and the next dirty turn re-pins
+		// A push from before the write marks the chat dirty, so the re-pin
+		// takes a snapshot without the pack and the next dirty turn re-pins
 		// again.
-		pushSnapshot("before pack", "/home/coder/AGENTS.md")
+		pushSnapshot(dbtime.Now().Add(-time.Minute), "before pack", "/home/coder/AGENTS.md")
 		writer.ContextDirtySince = sql.NullTime{Time: dbtime.Now(), Valid: true}
 		other.ContextDirtySince = writer.ContextDirtySince
 		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
 		require.Equal(t, "before pack", pinnedHash(writer), "a dirty turn after a write re-pins the writer")
 		pin(writer, "stale")
 		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
-		require.Equal(t, "before pack", pinnedHash(writer), "a re-pin that took no pack rows is retried")
+		require.Equal(t, "before pack", pinnedHash(writer), "a re-pin of a snapshot from before the write is retried")
 
 		// The agent's push of the written files marks both chats dirty, and
 		// each one's next turn re-pins it once.
-		pushSnapshot("with pack", "/home/coder/.coder/plugins/repin/plugin.json")
+		pushSnapshot(dbtime.Now(), "with pack", "/home/coder/.coder/plugins/repin/plugin.json")
 		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
 		require.Equal(t, "with pack", pinnedHash(writer))
 		server.materializePluginPacks(ctx, server.logger, other, agent.ID, dial)

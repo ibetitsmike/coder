@@ -7,6 +7,8 @@ package chatd
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"path"
 	"slices"
@@ -21,6 +23,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
@@ -51,7 +54,7 @@ const (
 // forkPackState is the in-memory plugin pack state of a Server. It is lost on
 // restart, which only costs a marker read per pack.
 type forkPackState struct {
-	// written maps materializedPackKey to the marker the agent holds.
+	// written maps materializedPackKey to the writtenPack the agent holds.
 	written sync.Map
 	// repinned maps repinKey to the marker a chat was last re-pinned for.
 	repinned sync.Map
@@ -64,6 +67,23 @@ type forkPackState struct {
 type materializedPackKey struct {
 	agentID uuid.UUID
 	packID  uuid.UUID
+}
+
+// writtenPack is a pack marker an agent holds and when this server finished
+// writing it. at is zero when the marker was already on disk.
+type writtenPack struct {
+	marker string
+	at     time.Time
+}
+
+// heldMarker reports whether the agent holds pack at its current commit.
+func (p *Server) heldMarker(agentID uuid.UUID, pack enabledPack) (writtenPack, bool) {
+	held, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID})
+	if !ok {
+		return writtenPack{}, false
+	}
+	written, ok := held.(writtenPack)
+	return written, ok && written.marker == packMarker(pack)
 }
 
 // repinKey identifies a chat re-pinned after a pack reached its agent.
@@ -112,7 +132,7 @@ func (p *Server) materializePluginPacks(
 	}
 	var pending []enabledPack
 	for _, pack := range enabled {
-		if marker, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); ok && marker == packMarker(pack) {
+		if _, ok := p.heldMarker(agentID, pack); ok {
 			continue
 		}
 		if slices.ContainsFunc(pending, func(other enabledPack) bool { return other.ID == pack.ID }) {
@@ -140,12 +160,17 @@ func (p *Server) materializePluginPacks(
 		return
 	}
 	for _, pack := range pending {
-		if err := p.materializePack(ctx, conn, home, pack); err != nil {
+		wrote, err := p.materializePack(ctx, conn, home, pack)
+		if err != nil {
 			logger.Warn(ctx, "failed to write plugin pack to workspace",
 				slog.F("pack_id", pack.ID), slog.F("pack_name", pack.Name), slog.Error(err))
 			continue
 		}
-		p.forkPacks.written.Store(materializedPackKey{agentID, pack.ID}, packMarker(pack))
+		held := writtenPack{marker: packMarker(pack)}
+		if wrote {
+			held.at = dbtime.Now()
+		}
+		p.forkPacks.written.Store(materializedPackKey{agentID, pack.ID}, held)
 	}
 }
 
@@ -157,20 +182,29 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 	if !chat.ContextDirtySince.Valid {
 		return
 	}
-	type duePack struct{ marker, name string }
-	due := map[repinKey]duePack{}
+	due := map[repinKey]writtenPack{}
 	for _, pack := range enabled {
-		marker := packMarker(pack)
-		if held, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); !ok || held != marker {
+		held, ok := p.heldMarker(agentID, pack)
+		if !ok {
 			continue
 		}
 		key := repinKey{chat.ID, agentID, pack.ID}
-		if last, ok := p.forkPacks.repinned.Load(key); ok && last == marker {
+		if last, ok := p.forkPacks.repinned.Load(key); ok && last == held.marker {
 			continue
 		}
-		due[key] = duePack{marker, pack.Name}
+		due[key] = held
 	}
 	if len(due) == 0 {
+		return
+	}
+	// The chat can be dirty from drift the agent pushed before it saw the
+	// pack's files, or from a push that took only some of them, so a pack
+	// counts as re-pinned only when the pinned snapshot arrived after the
+	// pack was written. The refresh pins this snapshot or a later one.
+	//nolint:gocritic // Chatd reads the snapshot it is about to pin.
+	snapshot, snapshotErr := p.db.GetLatestWorkspaceAgentContextSnapshot(dbauthz.AsChatd(ctx), agentID)
+	if snapshotErr != nil && !errors.Is(snapshotErr, sql.ErrNoRows) {
+		logger.Warn(ctx, "failed to read agent context snapshot to re-pin for plugin packs", slog.Error(snapshotErr))
 		return
 	}
 	updated, err := p.RefreshChatContext(ctx, chat)
@@ -179,48 +213,37 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 		return
 	}
 	p.publishChatPubsubEvents([]database.Chat{updated}, codersdk.ChatWatchEventKindContextDirty)
-	// The chat can be dirty for other drift before the agent pushed the
-	// pack, so a pack counts as re-pinned only once its rows are pinned.
-	//nolint:gocritic // Chatd reads the pinned rows of a chat it re-pinned.
-	pinned, err := p.db.ListChatContextResourcesByChatID(dbauthz.AsChatd(ctx), chat.ID)
-	if err != nil {
-		logger.Warn(ctx, "failed to read chat context after re-pinning for plugin packs", slog.Error(err))
+	if snapshotErr != nil {
 		return
 	}
-	pinnedPacks := map[string]bool{}
-	for _, row := range pinned {
-		if name, ok := managedPackName(row.SourcePath); ok && isPackContribution(row.SourcePath) {
-			pinnedPacks[name] = true
-		}
-	}
-	for key, pack := range due {
-		if pinnedPacks[pack.name] {
-			p.forkPacks.repinned.Store(key, pack.marker)
+	for key, held := range due {
+		if snapshot.ReceivedAt.After(held.at) {
+			p.forkPacks.repinned.Store(key, held.marker)
 		}
 	}
 }
 
 // materializePack writes pack into <home>/.coder/plugins/<name>, unless its
-// marker already matches.
-func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) error {
+// marker already matches. It reports whether it wrote the pack.
+func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) (bool, error) {
 	// Install validates names; checking again keeps a bad row from
 	// writing outside managedPackRoot.
 	if err := codersdk.NameValid(pack.Name); err != nil {
-		return xerrors.Errorf("invalid pack name: %w", err)
+		return false, xerrors.Errorf("invalid pack name: %w", err)
 	}
 	dir := strings.TrimRight(home, `/\`) + managedPackRoot + pack.Name
 	marker := dir + "/" + packCommitMarker
 	if content, err := readPackMarker(ctx, conn, marker); err == nil && content == packMarker(pack) {
-		return nil
+		return false, nil
 	}
 
 	resources, err := p.packResources(ctx, pack.ID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, resource := range resources {
 		if _, ok := packResourcePath(resource.Path); !ok {
-			return xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
+			return false, xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
 		}
 	}
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -234,12 +257,12 @@ func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentCon
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return err
+		return false, err
 	}
 	if err := conn.WriteFile(ctx, marker, strings.NewReader(packMarker(pack))); err != nil {
-		return xerrors.Errorf("write commit marker: %w", err)
+		return false, xerrors.Errorf("write commit marker: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // writePackFile writes one pack file, giving each attempt packWriteTimeout.
