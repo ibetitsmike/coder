@@ -129,12 +129,14 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// peer reported says nothing about the peer now answering, and a
 	// snapshot that still carries pack rows must not lead this
 	// connection's initial push to a replica that never asked for them.
-	// The rebuilt snapshot stays agent-local: with a fresh capability
-	// bit (1) so the server re-binds every chat to it, and a non-empty
-	// SnapshotError (2) so hydration keeps dirty timestamps instead of
-	// clearing them. coderd versions chats from aggregate hashes, so
-	// only the final, pack-decision-complete snapshot of the
-	// negotiation defines the baseline chats refresh against.
+	// The rebuilt snapshot is republished with a nonzero capability
+	// generation and a renegotiating SnapshotError, marking its push
+	// as a capability probe: coderd persists nothing and mutates no
+	// chat state for it, so the last settled snapshot and its
+	// resources stay the consistent pair that create- and
+	// refresh-time hydration consume. The settling push that follows
+	// (generation 0, once the peer's capabilities are known) defines
+	// the baseline chats refresh against.
 	if m.packRowsAdvertised.Swap(false) {
 		if _, err := m.resyncNegotiating(ctx); err != nil {
 			logger.Warn(ctx, "resync after capability reset failed", slog.Error(err))

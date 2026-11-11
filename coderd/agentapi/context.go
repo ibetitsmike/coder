@@ -139,12 +139,13 @@ type ContextDriftHasher interface {
 //
 // A push with capability_generation != 0 is a per-connection
 // negotiation push sent by a reconnecting agent whose push
-// capability was reset. The snapshot row and resource rows are
-// persisted so the shared tables never hold rows the serving
-// replica cannot interpret, but chat hydration and dirty marking
-// are skipped: the settling push that ends the negotiation
-// (capability_generation = 0) defines the baseline chats refresh
-// against.
+// capability was reset. It is a capability probe: nothing persists
+// (snapshot row, resource rows, stale deletes) and no chat state
+// changes, so create- and refresh-time hydration keep consuming the
+// last settled snapshot and its resources as one consistent pair.
+// The settling push that ends the negotiation
+// (capability_generation = 0) persists the settled inventory and
+// defines the baseline chats refresh against.
 //
 // Authorization happens in dbauthz: every query in the transaction
 // authorizes the actor (the agent's token subject) against the
@@ -217,6 +218,17 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		accepted = false
 		publishDirty = nil
 
+		// A negotiation push is a capability probe: it persists
+		// nothing and touches no chat state, so create- and
+		// refresh-time hydration keep consuming the last settled
+		// snapshot and its resources as one consistent pair. The
+		// settling push (capability_generation = 0) persists and
+		// defines the baseline chats refresh against.
+		if req.CapabilityGeneration != 0 {
+			accepted = true
+			return nil
+		}
+
 		existing, err := tx.GetLatestWorkspaceAgentContextSnapshot(ctx, a.AgentID)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
@@ -266,13 +278,9 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		// Hydrate and dirty chats against the snapshot just written, in the
 		// same transaction so a concurrent refresh cannot interleave with
 		// the version gate. Events are published only after commit.
-		// Negotiation pushes (capability_generation != 0) persist the
-		// snapshot and rows but skip this: the exchange is capability
-		// input, not a settled inventory, and dirtying chats against it
-		// would force a refresh on every chat pinned to the pre-reset
-		// hash even when the settling push restores that exact
-		// inventory.
-		if a.DirtyMarker != nil && req.CapabilityGeneration == 0 {
+		// Negotiation pushes never reach this point: they return above
+		// without persisting anything.
+		if a.DirtyMarker != nil {
 			publishDirty, err = a.DirtyMarker.HydrateAndMarkChatsDirty(ctx, tx, a.AgentID, driftHash, req.SnapshotError, now)
 			if err != nil {
 				return xerrors.Errorf("hydrate and mark chats dirty: %w", err)
@@ -293,8 +301,9 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			slog.F("initial", req.Initial),
 		)
 		return &agentproto.PushContextStateResponse{
-			Accepted:        false,
-			ForkPluginPacks: a.ForkPluginPacks,
+			Accepted:             false,
+			ForkPluginPacks:      a.ForkPluginPacks,
+			ForkAgentDefinitions: a.ForkAgentDefinitions,
 		}, nil
 	}
 
@@ -309,6 +318,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		slog.F("version", req.Version),
 		slog.F("initial", req.Initial),
 		slog.F("resources", len(rows)),
+		slog.F("capability_generation", req.CapabilityGeneration),
 	)
 	return &agentproto.PushContextStateResponse{
 		Accepted:             true,

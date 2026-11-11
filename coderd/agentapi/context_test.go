@@ -254,28 +254,51 @@ func TestPushContextState(t *testing.T) {
 		require.Equal(t, 0, marker.published)
 	})
 
+	t.Run("RejectedResponseCarriesCapabilities", func(t *testing.T) {
+		t.Parallel()
+
+		// A dropped (replay or out-of-order) push still reports the
+		// deployment's advertised capabilities: the agent treats a zero
+		// capability field as a retraction and would resync without pack
+		// rows until the next accepted response restores them.
+		api, dbm := makeAPI(t)
+		api.ForkPluginPacks = true
+		api.ForkAgentDefinitions = true
+		expectInTx(dbm)
+
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{Version: 5}, nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       2,
+			AggregateHash: []byte{0x01},
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.False(t, resp.GetAccepted())
+		require.True(t, resp.GetForkPluginPacks(), "a rejected response must still advertise the pack capability")
+		require.True(t, resp.GetForkAgentDefinitions(), "a rejected response must still advertise the definitions capability")
+	})
+
 	t.Run("NegotiationPushSkipsChatMutation", func(t *testing.T) {
 		t.Parallel()
 
 		// A reconnecting agent's negotiation push
-		// (capability_generation != 0) persists the snapshot and rows
-		// but must not hydrate or dirty chats: the settling push that
-		// ends the negotiation carries the settled inventory chats pin
+		// (capability_generation != 0) is a capability probe: it
+		// persists nothing (snapshot row, resource rows, stale
+		// deletes) and must not hydrate or dirty chats, so
+		// create- and refresh-time hydration keep consuming the
+		// last settled snapshot and its resources as one
+		// consistent pair. The settling push that ends the
+		// negotiation carries the settled inventory chats pin
 		// against.
 		api, dbm := makeAPI(t)
 		marker := &fakeDirtyMarker{}
 		api.DirtyMarker = marker
 		expectInTx(dbm)
 		expectInTx(dbm)
-
-		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
-			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
-		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
-			Return(database.WorkspaceAgentContextSnapshot{}, nil)
-		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
-			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
-		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
-			Return(nil)
 
 		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
 			Version:              1,
@@ -291,9 +314,10 @@ func TestPushContextState(t *testing.T) {
 		require.Equal(t, 0, marker.called, "the negotiation push must not hydrate or dirty chats")
 
 		// The settling push (capability_generation == 0) ends the
-		// negotiation and runs the chat mutation.
+		// negotiation and persists the inventory with the chat
+		// mutation.
 		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
-			Return(database.WorkspaceAgentContextSnapshot{Version: 1}, nil)
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
 		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
 			Return(database.WorkspaceAgentContextSnapshot{}, nil)
 		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).

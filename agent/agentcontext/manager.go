@@ -564,13 +564,14 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 }
 
 // resyncNegotiating republishes the snapshot as capability-negotiation
-// input rather than a settled inventory: the fork capability bit is
-// freshened so coderd re-binds chats to this version, and a
-// non-empty SnapshotError keeps hydration from clearing dirty
-// timestamps. RunPush uses it for the pack-free snapshot at
-// connection start; nothing it publishes is final, because the
-// negotiation's outcome (capability on or off) determines whether
-// the next pack-bearing or pack-free snapshot defines the baseline.
+// input rather than a settled inventory: the capability generation is
+// freshened so the push reads as a probe (coderd persists nothing and
+// mutates no chat state for it), and a non-empty SnapshotError marks
+// the snapshot as renegotiating. RunPush uses it for the pack-free
+// snapshot at connection start; nothing it publishes is final,
+// because the negotiation's outcome (capability on or off) determines
+// whether the next pack-bearing or pack-free snapshot defines the
+// baseline.
 // No-op when the Manager is not ready (nothing has been published).
 func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
 	m.mu.Lock()
