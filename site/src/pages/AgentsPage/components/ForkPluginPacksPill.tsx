@@ -30,7 +30,10 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 		) : null;
 	}
 	return (
-		<ForkPluginPacksPillView enabledCount={enabledQuery.data?.length}>
+		<ForkPluginPacksPillView
+			enabledCount={enabledQuery.data?.length}
+			isSubagent={Boolean(chatQuery.data.parent_chat_id)}
+		>
 			<ForkPluginPackToggles
 				target={target}
 				organizationId={chatQuery.data.organization_id}
@@ -54,12 +57,14 @@ export const ForkPluginPacksPillError: React.FC<{ error: unknown }> = ({
 type ForkPluginPacksPillViewProps = {
 	/** `undefined` while the chat's packs load or after loading fails. */
 	enabledCount: number | undefined;
+	/** Subagent chats also use every pack enabled on their ancestor chats. */
+	isSubagent: boolean;
 	children: React.ReactNode;
 };
 
 export const ForkPluginPacksPillView: React.FC<
 	ForkPluginPacksPillViewProps
-> = ({ enabledCount, children }) => (
+> = ({ enabledCount, isSubagent, children }) => (
 	<ComposerPillPopover
 		label={
 			enabledCount === undefined
@@ -82,7 +87,9 @@ export const ForkPluginPacksPillView: React.FC<
 		}
 	>
 		<p className="mb-3 mt-1 text-content-secondary">
-			Packs enabled on the project apply too.
+			{isSubagent
+				? "Packs enabled on the project or on a parent chat apply too."
+				: "Packs enabled on the project apply too."}
 		</p>
 		{children}
 	</ComposerPillPopover>

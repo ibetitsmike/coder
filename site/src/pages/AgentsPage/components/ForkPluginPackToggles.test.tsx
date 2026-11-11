@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as enablementApi from "#/api/forkPluginPackEnablement";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import { chatEntityKey } from "#/api/queries/chats";
 import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
 import {
@@ -25,13 +26,13 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-it("enables an installed pack for the target", async () => {
+it("enables an installed pack for the target and refetches the chat", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
 		MockForkPluginPack,
 		MockForkPluginPackWithoutPath,
 	]);
-	render(
+	const { queryClient } = render(
 		<ForkPluginPackToggles
 			target={target}
 			organizationId={MockForkPluginPack.organization_id}
@@ -39,6 +40,9 @@ it("enables an installed pack for the target", async () => {
 		/>,
 	);
 
+	queryClient.setQueryData(chatEntityKey(target.chatId), {
+		id: target.chatId,
+	});
 	const toggle = await screen.findByRole("switch", {
 		name: `Enable ${MockForkPluginPack.name}`,
 	});
@@ -50,6 +54,11 @@ it("enables an installed pack for the target", async () => {
 			MockForkPluginPack.id,
 			true,
 		),
+	);
+	await waitFor(() =>
+		expect(
+			queryClient.getQueryState(chatEntityKey(target.chatId))?.isInvalidated,
+		).toBe(true),
 	);
 });
 
