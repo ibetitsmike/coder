@@ -439,7 +439,6 @@ type CountRowProps = {
 	readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
-/** A row that counts a project's items and opens the dialog that manages them. */
 const CountRow: React.FC<CountRowProps> = ({
 	label,
 	noun,
