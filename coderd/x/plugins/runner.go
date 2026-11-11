@@ -367,40 +367,32 @@ func headersFromProto(headers []*pluginproto.Header) http.Header {
 }
 
 // webhookRequestHeaders returns a copy of the request headers without the
-// caller's Coder credentials: the session token cookies, the
-// Coder-Session-Token header and the Authorization header. The request
-// itself is not mutated, so the route handler may still read it.
+// caller's Coder credentials. The request itself is not mutated, so the
+// route handler may still read it.
 func webhookRequestHeaders(h http.Header) http.Header {
 	out := h.Clone()
 	out.Del(codersdk.SessionTokenHeader)
 	out.Del("Authorization")
 	cookieHeaders := out.Values("Cookie")
-	if len(cookieHeaders) > 0 {
-		out.Del("Cookie")
-		for _, cookieHeader := range cookieHeaders {
-			if stripped := httpapi.StripCoderCookies(cookieHeader); stripped != "" {
-				out.Add("Cookie", stripped)
-			}
+	out.Del("Cookie")
+	for _, cookieHeader := range cookieHeaders {
+		if stripped := httpapi.StripCoderCookies(cookieHeader); stripped != "" {
+			out.Add("Cookie", stripped)
 		}
 	}
 	return out
 }
 
 // webhookRequestURI returns the request URI to forward, without the
-// session-token query parameter. The URL is not mutated.
+// session-token query parameter.
 func webhookRequestURI(u *url.URL) string {
-	rawQuery, stripped := stripQueryParameter(u.RawQuery, codersdk.SessionTokenCookie)
-	if !stripped {
-		return u.RequestURI()
-	}
 	forwarded := *u
-	forwarded.RawQuery = rawQuery
+	forwarded.RawQuery, _ = stripQueryParameter(u.RawQuery, codersdk.SessionTokenCookie)
 	return forwarded.RequestURI()
 }
 
-// stripQueryParameter removes every occurrence of key from rawQuery and
-// reports whether it changed anything. It mirrors the workspaceapps proxy,
-// which strips the same parameter before proxying an inbound request.
+// stripQueryParameter mirrors the unexported stripQueryParam in the
+// workspaceapps proxy.
 func stripQueryParameter(rawQuery, key string) (string, bool) {
 	fields := strings.Split(rawQuery, "&")
 	kept := fields[:0]

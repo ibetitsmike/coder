@@ -45,10 +45,9 @@ func newWebhookRunner(t *testing.T) *runner {
 	return r
 }
 
-// TestWebhookStripsCoderCredentials covers the leak fixed here: the
-// unauthenticated webhook route must forward a signed-in caller's request
-// to the plugin without its Coder session credentials, while everything
-// else arrives intact.
+// TestWebhookStripsCoderCredentials verifies the unauthenticated webhook
+// route forwards a signed-in caller's request to the plugin without its
+// Coder session credentials, while everything else arrives intact.
 func TestWebhookStripsCoderCredentials(t *testing.T) {
 	t.Parallel()
 	r := newWebhookRunner(t)
