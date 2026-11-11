@@ -1,13 +1,15 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import { organizationAgentDefinitionACL } from "#/api/queries/forkAgentDefinitions";
 import {
 	MockNoPermissions,
 	MockOrganization,
 	MockOrganization2,
+	MockOrganizationSkillACL,
 	MockUserOwner,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
@@ -40,8 +42,7 @@ const renderPage = (search: string) => {
 		],
 		{ initialEntries: [`${path}${search}`] },
 	);
-	renderWithRouter(router);
-	return router;
+	return renderWithRouter(router);
 };
 
 beforeEach(() => {
@@ -83,7 +84,7 @@ it("switches the organization through the picker", async () => {
 	const list = vi
 		.spyOn(forkAgentDefinitionsApi, "getOrganizationAgentDefinitions")
 		.mockResolvedValue([MockForkAgentDefinitionMetadata]);
-	const router = renderPage("");
+	const { router } = renderPage("");
 	await waitFor(() => expect(list).toHaveBeenCalledWith(MockOrganization.id));
 
 	await user.click(await screen.findByRole("combobox"));
@@ -103,10 +104,80 @@ it("redirects to AI settings while the experiment is off", async () => {
 		forkAgentDefinitionsApi,
 		"getOrganizationAgentDefinitions",
 	);
-	const router = renderPage(`?org=${MockOrganization.name}`);
+	const { router } = renderPage(`?org=${MockOrganization.name}`);
 
 	await waitFor(() =>
 		expect(router.state.location.pathname).toBe("/ai/settings"),
 	);
 	expect(list).not.toHaveBeenCalled();
+});
+
+it("opens the sharing dialog and returns focus to the row menu", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitions",
+	).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+	const getACL = vi
+		.spyOn(forkAgentDefinitionsApi, "getOrganizationAgentDefinitionACL")
+		.mockResolvedValue(MockOrganizationSkillACL);
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	const menuButton = await screen.findByRole("button", {
+		name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+	});
+	await user.click(menuButton);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Manage permissions" }),
+	);
+
+	const dialog = await screen.findByRole("dialog", {
+		name: "Agent definition permissions",
+	});
+	expect(getACL).toHaveBeenCalledWith(
+		MockOrganization2.id,
+		MockForkAgentDefinitionMetadata.name,
+	);
+	await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+	await waitFor(() => expect(menuButton).toHaveFocus());
+});
+
+it("closes the sharing dialog when navigation changes the organization", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitions",
+	).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+	vi.spyOn(
+		forkAgentDefinitionsApi,
+		"getOrganizationAgentDefinitionACL",
+	).mockResolvedValue(MockOrganizationSkillACL);
+	const updateACL = vi
+		.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinitionACL")
+		.mockResolvedValue();
+	const { router, queryClient } = renderPage(`?org=${MockOrganization2.name}`);
+	const aclQueryKey = organizationAgentDefinitionACL(
+		MockOrganization2.id,
+		MockForkAgentDefinitionMetadata.name,
+	).queryKey;
+	const aclObservers = () =>
+		queryClient
+			.getQueryCache()
+			.find({ queryKey: aclQueryKey, exact: true })
+			?.getObserversCount() ?? 0;
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		}),
+	);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Manage permissions" }),
+	);
+	await waitFor(() => expect(aclObservers()).toBeGreaterThan(0));
+
+	await router.navigate(`${path}?org=${MockOrganization.name}`);
+
+	await waitFor(() => expect(aclObservers()).toBe(0));
+	expect(updateACL).not.toHaveBeenCalled();
 });

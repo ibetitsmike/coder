@@ -1,12 +1,16 @@
 // This file is fork code: the fork-agent-definitions experiment's API calls
 // live here so api.ts, an upstream file, stays unchanged.
 
-import { API } from "./api";
+import { API, getURLWithSearchParams } from "./api";
 import type {
+	ACLAvailable,
 	CreateForkAgentDefinitionRequest,
 	ForkAgentDefinition,
 	ForkAgentDefinitionMetadata,
+	OrganizationSkillACL,
 	UpdateForkAgentDefinitionRequest,
+	UpdateOrganizationSkillACLRequest,
+	UsersRequest,
 } from "./typesGenerated";
 
 const userAgentDefinitionsPath = (organizationId: string, user: string) =>
@@ -140,6 +144,49 @@ export const deleteOrganizationAgentDefinition = async (
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
 		organizationAgentDefinitionPath(organizationId, name),
+	);
+};
+
+const organizationAgentDefinitionACLPath = (
+	organizationId: string,
+	name: string,
+) => `${organizationAgentDefinitionPath(organizationId, name)}/acl`;
+
+/** Gets the members and groups an organization agent definition is shared with; requires share access. */
+export const getOrganizationAgentDefinitionACL = async (
+	organizationId: string,
+	name: string,
+): Promise<OrganizationSkillACL> => {
+	const response = await API.getAxiosInstance().get<OrganizationSkillACL>(
+		organizationAgentDefinitionACLPath(organizationId, name),
+	);
+	return response.data;
+};
+
+/** Searches the members and groups an organization agent definition can be shared with. */
+export const getOrganizationAgentDefinitionACLAvailable = async (
+	organizationId: string,
+	name: string,
+	options: UsersRequest,
+): Promise<ACLAvailable> => {
+	const response = await API.getAxiosInstance().get<ACLAvailable>(
+		getURLWithSearchParams(
+			`${organizationAgentDefinitionACLPath(organizationId, name)}/available`,
+			options,
+		),
+	);
+	return response.data;
+};
+
+/** Grants or revokes read access for the listed members and groups, leaving others unchanged. */
+export const updateOrganizationAgentDefinitionACL = async (
+	organizationId: string,
+	name: string,
+	req: UpdateOrganizationSkillACLRequest,
+): Promise<void> => {
+	await API.getAxiosInstance().patch(
+		organizationAgentDefinitionACLPath(organizationId, name),
+		req,
 	);
 };
 

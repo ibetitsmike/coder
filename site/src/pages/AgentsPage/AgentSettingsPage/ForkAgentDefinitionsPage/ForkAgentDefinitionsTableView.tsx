@@ -50,7 +50,7 @@ export type ForkAgentDefinitionDeleteState = {
 	onClose: () => void;
 };
 
-type ForkAgentDefinitionsTableViewProps = {
+export type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
 	description: string;
 	emptyMessage: string;
@@ -71,6 +71,14 @@ type ForkAgentDefinitionsTableViewProps = {
 	onCreate: () => void;
 	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	/**
+	 * The caller opens its own dialog and passes onCloseAutoFocus to it so
+	 * focus returns to the row's menu.
+	 */
+	onManagePermissions?: (
+		definition: ForkAgentDefinitionMetadata,
+		onCloseAutoFocus: (event: Event) => void,
+	) => void;
 	editorState?: ForkAgentDefinitionEditorState;
 	deleteState?: ForkAgentDefinitionDeleteState;
 };
@@ -118,6 +126,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	onCreate,
 	onEdit,
 	onDelete,
+	onManagePermissions,
 	editorState,
 	deleteState,
 }) => {
@@ -131,7 +140,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		? getErrorDetail(deleteState.error)
 		: undefined;
 
-	const hasRowActions = access.update || access.delete;
+	const hasRowActions =
+		access.update || access.delete || Boolean(onManagePermissions);
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
@@ -199,6 +209,15 @@ export const ForkAgentDefinitionsTableView: React.FC<
 									{access.update && (
 										<DropdownMenuItem onClick={() => onEdit(definition)}>
 											Edit
+										</DropdownMenuItem>
+									)}
+									{onManagePermissions && (
+										<DropdownMenuItem
+											onClick={() =>
+												onManagePermissions(definition, restoreFocus)
+											}
+										>
+											Manage permissions
 										</DropdownMenuItem>
 									)}
 									{access.delete && (

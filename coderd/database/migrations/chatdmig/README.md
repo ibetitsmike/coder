@@ -256,6 +256,36 @@ that fork nodes add. `forkdb.APIKeyScopeValues` lists them, and
 `scripts/check-scopes` reads the `ALTER TYPE api_key_scope ADD VALUE` lines
 of the fork nodes next to `dump.sql`.
 
+### The one upstream query edit
+
+One fork change breaks the `forkdb` rule. `fork-nested-subagents` rewrites
+upstream's `GetChatWorkerAcquisitionCandidates` in `queries/chats.sql`, and
+`queries.sql.go` and `querier.go` carry the regenerated code. The rewrite adds
+the `unowned_chats` CTE, the `fair_position` term in the pool order, and a
+`UNION ALL` branch that ranks subagents by organization and family when
+`interleave_subagents` is true.
+
+Upstream's worker loop in `coderd/x/chatd/worker.go` reads its candidates
+through this query. A `forkdb` query could do the ranking only as a full copy
+of upstream's query and a changed call in `worker.go`. An upstream change to
+the query would then merge cleanly and leave the copy behind, where the edit
+in place shows an overlapping change as a conflict.
+
+The rewritten SQL runs with the experiment off too. Only the ranking branch
+is off then, and the query returns upstream's order.
+
+When an upstream sync changes `GetChatWorkerAcquisitionCandidates`:
+
+1. In `queries/chats.sql`, take upstream's version and apply the fork's
+   rewrite to it again. Keep upstream's candidate filter in `unowned_chats`,
+   because both branches read it, and check it even when the merge is clean.
+2. Take upstream's `queries.sql.go` and `querier.go`, then run `make gen`. Do
+   not merge the generated files by hand.
+3. Run `go test ./coderd/x/chatd/`. `TestForkCapacity*` and
+   `TestForkAcquisitionCandidatesInterleaveBeforeStatus` cover the ranking,
+   and upstream's `TestWorker_AcquisitionCandidates*` tests cover the order
+   with the experiment off.
+
 ### Add a fork table and query
 
 The `chat_subagents` node and its queries are a complete example.
@@ -293,10 +323,16 @@ The `chat_subagents` node and its queries are a complete example.
 5. It opens a PR labeled `sync` from `sync/<date>-<sha>`. A clean PR merges
    itself with a merge commit when fork-ci passes.
 
-A person takes over in three cases:
+A person takes over in four cases:
 
 - **Conflict.** The job opens or updates an issue labeled `sync-blocked`.
   Merge upstream by hand on a branch and open a PR.
+- **Acquisition query change.** When the sync changes
+  `GetChatWorkerAcquisitionCandidates`, follow
+  [The one upstream query edit](#the-one-upstream-query-edit), with or
+  without a conflict. The job doesn't detect this case, and a clean sync PR
+  merges itself, so check the query after each sync that changes
+  `queries/chats.sql`.
 - **Mixed migration.** The PR is labeled `needs-mike`. Write
   `override/<name>.up.sql` (see [override/README.md](override/README.md)),
   push it to the PR branch and merge the PR.
