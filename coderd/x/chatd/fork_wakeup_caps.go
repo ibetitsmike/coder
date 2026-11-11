@@ -118,71 +118,63 @@ func formatWakeupSpend(micros int64) string {
 // organization reached at now, or "" when a wake-up of chat may run. The
 // check does not hold the chat lock, so concurrent replicas can overshoot the
 // organization caps by a few runs.
-func (*Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat database.Chat, now time.Time) (string, error) {
+func (*Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat database.Chat, now time.Time) (string, wakeupCaps, error) {
 	caps, err := organizationWakeupCaps(ctx, fdb, chat.OrganizationID)
 	if err != nil {
-		return "", err
+		return "", caps, err
 	}
 	since := now.Add(-wakeupCapWindow)
 	runs, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
 	if err != nil {
-		return "", xerrors.Errorf("count chat wake-up runs: %w", err)
+		return "", caps, xerrors.Errorf("count chat wake-up runs: %w", err)
 	}
 	if runs >= caps.MaxChatRunsPerDay {
-		return wakeupReasonDailyRunCap, nil
+		return wakeupReasonDailyRunCap, caps, nil
 	}
 	runs, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
 	if err != nil {
-		return "", xerrors.Errorf("count organization wake-up runs: %w", err)
+		return "", caps, xerrors.Errorf("count organization wake-up runs: %w", err)
 	}
 	if runs >= caps.MaxOrganizationRunsPerDay {
-		return wakeupReasonOrgDailyRunCap, nil
+		return wakeupReasonOrgDailyRunCap, caps, nil
 	}
 	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID, Since: since})
 	if err != nil {
-		return "", xerrors.Errorf("sum chat spend: %w", err)
+		return "", caps, xerrors.Errorf("sum chat spend: %w", err)
 	}
 	if spend >= caps.MaxChatSpendMicrosPerDay {
-		return wakeupReasonDailySpendCap, nil
+		return wakeupReasonDailySpendCap, caps, nil
 	}
 	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: chat.OrganizationID, Since: since})
 	if err != nil {
-		return "", xerrors.Errorf("sum organization wake-up spend: %w", err)
+		return "", caps, xerrors.Errorf("sum organization wake-up spend: %w", err)
 	}
 	if spend >= caps.MaxOrganizationSpendMicrosPerDay {
-		return wakeupReasonOrgDailySpendCap, nil
+		return wakeupReasonOrgDailySpendCap, caps, nil
 	}
-	return "", nil
+	return "", caps, nil
 }
 
 // pauseCappedWakeup pauses wakeup when chat or its organization reached a
 // daily cap, and reports whether it did. It records no run.
 func (p *Server) pauseCappedWakeup(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) (bool, error) {
-	reason, err := p.wakeupCapReached(ctx, fdb, chat, now)
+	reason, caps, err := p.wakeupCapReached(ctx, fdb, chat, now)
 	if err != nil || reason == "" {
 		return false, err
 	}
-	return true, p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: reason})
+	return true, p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: reason, pauseText: caps.pauseText(reason)})
 }
 
 // notifyWakeupPaused tells the chat owner that a wake-up of chat paused for
 // reason. The payload has no dedupe bypass, so the enqueuer sends at most one
 // notification per chat and reason a day, however many wake-ups pause. A
 // failure only logs: it must not change the outcome of the wake-up.
-func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, reason string) {
+func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, finish wakeupFinish) {
 	if p.chatWorker == nil {
 		return
 	}
-	caps := defaultWakeupCaps
-	fdb, err := forkdb.From(p.db)
-	if err == nil {
-		caps, err = organizationWakeupCaps(ctx, fdb, chat.OrganizationID)
-	}
-	if err != nil {
-		p.logger.Warn(ctx, "failed to read the wake-up caps of a paused chat wake-up", slog.F("chat_id", chat.ID), slog.Error(err))
-		caps = defaultWakeupCaps
-	}
-	message := fmt.Sprintf("A wake-up of chat %q is paused: %s.", chat.Title, caps.pauseText(reason))
+	reason := finish.reason
+	message := fmt.Sprintf("A wake-up of chat %q is paused: %s.", chat.Title, cmp.Or(finish.pauseText, defaultWakeupCaps.pauseText(reason)))
 	//nolint:gocritic // Background wake-up notifications run as the notifier subject.
 	if _, err := p.chatWorker.opts.NotificationsEnqueuer.EnqueueWithData(
 		dbauthz.AsNotifier(ctx),
