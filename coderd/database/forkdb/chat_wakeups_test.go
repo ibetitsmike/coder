@@ -172,10 +172,13 @@ func TestChatWakeupRuns(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z:failed"}, keys)
 
+	_, err = insertRun("2026-01-04T00:00:00Z", forkdb.ChatWakeupRunStatusDelivered)
+	require.NoError(t, err)
+
 	since := now.Add(-time.Hour)
 	count, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, count, "delivered runs count after their wake-up is deleted")
+	require.EqualValues(t, 1, count, "only delivered runs count")
 	count, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)

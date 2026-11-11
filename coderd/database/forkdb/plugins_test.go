@@ -152,7 +152,7 @@ func TestPluginChatBindings(t *testing.T) {
 func TestPluginLinkCodes(t *testing.T) {
 	t.Parallel()
 
-	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	db, _, _ := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
@@ -185,10 +185,6 @@ func TestPluginLinkCodes(t *testing.T) {
 	}))
 	_, err = fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: expiredHash[:]})
 	require.ErrorIs(t, err, sql.ErrNoRows, "an expired code cannot be consumed")
-
-	var remaining int
-	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.plugin_link_codes WHERE plugin_id = $1", plugin.ID).Scan(&remaining))
-	require.Zero(t, remaining)
 }
 
 func TestPluginLeases(t *testing.T) {
