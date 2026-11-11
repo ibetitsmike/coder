@@ -1,11 +1,12 @@
 // This file is fork code: wires the fork-agent-definitions table to the API.
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "react-query";
+import { hashKey, useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
 	type AgentDefinitionScope,
 	agentDefinitions,
+	agentDefinitionsKey,
 	deleteAgentDefinition,
 	isSameScope,
 	updateAgentDefinition,
@@ -34,6 +35,13 @@ const copy = {
 		deleteMessage: (name: string) =>
 			`The organization definition ${name} will be deleted for everyone in the organization. Personal, project, and workspace definitions with the same name are not affected. This action cannot be undone.`,
 	},
+	project: {
+		description:
+			"Custom agent types that chats in this project can spawn with spawn_agent. Each definition is a Claude Code or Cursor agent markdown file and is shared with everyone who can see the project.",
+		emptyMessage: "No project agent definitions yet.",
+		deleteMessage: (name: string) =>
+			`The project definition ${name} will be deleted for everyone in the project. Personal, organization, and workspace definitions with the same name are not affected. This action cannot be undone.`,
+	},
 } satisfies Record<
 	AgentDefinitionScope["tier"],
 	{
@@ -43,8 +51,8 @@ const copy = {
 	}
 >;
 
-const scopeKey = ({ tier, organizationId }: AgentDefinitionScope) =>
-	`${tier}/${organizationId}`;
+const scopeKey = (scope: AgentDefinitionScope) =>
+	hashKey(agentDefinitionsKey(scope));
 
 type ForkAgentDefinitionsTableProps = {
 	scope: AgentDefinitionScope;

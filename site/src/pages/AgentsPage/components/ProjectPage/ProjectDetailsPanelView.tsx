@@ -54,6 +54,15 @@ type ProjectDetailsPanelViewProps = {
 	readonly disabledSkillCount: number | undefined;
 	readonly skillsError: unknown;
 	readonly onOpenSkills: (event: React.MouseEvent<HTMLButtonElement>) => void;
+	/** Omit to hide the agent definitions row. */
+	readonly agentDefinitions?: {
+		/** `undefined` while the definitions load or after loading fails. */
+		readonly count: number | undefined;
+		/** `undefined` while the definitions load or after loading fails. */
+		readonly disabledCount: number | undefined;
+		readonly error: unknown;
+		readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
+	};
 	/** `undefined` until the instructions load. */
 	readonly instructions: ChatProjectInstructions | undefined;
 	readonly error: unknown;
@@ -77,6 +86,7 @@ export const ProjectDetailsPanelView: React.FC<
 	disabledSkillCount,
 	skillsError,
 	onOpenSkills,
+	agentDefinitions,
 	instructions,
 	error,
 	onRetry,
@@ -95,17 +105,6 @@ export const ProjectDetailsPanelView: React.FC<
 			}
 		/>
 	);
-	let skillsLabel =
-		skillCount === undefined
-			? "Unknown"
-			: skillCount === 0
-				? "None"
-				: skillCount === 1
-					? "1 skill"
-					: `${skillCount} skills`;
-	if (skillCount && disabledSkillCount) {
-		skillsLabel += `, ${disabledSkillCount} disabled`;
-	}
 
 	return (
 		<section aria-labelledby={headingId} className="flex flex-col gap-3">
@@ -156,24 +155,21 @@ export const ProjectDetailsPanelView: React.FC<
 							/>
 						</DetailRow>
 					)}
-					<DetailRow label="Skills">
-						{skillCount === undefined && !skillsError ? (
-							<>
-								<Skeleton className="my-1 ml-auto h-3 w-12" />
-								<span className="sr-only">Loading</span>
-							</>
-						) : (
-							<button
-								type="button"
-								aria-label={`Skills: ${skillsLabel}`}
-								className="group inline-flex items-center gap-1.5 rounded-sm hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
-								onClick={onOpenSkills}
-							>
-								{skillsLabel}
-								<PenIcon className="size-3.5 shrink-0 text-content-secondary group-hover:text-content-primary" />
-							</button>
-						)}
-					</DetailRow>
+					<CountRow
+						label="Skills"
+						noun="skill"
+						count={skillCount}
+						disabledCount={disabledSkillCount}
+						error={skillsError}
+						onOpen={onOpenSkills}
+					/>
+					{agentDefinitions && (
+						<CountRow
+							label="Agent definitions"
+							noun="agent"
+							{...agentDefinitions}
+						/>
+					)}
 				</dl>
 				<section
 					aria-labelledby={instructionsHeadingId}
@@ -433,6 +429,57 @@ const AvatarValue: React.FC<AvatarValueProps> = ({
 		</span>
 	</span>
 );
+
+type CountRowProps = {
+	readonly label: string;
+	readonly noun: string;
+	readonly count: number | undefined;
+	readonly disabledCount: number | undefined;
+	readonly error: unknown;
+	readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
+};
+
+/** A row that counts a project's items and opens the dialog that manages them. */
+const CountRow: React.FC<CountRowProps> = ({
+	label,
+	noun,
+	count,
+	disabledCount,
+	error,
+	onOpen,
+}) => {
+	let countLabel =
+		count === undefined
+			? "Unknown"
+			: count === 0
+				? "None"
+				: count === 1
+					? `1 ${noun}`
+					: `${count} ${noun}s`;
+	if (count && disabledCount) {
+		countLabel += `, ${disabledCount} disabled`;
+	}
+	return (
+		<DetailRow label={label}>
+			{count === undefined && !error ? (
+				<>
+					<Skeleton className="my-1 ml-auto h-3 w-12" />
+					<span className="sr-only">Loading</span>
+				</>
+			) : (
+				<button
+					type="button"
+					aria-label={`${label}: ${countLabel}`}
+					className="group inline-flex items-center gap-1.5 rounded-sm hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
+					onClick={onOpen}
+				>
+					{countLabel}
+					<PenIcon className="size-3.5 shrink-0 text-content-secondary group-hover:text-content-primary" />
+				</button>
+			)}
+		</DetailRow>
+	);
+};
 
 type DetailRowProps = {
 	readonly label: string;
