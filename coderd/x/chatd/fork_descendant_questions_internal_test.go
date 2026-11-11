@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,12 +79,40 @@ func TestDescendantQuestionTurnTools(t *testing.T) {
 	require.False(t, isFork)
 	require.Equal(t, upstreamStop(root), env.StopAfterTools)
 
+	isAsync := func(t *testing.T, tool fantasy.AgentTool) bool {
+		t.Helper()
+		resp, err := tool.Run(chatdTestContext(t), fantasy.ToolCall{ID: "call", Name: askUserQuestionToolName, Input: descendantQuestionInput})
+		require.NoError(t, err)
+		return strings.Contains(resp.Content, `"async":true`)
+	}
+	require.True(t, isAsync(t, tools[0]))
+
+	apiRoot := on.root
+	require.Equal(t, database.ChatClientTypeApi, apiRoot.ClientType)
+	env = turn(t, on, apiRoot)
+	tools = questionTools(env)
+	require.Len(t, tools, 1, "an API root gets the async question")
+	require.True(t, isAsync(t, tools[0]))
+	require.Equal(t, upstreamStop(apiRoot), env.StopAfterTools)
+
+	planRoot := on.root
+	planRoot.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
+	env = turn(t, on, planRoot)
+	tools = questionTools(env)
+	require.Len(t, tools, 1, "plan mode keeps the blocking question")
+	require.False(t, isAsync(t, tools[0]))
+
+	exploreRoot := on.root
+	exploreRoot.Mode = database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}
+	require.Empty(t, questionTools(turn(t, on, exploreRoot)))
+
 	off := newNestedSubagentsFixture(t, upstreamExperimentsKnown(), Limits{}, transport)
 	offChild, err := off.spawn(t, off.root, childSubagentChatOptions{})
 	require.NoError(t, err)
 	env = turn(t, off, offChild)
 	require.Empty(t, questionTools(env))
 	require.Equal(t, upstreamStop(offChild), env.StopAfterTools)
+	require.Empty(t, questionTools(turn(t, off, off.root)), "an API root keeps upstream's tools")
 }
 
 // Calls are validated against the tool schema before Run, so the schema has to
