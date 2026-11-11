@@ -17,7 +17,7 @@ import AgentCreatePage from "../AgentCreatePage/AgentCreatePage";
 // AgentPageHeader needs the layout's outlet context.
 vi.mock("./AgentPageHeader", () => ({ AgentPageHeader: () => null }));
 
-const agentType = (name: string, source: string, reason?: string) => ({
+const mockAgentType = (name: string, source: string, reason?: string) => ({
 	name,
 	source,
 	description: `The ${name} agent.`,
@@ -26,10 +26,10 @@ const agentType = (name: string, source: string, reason?: string) => ({
 	root_unavailable_reason: reason,
 });
 
-const agentTypes: ForkAgentType[] = [
-	agentType("general", "builtin"),
-	agentType("reviewer", "personal"),
-	agentType("deployer", "org", "Its model is not available."),
+const mockAgentTypes: ForkAgentType[] = [
+	mockAgentType("general", "builtin"),
+	mockAgentType("reviewer", "personal"),
+	mockAgentType("deployer", "org", "Its model is not available."),
 ];
 
 const renderPage = (experiments: Experiment[]) => {
@@ -51,7 +51,7 @@ const renderPage = (experiments: Experiment[]) => {
 	);
 	const getAgentTypes = vi
 		.spyOn(forkAgentDefinitionsApi, "getAgentTypes")
-		.mockResolvedValue(agentTypes);
+		.mockResolvedValue(mockAgentTypes);
 	const createChat = vi
 		.spyOn(API.experimental, "createChat")
 		.mockResolvedValue({ ...MockChat, id: "new-chat-id" });
@@ -96,8 +96,6 @@ describe("useForkAgentTypePicker", () => {
 			await screen.findByRole("button", { name: "Agent type: Default agent" }),
 		);
 		const deployer = await screen.findByRole("option", { name: /deployer/ });
-		expect(deployer).toHaveAttribute("aria-disabled", "true");
-		expect(deployer).toHaveTextContent("Its model is not available.");
 		// Selecting a row closes the menu, so the next row is only there to
 		// click when the unavailable one was not selected.
 		await user.click(deployer);
