@@ -277,6 +277,14 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 // containers under rootPath to out, plus one level inside skill containers,
 // so creating a pack or editing its files re-resolves the snapshot. The
 // watcher calls this next to addAgentWatchDirs.
+//
+// A manifest may declare a container that does not exist yet
+// ("skills": "components/skills" while only components/ is present).
+// fsnotify is non-recursive, so with only the pack root watched, creating
+// the container later fires no event and the pack stays undiscovered until
+// an unrelated resync. Watching the deepest existing ancestor of each
+// declared path arms that event, and the watcher re-collects after every
+// re-resolve, so the watch walks down as the tree is built out.
 func addPackWatchDirs(rootPath string, out map[string]struct{}) {
 	for _, pack := range packRootsFor(rootPath) {
 		out[pack.Dir] = struct{}{}
@@ -287,7 +295,27 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}) {
 		for _, container := range pack.agentContainers() {
 			out[container] = struct{}{}
 		}
+		for _, rel := range pack.declaredContainerRels() {
+			if ancestor := existingAncestor(filepath.Join(pack.Dir, rel)); ancestor != "" {
+				out[ancestor] = struct{}{}
+			}
+		}
 	}
+}
+
+// declaredContainerRels returns the manifest-validated relative paths of
+// the pack's skills and agents containers whether or not they exist on
+// disk. Invalid declarations ("../x", absolute) are rejected by
+// containerRelPath and skipped, matching discovery.
+func (p packRoot) declaredContainerRels() []string {
+	rels := make([]string, 0, 2)
+	if rel := containerRelPath(p.Manifest.Skills, defaultPackSkillsDir); rel != "" {
+		rels = append(rels, rel)
+	}
+	if rel := containerRelPath(p.Manifest.Agents, defaultPackAgentsDir); rel != "" {
+		rels = append(rels, rel)
+	}
+	return rels
 }
 
 // addPackImmediateSubdirs adds the immediate subdirectories of dir to out,

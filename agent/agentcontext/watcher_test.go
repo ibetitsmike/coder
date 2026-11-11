@@ -95,3 +95,47 @@ func TestWatcher_SyncAfterCloseNoop(t *testing.T) {
 	// Must not panic.
 	w.Sync(context.Background(), []agentcontext.ScanRoot{{Path: t.TempDir()}})
 }
+
+// TestWatcher_FiresWhenDeclaredPackContainerAppears covers the
+// missing-declared-container case: a manifest may declare a nested
+// container that does not exist yet ("skills": "components/skills" while
+// only components/ is present). fsnotify is non-recursive, so with only
+// the pack root watched, creating the container later fires no event and
+// the pack stays undiscovered until an unrelated resync. The deepest
+// existing ancestor of the declared path must be watched.
+func TestWatcher_FiresWhenDeclaredPackContainerAppears(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	packDir := filepath.Join(dir, "pstack")
+	manifestDir := filepath.Join(packDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(manifestDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "plugin.json"),
+		[]byte(`{"name": "pstack", "skills": "components/skills"}`), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(packDir, "components"), 0o755))
+
+	var fires atomic.Int32
+	w, err := agentcontext.NewWatcher(agentcontext.WatcherOptions{
+		Logger:   testutil.Logger(t).Named("watcher"),
+		Debounce: 10 * time.Millisecond,
+		OnChange: func() { fires.Add(1) },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	w.Sync(ctx, []agentcontext.ScanRoot{{Path: dir}})
+
+	// A directory is created once, so recreate it inside Eventually the
+	// way the edit test rewrites its file: every pass fires a fresh
+	// create event as soon as the watch-setup window has closed, without
+	// racing an initial create that could land before the watch is live.
+	require.Eventually(t, func() bool {
+		skillsDir := filepath.Join(packDir, "components", "skills")
+		_ = os.RemoveAll(skillsDir)
+		if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+			return false
+		}
+		return fires.Load() >= 1
+	}, testutil.WaitShort, testutil.IntervalFast, "expected a fire after creating the declared skills container")
+}

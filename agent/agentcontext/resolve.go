@@ -1062,7 +1062,11 @@ func driftResources(resources []Resource) []Resource {
 			// Pack rows are dropped by chatd while fork-plugins is
 			// off, so they must not read as prompt drift either:
 			// installing or editing a pack cannot look like a prompt
-			// change to hash-comparing subscribers.
+			// change to hash-comparing subscribers. The agent has no
+			// experiment knowledge, so the exclusion is unconditional
+			// here; chatd re-derives the drift hash from the pushed
+			// rows (coderd/x/chatd/fork_plugin_drift.go) and keeps
+			// pack rows drift-relevant while the experiment is on.
 			if isPackContribution(r) {
 				continue
 			}
