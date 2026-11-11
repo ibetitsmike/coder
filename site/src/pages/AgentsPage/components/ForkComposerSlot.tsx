@@ -6,6 +6,7 @@ import type React from "react";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { ChatTodoPill } from "./ChatTodoPill";
 import { ForkChatWakeupsPill } from "./ForkChatWakeupsPill";
+import { ForkPluginPacksPill } from "./ForkPluginPacksPill";
 
 type ForkComposerSlotProps = {
 	chatId?: string;
@@ -31,6 +32,9 @@ export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = ({
 			)}
 			{experiments.includes("fork-chat-wakeups") && (
 				<ForkChatWakeupsPill chatId={chatId} isDisabled={isDisabled} />
+			)}
+			{experiments.includes("fork-plugin-packs") && (
+				<ForkPluginPacksPill chatId={chatId} />
 			)}
 		</>
 	);
