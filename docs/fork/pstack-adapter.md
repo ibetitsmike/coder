@@ -344,7 +344,7 @@ To list the types before a chat exists, call `GET /api/v2/chats/fork/organizatio
 Add `project=<id>` for the project's definitions, `workspace=<id>` for the definitions that the workspace's agent reports, and `model_config_id=<id>` for the model that the chat would set, which wins over a definition's model as it does at creation.
 Each row gives the `name` to pass, with the same prefixes as `spawn_agent`, and its `source`, `description`, `model`, and `base_type`.
 `root_available` reports whether `agent_type` can start a chat as the type, and when it can't, `root_unavailable_reason` says why, as for every workspace definition.
-To delegate from the web UI, type `@` in the composer at the start of a line or after a space, and choose an agent.
+With the experiment, you can delegate from the web UI by typing `@` in the composer at the start of a line or after a space and choosing an agent.
 Coder inserts `Delegate to the <name> agent (spawn_agent type <name>):` and a space, with the name that `spawn_agent` accepts.
 In a child chat, the menu opens only in a `general` child with `fork-nested-subagents`.
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
@@ -586,7 +586,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `857d342b62`:
+Checked against fork `main` at `d523eb1a30`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -663,7 +663,7 @@ Checked against fork `main` at `857d342b62`:
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:155-159`, `:166-170`.
   A root chat started as an agent type, only with the experiment, `coderd/fork_chat_root_agent.go:24-69`, `coderd/exp_chats.go:1470-1473`, resolved without workspace definitions, `coderd/x/chatd/fork_root_agent.go:26`, `:73-132`, with its prompt and mode, `:137-149`, without the orchestration guidance when it cannot spawn, `:153-158`, `coderd/x/chatd/chatd.go:650`, and its `chat_subagents` row at depth 0, `fork_root_agent.go:163-182`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:107-160`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
-  The `@` menu in the composer, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatMessageInput/ForkAgentMentionPlugin.tsx:48-58`, `:66-95`, `:97-109`, `:123`, in a child chat only for a `general` child with `fork-nested-subagents`, `:131-136`, with its root chat's project, `:137-152`, holding Enter while agents load, `:195-212`, and rendered in Lexical's listbox, `:225-245`, registered in `ChatMessageInput.tsx:1405-1409`.
+  The `@` menu in the composer, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatMessageInput/ForkAgentMentionPlugin.tsx:146`, `:234-236`, opened at the start of a line or after a space, `:46-58`, with the built-in types and each source's agents under the names that `spawn_agent` accepts, `:60-95`, `:97-116`, `:170-198`, and inserting the delegation, `:118-130`, in a child chat only for a `general` child with `fork-nested-subagents`, `:156-161`, with its root chat's project, `:162-169`, holding Enter while agents load, `:215-232`, and rendered in Lexical's listbox, `:238-268`, registered in `ChatMessageInput.tsx:1405-1409`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:725-731`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:44-46`, `fork_tools.go:40-44`, ending the turn, `fork_descendant_questions.go:50-60`, `coderd/x/chatd/turn_environment.go:1096`, and not in plan-mode child turns, `:2053-2062`.
   Unanswered until the child gets a user message after the question, and a secret question until the message of its answer or decline, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-44`.
