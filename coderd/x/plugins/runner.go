@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/httpapi"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/codersdk"
@@ -309,6 +312,10 @@ func (r *runner) unsubscribeAll() {
 	}
 }
 
+// webhook sends req to the plugin's coder_on_http export. The webhook
+// route is unauthenticated, so the caller's Coder credentials are stripped
+// before anything is forwarded: a plugin is a sandboxed third party and
+// must not receive the session token of whoever opens the webhook URL.
 func (r *runner) webhook(ctx context.Context, req *http.Request) (*WebhookResponse, error) {
 	if !r.grants.Webhook {
 		return nil, xerrors.New("the plugin has no webhook grant")
@@ -326,8 +333,8 @@ func (r *runner) webhook(ctx context.Context, req *http.Request) (*WebhookRespon
 	}
 	in := &pluginproto.HTTPRequest{
 		Method:  req.Method,
-		Url:     req.URL.RequestURI(),
-		Headers: headersToProto(req.Header),
+		Url:     webhookRequestURI(req.URL),
+		Headers: headersToProto(webhookRequestHeaders(req.Header)),
 		Body:    body,
 	}
 	var out pluginproto.HTTPResponse
@@ -357,4 +364,55 @@ func headersFromProto(headers []*pluginproto.Header) http.Header {
 		h.Add(hd.GetName(), hd.GetValue())
 	}
 	return h
+}
+
+// webhookRequestHeaders returns a copy of the request headers without the
+// caller's Coder credentials: the session token cookies, the
+// Coder-Session-Token header and the Authorization header. The request
+// itself is not mutated, so the route handler may still read it.
+func webhookRequestHeaders(h http.Header) http.Header {
+	out := h.Clone()
+	out.Del(codersdk.SessionTokenHeader)
+	out.Del("Authorization")
+	cookieHeaders := out.Values("Cookie")
+	if len(cookieHeaders) > 0 {
+		out.Del("Cookie")
+		for _, cookieHeader := range cookieHeaders {
+			if stripped := httpapi.StripCoderCookies(cookieHeader); stripped != "" {
+				out.Add("Cookie", stripped)
+			}
+		}
+	}
+	return out
+}
+
+// webhookRequestURI returns the request URI to forward, without the
+// session-token query parameter. The URL is not mutated.
+func webhookRequestURI(u *url.URL) string {
+	rawQuery, stripped := stripQueryParameter(u.RawQuery, codersdk.SessionTokenCookie)
+	if !stripped {
+		return u.RequestURI()
+	}
+	forwarded := *u
+	forwarded.RawQuery = rawQuery
+	return forwarded.RequestURI()
+}
+
+// stripQueryParameter removes every occurrence of key from rawQuery and
+// reports whether it changed anything. It mirrors the workspaceapps proxy,
+// which strips the same parameter before proxying an inbound request.
+func stripQueryParameter(rawQuery, key string) (string, bool) {
+	fields := strings.Split(rawQuery, "&")
+	kept := fields[:0]
+	for _, field := range fields {
+		fieldKey, _, _ := strings.Cut(field, "=")
+		if decoded, err := url.QueryUnescape(fieldKey); err == nil && decoded == key {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	if len(kept) == len(fields) {
+		return rawQuery, false
+	}
+	return strings.Join(kept, "&"), true
 }
