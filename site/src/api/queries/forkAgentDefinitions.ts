@@ -1,12 +1,19 @@
 // This file is fork code: queries for the fork-agent-definitions experiment.
 
+import { isAxiosError } from "axios";
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
+	createUserAgentDefinition as createUserAgentDefinitionRequest,
 	deleteUserAgentDefinition as deleteUserAgentDefinitionRequest,
+	getUserAgentDefinition,
 	getUserAgentDefinitions,
 	updateUserAgentDefinition as updateUserAgentDefinitionRequest,
 } from "#/api/forkAgentDefinitions";
-import type { UpdateForkAgentDefinitionRequest } from "#/api/typesGenerated";
+import { compareUpdatedAtInstants } from "#/api/queries/chats";
+import type {
+	CreateForkAgentDefinitionRequest,
+	UpdateForkAgentDefinitionRequest,
+} from "#/api/typesGenerated";
 
 /** Query key for the current user's agent definitions in an organization. */
 export const userAgentDefinitionsKey = (organizationId: string) =>
@@ -17,6 +24,105 @@ export const userAgentDefinitions = (organizationId: string) =>
 	queryOptions({
 		queryKey: userAgentDefinitionsKey(organizationId),
 		queryFn: () => getUserAgentDefinitions(organizationId),
+	});
+
+/**
+ * The key extends the list key, so invalidating the list refetches this too.
+ * A 404 drops the requested row from the cached list unless a refetch has
+ * replaced that row since.
+ */
+export const userAgentDefinition = (
+	queryClient: QueryClient,
+	organizationId: string,
+	name: string,
+) =>
+	queryOptions({
+		queryKey: [...userAgentDefinitionsKey(organizationId), name] as const,
+		queryFn: async () => {
+			const listKey = userAgentDefinitions(organizationId).queryKey;
+			const listed = queryClient
+				.getQueryData(listKey)
+				?.find((definition) => definition.name === name);
+			try {
+				return await getUserAgentDefinition(organizationId, name);
+			} catch (error) {
+				if (isAxiosError(error) && error.response?.status === 404 && listed) {
+					queryClient.setQueryData(listKey, (definitions) =>
+						definitions?.filter((definition) => definition !== listed),
+					);
+				}
+				throw error;
+			}
+		},
+	});
+
+type Timestamped = { updated_at: string };
+
+/** Whether a was updated after b, to the timestamps' full precision. */
+export const isNewer = (a: Timestamped, b: Timestamped) =>
+	compareUpdatedAtInstants(a.updated_at, b.updated_at) > 0;
+
+/** Whether a request failed with no response, so it may still have applied. */
+export const isResponseLost = (error: unknown) =>
+	isAxiosError(error) && error.response === undefined;
+
+// Callers reconcile an unknown outcome against the refetched list, so only
+// then does the mutation stay pending until the refetch settles.
+const invalidateList = (
+	queryClient: QueryClient,
+	organizationId: string,
+	{ exact, awaitRefetch }: { exact: boolean; awaitRefetch: boolean },
+) => {
+	const refetch = queryClient.invalidateQueries({
+		queryKey: userAgentDefinitionsKey(organizationId),
+		exact,
+	});
+	return awaitRefetch ? refetch : undefined;
+};
+
+type CreateUserAgentDefinitionArgs = {
+	organizationId: string;
+	req: CreateForkAgentDefinitionRequest;
+};
+
+/**
+ * The list is invalidated after failures too, because a lost response can
+ * hide a created definition.
+ */
+export const createUserAgentDefinition = (queryClient: QueryClient) =>
+	mutationOptions({
+		mutationFn: ({ organizationId, req }: CreateUserAgentDefinitionArgs) =>
+			createUserAgentDefinitionRequest(organizationId, req),
+		// A list without the name may predate the commit or follow a delete;
+		// only the refetch below can tell, so the created row is added until it
+		// settles. The rows keep the API's order by name.
+		onSuccess: ({ content: _content, ...created }, { organizationId }) => {
+			queryClient.setQueryData(
+				userAgentDefinitions(organizationId).queryKey,
+				(definitions) => {
+					// A refetch can list the definition before this response
+					// arrives, or still list a deleted one with this name. Its
+					// row replaces that one unless the row is newer, such as a
+					// later change or a recreate.
+					const listed = definitions?.find(
+						(definition) =>
+							definition.id === created.id || definition.name === created.name,
+					);
+					if (!definitions || (listed && isNewer(listed, created))) {
+						return definitions;
+					}
+					return [
+						...definitions.filter((definition) => definition !== listed),
+						created,
+					].sort((a, b) => (a.name < b.name ? -1 : 1));
+				},
+			);
+		},
+		onSettled: (_data, error, { organizationId }) =>
+			invalidateList(queryClient, organizationId, {
+				exact: true,
+				awaitRefetch: isResponseLost(error),
+			}),
 	});
 
 type UpdateUserAgentDefinitionArgs = {
@@ -40,19 +146,31 @@ export const updateUserAgentDefinition = (queryClient: QueryClient) =>
 			updateUserAgentDefinitionRequest(organizationId, name, req),
 		// Writing the result keeps an accepted change visible even if the
 		// reconciling refetch below fails.
-		onSuccess: ({ content: _content, ...updated }, { organizationId }) => {
+		// Rows match by name, as the request does, so a stale row of a
+		// recreated definition takes the response. A response older than a
+		// cached change does not replace it.
+		onSuccess: (definition, { organizationId, name }) => {
+			const { content: _content, ...updated } = definition;
 			queryClient.setQueryData(
 				userAgentDefinitions(organizationId).queryKey,
 				(definitions) =>
-					definitions?.map((definition) =>
-						definition.id === updated.id ? updated : definition,
+					definitions?.map((listed) =>
+						listed.name === updated.name && !isNewer(listed, updated)
+							? updated
+							: listed,
 					),
 			);
+			queryClient.setQueryData(
+				userAgentDefinition(queryClient, organizationId, name).queryKey,
+				(cached) =>
+					cached && isNewer(cached, definition) ? cached : definition,
+			);
 		},
-		onSettled: (_data, _error, { organizationId }) =>
-			queryClient.invalidateQueries({
-				queryKey: userAgentDefinitionsKey(organizationId),
-				exact: true,
+		// Not exact, so a reopened editor refetches the definition it saved.
+		onSettled: (_data, error, { organizationId }) =>
+			invalidateList(queryClient, organizationId, {
+				exact: false,
+				awaitRefetch: isResponseLost(error),
 			}),
 	});
 
@@ -78,9 +196,11 @@ export const deleteUserAgentDefinition = (queryClient: QueryClient) =>
 					definitions?.filter((definition) => definition.name !== name),
 			);
 		},
-		onSettled: (_data, _error, { organizationId }) =>
-			queryClient.invalidateQueries({
-				queryKey: userAgentDefinitionsKey(organizationId),
+		onSettled: (_data, error, { organizationId }) =>
+			invalidateList(queryClient, organizationId, {
 				exact: true,
+				awaitRefetch:
+					isResponseLost(error) ||
+					(isAxiosError(error) && error.response?.status === 404),
 			}),
 	});

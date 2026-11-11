@@ -1,9 +1,14 @@
-import { screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
+import { AxiosError } from "axios";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
-import { userAgentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
+import {
+	userAgentDefinition,
+	userAgentDefinitionsKey,
+} from "#/api/queries/forkAgentDefinitions";
 import type {
 	Experiment,
 	ForkAgentDefinition,
@@ -17,8 +22,9 @@ import {
 	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
-import { renderWithAuth } from "#/testHelpers/renderHelpers";
+import { render, renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
+import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
 
 const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -39,6 +45,36 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
 	});
 	return { getDefinitions, queryClient, router };
+};
+
+// A request whose response never arrived, so the server's outcome is unknown.
+const networkError = () => new AxiosError("Network Error", "ERR_NETWORK");
+
+const openEditor = async (user: UserEvent) => {
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+};
+
+const codeReviewerContent = (description: string) =>
+	`---\nname: code-reviewer\ndescription: ${description}\n---\nReview the diff.\n`;
+
+// Renders the table in a parent that the returned function switches to
+// another organization.
+const renderTableWithOrganizationSwitch = () => {
+	let setOrganization: (organizationId: string) => void = () => {};
+	const OrganizationSwitch: React.FC = () => {
+		const [organizationId, setOrganizationId] = useState(
+			MockDefaultOrganization.id,
+		);
+		setOrganization = setOrganizationId;
+		return <ForkAgentDefinitionsTable organizationId={organizationId} />;
+	};
+	render(<OrganizationSwitch />);
+	return (organizationId: string) => setOrganization(organizationId);
 };
 
 afterEach(() => {
@@ -178,10 +214,10 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
-		// The deleted row was the only button left to take focus back.
+		// The deleted row took its menu button, so focus moves to New.
 		await waitFor(() =>
 			expect(
-				screen.getByRole("table", { name: "Agent definitions" }),
+				screen.getByRole("button", { name: "New agent definition" }),
 			).toHaveFocus(),
 		);
 	});
@@ -217,9 +253,13 @@ describe("ForkAgentDefinitionsPage", () => {
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"deleteUserAgentDefinition",
-		).mockRejectedValue(
-			mockApiError({ message: "Agent definition not found." }),
-		);
+		).mockRejectedValue({
+			isAxiosError: true,
+			response: {
+				status: 404,
+				data: { message: "Agent definition not found." },
+			},
+		});
 
 		await user.click(
 			await screen.findByRole("button", {
@@ -233,6 +273,840 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
+	});
+
+	it("creates a definition from the form in the selected organization", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "code-reviewer");
+		await user.type(
+			within(dialog).getByLabelText("Description"),
+			"Reviews diffs.",
+		);
+		await user.type(within(dialog).getByLabelText("Model"), "gpt-5");
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
+				content:
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\nmodel: gpt-5\n---\nReview the diff.\n",
+			}),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+	});
+
+	it("keeps one row for a created definition a refetch already listed", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(queryClient.getQueryState(key)?.status).toBe("error"),
+		);
+		expect(queryClient.getQueryData(key)).toEqual([
+			MockForkAgentDefinitionMetadata,
+		]);
+	});
+
+	it("creates a definition from an imported file with all its front-matter", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.upload(
+			within(dialog).getByLabelText("Upload agent definition file"),
+			new File(
+				["---\nmodel: sonnet\ntools: Read, Grep\n---\nWrite release notes.\n"],
+				"release-notes.md",
+			),
+		);
+		await waitFor(() =>
+			expect(within(dialog).getByLabelText("Name")).toHaveValue(
+				"release-notes",
+			),
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(create).toHaveBeenCalledWith(MockDefaultOrganization.id, {
+				content:
+					"---\nname: release-notes\nmodel: sonnet\ntools: Read, Grep\n---\nWrite release notes.\n",
+			}),
+		);
+	});
+
+	it("keeps the editor and its input through Escape so a rejected create can be resubmitted", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		let rejectCreate: (error: unknown) => void = () => {};
+		const create = vi
+			.spyOn(forkAgentDefinitionsApi, "createUserAgentDefinition")
+			.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectCreate = reject;
+					}),
+			)
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "code-reviewer");
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+		await user.keyboard("{Escape}");
+		rejectCreate(
+			mockApiError({
+				message: "Invalid agent definition content.",
+				detail: 'front-matter field "readonly" must be a boolean',
+			}),
+		);
+
+		const submit = await screen.findByRole("button", {
+			name: "Create agent definition",
+		});
+		await waitFor(() => expect(submit).toBeEnabled());
+		await user.click(submit);
+
+		await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+		expect(create).toHaveBeenLastCalledWith(MockDefaultOrganization.id, {
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+	});
+
+	const releaseNotesContent =
+		"---\nname: release-notes\n---\nWrite release notes.\n";
+
+	// Submits a create that fails with error while the refetched list gains
+	// the name with listedContent, from this create or from another tab's.
+	// With listUnknown, the list has failed to load before the create.
+	const failCreateWhileListed = async (
+		error: unknown,
+		listedContent = releaseNotesContent,
+		{ listUnknown = false } = {},
+	) => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		if (listUnknown) {
+			getDefinitions.mockRejectedValueOnce(
+				mockApiError({ message: "Offline." }),
+			);
+		}
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockRejectedValue(error);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			id: "agent-definition-release-notes",
+			name: "release-notes",
+			content: listedContent,
+		});
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Name"), "release-notes");
+		await user.type(
+			within(dialog).getByLabelText("Body"),
+			"Write release notes.",
+		);
+		getDefinitions.mockResolvedValue([
+			MockForkAgentDefinitionMetadata,
+			{
+				...MockForkAgentDefinitionMetadata,
+				id: "agent-definition-release-notes",
+				name: "release-notes",
+			},
+		]);
+		const createButton = within(dialog).getByRole("button", {
+			name: "Create agent definition",
+		});
+		await user.click(createButton);
+		await waitFor(() => expect(getDefinitions).toHaveBeenCalledTimes(2));
+		return { createButton, toastSuccess };
+	};
+
+	it("treats a create whose response was lost as done when the refetched list newly has it", async () => {
+		const { toastSuccess } = await failCreateWhileListed(networkError());
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+	});
+
+	it("treats a lost create as done when the list was unknown before it", async () => {
+		const { toastSuccess } = await failCreateWhileListed(
+			networkError(),
+			releaseNotesContent,
+			{ listUnknown: true },
+		);
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+	});
+
+	it("keeps a lost create failed when the listed definition has other content", async () => {
+		const { createButton, toastSuccess } = await failCreateWhileListed(
+			networkError(),
+			"---\nname: release-notes\n---\nAnother tab's notes.\n",
+		);
+
+		await waitFor(() => expect(createButton).toBeEnabled());
+		expect(toastSuccess).not.toHaveBeenCalled();
+	});
+
+	it("keeps a create the server rejected failed when another tab lists the name", async () => {
+		const { createButton, toastSuccess } = await failCreateWhileListed(
+			mockApiError({ message: "An agent definition with this name exists." }),
+		);
+
+		await waitFor(() => expect(createButton).toBeEnabled());
+		expect(toastSuccess).not.toHaveBeenCalled();
+	});
+
+	it("keeps a rejected create failed when the name was already listed", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions } = renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockRejectedValue(
+			mockApiError({ message: "An agent definition with this name exists." }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.type(within(dialog).getByLabelText("Body"), "Review the diff.");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Create agent definition" }),
+		);
+
+		await waitFor(() => expect(getDefinitions).toHaveBeenCalledTimes(2));
+		await waitFor(() =>
+			expect(
+				within(dialog).getByRole("button", { name: "Create agent definition" }),
+			).toBeEnabled(),
+		);
+		expect(toastSuccess).not.toHaveBeenCalled();
+	});
+
+	it("edits a reopened definition from cached data when its refetch fails", async () => {
+		const user = userEvent.setup();
+		const { queryClient } = renderPage();
+		// The test client drops unobserved queries at once; the app keeps them.
+		queryClient.setQueryDefaults(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			{ gcTime: Number.POSITIVE_INFINITY },
+		);
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\n---\nReview the diff.\n",
+			})
+			.mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await openEditor(user);
+		await screen.findByLabelText("Description");
+		await user.keyboard("{Escape}");
+		await openEditor(user);
+		await waitFor(() => expect(getDefinition).toHaveBeenCalledTimes(2));
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkAgentDefinitionMetadata.name,
+				{
+					content:
+						"---\nname: code-reviewer\ndescription: Reviews diffs for bugs.\n---\nReview the diff.\n",
+				},
+			),
+		);
+	});
+
+	it("reopens a saved definition with its saved content when the refetch fails", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		queryClient.setQueryDefaults(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			{ gcTime: Number.POSITIVE_INFINITY },
+		);
+		const MockSavedDefinition = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+		};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: codeReviewerContent("Reviews diffs."),
+			})
+			.mockRejectedValue(mockApiError({ message: "Upstream timeout." }));
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue({
+			...MockSavedDefinition,
+			content: codeReviewerContent("Reviews diffs for bugs."),
+		});
+		const toastSuccess = vi.spyOn(toast, "success");
+
+		await openEditor(user);
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		getDefinitions.mockResolvedValue([MockSavedDefinition]);
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+		await openEditor(user);
+
+		expect(await screen.findByLabelText("Description")).toHaveValue(
+			"Reviews diffs for bugs.",
+		);
+	});
+
+	it.each([
+		{
+			change: "recreated",
+			current: { id: "agent-definition-recreated" },
+		},
+		{
+			change: "edited elsewhere",
+			current: { updated_at: "2030-01-01T00:00:00Z" },
+		},
+	])(
+		"waits for a definition $change instead of opening its old cached content",
+		async ({ current }) => {
+			const user = userEvent.setup();
+			const { getDefinitions, queryClient } = renderPage();
+			const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+			queryClient.setQueryDefaults(listKey, {
+				gcTime: Number.POSITIVE_INFINITY,
+			});
+			const MockListedDefinition = {
+				...MockForkAgentDefinitionMetadata,
+				...current,
+			};
+			vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+				.mockResolvedValueOnce({
+					...MockForkAgentDefinitionMetadata,
+					content:
+						"---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+				})
+				.mockResolvedValue({
+					...MockListedDefinition,
+					content:
+						"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
+				});
+
+			await openEditor(user);
+			await screen.findByLabelText("Description");
+			getDefinitions.mockResolvedValue([MockListedDefinition]);
+			await queryClient.refetchQueries({ queryKey: listKey, exact: true });
+			await user.keyboard("{Escape}");
+			await openEditor(user);
+
+			expect(await screen.findByLabelText("Description")).toHaveValue(
+				"Current.",
+			);
+		},
+	);
+
+	it("keeps the tool list of an edited definition", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Reviews diffs.\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n",
+			});
+		const update = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await openEditor(user);
+		const description = await screen.findByLabelText("Description");
+		expect(getDefinition).toHaveBeenCalledWith(
+			MockDefaultOrganization.id,
+			MockForkAgentDefinitionMetadata.name,
+		);
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkAgentDefinitionMetadata.name,
+				{
+					content:
+						"---\nname: code-reviewer\ndescription: Reviews diffs for bugs.\ntools:\n  - Read\n  - Grep\n---\nReview the diff.\n",
+				},
+			),
+		);
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+	});
+
+	it("retries a failed load and keeps edits when a failed save refetches", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockRejectedValueOnce(mockApiError({ message: "Upstream timeout." }))
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: codeReviewerContent("Reviews diffs."),
+			})
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content: codeReviewerContent("Changed in another tab."),
+			});
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockRejectedValue(mockApiError({ message: "Permission denied." }));
+
+		await openEditor(user);
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() => expect(getDefinition).toHaveBeenCalledTimes(3));
+		expect(screen.getByLabelText("Description")).toHaveValue(
+			"Reviews diffs for bugs.",
+		);
+	});
+
+	it("treats a save whose response was lost as done when the refetched definition has it", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content: codeReviewerContent("Reviews diffs."),
+			})
+			.mockResolvedValue({
+				...MockForkAgentDefinitionMetadata,
+				content: codeReviewerContent("Reviews diffs for bugs."),
+			});
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockRejectedValue(networkError());
+
+		await openEditor(user);
+		const description = await screen.findByLabelText("Description");
+		await user.clear(description);
+		await user.type(description, "Reviews diffs for bugs.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition saved."),
+		);
+	});
+
+	it("does not save over a definition that changed after the editor loaded it", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+		});
+		const updateDefinition = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		);
+
+		await openEditor(user);
+		const description = await screen.findByLabelText("Description");
+		getDefinitions.mockResolvedValue([
+			{
+				...MockForkAgentDefinitionMetadata,
+				updated_at: "2030-01-01T00:00:00Z",
+			},
+		]);
+		await queryClient.refetchQueries({
+			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			exact: true,
+		});
+		await user.clear(description);
+		await user.type(description, "Mine.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		expect(updateDefinition).not.toHaveBeenCalled();
+		expect(description).toHaveValue("Mine.");
+	});
+
+	it("does not save a definition the refetched list no longer has", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+		const updateDefinition = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		);
+
+		await openEditor(user);
+		const description = await screen.findByLabelText("Description");
+		getDefinitions.mockResolvedValue([]);
+		await queryClient.refetchQueries({
+			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			exact: true,
+		});
+		await user.type(description, "Mine.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		expect(updateDefinition).not.toHaveBeenCalled();
+		expect(description).toHaveValue("Mine.");
+	});
+
+	it("saves a recreated definition that a stale listed row still names", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			id: "recreated",
+			updated_at: "2030-01-01T00:00:00Z",
+			content: "---\nname: code-reviewer\n---\nRecreated body.\n",
+		});
+		const updateDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await openEditor(user);
+		await user.type(await screen.findByLabelText("Description"), "Mine.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() => expect(updateDefinition).toHaveBeenCalled());
+	});
+
+	it("does not open content older than the listed definition, and retries", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const MockEditedDefinition = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+		};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
+			.mockResolvedValueOnce({
+				...MockForkAgentDefinitionMetadata,
+				content:
+					"---\nname: code-reviewer\ndescription: Old.\n---\nOld body.\n",
+			})
+			.mockResolvedValue({
+				...MockEditedDefinition,
+				content:
+					"---\nname: code-reviewer\ndescription: Current.\n---\nNew body.\n",
+			});
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		});
+		getDefinitions.mockResolvedValue([MockEditedDefinition]);
+		await queryClient.refetchQueries({ queryKey: listKey, exact: true });
+
+		await user.click(
+			screen.getByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+		expect(await screen.findByLabelText("Description")).toHaveValue("Current.");
+	});
+
+	it("does not open a definition the refetched list no longer has", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		let resolveDetail: (definition: ForkAgentDefinition) => void = () => {};
+		vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition").mockReturnValue(
+			new Promise((resolve) => {
+				resolveDetail = resolve;
+			}),
+		);
+
+		await openEditor(user);
+		getDefinitions.mockResolvedValue([]);
+		await queryClient.refetchQueries({
+			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			exact: true,
+		});
+		resolveDetail({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nDeleted body.\n",
+		});
+
+		const dialog = await screen.findByRole("dialog", {
+			name: "Unable to load agent definition",
+		});
+		expect(within(dialog).queryByRole("button", { name: "Retry" })).toBeNull();
+	});
+
+	it("drops a definition whose load returns 404 from the list", async () => {
+		const user = userEvent.setup();
+		const { queryClient } = renderPage();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockRejectedValue({
+			isAxiosError: true,
+			response: {
+				status: 404,
+				data: { message: "Agent definition not found." },
+			},
+		});
+
+		await openEditor(user);
+
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryData(
+					userAgentDefinitionsKey(MockDefaultOrganization.id),
+				),
+			).toEqual([]),
+		);
+	});
+
+	it("closes the editor when the selected organization changes", async () => {
+		const user = userEvent.setup();
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinitions",
+		).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+		const selectOrganization = renderTableWithOrganizationSwitch();
+
+		await openEditor(user);
+		await screen.findByLabelText("Description");
+		act(() => selectOrganization(MockOrganization2.id));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		act(() => selectOrganization(MockDefaultOrganization.id));
+
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("keeps an editor opened in another organization when an earlier create succeeds", async () => {
+		const user = userEvent.setup();
+		const toastSuccess = vi.spyOn(toast, "success");
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinitions",
+		).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			content: "---\nname: code-reviewer\n---\nReview the diff.\n",
+		});
+		let resolveCreate: (definition: ForkAgentDefinition) => void = () => {};
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"createUserAgentDefinition",
+		).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveCreate = resolve;
+				}),
+		);
+		const selectOrganization = renderTableWithOrganizationSwitch();
+
+		await user.click(
+			await screen.findByRole("button", { name: "New agent definition" }),
+		);
+		const createDialog = await screen.findByRole("dialog");
+		await user.type(within(createDialog).getByLabelText("Name"), "linter");
+		await user.type(within(createDialog).getByLabelText("Body"), "Lint.");
+		await user.click(
+			within(createDialog).getByRole("button", {
+				name: "Create agent definition",
+			}),
+		);
+		act(() => selectOrganization(MockOrganization2.id));
+		await openEditor(user);
+		await screen.findByLabelText("Description");
+		resolveCreate({ ...MockForkAgentDefinitionMetadata, content: "" });
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith("Agent definition created."),
+		);
+		const updateDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+		await user.type(screen.getByLabelText("Description"), "Lints.");
+		await user.click(
+			screen.getByRole("button", { name: "Save agent definition" }),
+		);
+
+		await waitFor(() =>
+			expect(updateDefinition).toHaveBeenCalledWith(
+				MockOrganization2.id,
+				MockForkAgentDefinitionMetadata.name,
+				{ content: expect.stringContaining("Lints.") },
+			),
+		);
+	});
+
+	it("keeps saved content when an older toggle response arrives later", async () => {
+		const user = userEvent.setup();
+		const { getDefinitions, queryClient } = renderPage();
+		const detailKey = userAgentDefinition(
+			queryClient,
+			MockDefaultOrganization.id,
+			MockForkAgentDefinitionMetadata.name,
+		).queryKey;
+		queryClient.setQueryDefaults(detailKey, {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		const MockSavedDefinition = {
+			...MockForkAgentDefinitionMetadata,
+			updated_at: "2030-01-01T00:00:00Z",
+			content: "---\nname: code-reviewer\n---\nSaved body.\n",
+		};
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		).mockResolvedValue({
+			...MockForkAgentDefinitionMetadata,
+			enabled: false,
+			content: "---\nname: code-reviewer\n---\nOld body.\n",
+		});
+
+		const toggle = await screen.findByRole("switch", {
+			name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+		});
+		const { content: _content, ...MockSavedMetadata } = MockSavedDefinition;
+		queryClient.setQueryData(detailKey, MockSavedDefinition);
+		queryClient.setQueryData(
+			userAgentDefinitionsKey(MockDefaultOrganization.id),
+			[MockSavedMetadata],
+		);
+		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
+		await user.click(toggle);
+
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryState(
+					userAgentDefinitionsKey(MockDefaultOrganization.id),
+				)?.status,
+			).toBe("error"),
+		);
+		expect(queryClient.getQueryData(detailKey)).toEqual(MockSavedDefinition);
+		expect(
+			queryClient.getQueryData(
+				userAgentDefinitionsKey(MockDefaultOrganization.id),
+			),
+		).toEqual([MockSavedMetadata]);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {
@@ -270,12 +1144,15 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps each pending toggle on its own row", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions } = renderPage();
-		const other = {
+		const MockReleaseNotesDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			id: "agent-definition-release-notes",
 			name: "release-notes",
 		};
-		getDefinitions.mockResolvedValue([MockForkAgentDefinitionMetadata, other]);
+		getDefinitions.mockResolvedValue([
+			MockForkAgentDefinitionMetadata,
+			MockReleaseNotesDefinition,
+		]);
 		const update = vi
 			.spyOn(forkAgentDefinitionsApi, "updateUserAgentDefinition")
 			.mockImplementation(() => new Promise(() => {}));
@@ -285,14 +1162,16 @@ describe("ForkAgentDefinitionsPage", () => {
 
 		await user.click(firstSwitch);
 		await user.click(
-			await screen.findByRole("switch", { name: `Enable ${other.name}` }),
+			await screen.findByRole("switch", {
+				name: `Enable ${MockReleaseNotesDefinition.name}`,
+			}),
 		);
 		await user.click(firstSwitch);
 
 		await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
 		expect(update.mock.calls.map(([, name]) => name)).toEqual([
 			MockForkAgentDefinitionMetadata.name,
-			other.name,
+			MockReleaseNotesDefinition.name,
 		]);
 	});
 
