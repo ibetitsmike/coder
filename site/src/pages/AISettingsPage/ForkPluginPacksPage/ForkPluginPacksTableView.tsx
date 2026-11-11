@@ -277,10 +277,14 @@ export const ForkPluginPacksTableView: React.FC<
 					</div>
 				}
 			/>
-			{Boolean(error) && !isLoadingError && (
+			{Boolean(error) && (
 				<ErrorAlert
 					error={error}
-					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+					actions={
+						isLoadingError ? undefined : (
+							<RetryButton isRetrying={isRetrying} onRetry={onRetry} />
+						)
+					}
 				/>
 			)}
 			<Table ref={tableRef} tabIndex={-1} aria-label={title}>

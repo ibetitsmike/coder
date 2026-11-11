@@ -35,6 +35,13 @@ type Story = StoryObj<typeof ForkPluginPacksTableView>;
 
 export const Populated: Story = {};
 
+export const Mobile: Story = {
+	parameters: {
+		viewport: { defaultViewport: "mobile1" },
+		pixel: { matrix: { viewports: ["phone"] } },
+	},
+};
+
 export const RowMenuOpen: Story = {
 	play: async () => {
 		await userEvent.click(
