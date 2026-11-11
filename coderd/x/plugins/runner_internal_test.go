@@ -58,7 +58,7 @@ func TestWebhookStripsCoderCredentials(t *testing.T) {
 	req.Header.Set("Cookie", codersdk.SessionTokenCookie+"=leak-me; other=stay")
 	req.Header.Add("Cookie", "another=also-stay")
 	req.Header.Set(codersdk.SessionTokenHeader, "leak-me")
-	req.Header.Set("Authorization", "Bearer leak-me")
+	req.Header.Set("Authorization", "Bearer stay")
 	req.Header.Set("X-Unrelated", "stay")
 
 	resp, err := r.webhook(testutil.Context(t, testutil.WaitLong), req)
@@ -77,7 +77,9 @@ func TestWebhookStripsCoderCredentials(t *testing.T) {
 	require.NotContains(t, got.URL, codersdk.SessionTokenCookie+"=leak-me")
 	require.NotContains(t, got.URL, "leak-me")
 	require.Empty(t, got.Headers.Values(codersdk.SessionTokenHeader))
-	require.Empty(t, got.Headers.Values("Authorization"))
+	// The plugin-owned Authorization header passes through; only the three
+	// credential vectors Coder itself sets are removed.
+	require.Equal(t, "Bearer stay", got.Headers.Get("Authorization"))
 	cookies := strings.Join(got.Headers.Values("Cookie"), "; ")
 	require.NotContains(t, cookies, codersdk.SessionTokenCookie)
 	require.NotContains(t, cookies, "leak-me")
@@ -93,7 +95,7 @@ func TestWebhookStripsCoderCredentials(t *testing.T) {
 	// The incoming request is not mutated: the route handler and the
 	// replica forwarding still read it.
 	require.Equal(t, "leak-me", req.Header.Get(codersdk.SessionTokenHeader))
-	require.Equal(t, "Bearer leak-me", req.Header.Get("Authorization"))
+	require.Equal(t, "Bearer stay", req.Header.Get("Authorization"))
 	require.Contains(t, req.Header.Get("Cookie"), codersdk.SessionTokenCookie+"=leak-me")
 	require.Contains(t, req.URL.RawQuery, codersdk.SessionTokenCookie+"=leak-me")
 }

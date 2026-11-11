@@ -369,10 +369,14 @@ func headersFromProto(headers []*pluginproto.Header) http.Header {
 // webhookRequestHeaders returns a copy of the request headers without the
 // caller's Coder credentials. The request itself is not mutated, so the
 // route handler may still read it.
+//
+// Authorization is forwarded on purpose: browsers never attach it
+// implicitly, so a value there belongs to the webhook sender and may be
+// how the plugin authenticates the caller (see the workspaceapps proxy,
+// which forwards it for the same reason).
 func webhookRequestHeaders(h http.Header) http.Header {
 	out := h.Clone()
 	out.Del(codersdk.SessionTokenHeader)
-	out.Del("Authorization")
 	cookieHeaders := out.Values("Cookie")
 	out.Del("Cookie")
 	for _, cookieHeader := range cookieHeaders {
