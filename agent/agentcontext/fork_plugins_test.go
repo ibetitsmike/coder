@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -597,4 +598,38 @@ func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
 	instruction := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "AGENTS.md"))
 	require.Equal(t, filepath.Join(root, "plugin.json"), instruction.SourcePath)
 	findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "skills", "review-pr"))
+}
+
+func TestResolver_PluginPacksClaudeCacheLayout(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code caches each plugin version three levels down and keeps
+	// orphaned versions for a while: only the newest live version counts.
+	cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
+	plugin := filepath.Join(cache, "pstack-marketplace", "pstack")
+	writeVersion := func(version string, modTime time.Time) string {
+		dir := filepath.Join(plugin, version)
+		mustWriteFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"), `{"name": "pstack"}`)
+		mustWriteFile(t, filepath.Join(dir, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+		require.NoError(t, os.Chtimes(dir, modTime, modTime))
+		return dir
+	}
+	now := time.Now()
+	writeVersion("0.15.34", now.Add(-2*time.Hour))
+	current := writeVersion("0.15.36", now.Add(-time.Hour))
+	orphaned := writeVersion("0.15.37", now)
+	mustWriteFile(t, filepath.Join(orphaned, ".orphaned_at"), "1794430000000")
+	require.NoError(t, os.Chtimes(orphaned, now, now))
+
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: cache}})
+
+	var sources []string
+	for _, res := range snap.Resources {
+		if res.Kind == agentcontext.KindSkill {
+			sources = append(sources, res.Source)
+		}
+	}
+	require.Equal(t, []string{filepath.Join(current, "skills", "review-pr")}, sources)
 }

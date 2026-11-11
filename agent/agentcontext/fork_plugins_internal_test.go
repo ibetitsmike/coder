@@ -4,6 +4,8 @@ package agentcontext
 // installed plugin pack root.
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
@@ -42,4 +44,24 @@ func TestWatcherEventRelevant(t *testing.T) {
 			require.Equal(t, tc.want, w.eventRelevant(tc.event))
 		})
 	}
+}
+
+func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
+	t.Parallel()
+	cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
+	plugin := filepath.Join(cache, "market", "pstack")
+	live := filepath.Join(plugin, "0.15.36")
+	orphaned := filepath.Join(plugin, "0.15.35")
+	for _, dir := range []string{filepath.Join(live, ".claude-plugin"), orphaned} {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(orphaned, claudeOrphanedMarker), nil, 0o600))
+
+	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: cache}})
+	// A new marketplace, plugin, or version, the manifest of a version
+	// created before it, and an orphan marker each fire in one of these.
+	for _, dir := range []string{cache, filepath.Join(cache, "market"), plugin, live, filepath.Join(live, ".claude-plugin")} {
+		require.Contains(t, dirs, dir)
+	}
+	require.NotContains(t, dirs, orphaned)
 }
