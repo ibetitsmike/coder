@@ -7,14 +7,13 @@ import {
 } from "#/testHelpers/forkPluginPacks";
 import {
 	createPluginPackMutation,
-	pluginPacks,
+	pluginPacksKey,
 	updatePluginPackMutation,
 } from "./forkPluginPacks";
 
 const organizationId = MockForkPluginPack.organization_id;
-const listKey = pluginPacks(organizationId).queryKey;
+const listKey = pluginPacksKey(organizationId);
 
-// Mutation results are written with no refetch in flight to replace them.
 const createQueryClient = () => {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
@@ -68,14 +67,16 @@ describe("createPluginPackMutation", () => {
 });
 
 describe("updatePluginPackMutation", () => {
-	const newer = {
+	const mockNewerPack = {
 		...MockForkPluginPack,
 		commit_sha: "fedcba9876543210fedcba9876543210fedcba98",
 	};
 
 	it("leaves an uncached list uncached", async () => {
 		const queryClient = createQueryClient();
-		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue(newer);
+		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue(
+			mockNewerPack,
+		);
 
 		await new MutationObserver(
 			queryClient,
@@ -91,7 +92,9 @@ describe("updatePluginPackMutation", () => {
 			MockForkPluginPack,
 			MockForkPluginPackWithoutPath,
 		]);
-		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue(newer);
+		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue(
+			mockNewerPack,
+		);
 
 		await new MutationObserver(
 			queryClient,
@@ -99,7 +102,7 @@ describe("updatePluginPackMutation", () => {
 		).mutate(MockForkPluginPack);
 
 		expect(queryClient.getQueryData(listKey)).toEqual([
-			newer,
+			mockNewerPack,
 			MockForkPluginPackWithoutPath,
 		]);
 	});

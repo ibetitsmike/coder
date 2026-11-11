@@ -5,6 +5,7 @@ import {
 	hashKey,
 	mutationOptions,
 	type QueryClient,
+	type QueryKey,
 	queryOptions,
 } from "react-query";
 import {
@@ -166,15 +167,12 @@ export const isResponseLost = (error: unknown) =>
 
 // Callers reconcile an unknown outcome against the refetched list, so only
 // then does the mutation stay pending until the refetch settles.
-const invalidateList = (
+export const invalidateList = (
 	queryClient: QueryClient,
-	scope: AgentDefinitionScope,
+	queryKey: QueryKey,
 	{ exact, awaitRefetch }: { exact: boolean; awaitRefetch: boolean },
 ) => {
-	const refetch = queryClient.invalidateQueries({
-		queryKey: agentDefinitionsKey(scope),
-		exact,
-	});
+	const refetch = queryClient.invalidateQueries({ queryKey, exact });
 	return awaitRefetch ? refetch : undefined;
 };
 
@@ -217,7 +215,7 @@ export const createAgentDefinition = (queryClient: QueryClient) =>
 			);
 		},
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: true,
 				awaitRefetch: isResponseLost(error),
 			}),
@@ -262,7 +260,7 @@ export const updateAgentDefinition = (queryClient: QueryClient) =>
 		},
 		// Not exact, so a reopened editor refetches the definition it saved.
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: false,
 				awaitRefetch: isResponseLost(error),
 			}),
@@ -291,7 +289,7 @@ export const deleteAgentDefinition = (queryClient: QueryClient) =>
 			);
 		},
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: true,
 				awaitRefetch:
 					isResponseLost(error) ||
