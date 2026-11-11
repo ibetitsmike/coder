@@ -92,6 +92,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				access={access}
 				action={picker}
 				error={packsQuery.error}
+				isLoadingError={packsQuery.isLoadingError}
 				isLoading={packsQuery.isLoading}
 				isRetrying={packsQuery.isFetching}
 				onRetry={() => void packsQuery.refetch()}

@@ -9,6 +9,7 @@ import {
 	MockOrganization,
 	MockOrganization2,
 	MockUserOwner,
+	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkPluginPack } from "#/testHelpers/forkPluginPacks";
 import { renderWithRouter } from "#/testHelpers/renderHelpers";
@@ -128,3 +129,18 @@ it("updates and deletes a pack from its row menu", async () => {
 		),
 	);
 });
+
+it("requests the packs again when Retry is clicked after a failed load", async () => {
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockRejectedValueOnce(
+			mockApiError({ message: "Failed to list plugin packs." }),
+		)
+		.mockResolvedValueOnce([MockForkPluginPack]);
+	renderPage();
+
+	await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
+
+	expect(await screen.findByText(MockForkPluginPack.name)).toBeInTheDocument();
+	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+});
+
