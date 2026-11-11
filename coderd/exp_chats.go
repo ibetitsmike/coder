@@ -1799,6 +1799,9 @@ func (api *API) createChatError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
+	}
 	if xerrors.Is(err, chatd.ErrInvalidModelConfigID) || database.IsForeignKeyViolation(
 		err,
 		database.ForeignKeyChatsLastModelConfigID,
@@ -3364,6 +3367,12 @@ func (api *API) sendChatMessageError(err error) error {
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
 	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
+	}
+	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
+		return secretQuestionPendingError(err)
+	}
 	if xerrors.Is(err, chatd.ErrChatArchived) {
 		return httperror.WrapResponseError(http.StatusBadRequest, codersdk.Response{
 			Message: "Cannot send messages to an archived chat.",
@@ -3516,6 +3525,8 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		switch {
+		case xerrors.Is(editErr, chatd.ErrSecretQuestionPending):
+			writeChatError(ctx, rw, secretQuestionPendingError(editErr))
 		case xerrors.Is(editErr, chatd.ErrChatArchived):
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: "Cannot edit messages in an archived chat.",

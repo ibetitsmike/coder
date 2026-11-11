@@ -46,8 +46,23 @@ RETURNING *;
 -- name: GetChatWakeupByID :one
 SELECT * FROM chat_wakeups WHERE id = @id;
 
+-- Locks the wake-up until the transaction ends, so a worker that finishes its
+-- claim in between waits and then finds its lease gone.
+-- name: GetChatWakeupByIDForUpdate :one
+SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
+
 -- name: ListChatWakeupsByChatID :many
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
+
+-- name: ListChildChatIDsWithActiveEventsWakeups :many
+-- Lists the children of @parent_chat_id that wait for events of their own,
+-- so a caller checks every child in one read.
+SELECT DISTINCT w.chat_id
+FROM chat_wakeups w
+JOIN chats c ON c.id = w.chat_id
+WHERE c.parent_chat_id = @parent_chat_id::uuid
+    AND w.kind = 'events'
+    AND w.status = 'active';
 
 -- Pauses, resumes, cancels or completes a wake-up. The caller computes
 -- next_run_at. Any claim on the row ends.
@@ -160,6 +175,11 @@ WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
+-- name: ListChatWakeupRunKeys :many
+-- A failed send of an events entry records its run under a key of its own,
+-- so it never blocks a later run of the entry.
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid ORDER BY created_at, id;
+
 -- name: UpdateChatWakeupRunStatus :one
 UPDATE chat_wakeup_runs
 SET
@@ -181,4 +201,34 @@ SELECT COUNT(*)
 FROM chat_wakeup_runs
 WHERE organization_id = @organization_id
     AND status = 'delivered'
+    AND created_at >= @since::timestamptz;
+
+-- Deleted messages count too: they were paid for. Messages without a price
+-- have a NULL cost and count as zero.
+-- name: SumChatCostMicrosSince :one
+SELECT COALESCE(SUM(total_cost_micros), 0)::bigint
+FROM chat_messages
+WHERE chat_id = @chat_id::uuid
+    AND created_at >= @since::timestamptz
+    AND total_cost_micros IS NOT NULL;
+
+-- Sums the spend of the chats of the organization that have a wake-up, so
+-- chats that only humans drive do not count.
+-- name: SumOrganizationWakeupChatCostMicrosSince :one
+SELECT COALESCE(SUM(cm.total_cost_micros), 0)::bigint
+FROM chat_messages cm
+WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organization_id = @organization_id::uuid)
+    AND cm.created_at >= @since::timestamptz
+    AND cm.total_cost_micros IS NOT NULL;
+
+-- Counts the notifications of one template that were enqueued for a user
+-- about a chat. One enqueue stores a row per delivery method, all with the
+-- same payload, and the enqueuer's dedupe rejects a second identical payload
+-- on the same UTC day, so distinct payloads per UTC day count enqueues.
+-- name: CountChatUserNotificationsSince :one
+SELECT COUNT(DISTINCT (payload, DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')))
+FROM notification_messages
+WHERE user_id = @user_id::uuid
+    AND notification_template_id = @notification_template_id::uuid
+    AND payload->'data'->>'chat_id' = @chat_id::text
     AND created_at >= @since::timestamptz;

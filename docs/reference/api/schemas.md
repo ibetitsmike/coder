@@ -6125,6 +6125,117 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |----------|----------|
 | `role`   | `read`   |
 
+## codersdk.ChatWakeup
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "created_at": "2019-08-24T14:15:22Z",
+  "created_by": "ee824cad-d7a6-4f48-87dc-e8461a9201c4",
+  "cron": "string",
+  "events": [
+    {
+      "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+      "on": [
+        "string"
+      ],
+      "type": "string",
+      "url": "string"
+    }
+  ],
+  "expires_at": "2019-08-24T14:15:22Z",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "interval_seconds": 0,
+  "kind": "delay",
+  "last_run_at": "2019-08-24T14:15:22Z",
+  "max_runs": 0,
+  "next_run_at": "2019-08-24T14:15:22Z",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "prompt": "string",
+  "run_count": 0,
+  "source": "string",
+  "status": "active",
+  "status_reason": "string",
+  "timezone": "string",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name               | Type                                                          | Required | Restrictions | Description                                                                                                               |
+|--------------------|---------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------|
+| `chat_id`          | string                                                        | false    |              |                                                                                                                           |
+| `created_at`       | string                                                        | false    |              |                                                                                                                           |
+| `created_by`       | string                                                        | false    |              |                                                                                                                           |
+| `cron`             | string                                                        | false    |              | Cron is set for a cron wake-up, which runs in Timezone.                                                                   |
+| `events`           | array of [codersdk.ChatWakeupEvent](#codersdkchatwakeupevent) | false    |              |                                                                                                                           |
+| `expires_at`       | string                                                        | false    |              |                                                                                                                           |
+| `id`               | string                                                        | false    |              |                                                                                                                           |
+| `interval_seconds` | integer                                                       | false    |              | Interval seconds is set for an interval wake-up.                                                                          |
+| `kind`             | [codersdk.ChatWakeupKind](#codersdkchatwakeupkind)            | false    |              |                                                                                                                           |
+| `last_run_at`      | string                                                        | false    |              |                                                                                                                           |
+| `max_runs`         | integer                                                       | false    |              |                                                                                                                           |
+| `next_run_at`      | string                                                        | false    |              | Next run at is when an active wake-up runs next. A paused wake-up keeps the run time it had, unless the worker paused it. |
+| `organization_id`  | string                                                        | false    |              |                                                                                                                           |
+| `prompt`           | string                                                        | false    |              |                                                                                                                           |
+| `run_count`        | integer                                                       | false    |              |                                                                                                                           |
+| `source`           | string                                                        | false    |              |                                                                                                                           |
+| `status`           | [codersdk.ChatWakeupStatus](#codersdkchatwakeupstatus)        | false    |              |                                                                                                                           |
+| `status_reason`    | string                                                        | false    |              | Status reason tells why the wake-up paused, completed or was canceled.                                                    |
+| `timezone`         | string                                                        | false    |              |                                                                                                                           |
+| `updated_at`       | string                                                        | false    |              |                                                                                                                           |
+
+## codersdk.ChatWakeupEvent
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "on": [
+    "string"
+  ],
+  "type": "string",
+  "url": "string"
+}
+```
+
+### Properties
+
+| Name      | Type            | Required | Restrictions | Description                                                                                        |
+|-----------|-----------------|----------|--------------|----------------------------------------------------------------------------------------------------|
+| `chat_id` | string          | false    |              | Chat ID is the child chat of a child_done event.                                                   |
+| `on`      | array of string | false    |              | On lists the pull request activity that wakes the chat.                                            |
+| `type`    | string          | false    |              | Type is child_done for a child chat that finishes, or pull_request for activity on a pull request. |
+| `url`     | string          | false    |              | URL is the pull request of a pull_request event.                                                   |
+
+## codersdk.ChatWakeupKind
+
+```json
+"delay"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                              |
+|---------------------------------------|
+| `cron`, `delay`, `events`, `interval` |
+
+## codersdk.ChatWakeupStatus
+
+```json
+"active"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                                    |
+|---------------------------------------------|
+| `active`, `canceled`, `completed`, `paused` |
+
 ## codersdk.ChatWatchEvent
 
 ```json
@@ -18013,6 +18124,26 @@ The cursor is owner-scoped, so only the chat owner may set this. Opening a chat'
 |---------------------------------|---------|----------|--------------|-------------|
 | `include_default_system_prompt` | boolean | false    |              |             |
 | `system_prompt`                 | string  | false    |              |             |
+
+## codersdk.UpdateChatWakeupRequest
+
+```json
+{
+  "status": "active"
+}
+```
+
+### Properties
+
+| Name     | Type                                                   | Required | Restrictions | Description |
+|----------|--------------------------------------------------------|----------|--------------|-------------|
+| `status` | [codersdk.ChatWakeupStatus](#codersdkchatwakeupstatus) | false    |              |             |
+
+#### Enumerated Values
+
+| Property | Value(s)                       |
+|----------|--------------------------------|
+| `status` | `active`, `canceled`, `paused` |
 
 ## codersdk.UpdateChatWorkspaceTTLRequest
 

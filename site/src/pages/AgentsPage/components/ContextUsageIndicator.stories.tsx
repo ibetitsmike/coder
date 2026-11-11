@@ -323,6 +323,21 @@ export const AgentDefinitions: Story = {
 	},
 };
 
+export const AgentDefinitionKeyboardFocus: Story = {
+	args: AgentDefinitions.args,
+	play: async (context) => {
+		await AgentDefinitions.play?.(context);
+		for (
+			let i = 0;
+			i < 10 && document.activeElement?.textContent !== "reviewer";
+			i++
+		) {
+			await userEvent.tab();
+		}
+		await screen.findByRole("tooltip");
+	},
+};
+
 // A failed skill appears inside its section alongside available skills.
 export const ResourceIssue: Story = {
 	args: {

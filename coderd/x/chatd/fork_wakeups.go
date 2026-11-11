@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	wakeupPollInterval  = 15 * time.Second
-	wakeupLease         = 2 * time.Minute
-	wakeupClaimBatch    = 20
-	wakeupEventsBackoff = time.Minute
+	wakeupPollInterval = 15 * time.Second
+	wakeupLease        = 2 * time.Minute
+	wakeupClaimBatch   = 20
+
+	wakeupReasonArchived = "archived"
 )
 
 // startForkLoops starts the worker loops of fork experiments.
@@ -133,15 +134,9 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 
 	switch {
 	case chat.Archived:
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"})
-	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now):
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
-	case wakeup.Kind == forkdb.ChatWakeupKindEvents:
-		// TODO(ibetitsmike): deliver events wake-ups (W5 PR4).
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupFinish{
-			status:    forkdb.ChatWakeupStatusActive,
-			nextRunAt: sql.NullTime{Time: now.Add(wakeupEventsBackoff), Valid: true},
-		})
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived})
+	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) && !eventsFinalPoll(wakeup, now):
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
 	case chat.Status == database.ChatStatusRunning,
 		chat.Status == database.ChatStatusInterrupting,
 		chat.Status == database.ChatStatusRequiresAction:
@@ -150,18 +145,34 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 			slog.F("chat_id", chat.ID),
 			slog.F("chat_status", chat.Status),
 		)
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupStaysDue(wakeup))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
+	case wakeup.Kind == forkdb.ChatWakeupKindEvents:
+		return p.deliverEventsWakeup(ctx, fdb, chat, wakeup, now)
+	}
+	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
+		return err
 	}
 
-	err = p.sendWakeupPrompt(ctx, chat, wakeup, now)
+	delivery := wakeupDelivery{
+		text:   wakeup.Prompt,
+		runKey: wakeupRunKey(wakeup),
+		finish: func(admittedAt time.Time) wakeupFinish { return nextWakeupRun(wakeup, admittedAt, 1) },
+	}
+	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, delivery.runKey, err)
+}
+
+// finishWakeupSend ends the claim of wakeup after sendWakeupPrompt returned
+// err for the occurrence runKey, and records a failed send as a run.
+func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, runKey string, err error) error {
 	switch {
 	case err == nil, errors.Is(err, errWakeupClaimLost):
 		return nil
 	case errors.Is(err, errWakeupChatBusy), errors.Is(err, chatstate.ErrMessageQueueFull):
 		// The chat turned busy after the status check.
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, wakeupStaysDue(wakeup))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
 	case errors.Is(err, errWakeupOccurrenceRan):
-		return p.finishWakeupClaim(ctx, fdb, wakeup, now, nextWakeupRun(wakeup, now, 0))
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, nextWakeupRun(wakeup, now, 0))
 	}
 
 	sendErr := err
@@ -176,7 +187,7 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 		_, err := ftx.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
 			ID:        uuid.New(),
 			WakeupID:  wakeup.ID,
-			RunKey:    wakeupRunKey(wakeup),
+			RunKey:    runKey,
 			Status:    runStatus,
 			Error:     sql.NullString{String: sendErr.Error(), Valid: true},
 			CreatedAt: now,
@@ -192,6 +203,9 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 	}
 	if err != nil {
 		return xerrors.Errorf("record failed wake-up run: %w", err)
+	}
+	if finish.status == forkdb.ChatWakeupStatusPaused {
+		p.notifyWakeupPaused(ctx, chat, finish.reason)
 	}
 	return nil
 }
@@ -213,11 +227,20 @@ func wakeupRunKey(wakeup forkdb.ChatWakeup) string {
 	return wakeup.NextRunAt.Time.UTC().Format(time.RFC3339Nano)
 }
 
-// sendWakeupPrompt sends the prompt as the chat owner. The delivered run and
-// the end of the claim commit in the send's transaction, under the chat lock:
-// a chat that turned busy, an occurrence that already ran, or a claim that was
-// canceled or taken over rolls the message back.
-func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) error {
+// wakeupDelivery is one occurrence of a wake-up: the message text, the run
+// key that keeps it from being delivered twice, and how a delivery admitted
+// at a given time ends the claim.
+type wakeupDelivery struct {
+	text   string
+	runKey string
+	finish func(admittedAt time.Time) wakeupFinish
+}
+
+// sendWakeupPrompt sends the text of delivery as the chat owner. The delivered
+// run and the end of the claim commit in the send's transaction, under the chat
+// lock: a chat that turned busy, an occurrence that already ran, or a claim
+// that was canceled or taken over rolls the message back.
+func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, delivery wakeupDelivery) error {
 	owner, err := p.chatOwnerSubject(ctx, chat.OwnerID)
 	if err != nil {
 		return err
@@ -228,10 +251,12 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 	// it counts against the family live subagent limit.
 	ownerCtx = withSubagentResume(ownerCtx)
 	sendStart := p.clock.Now("chatd", "wakeups")
+	// The finish of the admitted attempt, which commits with the message.
+	var finish wakeupFinish
 	_, err = p.SendMessage(ownerCtx, SendMessageOptions{
 		ChatID:    chat.ID,
 		CreatedBy: chat.OwnerID,
-		Content:   []codersdk.ChatMessagePart{codersdk.ChatMessageText(wakeup.Prompt)},
+		Content:   []codersdk.ChatMessagePart{codersdk.ChatMessageText(delivery.text)},
 		// Queue admits the message on an idle chat; forkAdmit rejects a
 		// send that would queue.
 		BusyBehavior: SendMessageBusyBehaviorQueue,
@@ -251,7 +276,7 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			_, err = txdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
 				ID:        uuid.New(),
 				WakeupID:  wakeup.ID,
-				RunKey:    wakeupRunKey(wakeup),
+				RunKey:    delivery.runKey,
 				Status:    forkdb.ChatWakeupRunStatusDelivered,
 				CreatedAt: admittedAt,
 				UpdatedAt: admittedAt,
@@ -262,7 +287,8 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			if err != nil {
 				return xerrors.Errorf("insert wake-up run: %w", err)
 			}
-			_, err = txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, admittedAt, nextWakeupRun(wakeup, admittedAt, 1)))
+			finish = delivery.finish(admittedAt)
+			_, err = txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, admittedAt, finish))
 			if errors.Is(err, sql.ErrNoRows) {
 				return errWakeupClaimLost
 			}
@@ -272,6 +298,9 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			return nil
 		},
 	})
+	if err == nil && finish.status == forkdb.ChatWakeupStatusPaused {
+		p.notifyWakeupPaused(ctx, chat, finish.reason)
+	}
 	return err
 }
 
@@ -279,20 +308,22 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 // claim ends.
 func (p *Server) wakeupFailure(ctx context.Context, wakeup forkdb.ChatWakeup, now time.Time, sendErr error) (forkdb.ChatWakeupRunStatus, wakeupFinish) {
 	if _, denied := errors.AsType[*chathooks.UserPromptDeniedError](sendErr); denied {
-		// TODO(ibetitsmike): notify the owner of the paused wake-up (W5 PR5).
 		return forkdb.ChatWakeupRunStatusFailed, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "hook_denied"}
 	}
 	switch {
 	case errors.Is(sendErr, ErrChatArchived), errors.Is(sendErr, chatstate.ErrChatFamilyArchived):
-		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"}
+		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived}
 	default:
 		// Includes hook dispatch failures, which are transient: the next
-		// occurrence tries again.
+		// occurrence tries again, and a final events poll is retried.
 		p.logger.Warn(ctx, "chat wake-up send failed",
 			slog.F("wakeup_id", wakeup.ID),
 			slog.F("chat_id", wakeup.ChatID),
 			slog.Error(sendErr),
 		)
+		if retry, ok := eventsFinalRetry(wakeup, now, now.Add(pullRequestErrorRetry)); ok {
+			return forkdb.ChatWakeupRunStatusFailed, retry
+		}
 		return forkdb.ChatWakeupRunStatusFailed, nextWakeupRun(wakeup, now, 0)
 	}
 }
@@ -317,6 +348,8 @@ func nextWakeupRun(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32) wake
 			return finish
 		}
 		next = schedule.Next(now)
+	case forkdb.ChatWakeupKindEvents:
+		return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(wakeupPollInterval))
 	default:
 		finish.status, finish.reason = forkdb.ChatWakeupStatusCompleted, "done"
 		return finish
@@ -333,9 +366,10 @@ func nextWakeupRun(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32) wake
 	return finish
 }
 
-// finishWakeupClaim ends the claim of wakeup. It does nothing when the lease
-// expired and another replica claimed the wake-up again.
-func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, now time.Time, finish wakeupFinish) error {
+// finishWakeupClaim ends the claim of wakeup of chat and notifies the owner
+// when it paused the wake-up. It does nothing when the lease expired and
+// another replica claimed the wake-up again.
+func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, finish wakeupFinish) error {
 	_, err := fdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, finish))
 	if errors.Is(err, sql.ErrNoRows) {
 		p.logger.Debug(ctx, "chat wake-up claim was taken over",
@@ -345,6 +379,25 @@ func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, wakeup
 	}
 	if err != nil {
 		return xerrors.Errorf("finish wake-up claim: %w", err)
+	}
+	if finish.status == forkdb.ChatWakeupStatusPaused {
+		p.notifyWakeupPaused(ctx, chat, finish.reason)
+	}
+	return nil
+}
+
+// cancelArchivedWakeups cancels the active and paused wake-ups of the chats of
+// an archived family.
+func cancelArchivedWakeups(ctx context.Context, fdb forkdb.Store, chats []database.Chat, now time.Time) error {
+	for _, chat := range chats {
+		_, err := fdb.CancelChatWakeupsByChatID(ctx, forkdb.CancelChatWakeupsByChatIDParams{
+			ChatID:    chat.ID,
+			Reason:    wakeupReasonArchived,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			return xerrors.Errorf("cancel wake-ups of archived chat %s: %w", chat.ID, err)
+		}
 	}
 	return nil
 }

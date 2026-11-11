@@ -974,6 +974,7 @@ func New(options *Options) *API {
 				NotificationsEnqueuer:          options.NotificationsEnqueuer,
 				Auditor:                        &api.Auditor,
 				Limits:                         api.chatLimits,
+				ForkPullRequestActivity:        api.forkChatPullRequestActivity,
 			})
 			if err != nil {
 				panic(xerrors.Errorf("create chat daemon: %w", err))
