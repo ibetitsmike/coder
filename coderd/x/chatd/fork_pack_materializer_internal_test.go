@@ -104,10 +104,9 @@ func TestMaterializePluginPacks(t *testing.T) {
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkPluginPacks}))
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
-	ctx := chatdTestContext(t)
 	user, org, model := seedInternalChatDeps(t, db)
 
-	insertPack := func(name string, paths ...string) forkdb.PluginPack {
+	insertPack := func(ctx context.Context, t *testing.T, name string, paths ...string) forkdb.PluginPack {
 		now := dbtime.Now()
 		pack, err := fdb.InsertPluginPack(ctx, forkdb.InsertPluginPackParams{
 			ID: uuid.New(), OrganizationID: org.ID, Name: name, SourceUrl: "https://example.com/packs.git",
@@ -126,7 +125,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 		}))
 		return pack
 	}
-	newChat := func(packs ...forkdb.PluginPack) database.Chat {
+	newChat := func(ctx context.Context, t *testing.T, packs ...forkdb.PluginPack) database.Chat {
 		chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
 		for _, pack := range packs {
 			_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID})
@@ -137,8 +136,9 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 	t.Run("WritesOncePerAgentAndCommit", func(t *testing.T) {
 		t.Parallel()
-		pack := insertPack("demo", ".claude-plugin/plugin.json", "skills/review/SKILL.md")
-		chat := newChat(pack)
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "demo", ".claude-plugin/plugin.json", "skills/review/SKILL.md")
+		chat := newChat(ctx, t, pack)
 		files := &fakeWorkspaceFiles{files: map[string]string{}}
 		dials := 0
 		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
@@ -172,8 +172,9 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 	t.Run("RetriesAStalledWrite", func(t *testing.T) {
 		t.Parallel()
-		pack := insertPack("stall", "plugin.json", "skills/review/SKILL.md")
-		chat := newChat(pack)
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "stall", "plugin.json", "skills/review/SKILL.md")
+		chat := newChat(ctx, t, pack)
 		stalled := "/home/coder/.coder/plugins/stall/skills/review/SKILL.md"
 		files := &fakeWorkspaceFiles{files: map[string]string{}, hangOnce: map[string]bool{stalled: true}}
 		dials := 0
@@ -193,7 +194,8 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 	t.Run("RepinsEachDirtyChatOncePerWrite", func(t *testing.T) {
 		t.Parallel()
-		pack := insertPack("repin", "plugin.json")
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "repin", "plugin.json")
 		// Chatd reads the agent's snapshot through dbauthz, which resolves
 		// the agent's workspace, so the agent needs a full build.
 		version := dbgen.TemplateVersion(t, db, database.TemplateVersion{OrganizationID: org.ID, CreatedBy: user.ID})
@@ -282,8 +284,9 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 	t.Run("UnsafePathWritesNoMarker", func(t *testing.T) {
 		t.Parallel()
-		pack := insertPack("unsafe", "plugin.json", "skills/../../escape")
-		chat := newChat(pack)
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "unsafe", "plugin.json", "skills/../../escape")
+		chat := newChat(ctx, t, pack)
 		files := &fakeWorkspaceFiles{files: map[string]string{}}
 		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
 			return files.conn(t), func() {}, nil
@@ -295,7 +298,8 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 	t.Run("NothingEnabled", func(t *testing.T) {
 		t.Parallel()
-		chat := newChat()
+		ctx := chatdTestContext(t)
+		chat := newChat(ctx, t)
 		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
 			t.Fatal("a chat with no enabled packs must not connect")
 			return nil, nil, nil
