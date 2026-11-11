@@ -12,10 +12,14 @@ const meta = {
 	component: ForkPluginPacksTableView,
 	args: {
 		packs: [MockForkPluginPack, MockForkPluginPackWithoutPath],
+		access: { create: true, update: true, delete: true },
 		error: undefined,
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
+		onInstall: fn(),
+		onUpdate: fn(),
+		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkPluginPacksTableView>;
 
@@ -24,8 +28,31 @@ type Story = StoryObj<typeof ForkPluginPacksTableView>;
 
 export const Populated: Story = {};
 
+export const ReadOnly: Story = {
+	args: { access: { create: false, update: false, delete: false } },
+};
+
+export const UpdateOnly: Story = {
+	args: { access: { create: false, update: true, delete: false } },
+};
+
+export const Updating: Story = {
+	args: { updatingPackId: MockForkPluginPack.id },
+};
+
 export const Empty: Story = {
 	args: { packs: [] },
+};
+
+export const EmptyReadOnly: Story = {
+	args: {
+		packs: [],
+		access: { create: false, update: false, delete: false },
+	},
+};
+
+export const Loading: Story = {
+	args: { packs: [], isLoading: true },
 };
 
 export const LoadError: Story = {
@@ -33,10 +60,6 @@ export const LoadError: Story = {
 		packs: [],
 		error: mockApiError({ message: "Failed to list plugin packs." }),
 	},
-};
-
-export const Loading: Story = {
-	args: { packs: [], isLoading: true },
 };
 
 export const RefetchError: Story = {

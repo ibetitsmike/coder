@@ -1,8 +1,16 @@
 // This file is fork code: the fork-plugin-packs experiment's organization
 // plugin pack table.
 
+import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
 import type { ForkPluginPack } from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
+import { Button } from "#/components/Button/Button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "#/components/DropdownMenu/DropdownMenu";
 import {
 	Table,
 	TableBody,
@@ -19,18 +27,50 @@ import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
 
 const title = "Plugin packs";
 
+/** The plugin pack actions the user may take in the organization. */
+export type ForkPluginPacksAccess = {
+	create: boolean;
+	update: boolean;
+	delete: boolean;
+};
+
 type ForkPluginPacksTableViewProps = {
 	packs: readonly ForkPluginPack[];
+	access: ForkPluginPacksAccess;
 	action?: React.ReactNode;
 	error: unknown;
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
+	updatingPackId?: string;
+	onInstall: () => void;
+	onUpdate: (pack: ForkPluginPack) => void;
+	onDelete: (pack: ForkPluginPack) => void;
 };
 
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
-> = ({ packs, action, error, isLoading, isRetrying, onRetry }) => {
+> = ({
+	packs,
+	access,
+	action,
+	error,
+	isLoading,
+	isRetrying,
+	onRetry,
+	updatingPackId,
+	onInstall,
+	onUpdate,
+	onDelete,
+}) => {
+	const installAction = access.create && (
+		<Button variant="outline" onClick={onInstall}>
+			<PlusIcon aria-hidden="true" />
+			Install plugin pack
+		</Button>
+	);
+	const hasRowActions = access.update || access.delete;
+
 	let tableBody: React.ReactNode;
 	if (isLoading) {
 		tableBody = <TableLoader />;
@@ -52,6 +92,7 @@ export const ForkPluginPacksTableView: React.FC<
 			<TableEmpty
 				message="No plugin packs installed"
 				description="Install a Claude Code or Cursor plugin from Git, then enable it on a project or chat to use its skills and agents."
+				cta={installAction}
 			/>
 		);
 	} else {
@@ -81,6 +122,37 @@ export const ForkPluginPacksTableView: React.FC<
 				<TableCell className="hidden whitespace-nowrap sm:table-cell">
 					{formatUpdatedAt(pack.updated_at)}
 				</TableCell>
+				{hasRowActions && (
+					<TableCell className="text-right">
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									size="icon"
+									variant="subtle"
+									aria-label={`More actions for ${pack.name}`}
+									disabled={updatingPackId === pack.id}
+								>
+									<EllipsisVerticalIcon aria-hidden="true" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								{access.update && (
+									<DropdownMenuItem onClick={() => onUpdate(pack)}>
+										Update to the latest commit of {pack.ref}
+									</DropdownMenuItem>
+								)}
+								{access.delete && (
+									<DropdownMenuItem
+										className="text-content-destructive focus:text-content-destructive"
+										onClick={() => onDelete(pack)}
+									>
+										Delete&hellip;
+									</DropdownMenuItem>
+								)}
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</TableCell>
+				)}
 			</TableRow>
 		));
 	}
@@ -90,7 +162,12 @@ export const ForkPluginPacksTableView: React.FC<
 			<SectionHeader
 				label={title}
 				description="Plugin packs installed in this organization. Projects and chats choose which packs they use."
-				action={action}
+				action={
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+						{action}
+						{installAction}
+					</div>
+				}
 			/>
 			{Boolean(error) && packs.length > 0 && (
 				<ErrorAlert
@@ -107,6 +184,11 @@ export const ForkPluginPacksTableView: React.FC<
 						<TableHead className="hidden whitespace-nowrap sm:table-cell">
 							Updated
 						</TableHead>
+						{hasRowActions && (
+							<TableHead className="w-14">
+								<span className="sr-only">Actions</span>
+							</TableHead>
+						)}
 					</TableRow>
 				</TableHeader>
 				<TableBody size="lg">{tableBody}</TableBody>
