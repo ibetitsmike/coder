@@ -232,6 +232,14 @@ While the experiment is on, the composer of a chat with active or paused wake-up
 Selecting the pill lists each one with its schedule, its prompt, its next run or pause reason, and its run count, with **Pause** or **Resume** and **Cancel** buttons that make the same changes as the API.
 The pill reads the list again every 30&nbsp;seconds, so a change that a run makes can take that long to show.
 When the list fails to load, the composer shows a warning pill instead.
+While the experiment is on, the conversation shows each `schedule_wakeup`, `wait_for_events`, and `notify_user` call as a card.
+The title of a `schedule_wakeup` card names the schedule, such as **Scheduled a wake-up every 5m**, and a cron schedule shows its time zone, which is UTC by default.
+The card lists the prompt, the next run, and the run limit and expiry when the call sets them.
+The title of a `wait_for_events` card names what the call waits for, such as **Waiting for 2 child agents and a pull request**.
+The card links each child with its title and status, and the pull request with its watched events, and shows when the wait stops.
+A `notify_user` card shows **Sent a notification** with the title and the message.
+A failed call shows **Failed to schedule a wake-up**, **Failed to wait for events**, or **Failed to send a notification** with the tool's error.
+A result that a card can't read shows the generic tool card.
 While the experiment is on, archiving a chat cancels the active and paused wake-ups of every chat in its family, and unarchiving doesn't resume them.
 A wake-up of a chat archived without the experiment stops at its next run without sending its prompt.
 
@@ -547,7 +555,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `383933339b`:
+Checked against fork `main` at `4bb7562026`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -610,9 +618,9 @@ Checked against fork `main` at `383933339b`:
   The error on a failed `spawn_agent` card, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:160-163`, `:172-174`, `forkToolUtils.ts:14-17`, in the card, `SubagentTool.tsx:260-264`, from `Tool.tsx:542`.
   Stored definitions: user routes, `coderd/fork_agent_definitions.go:32-170`, organization routes, `coderd/fork_organization_agent_definitions.go:26-180`, shared with the whole organization at creation, `:76-80`, with the sharing routes, `coderd/fork_organization_agent_definitions_acl.go:35-159`, and project routes, `coderd/fork_project_agent_definitions.go:20-190`.
   Offered to `spawn_agent` when enabled and readable by the chat owner, `coderd/x/chatd/fork_agent_definitions.go:187-311`, and for a project the owner owns or that is shared with them, `:264-268`, from the root chat for a child, `coderd/x/chatd/project_instructions.go:17-51`, `coderd/x/chatd/projects.go:16-61`.
-  The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-50`.
+  The personal definitions page: the **Settings** button, `site/src/pages/AgentsPage/components/ChatsSidebar/chats/ChatsPanel.tsx:512-519`, the route, `site/src/forkRoutes.tsx:16`, and the nav item and page, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-28`, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsPage.tsx:21-23`, with the organization picker, `:25-51`.
   Its table of the member's personal definitions, `site/src/api/forkAgentDefinitions.ts:12-30`, with the **Enabled** switch, `ForkAgentDefinitionsTableView.tsx:131-140`, the **Edit** and **Delete** menu items and the delete dialog, `:161-169`, `:236-249`, and **New agent definition**, `:186-196`, calls the user routes, `forkAgentDefinitions.ts:12-80`.
-  The editor dialog, `ForkAgentDefinitionsTableView.tsx:229-234`, with its title, fields, import, and buttons, `ForkAgentDefinitionEditorDialog.tsx:197-217`, `:242-264`, `:351-387`, `:405-418`, the read-only name of an edit, `site/src/pages/AgentsPage/components/SkillEditor.tsx:482-484`, the other front matter kept, `agentDefinitionMarkdown.ts:165-216`, and the create, the refused save over a changed definition, and the save, `useForkAgentDefinitionEditor.ts:106-157`, `:158-267`.
+  The editor dialog, `ForkAgentDefinitionsTableView.tsx:229-234`, with its title, fields, import, and buttons, `ForkAgentDefinitionEditorDialog.tsx:197-217`, `:242-264`, `:351-387`, `:405-418`, the read-only name of an edit, `site/src/pages/AgentsPage/components/SkillEditor.tsx:482-484`, the other front matter kept, `agentDefinitionMarkdown.ts:165-216`, and the create, the refused save over a changed definition, and the save, `useForkAgentDefinitionEditor.ts:108-159`, `:160-269`.
   Disabled personal definitions offer no type, `coderd/x/chatd/fork_agent_definitions.go:219-222`.
   The definition name without its prefix in subagent tool results, stored at spawn, `coderd/x/chatd/fork_subagents.go:378-381`, and reported by `coderd/x/chatd/fork_subagent_types.go:25-51`, `:86-112`, `fork_tools.go:48`.
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1937`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
@@ -644,14 +652,14 @@ Checked against fork `main` at `383933339b`:
   Item statuses, `fork_chat_todos.go:41`, checked against the tool schema before the tool runs, `coderd/x/chatd/toolinput.go:22-30`, `:125-127`.
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:19-31`, `ChatTodoPill.tsx:94-108`.
-  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:40-46`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
+  Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:43-49`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
   The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:28`, `:50`, `:70-74`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:29-34`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:33`.
   The recent tool calls and `tool_calls_error` on the `wait_agent` card, only with the same experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:36-70`, `:186-191`, `:203-206`.
   Chat search: `coderd/x/chatd/fork_search_chats.go:28-32`, `:51-67`, added with the same experiment, `fork_tools.go:32`, and run as the chat owner, `fork_search_chats.go:97-103`.
-  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:21-33`, `:47-56`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:56-67`, `:80-99`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
+  Cards for both calls, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:50-59`, with the search card's labels, query, chat links, and more-results note, `ForkSearchChatsTool.tsx:58-69`, `:82-101`, and the transcript card's labels, chat link, message lines, and more-results note, `ForkChatTranscriptTool.tsx:70-78`, `:93-125`.
   The plan-mode and `explore` allowlists in `turn_environment.go` don't list either tool.
 - No tool that creates or changes a PR: in the Go files of `coderd/x/chatd`, `pull_request` appears only in the read-only watch of `wait_for_events`, `coderd/x/chatd/fork_wait_for_events.go` and `coderd/x/chatd/fork_pull_request_events.go`.
 - Wake-ups, only with `fork-chat-wakeups`: `schedule_wakeup`, `wait_for_events`, and `notify_user`, `coderd/x/chatd/fork_tools.go:35-39`, not in the plan-mode or `explore` allowlists, `turn_environment.go:2054-2069`, `:2126-2135`.
@@ -667,6 +675,7 @@ Checked against fork `main` at `383933339b`:
   The read with the chat owner's linked account and its errors, `coderd/fork_chat_pull_requests.go:24-84`, wired in `coderd/coderd.go:977`, only for GitHub, `coderd/externalauth/gitprovider/fork_github_activity.go:85`, `:101-104`, without the owner's own reviews and comments, draft reviews, or older comments, `:140-200`, and the CI state, `:202-295`.
   The wake-up routes, only with the experiment, `coderd/fork_chat_routes.go:57-62`, the list, `coderd/fork_chat_wakeups.go:23-61`, and the change, as an update of the chat, with its errors, `:71-167`, `coderd/x/chatd/fork_wakeup_controls.go:20-76`, a pause that keeps the run time and the reasons, `:24-27`, `:78-92`, and a resume, `:94-114`, with the fields, `codersdk/fork_chat_wakeups.go:38-85`.
   The composer pill, only with the experiment, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:32-34`, with the open wake-ups and their number, `ForkChatWakeupsPill.tsx:54-132`, each row and its buttons, `:135-150`, `:165-260`, read every 30&nbsp;seconds, `site/src/api/queries/forkChatWakeups.ts:13-22`.
+  The tool cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:60-74`, the `schedule_wakeup` card, `ForkScheduleWakeupTool.tsx:12-43`, `:53-99`, the `wait_for_events` card, `ForkWaitForEventsTool.tsx:20-35`, `:43-103`, and the `notify_user` card, `ForkNotifyUserTool.tsx:10`, `:17-62`.
   The daily limits, `coderd/x/chatd/fork_wakeup_caps.go:22-38`, `:51-96`, checked before each send, `fork_wakeups.go:152-154`, `fork_wait_for_events.go:408-410`, over delivered runs and every message cost, `coderd/database/forkdb/queries/chat_wakeups.sql:192-225`.
   The other pauses, `fork_wakeups.go:309-312`, `:344-349`, `fork_wait_for_events.go:325`, and the notification after each pause, `fork_wakeups.go:207-209`, `:301-303`, `:383-385`, with its title, reasons, and the chat title in its text, once per chat, reason, and title a UTC day, `fork_wakeup_caps.go:36-49`, `:98-128`, by the dedupe hash, `coderd/database/migrations/000245_notifications_dedupe.up.sql:13-26`.
   The limit of 10 counts active and paused wake-ups, `fork_schedule_wakeup.go:213-228`.
