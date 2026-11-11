@@ -7,6 +7,7 @@ import type {
 	CreateForkAgentDefinitionRequest,
 	ForkAgentDefinition,
 	ForkAgentDefinitionMetadata,
+	ForkAgentType,
 	OrganizationSkillACL,
 	UpdateForkAgentDefinitionRequest,
 	UpdateOrganizationSkillACLRequest,
@@ -261,4 +262,25 @@ export const deleteProjectAgentDefinition = async (
 	await API.getAxiosInstance().delete(
 		projectAgentDefinitionPath(organizationId, projectId, name),
 	);
+};
+
+/** Narrows the agent types to those a chat in a project or workspace, on a model, can use. */
+export type AgentTypesParams = {
+	project?: string;
+	workspace?: string;
+	model_config_id?: string;
+};
+
+/** Lists the agent types a new chat in an organization can start as or spawn. */
+export const getAgentTypes = async (
+	organizationId: string,
+	params: AgentTypesParams = {},
+): Promise<ForkAgentType[]> => {
+	const response = await API.getAxiosInstance().get<ForkAgentType[]>(
+		getURLWithSearchParams(
+			`/api/v2/chats/fork/organizations/${organizationId}/agent-types`,
+			params,
+		),
+	);
+	return response.data;
 };
