@@ -183,7 +183,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 		// clears the pinned hash.
 		chat.ContextDirtySince = sql.NullTime{Time: dbtime.Now(), Valid: true}
 		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
-		require.Nil(t, pinnedHash(), "the first dirty turn after a write re-pins the chat")
+		require.Empty(t, pinnedHash(), "the first dirty turn after a write re-pins the chat")
 
 		require.NoError(t, db.SetChatContextSnapshot(ctx, database.SetChatContextSnapshotParams{
 			ID: chat.ID, AggregateHash: []byte("later snapshot"),
