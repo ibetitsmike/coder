@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -77,21 +79,49 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 		r.logger.Warn(ctx, "list links of chat owner", slog.Error(err))
 		return false
 	}
-	for _, l := range links {
-		if !l.ActiveChatID.Valid || l.ActiveChatID.UUID != b.ChatID {
+	var target *forkdb.PluginUserLink
+	var idle []forkdb.PluginUserLink
+	for i, l := range links {
+		if !l.ActiveChatID.Valid {
+			idle = append(idle, l)
 			continue
 		}
-		err := r.invokeResultLocked(ctx, "coder_on_event", &pluginproto.ChatEvent{
-			ChatId:     b.ChatID.String(),
-			ExternalId: l.ExternalID,
-			Status:     string(status),
-			Messages:   texts,
-			Title:      b.ChatTitle,
+		if l.ActiveChatID.UUID == b.ChatID {
+			target = &links[i]
+		}
+	}
+	if target == nil {
+		// No identity follows the chat yet, for example one the user
+		// started in Coder. A plugin without the chats create grant can
+		// only reach a link through such a chat, so give it to the one
+		// idle link. With several idle links any pick is a guess that
+		// could expose the chat to the wrong identity, so deliver nothing.
+		if len(idle) != 1 {
+			r.logger.Debug(ctx, "no single link follows chat",
+				slog.F("chat_id", b.ChatID), slog.F("idle_links", len(idle)))
+			return true
+		}
+		target = &idle[0]
+		err := r.m.fdb.SetPluginUserLinkActiveChat(sys(ctx), forkdb.SetPluginUserLinkActiveChatParams{
+			PluginID:     r.plugin.ID,
+			ExternalID:   target.ExternalID,
+			ActiveChatID: uuid.NullUUID{UUID: b.ChatID, Valid: true},
 		})
 		if err != nil {
-			r.deliveryFailed(ctx, b, err)
+			r.logger.Warn(ctx, "set active chat of idle link", slog.Error(err))
 			return false
 		}
+	}
+	err = r.invokeResultLocked(ctx, "coder_on_event", &pluginproto.ChatEvent{
+		ChatId:     b.ChatID.String(),
+		ExternalId: target.ExternalID,
+		Status:     string(status),
+		Messages:   texts,
+		Title:      b.ChatTitle,
+	})
+	if err != nil {
+		r.deliveryFailed(ctx, b, err)
+		return false
 	}
 	return true
 }

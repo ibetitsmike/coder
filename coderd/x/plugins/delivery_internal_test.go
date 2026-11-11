@@ -30,13 +30,108 @@ import (
 const bridgePluginPackage = "github.com/coder/coder/v2/coderd/x/plugins/testdata/bridge"
 
 // TestDeliverChatRoutesToActiveLink verifies a chat's events reach only the
-// plugin link whose active chat is that chat. One Coder user may link several
+// plugin link that follows that chat. One Coder user may link several
 // external identities to a plugin, and each identity follows its own active
 // chat, so broadcasting to every link of the owner would push one identity's
-// conversation to all of them.
+// conversation to all of them. A chat no link follows yet goes to the
+// owner's one idle link, so a plugin that cannot create chats still reaches
+// its first chat, and to nobody when the pick would be a guess.
 func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 	t.Parallel()
 
+	chatID := uuid.New()
+	active := uuid.NullUUID{UUID: chatID, Valid: true}
+	other := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+	for _, tc := range []struct {
+		name string
+		// links are the owner's links; the first one is the expected
+		// recipient unless wantNone is set.
+		links []forkdb.PluginUserLink
+		// bootstrap expects the recipient to be given the chat first.
+		bootstrap bool
+		wantNone  bool
+	}{
+		{
+			name: "ActiveLinkOnly",
+			links: []forkdb.PluginUserLink{
+				{ExternalID: "active-link", ActiveChatID: active},
+				{ExternalID: "other-chat-link", ActiveChatID: other},
+				{ExternalID: "idle-link"},
+			},
+		},
+		{
+			name: "SingleIdleLinkBootstraps",
+			links: []forkdb.PluginUserLink{
+				{ExternalID: "idle-link"},
+				{ExternalID: "other-chat-link", ActiveChatID: other},
+			},
+			bootstrap: true,
+		},
+		{
+			name: "SeveralIdleLinksGetNothing",
+			links: []forkdb.PluginUserLink{
+				{ExternalID: "idle-link-1"},
+				{ExternalID: "idle-link-2"},
+				{ExternalID: "other-chat-link", ActiveChatID: other},
+			},
+			wantNone: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, db, fdb, logs := newDeliveryRunner(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			owner := uuid.New()
+
+			db.EXPECT().GetChatMessagesByChatIDAscPaginated(gomock.Any(), database.GetChatMessagesByChatIDAscPaginatedParams{
+				ChatID:   chatID,
+				AfterID:  0,
+				LimitVal: messagesPerEvent,
+			}).Return([]database.ChatMessage{{
+				ID:             7,
+				Role:           database.ChatMessageRoleAssistant,
+				Content:        nullRawMessage(`[{"type":"text","text":"hello"}]`),
+				ContentVersion: chatprompt.ContentVersionV1,
+			}}, nil)
+			fdb.EXPECT().GetPluginUserLinksByPluginAndUser(gomock.Any(), forkdb.GetPluginUserLinksByPluginAndUserParams{
+				PluginID: r.plugin.ID,
+				UserID:   owner,
+			}).Return(tc.links, nil)
+			if tc.bootstrap {
+				fdb.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), forkdb.SetPluginUserLinkActiveChatParams{
+					PluginID:     r.plugin.ID,
+					ExternalID:   tc.links[0].ExternalID,
+					ActiveChatID: active,
+				}).Return(nil)
+			}
+			fdb.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), gomock.Any()).Return(nil)
+
+			r.deliverChat(ctx, forkdb.GetPluginChatBindingsDueRow{
+				PluginID:    r.plugin.ID,
+				ChatID:      chatID,
+				ChatStatus:  database.ChatStatusWaiting,
+				ChatTitle:   "delivery routing",
+				ChatOwnerID: owner,
+			})
+
+			delivered := logs.String()
+			for i, l := range tc.links {
+				event := "bridge-event external_id=" + l.ExternalID + " "
+				if i == 0 && !tc.wantNone {
+					require.Contains(t, delivered, event+"chat_id="+chatID.String())
+					continue
+				}
+				require.NotContains(t, delivered, event, "link %s must not receive this chat's events", l.ExternalID)
+			}
+		})
+	}
+}
+
+// newDeliveryRunner returns a runner with the bridge plugin loaded
+// in-process. The bridge plugin logs each event it receives, so the returned
+// buffer shows which links got an event.
+func newDeliveryRunner(t *testing.T) (*runner, *dbmock.MockStore, *forkdbmock.MockStore, *bytes.Buffer) {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	db := dbmock.NewMockStore(ctrl)
 	fdb := forkdbmock.NewMockStore(ctrl)
@@ -67,42 +162,7 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 	r.client = client
 	r.ready = make(chan struct{})
 	close(r.ready)
-
-	chatID := uuid.New()
-	owner := uuid.New()
-	msg := database.ChatMessage{
-		ID:             7,
-		Role:           database.ChatMessageRoleAssistant,
-		Content:        nullRawMessage(`[{"type":"text","text":"hello active link"}]`),
-		ContentVersion: chatprompt.ContentVersionV1,
-	}
-	db.EXPECT().GetChatMessagesByChatIDAscPaginated(gomock.Any(), database.GetChatMessagesByChatIDAscPaginatedParams{
-		ChatID:   chatID,
-		AfterID:  0,
-		LimitVal: messagesPerEvent,
-	}).Return([]database.ChatMessage{msg}, nil)
-	fdb.EXPECT().GetPluginUserLinksByPluginAndUser(gomock.Any(), forkdb.GetPluginUserLinksByPluginAndUserParams{
-		PluginID: r.plugin.ID,
-		UserID:   owner,
-	}).Return([]forkdb.PluginUserLink{
-		{ExternalID: "active-link", ActiveChatID: uuid.NullUUID{UUID: chatID, Valid: true}},
-		{ExternalID: "other-chat-link", ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}},
-		{ExternalID: "no-active-chat-link"},
-	}, nil)
-	fdb.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), gomock.Any()).Return(nil)
-
-	r.deliverChat(ctx, forkdb.GetPluginChatBindingsDueRow{
-		PluginID:    r.plugin.ID,
-		ChatID:      chatID,
-		ChatStatus:  database.ChatStatusWaiting,
-		ChatTitle:   "delivery routing",
-		ChatOwnerID: owner,
-	})
-
-	delivered := logs.String()
-	require.Contains(t, delivered, "bridge-event external_id=active-link chat_id="+chatID.String())
-	require.NotContains(t, delivered, "other-chat-link", "a link bound to another chat must not receive this chat's events")
-	require.NotContains(t, delivered, "no-active-chat-link", "a link with no active chat must not receive events")
+	return r, db, fdb, &logs
 }
 
 func nullRawMessage(s string) pqtype.NullRawMessage {
