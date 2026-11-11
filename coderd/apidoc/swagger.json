@@ -24728,7 +24728,7 @@
 				},
 				"provisioner": {
 					"type": "string",
-					"enum": ["terraform", "echo"]
+					"enum": ["terraform", "echo", "sandbox"]
 				},
 				"storage_method": {
 					"enum": ["file"],
@@ -25966,6 +25966,7 @@
 				"fork-agent-definitions",
 				"fork-subagent-isolation",
 				"fork-chat-wakeups",
+				"fork-sandbox-provisioner",
 				"example",
 				"notifications",
 				"workspace-usage",
@@ -26009,6 +26010,7 @@
 				"",
 				"",
 				"",
+				"",
 				"This isn't used for anything.",
 				"Sends notifications via SMTP and webhooks following certain events.",
 				"Enables the new workspace usage tracking.",
@@ -26033,6 +26035,7 @@
 				"ExperimentForkAgentDefinitions",
 				"ExperimentForkSubagentIsolation",
 				"ExperimentForkChatWakeups",
+				"ExperimentForkSandboxProvisioner",
 				"ExperimentExample",
 				"ExperimentNotifications",
 				"ExperimentWorkspaceUsage",

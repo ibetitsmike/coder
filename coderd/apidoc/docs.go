@@ -27195,7 +27195,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "terraform",
-                        "echo"
+                        "echo",
+                        "sandbox"
                     ]
                 },
                 "storage_method": {
@@ -28471,6 +28472,7 @@ const docTemplate = `{
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
                 "fork-chat-wakeups",
+                "fork-sandbox-provisioner",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -28514,6 +28516,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -28538,6 +28541,7 @@ const docTemplate = `{
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
                 "ExperimentForkChatWakeups",
+                "ExperimentForkSandboxProvisioner",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",

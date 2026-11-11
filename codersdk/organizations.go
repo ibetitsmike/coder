@@ -131,7 +131,7 @@ type CreateTemplateVersionRequest struct {
 	StorageMethod   ProvisionerStorageMethod `json:"storage_method" validate:"oneof=file,required" enums:"file"`
 	FileID          uuid.UUID                `json:"file_id,omitempty" validate:"required_without=ExampleID" format:"uuid"`
 	ExampleID       string                   `json:"example_id,omitempty" validate:"required_without=FileID"`
-	Provisioner     ProvisionerType          `json:"provisioner" validate:"oneof=terraform echo,required"`
+	Provisioner     ProvisionerType          `json:"provisioner" validate:"oneof=terraform echo sandbox,required"`
 	ProvisionerTags map[string]string        `json:"tags"`
 
 	UserVariableValues []VariableValue `json:"user_variable_values,omitempty"`
