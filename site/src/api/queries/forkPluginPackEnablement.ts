@@ -37,8 +37,7 @@ export type PluginPackToggle = {
 
 /**
  * Writes the new state into the cached enabled list on success, so a failed
- * refetch cannot revert the switch. For a chat target the chat is also
- * refetched.
+ * refetch cannot revert the switch.
  */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
