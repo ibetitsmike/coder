@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Manifest paths checked inside a pack directory, in priority order.
@@ -123,23 +124,100 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 
 // packRootsFor returns the pack roots of a scan root: rootPath itself when it
 // holds a manifest, plus every direct child directory that holds one. The
-// walk goes no deeper, so a cache root like ~/.claude/plugins/cache discovers
-// the packs under it without scanning unrelated subtrees.
+// walk goes no deeper, except in the Claude Code plugin cache, whose packs
+// sit three levels down (claudeCachePackRoots).
 func packRootsFor(rootPath string) []packRoot {
 	var out []packRoot
 	if pack, ok := readPluginManifest(rootPath); ok {
 		out = append(out, pack)
 	}
-	entries, err := os.ReadDir(rootPath)
-	if err != nil {
-		return out
+	for _, dir := range childDirs(rootPath) {
+		if pack, ok := readPluginManifest(dir); ok {
+			out = append(out, pack)
+		}
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	if isClaudePluginCache(rootPath) {
+		out = append(out, claudeCachePackRoots(rootPath)...)
+	}
+	return out
+}
+
+// claudePluginCacheRel is the Claude Code plugin cache relative to the home
+// directory. Claude Code copies each installed plugin version to
+// cache/<marketplace>/<plugin>/<version>/ and keeps a superseded version,
+// marked with claudeOrphanedMarker, for 14 days after an update or uninstall
+// (https://code.claude.com/docs/en/plugins/loading#find-plugins-on-disk).
+var claudePluginCacheRel = filepath.Join(".claude", "plugins", "cache")
+
+const claudeOrphanedMarker = ".orphaned_at"
+
+func isClaudePluginCache(rootPath string) bool {
+	return strings.HasSuffix(filepath.Clean(rootPath), string(filepath.Separator)+claudePluginCacheRel)
+}
+
+// claudeCachePackRoots returns one pack root per cached plugin: its newest
+// version directory that is not orphaned and holds a manifest. Emitting
+// every cached version would serve a removed or superseded copy next to
+// the current one.
+func claudeCachePackRoots(cacheDir string) []packRoot {
+	var out []packRoot
+	for _, marketplace := range childDirs(cacheDir) {
+		for _, plugin := range childDirs(marketplace) {
+			if pack, ok := currentClaudeCacheVersion(plugin); ok {
+				out = append(out, pack)
+			}
+		}
+	}
+	return out
+}
+
+func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
+	var (
+		best     packRoot
+		bestTime time.Time
+		found    bool
+	)
+	for _, versionDir := range claudeCacheLiveVersions(pluginDir) {
+		info, err := os.Stat(versionDir)
+		if err != nil {
 			continue
 		}
-		if pack, ok := readPluginManifest(filepath.Join(rootPath, e.Name())); ok {
-			out = append(out, pack)
+		pack, ok := readPluginManifest(versionDir)
+		if !ok {
+			continue
+		}
+		// Ties break on the directory name so the choice is stable.
+		if !found || info.ModTime().After(bestTime) || (info.ModTime().Equal(bestTime) && versionDir > best.Dir) {
+			best, bestTime, found = pack, info.ModTime(), true
+		}
+	}
+	return best, found
+}
+
+// claudeCacheLiveVersions returns the version directories of a cached
+// plugin that Claude Code has not orphaned.
+func claudeCacheLiveVersions(pluginDir string) []string {
+	var out []string
+	for _, versionDir := range childDirs(pluginDir) {
+		if _, err := os.Lstat(filepath.Join(versionDir, claudeOrphanedMarker)); err == nil {
+			continue
+		}
+		out = append(out, versionDir)
+	}
+	return out
+}
+
+// childDirs returns the paths of dir's immediate subdirectories. Symlinked
+// entries are skipped, like everywhere else in pack discovery.
+func childDirs(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, filepath.Join(dir, e.Name()))
 		}
 	}
 	return out
@@ -375,10 +453,21 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 	// candidate lives in the directory itself, which the scan-root and
 	// pack watches already cover.
 	dirs := packManifestCandidateDirs(rootPath)
-	if entries, err := os.ReadDir(rootPath); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				dirs = append(dirs, packManifestCandidateDirs(filepath.Join(rootPath, e.Name()))...)
+	for _, child := range childDirs(rootPath) {
+		dirs = append(dirs, packManifestCandidateDirs(child)...)
+	}
+	if isClaudePluginCache(rootPath) {
+		// Watching every level down to the version directories
+		// fires the events for a new install, a new version, and
+		// an orphan marker, which all change the chosen pack.
+		for _, marketplace := range childDirs(rootPath) {
+			out[marketplace] = struct{}{}
+			for _, plugin := range childDirs(marketplace) {
+				out[plugin] = struct{}{}
+				for _, version := range claudeCacheLiveVersions(plugin) {
+					out[version] = struct{}{}
+					dirs = append(dirs, packManifestCandidateDirs(version)...)
+				}
 			}
 		}
 	}
@@ -416,13 +505,7 @@ func (p packRoot) declaredContainerRels() []string {
 // addPackImmediateSubdirs adds the immediate subdirectories of dir to out,
 // the way the watcher watches one level inside skill containers.
 func addPackImmediateSubdirs(dir string, out map[string]struct{}) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			out[filepath.Join(dir, e.Name())] = struct{}{}
-		}
+	for _, child := range childDirs(dir) {
+		out[child] = struct{}{}
 	}
 }
