@@ -62,11 +62,71 @@ it("enables an installed pack for the target and refetches the chat", async () =
 	);
 });
 
+it("enables an installed pack for a project", async () => {
+	const user = userEvent.setup();
+	const projectTarget = {
+		kind: "project",
+		organizationId: MockForkPluginPack.organization_id,
+		projectId: "project-1",
+	} as const;
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+	]);
+	render(
+		<ForkPluginPackToggles
+			target={projectTarget}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(
+		await screen.findByRole("switch", {
+			name: `Enable ${MockForkPluginPack.name}`,
+		}),
+	);
+
+	expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledWith(
+		projectTarget,
+	);
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledWith(
+			projectTarget,
+			MockForkPluginPack.id,
+			true,
+		),
+	);
+});
+
+it("refetches both lists when Retry is pressed after a failed load", async () => {
+	const user = userEvent.setup();
+	vi.mocked(enablementApi.getEnabledPluginPacks).mockRejectedValueOnce(
+		mockApiError({ message: "Failed to list enabled plugin packs." }),
+	);
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+	]);
+	render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+	await waitFor(() => {
+		expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledTimes(2);
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	});
+});
+
 it("lists only enabled packs when the organization's packs cannot be listed", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockRejectedValue({
-		...mockApiError({ message: "Forbidden." }),
-		status: 403,
+		...mockApiError({ message: "Resource not found." }),
+		status: 404,
 	});
 	render(
 		<ForkPluginPackToggles

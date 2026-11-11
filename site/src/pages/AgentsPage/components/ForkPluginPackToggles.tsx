@@ -121,7 +121,8 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	const queryClient = useQueryClient();
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	// Listing the organization's packs needs the organization skill read
-	// permission, which members usually lack.
+	// permission, which members usually lack. The server hides that denial
+	// as a 404.
 	const installedQuery = useQuery({
 		...pluginPacks(organizationId),
 		retry: false,
@@ -136,8 +137,9 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 			}),
 	});
 	// Cached packs stay usable when a background refetch fails.
+	const installedStatus = getErrorStatus(installedQuery.error);
 	const installedError =
-		installedQuery.data || getErrorStatus(installedQuery.error) === 403
+		installedQuery.data || installedStatus === 403 || installedStatus === 404
 			? undefined
 			: installedQuery.error;
 	return (
