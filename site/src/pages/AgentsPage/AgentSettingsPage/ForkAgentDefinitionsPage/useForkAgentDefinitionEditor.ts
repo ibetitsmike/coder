@@ -5,12 +5,14 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
-	createUserAgentDefinition,
+	type AgentDefinitionScope,
+	agentDefinition,
+	agentDefinitions,
+	createAgentDefinition,
 	isNewer,
 	isResponseLost,
-	updateUserAgentDefinition,
-	userAgentDefinition,
-	userAgentDefinitions,
+	isSameScope,
+	updateAgentDefinition,
 } from "#/api/queries/forkAgentDefinitions";
 import type {
 	ForkAgentDefinition,
@@ -25,9 +27,9 @@ import {
 } from "./agentDefinitionMarkdown";
 import type { ForkAgentDefinitionEditorState } from "./ForkAgentDefinitionEditorDialog";
 
-// Targets keep the organization they were opened in, so a change of the
-// selected organization closes them instead of sending their input there.
-type EditorTarget = { organizationId: string } & (
+// Targets keep the scope they were opened in, so a change of the selected
+// organization closes them instead of sending their input there.
+type EditorTarget = { scope: AgentDefinitionScope } & (
 	| { mode: "create" }
 	| {
 			mode: "edit";
@@ -65,29 +67,29 @@ const editFormValues = (
 };
 
 /**
- * Each editor stays bound to the organization it opened in and closes when
- * the selection changes. A request whose response is lost counts as
+ * Each editor stays bound to the scope it opened in and closes when the
+ * selected scope changes. A request whose response is lost counts as
  * successful when the refetched definition shows the submitted content.
  */
-export const useForkAgentDefinitionEditor = (organizationId: string) => {
+export const useForkAgentDefinitionEditor = (scope: AgentDefinitionScope) => {
 	const queryClient = useQueryClient();
 	const [selectedEditorTarget, setEditorTarget] = useState<EditorTarget>();
 	const editorTarget =
-		selectedEditorTarget?.organizationId === organizationId
+		selectedEditorTarget && isSameScope(selectedEditorTarget.scope, scope)
 			? selectedEditorTarget
 			: undefined;
 	if (selectedEditorTarget && !editorTarget) {
 		setEditorTarget(undefined);
 	}
-	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
+	const definitionsQuery = useQuery(agentDefinitions(scope));
 	const editName = editorTarget?.mode === "edit" ? editorTarget.name : "";
 	const definitionQuery = useQuery({
-		...userAgentDefinition(queryClient, organizationId, editName),
+		...agentDefinition(queryClient, scope, editName),
 		enabled: Boolean(editName),
 	});
 
-	const createMutation = useMutation(createUserAgentDefinition(queryClient));
-	const saveMutation = useMutation(updateUserAgentDefinition(queryClient));
+	const createMutation = useMutation(createAgentDefinition(queryClient));
+	const saveMutation = useMutation(updateAgentDefinition(queryClient));
 
 	// A failed request reports its error in the editor, so the editor stays
 	// open, with the user's input, until the request settles.
@@ -113,7 +115,7 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 			),
 			isSubmitting: createMutation.isPending,
 			onSubmit: ({ name, content }, onSettled) => {
-				const listKey = userAgentDefinitions(organizationId).queryKey;
+				const listKey = agentDefinitions(scope).queryKey;
 				const getListedStatus = (): boolean | undefined =>
 					queryClient
 						.getQueryData(listKey)
@@ -133,7 +135,7 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 					}
 					try {
 						const created = await queryClient.fetchQuery(
-							userAgentDefinition(queryClient, organizationId, name),
+							agentDefinition(queryClient, scope, name),
 						);
 						return created.content === content;
 					} catch {
@@ -141,7 +143,7 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 					}
 				};
 				createMutation.mutate(
-					{ organizationId, req: { content } },
+					{ scope, req: { content } },
 					{
 						onSettled: async (_data, error) => {
 							if (await isCreated(error)) {
@@ -242,13 +244,13 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 					return;
 				}
 				saveMutation.mutate(
-					{ organizationId, name, req: { content } },
+					{ scope, name, req: { content } },
 					{
 						// A lost response can hide a save that committed, which the
 						// refetched definition then shows.
 						onSettled: (_data, error) => {
 							const saved = queryClient.getQueryData(
-								userAgentDefinition(queryClient, organizationId, name).queryKey,
+								agentDefinition(queryClient, scope, name).queryKey,
 							);
 							if (
 								!error ||
@@ -270,13 +272,13 @@ export const useForkAgentDefinitionEditor = (organizationId: string) => {
 		editorState,
 		openCreate: () => {
 			createMutation.reset();
-			setEditorTarget({ mode: "create", organizationId });
+			setEditorTarget({ mode: "create", scope });
 		},
 		openEdit: (definition: ForkAgentDefinitionMetadata) => {
 			saveMutation.reset();
 			setEditorTarget({
 				mode: "edit",
-				organizationId,
+				scope,
 				name: definition.name,
 			});
 		},

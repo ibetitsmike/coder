@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
-import { userAgentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
+import { agentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
@@ -38,7 +38,10 @@ export const MultipleOrganizations: Story = {
 		organizations: [MockDefaultOrganization, MockOrganization2],
 		queries: [
 			{
-				key: userAgentDefinitionsKey(MockDefaultOrganization.id),
+				key: agentDefinitionsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
 				data: [MockForkAgentDefinitionMetadata],
 			},
 		],

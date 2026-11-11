@@ -37,7 +37,7 @@ const ForkAgentDefinitionsPage: React.FC = () => {
 
 	return (
 		<ForkAgentDefinitionsTable
-			organizationId={organization.id}
+			scope={{ tier: "user", organizationId: organization.id }}
 			action={
 				<OrganizationField
 					id="agent-definitions-organization"
