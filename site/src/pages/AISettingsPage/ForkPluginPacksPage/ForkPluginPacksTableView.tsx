@@ -23,6 +23,8 @@ type ForkPluginPacksTableViewProps = {
 	packs: readonly ForkPluginPack[];
 	action?: React.ReactNode;
 	error: unknown;
+	/** True when the first load failed, so no cached packs exist. */
+	isLoadingError: boolean;
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
@@ -31,15 +33,24 @@ type ForkPluginPacksTableViewProps = {
 /**
  * Lists an organization's installed plugin packs. It shows a loader while
  * `isLoading`, a retryable empty state when the first load fails, and a
- * retryable alert above the cached rows when a later refetch fails.
+ * retryable alert above the cached rows, even an empty list, when a later
+ * refetch fails.
  */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
-> = ({ packs, action, error, isLoading, isRetrying, onRetry }) => {
+> = ({
+	packs,
+	action,
+	error,
+	isLoadingError,
+	isLoading,
+	isRetrying,
+	onRetry,
+}) => {
 	let tableBody: React.ReactNode;
 	if (isLoading) {
 		tableBody = <TableLoader />;
-	} else if (packs.length === 0 && error) {
+	} else if (isLoadingError) {
 		tableBody = (
 			<TableEmpty
 				message="Failed to load plugin packs"
@@ -97,7 +108,7 @@ export const ForkPluginPacksTableView: React.FC<
 				description="Plugin packs installed in this organization. Projects and chats choose which packs they use."
 				action={action}
 			/>
-			{Boolean(error) && packs.length > 0 && (
+			{Boolean(error) && !isLoadingError && (
 				<ErrorAlert
 					error={error}
 					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}

@@ -1,10 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { mockApiError } from "#/testHelpers/entities";
+import {
+	MockOrganization,
+	MockOrganization2,
+	mockApiError,
+} from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
 	MockForkPluginPackWithoutPath,
 } from "#/testHelpers/forkPluginPacks";
+import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
 import { ForkPluginPacksTableView } from "./ForkPluginPacksTableView";
 
 const meta = {
@@ -13,6 +18,7 @@ const meta = {
 	args: {
 		packs: [MockForkPluginPack, MockForkPluginPackWithoutPath],
 		error: undefined,
+		isLoadingError: false,
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
@@ -24,6 +30,20 @@ type Story = StoryObj<typeof ForkPluginPacksTableView>;
 
 export const Populated: Story = {};
 
+export const WithOrganizationPicker: Story = {
+	args: {
+		action: (
+			<OrganizationPicker
+				id="plugin-packs-organization"
+				className="w-full sm:w-60"
+				organizations={[MockOrganization, MockOrganization2]}
+				organization={MockOrganization}
+				showLabel={false}
+			/>
+		),
+	},
+};
+
 export const Empty: Story = {
 	args: { packs: [] },
 };
@@ -32,6 +52,7 @@ export const LoadError: Story = {
 	args: {
 		packs: [],
 		error: mockApiError({ message: "Failed to list plugin packs." }),
+		isLoadingError: true,
 	},
 };
 
@@ -39,6 +60,7 @@ export const Retrying: Story = {
 	args: {
 		packs: [],
 		error: mockApiError({ message: "Failed to list plugin packs." }),
+		isLoadingError: true,
 		isRetrying: true,
 	},
 };
@@ -49,6 +71,13 @@ export const Loading: Story = {
 
 export const RefetchError: Story = {
 	args: {
+		error: mockApiError({ message: "Failed to list plugin packs." }),
+	},
+};
+
+export const EmptyRefetchError: Story = {
+	args: {
+		packs: [],
 		error: mockApiError({ message: "Failed to list plugin packs." }),
 	},
 };
