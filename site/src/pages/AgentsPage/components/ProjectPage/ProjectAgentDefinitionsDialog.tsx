@@ -20,7 +20,6 @@ type ProjectAgentDefinitionsDialogProps = {
 	readonly onCloseAutoFocus: (event: Event) => void;
 };
 
-/** Manages a project's agent definitions, read-only without canEdit; onCloseAutoFocus restores focus. */
 export const ProjectAgentDefinitionsDialog: React.FC<
 	ProjectAgentDefinitionsDialogProps
 > = ({ project, open, onOpenChange, canEdit, onCloseAutoFocus }) => (
