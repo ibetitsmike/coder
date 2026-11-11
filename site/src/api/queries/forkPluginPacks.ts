@@ -19,7 +19,8 @@ export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
 
 /**
  * The query key of an organization's plugin pack list. It also prefixes the
- * keys of the organization's projects' enabled pack lists.
+ * keys of the organization's available pack list and its projects' enabled
+ * pack lists.
  */
 export const pluginPacksKey = (organizationId: string) =>
 	[...pluginPacksRootKey, organizationId] as const;

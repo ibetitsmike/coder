@@ -18,7 +18,7 @@ import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
  * refreshes it.
  */
 export const availablePluginPacksKey = (organizationId: string) =>
-	["chats", "fork-plugin-packs", organizationId, "available"] as const;
+	[...pluginPacksKey(organizationId), "available"] as const;
 
 /**
  * The query key of the plugin packs a project or chat enables directly. A
