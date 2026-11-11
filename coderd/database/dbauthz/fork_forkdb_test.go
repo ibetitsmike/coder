@@ -55,6 +55,23 @@ func TestForkQuerier(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]forkMethodCase{
+		"ClaimSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			arg := forkdb.ClaimSandboxOperationParams{ID: uuid.New(), WorkspaceID: ws.ID}
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{})
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().ClaimSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
+		},
+		"CompleteSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			arg := forkdb.CompleteSandboxOperationParams{ID: op.ID, Status: "done"}
+			fdb.EXPECT().GetSandboxOperation(gomock.Any(), op.ID).Return(op, nil).AnyTimes()
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().CompleteSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
+		},
 		"CountActiveSubagentsForCapacity": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.CountActiveSubagentsForCapacityParams{})
 			row := testutil.Fake(t, faker, forkdb.CountActiveSubagentsForCapacityRow{})
@@ -66,6 +83,22 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
+		},
+		"GetSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			fdb.EXPECT().GetSandboxOperation(gomock.Any(), op.ID).Return(op, nil).AnyTimes()
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			check.Args(op.ID).Asserts(ws, policy.ActionRead).Returns(op)
+		},
+		"GetSandboxOperationsByBuildID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			build := testutil.Fake(t, faker, database.WorkspaceBuild{WorkspaceID: ws.ID})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{})
+			db.EXPECT().GetWorkspaceBuildByID(gomock.Any(), build.ID).Return(build, nil).AnyTimes()
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().GetSandboxOperationsByBuildID(gomock.Any(), build.ID).Return([]forkdb.SandboxOperation{op}, nil).AnyTimes()
+			check.Args(build.ID).Asserts(ws, policy.ActionRead).Returns([]forkdb.SandboxOperation{op})
 		},
 		"GetFamilySubagentsAwaitingWorker": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -478,6 +511,20 @@ func TestForkQuerier(t *testing.T) {
 			arg := forkdb.UpdatePluginChatBindingFailedParams{PluginID: uuid.New(), ChatID: uuid.New(), NextAttemptAt: dbtime.Now()}
 			fdb.EXPECT().UpdatePluginChatBindingFailed(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"InsertSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			arg := forkdb.InsertSandboxOperationParams{
+				ID:               uuid.New(),
+				WorkspaceID:      ws.ID,
+				WorkspaceBuildID: uuid.New(),
+				Operation:        "create",
+				Generation:       1,
+			}
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{})
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().InsertSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
 		},
 		"InsertUserAgentDefinition": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			def := userAgentDefinition(uuid.New(), uuid.New(), "reviewer")

@@ -56,6 +56,24 @@ func (f *forkQuerier) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimD
 	return f.db.ClaimDueChatWakeups(ctx, arg)
 }
 
+// ClaimSandboxOperation authorizes as an update of the owning workspace,
+// from the workspace ID in the params directly.
+func (f *forkQuerier) ClaimSandboxOperation(ctx context.Context, arg forkdb.ClaimSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceObject(ctx, policy.ActionUpdate, arg.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.ClaimSandboxOperation(ctx, arg)
+}
+
+// CompleteSandboxOperation marks a claimed operation done or failed. It
+// authorizes as an update of the owning workspace.
+func (f *forkQuerier) CompleteSandboxOperation(ctx context.Context, arg forkdb.CompleteSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspace(ctx, policy.ActionUpdate, arg.ID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.CompleteSandboxOperation(ctx, arg)
+}
+
 func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return forkdb.PluginLinkCode{}, err
@@ -275,6 +293,54 @@ func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg 
 	return f.db.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
+// authorizeWorkspace loads a sandbox operation and authorizes the action
+// on its owning workspace.
+func (f *forkQuerier) authorizeWorkspace(ctx context.Context, action policy.Action, operationID uuid.UUID) error {
+	op, err := f.db.GetSandboxOperation(ctx, operationID)
+	if err != nil {
+		return err
+	}
+	return f.authorizeWorkspaceObject(ctx, action, op.WorkspaceID)
+}
+
+// authorizeWorkspaceObject loads a workspace by ID and authorizes the
+// action on it.
+func (f *forkQuerier) authorizeWorkspaceObject(ctx context.Context, action policy.Action, workspaceID uuid.UUID) error {
+	ws, err := f.q.db.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	return f.q.authorizeContext(ctx, action, ws)
+}
+
+// authorizeWorkspaceByBuildID loads a build and authorizes the action on
+// its owning workspace.
+func (f *forkQuerier) authorizeWorkspaceByBuildID(ctx context.Context, action policy.Action, buildID uuid.UUID) error {
+	build, err := f.q.db.GetWorkspaceBuildByID(ctx, buildID)
+	if err != nil {
+		return err
+	}
+	return f.authorizeWorkspaceObject(ctx, action, build.WorkspaceID)
+}
+
+// GetSandboxOperation authorizes as a read of the owning workspace.
+func (f *forkQuerier) GetSandboxOperation(ctx context.Context, id uuid.UUID) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspace(ctx, policy.ActionRead, id); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.GetSandboxOperation(ctx, id)
+}
+
+// GetSandboxOperationsByBuildID authorizes as a read of the owning workspace.
+// Builds of a workspace share its RBAC object, so the build list needs no
+// extra check.
+func (f *forkQuerier) GetSandboxOperationsByBuildID(ctx context.Context, workspaceBuildID uuid.UUID) ([]forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceByBuildID(ctx, policy.ActionRead, workspaceBuildID); err != nil {
+		return nil, err
+	}
+	return f.db.GetSandboxOperationsByBuildID(ctx, workspaceBuildID)
+}
+
 func (f *forkQuerier) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByName)(ctx, arg)
 }
@@ -404,6 +470,15 @@ func (f *forkQuerier) InsertProjectAgentDefinition(ctx context.Context, arg fork
 		return forkdb.AgentDefinition{}, err
 	}
 	return f.db.InsertProjectAgentDefinition(ctx, arg)
+}
+
+// InsertSandboxOperation authorizes as an update of the owning workspace,
+// from the workspace ID in the params directly.
+func (f *forkQuerier) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceObject(ctx, policy.ActionUpdate, arg.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.InsertSandboxOperation(ctx, arg)
 }
 
 func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {
