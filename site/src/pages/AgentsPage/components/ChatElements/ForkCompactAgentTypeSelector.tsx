@@ -73,9 +73,6 @@ export const ForkCompactAgentTypeSelector: React.FC<
 		onChange(name);
 		setOpen(false);
 	};
-	const checkFor = (name: string | null) =>
-		value === name && <CheckIcon className="ml-auto size-icon-sm shrink-0" />;
-
 	return (
 		<Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
 			<PopoverTrigger asChild>
@@ -115,7 +112,9 @@ export const ForkCompactAgentTypeSelector: React.FC<
 							>
 								<BotIcon />
 								<span className="truncate">{defaultAgentLabel}</span>
-								{checkFor(null)}
+								{value === null && (
+									<CheckIcon className="ml-auto size-icon-sm shrink-0" />
+								)}
 							</CommandItem>
 						</CommandGroup>
 						<CommandSeparator />
@@ -164,7 +163,9 @@ export const ForkCompactAgentTypeSelector: React.FC<
 														: agentType.root_unavailable_reason}
 												</span>
 											</span>
-											{checkFor(agentType.name)}
+											{value === agentType.name && (
+												<CheckIcon className="ml-auto size-icon-sm shrink-0" />
+											)}
 										</CommandItem>
 									))}
 								</CommandGroup>

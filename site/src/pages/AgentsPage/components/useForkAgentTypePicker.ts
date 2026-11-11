@@ -1,10 +1,11 @@
 // This file is fork code: the fork-agent-definitions experiment's agent type
-// choice for a new chat, kept here so AgentCreateForm only calls the hook.
+// choice for a new chat, kept here so AgentCreateForm only calls the hook and
+// renders ForkCompactAgentTypeSelector with its props.
 
 import { useState } from "react";
 import { useQuery } from "react-query";
 import { agentTypes } from "#/api/queries/forkAgentDefinitions";
-import { ForkCompactAgentTypeSelector } from "./ChatElements/ForkCompactAgentTypeSelector";
+import type { ForkCompactAgentTypeSelector } from "./ChatElements/ForkCompactAgentTypeSelector";
 import { useForkExperiment } from "./ChatElements/tools/forkToolUtils";
 
 type ForkAgentTypePickerOptions = {
@@ -15,9 +16,9 @@ type ForkAgentTypePickerOptions = {
 };
 
 /**
- * Returns the agent type a new chat starts as, undefined for the default
- * agent, and a render function for the picker that chooses it, null without
- * the experiment.
+ * Returns whether the experiment shows the agent type picker, the agent type
+ * a new chat starts as (undefined for the default agent), and the picker's
+ * props apart from `disabled`.
  */
 export const useForkAgentTypePicker = ({
 	organizationId,
@@ -44,20 +45,16 @@ export const useForkAgentTypePicker = ({
 	const agentType =
 		isEnabled && picked !== null && isPickedAvailable ? picked : undefined;
 
-	return {
-		agentType,
-		renderPicker: isEnabled
-			? (disabled: boolean) => (
-					<ForkCompactAgentTypeSelector
-						value={agentType ?? null}
-						agentTypes={query.data ?? []}
-						onChange={setPicked}
-						isLoading={query.isLoading}
-						error={query.data === undefined ? query.error : undefined}
-						onRetry={() => void query.refetch()}
-						disabled={disabled}
-					/>
-				)
-			: null,
+	const selectorProps: Omit<
+		React.ComponentProps<typeof ForkCompactAgentTypeSelector>,
+		"disabled"
+	> = {
+		value: agentType ?? null,
+		agentTypes: query.data ?? [],
+		onChange: setPicked,
+		isLoading: query.isLoading,
+		error: query.data === undefined ? query.error : undefined,
+		onRetry: () => void query.refetch(),
 	};
+	return { isEnabled, agentType, selectorProps };
 };
