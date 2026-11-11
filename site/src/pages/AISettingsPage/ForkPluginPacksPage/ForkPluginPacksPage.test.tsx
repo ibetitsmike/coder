@@ -151,8 +151,9 @@ it("requests the packs again when Retry is clicked after a failed load", async (
 	);
 });
 
-it("closes the install dialog when a lost response did install the pack", async () => {
+it("reports an install as done when a lost response did install the pack", async () => {
 	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
 	vi.spyOn(forkPluginPacksApi, "createPluginPack").mockRejectedValue(
 		new AxiosError("Network Error", "ERR_NETWORK"),
 	);
@@ -178,9 +179,10 @@ it("closes the install dialog when a lost response did install the pack", async 
 	await user.click(within(dialog).getByRole("button", { name: "Install" }));
 
 	await waitFor(() =>
-		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} installed.`,
+		),
 	);
-	expect(screen.getByText(MockForkPluginPack.name)).toBeInTheDocument();
 });
 
 it("reports an update as done when a lost response did update the pack", async () => {
