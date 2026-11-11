@@ -5,6 +5,7 @@ import { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import type { ForkPluginPack } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import {
 	MockNoPermissions,
@@ -23,23 +24,31 @@ vi.mock("#/hooks/useAuthenticated", () => ({
 		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
 	}),
 }));
+const dashboard = vi.hoisted((): { experiments: string[] } => ({
+	experiments: [],
+}));
 vi.mock("#/modules/dashboard/useDashboard", () => ({
 	useDashboard: () => ({
-		experiments: ["fork-plugin-packs"],
+		experiments: dashboard.experiments,
 		organizations: [MockOrganization, MockOrganization2],
 	}),
 }));
 
 const path = "/ai/settings/plugin-packs";
 
-const renderPage = () =>
+const renderPage = (search = `?org=${MockOrganization2.name}`) =>
 	renderWithRouter(
-		createMemoryRouter([{ path, element: <ForkPluginPacksPage /> }], {
-			initialEntries: [`${path}?org=${MockOrganization2.name}`],
-		}),
+		createMemoryRouter(
+			[
+				{ path, element: <ForkPluginPacksPage /> },
+				{ path: "/ai/settings", element: null },
+			],
+			{ initialEntries: [`${path}${search}`] },
+		),
 	);
 
 beforeEach(() => {
+	dashboard.experiments = ["fork-plugin-packs"];
 	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
 		Object.fromEntries(Object.keys(checks).map((key) => [key, true])),
 	);
@@ -53,7 +62,7 @@ afterEach(() => {
 });
 
 it("lists the packs of the organization the URL names", async () => {
-	renderPage();
+	renderPage(`?org=${MockOrganization2.name}`);
 
 	await waitFor(() =>
 		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
@@ -142,7 +151,7 @@ it("requests the packs again when Retry is clicked after a failed load", async (
 			mockApiError({ message: "Failed to list plugin packs." }),
 		)
 		.mockResolvedValueOnce([MockForkPluginPack]);
-	renderPage();
+	renderPage(`?org=${MockOrganization2.name}`);
 
 	await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
 
@@ -257,4 +266,157 @@ it("does not report an install when a lost response leaves only an older same-na
 	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
 	expect(create).toHaveBeenCalledTimes(1);
 	expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+it("does not report an install when a lost response follows a failed first load", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	const create = vi
+		.spyOn(forkPluginPacksApi, "createPluginPack")
+		.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
+	vi.mocked(forkPluginPacksApi.getPluginPacks).mockRejectedValueOnce(
+		mockApiError({ message: "Failed to list plugin packs." }),
+	);
+	renderPage();
+	await screen.findByRole("button", { name: "Retry" });
+
+	await user.click(
+		await screen.findByRole("button", { name: "Install plugin pack" }),
+	);
+	const dialog = await screen.findByRole("dialog");
+	await user.type(
+		within(dialog).getByLabelText(/^Name/),
+		MockForkPluginPack.name,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Git repository URL/),
+		MockForkPluginPack.source_url,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Ref/),
+		MockForkPluginPack.ref,
+	);
+	await user.click(within(dialog).getByRole("button", { name: "Install" }));
+
+	// The refetch lists a pack with the submitted name, but no list from before
+	// the request shows that it is new.
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+	);
+	await waitFor(() =>
+		expect(
+			within(dialog).getByRole("button", { name: "Install" }),
+		).toBeEnabled(),
+	);
+	expect(create).toHaveBeenCalledTimes(1);
+	expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+it("moves focus to the table when the last pack is deleted without permission to install", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
+		Object.fromEntries(
+			Object.keys(checks).map((key) => [
+				key,
+				!key.endsWith(".createOrganizationSkill"),
+			]),
+		),
+	);
+	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockResolvedValue();
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPack])
+		.mockResolvedValue([]);
+	renderPage();
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+	await user.click(
+		within(await screen.findByRole("dialog")).getByRole("button", {
+			name: "Delete",
+		}),
+	);
+
+	await waitFor(() =>
+		expect(document.activeElement).toBe(
+			screen.getByRole("table", { name: "Plugin packs" }),
+		),
+	);
+});
+
+it("keeps the row menu reachable and starts no second update while one is pending", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	let finishUpdate: (pack: ForkPluginPack) => void = () => {};
+	const update = vi
+		.spyOn(forkPluginPacksApi, "updatePluginPack")
+		.mockReturnValue(
+			new Promise((resolve) => {
+				finishUpdate = resolve;
+			}),
+		);
+	renderPage();
+	const menu = await screen.findByRole("button", {
+		name: `More actions for ${MockForkPluginPack.name}`,
+	});
+
+	await user.click(menu);
+	await user.click(
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		}),
+	);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	expect(menu).toBeEnabled();
+
+	await user.click(menu);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Updating…" }),
+	);
+	expect(update).toHaveBeenCalledTimes(1);
+
+	finishUpdate(MockForkPluginPack);
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} is at 0123456789.`,
+		),
+	);
+});
+
+it("switches the organization through the picker", async () => {
+	const user = userEvent.setup();
+	const { router } = renderPage("");
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization.id,
+		),
+	);
+
+	await user.click(await screen.findByRole("combobox"));
+	await user.click(
+		await screen.findByRole("option", { name: /My Organization 2/ }),
+	);
+
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization2.id,
+		),
+	);
+	expect(new URLSearchParams(router.state.location.search).get("org")).toBe(
+		MockOrganization2.name,
+	);
+});
+
+it("redirects to AI settings while the experiment is off", async () => {
+	dashboard.experiments = [];
+	const { router } = renderPage(`?org=${MockOrganization.name}`);
+
+	await waitFor(() =>
+		expect(router.state.location.pathname).toBe("/ai/settings"),
+	);
+	expect(API.checkAuthorization).not.toHaveBeenCalled();
+	expect(forkPluginPacksApi.getPluginPacks).not.toHaveBeenCalled();
 });
