@@ -1,0 +1,105 @@
+// This file is fork code: the "@" agent menu of the fork-agent-definitions
+// experiment.
+
+import { MenuOption } from "@lexical/react/LexicalTypeaheadMenuPlugin";
+import { cn } from "cn";
+import type { ChatSkillSource } from "#/api/typesGenerated";
+import {
+	Popover,
+	PopoverAnchor,
+	PopoverContent,
+} from "#/components/Popover/Popover";
+
+/** An agent type the "@" menu offers, by the name spawn_agent accepts. */
+export type AgentMention = {
+	name: string;
+	source: "built-in" | ChatSkillSource;
+	description: string;
+};
+
+/** Adapts an agent mention to Lexical's typeahead menu options. */
+export class AgentMentionOption extends MenuOption {
+	constructor(readonly agent: AgentMention) {
+		super(`${agent.source}:${agent.name}`);
+	}
+}
+
+type ForkAgentMentionMenuProps = {
+	/** The composer box the menu is pinned above. */
+	anchor: HTMLElement | null;
+	options: readonly AgentMentionOption[];
+	selectedIndex: number | null;
+	/** Why the list may be incomplete, such as a source still loading. */
+	status?: string;
+	onSelect: (option: AgentMentionOption) => void;
+	onHighlight: (index: number) => void;
+};
+
+/** Renders the "@" typeahead listbox above the composer. */
+export const ForkAgentMentionMenu: React.FC<ForkAgentMentionMenuProps> = ({
+	anchor,
+	options,
+	selectedIndex,
+	status,
+	onSelect,
+	onHighlight,
+}) => (
+	<Popover open={anchor !== null}>
+		{anchor && <PopoverAnchor virtualRef={{ current: anchor }} />}
+		{/* The editor's aria-activedescendant names these option ids. */}
+		<PopoverContent
+			disablePortal
+			role="presentation"
+			align="start"
+			side="top"
+			sideOffset={8}
+			className="w-(--radix-popper-anchor-width) overflow-hidden p-1 mobile-full-width-dropdown mobile-full-width-dropdown-above-composer"
+			onMouseDown={(event) => event.preventDefault()}
+			onOpenAutoFocus={(event) => event.preventDefault()}
+			onCloseAutoFocus={(event) => event.preventDefault()}
+		>
+			<div className="max-h-72 min-h-0 overflow-y-auto mobile-full-width-dropdown-scroll-area">
+				{options.map((option, index) => (
+					<button
+						type="button"
+						key={option.key}
+						ref={option.setRefElement}
+						id={`typeahead-item-${index}`}
+						role="option"
+						tabIndex={-1}
+						aria-selected={selectedIndex === index}
+						className={cn(
+							"flex w-full cursor-default select-none flex-col gap-1 rounded-sm border-0 bg-transparent px-2 py-2 text-left font-medium text-content-secondary text-sm",
+							selectedIndex === index &&
+								"bg-surface-secondary text-content-primary ring-2 ring-content-link ring-inset",
+						)}
+						onMouseEnter={() => onHighlight(index)}
+						onClick={() => onSelect(option)}
+					>
+						<div className="flex items-center gap-2 text-xs">
+							<span className="truncate font-mono">@{option.agent.name}</span>
+							<span className="ml-auto text-content-secondary">
+								{option.agent.source}
+							</span>
+						</div>
+						<div className="line-clamp-2 text-content-secondary text-xs">
+							{option.agent.description}
+						</div>
+					</button>
+				))}
+				{/* Stays mounted so screen readers announce status changes. */}
+				<div
+					role="status"
+					className={cn(status && "px-2 py-2 text-content-secondary text-sm")}
+				>
+					{status}
+				</div>
+				{options.length === 0 && !status && (
+					<div className="py-6 text-center text-sm">
+						No agents match that query.
+					</div>
+				)}
+			</div>
+		</PopoverContent>
+	</Popover>
+);
