@@ -1,3 +1,4 @@
+import { AxiosError } from "axios";
 import { MutationObserver, QueryClient } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
@@ -8,6 +9,8 @@ import {
 import {
 	createPluginPackMutation,
 	pluginPacksKey,
+	reconcileInstalledPluginPack,
+	reconcileUpdatedPluginPack,
 	updatePluginPackMutation,
 } from "./forkPluginPacks";
 
@@ -65,6 +68,25 @@ describe("createPluginPackMutation", () => {
 		]);
 	});
 
+	it("keeps a cached pack that is newer than the response", async () => {
+		const queryClient = createQueryClient();
+		const mockNewerListedPack = {
+			...MockForkPluginPack,
+			updated_at: "2026-11-12T12:00:00Z",
+		};
+		queryClient.setQueryData(listKey, [mockNewerListedPack]);
+		vi.spyOn(forkPluginPacksApi, "createPluginPack").mockResolvedValue(
+			MockForkPluginPack,
+		);
+
+		await new MutationObserver(
+			queryClient,
+			createPluginPackMutation(queryClient, organizationId),
+		).mutate(req);
+
+		expect(queryClient.getQueryData(listKey)).toEqual([mockNewerListedPack]);
+	});
+
 	it("replaces a cached pack that has the same name", async () => {
 		const queryClient = createQueryClient();
 		const mockRecreatedPack = { ...MockForkPluginPack, id: "recreated-pack" };
@@ -102,6 +124,25 @@ describe("updatePluginPackMutation", () => {
 		expect(queryClient.getQueryData(listKey)).toBeUndefined();
 	});
 
+	it("keeps a cached pack that is newer than the response", async () => {
+		const queryClient = createQueryClient();
+		const mockNewerListedPack = {
+			...MockForkPluginPack,
+			updated_at: "2026-11-12T12:00:00Z",
+		};
+		queryClient.setQueryData(listKey, [mockNewerListedPack]);
+		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue(
+			mockNewerPack,
+		);
+
+		await new MutationObserver(
+			queryClient,
+			updatePluginPackMutation(queryClient, organizationId),
+		).mutate(MockForkPluginPack);
+
+		expect(queryClient.getQueryData(listKey)).toEqual([mockNewerListedPack]);
+	});
+
 	it("replaces the cached copy of the newer pack", async () => {
 		const queryClient = createQueryClient();
 		queryClient.setQueryData(listKey, [
@@ -121,5 +162,85 @@ describe("updatePluginPackMutation", () => {
 			mockNewerPack,
 			MockForkPluginPackWithoutPath,
 		]);
+	});
+});
+
+describe("reconcileInstalledPluginPack", () => {
+	const lostResponse = new AxiosError("Network Error", "ERR_NETWORK");
+	const req = {
+		name: MockForkPluginPack.name,
+		source_url: MockForkPluginPack.source_url,
+		source_path: MockForkPluginPack.source_path,
+		ref: MockForkPluginPack.ref,
+	};
+
+	it("finds an unfamiliar pack with the submitted source", () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(listKey, [MockForkPluginPack]);
+
+		expect(
+			reconcileInstalledPluginPack(
+				queryClient,
+				organizationId,
+				req,
+				[],
+				lostResponse,
+			),
+		).toEqual(MockForkPluginPack);
+	});
+
+	it.each([
+		["source URL", { source_url: "https://git.example.com/other.git" }],
+		["path", { source_path: "other" }],
+		["ref", { ref: "main" }],
+	])("ignores a same-name pack with another %s", (_field, change) => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(listKey, [{ ...MockForkPluginPack, ...change }]);
+
+		expect(
+			reconcileInstalledPluginPack(
+				queryClient,
+				organizationId,
+				req,
+				[],
+				lostResponse,
+			),
+		).toBeUndefined();
+	});
+});
+
+describe("reconcileUpdatedPluginPack", () => {
+	const lostResponse = new AxiosError("Network Error", "ERR_NETWORK");
+	const mockRefreshedPack = {
+		...MockForkPluginPack,
+		updated_at: "2026-11-12T12:00:00Z",
+	};
+
+	it("finds a refreshed pack that keeps the ref", () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(listKey, [mockRefreshedPack]);
+
+		expect(
+			reconcileUpdatedPluginPack(
+				queryClient,
+				organizationId,
+				MockForkPluginPack,
+				lostResponse,
+			),
+		).toEqual(mockRefreshedPack);
+	});
+
+	it("ignores a refreshed pack that has another ref", () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(listKey, [{ ...mockRefreshedPack, ref: "main" }]);
+
+		expect(
+			reconcileUpdatedPluginPack(
+				queryClient,
+				organizationId,
+				MockForkPluginPack,
+				lostResponse,
+			),
+		).toBeUndefined();
 	});
 });

@@ -2,6 +2,7 @@
 // fork-plugin-packs experiment.
 
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
+import { getErrorStatus } from "#/api/errors";
 import {
 	getEnabledPluginPacks,
 	type PluginPackTarget,
@@ -24,6 +25,7 @@ export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 			] as const)
 		: ([...pluginPacksRootKey, "chats", target.chatId] as const);
 
+/** Query options for the plugin packs a project or chat enables directly. */
 export const enabledPluginPacks = (target: PluginPackTarget) =>
 	queryOptions({
 		queryKey: enabledPluginPacksKey(target),
@@ -37,11 +39,13 @@ export type PluginPackToggle = {
 
 /**
  * Writes the new state into the cached enabled list on success, so a failed
- * refetch cannot revert the switch.
+ * refetch cannot revert the switch. A 404 means the pack was deleted, so the
+ * organization's pack lists are refetched too.
  */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
 	target: PluginPackTarget,
+	organizationId: string,
 ) =>
 	mutationOptions({
 		mutationFn: ({ pack, enabled }: PluginPackToggle) =>
@@ -58,11 +62,15 @@ export const setPluginPackEnabledMutation = (
 					: others;
 			});
 		},
-		onSettled: async () => {
+		onSettled: async (_data, error) => {
 			await Promise.all([
 				queryClient.invalidateQueries({
 					queryKey: enabledPluginPacksKey(target),
 				}),
+				getErrorStatus(error) === 404 &&
+					queryClient.invalidateQueries({
+						queryKey: pluginPacksKey(organizationId),
+					}),
 				// The chat's context lists only resources from enabled packs, and
 				// waiting chats are not polled, so refetch it for the slash menu.
 				target.kind === "chat" &&
