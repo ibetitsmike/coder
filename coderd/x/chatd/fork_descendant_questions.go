@@ -30,9 +30,12 @@ const (
 	descendantQuestionPollInterval = 2 * time.Second
 	descendantQuestionNote         = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
 		"Call wait_agent again to wait until the child resumes and finishes, or answer it yourself with message_agent."
-	// descendantSecretQuestionNote leaves out message_agent: a message
-	// would answer the question without the secret value.
-	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. Only the user can give it, in the root chat. " +
+	// descendantSecretQuestionNote leaves out message_agent, which would
+	// answer the question without the secret value, and forbids asking for
+	// the value in chat, which would put it in model context.
+	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. " +
+		"The user enters it in the question panel above the root chat's input, which keeps it out of every model's context. " +
+		"Never ask the user to send the value as a chat message or to give it to you. " +
 		"Call wait_agent again to wait until the child resumes and finishes."
 )
 

@@ -215,7 +215,7 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 	}
 	switch {
 	case pending && question.Secret() && resume:
-		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can give in the root chat")
+		return xerrors.New("cannot message the child agent: it waits for a secret answer, which only the user can enter, in the question panel above the root chat's input; never ask the user to send the value as a chat message")
 	case pending && question.Secret():
 		return ErrSecretQuestionPending
 	}
@@ -291,7 +291,10 @@ func (p *Server) createSubagentChatWithID(
 	input chatstate.CreateChatInput,
 ) (chatstate.CreateChatResult, error) {
 	nested := p.nestedSubagentsEnabled()
-	isolation, isolated := subagentIsolationFromContext(ctx)
+	isolation, isolated, err := p.subagentIsolationOf(ctx, customAgent)
+	if err != nil {
+		return chatstate.CreateChatResult{}, err
+	}
 	if !isolated && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		worktree, bound, err := p.chatWorktree(ctx, parent)
 		if err != nil {
@@ -320,7 +323,6 @@ func (p *Server) createSubagentChatWithID(
 	var workspacePrompt chatstate.Message
 	switch {
 	case isolated && isolation.isolation == subagentIsolationWorkspace:
-		var err error
 		workspaceSource, err = p.subagentWorkspaceSourceOf(ctx, parent, input)
 		if err != nil {
 			return chatstate.CreateChatResult{}, err
@@ -350,7 +352,7 @@ func (p *Server) createSubagentChatWithID(
 	buffer := chatstate.NewPublishBuffer(publisher)
 	defer buffer.Discard()
 	var result chatstate.CreateChatResult
-	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+	err = forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
 		// Without nested subagents the parent is a root chat that was
 		// already validated, so only its depth is needed.
 		var depth int32

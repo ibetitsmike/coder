@@ -660,7 +660,8 @@ const parseUpdatedAtInstant = (updatedAt: string) => {
 	};
 };
 
-const compareUpdatedAtInstants = (a: string, b: string): number => {
+/** Orders two API timestamps to their full sub-millisecond precision. */
+export const compareUpdatedAtInstants = (a: string, b: string): number => {
 	const parsedA = parseUpdatedAtInstant(a);
 	const parsedB = parseUpdatedAtInstant(b);
 	if (!parsedA || !parsedB) {
