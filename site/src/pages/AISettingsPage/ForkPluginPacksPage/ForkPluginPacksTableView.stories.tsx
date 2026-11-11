@@ -17,6 +17,7 @@ const meta = {
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
+		updatingPackIds: new Set(),
 		onInstall: fn(),
 		onUpdate: fn(),
 		onDelete: fn(),
@@ -37,7 +38,7 @@ export const UpdateOnly: Story = {
 };
 
 export const Updating: Story = {
-	args: { updatingPackId: MockForkPluginPack.id },
+	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
 };
 
 export const Empty: Story = {
@@ -59,6 +60,14 @@ export const LoadError: Story = {
 	args: {
 		packs: [],
 		error: mockApiError({ message: "Failed to list plugin packs." }),
+	},
+};
+
+export const Retrying: Story = {
+	args: {
+		packs: [],
+		error: mockApiError({ message: "Failed to list plugin packs." }),
+		isRetrying: true,
 	},
 };
 

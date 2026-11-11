@@ -22,6 +22,7 @@ import {
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
+import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
 
@@ -42,12 +43,22 @@ type ForkPluginPacksTableViewProps = {
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
-	updatingPackId?: string;
+	updatingPackIds: ReadonlySet<string>;
+	/** Registers the buttons that open dialogs, so closing one restores focus. */
+	focusReturn?: Pick<
+		ReturnType<typeof useDialogFocusReturn>,
+		"rememberTrigger" | "setPrimaryFallback" | "setSecondaryFallback"
+	>;
 	onInstall: () => void;
 	onUpdate: (pack: ForkPluginPack) => void;
 	onDelete: (pack: ForkPluginPack) => void;
 };
 
+/**
+ * Lists an organization's installed plugin packs. It shows a loader while
+ * `isLoading`, a retryable empty state when the first load fails, and a
+ * retryable alert above the cached rows when a later refetch fails.
+ */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
 > = ({
@@ -58,17 +69,26 @@ export const ForkPluginPacksTableView: React.FC<
 	isLoading,
 	isRetrying,
 	onRetry,
-	updatingPackId,
+	updatingPackIds,
+	focusReturn,
 	onInstall,
 	onUpdate,
 	onDelete,
 }) => {
-	const installAction = access.create && (
-		<Button variant="outline" onClick={onInstall}>
-			<PlusIcon aria-hidden="true" />
-			Install plugin pack
-		</Button>
-	);
+	const installAction = (ref?: React.Ref<HTMLButtonElement>) =>
+		access.create && (
+			<Button
+				ref={ref}
+				variant="outline"
+				onClick={(event) => {
+					focusReturn?.rememberTrigger(event);
+					onInstall();
+				}}
+			>
+				<PlusIcon aria-hidden="true" />
+				Install plugin pack
+			</Button>
+		);
 	const hasRowActions = access.update || access.delete;
 
 	let tableBody: React.ReactNode;
@@ -92,11 +112,11 @@ export const ForkPluginPacksTableView: React.FC<
 			<TableEmpty
 				message="No plugin packs installed"
 				description="Install a Claude Code or Cursor plugin from Git, then enable it on a project or chat to use its skills and agents."
-				cta={installAction}
+				cta={installAction()}
 			/>
 		);
 	} else {
-		tableBody = packs.map((pack) => (
+		tableBody = packs.map((pack, index) => (
 			<TableRow key={pack.id}>
 				<TableCell className="max-w-48 truncate" title={pack.name}>
 					{pack.name}
@@ -130,7 +150,14 @@ export const ForkPluginPacksTableView: React.FC<
 									size="icon"
 									variant="subtle"
 									aria-label={`More actions for ${pack.name}`}
-									disabled={updatingPackId === pack.id}
+									disabled={updatingPackIds.has(pack.id)}
+									// A deleted row takes its menu button with it, so focus
+									// returns to the first remaining row's button.
+									ref={
+										index === 0 ? focusReturn?.setPrimaryFallback : undefined
+									}
+									onPointerDown={focusReturn?.rememberTrigger}
+									onKeyDown={focusReturn?.rememberTrigger}
 								>
 									<EllipsisVerticalIcon aria-hidden="true" />
 								</Button>
@@ -165,7 +192,7 @@ export const ForkPluginPacksTableView: React.FC<
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
-						{installAction}
+						{installAction(focusReturn?.setSecondaryFallback)}
 					</div>
 				}
 			/>
