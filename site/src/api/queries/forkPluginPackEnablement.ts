@@ -10,6 +10,7 @@ import {
 } from "#/api/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 import { chatEntityKey } from "./chats";
+import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
 
 /**
  * The query key of the plugin packs any organization member may enable. It
@@ -27,13 +28,11 @@ export const availablePluginPacksKey = (organizationId: string) =>
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
-				"chats",
-				"fork-plugin-packs",
-				target.organizationId,
+				...pluginPacksKey(target.organizationId),
 				"projects",
 				target.projectId,
 			] as const)
-		: (["chats", "fork-plugin-packs", "chats", target.chatId] as const);
+		: ([...pluginPacksRootKey, "chats", target.chatId] as const);
 
 /** Query options for the plugin packs any organization member may enable. */
 export const availablePluginPacks = (organizationId: string) =>
@@ -55,8 +54,7 @@ export type PluginPackToggle = {
 
 /**
  * Writes the new state into the cached enabled list on success, so a failed
- * refetch cannot revert the switch. For a chat target the chat is also
- * refetched.
+ * refetch cannot revert the switch.
  */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,

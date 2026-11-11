@@ -14,12 +14,15 @@ import type {
 } from "#/api/typesGenerated";
 import { invalidateList, isResponseLost } from "./forkAgentDefinitions";
 
+/** The key prefix shared by every plugin pack query. */
+export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
+
 /**
  * The query key of an organization's plugin pack list. It also prefixes the
  * keys of the organization's projects' enabled pack lists.
  */
 export const pluginPacksKey = (organizationId: string) =>
-	["chats", "fork-plugin-packs", organizationId] as const;
+	[...pluginPacksRootKey, organizationId] as const;
 
 /** Query options for the plugin packs installed in an organization. */
 export const pluginPacks = (organizationId: string) =>
