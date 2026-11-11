@@ -79,7 +79,6 @@ const ForkPluginPacksPage: React.FC = () => {
 				)}
 				{organization && (
 					<OrganizationPluginPacks
-						key={organization.id}
 						organization={organization}
 						picker={
 							<OrganizationPicker

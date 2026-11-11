@@ -105,10 +105,14 @@ export const ForkPluginPacksTableView: React.FC<
 				description="Plugin packs installed in this organization. Projects and chats choose which packs they use."
 				action={action}
 			/>
-			{Boolean(error) && !isLoadingError && (
+			{Boolean(error) && (
 				<ErrorAlert
 					error={error}
-					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+					actions={
+						isLoadingError ? undefined : (
+							<RetryButton isRetrying={isRetrying} onRetry={onRetry} />
+						)
+					}
 				/>
 			)}
 			<Table aria-label={title}>
