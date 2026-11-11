@@ -33,11 +33,14 @@ func newWebhookRunner(t *testing.T) *runner {
 		logger: testutil.Logger(t),
 	}
 	require.NoError(t, r.decode())
+	// Build before the deadline starts: a cold wasm build can exceed
+	// WaitSuperLong and does not observe the context.
+	wasm := plugintest.BuildWasm(t, echoPluginPackage)
 	ctx := testutil.Context(t, testutil.WaitSuperLong)
 	client, err := pluginhost.StartInProcess(ctx, testutil.Logger(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
-	_, err = client.Load(ctx, plugintest.BuildWasm(t, echoPluginPackage), sandbox.Limits{CallTimeout: testutil.WaitShort})
+	_, err = client.Load(ctx, wasm, sandbox.Limits{CallTimeout: testutil.WaitShort})
 	require.NoError(t, err)
 	r.client = client
 	r.ready = make(chan struct{})
