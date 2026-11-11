@@ -8,6 +8,7 @@ import {
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
+import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
 
 /**
  * The query key of the plugin packs a project or chat enables directly. A
@@ -16,13 +17,11 @@ import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
-				"chats",
-				"fork-plugin-packs",
-				target.organizationId,
+				...pluginPacksKey(target.organizationId),
 				"projects",
 				target.projectId,
 			] as const)
-		: (["chats", "fork-plugin-packs", "chats", target.chatId] as const);
+		: ([...pluginPacksRootKey, "chats", target.chatId] as const);
 
 export const enabledPluginPacks = (target: PluginPackTarget) =>
 	queryOptions({
