@@ -162,8 +162,18 @@ func TestMaterializePluginPacks(t *testing.T) {
 	t.Run("RepinsEachDirtyChatOncePerWrite", func(t *testing.T) {
 		t.Parallel()
 		pack := insertPack("repin", "plugin.json")
-		job := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{OrganizationID: org.ID})
-		resource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{JobID: job.ID})
+		// Chatd reads the agent's snapshot through dbauthz, which resolves
+		// the agent's workspace, so the agent needs a full build.
+		version := dbgen.TemplateVersion(t, db, database.TemplateVersion{OrganizationID: org.ID, CreatedBy: user.ID})
+		tmpl := dbgen.Template(t, db, database.Template{OrganizationID: org.ID, ActiveVersionID: version.ID, CreatedBy: user.ID})
+		ws := dbgen.Workspace(t, db, database.WorkspaceTable{OwnerID: user.ID, OrganizationID: org.ID, TemplateID: tmpl.ID})
+		job := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{
+			OrganizationID: org.ID, CompletedAt: sql.NullTime{Time: dbtime.Now(), Valid: true},
+		})
+		dbgen.WorkspaceBuild(t, db, database.WorkspaceBuild{
+			WorkspaceID: ws.ID, TemplateVersionID: version.ID, JobID: job.ID, Transition: database.WorkspaceTransitionStart,
+		})
+		resource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{JobID: job.ID, Transition: database.WorkspaceTransitionStart})
 		agent := dbgen.WorkspaceAgent(t, db, database.WorkspaceAgent{ResourceID: resource.ID})
 		pushSnapshot := func(hash string, sourcePaths ...string) {
 			now := dbtime.Now()
@@ -186,7 +196,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 		newAgentChat := func() database.Chat {
 			chat := dbgen.Chat(t, db, database.Chat{
 				OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID,
-				AgentID: uuid.NullUUID{UUID: agent.ID, Valid: true},
+				WorkspaceID: uuid.NullUUID{UUID: ws.ID, Valid: true}, AgentID: uuid.NullUUID{UUID: agent.ID, Valid: true},
 			})
 			_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID})
 			require.NoError(t, err)
