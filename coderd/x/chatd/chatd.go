@@ -439,6 +439,9 @@ type CreateOptions struct {
 	InlineMCPServers   []codersdk.InlineMCPServerRequest
 	Labels             database.StringMap
 	DynamicTools       json.RawMessage
+	// RootAgent, from ResolveRootAgent, is the agent type the chat starts
+	// as. Fork: fork-agent-definitions.
+	RootAgent *RootAgent
 }
 
 // SendMessageBusyBehavior controls what happens when a chat is already active.
@@ -611,6 +614,10 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		return database.Chat{}, xerrors.New("title is required")
 	}
 	opts.TitleSource = cmp.Or(opts.TitleSource, database.ChatTitleSourceFallback)
+	opts, err := withRootAgent(opts)
+	if err != nil {
+		return database.Chat{}, err
+	}
 	initialStatus := database.ChatStatusWaiting
 	if len(opts.InitialUserContent) > 0 {
 		initialStatus = database.ChatStatusRunning
@@ -643,6 +650,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 	if err != nil {
 		return database.Chat{}, err
 	}
+	deploymentPrompt = opts.RootAgent.deploymentPrompt(deploymentPrompt)
 	organizationPrompt, err := p.resolveOrganizationSystemPrompt(ctx, opts.OrganizationID)
 	if err != nil {
 		return database.Chat{}, err
@@ -724,6 +732,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 	if opts.WorkspaceID.Valid {
 		workspaceAwareness = workspaceAttachedAwareness
 	}
+	workspaceAwareness = opts.RootAgent.workspaceAwareness(workspaceAwareness)
 	workspaceAwarenessContent, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
 		codersdk.ChatMessageText(workspaceAwareness),
 	})
@@ -765,6 +774,8 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 			return database.Chat{}, xerrors.Errorf("marshal initial user content: %w", marshalErr)
 		}
 		initialMessages = append(initialMessages, userMessage(userContent, opts.ModelConfigID, cmp.Or(opts.CreatedBy, opts.OwnerID), opts.ReasoningEffort))
+	} else {
+		initialMessages[len(initialMessages)-1].ReasoningEffort = opts.RootAgent.idleReasoningEffort(opts.ReasoningEffort)
 	}
 
 	result, err := chatstate.CreateChatWithID(ctx, p.db, p.pubsub, chatID, chatstate.CreateChatInput{
@@ -796,7 +807,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		FileIDs:         chatprompt.FileIDs(contentParts),
 		InitialStatus:   initialStatus,
 		MaxFileLinks:    p.chatLimits.MaxAttachmentsPerChat,
-		ForkAfterInsert: loop.afterChatInsert(cmp.Or(opts.CreatedBy, opts.OwnerID), p.clock.Now()),
+		ForkAfterInsert: chainAfterInsert(loop.afterChatInsert(cmp.Or(opts.CreatedBy, opts.OwnerID), p.clock.Now()), rootAgentAfterInsert(opts.RootAgent)),
 	})
 	if err != nil {
 		return database.Chat{}, err

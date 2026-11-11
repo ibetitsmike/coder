@@ -1,7 +1,8 @@
 package coderd
 
-// This file is fork code: it reports the agent type of child chats in chat
-// responses when the fork-agent-definitions experiment is enabled.
+// This file is fork code: it reports the agent type of child chats, and of
+// root chats that started as an agent type, in chat responses when the
+// fork-agent-definitions experiment is enabled.
 
 import (
 	"context"
@@ -14,9 +15,9 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 )
 
-// fillForkWatchedChatAgentType sets AgentType on a created child chat in a
-// watch event. The Agents page adds a created child from the event alone,
-// so without it a new child shows no type until the next chat list fetch.
+// fillForkWatchedChatAgentType sets AgentType on a created chat in a watch
+// event. The Agents page adds a created chat from the event alone, so
+// without it a new chat shows no type until the next chat list fetch.
 func (api *API) fillForkWatchedChatAgentType(ctx context.Context, event *codersdk.ChatWatchEvent) {
 	if event.Kind != codersdk.ChatWatchEventKindCreated {
 		return
@@ -27,28 +28,26 @@ func (api *API) fillForkWatchedChatAgentType(ctx context.Context, event *codersd
 }
 
 // fillForkChatAgentTypes sets AgentType on every child chat in chats and
-// their embedded children. It is best effort: a failed lookup leaves the
-// field empty.
+// their embedded children, and on each root chat that started as an agent
+// type. It is best effort: a failed lookup leaves the field empty.
 func (api *API) fillForkChatAgentTypes(ctx context.Context, chats []codersdk.Chat) {
 	if !api.Experiments.Enabled(codersdk.ExperimentForkAgentDefinitions) {
 		return
 	}
-	children := map[uuid.UUID]*codersdk.Chat{}
+	byID := map[uuid.UUID]*codersdk.Chat{}
 	var collect func(chats []codersdk.Chat)
 	collect = func(chats []codersdk.Chat) {
 		for i := range chats {
-			if chats[i].ParentChatID != nil {
-				children[chats[i].ID] = &chats[i]
-			}
+			byID[chats[i].ID] = &chats[i]
 			collect(chats[i].Children)
 		}
 	}
 	collect(chats)
-	if len(children) == 0 {
+	if len(byID) == 0 {
 		return
 	}
-	ids := make([]uuid.UUID, 0, len(children))
-	for id := range children {
+	ids := make([]uuid.UUID, 0, len(byID))
+	for id := range byID {
 		ids = append(ids, id)
 	}
 	fdb, err := forkdb.From(api.Database)
@@ -65,7 +64,7 @@ func (api *API) fillForkChatAgentTypes(ctx context.Context, chats []codersdk.Cha
 		return
 	}
 	for _, row := range rows {
-		if chat, ok := children[row.ChatID]; ok {
+		if chat, ok := byID[row.ChatID]; ok {
 			chat.AgentType = row.AgentType
 		}
 	}
