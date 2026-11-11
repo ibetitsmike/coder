@@ -131,6 +131,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		? getErrorDetail(deleteState.error)
 		: undefined;
 
+	const hasRowActions = access.update || access.delete;
+
 	let tableBody: React.ReactNode;
 	if (isLoading) {
 		tableBody = <TableLoader />;
@@ -176,8 +178,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 					<TableCell className="hidden whitespace-nowrap sm:table-cell">
 						{formatUpdatedAt(definition.updated_at)}
 					</TableCell>
-					<TableCell className="text-right">
-						{(access.update || access.delete) && (
+					{hasRowActions && (
+						<TableCell className="text-right">
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
@@ -209,8 +211,8 @@ export const ForkAgentDefinitionsTableView: React.FC<
 									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
-						)}
-					</TableCell>
+						</TableCell>
+					)}
 				</TableRow>
 			);
 		});
@@ -261,9 +263,11 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						<TableHead className="hidden whitespace-nowrap sm:table-cell">
 							Updated
 						</TableHead>
-						<TableHead className="w-14">
-							<span className="sr-only">Actions</span>
-						</TableHead>
+						{hasRowActions && (
+							<TableHead className="w-14">
+								<span className="sr-only">Actions</span>
+							</TableHead>
+						)}
 					</TableRow>
 				</TableHeader>
 				<TableBody size="lg">{tableBody}</TableBody>

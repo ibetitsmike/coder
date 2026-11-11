@@ -12,8 +12,15 @@ type SkillEnabledSwitchProps = {
 	readOnly: boolean;
 };
 
-/** The read-only form of the enabled switch. */
-export const SkillEnabledStatus: React.FC<{ enabled: boolean }> = ({
+type SkillEnabledStatusProps = {
+	enabled: boolean;
+};
+
+/**
+ * Shows whether a skill is enabled as an accessible image, for users who
+ * cannot change it, so the status stays out of the tab order.
+ */
+export const SkillEnabledStatus: React.FC<SkillEnabledStatusProps> = ({
 	enabled,
 }) =>
 	enabled ? (
