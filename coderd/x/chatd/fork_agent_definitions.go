@@ -55,21 +55,30 @@ func forkLookupSubagentDefinition(ctx context.Context, p *Server, chat database.
 		}
 		return def, true
 	}
-	types := customAgentTypes(ctx, p, chat)
+	agentType, ok := lookupCustomAgentType(customAgentTypes(ctx, p, chat), id)
+	if !ok {
+		return subagentDefinition{}, false
+	}
+	return customSubagentDefinition(agentType, agentType.Description), true
+}
+
+// lookupCustomAgentType returns the type in types that id names, by its bare
+// name when only one tier defines it or by its tier-qualified name.
+func lookupCustomAgentType(types []customAgentType, id string) (customAgentType, bool) {
 	resolved := make([]skillspkg.ResolvedSkill, 0, len(types))
 	for _, agentType := range types {
 		resolved = append(resolved, agentType.ResolvedSkill)
 	}
 	match, err := skillspkg.Lookup(resolved, id)
 	if err != nil {
-		return subagentDefinition{}, false
+		return customAgentType{}, false
 	}
 	for _, agentType := range types {
 		if agentType.ResolvedSkill == match {
-			return customSubagentDefinition(agentType, agentType.Description), true
+			return agentType, true
 		}
 	}
-	return subagentDefinition{}, false
+	return customAgentType{}, false
 }
 
 // customAgentType is a custom agent type from one tier. load reads and
@@ -106,6 +115,12 @@ func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []cust
 	if !p.agentDefinitionsEnabled() || chat.ID == uuid.Nil {
 		return nil
 	}
+	return mergeCustomAgentTypes(workspaceAgentDefinitions(ctx, p, chat), p.storedAgentTypes(ctx, chat))
+}
+
+// mergeCustomAgentTypes merges the workspace definitions with the stored
+// tiers, as customAgentTypes describes.
+func mergeCustomAgentTypes(workspace []workspacesdk.AgentDefinition, stored []tierAgentType) []customAgentType {
 	tiers := map[skillspkg.Source][]skillspkg.Skill{}
 	loaders := map[string]func(context.Context) (workspacesdk.AgentDefinition, error){}
 	add := func(agentType tierAgentType) {
@@ -116,7 +131,7 @@ func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []cust
 		loaders[alias] = agentType.load
 		tiers[agentType.source] = append(tiers[agentType.source], skillspkg.Skill{Name: agentType.name, Description: agentType.description})
 	}
-	for _, def := range workspaceAgentDefinitions(ctx, p, chat) {
+	for _, def := range workspace {
 		add(tierAgentType{
 			source:      skillspkg.SourceWorkspace,
 			name:        def.Name,
@@ -124,7 +139,7 @@ func customAgentTypes(ctx context.Context, p *Server, chat database.Chat) []cust
 			load:        func(context.Context) (workspacesdk.AgentDefinition, error) { return def, nil },
 		})
 	}
-	for _, agentType := range p.storedAgentTypes(ctx, chat) {
+	for _, agentType := range stored {
 		add(agentType)
 	}
 
@@ -153,6 +168,12 @@ func workspaceAgentDefinitions(ctx context.Context, p *Server, chat database.Cha
 			slog.F("chat_id", chat.ID), slog.Error(err))
 		return nil
 	}
+	return parseAgentDefinitionResources(resources)
+}
+
+// parseAgentDefinitionResources parses the OK agent definition files in
+// resources and skips the rest.
+func parseAgentDefinitionResources(resources []database.ChatContextResource) []workspacesdk.AgentDefinition {
 	var defs []workspacesdk.AgentDefinition
 	for _, resource := range resources {
 		if resource.BodyKind != database.WorkspaceAgentContextBodyKindSubagent ||
@@ -368,15 +389,11 @@ func customSubagentDefinition(agentType customAgentType, description string) sub
 			}
 			// spawnAgent applies an explicit reasoning_effort after
 			// buildOptions, so it still wins over the definition's.
-			if def.ReasoningEffort != "" {
-				effort := strings.ToLower(def.ReasoningEffort)
-				if !chatprovider.IsValidReasoningEffort(effort) {
-					return childSubagentChatOptions{}, xerrors.Errorf(
-						"agent %q sets reasoning_effort %q, which is not one of %s",
-						def.Name, def.ReasoningEffort,
-						strings.Join(codersdk.ChatModelReasoningEffortValues(), ", "),
-					)
-				}
+			effort, err := customAgentReasoningEffort(def)
+			if err != nil {
+				return childSubagentChatOptions{}, err
+			}
+			if effort != "" {
 				options.reasoningEffortOverride = &effort
 			}
 			options.systemPrompt = def.Prompt
@@ -384,6 +401,20 @@ func customSubagentDefinition(agentType customAgentType, description string) sub
 			return options, nil
 		},
 	}
+}
+
+// customAgentReasoningEffort returns the definition's reasoning effort in
+// lower case, or "" when it sets none.
+func customAgentReasoningEffort(def workspacesdk.AgentDefinition) (string, error) {
+	effort := strings.ToLower(def.ReasoningEffort)
+	if effort != "" && !chatprovider.IsValidReasoningEffort(effort) {
+		return "", xerrors.Errorf(
+			"agent %q sets reasoning_effort %q, which is not one of %s",
+			def.Name, def.ReasoningEffort,
+			strings.Join(codersdk.ChatModelReasoningEffortValues(), ", "),
+		)
+	}
+	return effort, nil
 }
 
 // resolveCustomAgentModel matches the definition's model against the models

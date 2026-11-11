@@ -1,53 +1,127 @@
 // This file is fork code: queries for the fork-agent-definitions experiment.
 
 import { isAxiosError } from "axios";
-import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
+	hashKey,
+	mutationOptions,
+	type QueryClient,
+	queryOptions,
+} from "react-query";
+import {
+	type AgentTypesParams,
 	createOrganizationAgentDefinition,
+	createProjectAgentDefinition,
 	createUserAgentDefinition,
 	deleteOrganizationAgentDefinition,
+	deleteProjectAgentDefinition,
 	deleteUserAgentDefinition,
+	getAgentTypes,
 	getOrganizationAgentDefinition,
+	getOrganizationAgentDefinitionACL,
+	getOrganizationAgentDefinitionACLAvailable,
 	getOrganizationAgentDefinitions,
+	getProjectAgentDefinition,
+	getProjectAgentDefinitions,
 	getUserAgentDefinition,
 	getUserAgentDefinitions,
 	updateOrganizationAgentDefinition,
+	updateOrganizationAgentDefinitionACL,
+	updateProjectAgentDefinition,
 	updateUserAgentDefinition,
 } from "#/api/forkAgentDefinitions";
 import { compareUpdatedAtInstants } from "#/api/queries/chats";
 import type {
+	ACLAvailable,
 	CreateForkAgentDefinitionRequest,
+	ForkAgentDefinition,
+	ForkAgentDefinitionMetadata,
 	UpdateForkAgentDefinitionRequest,
+	UpdateOrganizationSkillACLRequest,
+	UsersRequest,
 } from "#/api/typesGenerated";
 
 /**
  * Where agent definitions live: the current user's personal definitions in
- * an organization, or the organization's own.
+ * an organization, the organization's own, or a project's.
  */
-export type AgentDefinitionScope = {
-	tier: "user" | "organization";
-	organizationId: string;
-};
+export type AgentDefinitionScope =
+	| { tier: "user" | "organization"; organizationId: string }
+	| { tier: "project"; organizationId: string; projectId: string };
+
+/** Query key for the agent definitions in a scope. */
+export const agentDefinitionsKey = (scope: AgentDefinitionScope) =>
+	[
+		"chats",
+		"fork-agent-definitions",
+		scope.tier,
+		scope.organizationId,
+		...(scope.tier === "project" ? [scope.projectId] : []),
+	] as const;
 
 /** Whether two scopes name the same definitions. */
 export const isSameScope = (a: AgentDefinitionScope, b: AgentDefinitionScope) =>
-	a.tier === b.tier && a.organizationId === b.organizationId;
+	hashKey(agentDefinitionsKey(a)) === hashKey(agentDefinitionsKey(b));
 
-/** Query key for the agent definitions in a scope. */
-export const agentDefinitionsKey = ({
-	tier,
-	organizationId,
-}: AgentDefinitionScope) =>
-	["chats", "fork-agent-definitions", tier, organizationId] as const;
+type ScopeEndpoints = {
+	list: () => Promise<ForkAgentDefinitionMetadata[]>;
+	get: (name: string) => Promise<ForkAgentDefinition>;
+	create: (
+		req: CreateForkAgentDefinitionRequest,
+	) => Promise<ForkAgentDefinition>;
+	update: (
+		name: string,
+		req: UpdateForkAgentDefinitionRequest,
+	) => Promise<ForkAgentDefinition>;
+	remove: (name: string) => Promise<void>;
+};
+
+const scopeEndpoints = (scope: AgentDefinitionScope): ScopeEndpoints => {
+	const { organizationId } = scope;
+	switch (scope.tier) {
+		case "user":
+			return {
+				list: () => getUserAgentDefinitions(organizationId),
+				get: (name) => getUserAgentDefinition(organizationId, name),
+				create: (req) => createUserAgentDefinition(organizationId, req),
+				update: (name, req) =>
+					updateUserAgentDefinition(organizationId, name, req),
+				remove: (name) => deleteUserAgentDefinition(organizationId, name),
+			};
+		case "organization":
+			return {
+				list: () => getOrganizationAgentDefinitions(organizationId),
+				get: (name) => getOrganizationAgentDefinition(organizationId, name),
+				create: (req) => createOrganizationAgentDefinition(organizationId, req),
+				update: (name, req) =>
+					updateOrganizationAgentDefinition(organizationId, name, req),
+				remove: (name) =>
+					deleteOrganizationAgentDefinition(organizationId, name),
+			};
+		case "project": {
+			const { projectId } = scope;
+			return {
+				list: () => getProjectAgentDefinitions(organizationId, projectId),
+				get: (name) =>
+					getProjectAgentDefinition(organizationId, projectId, name),
+				create: (req) =>
+					createProjectAgentDefinition(organizationId, projectId, req),
+				update: (name, req) =>
+					updateProjectAgentDefinition(organizationId, projectId, name, req),
+				remove: (name) =>
+					deleteProjectAgentDefinition(organizationId, projectId, name),
+			};
+		}
+	}
+};
+
+const agentDefinitionKey = (scope: AgentDefinitionScope, name: string) =>
+	[...agentDefinitionsKey(scope), name] as const;
 
 /** Query options for the agent definitions in a scope. */
 export const agentDefinitions = (scope: AgentDefinitionScope) =>
 	queryOptions({
 		queryKey: agentDefinitionsKey(scope),
-		queryFn: () =>
-			scope.tier === "user"
-				? getUserAgentDefinitions(scope.organizationId)
-				: getOrganizationAgentDefinitions(scope.organizationId),
+		queryFn: () => scopeEndpoints(scope).list(),
 	});
 
 /**
@@ -61,16 +135,14 @@ export const agentDefinition = (
 	name: string,
 ) =>
 	queryOptions({
-		queryKey: [...agentDefinitionsKey(scope), name] as const,
+		queryKey: agentDefinitionKey(scope, name),
 		queryFn: async () => {
 			const listKey = agentDefinitions(scope).queryKey;
 			const listed = queryClient
 				.getQueryData(listKey)
 				?.find((definition) => definition.name === name);
 			try {
-				return await (scope.tier === "user"
-					? getUserAgentDefinition(scope.organizationId, name)
-					: getOrganizationAgentDefinition(scope.organizationId, name));
+				return await scopeEndpoints(scope).get(name);
 			} catch (error) {
 				if (isAxiosError(error) && error.response?.status === 404 && listed) {
 					queryClient.setQueryData(listKey, (definitions) =>
@@ -118,9 +190,7 @@ type CreateAgentDefinitionArgs = {
 export const createAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ scope, req }: CreateAgentDefinitionArgs) =>
-			scope.tier === "user"
-				? createUserAgentDefinition(scope.organizationId, req)
-				: createOrganizationAgentDefinition(scope.organizationId, req),
+			scopeEndpoints(scope).create(req),
 		// A list without the name may predate the commit or follow a delete;
 		// only the refetch below can tell, so the created row is added until it
 		// settles. The rows keep the API's order by name.
@@ -167,9 +237,7 @@ type UpdateAgentDefinitionArgs = {
 export const updateAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ scope, name, req }: UpdateAgentDefinitionArgs) =>
-			scope.tier === "user"
-				? updateUserAgentDefinition(scope.organizationId, name, req)
-				: updateOrganizationAgentDefinition(scope.organizationId, name, req),
+			scopeEndpoints(scope).update(name, req),
 		// Writing the result keeps an accepted change visible even if the
 		// reconciling refetch below fails.
 		// Rows match by name, as the request does, so a stale row of a
@@ -214,9 +282,7 @@ type DeleteAgentDefinitionArgs = {
 export const deleteAgentDefinition = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ scope, name }: DeleteAgentDefinitionArgs) =>
-			scope.tier === "user"
-				? deleteUserAgentDefinition(scope.organizationId, name)
-				: deleteOrganizationAgentDefinition(scope.organizationId, name),
+			scopeEndpoints(scope).remove(name),
 		onSuccess: (_data, { scope, name }) => {
 			queryClient.setQueryData(
 				agentDefinitions(scope).queryKey,
@@ -231,4 +297,90 @@ export const deleteAgentDefinition = (queryClient: QueryClient) =>
 					isResponseLost(error) ||
 					(isAxiosError(error) && error.response?.status === 404),
 			}),
+	});
+
+const organizationAgentDefinitionACLKey = (
+	organizationId: string,
+	name: string,
+) =>
+	[
+		...agentDefinitionKey({ tier: "organization", organizationId }, name),
+		"acl",
+	] as const;
+
+/** Query options for who can read an organization agent definition. */
+export const organizationAgentDefinitionACL = (
+	organizationId: string,
+	name: string,
+) =>
+	queryOptions({
+		queryKey: organizationAgentDefinitionACLKey(organizationId, name),
+		queryFn: () => getOrganizationAgentDefinitionACL(organizationId, name),
+	});
+
+/**
+ * Query options for the members and groups matching a sharing search. Plain
+ * options, not queryOptions(), so ACLPrincipalAutocomplete accepts them.
+ */
+export const organizationAgentDefinitionACLAvailable = (
+	organizationId: string,
+	name: string,
+	options: UsersRequest,
+) => ({
+	queryKey: [
+		...organizationAgentDefinitionACLKey(organizationId, name),
+		"available",
+		options,
+	] as const,
+	queryFn: (): Promise<ACLAvailable> =>
+		getOrganizationAgentDefinitionACLAvailable(organizationId, name, options),
+});
+
+type UpdateOrganizationAgentDefinitionACLArgs = {
+	organizationId: string;
+	name: string;
+	req: UpdateOrganizationSkillACLRequest;
+};
+
+/**
+ * Saves a sparse ACL change to an organization definition, the only tier
+ * with an ACL.
+ */
+export const updateAgentDefinitionACL = (queryClient: QueryClient) =>
+	mutationOptions({
+		mutationFn: ({
+			organizationId,
+			name,
+			req,
+		}: UpdateOrganizationAgentDefinitionACLArgs) =>
+			updateOrganizationAgentDefinitionACL(organizationId, name, req),
+		// Saving an ACL bumps the definition's updated_at, so its metadata is
+		// stale.
+		onSuccess: (_data, { organizationId, name }) => {
+			const scope: AgentDefinitionScope = {
+				tier: "organization",
+				organizationId,
+			};
+			return Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: organizationAgentDefinitionACLKey(organizationId, name),
+					exact: true,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: agentDefinitionsKey(scope),
+					exact: true,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: agentDefinitionKey(scope, name),
+					exact: true,
+				}),
+			]);
+		},
+	});
+
+/** Query options for the agent types a new chat in an organization can start as. */
+export const agentTypes = (organizationId: string, params: AgentTypesParams) =>
+	queryOptions({
+		queryKey: ["chats", "fork-agent-types", organizationId, params] as const,
+		queryFn: () => getAgentTypes(organizationId, params),
 	});

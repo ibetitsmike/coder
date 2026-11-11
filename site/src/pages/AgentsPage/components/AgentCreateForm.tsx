@@ -58,8 +58,10 @@ import {
 import { getErrorTitle } from "./ChatConversation/chatStatusHelpers";
 import { CompactOrgSelector } from "./ChatElements/CompactOrgSelector";
 import { CompactProjectSelector } from "./ChatElements/CompactProjectSelector";
+import { ForkCompactAgentTypeSelector } from "./ChatElements/ForkCompactAgentTypeSelector";
 import { ChatProjectDialog } from "./ChatsSidebar/dialogs/ChatProjectDialog";
 import { getModelSelectorHelp } from "./ModelSelectorHelp";
+import { useForkAgentTypePicker } from "./useForkAgentTypePicker";
 
 /** @internal Exported for testing. */
 export const emptyInputStorageKey = "agents.empty-input";
@@ -89,6 +91,7 @@ export type CreateChatOptions = {
 	/** The project the chat joins, when the form composes for one. */
 	projectId?: string;
 	planMode?: TypesGen.ChatPlanMode;
+	agentType?: string;
 	// When present, the submit carries files destined for the chat's
 	// workspace. The page creates the chat without content, runs this
 	// callback to upload against the new chat ID, then sends the first
@@ -766,6 +769,12 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 			chatInputRef.current?.removeSkills(["project"]);
 		}
 	}, [organizationId, chatProjectId]);
+	const forkAgentType = useForkAgentTypePicker({
+		organizationId,
+		projectId: chatProjectId,
+		workspaceId: effectiveWorkspaceId ?? undefined,
+		modelConfigId: submittedModel,
+	});
 	const handleSend = async (
 		message: string,
 		fileIDs?: string[],
@@ -786,6 +795,7 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 					? [...effectiveMCPServerIds]
 					: undefined,
 			planMode: planModeEnabled ? "plan" : undefined,
+			agentType: forkAgentType.agentType,
 			uploadWorkspaceFiles,
 		}).catch((err) => {
 			resetDraft();
@@ -990,7 +1000,9 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 				{personalModelOverridesQuery.error != null && (
 					<ErrorAlert error={personalModelOverridesQuery.error} />
 				)}
-				{(showOrgSelector || showProjectSelector) && (
+				{(showOrgSelector ||
+					showProjectSelector ||
+					forkAgentType.isEnabled) && (
 					<div className="flex min-w-0 items-center gap-1">
 						{showOrgSelector && (
 							<CompactOrgSelector
@@ -1034,6 +1046,12 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 								}
 								onRetry={() => void projectsQuery.refetch()}
 								disabled={isSubmitPending}
+							/>
+						)}
+						{forkAgentType.isEnabled && (
+							<ForkCompactAgentTypeSelector
+								{...forkAgentType.selectorProps}
+								disabled={isSubmitPending || isForbidden}
 							/>
 						)}
 					</div>

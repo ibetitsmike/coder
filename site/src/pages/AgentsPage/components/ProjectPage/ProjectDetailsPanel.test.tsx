@@ -7,6 +7,7 @@ import {
 } from "react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
+import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import { chatProjectInstructionsKey } from "#/api/queries/chatProjects";
 import type {
 	ChatProject,
@@ -24,6 +25,7 @@ import {
 	MockUserMember,
 	mockApiError,
 } from "#/testHelpers/entities";
+import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { createTestQueryClient } from "#/testHelpers/renderHelpers";
 import { MockDisabledSkill, MockSkills } from "#/testHelpers/skills";
 import themes, { DEFAULT_THEME } from "#/theme";
@@ -36,10 +38,14 @@ vi.mock("#/hooks/useAuthenticated", async () => {
 	};
 });
 
+const dashboard = vi.hoisted((): { experiments: string[] } => ({
+	experiments: [],
+}));
 vi.mock("#/modules/dashboard/useDashboard", async () => {
 	const { MockDefaultOrganization } = await import("#/testHelpers/entities");
 	return {
 		useDashboard: () => ({
+			experiments: dashboard.experiments,
 			organizations: [MockDefaultOrganization],
 			showOrganizations: true,
 		}),
@@ -109,6 +115,7 @@ describe("ProjectDetailsPanel", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		focusManager.setFocused(undefined);
+		dashboard.experiments = [];
 	});
 
 	it("creates instructions and shows the saved text without refetching", async () => {
@@ -572,6 +579,63 @@ describe("ProjectDetailsPanel", () => {
 		await user.click(await screen.findByRole("button", { name: "Close" }));
 
 		await waitFor(() => expect(skillsButton).toHaveFocus());
+	});
+
+	it("opens the project agent definitions from the Agent definitions row", async () => {
+		dashboard.experiments = ["fork-agent-definitions"];
+		mockInstructions(MockChatProjectInstructions);
+		vi.spyOn(API.experimental, "getChatProjectSkills").mockResolvedValue([]);
+		vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getProjectAgentDefinitions",
+		).mockResolvedValue([
+			MockForkAgentDefinitionMetadata,
+			{
+				...MockForkAgentDefinitionMetadata,
+				id: "planner",
+				name: "planner",
+				enabled: false,
+			},
+		]);
+		const getDefinition = vi
+			.spyOn(forkAgentDefinitionsApi, "getProjectAgentDefinition")
+			.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+		const { user } = renderPanel();
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Agent definitions: 2 agents, 1 disabled",
+			}),
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+
+		await waitFor(() =>
+			expect(getDefinition).toHaveBeenCalledWith(
+				MockChatProject.organization_id,
+				MockChatProject.id,
+				MockForkAgentDefinitionMetadata.name,
+			),
+		);
+	});
+
+	it("does not load project agent definitions while the experiment is off", async () => {
+		mockInstructions(MockChatProjectInstructions);
+		const getSkills = vi
+			.spyOn(API.experimental, "getChatProjectSkills")
+			.mockResolvedValue([]);
+		const getDefinitions = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getProjectAgentDefinitions",
+		);
+		renderPanel();
+
+		await waitFor(() => expect(getSkills).toHaveBeenCalled());
+		expect(getDefinitions).not.toHaveBeenCalled();
 	});
 
 	it("opens the project access dialog from Manage access, refetches access, and returns focus when it closes", async () => {

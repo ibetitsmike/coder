@@ -510,10 +510,7 @@ func (p *Server) childGetsOrchestrationPrompt(
 	childMode database.NullChatMode,
 	customAgent *workspacesdk.AgentDefinition,
 ) bool {
-	if !p.nestedSubagentsEnabled() || !subagentModeCanSpawn(childMode) {
-		return false
-	}
-	if customAgent != nil && !customAgentToolPolicyFromDefinition(*customAgent).keepsOrchestrationTools() {
+	if !p.nestedSubagentsEnabled() || !keepsOrchestrationTools(childMode, customAgent) {
 		return false
 	}
 	fdb, err := forkdb.From(p.db)
@@ -534,6 +531,14 @@ func (p *Server) childGetsOrchestrationPrompt(
 		return false
 	}
 	return int(depth)+2 <= limits.maxDepth
+}
+
+// keepsOrchestrationTools reports whether a chat with mode and customAgent
+// (nil for built-in types) keeps the subagent tools that the orchestration
+// guidance tells it to call.
+func keepsOrchestrationTools(mode database.NullChatMode, customAgent *workspacesdk.AgentDefinition) bool {
+	return subagentModeCanSpawn(mode) &&
+		(customAgent == nil || customAgentToolPolicyFromDefinition(*customAgent).keepsOrchestrationTools())
 }
 
 const upstreamSpawnAgentChildToolsSentence = "The child cannot spawn its own subagents; its tools depend on its type and mode. "

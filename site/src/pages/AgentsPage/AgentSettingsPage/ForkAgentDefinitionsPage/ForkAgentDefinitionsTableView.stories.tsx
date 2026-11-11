@@ -56,6 +56,10 @@ export const Empty: Story = {
 	args: { definitions: [] },
 };
 
+export const EmptyReadOnly: Story = {
+	args: { definitions: [], access: readOnlySkillAccess },
+};
+
 export const TogglesPending: Story = {
 	args: {
 		pendingToggles: {

@@ -4928,6 +4928,136 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl/available": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get available organization agent definition ACL users and groups",
+                "operationId": "get-available-organization-agent-definition-acl-users-and-groups",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent definition name",
+                        "name": "agentDefinition",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User search query; free-text search also applies to groups",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "User after ID",
+                        "name": "after_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page limit for users and groups, if 0 returns all candidates",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "User page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ACLAvailable"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/organizations/{organization}/agent-types": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List agent types",
+                "operationId": "list-agent-types",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Project ID",
+                        "name": "project",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Workspace ID",
+                        "name": "workspace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Model config ID of the new root chat",
+                        "name": "model_config_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ForkAgentType"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions": {
             "get": {
                 "produces": [
@@ -23413,7 +23543,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "agent_type": {
-                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name, or the type a root chat started as.\nOnly set with the fork-agent-definitions experiment.",
                     "type": "string"
                 },
                 "archived": {
@@ -26585,6 +26715,10 @@ const docTemplate = `{
         "codersdk.CreateChatRequest": {
             "type": "object",
             "properties": {
+                "agent_type": {
+                    "description": "AgentType starts the chat as an agent type, like spawn_agent's\ntype: general, explore, or a personal, organization or project\nagent definition. It requires the fork-agent-definitions\nexperiment.",
+                    "type": "string"
+                },
                 "client_type": {
                     "$ref": "#/definitions/codersdk.ChatClientType"
                 },
@@ -28889,6 +29023,38 @@ const docTemplate = `{
                 "updated_at": {
                     "type": "string",
                     "format": "date-time"
+                }
+            }
+        },
+        "codersdk.ForkAgentType": {
+            "type": "object",
+            "properties": {
+                "base_type": {
+                    "description": "BaseType is general, explore or computer_use.",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "model": {
+                    "description": "Model is the definition's model, or empty when the type runs on the\nchat's model.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the type that spawn_agent and CreateChatRequest.AgentType\naccept: the bare name, or the source-qualified name, such as\npersonal/reviewer, when several sources define the name.",
+                    "type": "string"
+                },
+                "root_available": {
+                    "description": "RootAvailable reports whether a new root chat can start as the type.",
+                    "type": "boolean"
+                },
+                "root_unavailable_reason": {
+                    "description": "RootUnavailableReason says why a new root chat cannot start as the\ntype.",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Source is builtin, personal, org, project or workspace.",
+                    "type": "string"
                 }
             }
         },

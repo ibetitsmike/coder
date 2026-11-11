@@ -50,7 +50,7 @@ export type ForkAgentDefinitionDeleteState = {
 	onClose: () => void;
 };
 
-type ForkAgentDefinitionsTableViewProps = {
+export type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
 	description: string;
 	emptyMessage: string;
@@ -71,6 +71,14 @@ type ForkAgentDefinitionsTableViewProps = {
 	onCreate: () => void;
 	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	/**
+	 * The caller opens its own dialog and passes onCloseAutoFocus to it so
+	 * focus returns to the row's menu.
+	 */
+	onManagePermissions?: (
+		definition: ForkAgentDefinitionMetadata,
+		onCloseAutoFocus: (event: Event) => void,
+	) => void;
 	editorState?: ForkAgentDefinitionEditorState;
 	deleteState?: ForkAgentDefinitionDeleteState;
 };
@@ -118,6 +126,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	onCreate,
 	onEdit,
 	onDelete,
+	onManagePermissions,
 	editorState,
 	deleteState,
 }) => {
@@ -131,7 +140,23 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		? getErrorDetail(deleteState.error)
 		: undefined;
 
-	const hasRowActions = access.update || access.delete;
+	const createAction = (ref?: React.Ref<HTMLButtonElement>) =>
+		access.create && (
+			<Button
+				ref={ref}
+				variant="outline"
+				onClick={(event) => {
+					rememberTrigger(event);
+					onCreate();
+				}}
+			>
+				<PlusIcon aria-hidden="true" />
+				New agent definition
+			</Button>
+		);
+
+	const hasRowActions =
+		access.update || access.delete || Boolean(onManagePermissions);
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
@@ -150,7 +175,19 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			/>
 		);
 	} else if (definitions.length === 0) {
-		tableBody = <TableEmpty message={emptyMessage} />;
+		tableBody = (
+			<TableEmpty
+				message={emptyMessage}
+				description={
+					<>
+						Chats can also use agents from their workspace. Add a Claude Code or
+						Cursor agent file at <code>.claude/agents/&lt;name&gt;.md</code> and
+						chats in that workspace can spawn it with spawn_agent.
+					</>
+				}
+				cta={createAction()}
+			/>
+		);
 	} else {
 		tableBody = definitions.map((definition, index) => {
 			const pendingEnabled = pendingToggles[definition.name];
@@ -201,6 +238,15 @@ export const ForkAgentDefinitionsTableView: React.FC<
 											Edit
 										</DropdownMenuItem>
 									)}
+									{onManagePermissions && (
+										<DropdownMenuItem
+											onClick={() =>
+												onManagePermissions(definition, restoreFocus)
+											}
+										>
+											Manage permissions
+										</DropdownMenuItem>
+									)}
 									{access.delete && (
 										<DropdownMenuItem
 											className="text-content-destructive focus:text-content-destructive"
@@ -226,19 +272,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
-						{access.create && (
-							<Button
-								ref={setSecondaryFallback}
-								variant="outline"
-								onClick={(event) => {
-									rememberTrigger(event);
-									onCreate();
-								}}
-							>
-								<PlusIcon aria-hidden="true" />
-								New agent definition
-							</Button>
-						)}
+						{createAction(setSecondaryFallback)}
 					</div>
 				}
 			/>

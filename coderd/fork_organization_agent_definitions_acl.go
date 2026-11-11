@@ -55,6 +55,28 @@ func (api *API) forkOrganizationAgentDefinitionACL(rw http.ResponseWriter, r *ht
 	httpapi.Write(ctx, rw, http.StatusOK, codersdk.OrganizationSkillACL{Users: users, Groups: groups})
 }
 
+// @Summary Get available organization agent definition ACL users and groups
+// @ID get-available-organization-agent-definition-acl-users-and-groups
+// @Security CoderSessionToken
+// @Tags Chats
+// @Produce json
+// @Param organization path string true "Organization ID or name"
+// @Param agentDefinition path string true "Agent definition name"
+// @Param q query string false "User search query; free-text search also applies to groups"
+// @Param after_id query string false "User after ID" format(uuid)
+// @Param limit query int false "Page limit for users and groups, if 0 returns all candidates"
+// @Param offset query int false "User page offset"
+// @Success 200 {object} codersdk.ACLAvailable
+// @Router /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl/available [get]
+// @x-apidocgen {"skip": true}
+func (api *API) forkOrganizationAgentDefinitionACLAvailable(rw http.ResponseWriter, r *http.Request) {
+	row, ok := api.readForkOrganizationAgentDefinitionForShare(rw, r)
+	if !ok {
+		return
+	}
+	api.writeOrganizationACLAvailable(rw, r, row.OrganizationID)
+}
+
 // @Summary Update an organization agent definition ACL
 // @ID update-an-organization-agent-definition-acl
 // @Security CoderSessionToken
