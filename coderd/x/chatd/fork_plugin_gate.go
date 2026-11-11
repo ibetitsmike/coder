@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -90,9 +92,9 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 }
 
 // enabledPackNames returns the names of the packs enabled for the chat's
-// project, when the chat owner can use it, and for the chat's root chat, so
-// subagents see the packs of the chat that spawned them. A failed lookup is
-// logged and enables nothing, so the gate fails closed.
+// project, when the chat owner can use it, for the chat, and for its root
+// chat, so subagents also see the packs of the chat that spawned them. A
+// failed lookup is logged and enables nothing, so the gate fails closed.
 func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[string]bool {
 	enabled := map[string]bool{}
 	logger := p.logger.With(slog.F("chat_id", chat.ID))
@@ -101,11 +103,12 @@ func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[s
 		logger.Warn(ctx, "fork queries unavailable for plugin pack enablement", slog.Error(err))
 		return enabled
 	}
-	// Like project skills, enablement is read as chatd once the owner passes
-	// the usable-project check, so the gate does not depend on the caller.
+	// Like project skills, enablement and the usable-project check run as
+	// chatd and answer for the chat owner, so the gate does not depend on
+	// the caller.
 	//nolint:gocritic // Pack enablement applies to the chat owner, not the caller.
 	chatdCtx := dbauthz.AsChatd(ctx)
-	if projectID := p.resolveUsableChatProjectID(ctx, logger, chat); projectID.Valid {
+	if projectID := p.resolveUsableChatProjectID(chatdCtx, logger, chat); projectID.Valid {
 		rows, err := fdb.GetPluginPacksByProjectID(chatdCtx, projectID.UUID)
 		if err != nil {
 			logger.Warn(ctx, "failed to list project plugin packs", slog.F("project_id", projectID.UUID), slog.Error(err))
@@ -114,17 +117,19 @@ func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[s
 			enabled[row.Name] = true
 		}
 	}
-	rootChatID := chat.ID
-	if chat.RootChatID.Valid {
-		rootChatID = chat.RootChatID.UUID
+	chatIDs := []uuid.UUID{chat.ID}
+	if chat.RootChatID.Valid && chat.RootChatID.UUID != chat.ID {
+		chatIDs = append(chatIDs, chat.RootChatID.UUID)
 	}
-	rows, err := fdb.GetPluginPacksByChatID(chatdCtx, rootChatID)
-	// The agent type catalog passes a chat that does not exist yet.
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		logger.Warn(ctx, "failed to list chat plugin packs", slog.F("root_chat_id", rootChatID), slog.Error(err))
-	}
-	for _, row := range rows {
-		enabled[row.Name] = true
+	for _, chatID := range chatIDs {
+		rows, err := fdb.GetPluginPacksByChatID(chatdCtx, chatID)
+		// The agent type catalog passes a chat that does not exist yet.
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			logger.Warn(ctx, "failed to list chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
+		}
+		for _, row := range rows {
+			enabled[row.Name] = true
+		}
 	}
 	return enabled
 }
