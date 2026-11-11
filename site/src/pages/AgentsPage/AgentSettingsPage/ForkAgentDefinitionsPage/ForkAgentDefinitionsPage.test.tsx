@@ -1233,4 +1233,39 @@ describe("ForkAgentDefinitionsPage", () => {
 			{ enabled: false },
 		);
 	});
+
+	describe("organization tier", () => {
+		it("toggles an organization definition through the organization route", async () => {
+			const user = userEvent.setup();
+			vi.spyOn(
+				forkAgentDefinitionsApi,
+				"getOrganizationAgentDefinitions",
+			).mockResolvedValue([MockForkAgentDefinitionMetadata]);
+			const update = vi
+				.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinition")
+				.mockResolvedValue({ ...MockForkAgentDefinitionMetadata, content: "" });
+			render(
+				<ForkAgentDefinitionsTable
+					scope={{
+						tier: "organization",
+						organizationId: MockDefaultOrganization.id,
+					}}
+				/>,
+			);
+
+			await user.click(
+				await screen.findByRole("switch", {
+					name: `Enable ${MockForkAgentDefinitionMetadata.name}`,
+				}),
+			);
+
+			await waitFor(() =>
+				expect(update).toHaveBeenCalledWith(
+					MockDefaultOrganization.id,
+					MockForkAgentDefinitionMetadata.name,
+					{ enabled: false },
+				),
+			);
+		});
+	});
 });
