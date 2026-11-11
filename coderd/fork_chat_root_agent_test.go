@@ -123,7 +123,7 @@ func TestForkCreateChatAgentType(t *testing.T) {
 		agentType string
 		detail    string
 	}{
-		{name: "Unknown", client: client, agentType: "nope", detail: "type must be one of: general, explore, reviewer"},
+		{name: "Unknown", client: client, agentType: "nope", detail: "type must be one of: general, explore, private, reviewer ("},
 		{name: "WorkspaceQualified", client: client, agentType: "workspace/reviewer", detail: "only be used through spawn_agent"},
 		{name: "WorkspaceOnly", client: client, agentType: "workspace-only", detail: "only be used through spawn_agent"},
 		{name: "ComputerUse", client: client, agentType: "computer_use", detail: `type "computer_use" cannot start a chat`},
