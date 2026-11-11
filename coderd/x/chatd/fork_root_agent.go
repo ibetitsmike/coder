@@ -25,6 +25,10 @@ import (
 // agent connects, which is after the chat is created.
 const rootAgentWorkspaceReason = "agent definitions from the workspace can only be used through spawn_agent for now"
 
+// workspaceAttachedLimitedAwareness replaces workspaceAttachedAwareness for
+// a root agent whose policy removes a workspace tool that it names.
+const workspaceAttachedLimitedAwareness = "This chat is attached to a workspace. Use the workspace tools that are available to you."
+
 // RootAgent is the agent type that a root chat starts as.
 type RootAgent struct {
 	// Name is the agent type stored on the chat, as spawn_agent stores it.
@@ -41,6 +45,12 @@ type RootAgent struct {
 	// noOrchestration drops the orchestration guidance from a chat that
 	// has no subagent tools to follow it with.
 	noOrchestration bool
+	// noCreateWorkspace drops the create_workspace guidance from a chat
+	// whose tools cannot create a workspace.
+	noCreateWorkspace bool
+	// limitedWorkspaceTools drops the workspace tool names from the
+	// attached workspace guidance of a chat that lacks one of them.
+	limitedWorkspaceTools bool
 }
 
 // RootAgentOptions selects the agent type of a new root chat.
@@ -76,7 +86,7 @@ func (p *Server) ResolveRootAgent(ctx context.Context, opts RootAgentOptions) (R
 	case subagentTypeGeneral:
 		return RootAgent{Name: id}, nil
 	case subagentTypeExplore:
-		return RootAgent{Name: id, mode: database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}, noOrchestration: true}, nil
+		return RootAgent{Name: id, mode: database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}, noOrchestration: true, noCreateWorkspace: true, limitedWorkspaceTools: true}, nil
 	}
 	if _, ok := lookupSubagentDefinition(id); ok {
 		return RootAgent{}, &RootAgentError{Reason: fmt.Sprintf("type %q cannot start a chat", id)}
@@ -117,7 +127,10 @@ func (p *Server) rootAgentFromDefinition(ctx context.Context, chat database.Chat
 	if def.BaseType == workspacesdk.AgentDefinitionBaseExplore {
 		agent.mode = database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}
 	}
+	policy := customAgentToolPolicyFromDefinition(def)
 	agent.noOrchestration = !keepsOrchestrationTools(agent.mode, &def)
+	agent.noCreateWorkspace = agent.mode.Valid || !policy.keepsWorkspaceCreation()
+	agent.limitedWorkspaceTools = agent.mode.Valid || !policy.keepsWorkspaceFileTools()
 	if !explicitModel && def.Model != "" {
 		modelConfigID, err := p.resolveCustomAgentModel(ctx, chat, def)
 		if err != nil {
@@ -130,7 +143,7 @@ func (p *Server) rootAgentFromDefinition(ctx context.Context, chat database.Chat
 	if err != nil {
 		return RootAgent{}, &RootAgentError{Reason: err.Error()}
 	}
-	raw, err := json.Marshal(customAgentToolPolicyFromDefinition(def))
+	raw, err := json.Marshal(policy)
 	if err != nil {
 		return RootAgent{}, xerrors.Errorf("marshal tool policy of agent %q: %w", def.Name, err)
 	}
@@ -177,6 +190,20 @@ func (agent *RootAgent) idleReasoningEffort(effort *string) database.NullChatRea
 		return database.NullChatReasoningEffort{}
 	}
 	return database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffort(*effort), Valid: true}
+}
+
+// workspaceAwareness returns the workspace guidance without the tools that
+// agent lacks. A nil agent keeps awareness.
+func (agent *RootAgent) workspaceAwareness(awareness string) string {
+	switch {
+	case agent == nil:
+		return awareness
+	case awareness == workspaceDetachedAwareness && agent.noCreateWorkspace:
+		return workspaceDetachedAwarenessBase
+	case awareness == workspaceAttachedAwareness && agent.limitedWorkspaceTools:
+		return workspaceAttachedLimitedAwareness
+	}
+	return awareness
 }
 
 // rootAgentAfterInsert stores the chat_subagents row of a root chat that
