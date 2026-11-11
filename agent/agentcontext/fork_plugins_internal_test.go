@@ -69,6 +69,7 @@ func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
 //nolint:paralleltest,tparallel // Uses t.Setenv.
 func TestClaudePluginCacheDirOverride(t *testing.T) {
 	t.Setenv(claudePluginCacheDirEnv, "")
+	t.Setenv(claudeConfigDirEnv, "")
 	require.Equal(t, "~/.claude/plugins/cache", claudePluginCacheRoot())
 	require.Contains(t, defaultBuiltinRoots(), "~/.claude/plugins/cache")
 	require.False(t, isClaudePluginCache(filepath.Join(t.TempDir(), "custom", "cache")))
@@ -82,11 +83,25 @@ func TestClaudePluginCacheDirOverride(t *testing.T) {
 	require.True(t, isClaudePluginCache(cache))
 	require.True(t, isClaudePluginCache(filepath.Join(t.TempDir(), ".claude", "plugins", "cache")))
 	require.False(t, isClaudePluginCache(filepath.Join(root, "other")))
+
+	// CLAUDE_CONFIG_DIR moves the cache when the cache variable is unset,
+	// and the cache variable still wins when both are set.
+	configDir := t.TempDir()
+	configCache := filepath.Join(configDir, "plugins", "cache")
+	t.Setenv(claudePluginCacheDirEnv, "")
+	t.Setenv(claudeConfigDirEnv, configDir)
+	require.Equal(t, configCache, claudePluginCacheRoot())
+	require.Contains(t, defaultBuiltinRoots(), configCache)
+	require.NotContains(t, defaultBuiltinRoots(), "~/.claude/plugins/cache")
+	require.True(t, isClaudePluginCache(configCache))
+	t.Setenv(claudePluginCacheDirEnv, root)
+	require.Equal(t, cache, claudePluginCacheRoot())
 }
 
 //nolint:paralleltest,tparallel // Uses t.Setenv.
 func TestClaudeUserSettingsPath(t *testing.T) {
 	t.Setenv(claudePluginCacheDirEnv, "")
+	t.Setenv(claudeConfigDirEnv, "")
 	cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
 	got, ok := claudeUserSettingsPath(cache)
 	require.True(t, ok)
@@ -100,4 +115,23 @@ func TestClaudeUserSettingsPath(t *testing.T) {
 	got, ok = claudeUserSettingsPath(filepath.Join(t.TempDir(), "cache"))
 	require.True(t, ok)
 	require.Equal(t, filepath.Join(userHome, ".claude", "settings.json"), got)
+}
+
+//nolint:paralleltest,tparallel // Uses t.Setenv.
+func TestClaudeUserSettingsPathConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv(claudePluginCacheDirEnv, "")
+	t.Setenv(claudeConfigDirEnv, configDir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+
+	got, ok := claudeUserSettingsPath(filepath.Join(configDir, "plugins", "cache"))
+	require.True(t, ok)
+	require.Equal(t, filepath.Join(configDir, "settings.json"), got)
+
+	// A cache moved by CLAUDE_CODE_PLUGIN_CACHE_DIR still reads the settings
+	// of the configuration directory, not the home directory.
+	got, ok = claudeUserSettingsPath(filepath.Join(t.TempDir(), "cache"))
+	require.True(t, ok)
+	require.Equal(t, filepath.Join(configDir, "settings.json"), got)
 }

@@ -186,14 +186,28 @@ const claudeOrphanedMarker = ".orphaned_at"
 // cache moves to $CLAUDE_CODE_PLUGIN_CACHE_DIR/cache.
 const claudePluginCacheDirEnv = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
 
+// claudeConfigDirEnv replaces the ~/.claude directory, so the cache moves to
+// $CLAUDE_CONFIG_DIR/plugins/cache and the user settings to
+// $CLAUDE_CONFIG_DIR/settings.json. claudePluginCacheDirEnv wins for the
+// cache location.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// claudeConfigDir returns the directory selected by claudeConfigDirEnv, or ""
+// when it is unset or empty.
+func claudeConfigDir() string {
+	return strings.TrimSpace(os.Getenv(claudeConfigDirEnv))
+}
+
 // claudePluginCacheOverride returns the cache directory selected by
-// claudePluginCacheDirEnv, or "" when it is unset or empty.
+// claudePluginCacheDirEnv or claudeConfigDirEnv, or "" when neither is set.
 func claudePluginCacheOverride() string {
-	dir := strings.TrimSpace(os.Getenv(claudePluginCacheDirEnv))
-	if dir == "" {
-		return ""
+	if dir := strings.TrimSpace(os.Getenv(claudePluginCacheDirEnv)); dir != "" {
+		return filepath.Join(dir, "cache")
 	}
-	return filepath.Join(dir, "cache")
+	if dir := claudeConfigDir(); dir != "" {
+		return filepath.Join(dir, "plugins", "cache")
+	}
+	return ""
 }
 
 // claudePluginCacheRoot is the built-in scan root for the Claude Code plugin
@@ -223,13 +237,16 @@ func isClaudePluginCache(rootPath string) bool {
 }
 
 // claudeUserSettingsPath returns the user settings file next to the plugins
-// directory of cacheDir. A cache moved by claudePluginCacheDirEnv keeps its
-// settings in the home directory's .claude. ok is false when no location is
-// known.
+// directory of cacheDir. A cache elsewhere keeps its settings in
+// claudeConfigDirEnv when set, and in the home directory's .claude otherwise.
+// ok is false when no location is known.
 func claudeUserSettingsPath(cacheDir string) (string, bool) {
 	clean := filepath.Clean(cacheDir)
 	if strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
 		return filepath.Join(filepath.Dir(filepath.Dir(clean)), "settings.json"), true
+	}
+	if dir := claudeConfigDir(); dir != "" {
+		return filepath.Join(dir, "settings.json"), true
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
