@@ -332,6 +332,7 @@ Otherwise, you see the list read-only.
 A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
 A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
+To delegate from the web UI, type `@` at the start of a line or after a space in the composer and choose an agent, which inserts `Delegate to the <name> agent (spawn_agent type <name>):` and a space, with the name that `spawn_agent` accepts.
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
 On the **AI settings** > **Agent definitions** page, such a member selects **Manage permissions** in a row's menu, adds members or groups in **Agent definition permissions**, and selects **Save permissions**.
 The dialog offers the members and groups that `GET .../acl/available` lists.
@@ -634,6 +635,7 @@ Checked against fork `main` at `73f9bfa12e`:
   A child chat's `agent_type` in the chat list, the single-chat response, and a `created` watch event, only with the experiment, `coderd/exp_chats.go:614`, `:1937`, `:331`, `coderd/fork_chat_agent_type.go:17-72`, with a built-in child's type from its mode, `coderd/database/forkdb/queries/chat_subagents.sql:15-29`, and the badge, `site/src/pages/AgentsPage/components/ForkAgentTypeBadge.tsx:12-24`, in the sidebar, `ChatsSidebar/tree/ChatTreeNode.tsx:346`, and the top bar, `ChatTopBar.tsx:280`.
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:155-159`, `:166-170`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:98-145`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
+  The `@` menu in the composer, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatMessageInput/ForkAgentMentionPlugin.tsx:42-52`, `:60-89`, `:91-102`, `:117`, registered in `ChatMessageInput.tsx:1405-1409`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode only in web UI root chats: `coderd/x/chatd/turn_environment.go:725-731`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:44-46`, `fork_tools.go:40-44`, ending the turn, `fork_descendant_questions.go:50-60`, `coderd/x/chatd/turn_environment.go:1096`, and not in plan-mode child turns, `:2053-2062`.
   Unanswered until the child gets a user message after the question, and a secret question until the message of its answer or decline, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-44`.
