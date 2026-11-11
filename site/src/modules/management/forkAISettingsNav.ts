@@ -37,10 +37,7 @@ const useForkOrganizationPagePath = (
 	};
 };
 
-/**
- * Returns the organization agent definitions page link, or undefined while
- * the fork-agent-definitions experiment is off.
- */
+/** See `useForkOrganizationPagePath` for the organization carry-over rules. */
 export const useForkAgentDefinitionsPath = (
 	skillOrganizations: readonly Organization[],
 	organizationName: string | null,
@@ -52,10 +49,7 @@ export const useForkAgentDefinitionsPath = (
 		organizationName,
 	);
 
-/**
- * Returns the organization plugin packs page link, or undefined while the
- * fork-plugin-packs experiment is off.
- */
+/** See `useForkOrganizationPagePath` for the organization carry-over rules. */
 export const useForkPluginPacksPath = (
 	skillOrganizations: readonly Organization[],
 	organizationName: string | null,
