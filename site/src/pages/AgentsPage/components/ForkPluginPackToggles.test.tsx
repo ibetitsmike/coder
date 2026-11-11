@@ -1,8 +1,9 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as enablementApi from "#/api/forkPluginPackEnablement";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
@@ -18,6 +19,10 @@ beforeEach(() => {
 		MockForkPluginPackWithoutPath,
 	]);
 	vi.spyOn(enablementApi, "setPluginPackEnabled").mockResolvedValue();
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
 });
 
 it("enables an installed pack for the target", async () => {
@@ -72,6 +77,45 @@ it("lists only enabled packs when the organization's packs cannot be listed", as
 			target,
 			MockForkPluginPackWithoutPath.id,
 			false,
+		),
+	);
+});
+
+it("reports a failed toggle after the switches unmount", async () => {
+	const user = userEvent.setup();
+	const toastError = vi.spyOn(toast, "error");
+	let rejectToggle: (error: unknown) => void = () => {};
+	vi.mocked(enablementApi.setPluginPackEnabled).mockReturnValueOnce(
+		new Promise((_resolve, reject) => {
+			rejectToggle = reject;
+		}),
+	);
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+	]);
+	const { unmount } = render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(
+		await screen.findByRole("switch", {
+			name: `Enable ${MockForkPluginPack.name}`,
+		}),
+	);
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledTimes(1),
+	);
+	unmount();
+	rejectToggle(mockApiError({ message: "Failed to enable the plugin pack." }));
+
+	await waitFor(() =>
+		expect(toastError).toHaveBeenCalledWith(
+			"Failed to enable the plugin pack.",
+			expect.objectContaining({}),
 		),
 	);
 });
