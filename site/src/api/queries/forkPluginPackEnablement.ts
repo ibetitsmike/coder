@@ -3,6 +3,7 @@
 
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
+	getAvailablePluginPacks,
 	getEnabledPluginPacks,
 	type PluginPackTarget,
 	setPluginPackEnabled,
@@ -18,6 +19,17 @@ const enabledPluginPacksKey = (target: PluginPackTarget) =>
 				target.projectId,
 			] as const)
 		: (["chats", "fork-plugin-packs", "chats", target.chatId] as const);
+
+export const availablePluginPacks = (organizationId: string) =>
+	queryOptions({
+		queryKey: [
+			"chats",
+			"fork-plugin-packs",
+			organizationId,
+			"available",
+		] as const,
+		queryFn: () => getAvailablePluginPacks(organizationId),
+	});
 
 export const enabledPluginPacks = (target: PluginPackTarget) =>
 	queryOptions({

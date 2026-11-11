@@ -2,8 +2,6 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import * as enablementApi from "#/api/forkPluginPackEnablement";
-import * as forkPluginPacksApi from "#/api/forkPluginPacks";
-import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
 	MockForkPluginPackWithoutPath,
@@ -18,14 +16,14 @@ beforeEach(() => {
 		MockForkPluginPackWithoutPath,
 	]);
 	vi.spyOn(enablementApi, "setPluginPackEnabled").mockResolvedValue();
+	vi.spyOn(enablementApi, "getAvailablePluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+		MockForkPluginPackWithoutPath,
+	]);
 });
 
 it("enables an installed pack for the target", async () => {
 	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-		MockForkPluginPackWithoutPath,
-	]);
 	render(
 		<ForkPluginPackToggles
 			target={target}
@@ -48,12 +46,8 @@ it("enables an installed pack for the target", async () => {
 	);
 });
 
-it("lists only enabled packs when the organization's packs cannot be listed", async () => {
+it("disables a pack enabled for the target", async () => {
 	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockRejectedValue({
-		...mockApiError({ message: "Forbidden." }),
-		status: 403,
-	});
 	render(
 		<ForkPluginPackToggles
 			target={target}

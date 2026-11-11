@@ -38,6 +38,18 @@ func TestForkPluginPackEnablement(t *testing.T) {
 	foreign := insertForkPluginPack(t, db, dbgen.Organization(t, db, database.Organization{}).ID, owner.UserID, "demo")
 	want := []codersdk.ForkEnabledPluginPack{{ID: pack.ID, Name: pack.Name, CommitSHA: pack.CommitSha}}
 
+	t.Run("Available", func(t *testing.T) {
+		t.Parallel()
+		// A member lists the organization's packs without reading them.
+		packs, err := member.ForkAvailablePluginPacks(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, want, packs)
+
+		outsider, _ := coderdtest.CreateAnotherUser(t, client, dbgen.Organization(t, db, database.Organization{}).ID)
+		_, err = outsider.ForkAvailablePluginPacks(ctx, orgID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
 	t.Run("Project", func(t *testing.T) {
 		t.Parallel()
 		project := dbgen.ChatProject(t, db, database.ChatProject{OrganizationID: orgID, OwnerID: memberUser.ID})

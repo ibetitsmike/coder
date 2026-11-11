@@ -98,6 +98,7 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		orgPluginPacks.Get(orgPluginPacksPath+"/{pluginPack}", api.forkPluginPack)
 		orgPluginPacks.Delete(orgPluginPacksPath+"/{pluginPack}", api.deleteForkPluginPack)
 		orgPluginPacks.Post(orgPluginPacksPath+"/{pluginPack}/update", api.updateForkPluginPack)
+		orgPluginPacks.Get("/organizations/{organization}/available-plugin-packs", api.forkAvailablePluginPacks)
 
 		projectPluginPacks := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkPluginPacks),

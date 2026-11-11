@@ -28,6 +28,12 @@ func forkChatPluginPacksPath(chatID uuid.UUID) string {
 	return fmt.Sprintf("/api/v2/chats/fork/%s/plugin-packs", chatID)
 }
 
+// ForkAvailablePluginPacks returns the plugin packs installed in an
+// organization, for any member who may enable them.
+func (c *Client) ForkAvailablePluginPacks(ctx context.Context, organizationID uuid.UUID) ([]ForkEnabledPluginPack, error) {
+	return requestJSON[[]ForkEnabledPluginPack](ctx, c, http.MethodGet, fmt.Sprintf("/api/v2/chats/fork/organizations/%s/available-plugin-packs", organizationID), http.StatusOK, nil)
+}
+
 // ForkProjectPluginPacks returns the plugin packs enabled for a chat project.
 func (c *Client) ForkProjectPluginPacks(ctx context.Context, organizationID, projectID uuid.UUID) ([]ForkEnabledPluginPack, error) {
 	return requestJSON[[]ForkEnabledPluginPack](ctx, c, http.MethodGet, forkProjectPluginPacksPath(organizationID, projectID), http.StatusOK, nil)
