@@ -11,7 +11,7 @@ const projectScopeKey = agentDefinitionsKey({
 	projectId: MockChatProject.id,
 });
 
-const definitions = [
+const mockDefinitions = [
 	MockForkAgentDefinitionMetadata,
 	{
 		...MockForkAgentDefinitionMetadata,
@@ -39,14 +39,14 @@ type Story = StoryObj<typeof ProjectAgentDefinitionsDialog>;
 
 export const List: Story = {
 	parameters: {
-		queries: [{ key: projectScopeKey, data: definitions }],
+		queries: [{ key: projectScopeKey, data: mockDefinitions }],
 	},
 };
 
 export const ReadOnly: Story = {
 	args: { canEdit: false },
 	parameters: {
-		queries: [{ key: projectScopeKey, data: definitions }],
+		queries: [{ key: projectScopeKey, data: mockDefinitions }],
 	},
 };
 
