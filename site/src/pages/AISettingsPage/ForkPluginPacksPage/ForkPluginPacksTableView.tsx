@@ -22,9 +22,9 @@ import {
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
-import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
+import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
 
 const title = "Plugin packs";
 
