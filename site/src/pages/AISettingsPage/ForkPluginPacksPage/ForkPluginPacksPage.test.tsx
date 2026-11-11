@@ -182,6 +182,10 @@ it("reports an install as done when a lost response did install the pack", async
 		MockForkPluginPack.source_url,
 	);
 	await user.type(
+		within(dialog).getByLabelText(/^Path/),
+		MockForkPluginPack.source_path,
+	);
+	await user.type(
 		within(dialog).getByLabelText(/^Ref/),
 		MockForkPluginPack.ref,
 	);
