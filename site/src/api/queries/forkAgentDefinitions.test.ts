@@ -327,3 +327,116 @@ describe("agentDefinition", () => {
 		expect(queryClient.getQueryData(listKey)).toEqual([MockRecreatedMetadata]);
 	});
 });
+
+describe("organization scope", () => {
+	const organizationScope: AgentDefinitionScope = {
+		...scope,
+		tier: "organization",
+	};
+	const listed = definitionAt("2029-01-01T00:00:00Z");
+
+	it("lists and reads definitions from the organization endpoints", async () => {
+		const queryClient = createQueryClient();
+		const listOrganization = vi
+			.spyOn(forkAgentDefinitionsApi, "getOrganizationAgentDefinitions")
+			.mockResolvedValue([metadataOf(listed)]);
+		const getOrganization = vi
+			.spyOn(forkAgentDefinitionsApi, "getOrganizationAgentDefinition")
+			.mockResolvedValue(listed);
+		const listUser = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"getUserAgentDefinitions",
+		);
+		const getUser = vi.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition");
+
+		await queryClient.fetchQuery(agentDefinitions(organizationScope));
+		await queryClient.fetchQuery(
+			agentDefinition(queryClient, organizationScope, name),
+		);
+
+		expect(listOrganization).toHaveBeenCalledWith(scope.organizationId);
+		expect(getOrganization).toHaveBeenCalledWith(scope.organizationId, name);
+		expect(listUser).not.toHaveBeenCalled();
+		expect(getUser).not.toHaveBeenCalled();
+		expect(
+			queryClient.getQueryData(agentDefinitions(scope).queryKey),
+		).toBeUndefined();
+	});
+
+	it("updates the organization definition and leaves a same-named personal one", async () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(agentDefinitions(scope).queryKey, [
+			metadataOf(listed),
+		]);
+		queryClient.setQueryData(agentDefinitions(organizationScope).queryKey, [
+			metadataOf(listed),
+		]);
+		const updated = definitionAt("2030-01-01T00:00:00Z");
+		const updateOrganization = vi
+			.spyOn(forkAgentDefinitionsApi, "updateOrganizationAgentDefinition")
+			.mockResolvedValue(updated);
+		const updateUser = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"updateUserAgentDefinition",
+		);
+
+		await new MutationObserver(
+			queryClient,
+			updateAgentDefinition(queryClient),
+		).mutate({ scope: organizationScope, name, req: { enabled: false } });
+
+		expect(updateOrganization).toHaveBeenCalledWith(
+			scope.organizationId,
+			name,
+			{ enabled: false },
+		);
+		expect(updateUser).not.toHaveBeenCalled();
+		expect(
+			queryClient.getQueryData(agentDefinitions(organizationScope).queryKey),
+		).toEqual([metadataOf(updated)]);
+		expect(
+			queryClient.getQueryData(
+				agentDefinition(queryClient, organizationScope, name).queryKey,
+			),
+		).toEqual(updated);
+		expect(queryClient.getQueryData(agentDefinitions(scope).queryKey)).toEqual([
+			metadataOf(listed),
+		]);
+		expect(
+			queryClient.getQueryData(
+				agentDefinition(queryClient, scope, name).queryKey,
+			),
+		).toBeUndefined();
+	});
+
+	it("deletes the organization definition and leaves a same-named personal one", async () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(agentDefinitions(scope).queryKey, [
+			metadataOf(listed),
+		]);
+		queryClient.setQueryData(agentDefinitions(organizationScope).queryKey, [
+			metadataOf(listed),
+		]);
+		const deleteOrganization = vi
+			.spyOn(forkAgentDefinitionsApi, "deleteOrganizationAgentDefinition")
+			.mockResolvedValue();
+		const deleteUser = vi.spyOn(
+			forkAgentDefinitionsApi,
+			"deleteUserAgentDefinition",
+		);
+
+		await new MutationObserver(
+			queryClient,
+			deleteAgentDefinition(queryClient),
+		).mutate({ scope: organizationScope, name });
+
+		expect(deleteOrganization).toHaveBeenCalledWith(scope.organizationId, name);
+		expect(deleteUser).not.toHaveBeenCalled();
+		expect(
+			queryClient.getQueryData(agentDefinitions(organizationScope).queryKey),
+		).toEqual([]);
+		expect(queryClient.getQueryData(agentDefinitions(scope).queryKey)).toEqual([
+			metadataOf(listed),
+		]);
+	});
+});
