@@ -67,6 +67,16 @@ func (f forkQueryMetricsStore) ClaimDueChatWakeups(ctx context.Context, arg fork
 	return f.s.ClaimDueChatWakeups(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ClaimSandboxOperation(ctx context.Context, arg forkdb.ClaimSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "ClaimSandboxOperation", time.Now())
+	return f.s.ClaimSandboxOperation(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) CompleteSandboxOperation(ctx context.Context, arg forkdb.CompleteSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "CompleteSandboxOperation", time.Now())
+	return f.s.CompleteSandboxOperation(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	defer f.observe(ctx, "ConsumePluginLinkCode", time.Now())
 	return f.s.ConsumePluginLinkCode(ctx, arg)
@@ -217,6 +227,16 @@ func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Cont
 	return f.s.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetSandboxOperation(ctx context.Context, id uuid.UUID) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "GetSandboxOperation", time.Now())
+	return f.s.GetSandboxOperation(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetSandboxOperationsByBuildID(ctx context.Context, workspaceBuildID uuid.UUID) ([]forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "GetSandboxOperationsByBuildID", time.Now())
+	return f.s.GetSandboxOperationsByBuildID(ctx, workspaceBuildID)
+}
+
 func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "GetOrganizationAgentDefinitionByName", time.Now())
 	return f.s.GetOrganizationAgentDefinitionByName(ctx, arg)
@@ -305,6 +325,11 @@ func (f forkQueryMetricsStore) InsertPluginLinkCode(ctx context.Context, arg for
 func (f forkQueryMetricsStore) InsertProjectAgentDefinition(ctx context.Context, arg forkdb.InsertProjectAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertProjectAgentDefinition", time.Now())
 	return f.s.InsertProjectAgentDefinition(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "InsertSandboxOperation", time.Now())
+	return f.s.InsertSandboxOperation(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) InsertUserAgentDefinition(ctx context.Context, arg forkdb.InsertUserAgentDefinitionParams) (forkdb.AgentDefinition, error) {

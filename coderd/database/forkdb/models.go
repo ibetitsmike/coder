@@ -352,3 +352,14 @@ type PluginUserLink struct {
 	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
 	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }
+
+type SandboxOperation struct {
+	ID               uuid.UUID `db:"id" json:"id"`
+	WorkspaceID      uuid.UUID `db:"workspace_id" json:"workspace_id"`
+	WorkspaceBuildID uuid.UUID `db:"workspace_build_id" json:"workspace_build_id"`
+	Operation        string    `db:"operation" json:"operation"`
+	Generation       int64     `db:"generation" json:"generation"`
+	Status           string    `db:"status" json:"status"`
+	CreatedAt        time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt        time.Time `db:"updated_at" json:"updated_at"`
+}
