@@ -19,16 +19,14 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 	chatId,
 }) => {
 	const { user } = useAuthenticated();
-	const chatQuery = useQuery(chat(chatId));
+	// The chat page already loads this chat, so mounting the pill reuses the
+	// cached chat instead of fetching it again.
+	const chatQuery = useQuery({ ...chat(chatId), refetchOnMount: false });
 	const target = { kind: "chat", chatId } as const;
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	if (!chatQuery.data) {
 		return chatQuery.error ? (
-			<ComposerPillError
-				label="Plugin packs failed to load"
-				heading="Chat plugin packs"
-				message={getErrorMessage(chatQuery.error, "Failed to load the chat.")}
-			/>
+			<ForkPluginPacksPillError error={chatQuery.error} />
 		) : null;
 	}
 	return (
@@ -41,6 +39,17 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 		</ForkPluginPacksPillView>
 	);
 };
+
+/** The pill shown when the chat, and so its organization, fails to load. */
+export const ForkPluginPacksPillError: React.FC<{ error: unknown }> = ({
+	error,
+}) => (
+	<ComposerPillError
+		label="Plugin packs failed to load"
+		heading="Chat plugin packs"
+		message={getErrorMessage(error, "Failed to load the chat.")}
+	/>
+);
 
 type ForkPluginPacksPillViewProps = {
 	/** `undefined` while the chat's packs load or after loading fails. */

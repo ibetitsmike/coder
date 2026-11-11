@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
+import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
 	MockForkPluginPackWithoutPath,
 } from "#/testHelpers/forkPluginPacks";
-import { ForkPluginPacksPillView } from "./ForkPluginPacksPill";
+import {
+	ForkPluginPacksPillError,
+	ForkPluginPacksPillView,
+} from "./ForkPluginPacksPill";
 import { ForkPluginPackTogglesView } from "./ForkPluginPackToggles";
 
 const meta: Meta<typeof ForkPluginPacksPillView> = {
@@ -40,6 +44,21 @@ export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
 			within(canvasElement).getByRole("button", { name: /Plugin packs/ }),
+		);
+	},
+};
+
+export const ChatLoadError: Story = {
+	render: () => (
+		<ForkPluginPacksPillError
+			error={mockApiError({ message: "Failed to load the chat." })}
+		/>
+	),
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", {
+				name: /Plugin packs failed to load/,
+			}),
 		);
 	},
 };
