@@ -139,14 +139,42 @@ func TestPluginChatBindings(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{freshChat.ID}, dueChatIDs())
 
+	freshDelivered := func() bool {
+		due, err := fdb.GetPluginChatBindingsDue(ctx, forkdb.GetPluginChatBindingsDueParams{
+			PluginID:   plugin.ID,
+			LimitCount: 100,
+		})
+		require.NoError(t, err)
+		require.Len(t, due, 1)
+		require.Equal(t, freshChat.ID, due[0].ChatID)
+		return due[0].Delivered
+	}
+	require.False(t, freshDelivered(), "a new binding has not reached a link")
+
 	// Delivering the fresh chat's status clears it.
 	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
 		PluginID:      plugin.ID,
 		ChatID:        freshChat.ID,
 		SentMessageID: 0,
 		SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusWaiting, Valid: true},
+		Delivered:     true,
 	}))
 	require.Empty(t, dueChatIDs())
+
+	// Once a link got the chat, a later cursor update that reached no link
+	// keeps the mark.
+	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: freshChat.ID, Status: database.ChatStatusError})
+	require.NoError(t, err)
+	require.True(t, freshDelivered())
+	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
+		PluginID:      plugin.ID,
+		ChatID:        freshChat.ID,
+		SentMessageID: 0,
+		SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusError, Valid: true},
+	}))
+	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: freshChat.ID, Status: database.ChatStatusWaiting})
+	require.NoError(t, err)
+	require.True(t, freshDelivered())
 }
 
 func TestPluginLinkCodes(t *testing.T) {
@@ -185,6 +213,39 @@ func TestPluginLinkCodes(t *testing.T) {
 	}))
 	_, err = fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: expiredHash[:]})
 	require.ErrorIs(t, err, sql.ErrNoRows, "an expired code cannot be consumed")
+}
+
+// TestPluginUserLinkActiveChatUnique checks that two links of one plugin
+// cannot follow the same chat: delivery sends a chat's events to the link
+// that follows it, so a shared pointer would leak one identity's
+// conversation to another.
+func TestPluginUserLinkActiveChatUnique(t *testing.T) {
+	t.Parallel()
+
+	db, _ := dbtestutil.NewDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	org := dbgen.Organization(t, db, database.Organization{})
+	user := dbgen.User(t, db, database.User{})
+	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
+	modelCfg := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
+	plugin := dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID})
+	otherPlugin := dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID})
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: modelCfg.ID})
+
+	setActive := func(pluginID uuid.UUID, externalID string) error {
+		_, err := fdb.UpsertPluginUserLink(ctx, forkdb.UpsertPluginUserLinkParams{PluginID: pluginID, ExternalID: externalID, UserID: user.ID})
+		require.NoError(t, err)
+		return fdb.SetPluginUserLinkActiveChat(ctx, forkdb.SetPluginUserLinkActiveChatParams{
+			PluginID:     pluginID,
+			ExternalID:   externalID,
+			ActiveChatID: uuid.NullUUID{UUID: chat.ID, Valid: true},
+		})
+	}
+	require.NoError(t, setActive(plugin.ID, "+15550101"))
+	require.Error(t, setActive(plugin.ID, "+15550102"), "a second link of the plugin cannot follow the chat")
+	require.NoError(t, setActive(otherPlugin.ID, "+15550101"), "links of another plugin are independent")
 }
 
 func TestPluginLeases(t *testing.T) {

@@ -53,21 +53,27 @@ func TestFetch(t *testing.T) {
 	t.Run("Rejected", func(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitLong)
-		before := repo.Requests()
+		// A repository and server of its own, so the parallel subtests above
+		// cannot add requests while this one asserts that none arrived.
+		rejectRepo := pluginpackstest.New(t)
+		rejectFetcher := pluginpacks.Fetcher{
+			AllowedHosts: []string{"127.0.0.1"},
+			Transport:    rejectRepo.Client.Transport,
+		}
 
 		for _, src := range []pluginpacks.Source{
-			{URL: strings.Replace(repo.URL, "127.0.0.1", "localhost", 1), Ref: "main"},
-			{URL: strings.Replace(repo.URL, "https://", "http://", 1), Ref: "main"},
-			{URL: strings.Replace(repo.URL, "https://", "https://user:pass@", 1), Ref: "main"},
+			{URL: strings.Replace(rejectRepo.URL, "127.0.0.1", "localhost", 1), Ref: "main"},
+			{URL: strings.Replace(rejectRepo.URL, "https://", "http://", 1), Ref: "main"},
+			{URL: strings.Replace(rejectRepo.URL, "https://", "https://user:pass@", 1), Ref: "main"},
 		} {
-			_, err := fetcher.Fetch(ctx, src)
+			_, err := rejectFetcher.Fetch(ctx, src)
 			require.Error(t, err, src.URL)
 		}
-		require.Equal(t, before, repo.Requests(), "rejected sources must not reach the server")
+		require.Zero(t, rejectRepo.Requests(), "rejected sources must not reach the server")
 
-		_, err := fetcher.Fetch(ctx, pluginpacks.Source{URL: repo.URL, Ref: "missing"})
+		_, err := rejectFetcher.Fetch(ctx, pluginpacks.Source{URL: rejectRepo.URL, Ref: "missing"})
 		require.ErrorContains(t, err, `ref "missing"`)
-		_, err = fetcher.Fetch(ctx, pluginpacks.Source{URL: repo.URL, Path: "big", Ref: "main"})
+		_, err = rejectFetcher.Fetch(ctx, pluginpacks.Source{URL: rejectRepo.URL, Path: "big", Ref: "main"})
 		require.ErrorContains(t, err, "larger than")
 	})
 }

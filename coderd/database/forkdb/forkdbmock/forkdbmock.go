@@ -1065,20 +1065,6 @@ func (mr *MockStoreMockRecorder) SetPluginUserLinkActiveChat(ctx, arg any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinkActiveChat", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinkActiveChat), ctx, arg)
 }
 
-// SetPluginUserLinksActiveChatByUser mocks base method.
-func (m *MockStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetPluginUserLinksActiveChatByUser", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// SetPluginUserLinksActiveChatByUser indicates an expected call of SetPluginUserLinksActiveChatByUser.
-func (mr *MockStoreMockRecorder) SetPluginUserLinksActiveChatByUser(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinksActiveChatByUser", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinksActiveChatByUser), ctx, arg)
-}
-
 // SumChatCostMicrosSince mocks base method.
 func (m *MockStore) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
 	m.ctrl.T.Helper()

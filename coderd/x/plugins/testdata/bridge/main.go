@@ -51,8 +51,9 @@ func init() {
 			ticks++
 			return nil
 		},
-		OnEvent: func(_ pluginsdk.Host, ev pluginsdk.ChatEvent) error {
+		OnEvent: func(h pluginsdk.Host, ev pluginsdk.ChatEvent) error {
 			events = append(events, ev)
+			h.Logf("bridge-event external_id=%s chat_id=%s", ev.ExternalID, ev.ChatID)
 			return nil
 		},
 		OnHTTP: onHTTP,
