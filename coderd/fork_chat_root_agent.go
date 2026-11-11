@@ -2,7 +2,8 @@ package coderd
 
 // This file is fork code: it resolves the agent_type of a create chat request
 // behind the fork-agent-definitions experiment. Upstream's createChat calls
-// forkCreateChatRootAgent once, after it resolves the chat's model.
+// forkCreateChatRootAgent once, after it resolves the chat's model, and lets
+// it report that model's failure.
 
 import (
 	"context"
@@ -20,7 +21,9 @@ import (
 // the chat's model and fallback reasoning effort. A definition's model
 // replaces modelConfigID unless the request chose one, and drops the effort
 // of the replaced model. A definition's effort replaces effort. The request's
-// own reasoning_effort still wins over both.
+// own reasoning_effort still wins over both. modelErr, with modelStatus, is
+// the failure to resolve modelConfigID. A missing default model only fails
+// the request when the definition sets no model either.
 func (api *API) forkCreateChatRootAgent(
 	ctx context.Context,
 	ownerID uuid.UUID,
@@ -28,7 +31,12 @@ func (api *API) forkCreateChatRootAgent(
 	req codersdk.CreateChatRequest,
 	modelConfigID uuid.UUID,
 	effort *string,
+	modelStatus int,
+	modelErr *codersdk.Response,
 ) (*chatd.RootAgent, uuid.UUID, *string, error) {
+	if modelErr != nil && (req.AgentType == "" || modelErr.Message != noLocalChatModelResponse().Message) {
+		return nil, uuid.Nil, nil, httperror.NewResponseError(modelStatus, *modelErr)
+	}
 	if req.AgentType == "" {
 		return nil, modelConfigID, effort, nil
 	}
@@ -61,6 +69,9 @@ func (api *API) forkCreateChatRootAgent(
 	if agent.ModelConfigID.Valid {
 		modelConfigID = agent.ModelConfigID.UUID
 		effort = nil
+	}
+	if modelConfigID == uuid.Nil {
+		return nil, uuid.Nil, nil, httperror.NewResponseError(modelStatus, *modelErr)
 	}
 	if agent.ReasoningEffort != "" {
 		effort = &agent.ReasoningEffort
