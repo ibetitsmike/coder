@@ -102,16 +102,6 @@ func (f forkQueryMetricsStore) DeleteChatSecretAnswer(ctx context.Context, arg f
 	return f.s.DeleteChatSecretAnswer(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
-	defer f.observe(ctx, "DeleteChatWakeupByID", time.Now())
-	return f.s.DeleteChatWakeupByID(ctx, id)
-}
-
-func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
-	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
-	return f.s.DeleteExpiredPluginLinkCodes(ctx)
-}
-
 func (f forkQueryMetricsStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	defer f.observe(ctx, "DeleteOldChatSecretAnswers", time.Now())
 	return f.s.DeleteOldChatSecretAnswers(ctx, limitCount)
@@ -385,11 +375,6 @@ func (f forkQueryMetricsStore) SumOrganizationWakeupChatCostMicrosSince(ctx cont
 func (f forkQueryMetricsStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
 	defer f.observe(ctx, "UpdateChatSubagentWorkspaceID", time.Now())
 	return f.s.UpdateChatSubagentWorkspaceID(ctx, arg)
-}
-
-func (f forkQueryMetricsStore) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
-	defer f.observe(ctx, "UpdateChatWakeupRunStatus", time.Now())
-	return f.s.UpdateChatWakeupRunStatus(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {

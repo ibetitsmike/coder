@@ -191,34 +191,6 @@ func (mr *MockStoreMockRecorder) DeleteChatSecretAnswer(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswer", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswer), ctx, arg)
 }
 
-// DeleteChatWakeupByID mocks base method.
-func (m *MockStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteChatWakeupByID", ctx, id)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteChatWakeupByID indicates an expected call of DeleteChatWakeupByID.
-func (mr *MockStoreMockRecorder) DeleteChatWakeupByID(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatWakeupByID", reflect.TypeOf((*MockStore)(nil).DeleteChatWakeupByID), ctx, id)
-}
-
-// DeleteExpiredPluginLinkCodes mocks base method.
-func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpiredPluginLinkCodes", ctx)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteExpiredPluginLinkCodes indicates an expected call of DeleteExpiredPluginLinkCodes.
-func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx)
-}
-
 // DeleteOldChatSecretAnswers mocks base method.
 func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
@@ -1032,21 +1004,6 @@ func (m *MockStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkd
 func (mr *MockStoreMockRecorder) UpdateChatSubagentWorkspaceID(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatSubagentWorkspaceID", reflect.TypeOf((*MockStore)(nil).UpdateChatSubagentWorkspaceID), ctx, arg)
-}
-
-// UpdateChatWakeupRunStatus mocks base method.
-func (m *MockStore) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateChatWakeupRunStatus", ctx, arg)
-	ret0, _ := ret[0].(forkdb.ChatWakeupRun)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// UpdateChatWakeupRunStatus indicates an expected call of UpdateChatWakeupRunStatus.
-func (mr *MockStoreMockRecorder) UpdateChatWakeupRunStatus(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatWakeupRunStatus", reflect.TypeOf((*MockStore)(nil).UpdateChatWakeupRunStatus), ctx, arg)
 }
 
 // UpdateChatWakeupStatus mocks base method.

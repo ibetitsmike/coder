@@ -110,20 +110,6 @@ func (f *forkQuerier) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.Del
 	return f.db.DeleteChatSecretAnswer(ctx, arg)
 }
 
-func (f *forkQuerier) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
-		return err
-	}
-	return f.db.DeleteChatWakeupByID(ctx, id)
-}
-
-func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
-	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return f.db.DeleteExpiredPluginLinkCodes(ctx)
-}
-
 func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return 0, err
@@ -517,14 +503,6 @@ func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg for
 		return err
 	}
 	return f.db.UpdateChatSubagentWorkspaceID(ctx, arg)
-}
-
-// UpdateChatWakeupRunStatus is worker-only, so it needs site-wide chat access, like chatd's.
-func (f *forkQuerier) UpdateChatWakeupRunStatus(ctx context.Context, arg forkdb.UpdateChatWakeupRunStatusParams) (forkdb.ChatWakeupRun, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
-		return forkdb.ChatWakeupRun{}, err
-	}
-	return f.db.UpdateChatWakeupRunStatus(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {

@@ -251,14 +251,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().UpdateChatWakeupStatus(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
-		"DeleteChatWakeupByID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			fdb.EXPECT().DeleteChatWakeupByID(gomock.Any(), wakeup.ID).Return(nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(chat, policy.ActionUpdate).Returns()
-		},
 		"CancelChatWakeupsByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.CancelChatWakeupsByChatIDParams{ChatID: chat.ID})
@@ -300,12 +292,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(keys, nil).AnyTimes()
 			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(keys)
-		},
-		"UpdateChatWakeupRunStatus": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.UpdateChatWakeupRunStatusParams{})
-			run := testutil.Fake(t, faker, forkdb.ChatWakeupRun{ID: arg.ID})
-			fdb.EXPECT().UpdateChatWakeupRunStatus(gomock.Any(), arg).Return(run, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(run)
 		},
 		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -400,10 +386,6 @@ func TestForkQuerier(t *testing.T) {
 			arg := forkdb.ConsumePluginLinkCodeParams{PluginID: code.PluginID, CodeHash: code.CodeHash}
 			fdb.EXPECT().ConsumePluginLinkCode(gomock.Any(), arg).Return(code, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(code)
-		},
-		"DeleteExpiredPluginLinkCodes": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			fdb.EXPECT().DeleteExpiredPluginLinkCodes(gomock.Any()).Return(nil).AnyTimes()
-			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns()
 		},
 		"DeletePluginLinkCodesByUser": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			arg := forkdb.DeletePluginLinkCodesByUserParams{PluginID: uuid.New(), UserID: uuid.New()}

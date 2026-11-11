@@ -160,12 +160,6 @@ func TestChatWakeupRuns(t *testing.T) {
 	_, err = insertRun("2026-01-01T00:00:00Z", forkdb.ChatWakeupRunStatusPending)
 	require.ErrorIs(t, err, sql.ErrNoRows, "an occurrence runs once")
 
-	_, err = fdb.UpdateChatWakeupRunStatus(ctx, forkdb.UpdateChatWakeupRunStatusParams{
-		ID:        first.ID,
-		Status:    forkdb.ChatWakeupRunStatusDelivered,
-		UpdatedAt: now,
-	})
-	require.NoError(t, err)
 	_, err = insertRun("2026-01-02T00:00:00Z", forkdb.ChatWakeupRunStatusSkipped)
 	require.NoError(t, err)
 	_, err = insertRun("2026-01-03T00:00:00Z:failed", forkdb.ChatWakeupRunStatusFailed)
@@ -177,8 +171,6 @@ func TestChatWakeupRuns(t *testing.T) {
 	keys, err = fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z:failed"}, keys)
-
-	require.NoError(t, fdb.DeleteChatWakeupByID(ctx, wakeup.ID))
 
 	since := now.Add(-time.Hour)
 	count, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})

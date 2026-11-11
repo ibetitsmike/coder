@@ -186,7 +186,6 @@ func TestPluginLinkCodes(t *testing.T) {
 	_, err = fdb.ConsumePluginLinkCode(ctx, forkdb.ConsumePluginLinkCodeParams{PluginID: plugin.ID, CodeHash: expiredHash[:]})
 	require.ErrorIs(t, err, sql.ErrNoRows, "an expired code cannot be consumed")
 
-	require.NoError(t, fdb.DeleteExpiredPluginLinkCodes(ctx))
 	var remaining int
 	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.plugin_link_codes WHERE plugin_id = $1", plugin.ID).Scan(&remaining))
 	require.Zero(t, remaining)
