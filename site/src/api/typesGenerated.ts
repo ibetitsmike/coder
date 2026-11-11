@@ -2210,8 +2210,8 @@ export interface Chat {
 	readonly children: readonly Chat[];
 	/**
 	 * AgentType is the subagent type of a child chat, such as explore or a
-	 * custom agent definition name. Only set with the
-	 * fork-agent-definitions experiment.
+	 * custom agent definition name, or the type a root chat started as.
+	 * Only set with the fork-agent-definitions experiment.
 	 */
 	readonly agent_type?: string;
 }
@@ -4732,6 +4732,13 @@ export interface CreateChatRequest {
 	readonly inline_mcp_servers?: readonly InlineMCPServerRequest[];
 	readonly plan_mode?: ChatPlanMode;
 	readonly client_type?: ChatClientType;
+	/**
+	 * AgentType starts the chat as an agent type, like spawn_agent's
+	 * type: general, explore, or a personal, organization or project
+	 * agent definition. It requires the fork-agent-definitions
+	 * experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/users.go

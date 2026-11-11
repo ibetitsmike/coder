@@ -224,8 +224,8 @@ type Chat struct {
 	// is present as []. Always empty for child chats.
 	Children []Chat `json:"children"`
 	// AgentType is the subagent type of a child chat, such as explore or a
-	// custom agent definition name. Only set with the
-	// fork-agent-definitions experiment.
+	// custom agent definition name, or the type a root chat started as.
+	// Only set with the fork-agent-definitions experiment.
 	AgentType string `json:"agent_type,omitempty"`
 }
 
@@ -930,6 +930,11 @@ type CreateChatRequest struct {
 	InlineMCPServers []InlineMCPServerRequest `json:"inline_mcp_servers,omitempty"`
 	PlanMode         ChatPlanMode             `json:"plan_mode,omitempty"`
 	ClientType       ChatClientType           `json:"client_type,omitempty"`
+	// AgentType starts the chat as an agent type, like spawn_agent's
+	// type: general, explore, or a personal, organization or project
+	// agent definition. It requires the fork-agent-definitions
+	// experiment.
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // InlineMCPServerRequest declares a streamable HTTP MCP server by value on

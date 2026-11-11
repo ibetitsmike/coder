@@ -23482,7 +23482,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "agent_type": {
-                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name. Only set with the\nfork-agent-definitions experiment.",
+                    "description": "AgentType is the subagent type of a child chat, such as explore or a\ncustom agent definition name, or the type a root chat started as.\nOnly set with the fork-agent-definitions experiment.",
                     "type": "string"
                 },
                 "archived": {
@@ -26654,6 +26654,10 @@ const docTemplate = `{
         "codersdk.CreateChatRequest": {
             "type": "object",
             "properties": {
+                "agent_type": {
+                    "description": "AgentType starts the chat as an agent type, like spawn_agent's\ntype: general, explore, or a personal, organization or project\nagent definition. It requires the fork-agent-definitions\nexperiment.",
+                    "type": "string"
+                },
                 "client_type": {
                     "$ref": "#/definitions/codersdk.ChatClientType"
                 },
