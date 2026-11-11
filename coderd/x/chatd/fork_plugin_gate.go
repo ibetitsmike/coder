@@ -102,8 +102,8 @@ type enabledPack struct {
 }
 
 // enabledPacks returns the packs enabled for the chat's project, when the
-// chat owner can use it, for the chat, and for its root chat, so subagents
-// also see the packs of the chat that spawned them. A pack enabled in more
+// chat owner can use it, for the chat, and for its ancestors, so subagents
+// also see the packs of the chats that spawned them. A pack enabled in more
 // than one place is listed more than once. A failed lookup is logged and
 // enables nothing, so the gate fails closed.
 func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabledPack {
@@ -128,8 +128,15 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
 		}
 	}
+	// A subagent inherits the packs of every ancestor: its root and, with
+	// nested subagents, the chats in between.
 	chatIDs := []uuid.UUID{chat.ID}
-	if chat.RootChatID.Valid && chat.RootChatID.UUID != chat.ID {
+	for _, id := range AncestorChatIDs(chatdCtx, p.db, logger, p.nestedSubagentsEnabled(), chat) {
+		if ancestorID, err := uuid.Parse(id); err == nil {
+			chatIDs = append(chatIDs, ancestorID)
+		}
+	}
+	if chat.RootChatID.Valid && !slices.Contains(chatIDs, chat.RootChatID.UUID) {
 		chatIDs = append(chatIDs, chat.RootChatID.UUID)
 	}
 	for _, chatID := range chatIDs {
