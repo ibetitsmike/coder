@@ -201,14 +201,14 @@ it("reports an update as done when a lost response did update the pack", async (
 	const update = vi
 		.spyOn(forkPluginPacksApi, "updatePluginPack")
 		.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
-	const updated = {
+	const mockUpdatedPack = {
 		...MockForkPluginPack,
 		commit_sha: "fedcba9876543210fedcba9876543210fedcba98",
 		updated_at: "2026-11-12T12:00:00Z",
 	};
 	vi.mocked(forkPluginPacksApi.getPluginPacks)
 		.mockResolvedValueOnce([MockForkPluginPack])
-		.mockResolvedValue([updated]);
+		.mockResolvedValue([mockUpdatedPack]);
 	renderPage();
 
 	await user.click(
@@ -298,8 +298,6 @@ it("does not report an install when a lost response follows a failed first load"
 	);
 	await user.click(within(dialog).getByRole("button", { name: "Install" }));
 
-	// The refetch lists a pack with the submitted name, but no list from before
-	// the request shows that it is new.
 	await waitFor(() =>
 		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
@@ -393,7 +391,9 @@ it("switches the organization through the picker", async () => {
 		),
 	);
 
-	await user.click(await screen.findByRole("combobox"));
+	await user.click(
+		await screen.findByRole("combobox", { name: /^Organization/ }),
+	);
 	await user.click(
 		await screen.findByRole("option", { name: /My Organization 2/ }),
 	);

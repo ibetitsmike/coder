@@ -114,6 +114,37 @@ it("refetches both lists when Retry is pressed after a failed load", async () =>
 	});
 });
 
+it("keeps the switches and offers Retry when a refetch fails", async () => {
+	const user = userEvent.setup();
+	vi.mocked(enablementApi.getEnabledPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPackWithoutPath])
+		.mockRejectedValueOnce(
+			mockApiError({ message: "Failed to list enabled plugin packs." }),
+		);
+	render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(
+		await screen.findByRole("switch", {
+			name: `Enable ${MockForkPluginPack.name}`,
+		}),
+	);
+	const retry = await screen.findByRole("button", { name: "Retry" });
+	expect(
+		screen.getByRole("switch", { name: `Enable ${MockForkPluginPack.name}` }),
+	).toBeChecked();
+	await user.click(retry);
+
+	await waitFor(() =>
+		expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledTimes(3),
+	);
+});
+
 it("disables a pack enabled for the target", async () => {
 	const user = userEvent.setup();
 	render(

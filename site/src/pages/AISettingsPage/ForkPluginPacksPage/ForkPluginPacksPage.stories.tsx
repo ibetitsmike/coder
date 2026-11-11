@@ -3,7 +3,7 @@ import { type QueryClient, useQueryClient } from "react-query";
 import { spyOn } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
-import { pluginPacks } from "#/api/queries/forkPluginPacks";
+import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
 import { organizationsPermissions } from "#/api/queries/organizations";
 import {
 	MockDefaultOrganization,
@@ -50,10 +50,16 @@ export const Populated: Story = {
 				data: { [MockDefaultOrganization.id]: MockOrganizationPermissions },
 			},
 			{
-				key: pluginPacks(MockDefaultOrganization.id).queryKey,
+				key: pluginPacksKey(MockDefaultOrganization.id),
 				data: [MockForkPluginPack],
 			},
 		],
+	},
+};
+
+export const NoSkillsPermission: Story = {
+	parameters: {
+		permissions: { viewAnyOrganizationSkills: false },
 	},
 };
 
@@ -87,7 +93,7 @@ export const PermissionsRefetchError: Story = {
 				data: { [MockDefaultOrganization.id]: MockOrganizationPermissions },
 			},
 			{
-				key: pluginPacks(MockDefaultOrganization.id).queryKey,
+				key: pluginPacksKey(MockDefaultOrganization.id),
 				data: [MockForkPluginPack],
 			},
 		],

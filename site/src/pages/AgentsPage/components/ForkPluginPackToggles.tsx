@@ -41,15 +41,14 @@ export const ForkPluginPackTogglesView: React.FC<
 	pending,
 	onToggle,
 }) => {
+	const errorAlert = error ? (
+		<ErrorAlert
+			error={error}
+			actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+		/>
+	) : undefined;
 	if (!installed || !enabled) {
-		return error ? (
-			<ErrorAlert
-				error={error}
-				actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
-			/>
-		) : (
-			<Loader />
-		);
+		return errorAlert ?? <Loader />;
 	}
 	const isEnabled = (packId: string) =>
 		pending?.pack.id === packId
@@ -57,6 +56,7 @@ export const ForkPluginPackTogglesView: React.FC<
 			: enabled.some((pack) => pack.id === packId);
 	return (
 		<div className="flex flex-col gap-3">
+			{errorAlert}
 			{installed.length === 0 ? (
 				<p className="m-0 text-sm text-content-secondary">
 					No plugin packs are installed in this organization.

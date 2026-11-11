@@ -43,10 +43,12 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 	);
 };
 
+type ForkPluginPacksPillErrorProps = { error: unknown };
+
 /** The pill shown when the chat, and so its organization, fails to load. */
-export const ForkPluginPacksPillError: React.FC<{ error: unknown }> = ({
-	error,
-}) => (
+export const ForkPluginPacksPillError: React.FC<
+	ForkPluginPacksPillErrorProps
+> = ({ error }) => (
 	<ComposerPillError
 		label="Plugin packs failed to load"
 		heading="Chat plugin packs"

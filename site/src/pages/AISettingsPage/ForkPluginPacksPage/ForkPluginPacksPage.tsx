@@ -5,17 +5,22 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Navigate } from "react-router";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
-import { isResponseLost } from "#/api/queries/forkAgentDefinitions";
 import {
 	cachedPluginPacks,
 	createPluginPackMutation,
 	deletePluginPackMutation,
 	isPluginPackGone,
 	pluginPacks,
+	reconcileInstalledPluginPack,
+	reconcileUpdatedPluginPack,
 	updatePluginPackMutation,
 } from "#/api/queries/forkPluginPacks";
 import { organizationsPermissions } from "#/api/queries/organizations";
-import type { ForkPluginPack, Organization } from "#/api/typesGenerated";
+import type {
+	CreateForkPluginPackRequest,
+	ForkPluginPack,
+	Organization,
+} from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Loader } from "#/components/Loader/Loader";
 import { toast } from "#/components/Toaster/toast";
@@ -23,21 +28,40 @@ import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { RequirePermission } from "#/modules/permissions/RequirePermission";
 import { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
+import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
 import { pageTitle } from "#/utils/page";
 import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
 import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkillsOrganization";
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
 import { ForkDeletePluginPackDialog } from "./ForkDeletePluginPackDialog";
 import { ForkInstallPluginPackDialog } from "./ForkInstallPluginPackDialog";
-import {
-	type ForkPluginPacksAccess,
-	ForkPluginPacksTableView,
-} from "./ForkPluginPacksTableView";
+import { ForkPluginPacksTableView } from "./ForkPluginPacksTableView";
 
 type OrganizationPluginPacksProps = {
 	organization: Organization;
-	access: ForkPluginPacksAccess;
+	access: SkillAccess;
 	picker: React.ReactNode;
+};
+
+const withoutPackId = (ids: ReadonlySet<string>, packId: string) => {
+	const next = new Set(ids);
+	next.delete(packId);
+	return next;
+};
+
+const toastUpdateResult = (
+	pack: ForkPluginPack,
+	updated: ForkPluginPack | undefined,
+	error: unknown,
+) => {
+	if (!updated) {
+		toast.error(getErrorMessage(error, `Failed to update ${pack.name}.`), {
+			description: getErrorDetail(error),
+		});
+		return;
+	}
+
+	toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
 };
 
 const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
@@ -50,9 +74,8 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const installMutation = useMutation(
 		createPluginPackMutation(queryClient, organization.id),
 	);
-	// Every in-flight update keeps its row's actions disabled. TanStack Query tracks
-	// only the latest call's variables, and per-call callbacks run only for
-	// the latest call, so the mutation-level callbacks track each pack.
+	// Mutation-level callbacks track each pack, because per-call callbacks only
+	// fire for the latest call.
 	const [updatingPackIds, setUpdatingPackIds] = useState<ReadonlySet<string>>(
 		new Set(),
 	);
@@ -65,35 +88,18 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
 			const [data, error, pack] = args;
-			// After a lost response, a refetched pack with a new timestamp
-			// shows that the update went through.
-			const refreshed = isResponseLost(error)
-				? cachedPluginPacks(queryClient, organization.id)?.find(
-						(candidate) =>
-							candidate.id === pack.id &&
-							candidate.updated_at !== pack.updated_at,
-					)
-				: undefined;
-			const updated = data ?? refreshed;
-			if (updated) {
-				toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
-			} else {
-				toast.error(getErrorMessage(error, `Failed to update ${pack.name}.`), {
-					description: getErrorDetail(error),
-				});
-			}
-			setUpdatingPackIds((current) => {
-				const next = new Set(current);
-				next.delete(pack.id);
-				return next;
-			});
+			const updated =
+				data ??
+				reconcileUpdatedPluginPack(queryClient, organization.id, pack, error);
+			toastUpdateResult(pack, updated, error);
+			setUpdatingPackIds((current) => withoutPackId(current, pack.id));
 		},
 	});
 	const deleteMutation = useMutation(
 		deletePluginPackMutation(queryClient, organization.id),
 	);
 	const [isInstallOpen, setIsInstallOpen] = useState(false);
-	const [deleting, setDeleting] = useState<ForkPluginPack>();
+	const [packToDelete, setPackToDelete] = useState<ForkPluginPack>();
 	const focusReturn = useDialogFocusReturn();
 	const tableRef = useRef<HTMLTableElement>(null);
 	// Without a create permission, deleting the last pack leaves neither a row
@@ -104,6 +110,43 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 			event.preventDefault();
 			tableRef.current.focus();
 		}
+	};
+
+	const installPack = (req: CreateForkPluginPackRequest) => {
+		const cachedPacks = cachedPluginPacks(queryClient, organization.id);
+		const knownPackIds = cachedPacks?.map((pack) => pack.id);
+		installMutation.mutate(req, {
+			onSettled: (data, error) => {
+				const pack =
+					data ??
+					reconcileInstalledPluginPack(
+						queryClient,
+						organization.id,
+						req.name,
+						knownPackIds,
+						error,
+					);
+				if (!pack) {
+					return;
+				}
+
+				toast.success(`${pack.name} installed.`);
+				setIsInstallOpen(false);
+			},
+		});
+	};
+
+	const deletePack = (pack: ForkPluginPack) => {
+		deleteMutation.mutate(pack.id, {
+			onSettled: (_data, error) => {
+				if (error && !isPluginPackGone(queryClient, organization.id, pack.id)) {
+					return;
+				}
+
+				toast.success(`${pack.name} deleted.`);
+				setPackToDelete(undefined);
+			},
+		});
 	};
 
 	return (
@@ -127,7 +170,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				onUpdate={(pack) => updateMutation.mutate(pack)}
 				onDelete={(pack) => {
 					deleteMutation.reset();
-					setDeleting(pack);
+					setPackToDelete(pack);
 				}}
 			/>
 			{isInstallOpen && (
@@ -136,56 +179,17 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					isInstalling={installMutation.isPending}
 					onClose={() => setIsInstallOpen(false)}
 					onCloseAutoFocus={restoreFocus}
-					onInstall={(req) => {
-						const listed = cachedPluginPacks(queryClient, organization.id);
-						const knownPackIds = listed?.map((pack) => pack.id);
-						installMutation.mutate(req, {
-							// A lost response can still have installed the pack, so a
-							// pack with the submitted name that was not listed before
-							// the request shows that the install went through. Without a
-							// list from before the request, a pack with that name may
-							// predate it, so nothing is reconciled.
-							onSettled: (data, error) => {
-								const pack =
-									data ??
-									(knownPackIds && isResponseLost(error)
-										? cachedPluginPacks(queryClient, organization.id)?.find(
-												(candidate) =>
-													candidate.name === req.name &&
-													!knownPackIds.includes(candidate.id),
-											)
-										: undefined);
-								if (pack) {
-									toast.success(`${pack.name} installed.`);
-									setIsInstallOpen(false);
-								}
-							},
-						});
-					}}
+					onInstall={installPack}
 				/>
 			)}
-			{deleting && (
+			{packToDelete && (
 				<ForkDeletePluginPackDialog
-					pack={deleting}
+					pack={packToDelete}
 					error={deleteMutation.error}
 					isDeleting={deleteMutation.isPending}
-					onClose={() => setDeleting(undefined)}
+					onClose={() => setPackToDelete(undefined)}
 					onCloseAutoFocus={restoreFocus}
-					onConfirm={() =>
-						deleteMutation.mutate(deleting.id, {
-							// A lost response can still have deleted the pack, so the
-							// refetched list decides whether the delete is done.
-							onSettled: (_data, error, packId) => {
-								if (
-									!error ||
-									isPluginPackGone(queryClient, organization.id, packId)
-								) {
-									toast.success(`${deleting.name} deleted.`);
-									setDeleting(undefined);
-								}
-							},
-						})
-					}
+					onConfirm={() => deletePack(packToDelete)}
 				/>
 			)}
 		</>
@@ -203,7 +207,6 @@ const ForkPluginPacksPage: React.FC = () => {
 		enabled: isEnabled && permissions.viewAnyOrganizationSkills,
 	});
 
-	// Plugin packs share the organization skill permissions on the server.
 	const readableOrganizations = readableSkillsOrganizations(
 		organizations,
 		organizationPermissionsQuery.data,

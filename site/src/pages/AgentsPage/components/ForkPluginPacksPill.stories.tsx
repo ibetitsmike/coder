@@ -37,6 +37,10 @@ type Story = StoryObj<typeof ForkPluginPacksPillView>;
 
 export const Collapsed: Story = {};
 
+export const CountLoading: Story = {
+	args: { enabledCount: undefined },
+};
+
 export const NoneEnabled: Story = {
 	args: { enabledCount: 0 },
 };
