@@ -19,6 +19,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "#/components/Select/Select";
+import { Skeleton } from "#/components/Skeleton/Skeleton";
 import {
 	Table,
 	TableBody,
@@ -145,6 +146,23 @@ const ForkAvailableAgentsPage: React.FC = () => {
 			const typeChats = chats
 				.filter((chat) => chat.agent_type === storedAgentType(type))
 				.slice(0, recentChatLimit);
+			// "None" only once the chats loaded; a failed load shows its alert.
+			let recentChats: React.ReactNode = null;
+			if (chatsQuery.isPending) {
+				recentChats = <Skeleton variant="text" className="w-24" />;
+			} else if (typeChats.length > 0) {
+				recentChats = (
+					<ul className="m-0 flex list-none flex-col gap-1 p-0">
+						{typeChats.map((chat) => (
+							<li key={chat.id} className="max-w-60 truncate">
+								<Link to={`/agents/${chat.id}`}>{chat.title}</Link>
+							</li>
+						))}
+					</ul>
+				);
+			} else if (chatsQuery.data) {
+				recentChats = <span className="text-content-secondary">None</span>;
+			}
 			return (
 				<TableRow key={type.name}>
 					<TableCell>
@@ -159,19 +177,7 @@ const ForkAvailableAgentsPage: React.FC = () => {
 					<TableCell className="text-content-secondary">
 						{type.root_available ? "Available" : type.root_unavailable_reason}
 					</TableCell>
-					<TableCell>
-						{typeChats.length === 0 ? (
-							<span className="text-content-secondary">None</span>
-						) : (
-							<ul className="m-0 flex list-none flex-col gap-1 p-0">
-								{typeChats.map((chat) => (
-									<li key={chat.id} className="max-w-60 truncate">
-										<Link to={`/agents/${chat.id}`}>{chat.title}</Link>
-									</li>
-								))}
-							</ul>
-						)}
-					</TableCell>
+					<TableCell>{recentChats}</TableCell>
 				</TableRow>
 			);
 		});
@@ -210,6 +216,7 @@ const ForkAvailableAgentsPage: React.FC = () => {
 				/>
 			</div>
 			{agentTypesQuery.error && <ErrorAlert error={agentTypesQuery.error} />}
+			{chatsQuery.error && <ErrorAlert error={chatsQuery.error} />}
 			{!agentTypesQuery.isLoadingError && (
 				<Table aria-label="Available agents">
 					<TableHeader>

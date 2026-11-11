@@ -9,6 +9,7 @@ import {
 	MockDefaultOrganization,
 	MockUserMember,
 	MockWorkspace,
+	mockApiError,
 } from "#/testHelpers/entities";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAvailableAgentsPage from "./ForkAvailableAgentsPage";
@@ -59,7 +60,14 @@ const mockWorkspaceDev = {
 	organization_id: MockDefaultOrganization.id,
 };
 
-const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
+const renderPage = (
+	experiments: Experiment[] = ["fork-agent-definitions"],
+	getChats = async () => [
+		mockDefaultRootChat,
+		mockExploreChat,
+		mockOtherOrgReviewerChat,
+	],
+) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
 	vi.spyOn(API, "getAuthenticatedUser").mockResolvedValue({
 		...MockUserMember,
@@ -73,11 +81,7 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 		workspaces: [mockWorkspaceDev],
 		count: 1,
 	});
-	vi.spyOn(API.experimental, "getChats").mockResolvedValue([
-		mockDefaultRootChat,
-		mockExploreChat,
-		mockOtherOrgReviewerChat,
-	]);
+	vi.spyOn(API.experimental, "getChats").mockImplementation(getChats);
 	const getAgentTypes = vi
 		.spyOn(forkAgentDefinitionsApi, "getAgentTypes")
 		.mockResolvedValue([mockReviewer]);
@@ -93,6 +97,7 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 };
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
 
@@ -109,6 +114,21 @@ describe("ForkAvailableAgentsPage", () => {
 		await user.click(row.getByRole("link", { name: "Chat child" }));
 
 		expect(router.state.location.pathname).toBe("/agents/child");
+	});
+
+	it("shows a failed chat list instead of claiming no chats", async () => {
+		// The sidebar's chat list retries with backoff before it fails.
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		renderPage(undefined, () =>
+			Promise.reject(mockApiError({ message: "Failed to load chats." })),
+		);
+
+		const row = within(
+			await screen.findByRole("row", { name: /personal\/reviewer/ }),
+		);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(screen.getByText("Failed to load chats.")).toBeInTheDocument();
+		expect(row.queryByText("None")).not.toBeInTheDocument();
 	});
 
 	it("adds the picked workspace's agents", async () => {
