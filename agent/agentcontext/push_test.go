@@ -420,12 +420,11 @@ func TestRunPush_AdvertisedPacksTriggerResync(t *testing.T) {
 	p.mu.Lock()
 	p.resp = &agentcontext.PushResponse{Accepted: true}
 	p.mu.Unlock()
+	// Resync explicitly: negotiation settles synchronously, so this point
+	// can be reached before Run's watcher has registered its watches.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("v2"), 0o600))
-	select {
-	case <-p.signal:
-	case <-time.After(testutil.WaitShort):
-		t.Fatalf("expected a push after the file change")
-	}
+	_, err := m.Resync(ctx)
+	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		reqs := p.snapshot()
 		if len(reqs) < 3 {
