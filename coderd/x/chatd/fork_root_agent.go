@@ -174,6 +174,7 @@ func (agent *RootAgent) deploymentPrompt(prompt string) string {
 	return strings.Replace(prompt, subagentOrchestrationPromptBlock, "", 1)
 }
 
+<<<<<<< HEAD
 // idleReasoningEffort returns the effort that a root agent chat created
 // without a user message stores on its last system message. Inserting that
 // message sets chats.last_reasoning_effort, which the first turn reads, so the
@@ -185,6 +186,8 @@ func (agent *RootAgent) idleReasoningEffort(effort *string) database.NullChatRea
 	return database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffort(*effort), Valid: true}
 }
 
+=======
+>>>>>>> origin/main
 // workspaceAwareness returns the workspace guidance without the tools that
 // agent lacks. A nil agent keeps awareness.
 func (agent *RootAgent) workspaceAwareness(awareness string) string {
