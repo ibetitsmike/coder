@@ -40,7 +40,7 @@ import {
 	parseAgentDefinitionMarkdown,
 } from "./agentDefinitionMarkdown";
 
-type ForkAgentDefinitionEditorState = {
+export type ForkAgentDefinitionEditorState = {
 	mode: SkillEditorMode;
 	/** Unset while an edited definition loads or after it fails to load. */
 	initialValues?: AgentDefinitionFormValues;
@@ -56,6 +56,10 @@ type ForkAgentDefinitionEditorState = {
 		submission: { name: string; content: string },
 		onSettled: () => void,
 	) => void;
+	/**
+	 * While isSubmitting, this should keep the dialog open, because a failed
+	 * save is reported only as submitError here.
+	 */
 	onClose: () => void;
 };
 

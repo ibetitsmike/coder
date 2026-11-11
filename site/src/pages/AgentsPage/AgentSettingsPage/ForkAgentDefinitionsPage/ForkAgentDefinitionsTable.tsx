@@ -14,6 +14,7 @@ import {
 	type ForkAgentDefinitionDeleteState,
 	ForkAgentDefinitionsTableView,
 } from "./ForkAgentDefinitionsTableView";
+import { useForkAgentDefinitionEditor } from "./useForkAgentDefinitionEditor";
 
 type ForkAgentDefinitionsTableProps = {
 	organizationId: string;
@@ -24,9 +25,18 @@ export const ForkAgentDefinitionsTable: React.FC<
 	ForkAgentDefinitionsTableProps
 > = ({ organizationId, action }) => {
 	const queryClient = useQueryClient();
-	const [deleteTarget, setDeleteTarget] =
+	const [selectedDeleteTarget, setDeleteTarget] =
 		useState<ForkAgentDefinitionMetadata>();
+	const deleteTarget =
+		selectedDeleteTarget?.organization_id === organizationId
+			? selectedDeleteTarget
+			: undefined;
+	if (selectedDeleteTarget && !deleteTarget) {
+		setDeleteTarget(undefined);
+	}
 	const definitionsQuery = useQuery(userAgentDefinitions(organizationId));
+	const { editorState, openCreate, openEdit } =
+		useForkAgentDefinitionEditor(organizationId);
 
 	// Pending toggles are keyed by organization, then name, so a second
 	// toggle, or a switch to another organization with the same names, does
@@ -121,6 +131,9 @@ export const ForkAgentDefinitionsTable: React.FC<
 			onToggleEnabled={(name, enabled) =>
 				toggleMutation.mutate({ organizationId, name, req: { enabled } })
 			}
+			onCreate={openCreate}
+			onEdit={openEdit}
+			editorState={editorState}
 			onDelete={(definition) => {
 				deleteMutation.reset();
 				setDeleteTarget(definition);

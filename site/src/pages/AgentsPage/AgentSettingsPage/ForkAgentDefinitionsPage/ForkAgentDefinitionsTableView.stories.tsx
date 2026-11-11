@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
+import { emptyAgentDefinitionFormValues } from "./agentDefinitionMarkdown";
 import { ForkAgentDefinitionsTableView } from "./ForkAgentDefinitionsTableView";
 
 const MockReleaseNotesDefinition = {
@@ -22,6 +23,8 @@ const meta = {
 		isRetrying: false,
 		onRetry: fn(),
 		onToggleEnabled: fn(),
+		onCreate: fn(),
+		onEdit: fn(),
 		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkAgentDefinitionsTableView>;
@@ -66,6 +69,18 @@ export const RowActionsOpen: Story = {
 				name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
 			}),
 		);
+	},
+};
+
+export const EditorOpen: Story = {
+	args: {
+		editorState: {
+			mode: "create",
+			initialValues: emptyAgentDefinitionFormValues,
+			isSubmitting: false,
+			onSubmit: fn(),
+			onClose: fn(),
+		},
 	},
 };
 
