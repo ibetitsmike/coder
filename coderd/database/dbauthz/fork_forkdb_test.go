@@ -322,6 +322,57 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountChatUserNotificationsSince(gomock.Any(), arg).Return(int64(3), nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceNotificationMessage, policy.ActionRead).Returns(int64(3))
 		},
+		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			arg := forkdb.InsertPluginPackParams{ID: pack.ID, OrganizationID: pack.OrganizationID, Name: pack.Name}
+			fdb.EXPECT().InsertPluginPack(gomock.Any(), arg).Return(pack, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceOrganizationSkill.InOrg(pack.OrganizationID), policy.ActionCreate).Returns(pack)
+		},
+		"GetPluginPackByID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionRead).Returns(pack)
+		},
+		"GetPluginPacksByOrganizationID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			fdb.EXPECT().GetPluginPacksByOrganizationID(gomock.Any(), pack.OrganizationID).Return([]forkdb.PluginPack{pack}, nil).AnyTimes()
+			check.Args(pack.OrganizationID).
+				Asserts(rbac.ResourceOrganizationSkill.InOrg(pack.OrganizationID), policy.ActionRead).
+				Returns([]forkdb.PluginPack{pack})
+		},
+		"UpdatePluginPackCommit": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			arg := forkdb.UpdatePluginPackCommitParams{ID: pack.ID, Ref: "v2", CommitSha: pack.CommitSha}
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().UpdatePluginPackCommit(gomock.Any(), arg).Return(pack, nil).AnyTimes()
+			check.Args(arg).Asserts(pluginPackObject(pack), policy.ActionUpdate).Returns(pack)
+		},
+		"DeletePluginPackByID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().DeletePluginPackByID(gomock.Any(), pack.ID).Return(nil).AnyTimes()
+			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionDelete).Returns()
+		},
+		"InsertPluginPackResources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			arg := forkdb.InsertPluginPackResourcesParams{PackID: pack.ID, Paths: []string{"SKILL.md"}, Contents: [][]byte{[]byte("x")}, ContentHashes: []string{"h"}}
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().InsertPluginPackResources(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(pluginPackObject(pack), policy.ActionUpdate).Returns()
+		},
+		"DeletePluginPackResources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().DeletePluginPackResources(gomock.Any(), pack.ID).Return(nil).AnyTimes()
+			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionUpdate).Returns()
+		},
+		"GetPluginPackResources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			resources := []forkdb.PluginPackResource{{PackID: pack.ID, Path: "SKILL.md", Content: []byte("x"), ContentHash: "h"}}
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().GetPluginPackResources(gomock.Any(), pack.ID).Return(resources, nil).AnyTimes()
+			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionRead).Returns(resources)
+		},
 		"InsertPlugin": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			plugin := testutil.Fake(t, faker, forkdb.Plugin{})
 			arg := forkdb.InsertPluginParams{ID: plugin.ID, OrganizationID: plugin.OrganizationID, Name: plugin.Name}
@@ -865,4 +916,8 @@ func TestOrganizationAgentDefinitionOrganizationMembership(t *testing.T) {
 			require.Empty(t, rows)
 		})
 	}
+}
+
+func pluginPackObject(pack forkdb.PluginPack) rbac.Object {
+	return rbac.ResourceOrganizationSkill.WithID(pack.ID).InOrg(pack.OrganizationID)
 }

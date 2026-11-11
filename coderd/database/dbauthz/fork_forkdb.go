@@ -135,6 +135,17 @@ func (f *forkQuerier) DeletePluginLinkCodesByUser(ctx context.Context, arg forkd
 	return f.db.DeletePluginLinkCodesByUser(ctx, arg)
 }
 
+func (f *forkQuerier) DeletePluginPackByID(ctx context.Context, id uuid.UUID) error {
+	return deleteQ(f.q.log, f.q.auth, f.db.GetPluginPackByID, f.db.DeletePluginPackByID)(ctx, id)
+}
+
+func (f *forkQuerier) DeletePluginPackResources(ctx context.Context, packID uuid.UUID) error {
+	if err := f.authorizePluginPackUpdate(ctx, packID); err != nil {
+		return err
+	}
+	return f.db.DeletePluginPackResources(ctx, packID)
+}
+
 func (f *forkQuerier) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return err
@@ -280,6 +291,24 @@ func (f *forkQuerier) GetPluginChatBindingsDue(ctx context.Context, arg forkdb.G
 	return f.db.GetPluginChatBindingsDue(ctx, arg)
 }
 
+func (f *forkQuerier) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetPluginPackByID)(ctx, id)
+}
+
+func (f *forkQuerier) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
+	if _, err := f.GetPluginPackByID(ctx, packID); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPackResources(ctx, packID)
+}
+
+func (f *forkQuerier) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceOrganizationSkill.InOrg(organizationID)); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPacksByOrganizationID(ctx, organizationID)
+}
+
 func (f *forkQuerier) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
 		return forkdb.PluginUserLink{}, err
@@ -383,6 +412,20 @@ func (f *forkQuerier) InsertPluginLinkCode(ctx context.Context, arg forkdb.Inser
 		return err
 	}
 	return f.db.InsertPluginLinkCode(ctx, arg)
+}
+
+func (f *forkQuerier) InsertPluginPack(ctx context.Context, arg forkdb.InsertPluginPackParams) (forkdb.PluginPack, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.PluginPack{}, err
+	}
+	return f.db.InsertPluginPack(ctx, arg)
+}
+
+func (f *forkQuerier) InsertPluginPackResources(ctx context.Context, arg forkdb.InsertPluginPackResourcesParams) error {
+	if err := f.authorizePluginPackUpdate(ctx, arg.PackID); err != nil {
+		return err
+	}
+	return f.db.InsertPluginPackResources(ctx, arg)
 }
 
 func (f *forkQuerier) InsertProjectAgentDefinition(ctx context.Context, arg forkdb.InsertProjectAgentDefinitionParams) (forkdb.AgentDefinition, error) {
@@ -560,6 +603,13 @@ func (f *forkQuerier) UpdatePluginLastError(ctx context.Context, arg forkdb.Upda
 	return f.db.UpdatePluginLastError(ctx, arg)
 }
 
+func (f *forkQuerier) UpdatePluginPackCommit(ctx context.Context, arg forkdb.UpdatePluginPackCommitParams) (forkdb.PluginPack, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdatePluginPackCommitParams) (forkdb.PluginPack, error) {
+		return f.db.GetPluginPackByID(ctx, arg.ID)
+	}
+	return updateWithReturn(f.q.log, f.q.auth, fetch, f.db.UpdatePluginPackCommit)(ctx, arg)
+}
+
 func (f *forkQuerier) UpdateProjectAgentDefinitionByName(ctx context.Context, arg forkdb.UpdateProjectAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
 		return forkdb.AgentDefinition{}, err
@@ -634,6 +684,15 @@ func (f *forkQuerier) authorizeChatWakeup(ctx context.Context, action policy.Act
 		return forkdb.ChatWakeup{}, err
 	}
 	return wakeup, nil
+}
+
+// authorizePluginPackUpdate authorizes changing the resources of pack id.
+func (f *forkQuerier) authorizePluginPackUpdate(ctx context.Context, id uuid.UUID) error {
+	pack, err := f.db.GetPluginPackByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return f.q.authorizeContext(ctx, policy.ActionUpdate, pack)
 }
 
 // authorizeUserAgentDefinition authorizes action on the user-tier agent
