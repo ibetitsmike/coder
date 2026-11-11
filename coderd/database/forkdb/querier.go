@@ -98,6 +98,7 @@ type Querier interface {
 	GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error)
 	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
 	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
+	GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error)
 	GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]PluginPack, error)
 	GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error)
 	GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error)
@@ -164,6 +165,7 @@ type Querier interface {
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
+	UpsertPluginPackSources(ctx context.Context, arg UpsertPluginPackSourcesParams) (PluginPackSource, error)
 	// Relinking an external identity to another user clears the active chat so
 	// replies never reach a chat the new user does not own.
 	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)

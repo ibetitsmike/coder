@@ -86,6 +86,19 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		orgAgentDefinitions.Patch(orgAgentDefinitionsPath+"/{agentDefinition}/acl", api.patchForkOrganizationAgentDefinitionACL)
 		orgAgentDefinitions.Get("/organizations/{organization}/agent-types", api.forkAgentTypes)
 
+		orgPluginPacks := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkPluginPacks),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		orgPluginPacks.Get("/organizations/{organization}/plugin-pack-sources", api.forkPluginPackSources)
+		orgPluginPacks.Put("/organizations/{organization}/plugin-pack-sources", api.updateForkPluginPackSources)
+		const orgPluginPacksPath = "/organizations/{organization}/plugin-packs"
+		orgPluginPacks.Get(orgPluginPacksPath, api.forkPluginPacks)
+		orgPluginPacks.Post(orgPluginPacksPath, api.postForkPluginPack)
+		orgPluginPacks.Get(orgPluginPacksPath+"/{pluginPack}", api.forkPluginPack)
+		orgPluginPacks.Delete(orgPluginPacksPath+"/{pluginPack}", api.deleteForkPluginPack)
+		orgPluginPacks.Post(orgPluginPacksPath+"/{pluginPack}/update", api.updateForkPluginPack)
+
 		projectAgentDefinitions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
 			httpmw.ExtractOrganizationParam(api.Database),

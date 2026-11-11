@@ -4794,6 +4794,23 @@ export interface CreateForkAgentDefinitionRequest {
 	readonly content: string;
 }
 
+// From codersdk/fork_plugin_packs.go
+/**
+ * CreateForkPluginPackRequest installs a plugin pack.
+ */
+export interface CreateForkPluginPackRequest {
+	readonly name: string;
+	readonly source_url: string;
+	/**
+	 * SourcePath is the pack directory in the repository. Empty is the root.
+	 */
+	readonly source_path?: string;
+	/**
+	 * Ref is a tag, a branch or a full commit SHA.
+	 */
+	readonly ref: string;
+}
+
 // From codersdk/groups.go
 export interface CreateGroupRequest {
 	readonly name: string;
@@ -6619,6 +6636,47 @@ export interface ForkOrganizationSubagentLimitsResponse {
 	 * Effective holds the limits in force in the organization.
 	 */
 	readonly effective: ForkSubagentLimitValues;
+}
+
+// From codersdk/fork_plugin_packs.go
+/**
+ * ForkPluginPack is a plugin pack installed from a Git repository and pinned
+ * to one commit.
+ */
+export interface ForkPluginPack {
+	readonly id: string;
+	readonly organization_id: string;
+	readonly name: string;
+	readonly source_url: string;
+	readonly source_path: string;
+	readonly ref: string;
+	readonly commit_sha: string;
+	readonly created_by: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+	/**
+	 * Files is set only when a single pack is returned.
+	 */
+	readonly files?: readonly ForkPluginPackFile[];
+}
+
+// From codersdk/fork_plugin_packs.go
+/**
+ * ForkPluginPackFile is a stored file of a plugin pack.
+ */
+export interface ForkPluginPackFile {
+	readonly path: string;
+	readonly size_bytes: number;
+	readonly content_hash: string;
+}
+
+// From codersdk/fork_plugin_packs.go
+/**
+ * ForkPluginPackSources are the Git hosts that plugin packs of an
+ * organization can be installed from.
+ */
+export interface ForkPluginPackSources {
+	readonly hosts: readonly string[];
 }
 
 // From codersdk/fork_subagent_limits.go
@@ -11808,6 +11866,17 @@ export interface UpdateCheckResponse {
 export interface UpdateForkAgentDefinitionRequest {
 	readonly content?: string;
 	readonly enabled?: boolean;
+}
+
+// From codersdk/fork_plugin_packs.go
+/**
+ * UpdateForkPluginPackRequest fetches a plugin pack again.
+ */
+export interface UpdateForkPluginPackRequest {
+	/**
+	 * Ref replaces the ref of the pack. Empty fetches the current ref again.
+	 */
+	readonly ref?: string;
 }
 
 // From healthsdk/healthsdk.go

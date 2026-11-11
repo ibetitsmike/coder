@@ -67,6 +67,11 @@ func (f forkQueryMetricsStore) GetPluginPackResources(ctx context.Context, packI
 	return f.s.GetPluginPackResources(ctx, packID)
 }
 
+func (f forkQueryMetricsStore) GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (forkdb.PluginPackSource, error) {
+	defer f.observe(ctx, "GetPluginPackSources", time.Now())
+	return f.s.GetPluginPackSources(ctx, organizationID)
+}
+
 func (f forkQueryMetricsStore) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
 	defer f.observe(ctx, "GetPluginPacksByOrganizationID", time.Now())
 	return f.s.GetPluginPacksByOrganizationID(ctx, organizationID)
@@ -85,6 +90,11 @@ func (f forkQueryMetricsStore) InsertPluginPackResources(ctx context.Context, ar
 func (f forkQueryMetricsStore) UpdatePluginPackCommit(ctx context.Context, arg forkdb.UpdatePluginPackCommitParams) (forkdb.PluginPack, error) {
 	defer f.observe(ctx, "UpdatePluginPackCommit", time.Now())
 	return f.s.UpdatePluginPackCommit(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertPluginPackSources(ctx context.Context, arg forkdb.UpsertPluginPackSourcesParams) (forkdb.PluginPackSource, error) {
+	defer f.observe(ctx, "UpsertPluginPackSources", time.Now())
+	return f.s.UpsertPluginPackSources(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) observe(ctx context.Context, query string, start time.Time) {

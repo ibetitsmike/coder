@@ -85,6 +85,17 @@ func (q *Queries) GetPluginPackResources(ctx context.Context, packID uuid.UUID) 
 	return items, nil
 }
 
+const getPluginPackSources = `-- name: GetPluginPackSources :one
+SELECT organization_id, hosts, updated_at FROM plugin_pack_sources WHERE organization_id = $1
+`
+
+func (q *Queries) GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error) {
+	row := q.db.QueryRowContext(ctx, getPluginPackSources, organizationID)
+	var i PluginPackSource
+	err := row.Scan(&i.OrganizationID, pq.Array(&i.Hosts), &i.UpdatedAt)
+	return i, err
+}
+
 const getPluginPacksByOrganizationID = `-- name: GetPluginPacksByOrganizationID :many
 SELECT id, organization_id, name, source_url, source_path, ref, commit_sha, created_by, created_at, updated_at FROM plugin_packs WHERE organization_id = $1 ORDER BY name
 `
@@ -255,5 +266,28 @@ func (q *Queries) UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const upsertPluginPackSources = `-- name: UpsertPluginPackSources :one
+INSERT INTO plugin_pack_sources (organization_id, hosts, updated_at)
+VALUES ($1, $2::text[], $3)
+ON CONFLICT (organization_id) DO UPDATE
+SET
+    hosts = EXCLUDED.hosts,
+    updated_at = EXCLUDED.updated_at
+RETURNING organization_id, hosts, updated_at
+`
+
+type UpsertPluginPackSourcesParams struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Hosts          []string  `db:"hosts" json:"hosts"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
+}
+
+func (q *Queries) UpsertPluginPackSources(ctx context.Context, arg UpsertPluginPackSourcesParams) (PluginPackSource, error) {
+	row := q.db.QueryRowContext(ctx, upsertPluginPackSources, arg.OrganizationID, pq.Array(arg.Hosts), arg.UpdatedAt)
+	var i PluginPackSource
+	err := row.Scan(&i.OrganizationID, pq.Array(&i.Hosts), &i.UpdatedAt)
 	return i, err
 }

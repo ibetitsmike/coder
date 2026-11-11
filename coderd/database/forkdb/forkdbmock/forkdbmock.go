@@ -620,6 +620,21 @@ func (mr *MockStoreMockRecorder) GetPluginPackResources(ctx, packID any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackResources", reflect.TypeOf((*MockStore)(nil).GetPluginPackResources), ctx, packID)
 }
 
+// GetPluginPackSources mocks base method.
+func (m *MockStore) GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (forkdb.PluginPackSource, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPackSources", ctx, organizationID)
+	ret0, _ := ret[0].(forkdb.PluginPackSource)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPackSources indicates an expected call of GetPluginPackSources.
+func (mr *MockStoreMockRecorder) GetPluginPackSources(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackSources", reflect.TypeOf((*MockStore)(nil).GetPluginPackSources), ctx, organizationID)
+}
+
 // GetPluginPacksByOrganizationID mocks base method.
 func (m *MockStore) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
 	m.ctrl.T.Helper()
@@ -1299,6 +1314,21 @@ func (m *MockStore) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTo
 func (mr *MockStoreMockRecorder) UpsertChatTodos(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatTodos", reflect.TypeOf((*MockStore)(nil).UpsertChatTodos), ctx, arg)
+}
+
+// UpsertPluginPackSources mocks base method.
+func (m *MockStore) UpsertPluginPackSources(ctx context.Context, arg forkdb.UpsertPluginPackSourcesParams) (forkdb.PluginPackSource, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertPluginPackSources", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginPackSource)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertPluginPackSources indicates an expected call of UpsertPluginPackSources.
+func (mr *MockStoreMockRecorder) UpsertPluginPackSources(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertPluginPackSources", reflect.TypeOf((*MockStore)(nil).UpsertPluginPackSources), ctx, arg)
 }
 
 // UpsertPluginUserLink mocks base method.

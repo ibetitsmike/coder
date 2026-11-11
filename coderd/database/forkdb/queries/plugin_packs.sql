@@ -55,3 +55,15 @@ DELETE FROM plugin_pack_resources WHERE pack_id = @pack_id;
 
 -- name: GetPluginPackResources :many
 SELECT * FROM plugin_pack_resources WHERE pack_id = @pack_id ORDER BY path;
+
+-- name: GetPluginPackSources :one
+SELECT * FROM plugin_pack_sources WHERE organization_id = @organization_id;
+
+-- name: UpsertPluginPackSources :one
+INSERT INTO plugin_pack_sources (organization_id, hosts, updated_at)
+VALUES (@organization_id, @hosts::text[], @updated_at)
+ON CONFLICT (organization_id) DO UPDATE
+SET
+    hosts = EXCLUDED.hosts,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;

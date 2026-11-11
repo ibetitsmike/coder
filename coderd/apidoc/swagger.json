@@ -4757,6 +4757,284 @@
 				}
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/plugin-pack-sources": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get plugin pack sources",
+				"operationId": "get-plugin-pack-sources",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPackSources"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"put": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Update plugin pack sources",
+				"operationId": "update-plugin-pack-sources",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPackSources"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPackSources"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/plugin-packs": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List plugin packs",
+				"operationId": "list-plugin-packs",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkPluginPack"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"post": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Install a plugin pack",
+				"operationId": "install-a-plugin-pack",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.CreateForkPluginPackRequest"
+						}
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPack"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/plugin-packs/{pluginPack}": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get a plugin pack",
+				"operationId": "get-a-plugin-pack",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPack"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Delete a plugin pack",
+				"operationId": "delete-a-plugin-pack",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/plugin-packs/{pluginPack}/update": {
+			"post": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Update a plugin pack",
+				"operationId": "update-a-plugin-pack",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.UpdateForkPluginPackRequest"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkPluginPack"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/organizations/{organization}/projects/{project}/agent-definitions": {
 			"get": {
 				"produces": ["application/json"],
@@ -24439,6 +24717,25 @@
 				}
 			}
 		},
+		"codersdk.CreateForkPluginPackRequest": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"ref": {
+					"description": "Ref is a tag, a branch or a full commit SHA.",
+					"type": "string"
+				},
+				"source_path": {
+					"description": "SourcePath is the pack directory in the repository. Empty is the root.",
+					"type": "string"
+				},
+				"source_url": {
+					"type": "string"
+				}
+			}
+		},
 		"codersdk.CreateGroupRequest": {
 			"type": "object",
 			"required": ["name"],
@@ -26642,6 +26939,78 @@
 							"$ref": "#/definitions/codersdk.ForkOrganizationSubagentLimits"
 						}
 					]
+				}
+			}
+		},
+		"codersdk.ForkPluginPack": {
+			"type": "object",
+			"properties": {
+				"commit_sha": {
+					"type": "string"
+				},
+				"created_at": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"created_by": {
+					"type": "string",
+					"format": "uuid"
+				},
+				"files": {
+					"description": "Files is set only when a single pack is returned.",
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/codersdk.ForkPluginPackFile"
+					}
+				},
+				"id": {
+					"type": "string",
+					"format": "uuid"
+				},
+				"name": {
+					"type": "string"
+				},
+				"organization_id": {
+					"type": "string",
+					"format": "uuid"
+				},
+				"ref": {
+					"type": "string"
+				},
+				"source_path": {
+					"type": "string"
+				},
+				"source_url": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string",
+					"format": "date-time"
+				}
+			}
+		},
+		"codersdk.ForkPluginPackFile": {
+			"type": "object",
+			"properties": {
+				"content_hash": {
+					"type": "string"
+				},
+				"path": {
+					"type": "string"
+				},
+				"size_bytes": {
+					"type": "integer"
+				}
+			}
+		},
+		"codersdk.ForkPluginPackSources": {
+			"type": "object",
+			"properties": {
+				"hosts": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
 				}
 			}
 		},
@@ -32963,6 +33332,15 @@
 				},
 				"enabled": {
 					"type": "boolean"
+				}
+			}
+		},
+		"codersdk.UpdateForkPluginPackRequest": {
+			"type": "object",
+			"properties": {
+				"ref": {
+					"description": "Ref replaces the ref of the pack. Empty fetches the current ref again.",
+					"type": "string"
 				}
 			}
 		},

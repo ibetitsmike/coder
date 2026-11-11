@@ -302,6 +302,13 @@ func (f *forkQuerier) GetPluginPackResources(ctx context.Context, packID uuid.UU
 	return f.db.GetPluginPackResources(ctx, packID)
 }
 
+func (f *forkQuerier) GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (forkdb.PluginPackSource, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceOrganizationSkill.InOrg(organizationID)); err != nil {
+		return forkdb.PluginPackSource{}, err
+	}
+	return f.db.GetPluginPackSources(ctx, organizationID)
+}
+
 func (f *forkQuerier) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceOrganizationSkill.InOrg(organizationID)); err != nil {
 		return nil, err
@@ -654,6 +661,13 @@ func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChat
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.UpsertChatTodos(ctx, arg)
+}
+
+func (f *forkQuerier) UpsertPluginPackSources(ctx context.Context, arg forkdb.UpsertPluginPackSourcesParams) (forkdb.PluginPackSource, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.PluginPackSource{}, err
+	}
+	return f.db.UpsertPluginPackSources(ctx, arg)
 }
 
 func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {
