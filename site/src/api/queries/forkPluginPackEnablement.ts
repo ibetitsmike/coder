@@ -11,14 +11,18 @@ import {
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 import { chatEntityKey } from "./chats";
 
-// Both keys sit under the admin list's key, so installing, updating or
-// deleting a pack refreshes them.
+/**
+ * The query key of the plugin packs any organization member may enable. It
+ * extends pluginPacksKey, so installing, updating or deleting a pack
+ * refreshes it.
+ */
 export const availablePluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId, "available"] as const;
 
 /**
  * The query key of the plugin packs a project or chat enables directly. A
- * project's key extends pluginPacksKey of its organization.
+ * project's key extends pluginPacksKey of its organization, but a chat's key
+ * does not.
  */
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
@@ -31,6 +35,7 @@ export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 			] as const)
 		: (["chats", "fork-plugin-packs", "chats", target.chatId] as const);
 
+/** Query options for the plugin packs any organization member may enable. */
 export const availablePluginPacks = (organizationId: string) =>
 	queryOptions({
 		queryKey: availablePluginPacksKey(organizationId),
