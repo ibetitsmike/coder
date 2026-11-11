@@ -63,9 +63,9 @@ func managedPackName(sourcePath string) (string, bool) {
 }
 
 // filterPackResources drops pack-contributed resources when fork-plugin-packs is
-// off. With it on, it drops the rows of installed packs that are enabled
-// neither for the chat's project nor for its root chat: every workspace
-// receives the packs of all its chats, so each chat filters to its own set.
+// off. With it on, it drops the rows of installed packs that are not enabled
+// for the chat: every workspace receives the packs of all its chats, so each
+// chat filters to its own set.
 // Packs the user placed outside managedPackRoot are kept. The prompt builder,
 // the context resource listing, and the agent type catalog all call it, so
 // the gate covers every consumer of the pinned rows.
