@@ -604,23 +604,6 @@ func (q *Queries) SetPluginUserLinkActiveChat(ctx context.Context, arg SetPlugin
 	return err
 }
 
-const setPluginUserLinksActiveChatByUser = `-- name: SetPluginUserLinksActiveChatByUser :exec
-UPDATE plugin_user_links
-SET active_chat_id = $1
-WHERE plugin_id = $2 AND user_id = $3
-`
-
-type SetPluginUserLinksActiveChatByUserParams struct {
-	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
-	PluginID     uuid.UUID     `db:"plugin_id" json:"plugin_id"`
-	UserID       uuid.UUID     `db:"user_id" json:"user_id"`
-}
-
-func (q *Queries) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error {
-	_, err := q.db.ExecContext(ctx, setPluginUserLinksActiveChatByUser, arg.ActiveChatID, arg.PluginID, arg.UserID)
-	return err
-}
-
 const updatePluginChatBindingDelivered = `-- name: UpdatePluginChatBindingDelivered :exec
 UPDATE plugin_chat_bindings
 SET

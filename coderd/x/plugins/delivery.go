@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -98,7 +96,14 @@ func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindings
 			r.logger.Warn(ctx, "list links of chat owner", slog.Error(err))
 			return
 		}
+		// A user may link several external identities to one plugin.
+		// Each identity follows its own active chat, so deliver only to
+		// the links whose active chat is this one; broadcasting would
+		// push one identity's conversation to all of them.
 		for _, l := range links {
+			if !l.ActiveChatID.Valid || l.ActiveChatID.UUID != b.ChatID {
+				continue
+			}
 			err := r.invokeResult(ctx, "coder_on_event", &pluginproto.ChatEvent{
 				ChatId:     b.ChatID.String(),
 				ExternalId: l.ExternalID,
@@ -109,16 +114,6 @@ func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindings
 			if err != nil {
 				r.deliveryFailed(ctx, b, err)
 				return
-			}
-		}
-		if len(texts) > 0 && len(links) > 0 {
-			err := r.m.fdb.SetPluginUserLinksActiveChatByUser(sys(ctx), forkdb.SetPluginUserLinksActiveChatByUserParams{
-				PluginID:     r.plugin.ID,
-				UserID:       b.ChatOwnerID,
-				ActiveChatID: uuidNull(b.ChatID),
-			})
-			if err != nil {
-				r.logger.Warn(ctx, "set active plugin chat", slog.Error(err))
 			}
 		}
 	}
@@ -197,8 +192,4 @@ func messageText(msg database.ChatMessage) string {
 		}
 	}
 	return strings.Join(texts, "\n\n")
-}
-
-func uuidNull(id uuid.UUID) uuid.NullUUID {
-	return uuid.NullUUID{UUID: id, Valid: true}
 }

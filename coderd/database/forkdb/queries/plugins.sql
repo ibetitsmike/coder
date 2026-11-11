@@ -137,11 +137,6 @@ UPDATE plugin_user_links
 SET active_chat_id = @active_chat_id
 WHERE plugin_id = @plugin_id AND external_id = @external_id;
 
--- name: SetPluginUserLinksActiveChatByUser :exec
-UPDATE plugin_user_links
-SET active_chat_id = @active_chat_id
-WHERE plugin_id = @plugin_id AND user_id = @user_id;
-
 -- Binds every top-level, unarchived chat of a linked user in the plugin's
 -- organization. Chats created after the link start at cursor 0 so their whole
 -- history is delivered. Older chats start at their newest message so linking
