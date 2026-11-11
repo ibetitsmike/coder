@@ -102,19 +102,19 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 }) => {
 	const queryClient = useQueryClient();
 	const enabledQuery = useQuery(enabledPluginPacks(target));
-	const installedQuery = useQuery(availablePluginPacks(organizationId));
+	const availableQuery = useQuery(availablePluginPacks(organizationId));
 	const toggleMutation = useMutation(
 		setPluginPackEnabledMutation(queryClient, target),
 	);
 	return (
 		<ForkPluginPackTogglesView
-			installed={installedQuery.data}
+			installed={availableQuery.data}
 			enabled={enabledQuery.data}
-			error={enabledQuery.error ?? installedQuery.error}
-			isRetrying={enabledQuery.isFetching || installedQuery.isFetching}
+			error={enabledQuery.error ?? availableQuery.error}
+			isRetrying={enabledQuery.isFetching || availableQuery.isFetching}
 			onRetry={() => {
 				void enabledQuery.refetch();
-				void installedQuery.refetch();
+				void availableQuery.refetch();
 			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}

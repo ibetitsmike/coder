@@ -9,7 +9,12 @@ import {
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
 
-const enabledPluginPacksKey = (target: PluginPackTarget) =>
+// Both keys sit under the admin list's key, so installing, updating or
+// deleting a pack refreshes them.
+export const availablePluginPacksKey = (organizationId: string) =>
+	["chats", "fork-plugin-packs", organizationId, "available"] as const;
+
+export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
 				"chats",
@@ -22,12 +27,7 @@ const enabledPluginPacksKey = (target: PluginPackTarget) =>
 
 export const availablePluginPacks = (organizationId: string) =>
 	queryOptions({
-		queryKey: [
-			"chats",
-			"fork-plugin-packs",
-			organizationId,
-			"available",
-		] as const,
+		queryKey: availablePluginPacksKey(organizationId),
 		queryFn: () => getAvailablePluginPacks(organizationId),
 	});
 

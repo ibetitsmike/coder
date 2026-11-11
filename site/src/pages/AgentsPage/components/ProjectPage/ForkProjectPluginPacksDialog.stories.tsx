@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 import {
-	availablePluginPacks,
-	enabledPluginPacks,
+	availablePluginPacksKey,
+	enabledPluginPacksKey,
 } from "#/api/queries/forkPluginPackEnablement";
 import { MockChatProject } from "#/testHelpers/entities";
 import {
@@ -11,14 +11,12 @@ import {
 } from "#/testHelpers/forkPluginPacks";
 import { ForkProjectPluginPacksDialog } from "./ForkProjectPluginPacksDialog";
 
-const enabledKey = enabledPluginPacks({
+const enabledKey = enabledPluginPacksKey({
 	kind: "project",
 	organizationId: MockChatProject.organization_id,
 	projectId: MockChatProject.id,
-}).queryKey;
-const installedKey = availablePluginPacks(
-	MockChatProject.organization_id,
-).queryKey;
+});
+const availableKey = availablePluginPacksKey(MockChatProject.organization_id);
 
 const meta: Meta<typeof ForkProjectPluginPacksDialog> = {
 	title: "pages/AgentsPage/ProjectPage/ForkProjectPluginPacksDialog",
@@ -33,7 +31,7 @@ const meta: Meta<typeof ForkProjectPluginPacksDialog> = {
 		queries: [
 			{ key: enabledKey, data: [MockForkPluginPack] },
 			{
-				key: installedKey,
+				key: availableKey,
 				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
 			},
 		],
