@@ -25,18 +25,9 @@ import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
 import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
+import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
 
 const title = "Plugin packs";
-
-/** Which plugin pack actions the table offers. */
-export type ForkPluginPacksAccess = {
-	/** Shows the install button. */
-	create: boolean;
-	/** Shows the update item in each row's menu. */
-	update: boolean;
-	/** Shows the delete item in each row's menu. */
-	delete: boolean;
-};
 
 type FocusReturn = Pick<
 	ReturnType<typeof useDialogFocusReturn>,
@@ -45,7 +36,7 @@ type FocusReturn = Pick<
 
 type ForkPluginPacksTableViewProps = {
 	packs: readonly ForkPluginPack[];
-	access: ForkPluginPacksAccess;
+	access: SkillAccess;
 	action?: React.ReactNode;
 	error: unknown;
 	isLoadingError: boolean;
@@ -88,7 +79,7 @@ const InstallPluginPackButton: React.FC<InstallPluginPackButtonProps> = ({
 
 type ForkPluginPackRowProps = {
 	pack: ForkPluginPack;
-	access: ForkPluginPacksAccess;
+	access: SkillAccess;
 	isUpdating: boolean;
 	isFirst: boolean;
 	focusReturn?: FocusReturn;
@@ -234,14 +225,6 @@ export const ForkPluginPacksTableView: React.FC<
 			<TableEmpty
 				message="No plugin packs installed"
 				description="Install a Claude Code or Cursor plugin from Git, then enable it on a project or chat to use its skills and agents."
-				cta={
-					access.create && (
-						<InstallPluginPackButton
-							focusReturn={focusReturn}
-							onInstall={onInstall}
-						/>
-					)
-				}
 			/>
 		);
 	} else {
@@ -277,10 +260,14 @@ export const ForkPluginPacksTableView: React.FC<
 					</div>
 				}
 			/>
-			{Boolean(error) && !isLoadingError && (
+			{Boolean(error) && (
 				<ErrorAlert
 					error={error}
-					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+					actions={
+						isLoadingError ? undefined : (
+							<RetryButton isRetrying={isRetrying} onRetry={onRetry} />
+						)
+					}
 				/>
 			)}
 			<Table ref={tableRef} tabIndex={-1} aria-label={title}>

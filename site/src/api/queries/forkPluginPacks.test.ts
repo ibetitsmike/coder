@@ -64,6 +64,22 @@ describe("createPluginPackMutation", () => {
 			MockForkPluginPackWithoutPath,
 		]);
 	});
+
+	it("replaces a cached pack that has the same name", async () => {
+		const queryClient = createQueryClient();
+		const mockRecreatedPack = { ...MockForkPluginPack, id: "recreated-pack" };
+		queryClient.setQueryData(listKey, [MockForkPluginPack]);
+		vi.spyOn(forkPluginPacksApi, "createPluginPack").mockResolvedValue(
+			mockRecreatedPack,
+		);
+
+		await new MutationObserver(
+			queryClient,
+			createPluginPackMutation(queryClient, organizationId),
+		).mutate(req);
+
+		expect(queryClient.getQueryData(listKey)).toEqual([mockRecreatedPack]);
+	});
 });
 
 describe("updatePluginPackMutation", () => {

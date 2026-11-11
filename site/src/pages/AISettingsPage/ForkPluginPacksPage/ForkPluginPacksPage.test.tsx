@@ -391,7 +391,9 @@ it("switches the organization through the picker", async () => {
 		),
 	);
 
-	await user.click(await screen.findByRole("combobox"));
+	await user.click(
+		await screen.findByRole("combobox", { name: /^Organization/ }),
+	);
 	await user.click(
 		await screen.findByRole("option", { name: /My Organization 2/ }),
 	);
