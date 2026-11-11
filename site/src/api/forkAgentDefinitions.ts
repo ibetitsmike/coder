@@ -78,3 +78,67 @@ export const deleteUserAgentDefinition = async (
 		userAgentDefinitionPath(organizationId, name, user),
 	);
 };
+
+const organizationAgentDefinitionsPath = (organizationId: string) =>
+	`/api/v2/chats/fork/organizations/${organizationId}/agent-definitions`;
+const organizationAgentDefinitionPath = (
+	organizationId: string,
+	name: string,
+) =>
+	`${organizationAgentDefinitionsPath(organizationId)}/${encodeURIComponent(name)}`;
+
+/** Lists the organization agent definitions the signed-in member can read. */
+export const getOrganizationAgentDefinitions = async (
+	organizationId: string,
+): Promise<ForkAgentDefinitionMetadata[]> => {
+	const response = await API.getAxiosInstance().get<
+		ForkAgentDefinitionMetadata[]
+	>(organizationAgentDefinitionsPath(organizationId));
+	return response.data;
+};
+
+/** Gets one organization agent definition with its content. */
+export const getOrganizationAgentDefinition = async (
+	organizationId: string,
+	name: string,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().get<ForkAgentDefinition>(
+		organizationAgentDefinitionPath(organizationId, name),
+	);
+	return response.data;
+};
+
+/** Creates an organization agent definition; organization admins only. */
+export const createOrganizationAgentDefinition = async (
+	organizationId: string,
+	req: CreateForkAgentDefinitionRequest,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().post<ForkAgentDefinition>(
+		organizationAgentDefinitionsPath(organizationId),
+		req,
+	);
+	return response.data;
+};
+
+/** Updates an organization agent definition; organization admins only. */
+export const updateOrganizationAgentDefinition = async (
+	organizationId: string,
+	name: string,
+	req: UpdateForkAgentDefinitionRequest,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().patch<ForkAgentDefinition>(
+		organizationAgentDefinitionPath(organizationId, name),
+		req,
+	);
+	return response.data;
+};
+
+/** Deletes an organization agent definition; organization admins only. */
+export const deleteOrganizationAgentDefinition = async (
+	organizationId: string,
+	name: string,
+): Promise<void> => {
+	await API.getAxiosInstance().delete(
+		organizationAgentDefinitionPath(organizationId, name),
+	);
+};

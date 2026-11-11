@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import {
-	userAgentDefinition,
-	userAgentDefinitionsKey,
+	type AgentDefinitionScope,
+	agentDefinition,
+	agentDefinitionsKey,
 } from "#/api/queries/forkAgentDefinitions";
 import type {
 	Experiment,
@@ -25,6 +26,11 @@ import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefiniti
 import { render, renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAgentDefinitionsPage from "./ForkAgentDefinitionsPage";
 import { ForkAgentDefinitionsTable } from "./ForkAgentDefinitionsTable";
+
+const userScope: AgentDefinitionScope = {
+	tier: "user",
+	organizationId: MockDefaultOrganization.id,
+};
 
 const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -71,7 +77,9 @@ const renderTableWithOrganizationSwitch = () => {
 			MockDefaultOrganization.id,
 		);
 		setOrganization = setOrganizationId;
-		return <ForkAgentDefinitionsTable organizationId={organizationId} />;
+		return (
+			<ForkAgentDefinitionsTable scope={{ tier: "user", organizationId }} />
+		);
 	};
 	render(<OrganizationSwitch />);
 	return (organizationId: string) => setOrganization(organizationId);
@@ -144,7 +152,7 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps an accepted toggle when the list refetch fails", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const key = agentDefinitionsKey(userScope);
 		const updated = { ...MockForkAgentDefinitionMetadata, enabled: false };
 		vi.spyOn(
 			forkAgentDefinitionsApi,
@@ -225,7 +233,7 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("drops a deleted definition when the list refetch fails", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const key = agentDefinitionsKey(userScope);
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"deleteUserAgentDefinition",
@@ -312,7 +320,7 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps one row for a created definition a refetch already listed", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const key = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const key = agentDefinitionsKey(userScope);
 		vi.spyOn(
 			forkAgentDefinitionsApi,
 			"createUserAgentDefinition",
@@ -552,10 +560,9 @@ describe("ForkAgentDefinitionsPage", () => {
 		const user = userEvent.setup();
 		const { queryClient } = renderPage();
 		// The test client drops unobserved queries at once; the app keeps them.
-		queryClient.setQueryDefaults(
-			userAgentDefinitionsKey(MockDefaultOrganization.id),
-			{ gcTime: Number.POSITIVE_INFINITY },
-		);
+		queryClient.setQueryDefaults(agentDefinitionsKey(userScope), {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
 		const getDefinition = vi
 			.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinition")
 			.mockResolvedValueOnce({
@@ -595,10 +602,9 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("reopens a saved definition with its saved content when the refetch fails", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		queryClient.setQueryDefaults(
-			userAgentDefinitionsKey(MockDefaultOrganization.id),
-			{ gcTime: Number.POSITIVE_INFINITY },
-		);
+		queryClient.setQueryDefaults(agentDefinitionsKey(userScope), {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
 		const MockSavedDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			updated_at: "2030-01-01T00:00:00Z",
@@ -650,7 +656,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		async ({ current }) => {
 			const user = userEvent.setup();
 			const { getDefinitions, queryClient } = renderPage();
-			const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+			const listKey = agentDefinitionsKey(userScope);
 			queryClient.setQueryDefaults(listKey, {
 				gcTime: Number.POSITIVE_INFINITY,
 			});
@@ -814,7 +820,7 @@ describe("ForkAgentDefinitionsPage", () => {
 			},
 		]);
 		await queryClient.refetchQueries({
-			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			queryKey: agentDefinitionsKey(userScope),
 			exact: true,
 		});
 		await user.clear(description);
@@ -846,7 +852,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		const description = await screen.findByLabelText("Description");
 		getDefinitions.mockResolvedValue([]);
 		await queryClient.refetchQueries({
-			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			queryKey: agentDefinitionsKey(userScope),
 			exact: true,
 		});
 		await user.type(description, "Mine.");
@@ -886,7 +892,7 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("does not open content older than the listed definition, and retries", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const listKey = userAgentDefinitionsKey(MockDefaultOrganization.id);
+		const listKey = agentDefinitionsKey(userScope);
 		const MockEditedDefinition = {
 			...MockForkAgentDefinitionMetadata,
 			updated_at: "2030-01-01T00:00:00Z",
@@ -932,7 +938,7 @@ describe("ForkAgentDefinitionsPage", () => {
 		await openEditor(user);
 		getDefinitions.mockResolvedValue([]);
 		await queryClient.refetchQueries({
-			queryKey: userAgentDefinitionsKey(MockDefaultOrganization.id),
+			queryKey: agentDefinitionsKey(userScope),
 			exact: true,
 		});
 		resolveDetail({
@@ -963,11 +969,9 @@ describe("ForkAgentDefinitionsPage", () => {
 		await openEditor(user);
 
 		await waitFor(() =>
-			expect(
-				queryClient.getQueryData(
-					userAgentDefinitionsKey(MockDefaultOrganization.id),
-				),
-			).toEqual([]),
+			expect(queryClient.getQueryData(agentDefinitionsKey(userScope))).toEqual(
+				[],
+			),
 		);
 	});
 
@@ -1060,9 +1064,9 @@ describe("ForkAgentDefinitionsPage", () => {
 	it("keeps saved content when an older toggle response arrives later", async () => {
 		const user = userEvent.setup();
 		const { getDefinitions, queryClient } = renderPage();
-		const detailKey = userAgentDefinition(
+		const detailKey = agentDefinition(
 			queryClient,
-			MockDefaultOrganization.id,
+			userScope,
 			MockForkAgentDefinitionMetadata.name,
 		).queryKey;
 		queryClient.setQueryDefaults(detailKey, {
@@ -1087,26 +1091,21 @@ describe("ForkAgentDefinitionsPage", () => {
 		});
 		const { content: _content, ...MockSavedMetadata } = MockSavedDefinition;
 		queryClient.setQueryData(detailKey, MockSavedDefinition);
-		queryClient.setQueryData(
-			userAgentDefinitionsKey(MockDefaultOrganization.id),
-			[MockSavedMetadata],
-		);
+		queryClient.setQueryData(agentDefinitionsKey(userScope), [
+			MockSavedMetadata,
+		]);
 		getDefinitions.mockRejectedValue(mockApiError({ message: "Offline." }));
 		await user.click(toggle);
 
 		await waitFor(() =>
 			expect(
-				queryClient.getQueryState(
-					userAgentDefinitionsKey(MockDefaultOrganization.id),
-				)?.status,
+				queryClient.getQueryState(agentDefinitionsKey(userScope))?.status,
 			).toBe("error"),
 		);
 		expect(queryClient.getQueryData(detailKey)).toEqual(MockSavedDefinition);
-		expect(
-			queryClient.getQueryData(
-				userAgentDefinitionsKey(MockDefaultOrganization.id),
-			),
-		).toEqual([MockSavedMetadata]);
+		expect(queryClient.getQueryData(agentDefinitionsKey(userScope))).toEqual([
+			MockSavedMetadata,
+		]);
 	});
 
 	it("keeps the delete dialog open through Escape so a failed delete can be retried", async () => {

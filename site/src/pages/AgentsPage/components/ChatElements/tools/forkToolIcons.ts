@@ -2,6 +2,9 @@
 // icons, so an upstream sync of ToolIcon.tsx stays clean.
 
 import {
+	AlarmClockIcon,
+	BellIcon,
+	HourglassIcon,
 	ListTodoIcon,
 	type LucideIcon,
 	MessagesSquareIcon,
@@ -13,4 +16,7 @@ export const forkToolIcons: Record<string, LucideIcon> = {
 	fork_todo: ListTodoIcon,
 	fork_search_chats: SearchIcon,
 	fork_chat_transcript: MessagesSquareIcon,
+	fork_wakeup: AlarmClockIcon,
+	fork_wait_for_events: HourglassIcon,
+	fork_notify_user: BellIcon,
 };
