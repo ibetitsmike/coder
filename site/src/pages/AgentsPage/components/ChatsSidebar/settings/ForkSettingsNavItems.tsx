@@ -1,7 +1,7 @@
 // This file is fork code: settings nav items for fork experiments, so
 // SettingsPanel.tsx, an upstream file, needs one line.
 
-import { WorkflowIcon } from "lucide-react";
+import { BotIcon, WorkflowIcon } from "lucide-react";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { SettingsNavItem } from "./SettingsNavItem";
 
@@ -19,12 +19,21 @@ export const ForkSettingsNavItems: React.FC<ForkSettingsNavItemsProps> = ({
 		return null;
 	}
 	return (
-		<SettingsNavItem
-			icon={WorkflowIcon}
-			label="Agent definitions"
-			active={settingsSection === "agent-definitions"}
-			to="/agents/settings/agent-definitions"
-			state={state}
-		/>
+		<>
+			<SettingsNavItem
+				icon={WorkflowIcon}
+				label="Agent definitions"
+				active={settingsSection === "agent-definitions"}
+				to="/agents/settings/agent-definitions"
+				state={state}
+			/>
+			<SettingsNavItem
+				icon={BotIcon}
+				label="Available agents"
+				active={settingsSection === "available-agents"}
+				to="/agents/settings/available-agents"
+				state={state}
+			/>
+		</>
 	);
 };
