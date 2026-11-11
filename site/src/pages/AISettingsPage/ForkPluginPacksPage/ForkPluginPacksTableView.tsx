@@ -111,7 +111,14 @@ const ForkPluginPackActions: React.FC<ForkPluginPackRowProps> = ({
 		</DropdownMenuTrigger>
 		<DropdownMenuContent align="end">
 			{access.update && (
-				<DropdownMenuItem disabled={isUpdating} onClick={() => onUpdate(pack)}>
+				<DropdownMenuItem
+					disabled={isUpdating}
+					onClick={() => {
+						if (!isUpdating) {
+							onUpdate(pack);
+						}
+					}}
+				>
 					{isUpdating
 						? "Updating…"
 						: `Update to the latest commit of ${pack.ref}`}
@@ -149,10 +156,7 @@ const ForkPluginPackRow: React.FC<ForkPluginPackRowProps> = ({
 		>
 			{pack.source_url}
 			{pack.source_path && (
-				<span className="text-content-secondary">
-					{" "}
-					/ {pack.source_path}
-				</span>
+				<span className="text-content-secondary"> / {pack.source_path}</span>
 			)}
 		</TableCell>
 		<TableCell className="whitespace-nowrap">
