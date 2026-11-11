@@ -61,6 +61,27 @@ func (p *fakePusher) snapshot() []*agentcontext.PushRequest {
 	return out
 }
 
+// waitSettled waits until the pusher has seen at least n settled
+// (capability generation zero) pushes and returns them in order. A
+// Manager's first connection leads with a capability probe, so settled
+// pushes are the ones that carry persisted inventory.
+func waitSettled(t *testing.T, p *fakePusher, n int) []*agentcontext.PushRequest {
+	t.Helper()
+	settled := func() []*agentcontext.PushRequest {
+		var out []*agentcontext.PushRequest
+		for _, req := range p.snapshot() {
+			if req.CapabilityGeneration == 0 {
+				out = append(out, req)
+			}
+		}
+		return out
+	}
+	require.Eventually(t, func() bool {
+		return len(settled()) >= n
+	}, testutil.WaitShort, testutil.IntervalFast, "expected %d settled pushes", n)
+	return settled()
+}
+
 func TestRunPush_FirstPushIsInitial(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -81,17 +102,15 @@ func TestRunPush_FirstPushIsInitial(t *testing.T) {
 		})
 	}()
 
-	// Wait for the first push.
-	select {
-	case <-p.signal:
-	case <-time.After(testutil.WaitShort):
-		t.Fatalf("expected initial push")
-	}
-
+	// A fresh Manager (for example after an agent restart) leads with a
+	// capability probe, so a pack-free snapshot never replaces the pack
+	// rows a previous agent process stored. The settled successor keeps
+	// Initial=true because coderd persisted nothing for the probe.
+	settled := waitSettled(t, p, 1)
 	requests := p.snapshot()
-	require.Len(t, requests, 1)
+	require.NotZero(t, requests[0].CapabilityGeneration, "a fresh Manager's first push must be a capability probe")
 	require.True(t, requests[0].Initial, "first push must be initial")
-	require.Equal(t, uint64(1), requests[0].Version)
+	require.True(t, settled[0].Initial, "the probe's settled successor must stay initial")
 
 	cancel()
 	require.ErrorIs(t, <-pushDone, context.Canceled)
@@ -117,23 +136,16 @@ func TestRunPush_SubsequentPushOnChange(t *testing.T) {
 		})
 	}()
 
-	// Initial push.
-	<-p.signal
+	// Initial settled push.
+	waitSettled(t, p, 1)
 
 	// Trigger a resync via Resync.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("v2"), 0o600))
 	_, err := m.Resync(ctx)
 	require.NoError(t, err)
 
-	// Second push.
-	select {
-	case <-p.signal:
-	case <-time.After(testutil.WaitShort):
-		t.Fatalf("expected second push after resync")
-	}
-
-	requests := p.snapshot()
-	require.GreaterOrEqual(t, len(requests), 2)
+	// Second settled push.
+	requests := waitSettled(t, p, 2)
 	require.False(t, requests[1].Initial, "subsequent pushes must not be Initial")
 	require.NotEqual(t, requests[0].AggregateHash, requests[1].AggregateHash,
 		"second push must reflect the v2 content, not a duplicate of the first snapshot")
@@ -267,11 +279,7 @@ func TestRunPush_RejectedResponseProceeds(t *testing.T) {
 
 	// Initial push delivered and accepted=false; loop must park
 	// on changes, not retry the same payload.
-	select {
-	case <-p.signal:
-	case <-ctx.Done():
-		t.Fatalf("initial push never landed: %v", ctx.Err())
-	}
+	waitSettled(t, p, 1)
 
 	// Trigger a content change so a second push lands. Without
 	// the change, the loop should remain parked.
@@ -279,13 +287,7 @@ func TestRunPush_RejectedResponseProceeds(t *testing.T) {
 	_, err := m.Resync(ctx)
 	require.NoError(t, err)
 
-	select {
-	case <-p.signal:
-	case <-ctx.Done():
-		t.Fatalf("second push never landed after change: %v", ctx.Err())
-	}
-
-	requests := p.snapshot()
+	requests := waitSettled(t, p, 2)
 	require.GreaterOrEqual(t, len(requests), 2,
 		"exactly one push per snapshot; rejection must not double-fire")
 	require.NotEqual(t, requests[0].AggregateHash, requests[1].AggregateHash)
@@ -331,14 +333,7 @@ func TestRunPush_WaitsForReady(t *testing.T) {
 	// is pushed with Initial=true.
 	m.SetReady()
 
-	select {
-	case <-p.signal:
-	case <-time.After(testutil.WaitShort):
-		t.Fatal("expected a push after SetReady")
-	}
-
-	requests := p.snapshot()
-	require.NotEmpty(t, requests)
+	requests := waitSettled(t, p, 1)
 	first := requests[0]
 	require.True(t, first.Initial, "first push after the gate releases must be Initial")
 	require.NotEmpty(t, first.Resources, "first push must carry the resolved inventory")
@@ -389,6 +384,9 @@ func TestRunPush_AdvertisedPacksTriggerResync(t *testing.T) {
 	<-p.signal
 	var packRows int
 	for _, req := range p.snapshot() {
+		if req.CapabilityGeneration == 0 {
+			continue
+		}
 		for _, res := range req.Resources {
 			if res.SourcePath != "" {
 				packRows++
@@ -495,8 +493,8 @@ func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
 
 	reqs1 := p1.snapshot()
 	require.NotEmpty(t, reqs1)
-	require.Equal(t, uint64(0), reqs1[0].CapabilityGeneration,
-		"the first connection starts without a capability reset, so its initial push is not a negotiation push")
+	require.NotZero(t, reqs1[0].CapabilityGeneration,
+		"a fresh Manager's first connection negotiates, so its initial push is a capability probe")
 	require.Equal(t, uint64(0), reqs1[len(reqs1)-1].CapabilityGeneration,
 		"settling pushes after an advertisement flip are not negotiation pushes")
 

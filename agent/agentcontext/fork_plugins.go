@@ -327,8 +327,10 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 
 // addPackWatchDirs adds every pack root and its declared skill and agent
 // containers under rootPath to out, plus one level inside skill containers,
-// so creating a pack or editing its files re-resolves the snapshot. The
-// watcher calls this next to addAgentWatchDirs.
+// so creating a pack or editing its files re-resolves the snapshot. Agent
+// containers also go to agentDirs, so overwriting a definition in a
+// declared container with any name re-resolves. The watcher calls this
+// next to addAgentWatchDirs.
 //
 // A manifest may declare a container that does not exist yet
 // ("skills": "components/skills" while only components/ is present).
@@ -337,7 +339,7 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 // an unrelated resync. Watching the deepest existing ancestor of each
 // declared path arms that event, and the watcher re-collects after every
 // re-resolve, so the watch walks down as the tree is built out.
-func addPackWatchDirs(rootPath string, out map[string]struct{}) {
+func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 	for _, pack := range packRootsFor(rootPath) {
 		out[pack.Dir] = struct{}{}
 		// Nested manifests (.claude-plugin/plugin.json) live in their
@@ -354,6 +356,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}) {
 		}
 		for _, container := range pack.agentContainers() {
 			out[container] = struct{}{}
+			agentDirs[container] = struct{}{}
 		}
 		for _, rel := range pack.declaredContainerRels() {
 			if ancestor := existingAncestor(filepath.Join(pack.Dir, rel)); ancestor != "" {

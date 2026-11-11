@@ -134,6 +134,25 @@ func TestDriftHash(t *testing.T) {
 			"with fork-agent-definitions off a pack agent edit is invisible to chats and must not drift")
 	})
 
+	t.Run("OrdinaryAgentReclassifiedIntoPackDoesNotDriftWhenDefinitionsOff", func(t *testing.T) {
+		t.Parallel()
+
+		// Adding plugin.json to a scan root turns its ordinary agent row
+		// into a pack row, which the agent then omits while the definitions
+		// capability is off. Subagents are invisible to chats in that
+		// configuration, so neither the ordinary row nor its disappearance
+		// may change the hash.
+		pluginsOnly := &Server{experiments: codersdk.Experiments{codersdk.ExperimentForkPluginPacks}}
+		before := []database.UpsertWorkspaceAgentContextResourceParams{
+			rows[0],
+			driftRow("/home/u/project/agents/reviewer.md", "",
+				database.WorkspaceAgentContextBodyKindSubagent, []byte{0x05}),
+		}
+		after := []database.UpsertWorkspaceAgentContextResourceParams{rows[0]}
+		require.Equal(t, pluginsOnly.DriftHash(before, nil), pluginsOnly.DriftHash(after, nil),
+			"with fork-agent-definitions off no subagent row may drift chats")
+	})
+
 	t.Run("PackEditDriftsOnlyWhenOn", func(t *testing.T) {
 		t.Parallel()
 

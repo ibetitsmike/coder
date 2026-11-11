@@ -105,6 +105,8 @@ type PushOptions struct {
 // server advertises the capability, a flip in either direction triggers
 // an immediate resync, and every new connection starts unadvertised so a
 // reconnect to an older replica never leads with a pack-bearing snapshot.
+// The first connection of a Manager negotiates the same way, so a
+// restarted agent never leads with a pack-free settled snapshot either.
 // A negotiation push (nonzero capability generation) always settles with
 // a synchronous generation-zero successor resync, even when no capability
 // flips, so chat hydration resumes after the non-mutating exchange. A
@@ -142,7 +144,8 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// inventory. The settling push that ends the window (generation 0,
 	// once the peer's capabilities are known) defines the baseline
 	// chats refresh against.
-	if m.packRowsAdvertised.Swap(false) || m.negotiating.Load() {
+	firstConnection := !m.pushConnected.Swap(true)
+	if m.packRowsAdvertised.Swap(false) || m.negotiating.Load() || firstConnection {
 		snap, err := m.resyncNegotiating(ctx)
 		if err != nil {
 			// The reset could not rebuild the snapshot (for example the
@@ -234,10 +237,21 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 		resp, err := pushWithRetry(ctx, p, req, initialBackoff, maxBackoff, clock, logger)
 		switch {
 		case err == nil:
-			initial = false
+			// A probe persists nothing, so the settled successor keeps
+			// Initial=true: after an agent restart its version can be
+			// below the one coderd stored for the previous process.
+			if req.CapabilityGeneration == 0 {
+				initial = false
+			}
 			advertise(resp, req.CapabilityGeneration != 0)
 		case errors.Is(err, ErrPushUnimplemented):
 			logger.Warn(ctx, "coderd peer does not implement PushContextState; stopping")
+			// No negotiation can complete against this peer; close the
+			// window so the local snapshot stops carrying probe markers.
+			m.negotiating.Store(false)
+			if _, err := m.Resync(ctx); err != nil {
+				logger.Warn(ctx, "resync after unimplemented push failed", slog.Error(err))
+			}
 			return nil
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			return ctx.Err()

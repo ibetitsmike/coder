@@ -5,9 +5,10 @@ package chatd
 // its pushed aggregate unconditionally (agent/agentcontext/resolve.go
 // driftResources) because it has no experiment knowledge; with the
 // experiment on, pack rows ARE pinned prompt content, so chatd re-derives
-// the hash from the persisted rows and includes them. With it off chatd
-// reproduces the agent's exclusion, making the derived hash byte-identical
-// to the pushed one (same ComputeAggregateHash scheme, same filters).
+// the hash from the persisted rows and includes them. With both fork
+// experiments off and no subagent rows, chatd reproduces the agent's
+// exclusion, making the derived hash byte-identical to the pushed one (same
+// ComputeAggregateHash scheme, same filters).
 //
 // Deriving at push time and storing the result on the snapshot row keeps
 // every chat pinning path consistent: the push path hydrates and dirties
@@ -24,10 +25,11 @@ import (
 // agentcontext resources the rows encode and hashes them with the agent's
 // scheme, minus MCP and ACP rows (live-synced on every push, never drift)
 // and, while fork-plugin-packs is off, minus pack-contributed rows (invisible
-// to chats). Pack subagent rows are also skipped while fork-agent-definitions
-// is off: nothing consumes them then (custom agent types are disabled and the
-// context listing hides subagents), so editing a pack agent definition would
-// otherwise dirty every chat without changing anything it can see. Unknown
+// to chats). Every subagent row is also skipped while fork-agent-definitions
+// is off: nothing consumes them then (custom agent types and the agent type
+// catalog are disabled, and the context listing hides subagents), so adding,
+// editing, or reclassifying an agent definition would otherwise dirty every
+// chat without changing anything it can see. Unknown
 // body kinds or statuses cannot occur today (the push validator rejects
 // them); they are skipped rather than mis-hashed.
 func (p *Server) DriftHash(rows []database.UpsertWorkspaceAgentContextResourceParams, _ []byte) []byte {
@@ -47,7 +49,7 @@ func (p *Server) DriftHash(rows []database.UpsertWorkspaceAgentContextResourcePa
 		if !pluginsOn && packRow {
 			continue
 		}
-		if kind == agentcontext.KindSubagent && packRow && !definitionsOn {
+		if kind == agentcontext.KindSubagent && !definitionsOn {
 			continue
 		}
 		status, ok := agentResourceStatus(row.Status)

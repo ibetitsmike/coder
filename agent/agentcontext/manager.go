@@ -134,6 +134,12 @@ type Manager struct {
 	// (coderd persists nothing) and no concurrent resolve can settle
 	// chats against a temporary pack-free inventory.
 	negotiating atomic.Bool
+	// pushConnected records that RunPush has started at least once. A
+	// restarted agent process has a fresh Manager whose capability flags
+	// read false, so its first connection negotiates too instead of
+	// leading with a pack-free settled snapshot that would delete the
+	// pack rows a previous process stored.
+	pushConnected atomic.Bool
 
 	watcher *Watcher
 }

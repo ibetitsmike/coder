@@ -22,7 +22,7 @@ func TestDefaultBuiltinRootsIncludePackRoot(t *testing.T) {
 
 func TestWatcherEventRelevant(t *testing.T) {
 	t.Parallel()
-	w := &Watcher{}
+	w := &Watcher{agentDirs: map[string]struct{}{"/p/pstack/definitions": {}}}
 	cases := []struct {
 		name  string
 		event fsnotify.Event
@@ -33,6 +33,8 @@ func TestWatcherEventRelevant(t *testing.T) {
 		{"cursor manifest write re-resolves", fsnotify.Event{Name: "/p/pstack/.cursor-plugin/plugin.json", Op: fsnotify.Write}, true},
 		{"skill edit re-resolves", fsnotify.Event{Name: "/p/pstack/skills/x/SKILL.md", Op: fsnotify.Write}, true},
 		{"ordinary write ignored", fsnotify.Event{Name: "/p/pstack/README.md", Op: fsnotify.Write}, false},
+		{"declared agent container write re-resolves", fsnotify.Event{Name: "/p/pstack/definitions/reviewer.md", Op: fsnotify.Write}, true},
+		{"non-markdown write in agent container ignored", fsnotify.Event{Name: "/p/pstack/definitions/notes.txt", Op: fsnotify.Write}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
