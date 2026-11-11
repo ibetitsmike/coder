@@ -38,6 +38,14 @@ const (
 	// packWriteConcurrency bounds the files of a pack written at once. Each
 	// write is one agent round trip, and a pack can hold 2,000 files.
 	packWriteConcurrency = 16
+	// packWriteTimeout bounds one file write. Under concurrent writes an
+	// agent round trip can stall while the others finish, so a stalled
+	// write is cancelled and retried instead of holding the whole pack.
+	packWriteTimeout = 2 * time.Second
+	// packWriteAttempts is how often a file write is tried within the
+	// turn's bound. The agent writes through a temp file and a rename, so
+	// a retry is safe.
+	packWriteAttempts = 3
 )
 
 // forkPackState is the in-memory plugin pack state of a Server. It is lost on
@@ -219,7 +227,7 @@ func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentCon
 	eg.SetLimit(packWriteConcurrency)
 	for _, resource := range resources {
 		eg.Go(func() error {
-			if err := conn.WriteFile(egCtx, dir+"/"+resource.Path, bytes.NewReader(resource.Content)); err != nil {
+			if err := writePackFile(egCtx, conn, dir+"/"+resource.Path, resource.Content); err != nil {
 				return xerrors.Errorf("write %q: %w", resource.Path, err)
 			}
 			return nil
@@ -232,6 +240,20 @@ func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentCon
 		return xerrors.Errorf("write commit marker: %w", err)
 	}
 	return nil
+}
+
+// writePackFile writes one pack file, giving each attempt packWriteTimeout.
+func writePackFile(ctx context.Context, conn workspacesdk.AgentConn, path string, content []byte) error {
+	var err error
+	for range packWriteAttempts {
+		attemptCtx, cancel := context.WithTimeout(ctx, packWriteTimeout)
+		err = conn.WriteFile(attemptCtx, path, bytes.NewReader(content))
+		cancel()
+		if err == nil || ctx.Err() != nil {
+			return err
+		}
+	}
+	return err
 }
 
 // packResources returns the stored files of a pack.

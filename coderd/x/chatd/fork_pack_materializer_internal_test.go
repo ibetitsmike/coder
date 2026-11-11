@@ -46,11 +46,13 @@ func TestPackResourcePath(t *testing.T) {
 }
 
 // fakeWorkspaceFiles is an in-memory workspace file system behind a mock
-// agent connection. writes records each written path in order.
+// agent connection. writes records each written path in order. A write to a
+// path in hangOnce blocks until its context ends, once.
 type fakeWorkspaceFiles struct {
-	mu     sync.Mutex
-	files  map[string]string
-	writes []string
+	mu       sync.Mutex
+	files    map[string]string
+	writes   []string
+	hangOnce map[string]bool
 }
 
 func (f *fakeWorkspaceFiles) conn(t *testing.T) workspacesdk.AgentConn {
@@ -68,7 +70,15 @@ func (f *fakeWorkspaceFiles) conn(t *testing.T) workspacesdk.AgentConn {
 			return io.NopCloser(strings.NewReader(content)), "", nil
 		}).AnyTimes()
 	conn.EXPECT().WriteFile(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, path string, reader io.Reader) error {
+		DoAndReturn(func(ctx context.Context, path string, reader io.Reader) error {
+			f.mu.Lock()
+			hang := f.hangOnce[path]
+			delete(f.hangOnce, path)
+			f.mu.Unlock()
+			if hang {
+				<-ctx.Done()
+				return ctx.Err()
+			}
 			content, err := io.ReadAll(reader)
 			if err != nil {
 				return err
@@ -157,6 +167,27 @@ func TestMaterializePluginPacks(t *testing.T) {
 		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 		require.Equal(t, 2, dials)
 		require.Empty(t, files.writes, "a matching marker skips the write")
+	})
+
+	t.Run("RetriesAStalledWrite", func(t *testing.T) {
+		t.Parallel()
+		pack := insertPack("stall", "plugin.json", "skills/review/SKILL.md")
+		chat := newChat(pack)
+		stalled := "/home/coder/.coder/plugins/stall/skills/review/SKILL.md"
+		files := &fakeWorkspaceFiles{files: map[string]string{}, hangOnce: map[string]bool{stalled: true}}
+		dials := 0
+		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+			dials++
+			return files.conn(t), func() {}, nil
+		}
+
+		agentID := uuid.New()
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, "content of skills/review/SKILL.md", files.files[stalled], "the stalled write is retried")
+		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files["/home/coder/.coder/plugins/stall/"+packCommitMarker],
+			"the pack completes on the same turn")
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, 1, dials, "the completed pack is recorded for the agent")
 	})
 
 	t.Run("RepinsEachDirtyChatOncePerWrite", func(t *testing.T) {
