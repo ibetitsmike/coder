@@ -1770,6 +1770,7 @@ func newProvisionerDaemon(
 			return nil, xerrors.Errorf("unknown provisioner type %q", provisionerType)
 		}
 	}
+	provisionerTypes, connector = forkSandboxProvisioners(ctx, coderAPI, provisionerLogger, workDir, provisionerTypes, connector, errCh, wg, cancel)
 
 	return provisionerd.New(func(dialCtx context.Context) (proto.DRPCProvisionerDaemonClient, error) {
 		// This debounces calls to listen every second. Read the comment

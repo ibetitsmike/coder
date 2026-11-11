@@ -1,0 +1,13 @@
+version: 1
+container:
+  image: docker.io/library/alpine:3.20
+  entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+  cpu_millis: 1000
+  memory_mib: 2048
+agent:
+  name: main
+  arch: amd64
+  os: linux
+  dir: /home/coder
+lifecycle:
+  stop_after_idle_minutes: 30

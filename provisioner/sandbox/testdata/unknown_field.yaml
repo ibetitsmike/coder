@@ -1,0 +1,6 @@
+version: 1
+container:
+  image: docker.io/library/alpine:3.20
+  unknown_field: true
+agent:
+  name: main
