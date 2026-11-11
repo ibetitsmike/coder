@@ -6650,6 +6650,55 @@ export interface ForkOrganizationSubagentLimitsResponse {
 	readonly effective: ForkSubagentLimitValues;
 }
 
+// From codersdk/fork_wakeup_caps.go
+/**
+ * ForkOrganizationWakeupCaps are the daily wake-up caps of an organization,
+ * over the rolling 24 hours before each wake-up. A nil cap, which is omitted
+ * from JSON, uses the built-in default. A set cap replaces the default and can
+ * be higher or lower.
+ */
+export interface ForkOrganizationWakeupCaps {
+	/**
+	 * MaxChatRunsPerDay is the maximum number of wake-up runs of one chat.
+	 */
+	readonly max_chat_runs_per_day?: number;
+	/**
+	 * MaxOrganizationRunsPerDay is the maximum number of wake-up runs of all
+	 * chats in the organization.
+	 */
+	readonly max_organization_runs_per_day?: number;
+	/**
+	 * MaxChatSpendMicrosPerDay is the maximum model spend of one chat with a
+	 * wake-up, in millionths of a dollar.
+	 */
+	readonly max_chat_spend_micros_per_day?: number;
+	/**
+	 * MaxOrganizationSpendMicrosPerDay is the maximum model spend of all
+	 * chats with a wake-up in the organization, in millionths of a dollar.
+	 */
+	readonly max_organization_spend_micros_per_day?: number;
+}
+
+// From codersdk/fork_wakeup_caps.go
+/**
+ * ForkOrganizationWakeupCapsResponse holds the wake-up caps of an
+ * organization with the defaults and the caps in force.
+ */
+export interface ForkOrganizationWakeupCapsResponse {
+	/**
+	 * Organization holds the stored organization caps. A nil cap is unset.
+	 */
+	readonly organization: ForkOrganizationWakeupCaps;
+	/**
+	 * Default holds the built-in caps.
+	 */
+	readonly default: ForkWakeupCapValues;
+	/**
+	 * Effective holds the caps in force in the organization.
+	 */
+	readonly effective: ForkWakeupCapValues;
+}
+
 // From codersdk/fork_plugin_packs.go
 /**
  * ForkPluginPack is a plugin pack installed from a Git repository and pinned
@@ -6715,6 +6764,17 @@ export interface ForkSubagentLimitValues {
 	 * root chat.
 	 */
 	readonly max_live_per_family: number;
+}
+
+// From codersdk/fork_wakeup_caps.go
+/**
+ * ForkWakeupCapValues are wake-up caps in force.
+ */
+export interface ForkWakeupCapValues {
+	readonly max_chat_runs_per_day: number;
+	readonly max_organization_runs_per_day: number;
+	readonly max_chat_spend_micros_per_day: number;
+	readonly max_organization_spend_micros_per_day: number;
 }
 
 // From codersdk/files.go

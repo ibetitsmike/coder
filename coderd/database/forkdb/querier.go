@@ -67,6 +67,7 @@ type Querier interface {
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
+	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
@@ -174,6 +175,7 @@ type Querier interface {
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
+	UpsertChatOrganizationWakeupCaps(ctx context.Context, arg UpsertChatOrganizationWakeupCapsParams) (ChatOrganizationWakeupCap, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	UpsertPluginPackSources(ctx context.Context, arg UpsertPluginPackSourcesParams) (PluginPackSource, error)
 	// Relinking an external identity to another user clears the active chat so

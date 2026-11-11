@@ -237,6 +237,11 @@ func (f forkQueryMetricsStore) GetChatOrganizationSubagentLimits(ctx context.Con
 	return f.s.GetChatOrganizationSubagentLimits(ctx, organizationID)
 }
 
+func (f forkQueryMetricsStore) GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationWakeupCap, error) {
+	defer f.observe(ctx, "GetChatOrganizationWakeupCaps", time.Now())
+	return f.s.GetChatOrganizationWakeupCaps(ctx, organizationID)
+}
+
 func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "GetChatSubagentByChatID", time.Now())
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
@@ -510,6 +515,11 @@ func (f forkQueryMetricsStore) UpsertChatDescendantQuestion(ctx context.Context,
 func (f forkQueryMetricsStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {
 	defer f.observe(ctx, "UpsertChatOrganizationSubagentLimits", time.Now())
 	return f.s.UpsertChatOrganizationSubagentLimits(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertChatOrganizationWakeupCaps(ctx context.Context, arg forkdb.UpsertChatOrganizationWakeupCapsParams) (forkdb.ChatOrganizationWakeupCap, error) {
+	defer f.observe(ctx, "UpsertChatOrganizationWakeupCaps", time.Now())
+	return f.s.UpsertChatOrganizationWakeupCaps(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
