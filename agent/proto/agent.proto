@@ -714,6 +714,16 @@ message PushContextStateRequest {
 	repeated ContextResource resources = 3;
 	bool initial = 4;
 	string snapshot_error = 6;
+	// Fork: capability_generation is nonzero only on the per-connection
+	// negotiation push a reconnecting agent sends after its push
+	// capability was reset (see agentcontext resyncNegotiating). The
+	// server persists that snapshot and its rows so the shared tables
+	// never hold rows the serving replica cannot interpret, but it
+	// skips chat hydration and dirty marking: the negotiation exchange
+	// is input, not a settled inventory, and the settling push that
+	// ends the negotiation (capability_generation = 0) defines the
+	// baseline chats refresh against.
+	uint64 capability_generation = 7;
 
 	// Reserved tags from the pre-release v2.10 schema. schema_version
 	// was removed before the first release that ships v2.10 because
@@ -731,6 +741,11 @@ message PushContextStateResponse {
 	// a response set this, so a newer agent connected to an older
 	// replica (which leaves the field false) never persists pack rows.
 	bool fork_plugin_packs = 100;
+	// Fork: fork_agent_definitions advertises that the serving coderd has
+	// the fork-agent-definitions experiment enabled. While it is false the
+	// agent emits visible pack agent rows as excluded: chatd drops every
+	// subagent row, so the rows would only occupy snapshot caps.
+	bool fork_agent_definitions = 101;
 }
 
 service Agent {

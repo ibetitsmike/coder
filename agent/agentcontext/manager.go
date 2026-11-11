@@ -122,6 +122,11 @@ type Manager struct {
 	// push loop last saw; the resolver reads it through PackRowsAdvertised.
 	// The atomic keeps resolve passes lock-free while RunPush updates it.
 	packRowsAdvertised atomic.Bool
+	// packAgentDefinitionsAdvertised mirrors the fork-agent-definitions
+	// capability: pack agent rows are emitted visible only while it is
+	// set, so a deployment without agent definitions never fills its
+	// snapshot caps with invisible pack agents.
+	packAgentDefinitionsAdvertised atomic.Bool
 
 	watcher *Watcher
 }
@@ -182,6 +187,9 @@ func NewManager(opts ManagerOptions) *Manager {
 	// resolver consults it on every pass (see push.go RunPush).
 	resolver.PackRowsAdvertised = func() bool {
 		return m.packRowsAdvertised.Load()
+	}
+	resolver.PackAgentDefinitionsAdvertised = func() bool {
+		return m.packAgentDefinitionsAdvertised.Load()
 	}
 
 	for _, s := range opts.InitialSources {
@@ -458,7 +466,10 @@ func (m *Manager) SubscribeChanges() (<-chan struct{}, func()) {
 // AddSource, RemoveSource, and Snapshot calls do not block on
 // filesystem I/O. When the watcher is active, Resync also
 // re-arms it so newly added scan roots are observed for
-// subsequent edits.
+// subsequent edits. RunPush's connection-level reset calls
+// resyncNegotiating (not this method directly) so the pack-free
+// republish carries negotiation input (fresh capability bit and
+// a non-empty SnapshotError) instead of settling chats on it.
 func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return m.Snapshot(), ctxErr
@@ -535,14 +546,72 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	}
 	m.mu.Unlock()
 
-	if watcher != nil {
-		watcher.Sync(ctx, roots)
-	}
-
 	// The broadcast is unconditional: Resync waiters that
 	// triggered the pass without an actual content change
 	// still need to wake up. Subscribers compare snapshots via
 	// AggregateHash if they want to filter.
+	for _, ch := range subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+
+	if watcher != nil {
+		watcher.Sync(ctx, roots)
+	}
+	return snap, nil
+}
+
+// resyncNegotiating republishes the snapshot as capability-negotiation
+// input rather than a settled inventory: the fork capability bit is
+// freshened so coderd re-binds chats to this version, and a
+// non-empty SnapshotError keeps hydration from clearing dirty
+// timestamps. RunPush uses it for the pack-free snapshot at
+// connection start; nothing it publishes is final, because the
+// negotiation's outcome (capability on or off) determines whether
+// the next pack-bearing or pack-free snapshot defines the baseline.
+// No-op when the Manager is not ready (nothing has been published).
+func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
+	m.mu.Lock()
+	ready := m.ready && !m.closed
+	m.mu.Unlock()
+	if !ready {
+		return m.Resync(ctx)
+	}
+	snap, err := m.Resync(ctx)
+	if err != nil {
+		return snap, err
+	}
+	if snap.Version == 0 {
+		return snap, nil
+	}
+	if snap.CapabilityGeneration == 0 {
+		snap.CapabilityGeneration = 1
+	} else {
+		snap.CapabilityGeneration++
+	}
+	if snap.SnapshotError == "" {
+		snap.SnapshotError = "plugin-pack capability renegotiating"
+	}
+	m.mu.Lock()
+	if m.closed || m.snapshot.Version != snap.Version {
+		// Resync published the snapshot this method is about to
+		// renegotiate, so an equal version still means our pass is
+		// the latest. Anything else is a concurrent pass that
+		// published a different snapshot; leave it alone.
+		m.mu.Unlock()
+		return m.Snapshot(), nil
+	}
+	m.version++
+	snap.Version = m.version
+	snap.AggregateHash = ComputeAggregateHash(driftResources(snap.Resources))
+	m.snapshot = snap
+	subs := make([]chan struct{}, 0, len(m.subscribers))
+	for ch := range m.subscribers {
+		subs = append(subs, ch)
+	}
+	m.mu.Unlock()
 	for _, ch := range subs {
 		select {
 		case ch <- struct{}{}:

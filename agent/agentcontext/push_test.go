@@ -492,6 +492,13 @@ func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
 	}, testutil.WaitShort, testutil.IntervalFast,
 		"the advertised connection must push pack rows")
 
+	reqs1 := p1.snapshot()
+	require.NotEmpty(t, reqs1)
+	require.Equal(t, uint64(0), reqs1[0].CapabilityGeneration,
+		"the first connection starts without a capability reset, so its initial push is not a negotiation push")
+	require.Equal(t, uint64(0), reqs1[len(reqs1)-1].CapabilityGeneration,
+		"settling pushes after an advertisement flip are not negotiation pushes")
+
 	cancel1()
 	require.ErrorIs(t, <-done1, context.Canceled)
 
@@ -525,6 +532,14 @@ func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
 		return true
 	}, testutil.WaitShort, testutil.IntervalFast,
 		"the reconnected initial push must not carry pack rows")
+
+	reqs2 := p2.snapshot()
+	require.NotEmpty(t, reqs2)
+	first2 := reqs2[0]
+	require.NotZero(t, first2.CapabilityGeneration,
+		"the reconnect's first push is the negotiation push and must be marked as capability input")
+	require.NotEmpty(t, first2.SnapshotError,
+		"the negotiation push marks the snapshot as renegotiating so the server treats it as input")
 
 	cancel2()
 	require.ErrorIs(t, <-done2, context.Canceled)

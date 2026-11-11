@@ -49,6 +49,7 @@ func TestResolver_PluginPacks(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -79,6 +80,7 @@ func TestResolver_PluginPacksRootIsPack(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	manifestPath := filepath.Join(root, "plugin.json")
@@ -99,6 +101,7 @@ func TestResolver_PluginPacksCursorManifestDeclaredDirs(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -116,6 +119,7 @@ func TestResolver_PluginPacksRootManifestDefaults(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "pstack", "skills", "review-pr"))
@@ -135,6 +139,7 @@ func TestResolver_PluginPacksRejectsEscapingPaths(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -151,6 +156,7 @@ func TestResolver_PluginPacksInvalidManifest(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	require.Empty(t, snap.Resources, "a pack whose manifest does not parse contributes nothing")
@@ -169,6 +175,7 @@ func TestResolver_PluginPacksYieldToUserSkills(t *testing.T) {
 	// user's skill must win the name collision.
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{
 		{Path: userRoot},
 		{Path: packRoot},
@@ -196,6 +203,7 @@ func TestResolver_PluginPacksDirectChildrenOnly(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -224,6 +232,7 @@ func TestResolver_PluginPacksSymlinkEscape(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -245,6 +254,7 @@ func TestResolver_PluginPacksManifestTooLarge(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -271,6 +281,7 @@ func TestResolver_PluginPacksSortedLastAtCaps(t *testing.T) {
 
 	r := &agentcontext.Resolver{MaxResources: len(names) + 1}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{
 		{Path: filepath.Join(root, "user")},
 		{Path: filepath.Join(root, "pstack")},
@@ -322,6 +333,7 @@ func TestResolver_PluginPacksManifestSymlinkRejected(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -348,6 +360,7 @@ func TestResolver_PluginPacksNamelessManifest(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 
 	for _, res := range snap.Resources {
@@ -373,6 +386,7 @@ func TestResolver_PluginPacksExcludedFromDrift(t *testing.T) {
 
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	h1 := r.Resolve([]agentcontext.ScanRoot{{Path: root}}).AggregateHash
 
 	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
@@ -446,6 +460,106 @@ func TestResolver_PluginPacksFollowCapabilityFlips(t *testing.T) {
 	require.Zero(t, packRows(), "losing the capability must stop pack discovery")
 }
 
+func TestResolver_PluginPacksAgentsNeedDefinitionsCapability(t *testing.T) {
+	t.Parallel()
+
+	// Pack agent rows are omitted entirely while the fork-agent-definitions
+	// capability is unadvertised: chatd drops every subagent row then, so
+	// the rows would be invisible inventory that still occupies the
+	// index-based count cap ahead of live MCP and ACP resources (a
+	// 500-agent pack fills DefaultMaxResources on its own). Omission
+	// mirrors how pack skills stay omitted while the pack capability is
+	// unadvertised; the pack's skills keep flowing in both cases here.
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "AGENTS.md"), "Root instructions.\n")
+	writePack(t, root, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	for name, advertised := range map[string]func() bool{
+		"nil callback":   nil,
+		"not advertised": func() bool { return false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			r.PackAgentDefinitionsAdvertised = advertised
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+			for _, res := range snap.Resources {
+				require.NotContains(t, res.Source, filepath.Join(root, "pstack", "agents"),
+					"no pack agent row may be emitted while agent definitions are unadvertised")
+			}
+			findResource(t, snap.Resources, agentcontext.KindSkill,
+				filepath.Join(root, "pstack", "skills", "review-pr"))
+		})
+	}
+}
+
+func TestResolver_PluginPacksOverTransportLimitOmitted(t *testing.T) {
+	t.Parallel()
+
+	// A pack whose manifest path exceeds coderd's source_path transport
+	// limit must contribute nothing: the manifest path is the marker every
+	// pack row carries, and coderd rejects a whole snapshot whose
+	// source_path is over the limit, leaving pushWithRetry to retry that
+	// rejection forever. The fixture needs a path longer than 1024 bytes,
+	// which Linux filesystems allow and macOS does not, so hosts that
+	// cannot create it skip.
+	root := t.TempDir()
+	parent := filepath.Join(root,
+		strings.Repeat("d", 200),
+		strings.Repeat("d", 200),
+		strings.Repeat("d", 200),
+		strings.Repeat("d", 200),
+	)
+	packDir := filepath.Join(parent, strings.Repeat("p", 200))
+	if err := os.MkdirAll(packDir, 0o700); err != nil {
+		t.Skipf("filesystem cannot create a manifest path over %d bytes: %v", 1024, err) // 1024 = maxSourcePathBytes
+	}
+	// Laid out directly (not via writePack, which nests a pstack level) so
+	// the pack directory itself is the direct child of the scan root and
+	// its manifest path exceeds the transport limit.
+	mustWriteFile(t, filepath.Join(packDir, "plugin.json"), `{"name": "pstack"}`)
+	mustWriteFile(t, filepath.Join(packDir, "skills", "review-pr", "SKILL.md"), skillName("review-pr"))
+	mustWriteFile(t, filepath.Join(packDir, "agents", "comment-sicko.md"), packAgent("comment-sicko"))
+	// 1024 = maxSourcePathBytes (unexported): a limit change must
+	// resize this fixture deliberately.
+	require.Greater(t, len(filepath.Join(packDir, "plugin.json")), 1024,
+		"fixture must exceed the transport limit to exercise the guard")
+	mustWriteFile(t, filepath.Join(parent, "AGENTS.md"), "Root instructions.\n")
+
+	for name, scanRoot := range map[string]agentcontext.ScanRoot{
+		"child pack": {Path: parent},
+		"pack root":  {Path: packDir},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			r.PackAgentDefinitionsAdvertised = func() bool { return true }
+			snap := r.Resolve([]agentcontext.ScanRoot{scanRoot})
+
+			for _, res := range snap.Resources {
+				require.Empty(t, res.SourcePath,
+					"no row may carry a pack marker when the manifest path is over the transport limit")
+				require.NotContains(t, res.Source, packDir,
+					"nothing from an over-limit pack may be discovered")
+			}
+			if name == "child pack" {
+				// Positive control: ordinary discovery still runs next
+				// to the skipped pack.
+				findResource(t, snap.Resources, agentcontext.KindInstructionFile,
+					filepath.Join(parent, "AGENTS.md"))
+			} else {
+				require.Empty(t, snap.Resources,
+					"a pack root over the transport limit is wholly pack content and must be skipped")
+			}
+		})
+	}
+}
+
 func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
 	t.Parallel()
 
@@ -478,6 +592,7 @@ func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
 	// containers are discovered.
 	r := &agentcontext.Resolver{}
 	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
 	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
 	instruction := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(root, "AGENTS.md"))
 	require.Equal(t, filepath.Join(root, "plugin.json"), instruction.SourcePath)

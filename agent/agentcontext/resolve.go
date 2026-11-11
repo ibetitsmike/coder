@@ -133,6 +133,15 @@ type Resolver struct {
 	// emission stays off so a newer agent cannot persist pack rows on an
 	// older coderd during a rolling upgrade.
 	PackRowsAdvertised func() bool
+	// PackAgentDefinitionsAdvertised, when non-nil, additionally gates pack
+	// agent emission on the fork-agent-definitions capability: chatd drops
+	// every subagent row while agent definitions are off, so pack agents
+	// would be invisible rows that still occupy the snapshot count and
+	// byte caps ahead of live MCP and ACP resources. The Manager wires it
+	// alongside PackRowsAdvertised; nil omits pack agent rows for unwired
+	// resolvers, since the capability must be earned from the server like
+	// PackRowsAdvertised.
+	PackAgentDefinitionsAdvertised func() bool
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -309,6 +318,13 @@ func isPackContribution(resource Resource) bool {
 	return base == packManifestBaseName
 }
 
+// maxSourcePathBytes mirrors coderd's source_path transport limit
+// (agentapi rejects a whole snapshot whose source_path exceeds it, and the
+// agent would retry that rejection forever). The manifest path is the
+// marker every pack row carries, so a pack whose manifest path cannot be
+// transported contributes nothing instead of sinking every push.
+const maxSourcePathBytes = 1024
+
 // discoverIn inspects a single scan root. A root that points at a
 // file is classified directly. A directory root contributes its
 // top-level instruction files and .mcp.json plus skills from the
@@ -337,6 +353,12 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 		// included: an older replica pins unmarked rows as ordinary
 		// context, so the marker alone cannot protect them.
 		if !r.packRowsAdvertised() {
+			return
+		}
+		if len(pack.ManifestPath) > maxSourcePathBytes {
+			// Same transport limit as emitPacks: the stamped rows would
+			// carry a source_path coderd rejects, sinking the whole
+			// snapshot. Discover nothing from this pack root.
 			return
 		}
 		// The scan root is itself a pack. Its resources must carry the
@@ -1063,8 +1085,22 @@ type Snapshot struct {
 	PayloadBytes uint64
 	// SnapshotError carries a single snapshot-level error
 	// string when present (count cap exceeded, watcher
-	// degraded, ENOSPC, etc.). Empty when healthy.
+	// degraded, ENOSPC, etc.). Empty when healthy. The push
+	// loop also sets it on connection-start negotiation
+	// snapshots ("plugin-pack capability renegotiating") so
+	// coderd hydration treats the push as negotiation input
+	// and keeps chat dirty timestamps instead of clearing
+	// them; the settling push at the end of the negotiation
+	// sends an empty SnapshotError again.
 	SnapshotError string
+	// CapabilityGeneration counts Manager-level capability
+	// renegotiations: it is bumped whenever the push loop
+	// republishes the snapshot because the plugin-pack
+	// advertisement was reset (new push connection), so the
+	// server can bind chats to the renegotiated version and
+	// distinguish settled snapshots from negotiation input.
+	// Zero on ordinary resolves.
+	CapabilityGeneration uint64
 }
 
 // driftResources excludes MCP and ACP resources because agents discover them

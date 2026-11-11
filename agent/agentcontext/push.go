@@ -25,6 +25,13 @@ type PushRequest struct {
 	Resources     []Resource
 	Initial       bool
 	SnapshotError string
+	// CapabilityGeneration is nonzero only on the per-connection
+	// negotiation push RunPush sends after a capability reset (see
+	// Manager.resyncNegotiating): the server persists the snapshot and
+	// rows but skips chat hydration and dirty marking, because the
+	// settling push that ends the negotiation defines the baseline
+	// chats refresh against.
+	CapabilityGeneration uint64
 }
 
 // PushResponse is the wire-format-independent return value of
@@ -36,6 +43,12 @@ type PushResponse struct {
 	// treat pack-contributed rows accordingly. Servers that predate the
 	// capability leave it false, and pack emission stays off.
 	ForkPluginPacks bool
+	// ForkAgentDefinitions mirrors the fork-agent-definitions capability:
+	// while it is false the resolver emits visible pack agent rows as
+	// excluded, because chatd drops every subagent row and the rows would
+	// only occupy snapshot caps. Servers that predate the capability
+	// leave it false.
+	ForkAgentDefinitions bool
 }
 
 // Pusher delivers snapshots to coderd. Concrete implementations
@@ -113,12 +126,18 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// peer reported says nothing about the peer now answering, and a
 	// snapshot that still carries pack rows must not lead this
 	// connection's initial push to a replica that never asked for them.
-	// Re-resolve first so the dropped rows are out of the snapshot.
+	// The rebuilt snapshot stays agent-local: with a fresh capability
+	// bit (1) so the server re-binds every chat to it, and a non-empty
+	// SnapshotError (2) so hydration keeps dirty timestamps instead of
+	// clearing them. coderd versions chats from aggregate hashes, so
+	// only the final, pack-decision-complete snapshot of the
+	// negotiation defines the baseline chats refresh against.
 	if m.packRowsAdvertised.Swap(false) {
-		if _, err := m.Resync(ctx); err != nil {
+		if _, err := m.resyncNegotiating(ctx); err != nil {
 			logger.Warn(ctx, "resync after capability reset failed", slog.Error(err))
 		}
 	}
+	m.packAgentDefinitionsAdvertised.Swap(false)
 
 	changes, unsub := m.SubscribeChanges()
 	defer unsub()
@@ -133,6 +152,10 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 		was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
 		if resp.ForkPluginPacks != was {
 			logger.Debug(ctx, "server flipped plugin-pack advertisement; re-resolving")
+			m.Trigger()
+		}
+		if resp.ForkAgentDefinitions != m.packAgentDefinitionsAdvertised.Swap(resp.ForkAgentDefinitions) {
+			logger.Debug(ctx, "server flipped the agent-definitions advertisement; re-resolving")
 			m.Trigger()
 		}
 	}
@@ -239,10 +262,11 @@ func pushWithRetry(
 // not mutate it.
 func snapshotToPushRequest(s Snapshot, initial bool) *PushRequest {
 	return &PushRequest{
-		Version:       s.Version,
-		AggregateHash: s.AggregateHash,
-		Resources:     s.Resources,
-		Initial:       initial,
-		SnapshotError: s.SnapshotError,
+		Version:              s.Version,
+		AggregateHash:        s.AggregateHash,
+		Resources:            s.Resources,
+		Initial:              initial,
+		SnapshotError:        s.SnapshotError,
+		CapabilityGeneration: s.CapabilityGeneration,
 	}
 }

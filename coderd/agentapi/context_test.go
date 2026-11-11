@@ -254,6 +254,67 @@ func TestPushContextState(t *testing.T) {
 		require.Equal(t, 0, marker.published)
 	})
 
+	t.Run("NegotiationPushSkipsChatMutation", func(t *testing.T) {
+		t.Parallel()
+
+		// A reconnecting agent's negotiation push
+		// (capability_generation != 0) persists the snapshot and rows
+		// but must not hydrate or dirty chats: the settling push that
+		// ends the negotiation carries the settled inventory chats pin
+		// against.
+		api, dbm := makeAPI(t)
+		marker := &fakeDirtyMarker{}
+		api.DirtyMarker = marker
+		expectInTx(dbm)
+		expectInTx(dbm)
+
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextSnapshot{}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:              1,
+			AggregateHash:        []byte{0x01},
+			Initial:              true,
+			CapabilityGeneration: 1,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, 0, marker.called, "the negotiation push must not hydrate or dirty chats")
+
+		// The settling push (capability_generation == 0) ends the
+		// negotiation and runs the chat mutation.
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{Version: 1}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextSnapshot{}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		resp, err = api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       2,
+			AggregateHash: []byte{0x02},
+			Initial:       false,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, 1, marker.called, "the settling push runs the chat mutation")
+		require.Equal(t, 1, marker.published, "the settling push publishes after commit")
+	})
+
 	t.Run("RejectsEmptyAndDuplicateSources", func(t *testing.T) {
 		t.Parallel()
 

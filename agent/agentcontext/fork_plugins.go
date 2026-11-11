@@ -211,6 +211,17 @@ func (r *Resolver) packRowsAdvertised() bool {
 	return r.PackRowsAdvertised != nil && r.PackRowsAdvertised()
 }
 
+// PackAgentDefinitionsOn reports whether the fork-agent-definitions
+// capability is on: chatd drops every subagent row while agent
+// definitions are off, so emitted pack agents would be invisible rows
+// that still occupy the index-based snapshot count cap ahead of live
+// MCP and ACP resources. The Manager wires the callback alongside
+// PackRowsAdvertised; nil omits the rows for unwired resolvers, since
+// the capability must be earned from the server like PackRowsAdvertised.
+func (r *Resolver) PackAgentDefinitionsOn() bool {
+	return r.PackAgentDefinitionsAdvertised != nil && r.PackAgentDefinitionsAdvertised()
+}
+
 // emitPacks appends the pack-contributed resources of a scan root after the
 // ordinary discovery, so a pack skill sharing a name with an ordinary skill
 // or an earlier pack's skill loses the usual first-wins dedup. Emission waits
@@ -223,6 +234,14 @@ func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]i
 		return
 	}
 	for _, pack := range packRootsFor(root.Path) {
+		if len(pack.ManifestPath) > maxSourcePathBytes {
+			// The manifest path is the marker every pack row carries;
+			// a path over coderd's source_path transport limit would
+			// sink the whole snapshot (and pushWithRetry would retry
+			// that rejection forever), so this pack contributes
+			// nothing instead.
+			continue
+		}
 		r.emitPackSkills(pack, root, out, seenID)
 		r.emitPackAgents(pack, root, out, seenID)
 	}
@@ -264,8 +283,18 @@ func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource,
 
 // emitPackAgents emits one KindSubagent resource per agent definition file in
 // the pack's agent containers. The loop mirrors emitAgents over the pack's
-// containers.
+// containers. It emits nothing while the fork-agent-definitions capability is
+// unadvertised: chatd drops every subagent row then, so the rows would be
+// invisible inventory that still occupies the snapshot count cap ahead of live
+// MCP and ACP resources (the cap is index-based, so even excluded rows consume
+// slots; a 500-agent pack would fill DefaultMaxResources on its own). Omitting
+// mirrors how pack skills stay omitted while the pack capability is
+// unadvertised, and enabling the capability flips the advertisement, which
+// triggers the resync that adds the rows back.
 func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource, seenID map[string]int) {
+	if !r.PackAgentDefinitionsOn() {
+		return
+	}
 	for _, container := range pack.agentContainers() {
 		entries, err := os.ReadDir(container)
 		if err != nil {

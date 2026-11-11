@@ -195,6 +195,7 @@ func (api *API) workspaceAgentRPC(rw http.ResponseWriter, r *http.Request) {
 		ContextDirtyMarker:   contextDirtyMarker,
 		ContextSyncDisabled:  api.DeploymentValues.DisableWorkspaceAgentContextSync.Value(),
 		ForkPluginPacks:      api.Experiments.Enabled(codersdk.ExperimentForkPluginPacks),
+		ForkAgentDefinitions: api.Experiments.Enabled(codersdk.ExperimentForkAgentDefinitions),
 	}, workspace, workspaceAgent)
 
 	streamID := tailnet.StreamID{
