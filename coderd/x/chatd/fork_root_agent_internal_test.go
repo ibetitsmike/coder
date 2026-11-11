@@ -93,6 +93,9 @@ func TestForkRootAgent(t *testing.T) {
 
 	prompt := (agentDefinitionsFixture{db: f.db}).systemPrompt(t, root.ID)
 	require.Contains(t, prompt, "ROOT-REVIEWER-MARKER")
+	// readonly removes write_file, which the attached guidance names.
+	require.Contains(t, prompt, workspaceAttachedLimitedAwareness)
+	require.NotContains(t, prompt, workspaceAttachedAwareness)
 	// readonly removes spawn_agent, so the root loses the guidance to use it.
 	require.NotContains(t, prompt, subagentOrchestrationPromptBlock)
 	require.Contains(t, prompt, strings.Replace(DefaultSystemPrompt, subagentOrchestrationPromptBlock, "", 1))
@@ -154,6 +157,7 @@ func TestForkRootAgent(t *testing.T) {
 	require.Contains(t, names, "acp_spawn_agent")
 	require.NotContains(t, names, "acp_wait_agent")
 	require.NotContains(t, systemText(spawnerEnv), acpSubagentPromptBlock)
+	require.Contains(t, (agentDefinitionsFixture{db: f.db}).systemPrompt(t, spawner.ID), workspaceAttachedAwareness)
 
 	// A detached root that cannot create a workspace is not told to.
 	detached, err := f.server.CreateChat(ctx, CreateOptions{
