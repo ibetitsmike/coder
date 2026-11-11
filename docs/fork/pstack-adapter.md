@@ -326,6 +326,7 @@ The dialog shows the server's errors, such as `Invalid agent definition content.
 The page doesn't list the workspace's definition files, such as the pstack agents that Setup copies to `~/.coder/agents/`.
 `spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
 It offers project definitions only when the chat owner owns the project or the project is shared with them, and a child chat uses its root chat's project.
+To manage a project's definitions, open the project from the Agents sidebar and select the **Agent definitions** row in its details panel; members who can edit the project get **New agent definition**, **Edit**, **Delete**, and the **Enabled** switch, and other project members see the list read-only.
 A name that only one of the workspace, personal, organization, and project sources defines keeps its bare name.
 A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
