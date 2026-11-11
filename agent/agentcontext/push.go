@@ -106,8 +106,10 @@ type PushOptions struct {
 // an immediate resync, and every new connection starts unadvertised so a
 // reconnect to an older replica never leads with a pack-bearing snapshot.
 // A negotiation push (nonzero capability generation) always settles with
-// a generation-zero successor resync, even when no capability flips, so
-// chat hydration resumes after the non-mutating exchange.
+// a synchronous generation-zero successor resync, even when no capability
+// flips, so chat hydration resumes after the non-mutating exchange. A
+// reset whose resync is superseded by a concurrent resolve fails the
+// connection, because the snapshot it gets back is not its probe.
 func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error {
 	if p == nil {
 		return xerrors.New("agentcontext: Pusher is required")
@@ -141,7 +143,8 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// once the peer's capabilities are known) defines the baseline
 	// chats refresh against.
 	if m.packRowsAdvertised.Swap(false) || m.negotiating.Load() {
-		if _, err := m.resyncNegotiating(ctx); err != nil {
+		snap, err := m.resyncNegotiating(ctx)
+		if err != nil {
 			// The reset could not rebuild the snapshot (for example the
 			// connection's context was already canceled). The window
 			// stays open so the next connection retries the reset;
@@ -153,6 +156,17 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 			}
 			return xerrors.Errorf("capability reset resync: %w", err)
 		}
+		if snap.Version != 0 && snap.CapabilityGeneration == 0 {
+			// A concurrent resolve superseded this reset's pass, so
+			// Resync's stale-epoch path returned the previously
+			// published snapshot instead of the probe this reset
+			// built. That snapshot can be the retained pack-bearing
+			// inventory, which must never lead this connection's
+			// pushes; the window stays open so the next connection
+			// retries the reset.
+			logger.Warn(ctx, "capability reset superseded by a settled snapshot")
+			return xerrors.Errorf("capability reset superseded by a settled snapshot")
+		}
 	}
 	m.packAgentDefinitionsAdvertised.Swap(false)
 
@@ -161,35 +175,42 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 
 	// advertise records the capability the server last reported, closes
 	// the connection's negotiation window once the push was processed,
-	// and triggers a resync when a capability flips in either direction
-	// or when the processed push was a negotiation probe: the triggered
-	// resync publishes the first generation-zero snapshot with the
-	// processed capabilities, which the push loop sends as settled
-	// inventory. Without it, a probe whose response flips nothing would
-	// leave the negotiation open and chats created while disconnected
-	// unhydrated.
+	// and produces the settled successor: the reported capabilities are
+	// swapped in while the window is still open (a resolve that races
+	// there publishes a probe, never settled inventory), then the window
+	// closes and a synchronous resync publishes the first generation-zero
+	// snapshot with the processed capabilities, which the push loop sends
+	// as settled inventory. Without it, a probe whose response flips
+	// nothing would leave the negotiation open and chats created while
+	// disconnected unhydrated, and a resolve that raced between the close
+	// and an asynchronous settle could publish a generation-zero snapshot
+	// built from the reset defaults.
 	advertise := func(resp *PushResponse, negotiated bool) {
+		flipped := false
+		if resp != nil {
+			was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
+			if resp.ForkPluginPacks != was {
+				logger.Debug(ctx, "server flipped plugin-pack advertisement; re-resolving")
+				flipped = true
+			}
+			if resp.ForkAgentDefinitions != m.packAgentDefinitionsAdvertised.Swap(resp.ForkAgentDefinitions) {
+				logger.Debug(ctx, "server flipped the agent-definitions advertisement; re-resolving")
+				flipped = true
+			}
+		}
 		if negotiated {
 			// End the window even when the response carries no
 			// capabilities: a nil response leaves the reset defaults in
 			// force, which is safe to settle on.
 			m.negotiating.Store(false)
-		}
-		if resp == nil {
+			if _, err := m.Resync(ctx); err != nil {
+				logger.Warn(ctx, "settling capability negotiation failed", slog.Error(err))
+				m.Trigger()
+			}
 			return
 		}
-		settled := negotiated
-		was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
-		if resp.ForkPluginPacks != was {
-			logger.Debug(ctx, "server flipped plugin-pack advertisement; re-resolving")
-			settled = true
-		}
-		if resp.ForkAgentDefinitions != m.packAgentDefinitionsAdvertised.Swap(resp.ForkAgentDefinitions) {
-			logger.Debug(ctx, "server flipped the agent-definitions advertisement; re-resolving")
-			settled = true
-		}
-		if settled {
-			logger.Debug(ctx, "settling capability negotiation; re-resolving")
+		if flipped {
+			logger.Debug(ctx, "capability advertisement flipped; re-resolving")
 			m.Trigger()
 		}
 	}

@@ -361,6 +361,38 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}) {
 			}
 		}
 	}
+	// Candidate manifest directories are watched whenever they exist,
+	// even when no manifest parses there: packRootsFor only returns
+	// directories whose manifest exists, so a .claude-plugin/ created
+	// ahead of its plugin.json (or after a deletion) would otherwise
+	// get no watch, and creating the manifest would fire an event in a
+	// directory fsnotify does not observe. Sync re-installs the watch
+	// set on every resync, so the directory is picked up as soon as it
+	// exists. Only nested candidates need this: the root-level
+	// candidate lives in the directory itself, which the scan-root and
+	// pack watches already cover.
+	dirs := packManifestCandidateDirs(rootPath)
+	if entries, err := os.ReadDir(rootPath); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, packManifestCandidateDirs(filepath.Join(rootPath, e.Name()))...)
+			}
+		}
+	}
+	for _, dir := range dirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			out[dir] = struct{}{}
+		}
+	}
+}
+
+// packManifestCandidateDirs returns the nested directories that may
+// hold a plugin manifest for packDir, in candidate order.
+func packManifestCandidateDirs(packDir string) []string {
+	return []string{
+		filepath.Join(packDir, filepath.Dir(claudePluginManifestRelPath)),
+		filepath.Join(packDir, filepath.Dir(cursorPluginManifestRelPath)),
+	}
 }
 
 // declaredContainerRels returns the manifest-validated relative paths of

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -676,6 +677,196 @@ func TestRunPush_ResetFailureRetriesNegotiation(t *testing.T) {
 		return false
 	}, testutil.WaitShort, testutil.IntervalFast,
 		"after the peer advertises, the settle push must carry pack rows as settled inventory")
+
+	cancel3()
+	require.ErrorIs(t, <-done3, context.Canceled)
+}
+
+func TestRunPush_SupersededResetFailsConnection(t *testing.T) {
+	t.Parallel()
+
+	// A reset whose resync pass is superseded by a newer resolve
+	// returns the previously published snapshot (Resync's stale-epoch
+	// path) instead of the probe it built, and that snapshot can be the
+	// retained pack-bearing inventory. RunPush must fail the connection
+	// instead of pushing it, and the still-open window must make the
+	// next connection retry the reset.
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+	writePack(t, dir, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	// Resolver.MCPResources runs exactly once per resolve, after the
+	// filesystem walk, so gating it parks a resolve mid-pass. Once
+	// armed, the first gated call parks the connection's reset resolve
+	// and the second parks a manual resync started after the reset
+	// claimed its resolve epoch; later calls pass through.
+	var armed atomic.Bool
+	var gated atomic.Int32
+	gateA := make(chan struct{})
+	gateB := make(chan struct{})
+	blockedA := make(chan struct{}, 1)
+	blockedB := make(chan struct{}, 1)
+	resolver := &agentcontext.Resolver{}
+	resolver.MCPResources = func() []agentcontext.Resource {
+		if !armed.Load() {
+			return nil
+		}
+		switch gated.Add(1) {
+		case 1:
+			blockedA <- struct{}{}
+			<-gateA
+		case 2:
+			blockedB <- struct{}{}
+			<-gateB
+		}
+		return nil
+	}
+
+	m := newTestManager(t, agentcontext.ManagerOptions{
+		WorkingDir: func() string { return dir },
+		Resolver:   resolver,
+	})
+	// Manager.Run is deliberately not started: its watcher-driven
+	// resolves also call MCPResources and could take a gate slot. The
+	// advertisement flip below is followed by a manual Resync instead,
+	// and the settle after a probe is synchronous in RunPush.
+
+	p1 := newFakePusher()
+	p1.mu.Lock()
+	p1.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p1.mu.Unlock()
+
+	ctx1, cancel1 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- m.RunPush(ctx1, p1, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push1"),
+		})
+	}()
+
+	<-p1.signal
+	require.Eventually(t, func() bool {
+		if len(p1.snapshot()) == 0 {
+			return false
+		}
+		_, err := m.Resync(ctx1)
+		require.NoError(t, err)
+		reqs := p1.snapshot()
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the advertised connection must push pack rows before the gate is armed")
+
+	cancel1()
+	require.ErrorIs(t, <-done1, context.Canceled)
+
+	armed.Store(true)
+
+	// The connection's reset resolve parks at the gate after claiming
+	// its resolve epoch.
+	p2 := newFakePusher()
+	ctx2, cancel2 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	defer cancel2()
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- m.RunPush(ctx2, p2, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push2"),
+		})
+	}()
+	select {
+	case <-blockedA:
+	case <-time.After(testutil.WaitShort):
+		t.Fatal("the reset resolve never reached the gate")
+	}
+
+	// A manual resync started while the reset resolve is parked claims
+	// the newer epoch and parks too, so neither has published.
+	manualDone := make(chan agentcontext.Snapshot, 1)
+	manualErr := make(chan error, 1)
+	go func() {
+		snap, err := m.Resync(context.Background())
+		manualDone <- snap
+		manualErr <- err
+	}()
+	select {
+	case <-blockedB:
+	case <-time.After(testutil.WaitShort):
+		t.Fatal("the manual resync never reached the gate")
+	}
+
+	// Release the reset resolve first: it finishes after the manual
+	// resync claimed its epoch, so the stale-epoch path returns the
+	// previously published pack-bearing snapshot and RunPush must
+	// refuse it.
+	close(gateA)
+	require.ErrorContains(t, <-done2, "capability reset superseded by a settled snapshot")
+	require.Empty(t, p2.snapshot(),
+		"the superseded connection must not push the retained pack-bearing snapshot")
+
+	// Release the manual resync; it publishes a probe because the
+	// window is still open.
+	close(gateB)
+	<-manualDone
+	require.NoError(t, <-manualErr)
+
+	// The window stays open, so a resolve still publishes a probe and
+	// the next connection retries the reset.
+	snap, err := m.Resync(context.Background())
+	require.NoError(t, err)
+	require.NotZero(t, snap.CapabilityGeneration,
+		"publishes inside the negotiation window must stay probes")
+	require.Equal(t, "plugin-pack capability renegotiating", snap.SnapshotError)
+
+	// The next healthy connection retries the reset: its first push is
+	// a pack-free probe, and the settled successor the response's
+	// capabilities produce carries the pack rows.
+	p3 := newFakePusher()
+	p3.mu.Lock()
+	p3.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p3.mu.Unlock()
+
+	ctx3, cancel3 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	defer cancel3()
+	done3 := make(chan error, 1)
+	go func() {
+		done3 <- m.RunPush(ctx3, p3, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push3"),
+		})
+	}()
+
+	<-p3.signal
+	require.Eventually(t, func() bool {
+		return len(p3.snapshot()) >= 2
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the retried reset must produce the probe and the settled successor")
+
+	reqs3 := p3.snapshot()
+	first3 := reqs3[0]
+	require.NotZero(t, first3.CapabilityGeneration,
+		"the retried reset's first push is a capability probe")
+	for _, res := range first3.Resources {
+		require.Empty(t, res.SourcePath,
+			"the probe push must be pack-free")
+	}
+	for _, req := range reqs3[1:] {
+		require.Zero(t, req.CapabilityGeneration,
+			"pushes after the probe are settled inventory")
+	}
+	last3 := reqs3[len(reqs3)-1]
+	hasPackRows := false
+	for _, res := range last3.Resources {
+		if res.SourcePath != "" {
+			hasPackRows = true
+		}
+	}
+	require.True(t, hasPackRows,
+		"after the peer advertises, the settle push must carry pack rows as settled inventory")
+	require.Empty(t, last3.SnapshotError,
+		"the settling push carries a settled snapshot")
 
 	cancel3()
 	require.ErrorIs(t, <-done3, context.Canceled)
