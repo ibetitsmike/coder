@@ -8,8 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	agentproto "github.com/coder/coder/v2/agent/proto"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -23,7 +27,7 @@ func TestForkRootAgent(t *testing.T) {
 	t.Parallel()
 
 	f := newNestedSubagentsFixture(t,
-		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions, codersdk.ExperimentForkNestedSubagents},
+		codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions, codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentChatACPSubagents},
 		Limits{Fork: ForkLimits{MaxSubagentDepth: 1}}, withInternalTestServerTransportFactory(&aibridgeTestFactory{}))
 	ctx := chatdTestContext(t)
 	_, err := f.fdb.UpsertChatOrganizationSubagentLimits(ctx, forkdb.UpsertChatOrganizationSubagentLimitsParams{
@@ -38,6 +42,9 @@ func TestForkRootAgent(t *testing.T) {
 		Content:        agentDefinitionMarkdown("name: reviewer\nreadonly: true", "ROOT-REVIEWER-MARKER"),
 	})
 	require.NoError(t, err)
+	acpBody, err := protojson.Marshal(&agentproto.ACPHarnessBody{Slug: "test", DisplayName: "Test"})
+	require.NoError(t, err)
+	seedAgentContext(ctx, t, f.db, f.root.AgentID.UUID, "test", []byte("acp"), database.WorkspaceAgentContextBodyKindAcpHarness, acpBody)
 	agent, err := f.server.ResolveRootAgent(ctx, RootAgentOptions{
 		OwnerID:        f.root.OwnerID,
 		OrganizationID: f.root.OrganizationID,
@@ -59,6 +66,15 @@ func TestForkRootAgent(t *testing.T) {
 	require.NoError(t, err)
 	root, err = f.db.GetChatByID(ctx, root.ID)
 	require.NoError(t, err)
+	_, err = f.server.CreateChat(ctx, CreateOptions{
+		OrganizationID: f.root.OrganizationID,
+		OwnerID:        f.root.OwnerID,
+		ParentChatID:   uuid.NullUUID{UUID: f.root.ID, Valid: true},
+		Title:          "reviewer child",
+		ModelConfigID:  f.root.LastModelConfigID,
+		RootAgent:      &agent,
+	})
+	require.ErrorContains(t, err, "a child chat cannot start as a root agent type")
 
 	prompt := (agentDefinitionsFixture{db: f.db}).systemPrompt(t, root.ID)
 	require.Contains(t, prompt, "ROOT-REVIEWER-MARKER")
@@ -74,6 +90,17 @@ func TestForkRootAgent(t *testing.T) {
 	require.Contains(t, names, "execute")
 	require.NotContains(t, names, "write_file")
 	require.NotContains(t, names, spawnAgentToolName)
+	// readonly also removes acp_spawn_agent, and with it the ACP guidance.
+	require.NotContains(t, names, "acp_spawn_agent")
+	var system strings.Builder
+	for _, message := range env.Prompt {
+		for _, part := range message.Content {
+			if text, ok := part.(fantasy.TextPart); ok && message.Role == fantasy.MessageRoleSystem {
+				system.WriteString(text.Text)
+			}
+		}
+	}
+	require.NotContains(t, system.String(), acpSubagentPromptBlock)
 
 	// The root is running, and its depth 0 row must not use up the depth
 	// limit or the family's one live subagent.

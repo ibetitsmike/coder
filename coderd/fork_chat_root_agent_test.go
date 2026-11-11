@@ -86,6 +86,14 @@ func TestForkCreateChatAgentType(t *testing.T) {
 	require.Equal(t, "reviewer", got.AgentType)
 	require.Empty(t, got.Children)
 
+	// A chat created without a message keeps the definition's effort for
+	// its first turn.
+	idle, err := client.CreateChat(ctx, codersdk.CreateChatRequest{OrganizationID: user.OrganizationID, AgentType: "reviewer"})
+	require.NoError(t, err)
+	idleRow, err := db.GetChatByID(sysCtx, idle.ID)
+	require.NoError(t, err)
+	require.Equal(t, database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffortHigh, Valid: true}, idleRow.LastReasoningEffort)
+
 	// The request's model wins over the definition's.
 	explicit, err := create(client, codersdk.CreateChatRequest{AgentType: "reviewer", ModelConfigID: &defaultModel.ID})
 	require.NoError(t, err)
@@ -112,6 +120,7 @@ func TestForkCreateChatAgentType(t *testing.T) {
 	}
 	require.Equal(t, map[string]string{
 		reviewer.ID.String(): "reviewer",
+		idle.ID.String():     "reviewer",
 		explicit.ID.String(): "reviewer",
 		explore.ID.String():  "explore",
 		plain.ID.String():    "",
