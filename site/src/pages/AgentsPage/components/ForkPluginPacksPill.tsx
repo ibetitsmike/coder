@@ -3,10 +3,11 @@
 import { PuzzleIcon } from "lucide-react";
 import type React from "react";
 import { useQuery } from "react-query";
+import { getErrorMessage } from "#/api/errors";
 import { chat } from "#/api/queries/chats";
 import { enabledPluginPacks } from "#/api/queries/forkPluginPackEnablement";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
-import { ComposerPillPopover } from "./ComposerPillPopover";
+import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 import { ForkPluginPackToggles } from "./ForkPluginPackToggles";
 
 type ForkPluginPacksPillProps = {
@@ -22,7 +23,13 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 	const target = { kind: "chat", chatId } as const;
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	if (!chatQuery.data) {
-		return null;
+		return chatQuery.error ? (
+			<ComposerPillError
+				label="Plugin packs failed to load"
+				heading="Chat plugin packs"
+				message={getErrorMessage(chatQuery.error, "Failed to load the chat.")}
+			/>
+		) : null;
 	}
 	return (
 		<ForkPluginPacksPillView enabledCount={enabledQuery.data?.length}>
