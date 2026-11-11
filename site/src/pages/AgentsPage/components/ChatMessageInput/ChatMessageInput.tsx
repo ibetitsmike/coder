@@ -68,6 +68,7 @@ import {
 	$createFileReferenceNode,
 	FileReferenceNode,
 } from "./FileReferenceNode";
+import { ForkAgentMentionPlugin } from "./ForkAgentMentionPlugin";
 import { IOSBackspacePlugin } from "./iosBackspace";
 import {
 	createPasteFile,
@@ -1400,6 +1401,12 @@ const ChatMessageInput = ({
 					onSelectedIndexChange={setSkillsMenuSelectedIndex}
 					onTriggerChange={handleSkillsTriggerChange}
 					onSkillSelect={replaceActiveSkillsTrigger}
+				/>
+				<ForkAgentMentionPlugin
+					organizationId={organizationId}
+					projectId={projectId}
+					hasWorkspace={hasWorkspace}
+					anchor={skillsMenuAnchor ?? containerElement}
 				/>
 				<EditableStatePlugin disabled={disabled} />
 				{onFilePaste && acceptFilePasteWhileDisabled && (
