@@ -249,6 +249,34 @@ func (mr *MockStoreMockRecorder) DeletePluginLinkCodesByUser(ctx, arg any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginLinkCodesByUser", reflect.TypeOf((*MockStore)(nil).DeletePluginLinkCodesByUser), ctx, arg)
 }
 
+// DeletePluginPackByID mocks base method.
+func (m *MockStore) DeletePluginPackByID(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePluginPackByID", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeletePluginPackByID indicates an expected call of DeletePluginPackByID.
+func (mr *MockStoreMockRecorder) DeletePluginPackByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginPackByID", reflect.TypeOf((*MockStore)(nil).DeletePluginPackByID), ctx, id)
+}
+
+// DeletePluginPackResources mocks base method.
+func (m *MockStore) DeletePluginPackResources(ctx context.Context, packID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePluginPackResources", ctx, packID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeletePluginPackResources indicates an expected call of DeletePluginPackResources.
+func (mr *MockStoreMockRecorder) DeletePluginPackResources(ctx, packID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePluginPackResources", reflect.TypeOf((*MockStore)(nil).DeletePluginPackResources), ctx, packID)
+}
+
 // DeletePluginUserLink mocks base method.
 func (m *MockStore) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
 	m.ctrl.T.Helper()
@@ -562,6 +590,51 @@ func (mr *MockStoreMockRecorder) GetPluginChatBindingsDue(ctx, arg any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginChatBindingsDue", reflect.TypeOf((*MockStore)(nil).GetPluginChatBindingsDue), ctx, arg)
 }
 
+// GetPluginPackByID mocks base method.
+func (m *MockStore) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPackByID", ctx, id)
+	ret0, _ := ret[0].(forkdb.PluginPack)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPackByID indicates an expected call of GetPluginPackByID.
+func (mr *MockStoreMockRecorder) GetPluginPackByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackByID", reflect.TypeOf((*MockStore)(nil).GetPluginPackByID), ctx, id)
+}
+
+// GetPluginPackResources mocks base method.
+func (m *MockStore) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPackResources", ctx, packID)
+	ret0, _ := ret[0].([]forkdb.PluginPackResource)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPackResources indicates an expected call of GetPluginPackResources.
+func (mr *MockStoreMockRecorder) GetPluginPackResources(ctx, packID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackResources", reflect.TypeOf((*MockStore)(nil).GetPluginPackResources), ctx, packID)
+}
+
+// GetPluginPacksByOrganizationID mocks base method.
+func (m *MockStore) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPacksByOrganizationID", ctx, organizationID)
+	ret0, _ := ret[0].([]forkdb.PluginPack)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPacksByOrganizationID indicates an expected call of GetPluginPacksByOrganizationID.
+func (mr *MockStoreMockRecorder) GetPluginPacksByOrganizationID(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPacksByOrganizationID", reflect.TypeOf((*MockStore)(nil).GetPluginPacksByOrganizationID), ctx, organizationID)
+}
+
 // GetPluginUserLink mocks base method.
 func (m *MockStore) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
 	m.ctrl.T.Helper()
@@ -768,6 +841,35 @@ func (m *MockStore) InsertPluginLinkCode(ctx context.Context, arg forkdb.InsertP
 func (mr *MockStoreMockRecorder) InsertPluginLinkCode(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPluginLinkCode", reflect.TypeOf((*MockStore)(nil).InsertPluginLinkCode), ctx, arg)
+}
+
+// InsertPluginPack mocks base method.
+func (m *MockStore) InsertPluginPack(ctx context.Context, arg forkdb.InsertPluginPackParams) (forkdb.PluginPack, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertPluginPack", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginPack)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertPluginPack indicates an expected call of InsertPluginPack.
+func (mr *MockStoreMockRecorder) InsertPluginPack(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPluginPack", reflect.TypeOf((*MockStore)(nil).InsertPluginPack), ctx, arg)
+}
+
+// InsertPluginPackResources mocks base method.
+func (m *MockStore) InsertPluginPackResources(ctx context.Context, arg forkdb.InsertPluginPackResourcesParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertPluginPackResources", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertPluginPackResources indicates an expected call of InsertPluginPackResources.
+func (mr *MockStoreMockRecorder) InsertPluginPackResources(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPluginPackResources", reflect.TypeOf((*MockStore)(nil).InsertPluginPackResources), ctx, arg)
 }
 
 // InsertProjectAgentDefinition mocks base method.
@@ -1121,6 +1223,21 @@ func (m *MockStore) UpdatePluginLastError(ctx context.Context, arg forkdb.Update
 func (mr *MockStoreMockRecorder) UpdatePluginLastError(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginLastError", reflect.TypeOf((*MockStore)(nil).UpdatePluginLastError), ctx, arg)
+}
+
+// UpdatePluginPackCommit mocks base method.
+func (m *MockStore) UpdatePluginPackCommit(ctx context.Context, arg forkdb.UpdatePluginPackCommitParams) (forkdb.PluginPack, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdatePluginPackCommit", ctx, arg)
+	ret0, _ := ret[0].(forkdb.PluginPack)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdatePluginPackCommit indicates an expected call of UpdatePluginPackCommit.
+func (mr *MockStoreMockRecorder) UpdatePluginPackCommit(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePluginPackCommit", reflect.TypeOf((*MockStore)(nil).UpdatePluginPackCommit), ctx, arg)
 }
 
 // UpdateProjectAgentDefinitionByName mocks base method.

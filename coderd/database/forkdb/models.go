@@ -343,6 +343,32 @@ type PluginLinkCode struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+// Plugin packs installed from a Git repository and pinned to one commit.
+type PluginPack struct {
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Name           string    `db:"name" json:"name"`
+	SourceUrl      string    `db:"source_url" json:"source_url"`
+	// Directory of the pack in the repository. Empty for the repository root.
+	SourcePath string `db:"source_path" json:"source_path"`
+	// Tag, branch or commit that the install or the last update resolved.
+	Ref string `db:"ref" json:"ref"`
+	// Commit that the stored resources come from.
+	CommitSha string    `db:"commit_sha" json:"commit_sha"`
+	CreatedBy uuid.UUID `db:"created_by" json:"created_by"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+type PluginPackResource struct {
+	PackID uuid.UUID `db:"pack_id" json:"pack_id"`
+	// Slash-separated path relative to the pack directory.
+	Path    string `db:"path" json:"path"`
+	Content []byte `db:"content" json:"content"`
+	// Hex SHA-256 of content.
+	ContentHash string `db:"content_hash" json:"content_hash"`
+}
+
 type PluginUserLink struct {
 	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
 	// Identity of the user on the external service, for example a phone number.
