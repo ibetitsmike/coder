@@ -8,6 +8,7 @@ import {
 	type PluginPackTarget,
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
+import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 
 // Both keys sit under the admin list's key, so installing, updating or
 // deleting a pack refreshes them.
@@ -39,15 +40,35 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 	});
 
 /** A pack's requested enabled state for a target. */
-export type PluginPackToggle = { packId: string; enabled: boolean };
+export type PluginPackToggle = {
+	pack: ForkEnabledPluginPack;
+	enabled: boolean;
+};
 
+/**
+ * Enables or disables a pack for a target. On success the cached enabled
+ * list changes to match, so a failed refetch cannot revert the switch. The
+ * list is then invalidated.
+ */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
 	target: PluginPackTarget,
 ) =>
 	mutationOptions({
-		mutationFn: ({ packId, enabled }: PluginPackToggle) =>
-			setPluginPackEnabled(target, packId, enabled),
+		mutationFn: ({ pack, enabled }: PluginPackToggle) =>
+			setPluginPackEnabled(target, pack.id, enabled),
+		onSuccess: (_data, { pack, enabled }) => {
+			const queryKey = enabledPluginPacks(target).queryKey;
+			queryClient.setQueryData(queryKey, (packs) => {
+				const others = packs?.filter((cached) => cached.id !== pack.id);
+				return enabled && others
+					? [
+							...others,
+							{ id: pack.id, name: pack.name, commit_sha: pack.commit_sha },
+						]
+					: others;
+			});
+		},
 		onSettled: () =>
 			queryClient.invalidateQueries({
 				queryKey: enabledPluginPacksKey(target),

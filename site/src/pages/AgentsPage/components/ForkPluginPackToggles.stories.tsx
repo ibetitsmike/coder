@@ -33,7 +33,7 @@ export const ReadOnly: Story = {
 
 export const Toggling: Story = {
 	args: {
-		pending: { packId: MockForkPluginPackWithoutPath.id, enabled: true },
+		pending: { pack: MockForkPluginPackWithoutPath, enabled: true },
 	},
 };
 
