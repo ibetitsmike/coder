@@ -43,6 +43,14 @@ import {
 const noneValue = "none";
 const recentChatLimit = 3;
 
+const tierLabels: Record<string, string> = {
+	builtin: "Built-in",
+	personal: "Personal",
+	org: "Organization",
+	project: "Project",
+	workspace: "Workspace",
+};
+
 // Chats store a definition's name without its source prefix, so a name that
 // several sources define matches the chats of each of them.
 const storedAgentType = ({ name, source }: ForkAgentType) =>
@@ -151,9 +159,7 @@ const ForkAvailableAgentsPage: React.FC = () => {
 						<div className="text-content-secondary">{type.description}</div>
 					</TableCell>
 					<TableCell>
-						<Badge size="sm" className="capitalize">
-							{type.source}
-						</Badge>
+						<Badge size="sm">{tierLabels[type.source] ?? type.source}</Badge>
 					</TableCell>
 					<TableCell className="text-content-secondary">
 						{type.root_available ? "Available" : type.root_unavailable_reason}

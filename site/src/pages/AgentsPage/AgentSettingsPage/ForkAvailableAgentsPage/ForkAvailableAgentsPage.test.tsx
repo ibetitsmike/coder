@@ -86,7 +86,7 @@ describe("ForkAvailableAgentsPage", () => {
 		const row = within(
 			(await screen.findByText("personal/reviewer")).closest("tr")!,
 		);
-		expect(row.getByText("personal")).toBeInTheDocument();
+		expect(row.getByText("Personal")).toBeInTheDocument();
 		expect(row.getByText("Its model is not available.")).toBeInTheDocument();
 		const links = await row.findAllByRole("link");
 		expect(links.map((link) => link.textContent)).toEqual(["Chat child"]);
