@@ -23,7 +23,9 @@ type SearchChatsEntry = {
 	shared: boolean;
 };
 
-const parseSearchChatsEntry = (item: unknown): SearchChatsEntry | null => {
+export const parseSearchChatsEntry = (
+	item: unknown,
+): SearchChatsEntry | null => {
 	const record = asRecord(item);
 	if (!record || typeof record.chat_id !== "string") {
 		return null;
