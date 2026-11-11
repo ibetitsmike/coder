@@ -287,8 +287,7 @@ type UpdateOrganizationAgentDefinitionACLArgs = {
 
 /**
  * Saves a sparse ACL change to an organization definition, the only tier
- * with an ACL. The organization and name travel in the variables, as in the
- * other mutations here.
+ * with an ACL.
  */
 export const updateAgentDefinitionACL = (queryClient: QueryClient) =>
 	mutationOptions({

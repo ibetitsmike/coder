@@ -72,8 +72,8 @@ export type ForkAgentDefinitionsTableViewProps = {
 	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
 	/**
-	 * Shows a Manage permissions row action when set. The caller opens its own dialog and
-	 * passes onCloseAutoFocus to it so focus returns to the row's menu.
+	 * The caller opens its own dialog and passes onCloseAutoFocus to it so
+	 * focus returns to the row's menu.
 	 */
 	onManagePermissions?: (
 		definition: ForkAgentDefinitionMetadata,

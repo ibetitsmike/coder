@@ -57,3 +57,25 @@ export const SaveError: Story = {
 		);
 	},
 };
+
+export const Empty: Story = {
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: { users: [], groups: [] },
+		});
+	},
+	play: async () => {
+		await screen.findByText("No members or groups have permission yet");
+	},
+};
+
+export const LoadError: Story = {
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockRejectedValue(
+			mockApiError({ message: "Failed to load agent definition permissions." }),
+		);
+	},
+	play: async () => {
+		await screen.findByText("Failed to load agent definition permissions.");
+	},
+};
