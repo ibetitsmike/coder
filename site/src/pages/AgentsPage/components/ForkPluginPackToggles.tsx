@@ -61,7 +61,8 @@ export const ForkPluginPackTogglesView: React.FC<
 	const packs = [
 		...(installed ?? []),
 		...enabled.filter(
-			(pack) => !installed?.some((installedPack) => installedPack.id === pack.id),
+			(pack) =>
+				!installed?.some((installedPack) => installedPack.id === pack.id),
 		),
 	];
 	return (
@@ -98,8 +99,8 @@ export const ForkPluginPackTogglesView: React.FC<
 			)}
 			{!installed && (
 				<p className="m-0 text-xs text-content-secondary">
-					Only enabled packs are shown. Organization admins install plugin
-					packs in AI settings.
+					Only enabled packs are shown. Organization admins install plugin packs
+					in AI settings.
 				</p>
 			)}
 		</div>

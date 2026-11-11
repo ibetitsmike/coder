@@ -40,7 +40,9 @@ export const EnabledOnlyEmpty: Story = {
 };
 
 export const Toggling: Story = {
-	args: { pending: { packId: MockForkPluginPackWithoutPath.id, enabled: true } },
+	args: {
+		pending: { packId: MockForkPluginPackWithoutPath.id, enabled: true },
+	},
 };
 
 export const NoneInstalled: Story = {

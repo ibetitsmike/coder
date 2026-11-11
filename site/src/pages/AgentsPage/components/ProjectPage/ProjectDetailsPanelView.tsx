@@ -64,7 +64,10 @@ type ProjectDetailsPanelViewProps = {
 		readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 	};
 	/** Omit to hide the plugin packs row. */
-	readonly pluginPacks?: Omit<CountRowProps, "label" | "noun" | "disabledCount">;
+	readonly pluginPacks?: Omit<
+		CountRowProps,
+		"label" | "noun" | "disabledCount"
+	>;
 	/** `undefined` until the instructions load. */
 	readonly instructions: ChatProjectInstructions | undefined;
 	readonly error: unknown;

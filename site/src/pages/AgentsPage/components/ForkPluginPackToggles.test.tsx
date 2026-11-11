@@ -8,7 +8,7 @@ import {
 	MockForkPluginPack,
 	MockForkPluginPackWithoutPath,
 } from "#/testHelpers/forkPluginPacks";
-import { renderComponent } from "#/testHelpers/renderHelpers";
+import { render } from "#/testHelpers/renderHelpers";
 import { ForkPluginPackToggles } from "./ForkPluginPackToggles";
 
 const target = { kind: "chat", chatId: "chat-1" } as const;
@@ -26,7 +26,7 @@ it("enables an installed pack for the target", async () => {
 		MockForkPluginPack,
 		MockForkPluginPackWithoutPath,
 	]);
-	renderComponent(
+	render(
 		<ForkPluginPackToggles
 			target={target}
 			organizationId={MockForkPluginPack.organization_id}
@@ -54,7 +54,7 @@ it("lists only enabled packs when the organization's packs cannot be listed", as
 		...mockApiError({ message: "Forbidden." }),
 		status: 403,
 	});
-	renderComponent(
+	render(
 		<ForkPluginPackToggles
 			target={target}
 			organizationId={MockForkPluginPack.organization_id}
