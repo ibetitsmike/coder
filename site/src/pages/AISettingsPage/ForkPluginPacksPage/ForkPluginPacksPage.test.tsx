@@ -221,3 +221,40 @@ it("reports an update as done when a lost response did update the pack", async (
 	expect(toastError).not.toHaveBeenCalled();
 	expect(update).toHaveBeenCalledTimes(1);
 });
+
+it("does not report an install when a lost response leaves only an older same-name pack", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	const create = vi
+		.spyOn(forkPluginPacksApi, "createPluginPack")
+		.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
+	renderPage();
+
+	await user.click(
+		await screen.findByRole("button", { name: "Install plugin pack" }),
+	);
+	const dialog = await screen.findByRole("dialog");
+	await user.type(
+		within(dialog).getByLabelText(/^Name/),
+		MockForkPluginPack.name,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Git repository URL/),
+		MockForkPluginPack.source_url,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Ref/),
+		MockForkPluginPack.ref,
+	);
+	await user.click(within(dialog).getByRole("button", { name: "Install" }));
+
+	// The mutation has settled, refetch included, once Install is enabled again.
+	await waitFor(() =>
+		expect(
+			within(dialog).getByRole("button", { name: "Install" }),
+		).toBeEnabled(),
+	);
+	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	expect(create).toHaveBeenCalledTimes(1);
+	expect(toastSuccess).not.toHaveBeenCalled();
+});
