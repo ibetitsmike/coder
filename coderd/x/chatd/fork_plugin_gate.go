@@ -115,8 +115,10 @@ type packCommitKey struct {
 // read is logged and returns no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	key := packCommitKey{pack.ID, pack.CommitSHA}
-	if paths, ok := p.forkPacks.paths.Load(key); ok {
-		return paths.(packPathSet)
+	if cached, ok := p.forkPacks.paths.Load(key); ok {
+		if paths, ok := cached.(packPathSet); ok {
+			return paths
+		}
 	}
 	resources, err := p.packResources(ctx, pack.ID)
 	if err != nil {
