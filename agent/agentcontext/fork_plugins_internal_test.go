@@ -67,6 +67,25 @@ func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
 	}
 }
 
+func TestCollectDirsWatchesDefaultAndSingleSkillFolders(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	pack := filepath.Join(root, "pstack")
+	manifest := filepath.Join(pack, ".claude-plugin", "plugin.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o755))
+	require.NoError(t, os.WriteFile(manifest, []byte(`{"name": "pstack", "skills": "./review-pr"}`), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(pack, "skills", "default-skill"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pack, "review-pr"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pack, "review-pr", skillMetaFileName), []byte("x"), 0o600))
+
+	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: root}})
+	// The default container and its skill folders stay watched next to the
+	// declared single skill folder.
+	for _, dir := range []string{filepath.Join(pack, "skills"), filepath.Join(pack, "skills", "default-skill"), filepath.Join(pack, "review-pr")} {
+		require.Contains(t, dirs, dir)
+	}
+}
+
 //nolint:paralleltest,tparallel // Uses t.Setenv.
 func TestClaudePluginCacheDirOverride(t *testing.T) {
 	t.Setenv(claudePluginCacheDirEnv, "")

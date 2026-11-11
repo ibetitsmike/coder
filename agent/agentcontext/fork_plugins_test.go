@@ -650,8 +650,26 @@ func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
 			manifest:   `{"name": "pstack", "skills": "./extra-skills", "agents": "./extra-agents"}`,
 			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
 			agentFiles: []string{"agents/default-agent.md", "extra-agents/extra-agent.md"},
-			wantSkills: []string{"extra-skill"},
+			wantSkills: []string{"default-skill", "extra-skill"},
 			wantAgents: []string{"extra-agent"},
+		},
+		{
+			name:       "declared skill folder holding SKILL.md is one skill",
+			manifest:   `{"name": "pstack", "skills": "./review-pr"}`,
+			skillDirs:  []string{"skills/default-skill", "review-pr", "review-pr/nested-skill"},
+			wantSkills: []string{"default-skill", "review-pr"},
+		},
+		{
+			name:       "declared container and skill folder mix",
+			manifest:   `{"name": "pstack", "skills": ["./extra-skills", "./solo-skill"]}`,
+			skillDirs:  []string{"extra-skills/extra-skill", "solo-skill"},
+			wantSkills: []string{"extra-skill", "solo-skill"},
+		},
+		{
+			name:       "declaring the default container does not duplicate it",
+			manifest:   `{"name": "pstack", "skills": ["./skills/", "./skills/default-skill"]}`,
+			skillDirs:  []string{"skills/default-skill", "skills/other-skill"},
+			wantSkills: []string{"default-skill", "other-skill"},
 		},
 		{
 			name:       "array declarations",

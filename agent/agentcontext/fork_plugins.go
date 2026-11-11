@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -405,14 +406,34 @@ func declaredRels(declared manifestPaths, fallback string) []string {
 	return out
 }
 
-// skillContainers returns the existing skill-container directories of a
-// pack, honoring the manifest's declared skills directories.
-func (p packRoot) skillContainers() []string {
-	var out []string
+// skillRels returns the default skills directory followed by the manifest's
+// declared skills paths. Declared paths add to the default directory (Claude
+// Code scans both), so declaring one never hides skills/.
+func (p packRoot) skillRels() []string {
+	out := []string{defaultPackSkillsDir}
 	for _, rel := range declaredRels(p.Manifest.Skills, defaultPackSkillsDir) {
-		out = append(out, inPackContainers(p, rel)...)
+		if !slices.Contains(out, rel) {
+			out = append(out, rel)
+		}
 	}
 	return out
+}
+
+// skillPaths splits the pack's existing skill paths into containers of skill
+// folders and single skill folders. A declared path holding SKILL.md itself
+// is one skill (a manifest may declare "./review-pr"); any other directory is
+// a container whose child folders are the skills.
+func (p packRoot) skillPaths() (containers, folders []string) {
+	for _, rel := range p.skillRels() {
+		for _, dir := range inPackContainers(p, rel) {
+			if _, err := os.Lstat(filepath.Join(dir, skillMetaFileName)); err == nil {
+				folders = append(folders, dir)
+				continue
+			}
+			containers = append(containers, dir)
+		}
+	}
+	return containers, folders
 }
 
 // agentContainers returns the existing agent-container directories of a
@@ -516,11 +537,12 @@ func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]i
 }
 
 // emitPackSkills emits one Skill resource per skill directory in the pack's
-// skill containers. The loop mirrors emitSkillsFromContainer but stamps
-// SourcePath with the manifest path so the coderd fork-plugin gate can
-// identify pack contributions.
+// skill containers, plus one per declared single skill folder. The loop
+// mirrors emitSkillsFromContainer but stamps SourcePath with the manifest
+// path so the coderd fork-plugin gate can identify pack contributions.
 func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource, seenID map[string]int) {
-	for _, container := range pack.skillContainers() {
+	containers, folders := pack.skillPaths()
+	for _, container := range containers {
 		entries, err := os.ReadDir(container)
 		if err != nil {
 			continue
@@ -529,24 +551,31 @@ func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource,
 			if !e.IsDir() {
 				continue
 			}
-			meta := filepath.Join(container, e.Name(), skillMetaFileName)
-			// Lstat (not Stat) so a symlinked SKILL.md is
-			// detected and routed through resolveReadTarget,
-			// which enforces the pack-root boundary: a pack
-			// must not import skills from outside itself even
-			// when the target stays inside the scan root.
-			info, err := os.Lstat(meta)
-			if err != nil {
-				continue
-			}
-			res, ok := r.readSkillMeta(pack.Dir, meta, info, root.UserSource)
-			if !ok {
-				continue
-			}
-			res.SourcePath = pack.ManifestPath
-			appendResource(out, seenID, res)
+			r.emitPackSkill(pack, root, filepath.Join(container, e.Name()), out, seenID)
 		}
 	}
+	for _, folder := range folders {
+		r.emitPackSkill(pack, root, folder, out, seenID)
+	}
+}
+
+// emitPackSkill emits the skill in dir when it holds a SKILL.md.
+func (r *Resolver) emitPackSkill(pack packRoot, root ScanRoot, dir string, out *[]Resource, seenID map[string]int) {
+	meta := filepath.Join(dir, skillMetaFileName)
+	// Lstat (not Stat) so a symlinked SKILL.md is detected and routed
+	// through resolveReadTarget, which enforces the pack-root boundary: a
+	// pack must not import skills from outside itself even when the target
+	// stays inside the scan root.
+	info, err := os.Lstat(meta)
+	if err != nil {
+		return
+	}
+	res, ok := r.readSkillMeta(pack.Dir, meta, info, root.UserSource)
+	if !ok {
+		return
+	}
+	res.SourcePath = pack.ManifestPath
+	appendResource(out, seenID, res)
 }
 
 // emitPackAgents emits one KindSubagent resource per agent definition file in
@@ -625,9 +654,13 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		if parent := filepath.Dir(pack.ManifestPath); parent != pack.Dir {
 			out[parent] = struct{}{}
 		}
-		for _, container := range pack.skillContainers() {
+		containers, folders := pack.skillPaths()
+		for _, container := range containers {
 			out[container] = struct{}{}
 			addPackImmediateSubdirs(container, out)
+		}
+		for _, folder := range folders {
+			out[folder] = struct{}{}
 		}
 		for _, container := range pack.agentContainers() {
 			out[container] = struct{}{}
@@ -699,7 +732,7 @@ func packManifestCandidateDirs(packDir string) []string {
 // disk. Invalid declarations ("../x", absolute) are rejected by
 // containerRelPath and skipped, matching discovery.
 func (p packRoot) declaredContainerRels() []string {
-	return append(declaredRels(p.Manifest.Skills, defaultPackSkillsDir), declaredRels(p.Manifest.Agents, defaultPackAgentsDir)...)
+	return append(p.skillRels(), declaredRels(p.Manifest.Agents, defaultPackAgentsDir)...)
 }
 
 // addPackImmediateSubdirs adds the immediate subdirectories of dir to out,
