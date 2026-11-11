@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useQuery } from "react-query";
-import { Navigate, useSearchParams } from "react-router";
+import { Navigate } from "react-router";
 import { organizationsPermissions } from "#/api/queries/organizations";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Loader } from "#/components/Loader/Loader";
@@ -13,17 +13,13 @@ import { RequirePermission } from "#/modules/permissions/RequirePermission";
 import { ForkAgentDefinitionsTable } from "#/pages/AgentsPage/AgentSettingsPage/ForkAgentDefinitionsPage/ForkAgentDefinitionsTable";
 import { pageTitle } from "#/utils/page";
 import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
-import {
-	orgSearchParam,
-	selectOrganization,
-} from "../MCPServersPage/organizationParam";
+import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkillsOrganization";
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
 import { ForkOrganizationAgentDefinitionSharingDialog } from "./ForkOrganizationAgentDefinitionSharingDialog";
 
 const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 	const { permissions } = useAuthenticated();
 	const { experiments, organizations } = useDashboard();
-	const [searchParams, setSearchParams] = useSearchParams();
 	const isEnabled = experiments.includes("fork-agent-definitions");
 	const organizationPermissionsQuery = useQuery({
 		...organizationsPermissions(
@@ -36,31 +32,20 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 		name: string;
 		onCloseAutoFocus: (event: Event) => void;
 	}>();
-
-	if (!isEnabled) {
-		return <Navigate to="/ai/settings" replace />;
-	}
-
 	// Organization agent definitions share the organization skill
 	// permissions on the server.
 	const readableOrganizations = readableSkillsOrganizations(
 		organizations,
 		organizationPermissionsQuery.data,
 	);
-	const requestedOrganizationName = searchParams.get(orgSearchParam);
-	const defaultOrganization =
-		readableOrganizations.length > 0
-			? selectOrganization(readableOrganizations, null)
-			: undefined;
-	// A requested organization the user cannot read is denied rather than
-	// replaced, so a definition is never added to an organization the URL did
-	// not name.
-	const organization =
-		requestedOrganizationName === null
-			? defaultOrganization
-			: readableOrganizations.find(
-					(organization) => organization.name === requestedOrganizationName,
-				);
+	const { organization, setOrganization } = useRequestedSkillsOrganization(
+		readableOrganizations,
+	);
+
+	if (!isEnabled) {
+		return <Navigate to="/ai/settings" replace />;
+	}
+
 	const organizationPermissions = organization
 		? organizationPermissionsQuery.data?.[organization.id]
 		: undefined;
@@ -116,13 +101,7 @@ const ForkOrganizationAgentDefinitionsPage: React.FC = () => {
 									className="w-full sm:w-60"
 									organizations={readableOrganizations}
 									organization={organization}
-									onChange={(org) => {
-										setSearchParams((params) => {
-											const next = new URLSearchParams(params);
-											next.set(orgSearchParam, org.name);
-											return next;
-										});
-									}}
+									onChange={setOrganization}
 									showLabel={false}
 								/>
 							}
