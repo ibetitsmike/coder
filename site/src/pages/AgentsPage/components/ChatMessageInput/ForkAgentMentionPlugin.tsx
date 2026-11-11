@@ -17,7 +17,7 @@ import { useQueries, useQuery } from "react-query";
 import { useParams } from "react-router";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
-import type { ChatSkillSource } from "#/api/typesGenerated";
+import type { ChatContext, ChatSkillSource } from "#/api/typesGenerated";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
 import {
 	type AgentMention,
@@ -94,6 +94,23 @@ const resolveAgentMentions = (
 	];
 };
 
+/**
+ * Lists the workspace agents of a chat's pinned context. A pinned context
+ * without resources is unknown: the chat endpoint omits them when it fails
+ * to load them, and also when there are none.
+ */
+const workspaceAgents = (context: ChatContext | undefined) => {
+	if (!context) {
+		return [];
+	}
+	return context.resources
+		?.filter(({ kind, status }) => kind === "subagent" && status === "ok")
+		.map((resource) => ({
+			name: resource.subagent_name ?? "",
+			description: resource.subagent_description ?? "",
+		}));
+};
+
 const handleSelect = (
 	option: AgentMentionOption,
 	textNode: TextNode | null,
@@ -125,6 +142,8 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const [editor] = useLexicalComposerContext();
 	const [query, setQuery] = useState<string | null>(null);
 	const isMenuOpen = query !== null;
+	// Escape closes the menu but leaves the query, so Enter checks this.
+	const [isMenuShown, setIsMenuShown] = useState(false);
 	// The chat page loads the chat; the menu only reads its cached copy.
 	const { agentId } = useParams();
 	const currentChat = useQuery({ ...chat(agentId ?? ""), enabled: false }).data;
@@ -168,12 +187,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			: []),
 		{
 			source: "workspace",
-			agents: (currentChat?.context?.resources ?? [])
-				.filter(({ kind, status }) => kind === "subagent" && status === "ok")
-				.map((resource) => ({
-					name: resource.subagent_name ?? "",
-					description: resource.subagent_description ?? "",
-				})),
+			agents: workspaceAgents(currentChat?.context),
 		},
 	]);
 	const options = mentions
@@ -193,9 +207,9 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	);
 
 	// Lexical's menu lets Enter through when nothing is selectable, which
-	// would send the unfinished mention while agents still load.
+	// would send the unfinished mention while agents load or failed to.
 	const handleEnter = useEffectEvent((event: KeyboardEvent | null) => {
-		if (!isMenuOpen || options.length > 0 || !isLoading) {
+		if (!isMenuShown || options.length > 0 || !(isLoading || hasError)) {
 			return false;
 		}
 		event?.preventDefault();
@@ -220,6 +234,8 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			options={options}
 			triggerFn={matchAgentMention}
 			onQueryChange={setQuery}
+			onOpen={() => setIsMenuShown(true)}
+			onClose={() => setIsMenuShown(false)}
 			onSelectOption={handleSelect}
 			commandPriority={COMMAND_PRIORITY_CRITICAL}
 			menuRenderFn={(menuContainer, menu) =>

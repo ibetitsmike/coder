@@ -17,6 +17,7 @@ export type AgentMention = {
 	description: string;
 };
 
+/** Adapts an agent mention to Lexical's typeahead menu options. */
 export class AgentMentionOption extends MenuOption {
 	constructor(readonly agent: AgentMention) {
 		super(`${agent.source}:${agent.name}`);
@@ -34,6 +35,7 @@ type ForkAgentMentionMenuProps = {
 	onHighlight: (index: number) => void;
 };
 
+/** Renders the "@" typeahead listbox above the composer. */
 export const ForkAgentMentionMenu: React.FC<ForkAgentMentionMenuProps> = ({
 	anchor,
 	options,

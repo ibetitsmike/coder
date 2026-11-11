@@ -163,21 +163,31 @@ describe("ForkAgentMentionPlugin", () => {
 		);
 	});
 
-	it("points the editor at the rendered options", async () => {
-		renderComposer();
+	it("inserts the option the arrow keys highlight", async () => {
+		const { inputRef } = renderComposer();
 		const user = await typeIntoComposer("@");
-		await user.keyboard("{ArrowDown}");
-		const textbox = screen.getByRole("textbox", { name: "Chat message input" });
-		const highlighted = await screen.findByRole("option", { selected: true });
-		expect(textbox.getAttribute("aria-activedescendant")).toBe(highlighted.id);
-		const listbox = document.getElementById(
-			textbox.getAttribute("aria-controls") ?? "",
+		await screen.findByRole("option", { name: /^@explore/ });
+		await user.keyboard("{ArrowDown}{Enter}");
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the explore agent (spawn_agent type explore): ",
 		);
-		expect(listbox?.contains(highlighted)).toBe(true);
 	});
 
-	it("keeps cached agents and shows the retry message when a refetch fails", async () => {
-		const { getPersonal, queryClient } = renderComposer();
+	it("qualifies stored names while the workspace agents are unknown", async () => {
+		const { inputRef } = renderComposer({
+			chat: { context: { dirty: false } },
+		});
+		const user = await typeIntoComposer("@rev");
+		await user.click(
+			await screen.findByRole("option", { name: /^@personal\/reviewer/ }),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the personal/reviewer agent (spawn_agent type personal/reviewer): ",
+		);
+	});
+
+	it("keeps cached agents usable when a refetch fails", async () => {
+		const { getPersonal, queryClient, inputRef } = renderComposer();
 		queryClient.setQueryData(
 			agentDefinitions({
 				tier: "user",
@@ -187,11 +197,27 @@ describe("ForkAgentMentionPlugin", () => {
 			{ updatedAt: 0 },
 		);
 		getPersonal.mockRejectedValue(new Error("offline"));
-		await typeIntoComposer("@");
+		const user = await typeIntoComposer("@");
 		await screen.findByText(
 			"Could not load some agents. Close and type @ again to retry.",
 		);
-		expect(screen.getByRole("option", { name: /^@cached/ })).toBeVisible();
+		await user.click(screen.getByRole("option", { name: /^@cached/ }));
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the cached agent (spawn_agent type cached): ",
+		);
+	});
+
+	it("keeps Enter from sending after agents fail to load until the menu closes", async () => {
+		const { onEnter, getPersonal } = renderComposer();
+		getPersonal.mockRejectedValue(new Error("offline"));
+		const user = await typeIntoComposer("@rev");
+		await screen.findByText(
+			"Could not load some agents. Close and type @ again to retry.",
+		);
+		await user.keyboard("{Enter}");
+		expect(onEnter).not.toHaveBeenCalled();
+		await user.keyboard("{Escape}{Enter}");
+		expect(onEnter).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps Enter from sending while agents load", async () => {
