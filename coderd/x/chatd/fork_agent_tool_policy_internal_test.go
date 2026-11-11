@@ -26,8 +26,8 @@ func (t *testWorkspaceMCPAgentTool) ServerName() string {
 }
 
 // TestCustomAgentToolPolicySkipsLookup checks that a chat without the
-// experiment, or a root chat, keeps its tools without reading the database:
-// the server has no store, so any read fails the call.
+// experiment keeps its tools without reading the database: the server has no
+// store, so any read fails the call.
 func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 	t.Parallel()
 
@@ -38,11 +38,6 @@ func TestCustomAgentToolPolicySkipsLookup(t *testing.T) {
 		chat        database.Chat
 	}{
 		{name: "ExperimentOff", chat: database.Chat{ID: uuid.New(), ParentChatID: parent}},
-		{
-			name:        "RootChat",
-			experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions},
-			chat:        database.Chat{ID: uuid.New()},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

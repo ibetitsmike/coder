@@ -3,9 +3,10 @@ package chatd
 // This file is fork code: it enforces a custom agent's readonly, tools,
 // disallowed_tools and mcp fields behind the fork-agent-definitions
 // experiment. Spawn stores the policy on the child's chat_subagents row, and
-// upstream's buildTurnEnvironment loads it with customAgentToolPolicyOfChat
-// and filters with applyCustomAgentToolPolicy. Both change nothing when the
-// experiment is off or the chat is a root chat.
+// a root chat created as an agent type on its own row. Upstream's
+// buildTurnEnvironment loads it with customAgentToolPolicyOfChat and filters
+// with applyCustomAgentToolPolicy. Both change nothing when the experiment is
+// off or the chat has no row.
 
 import (
 	"context"
@@ -170,10 +171,11 @@ func (policy customAgentToolPolicy) filter(
 }
 
 // customAgentToolPolicyOfChat returns the tool policy stored when chat was
-// spawned, or nil when there is none. A policy that cannot be read fails the
-// turn instead of running it unrestricted.
+// spawned, or when a root chat was created as an agent type, or nil when
+// there is none. A policy that cannot be read fails the turn instead of
+// running it unrestricted.
 func (p *Server) customAgentToolPolicyOfChat(ctx context.Context, chat database.Chat) (*customAgentToolPolicy, error) {
-	if !p.agentDefinitionsEnabled() || !chat.ParentChatID.Valid {
+	if !p.agentDefinitionsEnabled() {
 		return nil, nil
 	}
 	fdb, err := forkdb.From(p.db)
