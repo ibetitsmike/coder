@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
-import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
+import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
