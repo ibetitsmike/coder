@@ -23,9 +23,10 @@ it("starts a new definition from the empty state", async () => {
 		/>,
 	);
 
-	await user.click(
-		screen.getByRole("button", { name: "Create agent definition" }),
-	);
+	const [, emptyStateButton] = screen.getAllByRole("button", {
+		name: "New agent definition",
+	});
+	await user.click(emptyStateButton);
 
 	expect(onCreate).toHaveBeenCalledOnce();
 });

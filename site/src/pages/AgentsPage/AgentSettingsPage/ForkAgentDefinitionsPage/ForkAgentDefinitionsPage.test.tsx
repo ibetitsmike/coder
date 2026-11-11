@@ -222,10 +222,11 @@ describe("ForkAgentDefinitionsPage", () => {
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Agent definition deleted."),
 		);
-		// The deleted row took its menu button, so focus moves to New.
+		// The deleted row took its menu button, so focus moves to the header's
+		// New button, not the empty state's.
 		await waitFor(() =>
 			expect(
-				screen.getByRole("button", { name: "New agent definition" }),
+				screen.getAllByRole("button", { name: "New agent definition" })[0],
 			).toHaveFocus(),
 		);
 	});

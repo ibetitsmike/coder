@@ -140,6 +140,21 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		? getErrorDetail(deleteState.error)
 		: undefined;
 
+	const createAction = (ref?: React.Ref<HTMLButtonElement>) =>
+		access.create && (
+			<Button
+				ref={ref}
+				variant="outline"
+				onClick={(event) => {
+					rememberTrigger(event);
+					onCreate();
+				}}
+			>
+				<PlusIcon aria-hidden="true" />
+				New agent definition
+			</Button>
+		);
+
 	const hasRowActions =
 		access.update || access.delete || Boolean(onManagePermissions);
 
@@ -170,19 +185,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						chats in that workspace can spawn it with spawn_agent.
 					</>
 				}
-				cta={
-					access.create && (
-						<Button
-							onClick={(event) => {
-								rememberTrigger(event);
-								onCreate();
-							}}
-						>
-							<PlusIcon aria-hidden="true" />
-							Create agent definition
-						</Button>
-					)
-				}
+				cta={createAction()}
 			/>
 		);
 	} else {
@@ -269,19 +272,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
-						{access.create && (
-							<Button
-								ref={setSecondaryFallback}
-								variant="outline"
-								onClick={(event) => {
-									rememberTrigger(event);
-									onCreate();
-								}}
-							>
-								<PlusIcon aria-hidden="true" />
-								New agent definition
-							</Button>
-						)}
+						{createAction(setSecondaryFallback)}
 					</div>
 				}
 			/>
