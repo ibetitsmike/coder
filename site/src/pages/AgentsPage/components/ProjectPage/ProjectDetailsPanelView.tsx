@@ -63,6 +63,8 @@ type ProjectDetailsPanelViewProps = {
 		readonly error: unknown;
 		readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 	};
+	/** Omit to hide the plugin packs row. */
+	readonly pluginPacks?: ProjectDetailsPanelViewProps["agentDefinitions"];
 	/** `undefined` until the instructions load. */
 	readonly instructions: ChatProjectInstructions | undefined;
 	readonly error: unknown;
@@ -87,6 +89,7 @@ export const ProjectDetailsPanelView: React.FC<
 	skillsError,
 	onOpenSkills,
 	agentDefinitions,
+	pluginPacks,
 	instructions,
 	error,
 	onRetry,
@@ -169,6 +172,9 @@ export const ProjectDetailsPanelView: React.FC<
 							noun="agent"
 							{...agentDefinitions}
 						/>
+					)}
+					{pluginPacks && (
+						<CountRow label="Plugin packs" noun="pack" {...pluginPacks} />
 					)}
 				</dl>
 				<section
