@@ -20,6 +20,16 @@ type Story = StoryObj<typeof ForkInstallPluginPackDialog>;
 
 export const Default: Story = {};
 
+/** Leaves a required field empty after touching it, which shows its error. */
+export const ValidationError: Story = {
+	play: async () => {
+		const dialog = within(await screen.findByRole("dialog"));
+		await userEvent.click(dialog.getByLabelText(/^Ref/));
+		await userEvent.tab();
+		await dialog.findByText("Ref is required.");
+	},
+};
+
 /** Fills the form with valid values and submits it, as the page requires. */
 const submitValidForm = async () => {
 	const dialog = within(await screen.findByRole("dialog"));

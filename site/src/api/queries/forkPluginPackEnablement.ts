@@ -9,6 +9,7 @@ import {
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
+import { chatEntityKey } from "./chats";
 
 // Both keys sit under the admin list's key, so installing, updating or
 // deleting a pack refreshes them.
@@ -48,7 +49,7 @@ export type PluginPackToggle = {
 /**
  * Enables or disables a pack for a target. On success the cached enabled
  * list changes to match, so a failed refetch cannot revert the switch. The
- * list is then invalidated.
+ * list, and for a chat target the chat itself, is then invalidated.
  */
 export const setPluginPackEnabledMutation = (
 	queryClient: QueryClient,
@@ -69,8 +70,18 @@ export const setPluginPackEnabledMutation = (
 					: others;
 			});
 		},
-		onSettled: () =>
-			queryClient.invalidateQueries({
-				queryKey: enabledPluginPacksKey(target),
-			}),
+		onSettled: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: enabledPluginPacksKey(target),
+				}),
+				// The chat's context lists only resources from enabled packs, and
+				// waiting chats are not polled, so refetch it for the slash menu.
+				target.kind === "chat" &&
+					queryClient.invalidateQueries({
+						queryKey: chatEntityKey(target.chatId),
+						exact: true,
+					}),
+			]);
+		},
 	});

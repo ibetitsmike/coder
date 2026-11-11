@@ -55,6 +55,11 @@ type ForkPluginPacksTableViewProps = {
 		ReturnType<typeof useDialogFocusReturn>,
 		"rememberTrigger" | "setPrimaryFallback" | "setSecondaryFallback"
 	>;
+	/**
+	 * Focus target of last resort. It is focusable by script only, so closing a
+	 * dialog can land on it when no row or install button is left.
+	 */
+	tableRef?: React.Ref<HTMLTableElement>;
 	onInstall: () => void;
 	onUpdate: (pack: ForkPluginPack) => void;
 	onDelete: (pack: ForkPluginPack) => void;
@@ -79,6 +84,7 @@ export const ForkPluginPacksTableView: React.FC<
 	onRetry,
 	updatingPackIds,
 	focusReturn,
+	tableRef,
 	onInstall,
 	onUpdate,
 	onDelete,
@@ -158,7 +164,6 @@ export const ForkPluginPacksTableView: React.FC<
 									size="icon"
 									variant="subtle"
 									aria-label={`More actions for ${pack.name}`}
-									disabled={updatingPackIds.has(pack.id)}
 									// A deleted row takes its menu button with it, so focus
 									// returns to the first remaining row's button.
 									ref={
@@ -172,13 +177,23 @@ export const ForkPluginPacksTableView: React.FC<
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
 								{access.update && (
-									<DropdownMenuItem onClick={() => onUpdate(pack)}>
-										Update to the latest commit of {pack.ref}
+									<DropdownMenuItem
+										disabled={updatingPackIds.has(pack.id)}
+										onClick={() => {
+											if (!updatingPackIds.has(pack.id)) {
+												onUpdate(pack);
+											}
+										}}
+									>
+										{updatingPackIds.has(pack.id)
+											? "Updating…"
+											: `Update to the latest commit of ${pack.ref}`}
 									</DropdownMenuItem>
 								)}
 								{access.delete && (
 									<DropdownMenuItem
 										className="text-content-destructive focus:text-content-destructive"
+										disabled={updatingPackIds.has(pack.id)}
 										onClick={() => onDelete(pack)}
 									>
 										Delete&hellip;
@@ -210,7 +225,7 @@ export const ForkPluginPacksTableView: React.FC<
 					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 				/>
 			)}
-			<Table aria-label={title}>
+			<Table ref={tableRef} tabIndex={-1} aria-label={title}>
 				<TableHeader>
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>

@@ -16,6 +16,7 @@ const meta: Meta<typeof ForkPluginPacksPillView> = {
 	component: ForkPluginPacksPillView,
 	args: {
 		enabledCount: 1,
+		isSubagent: false,
 		children: (
 			<ForkPluginPackTogglesView
 				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
@@ -46,6 +47,11 @@ export const Expanded: Story = {
 			within(canvasElement).getByRole("button", { name: /Plugin packs/ }),
 		);
 	},
+};
+
+export const SubagentExpanded: Story = {
+	args: { isSubagent: true },
+	play: Expanded.play,
 };
 
 export const ChatLoadError: Story = {
