@@ -15,6 +15,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkAgentDefinitions,
 	ExperimentForkSubagentIsolation,
 	ExperimentForkChatWakeups,
+	ExperimentForkPluginPacks,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -36,6 +37,11 @@ const ExperimentForkSubagentIsolation Experiment = "fork-subagent-isolation"
 // ExperimentForkChatWakeups lets chats schedule their own wake-ups: the
 // schedule_wakeup and wait_for_events tools, /loop, and the wake-up worker.
 const ExperimentForkChatWakeups Experiment = "fork-chat-wakeups"
+
+// ExperimentForkPluginPacks enables plugin packs: workspace pack discovery with
+// manifest-honored skills and agents, installed packs, and (in later PRs)
+// their rules and surfacing controls.
+const ExperimentForkPluginPacks Experiment = "fork-plugin-packs"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

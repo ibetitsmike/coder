@@ -126,6 +126,22 @@ type Resolver struct {
 	MCPResources func() []Resource
 	// ACPResources returns cached harness metadata; it must never launch processes.
 	ACPResources func() []Resource
+	// PackRowsAdvertised, when non-nil, gates plugin-pack emission: packs are
+	// discovered only while it returns true, which the Manager wires to the
+	// server's push-response capability. Nil means the resolver is used
+	// without a push negotiation (tests, or a server that never advertises);
+	// emission stays off so a newer agent cannot persist pack rows on an
+	// older coderd during a rolling upgrade.
+	PackRowsAdvertised func() bool
+	// PackAgentDefinitionsAdvertised, when non-nil, additionally gates pack
+	// agent emission on the fork-agent-definitions capability: chatd drops
+	// every subagent row while agent definitions are off, so pack agents
+	// would be invisible rows that still occupy the snapshot count and
+	// byte caps ahead of live MCP and ACP resources. The Manager wires it
+	// alongside PackRowsAdvertised; nil omits pack agent rows for unwired
+	// resolvers, since the capability must be earned from the server like
+	// PackRowsAdvertised.
+	PackAgentDefinitionsAdvertised func() bool
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -290,10 +306,32 @@ func deduplicateSkills(resources []Resource) []Resource {
 	return out
 }
 
+// isPackContribution reports whether a resolver resource was contributed by
+// a plugin pack: the resolver stamps pack contributions with the manifest
+// path (fork_plugins.go), which is what the chatd fork-plugin gate matches
+// on. Keep the marker in sync with packManifestBaseName.
+func isPackContribution(resource Resource) bool {
+	base := strings.TrimSpace(resource.SourcePath)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return base == packManifestBaseName
+}
+
+// maxSourcePathBytes mirrors coderd's source_path transport limit
+// (agentapi rejects a whole snapshot whose source_path exceeds it, and the
+// agent would retry that rejection forever). The manifest path is the
+// marker every pack row carries, so a pack whose manifest path cannot be
+// transported contributes nothing instead of sinking every push.
+const maxSourcePathBytes = 1024
+
 // discoverIn inspects a single scan root. A root that points at a
 // file is classified directly. A directory root contributes its
 // top-level instruction files and .mcp.json plus skills from the
-// fixed container locations under it. The walk goes no deeper.
+// fixed container locations under it. The walk goes no deeper. A
+// root that is itself a pack is discovered only while the server's
+// push capability is advertised; without it nothing is discovered
+// from that root, top-level files included.
 func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	info, err := os.Stat(root.Path)
 	if err != nil {
@@ -308,11 +346,40 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 		}
 		return
 	}
+	pack, rootIsPack := readPluginManifest(root.Path)
+	if rootIsPack {
+		// A pack root is wholly pack content. Without the advertised
+		// capability nothing may be discovered from it, top-level files
+		// included: an older replica pins unmarked rows as ordinary
+		// context, so the marker alone cannot protect them.
+		if !r.packRowsAdvertised() {
+			return
+		}
+		if len(pack.ManifestPath) > maxSourcePathBytes {
+			// Same transport limit as emitPacks: the stamped rows would
+			// carry a source_path coderd rejects, sinking the whole
+			// snapshot. Discover nothing from this pack root.
+			return
+		}
+		// The scan root is itself a pack. Its resources must carry the
+		// manifest path so the fork-plugin gate can drop them, so the
+		// pack walk owns skills and agents (ordinary container
+		// discovery would claim the same files unstamped), and the
+		// root's own instruction files are stamped with it too.
+		topLevelStart := len(*out)
+		r.discoverTopLevelFiles(root, out, seenID)
+		for i := topLevelStart; i < len(*out); i++ {
+			(*out)[i].SourcePath = pack.ManifestPath
+		}
+		r.emitPacks(root, out, seenID)
+		return
+	}
 	r.discoverTopLevelFiles(root, out, seenID)
 	for _, container := range skillContainersFor(root.Path) {
 		r.emitSkillsFromContainer(container, root, out, seenID)
 	}
 	r.emitAgents(root, out, seenID)
+	r.emitPacks(root, out, seenID)
 }
 
 // discoverTopLevelFiles classifies the instruction files and
@@ -686,11 +753,20 @@ func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out 
 // append additional resources (e.g. MCP server tool lists) can
 // apply the same byte cap to the appended slice.
 func (r *Resolver) applyCaps(resources []Resource) ([]Resource, uint64) {
-	// Stable sort by (Kind asc, Source asc) so excluded
-	// resources are deterministic.
+	// Stable sort by (Kind asc, pack last, Source asc) so excluded
+	// resources are deterministic: when the cap cuts, it cuts pack
+	// contributions before ordinary workspace resources, so chatd's
+	// fork-plugin filter never leaves ordinary resources excluded on
+	// behalf of a hidden pack.
 	slices.SortStableFunc(resources, func(a, b Resource) int {
 		if a.Kind != b.Kind {
 			return int(a.Kind) - int(b.Kind)
+		}
+		if ap, bp := isPackContribution(a), isPackContribution(b); ap != bp {
+			if ap {
+				return 1
+			}
+			return -1
 		}
 		return strings.Compare(a.Source, b.Source)
 	})
@@ -1009,8 +1085,22 @@ type Snapshot struct {
 	PayloadBytes uint64
 	// SnapshotError carries a single snapshot-level error
 	// string when present (count cap exceeded, watcher
-	// degraded, ENOSPC, etc.). Empty when healthy.
+	// degraded, ENOSPC, etc.). Empty when healthy. The push
+	// loop also sets it on connection-start negotiation
+	// snapshots ("plugin-pack capability renegotiating") so
+	// the push reads as a capability probe: coderd persists
+	// nothing and mutates no chat state for it; the settling
+	// push at the end of the negotiation sends an empty
+	// SnapshotError again.
 	SnapshotError string
+	// CapabilityGeneration marks Manager-level capability
+	// renegotiation: it is nonzero on snapshots published inside a
+	// negotiation window (a new push connection reset the
+	// advertisement, until its first processed response), making
+	// their push a capability probe that coderd persists nothing
+	// for. Zero on ordinary resolves, whose pushes are settled
+	// inventory.
+	CapabilityGeneration uint64
 }
 
 // driftResources excludes MCP and ACP resources because agents discover them
@@ -1023,6 +1113,18 @@ func driftResources(resources []Resource) []Resource {
 		case KindMCPConfig, KindMCPServer, KindACPHarness:
 			continue
 		default:
+			// Pack rows are dropped by chatd while fork-plugin-packs is
+			// off, so they must not read as prompt drift either:
+			// installing or editing a pack cannot look like a prompt
+			// change to hash-comparing subscribers. The agent has no
+			// experiment knowledge, so the exclusion is unconditional
+			// here; chatd re-derives the drift hash from the pushed
+			// rows (coderd/x/chatd/fork_plugin_drift.go) and keeps
+			// pack rows drift-relevant while the experiments that
+			// surface them are on.
+			if isPackContribution(r) {
+				continue
+			}
 			out = append(out, r)
 		}
 	}

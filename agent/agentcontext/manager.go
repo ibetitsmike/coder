@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/xerrors"
@@ -117,6 +118,29 @@ type Manager struct {
 	runDoneCh    chan struct{}
 	runStartedCh chan struct{}
 
+	// packRowsAdvertised mirrors the server's push-response capability the
+	// push loop last saw; the resolver reads it through PackRowsAdvertised.
+	// The atomic keeps resolve passes lock-free while RunPush updates it.
+	packRowsAdvertised atomic.Bool
+	// packAgentDefinitionsAdvertised mirrors the fork-agent-definitions
+	// capability: pack agent rows are emitted visible only while it is
+	// set, so a deployment without agent definitions never fills its
+	// snapshot caps with invisible pack agents.
+	packAgentDefinitionsAdvertised atomic.Bool
+	// negotiating marks the window between a connection's capability
+	// reset and its first processed push response. Every snapshot
+	// published inside the window carries a nonzero capability
+	// generation, so any push in that window is a capability probe
+	// (coderd persists nothing) and no concurrent resolve can settle
+	// chats against a temporary pack-free inventory.
+	negotiating atomic.Bool
+	// pushConnected records that RunPush has started at least once. A
+	// restarted agent process has a fresh Manager whose capability flags
+	// read false, so its first connection negotiates too instead of
+	// leading with a pack-free settled snapshot that would delete the
+	// pack rows a previous process stored.
+	pushConnected atomic.Bool
+
 	watcher *Watcher
 }
 
@@ -169,6 +193,16 @@ func NewManager(opts ManagerOptions) *Manager {
 		resolver.MCPResources = func() []Resource {
 			return buildMCPServerResources(opts.MCPCatalog())
 		}
+	}
+
+	// Pack emission follows the server's advertised push-response
+	// capability; the push loop flips this flag when it changes, and the
+	// resolver consults it on every pass (see push.go RunPush).
+	resolver.PackRowsAdvertised = func() bool {
+		return m.packRowsAdvertised.Load()
+	}
+	resolver.PackAgentDefinitionsAdvertised = func() bool {
+		return m.packAgentDefinitionsAdvertised.Load()
 	}
 
 	for _, s := range opts.InitialSources {
@@ -445,7 +479,10 @@ func (m *Manager) SubscribeChanges() (<-chan struct{}, func()) {
 // AddSource, RemoveSource, and Snapshot calls do not block on
 // filesystem I/O. When the watcher is active, Resync also
 // re-arms it so newly added scan roots are observed for
-// subsequent edits.
+// subsequent edits. RunPush's connection-level reset calls
+// resyncNegotiating (not this method directly) so the pack-free
+// republish carries negotiation input (fresh capability bit and
+// a non-empty SnapshotError) instead of settling chats on it.
 func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return m.Snapshot(), ctxErr
@@ -471,6 +508,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	roots := m.scanRootsLocked()
 	resolver := m.resolver
 	watcher := m.watcher
+	negotiating := m.negotiating.Load()
 	m.resolveEpoch++
 	myEpoch := m.resolveEpoch
 	m.mu.Unlock()
@@ -515,16 +553,13 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	}
 	m.version++
 	snap.Version = m.version
+	m.stampNegotiating(&snap, negotiating)
 	m.snapshot = snap
 	subs := make([]chan struct{}, 0, len(m.subscribers))
 	for ch := range m.subscribers {
 		subs = append(subs, ch)
 	}
 	m.mu.Unlock()
-
-	if watcher != nil {
-		watcher.Sync(ctx, roots)
-	}
 
 	// The broadcast is unconditional: Resync waiters that
 	// triggered the pass without an actual content change
@@ -536,7 +571,50 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 		default:
 		}
 	}
+
+	if watcher != nil {
+		watcher.Sync(ctx, roots)
+	}
 	return snap, nil
+}
+
+// resyncNegotiating opens the capability negotiation window and
+// republishes the snapshot: while the window is open every published
+// snapshot carries a nonzero capability generation, so its push is a
+// capability probe (coderd persists nothing and mutates no chat
+// state), and the SnapshotError marks the snapshot as renegotiating.
+// RunPush uses it for the pack-free snapshot at connection start;
+// nothing it publishes is final, because the negotiation's outcome
+// (capability on or off) determines whether the next pack-bearing or
+// pack-free snapshot defines the baseline. No-op when the Manager is
+// not ready (nothing has been published).
+func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
+	m.negotiating.Store(true)
+	return m.Resync(ctx)
+}
+
+// stampNegotiating marks a freshly resolved snapshot as
+// capability-negotiation input when its resolve started inside the
+// negotiation window: a nonzero capability generation makes its push
+// a probe (coderd persists nothing and mutates no chat state), and a
+// renegotiating SnapshotError keeps the snapshot self-describing.
+// Capturing the flag when the resolve starts keeps concurrent
+// resolves inside the negotiation: a watcher event mid-negotiation
+// would otherwise publish an ordinary snapshot that the push loop
+// sends as settled inventory before the capability-complete successor
+// lands.
+func (m *Manager) stampNegotiating(snap *Snapshot, negotiating bool) {
+	if !negotiating {
+		return
+	}
+	if snap.CapabilityGeneration == 0 {
+		snap.CapabilityGeneration = 1
+	} else {
+		snap.CapabilityGeneration++
+	}
+	if snap.SnapshotError == "" {
+		snap.SnapshotError = "plugin-pack capability renegotiating"
+	}
 }
 
 // signal triggers a re-resolve. Sends are non-blocking; the
@@ -658,6 +736,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	roots := m.scanRootsLocked()
 	resolver := m.resolver
 	watcher := m.watcher
+	negotiating := m.negotiating.Load()
 	m.resolveEpoch++
 	myEpoch := m.resolveEpoch
 	m.mu.Unlock()
@@ -695,6 +774,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	}
 	m.version++
 	snap.Version = m.version
+	m.stampNegotiating(&snap, negotiating)
 	m.snapshot = snap
 	subs := make([]chan struct{}, 0, len(m.subscribers))
 	for ch := range m.subscribers {

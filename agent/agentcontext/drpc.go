@@ -45,7 +45,11 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		}
 		return nil, err
 	}
-	return &PushResponse{Accepted: resp.GetAccepted()}, nil
+	return &PushResponse{
+		Accepted:             resp.GetAccepted(),
+		ForkPluginPacks:      resp.GetForkPluginPacks(),
+		ForkAgentDefinitions: resp.GetForkAgentDefinitions(),
+	}, nil
 }
 
 // pushRequestToProto converts the Go push payload to its
@@ -55,11 +59,12 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 // the kind even when Status != OK.
 func pushRequestToProto(req *PushRequest) *agentproto.PushContextStateRequest {
 	pb := &agentproto.PushContextStateRequest{
-		Version:       req.Version,
-		AggregateHash: append([]byte(nil), req.AggregateHash[:]...),
-		Initial:       req.Initial,
-		SnapshotError: truncatePushError(req.SnapshotError),
-		Resources:     make([]*agentproto.ContextResource, 0, len(req.Resources)),
+		Version:              req.Version,
+		AggregateHash:        append([]byte(nil), req.AggregateHash[:]...),
+		Initial:              req.Initial,
+		SnapshotError:        truncatePushError(req.SnapshotError),
+		CapabilityGeneration: req.CapabilityGeneration,
+		Resources:            make([]*agentproto.ContextResource, 0, len(req.Resources)),
 	}
 	for i := range req.Resources {
 		r := req.Resources[i]

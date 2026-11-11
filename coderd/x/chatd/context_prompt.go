@@ -188,6 +188,7 @@ func (server *Server) pinnedWorkspaceContext(
 	if err != nil {
 		return "", nil, xerrors.Errorf("list chat context resources: %w", err)
 	}
+	resources = server.filterPackResources(resources)
 	if len(resources) == 0 {
 		return "", nil, nil
 	}
@@ -312,6 +313,7 @@ func (server *Server) ContextResources(
 	if err != nil {
 		return nil, xerrors.Errorf("list chat context resources: %w", err)
 	}
+	pinned = server.filterPackResources(pinned)
 	resources := pinnedContextResources(pinned)
 	if !server.experiments.Enabled(codersdk.ExperimentChatACPSubagents) {
 		resources = slices.DeleteFunc(resources, func(resource codersdk.ChatContextResource) bool {

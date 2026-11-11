@@ -168,11 +168,13 @@ func workspaceAgentDefinitions(ctx context.Context, p *Server, chat database.Cha
 			slog.F("chat_id", chat.ID), slog.Error(err))
 		return nil
 	}
+	resources = p.filterPackResources(resources)
 	return parseAgentDefinitionResources(resources)
 }
 
 // parseAgentDefinitionResources parses the OK agent definition files in
-// resources and skips the rest.
+// resources and skips the rest. Callers filter pack-contributed rows with
+// filterPackResources first.
 func parseAgentDefinitionResources(resources []database.ChatContextResource) []workspacesdk.AgentDefinition {
 	var defs []workspacesdk.AgentDefinition
 	for _, resource := range resources {
