@@ -12,7 +12,11 @@ import type {
 	CreateForkPluginPackRequest,
 	ForkPluginPack,
 } from "#/api/typesGenerated";
-import { invalidateList, isResponseLost } from "./forkAgentDefinitions";
+import {
+	invalidateList,
+	isNewer,
+	isResponseLost,
+} from "./forkAgentDefinitions";
 
 /** The key prefix shared by every plugin pack query. */
 export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
@@ -63,7 +67,7 @@ export const isPluginPackGone = (
 
 /**
  * After a lost response, a refetched copy of the pack with a new timestamp
- * shows that the update went through.
+ * and the ref the update started from shows that the update went through.
  */
 export const reconcileUpdatedPluginPack = (
 	queryClient: QueryClient,
@@ -77,19 +81,21 @@ export const reconcileUpdatedPluginPack = (
 
 	return cachedPluginPacks(queryClient, organizationId)?.find(
 		(candidate) =>
-			candidate.id === pack.id && candidate.updated_at !== pack.updated_at,
+			candidate.id === pack.id &&
+			candidate.ref === pack.ref &&
+			candidate.updated_at !== pack.updated_at,
 	);
 };
 
 /**
- * After a lost response, a refetched pack with the submitted name that was not
- * listed before the request shows that the install went through. Without that
- * earlier list, a pack with the name may predate the request.
+ * After a lost response, a refetched pack with the submitted name and source
+ * that was not listed before the request shows that the install went through.
+ * Without that earlier list, a pack with the name may predate the request.
  */
 export const reconcileInstalledPluginPack = (
 	queryClient: QueryClient,
 	organizationId: string,
-	name: string,
+	req: CreateForkPluginPackRequest,
 	knownPackIds: readonly string[] | undefined,
 	error: unknown,
 ) => {
@@ -99,18 +105,30 @@ export const reconcileInstalledPluginPack = (
 
 	return cachedPluginPacks(queryClient, organizationId)?.find(
 		(candidate) =>
-			candidate.name === name && !knownPackIds.includes(candidate.id),
+			candidate.name === req.name &&
+			candidate.source_url === req.source_url &&
+			candidate.source_path === (req.source_path ?? "") &&
+			candidate.ref === req.ref &&
+			!knownPackIds.includes(candidate.id),
 	);
 };
 
 const withPluginPack = (
 	packs: readonly ForkPluginPack[],
 	pack: ForkPluginPack,
-) =>
-	packs
-		.filter((cached) => cached.id !== pack.id && cached.name !== pack.name)
+) => {
+	const replaced = packs.filter(
+		(cached) => cached.id === pack.id || cached.name === pack.name,
+	);
+	if (replaced.some((cached) => isNewer(cached, pack))) {
+		return packs;
+	}
+
+	return packs
+		.filter((cached) => !replaced.includes(cached))
 		.concat(pack)
 		.sort((a, b) => a.name.localeCompare(b.name));
+};
 
 /** Installs a pack and caches it, so a failed refetch cannot hide it. */
 export const createPluginPackMutation = (

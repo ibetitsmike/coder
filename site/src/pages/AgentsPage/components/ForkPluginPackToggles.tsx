@@ -106,7 +106,7 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	// The error toast is a mutation-level callback, so it still shows when
 	// the dialog closes while the request is in flight.
 	const toggleMutation = useMutation({
-		...setPluginPackEnabledMutation(queryClient, target),
+		...setPluginPackEnabledMutation(queryClient, target, organizationId),
 		onError: (error) =>
 			toast.error(getErrorMessage(error, "Failed to update the plugin pack."), {
 				description: getErrorDetail(error),

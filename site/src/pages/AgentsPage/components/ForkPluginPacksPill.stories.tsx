@@ -41,16 +41,31 @@ export const CountLoading: Story = {
 	args: { enabledCount: undefined },
 };
 
-export const NoneEnabled: Story = {
-	args: { enabledCount: 0 },
-};
-
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
 			within(canvasElement).getByRole("button", { name: /Plugin packs/ }),
 		);
 	},
+};
+
+export const NoneEnabled: Story = {
+	args: {
+		enabledCount: 0,
+		children: (
+			<ForkPluginPackTogglesView
+				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
+				enabled={[]}
+				error={undefined}
+				isRetrying={false}
+				onRetry={fn()}
+				canEdit
+				pending={undefined}
+				onToggle={fn()}
+			/>
+		),
+	},
+	play: Expanded.play,
 };
 
 export const SubagentExpanded: Story = {

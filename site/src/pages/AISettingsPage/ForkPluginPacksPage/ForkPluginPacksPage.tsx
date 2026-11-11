@@ -124,7 +124,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					reconcileInstalledPluginPack(
 						queryClient,
 						organization.id,
-						req.name,
+						req,
 						knownPackIds,
 						error,
 					);

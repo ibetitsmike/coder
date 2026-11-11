@@ -169,6 +169,49 @@ it("disables a pack enabled for the target", async () => {
 	);
 });
 
+const toggleDeletedPack = async (
+	toggleTarget: enablementApi.PluginPackTarget,
+) => {
+	const user = userEvent.setup();
+	vi.mocked(enablementApi.setPluginPackEnabled).mockRejectedValueOnce({
+		...mockApiError({ message: "Resource not found." }),
+		status: 404,
+	});
+	render(
+		<ForkPluginPackToggles
+			target={toggleTarget}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(
+		await screen.findByRole("switch", {
+			name: `Enable ${MockForkPluginPack.name}`,
+		}),
+	);
+};
+
+it("refetches the available packs when a chat toggle finds a deleted pack", async () => {
+	await toggleDeletedPack(target);
+
+	await waitFor(() =>
+		expect(enablementApi.getAvailablePluginPacks).toHaveBeenCalledTimes(2),
+	);
+});
+
+it("refetches the available packs when a project toggle finds a deleted pack", async () => {
+	await toggleDeletedPack({
+		kind: "project",
+		organizationId: MockForkPluginPack.organization_id,
+		projectId: "project-1",
+	});
+
+	await waitFor(() =>
+		expect(enablementApi.getAvailablePluginPacks).toHaveBeenCalledTimes(2),
+	);
+});
+
 it("reports a failed toggle after the switches unmount", async () => {
 	const user = userEvent.setup();
 	const toastError = vi.spyOn(toast, "error");
