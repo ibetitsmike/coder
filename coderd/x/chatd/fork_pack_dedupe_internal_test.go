@@ -63,6 +63,12 @@ func TestDedupePackResourceNames(t *testing.T) {
 	undecodablePackSkill.Source = testPackPluginsRoot + "beta/skills/broken"
 	undecodablePackSkill.Body = []byte(`{"name": 7}`)
 
+	unmanagedSkill := func(pack string) database.ChatContextResource {
+		row := skillResource(t, "/home/u/.claude/plugins/cache/"+pack+"/skills/review", "review", "Unmanaged.", database.WorkspaceAgentContextResourceStatusOk)
+		row.SourcePath = "/home/u/.claude/plugins/cache/" + pack + "/plugin.json"
+		return row
+	}
+
 	tests := []struct {
 		name string
 		rows []database.ChatContextResource
@@ -85,6 +91,18 @@ func TestDedupePackResourceNames(t *testing.T) {
 				packSkillRow(t, "alpha", "review"), ordinarySkill,
 			},
 			want: []string{ordinarySkill.Source},
+		},
+		{
+			name: "UnmanagedPackBeatsManagedPack",
+			rows: []database.ChatContextResource{
+				packSkillRow(t, "alpha", "review"), unmanagedSkill("own"),
+			},
+			want: []string{unmanagedSkill("own").Source},
+		},
+		{
+			name: "UnmanagedPacksAreNotDeduplicated",
+			rows: []database.ChatContextResource{unmanagedSkill("one"), unmanagedSkill("two")},
+			want: []string{unmanagedSkill("one").Source, unmanagedSkill("two").Source},
 		},
 		{
 			name: "SkillAndAgentNamesAreIndependent",
@@ -205,7 +223,11 @@ func TestFilterPackResourcesDedupesEnabledPacks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := server.filterPackResources(ctx, tt.chat, slices.Clone(rows))
+			// The subtest gets its own context: parallel subtests can wait
+			// behind other tests longer than a context made in the parent
+			// lives, and an expired context fails the pack lookups closed.
+			testCtx := chatdTestContext(t)
+			got := server.filterPackResources(testCtx, tt.chat, slices.Clone(rows))
 			require.ElementsMatch(t, tt.want, contextRowSources(got))
 
 			// Every consumer reads the filtered rows: the prompt's skill

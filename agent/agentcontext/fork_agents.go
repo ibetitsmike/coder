@@ -75,7 +75,7 @@ func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]
 				continue
 			}
 			res, ok := r.readAgentDefinition(root, path, info)
-			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKOrdinarySubagent(*out, res.Name)) {
+			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
 				continue
 			}
 			appendResource(out, seenID, res)
@@ -147,12 +147,12 @@ func hasSource(resources []Resource, source string) bool {
 	return false
 }
 
-// hasOKOrdinarySubagent reports whether a valid agent that is not a pack
-// contribution already uses name. Pack agents never shadow ordinary ones:
-// dropShadowedPackResources resolves that collision once every root is walked.
-func hasOKOrdinarySubagent(resources []Resource, name string) bool {
+// hasOKSubagent reports whether a valid agent already uses name. Agents of
+// managed packs are skipped: they are never first-wins winners, see
+// splitManagedPackDuplicates.
+func hasOKSubagent(resources []Resource, name string) bool {
 	for _, existing := range resources {
-		if existing.Kind == KindSubagent && existing.Status == StatusOK && existing.Name == name && !isPackContribution(existing) {
+		if existing.Kind == KindSubagent && existing.Status == StatusOK && existing.Name == name && !isManagedPackContribution(existing) {
 			return true
 		}
 	}

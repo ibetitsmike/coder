@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -225,13 +224,12 @@ func (r *Resolver) PackAgentDefinitionsOn() bool {
 
 // emitPacks appends the pack-contributed resources of a scan root after the
 // ordinary discovery. A pack skill or agent sharing a name with an ordinary
-// one is dropped by dropShadowedPackResources; packs never shadow each other
-// here, because coderd filters per chat and commit before it dedupes the
-// pack rows that remain. Emission waits for the server's push-response
-// capability: an upgrade window with a newer agent and an older coderd replica
-// must not persist pack rows, because the older replica serves pinned skills
-// without a pack gate. The callback is re-read per root, so a capability flip
-// applies to the next resolve.
+// one or an earlier unmanaged pack's loses the usual first-wins dedup; managed
+// packs are settled by splitManagedPackDuplicates and coderd. Emission waits
+// for the server's push-response capability: an upgrade window with a newer
+// agent and an older coderd replica must not persist pack rows, because the
+// older replica serves pinned skills without a pack gate. The callback is
+// re-read per root, so a capability flip applies to the next resolve.
 func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	if !r.packRowsAdvertised() {
 		return
@@ -298,6 +296,9 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 	if !r.PackAgentDefinitionsOn() {
 		return
 	}
+	// Agents of a managed pack are never first-wins winners: see
+	// splitManagedPackDuplicates.
+	managed := isManagedPackManifest(pack.ManifestPath)
 	for _, container := range pack.agentContainers() {
 		entries, err := os.ReadDir(container)
 		if err != nil {
@@ -319,7 +320,7 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 			// when the target stays inside the enclosing scan
 			// root.
 			res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
-			if !ok || hasSource(*out, res.Source) {
+			if !ok || hasSource(*out, res.Source) || (!managed && res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
 				continue
 			}
 			res.SourcePath = pack.ManifestPath
@@ -328,30 +329,103 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 	}
 }
 
-// dropShadowedPackResources drops pack skills and agents whose name an
-// ordinary resource of the same kind already uses, so workspace skills and
-// agents win over packs whatever the scan-root order. Two packs with the same
-// name are both kept: the on-disk packs include ones disabled for a chat or
-// removed from a commit, so only coderd knows which pack row is live.
-func dropShadowedPackResources(resources []Resource) []Resource {
+// managedPackRoot is the directory, relative to the home directory, that
+// coderd writes installed packs into, one subdirectory per pack. Keep in sync
+// with managedPackRoot in coderd/x/chatd/fork_plugin_gate.go, which filters
+// the rows of these packs per chat.
+const managedPackRoot = "/.coder/plugins/"
+
+// isManagedPackManifest reports whether a pack manifest path belongs to a pack
+// installed by coderd: its pack directory is a direct child of managedPackRoot.
+// It splits on both separators because the agent may run on Windows.
+func isManagedPackManifest(manifestPath string) bool {
+	normalized := strings.ReplaceAll(manifestPath, `\`, "/")
+	i := strings.LastIndex(normalized, managedPackRoot)
+	if i < 0 {
+		return false
+	}
+	name, _, ok := strings.Cut(normalized[i+len(managedPackRoot):], "/")
+	return ok && name != ""
+}
+
+// isManagedPackContribution reports whether a resource comes from a pack
+// installed by coderd. Disk holds every such pack, enabled for a chat or not,
+// so the agent cannot tell which of two same-named resources is live.
+func isManagedPackContribution(resource Resource) bool {
+	return isPackContribution(resource) && isManagedPackManifest(resource.SourcePath)
+}
+
+// splitManagedPackDuplicates settles name collisions that the agent can settle
+// and defers the rest to coderd. A skill or agent of a managed pack is dropped
+// when any other source (an ordinary resource, or a pack the user placed
+// outside managedPackRoot) uses its name, whatever the scan-root order: those
+// sources are never filtered per chat, so they are always live. Among managed
+// packs the first resource with a name stays in resources and later ones are
+// returned as duplicates, which appendManagedPackDuplicates adds back within
+// spare capacity. coderd keeps the first duplicate of the packs enabled for a
+// chat, which a disabled pack or a file removed by a pack update must not
+// hide.
+func splitManagedPackDuplicates(resources []Resource) (kept, duplicates []Resource) {
 	type nameKey struct {
 		kind ResourceKind
 		name string
 	}
-	ordinary := make(map[nameKey]struct{})
+	deferrable := func(resource Resource) bool {
+		return (resource.Kind == KindSkill || resource.Kind == KindSubagent) &&
+			resource.Status == StatusOK && isManagedPackContribution(resource)
+	}
+	winners := make(map[nameKey]struct{})
 	for _, resource := range resources {
-		if resource.Status == StatusOK && !isPackContribution(resource) &&
-			(resource.Kind == KindSkill || resource.Kind == KindSubagent) {
-			ordinary[nameKey{resource.Kind, resource.Name}] = struct{}{}
+		if (resource.Kind == KindSkill || resource.Kind == KindSubagent) &&
+			resource.Status == StatusOK && !deferrable(resource) {
+			winners[nameKey{resource.Kind, resource.Name}] = struct{}{}
 		}
 	}
-	return slices.DeleteFunc(resources, func(resource Resource) bool {
-		if resource.Status != StatusOK || !isPackContribution(resource) {
-			return false
+	managedSeen := make(map[nameKey]struct{})
+	kept = resources[:0]
+	for _, resource := range resources {
+		if !deferrable(resource) {
+			kept = append(kept, resource)
+			continue
 		}
-		_, shadowed := ordinary[nameKey{resource.Kind, resource.Name}]
-		return shadowed
-	})
+		key := nameKey{resource.Kind, resource.Name}
+		if _, shadowed := winners[key]; shadowed {
+			continue
+		}
+		if _, dup := managedSeen[key]; dup {
+			duplicates = append(duplicates, resource)
+			continue
+		}
+		managedSeen[key] = struct{}{}
+		kept = append(kept, resource)
+	}
+	return kept, duplicates
+}
+
+// appendManagedPackDuplicates adds the duplicates splitManagedPackDuplicates
+// set aside. They are speculative copies for a chat that enables a later pack
+// than the first one on disk, so they never displace anything: they are added
+// after applyCaps and applyProviderCaps, skip the resource count cap, and take
+// only the bytes the snapshot has left. Their count is bounded by twice
+// MaxResources, the headroom coderd's per-push limit allows above the agent
+// cap. Duplicates that do not fit are omitted, not stubbed.
+func (r *Resolver) appendManagedPackDuplicates(resources, duplicates []Resource) []Resource {
+	var used uint64
+	for _, resource := range resources {
+		used += uint64(len(resource.Payload))
+	}
+	for _, duplicate := range duplicates {
+		if len(resources) >= 2*r.MaxResources {
+			break
+		}
+		size := uint64(len(duplicate.Payload))
+		if used+size > r.MaxSnapshotBytes {
+			continue
+		}
+		used += size
+		resources = append(resources, duplicate)
+	}
+	return resources
 }
 
 // addPackWatchDirs adds every pack root and its declared skill and agent
