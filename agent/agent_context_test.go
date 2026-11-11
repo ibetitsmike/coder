@@ -63,8 +63,16 @@ func TestAgent_ContextStatePushed(t *testing.T) {
 	}
 	assert.True(t, foundAgents, "first push must already include the seeded AGENTS.md")
 
-	// Subsequent pushes must not be Initial.
-	for _, p := range pushes[1:] {
-		assert.False(t, p.GetInitial(), "only the first push must be Initial")
+	// The first push is a capability probe; its settled successor stays
+	// Initial because coderd persisted nothing for the probe. Pushes
+	// after the first settled one must not be Initial.
+	settled := false
+	for _, p := range pushes {
+		if settled {
+			assert.False(t, p.GetInitial(), "pushes after the first settled push must not be Initial")
+		}
+		if p.GetCapabilityGeneration() == 0 {
+			settled = true
+		}
 	}
 }

@@ -13546,6 +13546,10 @@ changed AS (
                         AND ccr.content_hash = m.content_hash
                         AND ccr.status = m.status
                         AND ccr.error = m.error
+                        -- source_path is the pack-contribution marker; a
+                        -- reclassification must count as a change even when
+                        -- the row's other fields are identical.
+                        AND ccr.source_path IS NOT DISTINCT FROM m.source_path
                 )
             )
             OR EXISTS (
@@ -13559,6 +13563,7 @@ changed AS (
                             AND m.content_hash = ccr.content_hash
                             AND m.status = ccr.status
                             AND m.error = ccr.error
+                            AND m.source_path IS NOT DISTINCT FROM ccr.source_path
                     )
             )
         )

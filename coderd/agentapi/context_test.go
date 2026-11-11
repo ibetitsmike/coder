@@ -110,6 +110,46 @@ func TestPushContextState(t *testing.T) {
 		require.True(t, resp.GetAccepted())
 	})
 
+	t.Run("AdvertisesForkPluginPacks", func(t *testing.T) {
+		t.Parallel()
+
+		// The capability flag flows from the deployment experiment into
+		// every response; agents hold pack rows back until they see it.
+		ctrl := gomock.NewController(t)
+		dbm := dbmock.NewMockStore(ctrl)
+		api := &agentapi.ContextAPI{
+			AgentID:         agentID,
+			Log:             slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}).Leveled(slog.LevelDebug),
+			Clock:           clock,
+			Database:        dbm,
+			ForkPluginPacks: true,
+		}
+		expectInTx(dbm)
+
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextSnapshot{}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), database.DeleteStaleWorkspaceAgentContextResourcesParams{
+			WorkspaceAgentID: agentID,
+			ActiveSources:    []string{"/home/coder/AGENTS.md"},
+		}).Return(nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       1,
+			AggregateHash: []byte{0x01, 0x02, 0x03},
+			Initial:       true,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.True(t, resp.GetForkPluginPacks(), "the response must advertise the pack capability when enabled")
+	})
+
 	t.Run("DirtyMarkerInvokedAfterCommit", func(t *testing.T) {
 		t.Parallel()
 
@@ -147,6 +187,46 @@ func TestPushContextState(t *testing.T) {
 		require.Equal(t, "watcher degraded", marker.gotErr)
 	})
 
+	t.Run("DriftHasherOverridesPushedHash", func(t *testing.T) {
+		t.Parallel()
+
+		api, dbm := makeAPI(t)
+		marker := &fakeDriftHasher{returnHash: []byte{0xde, 0xad}}
+		api.DirtyMarker = marker
+		expectInTx(dbm)
+
+		// A marker implementing the optional ContextDriftHasher capability
+		// owns the drift hash: the snapshot row stores the derived value,
+		// and the marker receives that same value back so hydration and
+		// dirty marking agree with what create-time and refresh pinning
+		// read from the snapshot row.
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params database.UpsertWorkspaceAgentContextSnapshotParams) (database.WorkspaceAgentContextSnapshot, error) {
+				require.Equal(t, []byte{0xde, 0xad}, params.AggregateHash)
+				return database.WorkspaceAgentContextSnapshot{}, nil
+			})
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       1,
+			AggregateHash: []byte{0xaa, 0xbb},
+			Initial:       true,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, []byte{0xde, 0xad}, marker.gotHash)
+		require.Len(t, marker.gotRows, 1)
+		require.Equal(t, "/home/coder/AGENTS.md", marker.gotRows[0].Source)
+	})
+
 	t.Run("DirtyMarkerSkippedOnDrop", func(t *testing.T) {
 		t.Parallel()
 
@@ -172,6 +252,91 @@ func TestPushContextState(t *testing.T) {
 		require.False(t, resp.GetAccepted())
 		require.Equal(t, 0, marker.called)
 		require.Equal(t, 0, marker.published)
+	})
+
+	t.Run("RejectedResponseCarriesCapabilities", func(t *testing.T) {
+		t.Parallel()
+
+		// A dropped (replay or out-of-order) push still reports the
+		// deployment's advertised capabilities: the agent treats a zero
+		// capability field as a retraction and would resync without pack
+		// rows until the next accepted response restores them.
+		api, dbm := makeAPI(t)
+		api.ForkPluginPacks = true
+		api.ForkAgentDefinitions = true
+		expectInTx(dbm)
+
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{Version: 5}, nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       2,
+			AggregateHash: []byte{0x01},
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.False(t, resp.GetAccepted())
+		require.True(t, resp.GetForkPluginPacks(), "a rejected response must still advertise the pack capability")
+		require.True(t, resp.GetForkAgentDefinitions(), "a rejected response must still advertise the definitions capability")
+	})
+
+	t.Run("NegotiationPushSkipsChatMutation", func(t *testing.T) {
+		t.Parallel()
+
+		// A reconnecting agent's negotiation push
+		// (capability_generation != 0) is a capability probe: it
+		// persists nothing (snapshot row, resource rows, stale
+		// deletes) and must not hydrate or dirty chats, so
+		// create- and refresh-time hydration keep consuming the
+		// last settled snapshot and its resources as one
+		// consistent pair. The settling push that ends the
+		// negotiation carries the settled inventory chats pin
+		// against.
+		api, dbm := makeAPI(t)
+		marker := &fakeDirtyMarker{}
+		api.DirtyMarker = marker
+		expectInTx(dbm)
+		expectInTx(dbm)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:              1,
+			AggregateHash:        []byte{0x01},
+			Initial:              true,
+			CapabilityGeneration: 1,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, 0, marker.called, "the negotiation push must not hydrate or dirty chats")
+
+		// The settling push (capability_generation == 0) ends the
+		// negotiation and persists the inventory with the chat
+		// mutation.
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextSnapshot{}, nil)
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		resp, err = api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       2,
+			AggregateHash: []byte{0x02},
+			Initial:       false,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, 1, marker.called, "the settling push runs the chat mutation")
+		require.Equal(t, 1, marker.published, "the settling push publishes after commit")
 	})
 
 	t.Run("RejectsEmptyAndDuplicateSources", func(t *testing.T) {
@@ -710,4 +875,20 @@ func (f *fakeDirtyMarker) HydrateAndMarkChatsDirty(_ context.Context, _ database
 	f.gotHash = aggregateHash
 	f.gotErr = snapshotError
 	return func() { f.published++ }, nil
+} // fakeDriftHasher is a test double that also implements the optional
+// agentapi.ContextDriftHasher capability so tests can assert the derived
+// hash is what gets stored on the snapshot row and handed back to the
+// dirty marker.
+type fakeDriftHasher struct {
+	fakeDirtyMarker
+	gotRows    []database.UpsertWorkspaceAgentContextResourceParams
+	returnHash []byte
+}
+
+func (f *fakeDriftHasher) DriftHash(rows []database.UpsertWorkspaceAgentContextResourceParams, aggregateHash []byte) []byte {
+	f.gotRows = rows
+	if f.returnHash == nil {
+		return aggregateHash
+	}
+	return f.returnHash
 }

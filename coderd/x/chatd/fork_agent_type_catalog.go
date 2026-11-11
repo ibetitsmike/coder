@@ -68,13 +68,7 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 		if err != nil {
 			return nil, xerrors.Errorf("list workspace agent context resources: %w", err)
 		}
-		chatResources := make([]database.ChatContextResource, 0, len(resources))
-		for _, resource := range resources {
-			chatResources = append(chatResources, database.ChatContextResource{
-				BodyKind: resource.BodyKind, Body: resource.Body, Status: resource.Status,
-			})
-		}
-		workspace = parseAgentDefinitionResources(chatResources)
+		workspace = p.agentRowDefinitions(resources)
 	}
 	for _, agentType := range mergeCustomAgentTypes(workspace, p.storedAgentTypes(ctx, chat)) {
 		entry := codersdk.ForkAgentType{
@@ -106,4 +100,18 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// agentRowDefinitions parses the agent definitions in a workspace agent's
+// context rows. Pack-contributed rows go through the same fork-plugin-packs
+// gate as pinned chat rows, so the catalog never lists a pack agent type that
+// spawn_agent would not offer.
+func (p *Server) agentRowDefinitions(rows []database.WorkspaceAgentContextResource) []workspacesdk.AgentDefinition {
+	resources := make([]database.ChatContextResource, 0, len(rows))
+	for _, row := range rows {
+		resources = append(resources, database.ChatContextResource{
+			BodyKind: row.BodyKind, Body: row.Body, Status: row.Status, SourcePath: row.SourcePath,
+		})
+	}
+	return parseAgentDefinitionResources(p.filterPackResources(resources))
 }

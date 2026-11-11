@@ -75,6 +75,16 @@ type ContextAPI struct {
 	// deployment-wide kill switch for context sync write load
 	// (CODER_DISABLE_WORKSPACE_AGENT_CONTEXT_SYNC).
 	Disabled bool
+	// ForkPluginPacks mirrors the fork-plugin-packs experiment. It is
+	// advertised in every PushContextStateResponse so the agent emits
+	// plugin-pack rows only to replicas that know them: an older replica
+	// leaves the field false and the agent never persists pack rows there.
+	ForkPluginPacks bool
+	// ForkAgentDefinitions mirrors the fork-agent-definitions experiment:
+	// when false, responses also tell the agent to emit pack agent rows
+	// excluded, because chatd drops every subagent row and the rows would
+	// only occupy the snapshot caps.
+	ForkAgentDefinitions bool
 }
 
 // ContextDirtyMarker hydrates chats from, and marks chats dirty against, a
@@ -85,11 +95,31 @@ type ContextDirtyMarker interface {
 	// HydrateAndMarkChatsDirty runs inside the PushContextState
 	// transaction using the supplied store. It hydrates chats for the
 	// agent that have no pinned hash yet (no dirty event) and flips
-	// already-pinned chats whose hash differs from aggregateHash. It
+	// already-pinned chats whose hash differs from the drift hash
+	// (the pushed aggregate, or the marker-derived value when the
+	// marker implements ContextDriftHasher). It
 	// returns a callback that publishes the resulting dirty watch events;
 	// the caller invokes it only after the transaction commits. The
 	// callback is a no-op when nothing transitioned to dirty.
 	HydrateAndMarkChatsDirty(ctx context.Context, tx database.Store, agentID uuid.UUID, aggregateHash []byte, snapshotError string, now time.Time) (publishDirty func(), err error)
+}
+
+// ContextDriftHasher is an optional capability a ContextDirtyMarker can
+// implement to own the drift hash chats pin against. When the marker
+// implements it, PushContextState derives that hash from the pushed
+// resource rows instead of trusting the agent's pushed aggregate, stores
+// it on the snapshot row, and hydrates and dirties chats against it, so
+// the create-time and refresh pinning paths (which re-read the snapshot
+// row) stay consistent with the push path by construction. chatd uses
+// this to keep deployment-side filters such as fork-plugin-packs in control
+// of what counts as prompt drift.
+type ContextDriftHasher interface {
+	// DriftHash maps the just-validated resource rows (exactly the set
+	// this push persists) to the drift hash. It must be a pure function:
+	// ReadModifyUpdate may re-run the push transaction, and identical
+	// rows must always yield an identical hash. The pushed aggregateHash
+	// is a fallback for markers that do not implement this interface.
+	DriftHash(rows []database.UpsertWorkspaceAgentContextResourceParams, aggregateHash []byte) []byte
 }
 
 // PushContextState persists a snapshot pushed by the workspace
@@ -106,6 +136,16 @@ type ContextDirtyMarker interface {
 // counter is monotonic, and only an initial = true push from a
 // freshly-booted agent resets that baseline. Replays and stale
 // retransmits leave the stored state untouched.
+//
+// A push with capability_generation != 0 is a per-connection
+// negotiation push sent by a reconnecting agent whose push
+// capability was reset. It is a capability probe: nothing persists
+// (snapshot row, resource rows, stale deletes) and no chat state
+// changes, so create- and refresh-time hydration keep consuming the
+// last settled snapshot and its resources as one consistent pair.
+// The settling push that ends the negotiation
+// (capability_generation = 0) persists the settled inventory and
+// defines the baseline chats refresh against.
 //
 // Authorization happens in dbauthz: every query in the transaction
 // authorizes the actor (the agent's token subject) against the
@@ -129,6 +169,18 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 	rows, err := validateAndConvertContextResources(req.Resources)
 	if err != nil {
 		return nil, err
+	}
+
+	// The drift hash chats pin against. A marker that implements
+	// ContextDriftHasher re-derives it from the rows so deployment-side
+	// filters (fork-plugin-packs) decide what counts as prompt drift; the
+	// agent's own aggregate remains authoritative on the wire and in the
+	// agent's local snapshot.
+	driftHash := req.AggregateHash
+	if a.DirtyMarker != nil {
+		if dh, ok := a.DirtyMarker.(ContextDriftHasher); ok {
+			driftHash = dh.DriftHash(rows, req.AggregateHash)
+		}
 	}
 
 	// Attach the cached workspace RBAC object so dbauthz can take its
@@ -166,6 +218,17 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		accepted = false
 		publishDirty = nil
 
+		// A negotiation push is a capability probe: it persists
+		// nothing and touches no chat state, so create- and
+		// refresh-time hydration keep consuming the last settled
+		// snapshot and its resources as one consistent pair. The
+		// settling push (capability_generation = 0) persists and
+		// defines the baseline chats refresh against.
+		if req.CapabilityGeneration != 0 {
+			accepted = true
+			return nil
+		}
+
 		existing, err := tx.GetLatestWorkspaceAgentContextSnapshot(ctx, a.AgentID)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
@@ -187,7 +250,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			WorkspaceAgentID: a.AgentID,
 			//nolint:gosec // Bounded by validateContextPushRequest.
 			Version:       int64(req.Version),
-			AggregateHash: append([]byte(nil), req.AggregateHash...),
+			AggregateHash: append([]byte(nil), driftHash...),
 			SnapshotError: req.SnapshotError,
 			ReceivedAt:    now,
 		})
@@ -215,8 +278,10 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		// Hydrate and dirty chats against the snapshot just written, in the
 		// same transaction so a concurrent refresh cannot interleave with
 		// the version gate. Events are published only after commit.
+		// Negotiation pushes never reach this point: they return above
+		// without persisting anything.
 		if a.DirtyMarker != nil {
-			publishDirty, err = a.DirtyMarker.HydrateAndMarkChatsDirty(ctx, tx, a.AgentID, req.AggregateHash, req.SnapshotError, now)
+			publishDirty, err = a.DirtyMarker.HydrateAndMarkChatsDirty(ctx, tx, a.AgentID, driftHash, req.SnapshotError, now)
 			if err != nil {
 				return xerrors.Errorf("hydrate and mark chats dirty: %w", err)
 			}
@@ -235,7 +300,11 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			slog.F("version", req.Version),
 			slog.F("initial", req.Initial),
 		)
-		return &agentproto.PushContextStateResponse{Accepted: false}, nil
+		return &agentproto.PushContextStateResponse{
+			Accepted:             false,
+			ForkPluginPacks:      a.ForkPluginPacks,
+			ForkAgentDefinitions: a.ForkAgentDefinitions,
+		}, nil
 	}
 
 	// The snapshot committed; fan out dirty watch events to chats whose
@@ -249,8 +318,13 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		slog.F("version", req.Version),
 		slog.F("initial", req.Initial),
 		slog.F("resources", len(rows)),
+		slog.F("capability_generation", req.CapabilityGeneration),
 	)
-	return &agentproto.PushContextStateResponse{Accepted: true}, nil
+	return &agentproto.PushContextStateResponse{
+		Accepted:             true,
+		ForkPluginPacks:      a.ForkPluginPacks,
+		ForkAgentDefinitions: a.ForkAgentDefinitions,
+	}, nil
 }
 
 // validateContextPushRequest enforces the request-level caps: counts
