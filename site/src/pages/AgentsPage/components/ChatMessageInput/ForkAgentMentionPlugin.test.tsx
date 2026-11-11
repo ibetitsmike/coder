@@ -16,7 +16,12 @@ import {
 	MockChat,
 	MockChatContextAgentDefinitions,
 } from "#/testHelpers/chatEntities";
-import { MockDefaultOrganization } from "#/testHelpers/entities";
+import {
+	MockAppearanceConfig,
+	MockBuildInfo,
+	MockDefaultOrganization,
+	MockEntitlements,
+} from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
 import { createTestQueryClient } from "#/testHelpers/renderHelpers";
 import { MockSkill } from "#/testHelpers/skills";
@@ -51,10 +56,15 @@ const renderComposer = (context?: ChatContext) => {
 	});
 	const inputRef = createRef<ChatMessageInputRef>();
 	const onEnter = vi.fn();
-	// The mention menu reads only the experiments.
-	const dashboard = {
+	const dashboard: DashboardValue = {
+		entitlements: MockEntitlements,
 		experiments: ["fork-agent-definitions"],
-	} as DashboardValue;
+		appearance: MockAppearanceConfig,
+		buildInfo: MockBuildInfo,
+		organizations: [MockDefaultOrganization],
+		showOrganizations: false,
+		canViewOrganizationSettings: false,
+	};
 	render(
 		<QueryClientProvider client={queryClient}>
 			<DashboardContext.Provider value={dashboard}>

@@ -149,7 +149,11 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		},
 	]);
 	const options = mentions
-		.filter(({ name }) => name.includes((query ?? "").toLowerCase()))
+		.filter(({ name }) =>
+			name
+				.toLocaleLowerCase("en-US")
+				.includes((query ?? "").toLocaleLowerCase("en-US")),
+		)
 		.map((mention) => new AgentMentionOption(mention));
 	const unresolved = storedQueries.filter((result) => !result.data);
 
