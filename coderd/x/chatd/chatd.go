@@ -773,6 +773,8 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 			return database.Chat{}, xerrors.Errorf("marshal initial user content: %w", marshalErr)
 		}
 		initialMessages = append(initialMessages, userMessage(userContent, opts.ModelConfigID, cmp.Or(opts.CreatedBy, opts.OwnerID), opts.ReasoningEffort))
+	} else {
+		initialMessages[len(initialMessages)-1].ReasoningEffort = opts.RootAgent.idleReasoningEffort(opts.ReasoningEffort)
 	}
 
 	result, err := chatstate.CreateChatWithID(ctx, p.db, p.pubsub, chatID, chatstate.CreateChatInput{

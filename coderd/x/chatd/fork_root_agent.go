@@ -161,6 +161,17 @@ func (agent *RootAgent) deploymentPrompt(prompt string) string {
 	return strings.Replace(prompt, subagentOrchestrationPromptBlock, "", 1)
 }
 
+// idleReasoningEffort returns the effort that a root agent chat created
+// without a user message stores on its last system message. Inserting that
+// message sets chats.last_reasoning_effort, which the first turn reads, so the
+// effort survives until the first message. A nil agent returns no effort.
+func (agent *RootAgent) idleReasoningEffort(effort *string) database.NullChatReasoningEffort {
+	if agent == nil || effort == nil || *effort == "" {
+		return database.NullChatReasoningEffort{}
+	}
+	return database.NullChatReasoningEffort{ChatReasoningEffort: database.ChatReasoningEffort(*effort), Valid: true}
+}
+
 // rootAgentAfterInsert stores the chat_subagents row of a root chat that
 // starts as agent. Depth 0 keeps the root out of every subagent count, which
 // all select children by parent_chat_id or root_chat_id.
