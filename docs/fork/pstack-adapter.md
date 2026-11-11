@@ -333,7 +333,7 @@ A name that only one of the workspace, personal, organization, and project sourc
 A name that more than one source defines is listed only as `workspace/<name>`, `personal/<name>`, `org/<name>`, or `project/<name>`.
 A bare name that more than one source defines fails with `type must be one of:` and the listed types.
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.
-To manage an organization's definitions, open **AI Settings**, select **Agent definitions**, and pick the organization.
+To manage an organization's definitions, open **AI Settings** > **Agent definitions** and pick the organization.
 The link and the page at `/ai/settings/agent-definitions` need the experiment and a user who can read the organization skills of an organization, such as an organization admin or auditor.
 The picker lists the organizations whose skills you can read, and the `org` search parameter names the selected one.
 An `org` that you can't read shows `You don't have permission to view this page` instead of another organization's definitions.
