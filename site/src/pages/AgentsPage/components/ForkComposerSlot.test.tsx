@@ -2,6 +2,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
+import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
@@ -18,6 +20,7 @@ import {
 	MockBuildInfo,
 	MockDefaultOrganization,
 	MockEntitlements,
+	MockUserOwner,
 } from "#/testHelpers/entities";
 import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
 import {
@@ -34,6 +37,10 @@ import {
 } from "#/testHelpers/websockets";
 import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import { ForkComposerSlot } from "./ForkComposerSlot";
+
+vi.mock("#/hooks/useAuthenticated", () => ({
+	useAuthenticated: () => ({ user: MockUserOwner }),
+}));
 
 const renderSlot = (
 	experiments: Experiment[],
@@ -310,5 +317,40 @@ describe("ForkComposerSlot wake-ups", () => {
 			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
 		);
 		expect(updateWakeup).not.toHaveBeenCalled();
+	});
+});
+
+describe("ForkComposerSlot plugin packs", () => {
+	it("does not request the chat or its packs while fork-plugin-packs is off", () => {
+		const getChat = vi
+			.spyOn(API.experimental, "getChat")
+			.mockResolvedValue(MockChat);
+		const getEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
+			.mockResolvedValue([]);
+
+		renderSlot([]);
+
+		expect(getChat).not.toHaveBeenCalled();
+		expect(getEnabled).not.toHaveBeenCalled();
+	});
+
+	it("requests the chat's plugin packs while fork-plugin-packs is on", async () => {
+		const getChat = vi
+			.spyOn(API.experimental, "getChat")
+			.mockResolvedValue(MockChat);
+		const getEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
+			.mockResolvedValue([]);
+
+		renderSlot(["fork-plugin-packs"]);
+
+		await waitFor(() =>
+			expect(getEnabled).toHaveBeenCalledWith({
+				kind: "chat",
+				chatId: MockChat.id,
+			}),
+		);
+		expect(getChat).toHaveBeenCalledWith(MockChat.id, expect.anything());
 	});
 });

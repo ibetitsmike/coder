@@ -24,6 +24,7 @@ type ForkInstallPluginPackDialogProps = {
 	onInstall: (req: CreateForkPluginPackRequest) => void;
 	/** While isInstalling, close requests are ignored. */
 	onClose: () => void;
+	onCloseAutoFocus?: (event: Event) => void;
 };
 
 type InstallFormValues = {
@@ -42,7 +43,7 @@ const validationSchema = Yup.object({
 
 export const ForkInstallPluginPackDialog: React.FC<
 	ForkInstallPluginPackDialogProps
-> = ({ error, isInstalling, onInstall, onClose }) => {
+> = ({ error, isInstalling, onInstall, onClose, onCloseAutoFocus }) => {
 	const form = useFormik<InstallFormValues>({
 		initialValues: { name: "", source_url: "", source_path: "", ref: "" },
 		validationSchema,
@@ -66,7 +67,7 @@ export const ForkInstallPluginPackDialog: React.FC<
 				}
 			}}
 		>
-			<DialogContent>
+			<DialogContent onCloseAutoFocus={onCloseAutoFocus}>
 				<DialogHeader>
 					<DialogTitle>Install plugin pack</DialogTitle>
 					<DialogDescription>

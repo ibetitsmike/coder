@@ -14,6 +14,7 @@ import {
 export const availablePluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId, "available"] as const;
 
+/** The query key of the plugin packs a project or chat enables directly. */
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
