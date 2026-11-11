@@ -732,6 +732,7 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 	if opts.WorkspaceID.Valid {
 		workspaceAwareness = workspaceAttachedAwareness
 	}
+	workspaceAwareness = opts.RootAgent.workspaceAwareness(workspaceAwareness)
 	workspaceAwarenessContent, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
 		codersdk.ChatMessageText(workspaceAwareness),
 	})

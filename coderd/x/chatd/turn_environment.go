@@ -751,10 +751,7 @@ func (p *Server) buildTurnEnvironment(
 	if err != nil {
 		return turnEnvironment{}, err
 	}
-	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(customAgentPolicy.keptTools(tools), func(tool fantasy.AgentTool) bool {
-		_, ok := tool.(acpSpawnTool)
-		return ok
-	})
+	acpSubagentsAvailable := !isExploreSubagent && customAgentPolicy.keepsACPTools(tools)
 	if customAgentPolicy != nil && !customAgentPolicy.keepsSkillTools() {
 		initialResolvedSkills = nil
 	}
@@ -946,6 +943,7 @@ func (p *Server) buildTurnEnvironment(
 	if tools, deferredCandidates, providerTools, err = p.applyCustomAgentToolPolicy(ctx, chat, customAgentPolicy, tools, deferredCandidates, providerTools); err != nil {
 		return turnEnvironment{}, err
 	}
+	customAgentPolicy.keepDynamicToolNames(dynamicToolNames, tools)
 
 	activeToolNames := activeToolNamesForTurn(tools, currentPlanMode, chat.ParentChatID, approvedPlanMCPConfigIDs)
 	if isExploreSubagent {
