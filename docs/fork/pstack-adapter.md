@@ -242,7 +242,7 @@ The spend counts every message in those chats, not only the ones that wake-ups s
 The check only uses the cost recorded so far, so the run that it lets through can take the spend past a limit, and runs on several replicas at once can pass an organization limit by a few runs.
 When the chat or its organization has reached a limit, the wake-up pauses without sending its prompt.
 A wake-up also pauses when a prompt hook denies its prompt, or when its cron schedule or its events are invalid.
-A paused wake-up runs again only after a user resumes it through the API, and it still counts toward the chat's limit of 10 active or paused wake-ups.
+A paused wake-up runs again only after a user resumes it through the API or the composer pill, and it still counts toward the chat's limit of 10 active or paused wake-ups.
 A resumed wake-up that still hits a limit pauses again at its next run, and a canceled one no longer counts toward the limit.
 When a wake-up pauses, Coder Agents sends the chat owner a Coder notification titled `Chat wake-up paused` that names the chat and the reason.
 It sends at most one per chat and reason each UTC day, unless the chat gets a new title in between, because the notification text includes the title.
