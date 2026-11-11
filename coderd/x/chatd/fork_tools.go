@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -41,6 +42,14 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		return tool.Info().Name == askUserQuestionToolName
 	}) {
 		tools = append(tools, p.newDescendantQuestionTool(chat))
+	}
+	// turn_environment.go gives the async question only to UI roots. An API
+	// root gets it here: its owner can answer in the web UI, and the turn never
+	// waits for the answer.
+	if p.nestedSubagentsEnabled() && !chat.ParentChatID.Valid && !isExploreSubagentMode(chat.Mode) && !slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
+		return tool.Info().Name == askUserQuestionToolName
+	}) {
+		tools = append(tools, chattool.NewAskUserQuestionTool(chattool.AskUserQuestionOptions{Async: true}))
 	}
 	if p.nestedSubagentsEnabled() {
 		tools = p.withDescendantQuestionWait(tools, chat)
