@@ -769,6 +769,16 @@ func TestResolver_PluginPacksClaudeCacheEnabledPlugins(t *testing.T) {
 			want:     []string{"alpha", "beta", "gamma"},
 		},
 		{
+			name:     "settings past the manifest cap still apply",
+			settings: `{"padding": "` + strings.Repeat("x", 128*1024) + `", "enabledPlugins": {"alpha@market": false}}`,
+			want:     []string{"beta", "gamma"},
+		},
+		{
+			name:     "settings past the settings cap keep every plugin",
+			settings: `{"padding": "` + strings.Repeat("x", 2*1024*1024) + `", "enabledPlugins": {"alpha@market": false}}`,
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+		{
 			name:     "missing settings keeps every plugin",
 			settings: "",
 			want:     []string{"alpha", "beta", "gamma"},

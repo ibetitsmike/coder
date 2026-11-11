@@ -49,6 +49,11 @@ const packManifestBaseName = "plugin.json"
 // directory declarations.
 const maxManifestBytes = 64 * 1024
 
+// maxSettingsBytes bounds a Claude Code user settings read. Settings carry
+// permissions, hooks and other unrelated state, so they grow well past a
+// manifest while the resolver needs only enabledPlugins.
+const maxSettingsBytes = 1024 * 1024
+
 // Default containers when the manifest declares none, matching the Cursor
 // defaults and what pstack ships.
 const (
@@ -120,7 +125,7 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 	if manifestPath == "" {
 		return packRoot{}, false
 	}
-	data, ok := readCappedRegularFile(manifestPath)
+	data, ok := readCappedRegularFile(manifestPath, maxManifestBytes)
 	if !ok {
 		return packRoot{}, false
 	}
@@ -138,12 +143,12 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest}, true
 }
 
-// readCappedRegularFile reads a file only when it is a regular file within
-// the manifest size cap. Lstat (not Stat) so a symlinked or special file is
+// readCappedRegularFile reads a file only when it is a regular file of at
+// most maxBytes. Lstat (not Stat) so a symlinked or special file is
 // never followed: a checked-in plugin.json -> /dev/zero or a FIFO must not
 // be read at all, whatever its apparent size.
-func readCappedRegularFile(path string) ([]byte, bool) {
-	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxManifestBytes {
+func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
 		return nil, false
 	}
 	data, err := os.ReadFile(path)
@@ -265,7 +270,7 @@ func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
 	if !ok {
 		return nil
 	}
-	data, ok := readCappedRegularFile(path)
+	data, ok := readCappedRegularFile(path, maxSettingsBytes)
 	if !ok {
 		return nil
 	}
