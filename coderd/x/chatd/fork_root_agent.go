@@ -133,11 +133,15 @@ func (p *Server) ResolveRootAgent(ctx context.Context, opts RootAgentOptions) (R
 
 // withRootAgent returns opts with the mode and prompt of its root agent. The
 // definition's prompt follows the caller's system prompt, so the deployment
-// and organization prompts stay first.
-func withRootAgent(opts CreateOptions) CreateOptions {
+// and organization prompts stay first. A child chat cannot have a root agent,
+// because its depth 0 row would hide it from every subagent count.
+func withRootAgent(opts CreateOptions) (CreateOptions, error) {
 	agent := opts.RootAgent
 	if agent == nil {
-		return opts
+		return opts, nil
+	}
+	if opts.ParentChatID.Valid {
+		return CreateOptions{}, xerrors.New("a child chat cannot start as a root agent type")
 	}
 	if agent.mode.Valid {
 		opts.ChatMode = agent.mode
@@ -145,7 +149,7 @@ func withRootAgent(opts CreateOptions) CreateOptions {
 	if prompt := strings.TrimSpace(agent.prompt); prompt != "" {
 		opts.SystemPrompt = strings.TrimSpace(opts.SystemPrompt + "\n\n" + prompt)
 	}
-	return opts
+	return opts, nil
 }
 
 // deploymentPrompt returns prompt without the orchestration guidance when

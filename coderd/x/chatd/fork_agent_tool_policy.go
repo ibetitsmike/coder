@@ -133,6 +133,18 @@ func (policy customAgentToolPolicy) keepsSkillTools() bool {
 	return policy.allowsNonMCPTool("read_skill")
 }
 
+// keptTools returns tools as policy filters them, or tools when policy is
+// nil. It knows no MCP server slugs, so only its non-MCP tools are exact.
+// The system prompt is built before the policy filters the turn's tools,
+// so a prompt block that names a tool checks it here.
+func (policy *customAgentToolPolicy) keptTools(tools []fantasy.AgentTool) []fantasy.AgentTool {
+	if policy == nil {
+		return tools
+	}
+	kept, _, _ := policy.filter(tools, nil, nil, nil)
+	return kept
+}
+
 // filter returns the tools, deferred MCP candidates and provider tools that
 // policy allows, in their original order. readonly keeps web_search, the
 // provider tool that Explore children keep. mcpServerSlugs is only read in
