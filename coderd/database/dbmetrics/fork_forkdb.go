@@ -397,11 +397,6 @@ func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, 
 	return f.s.SetPluginUserLinkActiveChat(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
-	defer f.observe(ctx, "SetPluginUserLinksActiveChatByUser", time.Now())
-	return f.s.SetPluginUserLinksActiveChatByUser(ctx, arg)
-}
-
 func (f forkQueryMetricsStore) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
 	defer f.observe(ctx, "SumChatCostMicrosSince", time.Now())
 	return f.s.SumChatCostMicrosSince(ctx, arg)

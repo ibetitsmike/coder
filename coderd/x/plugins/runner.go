@@ -216,6 +216,13 @@ func (r *runner) run(ctx context.Context) error {
 
 // invoke calls one export and decodes its output.
 func (r *runner) invoke(ctx context.Context, export string, in, out proto.Message) error {
+	r.callMu.Lock()
+	defer r.callMu.Unlock()
+	return r.invokeLocked(ctx, export, in, out)
+}
+
+// invokeLocked is invoke for a caller that holds callMu.
+func (r *runner) invokeLocked(ctx context.Context, export string, in, out proto.Message) error {
 	var input []byte
 	if in != nil {
 		var err error
@@ -224,8 +231,6 @@ func (r *runner) invoke(ctx context.Context, export string, in, out proto.Messag
 			return xerrors.Errorf("encode input: %w", err)
 		}
 	}
-	r.callMu.Lock()
-	defer r.callMu.Unlock()
 	output, err := r.client.Invoke(ctx, export, input, r.hostCall)
 	if err != nil {
 		return xerrors.Errorf("call %s: %w", export, err)
@@ -237,8 +242,15 @@ func (r *runner) invoke(ctx context.Context, export string, in, out proto.Messag
 }
 
 func (r *runner) invokeResult(ctx context.Context, export string, in proto.Message) error {
+	r.callMu.Lock()
+	defer r.callMu.Unlock()
+	return r.invokeResultLocked(ctx, export, in)
+}
+
+// invokeResultLocked is invokeResult for a caller that holds callMu.
+func (r *runner) invokeResultLocked(ctx context.Context, export string, in proto.Message) error {
 	var res pluginproto.Result
-	if err := r.invoke(ctx, export, in, &res); err != nil {
+	if err := r.invokeLocked(ctx, export, in, &res); err != nil {
 		return err
 	}
 	if res.GetError() != "" {

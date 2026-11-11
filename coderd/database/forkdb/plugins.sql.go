@@ -216,6 +216,7 @@ SELECT
     b.sent_status,
     b.attempts,
     b.next_attempt_at,
+    b.delivered,
     c.status AS chat_status,
     c.title AS chat_title,
     c.owner_id AS chat_owner_id
@@ -253,6 +254,7 @@ type GetPluginChatBindingsDueRow struct {
 	SentStatus    database.NullChatStatus `db:"sent_status" json:"sent_status"`
 	Attempts      int32                   `db:"attempts" json:"attempts"`
 	NextAttemptAt time.Time               `db:"next_attempt_at" json:"next_attempt_at"`
+	Delivered     bool                    `db:"delivered" json:"delivered"`
 	ChatStatus    database.ChatStatus     `db:"chat_status" json:"chat_status"`
 	ChatTitle     string                  `db:"chat_title" json:"chat_title"`
 	ChatOwnerID   uuid.UUID               `db:"chat_owner_id" json:"chat_owner_id"`
@@ -276,6 +278,7 @@ func (q *Queries) GetPluginChatBindingsDue(ctx context.Context, arg GetPluginCha
 			&i.SentStatus,
 			&i.Attempts,
 			&i.NextAttemptAt,
+			&i.Delivered,
 			&i.ChatStatus,
 			&i.ChatTitle,
 			&i.ChatOwnerID,
@@ -604,36 +607,21 @@ func (q *Queries) SetPluginUserLinkActiveChat(ctx context.Context, arg SetPlugin
 	return err
 }
 
-const setPluginUserLinksActiveChatByUser = `-- name: SetPluginUserLinksActiveChatByUser :exec
-UPDATE plugin_user_links
-SET active_chat_id = $1
-WHERE plugin_id = $2 AND user_id = $3
-`
-
-type SetPluginUserLinksActiveChatByUserParams struct {
-	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
-	PluginID     uuid.UUID     `db:"plugin_id" json:"plugin_id"`
-	UserID       uuid.UUID     `db:"user_id" json:"user_id"`
-}
-
-func (q *Queries) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg SetPluginUserLinksActiveChatByUserParams) error {
-	_, err := q.db.ExecContext(ctx, setPluginUserLinksActiveChatByUser, arg.ActiveChatID, arg.PluginID, arg.UserID)
-	return err
-}
-
 const updatePluginChatBindingDelivered = `-- name: UpdatePluginChatBindingDelivered :exec
 UPDATE plugin_chat_bindings
 SET
     sent_message_id = $1,
     sent_status = $2,
+    delivered = delivered OR $3,
     attempts = 0,
     next_attempt_at = now()
-WHERE plugin_id = $3 AND chat_id = $4
+WHERE plugin_id = $4 AND chat_id = $5
 `
 
 type UpdatePluginChatBindingDeliveredParams struct {
 	SentMessageID int64                   `db:"sent_message_id" json:"sent_message_id"`
 	SentStatus    database.NullChatStatus `db:"sent_status" json:"sent_status"`
+	Delivered     bool                    `db:"delivered" json:"delivered"`
 	PluginID      uuid.UUID               `db:"plugin_id" json:"plugin_id"`
 	ChatID        uuid.UUID               `db:"chat_id" json:"chat_id"`
 }
@@ -642,6 +630,7 @@ func (q *Queries) UpdatePluginChatBindingDelivered(ctx context.Context, arg Upda
 	_, err := q.db.ExecContext(ctx, updatePluginChatBindingDelivered,
 		arg.SentMessageID,
 		arg.SentStatus,
+		arg.Delivered,
 		arg.PluginID,
 		arg.ChatID,
 	)

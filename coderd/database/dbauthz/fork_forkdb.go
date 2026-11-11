@@ -517,13 +517,6 @@ func (f *forkQuerier) SetPluginUserLinkActiveChat(ctx context.Context, arg forkd
 	return f.db.SetPluginUserLinkActiveChat(ctx, arg)
 }
 
-func (f *forkQuerier) SetPluginUserLinksActiveChatByUser(ctx context.Context, arg forkdb.SetPluginUserLinksActiveChatByUserParams) error {
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
-		return err
-	}
-	return f.db.SetPluginUserLinksActiveChatByUser(ctx, arg)
-}
-
 func (f *forkQuerier) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return 0, err
