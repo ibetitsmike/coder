@@ -62,9 +62,13 @@ afterEach(() => vi.restoreAllMocks());
 const renderComposer = ({
 	chat: chatOverrides,
 	experiments = [],
+	isNewChat = false,
+	hasWorkspace = false,
 }: {
 	chat?: Partial<Chat>;
 	experiments?: Experiment[];
+	isNewChat?: boolean;
+	hasWorkspace?: boolean;
 } = {}) => {
 	const getPersonal = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
@@ -95,10 +99,12 @@ const renderComposer = ({
 	render(
 		<QueryClientProvider client={queryClient}>
 			<DashboardContext.Provider value={dashboard}>
-				<MemoryRouter initialEntries={[`/agents/${MockChat.id}`]}>
+				<MemoryRouter
+					initialEntries={[isNewChat ? "/agents" : `/agents/${MockChat.id}`]}
+				>
 					<Routes>
 						<Route
-							path="/agents/:agentId"
+							path={isNewChat ? "/agents" : "/agents/:agentId"}
 							element={
 								<ChatMessageInput
 									ref={inputRef}
@@ -109,7 +115,7 @@ const renderComposer = ({
 									onEnter={onEnter}
 									sendShortcut={DEFAULT_AGENT_CHAT_SEND_SHORTCUT}
 									disabled={false}
-									hasWorkspace={false}
+									hasWorkspace={hasWorkspace}
 									organizationId={MockDefaultOrganization.id}
 								/>
 							}
@@ -176,6 +182,20 @@ describe("ForkAgentMentionPlugin", () => {
 	it("qualifies stored names while the workspace agents are unknown", async () => {
 		const { inputRef } = renderComposer({
 			chat: { context: { dirty: false } },
+		});
+		const user = await typeIntoComposer("@rev");
+		await user.click(
+			await screen.findByRole("option", { name: /^@personal\/reviewer/ }),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the personal/reviewer agent (spawn_agent type personal/reviewer): ",
+		);
+	});
+
+	it("qualifies stored names in a new chat with a selected workspace", async () => {
+		const { inputRef } = renderComposer({
+			isNewChat: true,
+			hasWorkspace: true,
 		});
 		const user = await typeIntoComposer("@rev");
 		await user.click(

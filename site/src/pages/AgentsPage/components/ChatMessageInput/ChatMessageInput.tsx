@@ -1405,6 +1405,7 @@ const ChatMessageInput = ({
 				<ForkAgentMentionPlugin
 					organizationId={organizationId}
 					projectId={projectId}
+					hasWorkspace={hasWorkspace}
 					anchor={skillsMenuAnchor ?? containerElement}
 				/>
 				<EditableStatePlugin disabled={disabled} />

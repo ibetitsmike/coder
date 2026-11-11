@@ -95,16 +95,20 @@ const resolveAgentMentions = (
 };
 
 /**
- * Lists the workspace agents of a chat's pinned context. A pinned context
- * without resources is unknown: the chat endpoint omits them when it fails
- * to load them, and also when there are none.
+ * Lists the workspace agents of a chat's pinned context. They are unknown
+ * when the chat endpoint omits the resources, which it does both when it
+ * fails to load them and when there are none, and when a workspace is
+ * selected but not pinned yet, as in a new chat.
  */
-const workspaceAgents = (context: ChatContext | undefined) => {
-	if (!context) {
-		return [];
+const workspaceAgents = (
+	context: ChatContext | undefined,
+	hasWorkspace: boolean,
+) => {
+	if (!context?.resources) {
+		return context || hasWorkspace ? undefined : [];
 	}
 	return context.resources
-		?.filter(({ kind, status }) => kind === "subagent" && status === "ok")
+		.filter(({ kind, status }) => kind === "subagent" && status === "ok")
 		.map((resource) => ({
 			name: resource.subagent_name ?? "",
 			description: resource.subagent_description ?? "",
@@ -128,6 +132,7 @@ const handleSelect = (
 type ForkAgentMentionPluginProps = {
 	organizationId?: string;
 	projectId?: string;
+	hasWorkspace: boolean;
 	anchor: HTMLElement | null;
 };
 
@@ -135,6 +140,7 @@ type ForkAgentMentionPluginProps = {
 export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	organizationId = "",
 	projectId,
+	hasWorkspace,
 	anchor,
 }) => {
 	const isEnabled = useForkExperiment("fork-agent-definitions");
@@ -187,7 +193,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			: []),
 		{
 			source: "workspace",
-			agents: workspaceAgents(currentChat?.context),
+			agents: workspaceAgents(currentChat?.context, hasWorkspace),
 		},
 	]);
 	const options = mentions
