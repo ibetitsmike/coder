@@ -43,11 +43,6 @@ const builtinAgentTypes = [
 // chatd reserves the built-in names, computer_use included, in every tier.
 const reservedAgentTypeNames = new Set(["general", "explore", "computer_use"]);
 
-// chatd never gives spawn_agent to a child of these types, and gives it to
-// other children only with fork-nested-subagents (nestedSubagentTools in
-// coderd/x/chatd/fork_subagents.go).
-const nonSpawningAgentTypes = new Set(["explore", "computer_use"]);
-
 // Only an "@" at the start of a line or after whitespace opens the menu, so
 // email addresses stay plain text.
 const matchAgentMention: TriggerFn = (text) => {
@@ -134,10 +129,11 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const { agentId } = useParams();
 	const currentChat = useQuery({ ...chat(agentId ?? ""), enabled: false }).data;
 	const isChildChat = currentChat?.parent_chat_id !== undefined;
+	// chatd gives a child spawn_agent only with fork-nested-subagents, and a
+	// custom child only when its definition allows it, which the client can't
+	// see (nestedSubagentTools in coderd/x/chatd/fork_subagents.go).
 	const canSpawn =
-		!isChildChat ||
-		(isNestingEnabled &&
-			!nonSpawningAgentTypes.has(currentChat?.agent_type ?? ""));
+		!isChildChat || (isNestingEnabled && currentChat?.agent_type === "general");
 	// A child chat has no project of its own; chatd offers it the agents of
 	// its root chat's project.
 	const rootChatId = isChildChat ? currentChat?.root_chat_id : undefined;
@@ -192,6 +188,9 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		...(isRootProjectUnknown ? [rootChat] : []),
 	].filter((result) => !result.data);
 	const isLoading = unresolved.some((result) => result.isFetching);
+	const hasError = [...storedQueries, ...(rootChatId ? [rootChat] : [])].some(
+		(result) => result.isError,
+	);
 
 	// Lexical's menu lets Enter through when nothing is selectable, which
 	// would send the unfinished mention while agents still load.
@@ -232,7 +231,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 						options={options}
 						selectedIndex={menu.selectedIndex}
 						status={
-							unresolved.some((result) => result.isError)
+							hasError
 								? "Could not load some agents. Close and type @ again to retry."
 								: isLoading
 									? "Loading agents..."

@@ -15,6 +15,7 @@ import {
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import { chat } from "#/api/queries/chats";
+import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
 import { userSkills } from "#/api/queries/userSkills";
 import type { Chat, Experiment } from "#/api/typesGenerated";
 import {
@@ -118,7 +119,7 @@ const renderComposer = ({
 			</DashboardContext.Provider>
 		</QueryClientProvider>,
 	);
-	return { inputRef, onEnter, getPersonal };
+	return { inputRef, onEnter, getPersonal, queryClient };
 };
 
 const typeIntoComposer = async (text: string) => {
@@ -175,6 +176,24 @@ describe("ForkAgentMentionPlugin", () => {
 		expect(listbox?.contains(highlighted)).toBe(true);
 	});
 
+	it("keeps cached agents and shows the retry message when a refetch fails", async () => {
+		const { getPersonal, queryClient } = renderComposer();
+		queryClient.setQueryData(
+			agentDefinitions({
+				tier: "user",
+				organizationId: MockDefaultOrganization.id,
+			}).queryKey,
+			[{ ...MockForkAgentDefinitionMetadata, name: "cached" }],
+			{ updatedAt: 0 },
+		);
+		getPersonal.mockRejectedValue(new Error("offline"));
+		await typeIntoComposer("@");
+		await screen.findByText(
+			"Could not load some agents. Close and type @ again to retry.",
+		);
+		expect(screen.getByRole("option", { name: /^@cached/ })).toBeVisible();
+	});
+
 	it("keeps Enter from sending while agents load", async () => {
 		const { onEnter, getPersonal } = renderComposer();
 		getPersonal.mockReturnValue(new Promise(() => {}));
@@ -184,14 +203,21 @@ describe("ForkAgentMentionPlugin", () => {
 		expect(onEnter).not.toHaveBeenCalled();
 	});
 
-	it("leaves @ as text in a child chat that cannot spawn agents", async () => {
-		const { onEnter } = renderComposer({
-			chat: { parent_chat_id: "parent", root_chat_id: "root" },
-		});
-		const user = await typeIntoComposer("@exp");
-		await user.keyboard("{Enter}");
-		expect(onEnter).toHaveBeenCalledTimes(1);
-	});
+	it.each([
+		{ agent_type: "general", experiments: [] },
+		{ agent_type: "reviewer", experiments: ["fork-nested-subagents" as const] },
+	])(
+		"leaves @ as text in a $agent_type child chat that cannot spawn agents",
+		async ({ agent_type, experiments }) => {
+			const { onEnter } = renderComposer({
+				chat: { parent_chat_id: "parent", root_chat_id: "root", agent_type },
+				experiments,
+			});
+			const user = await typeIntoComposer("@exp");
+			await user.keyboard("{Enter}");
+			expect(onEnter).toHaveBeenCalledTimes(1);
+		},
+	);
 
 	it("offers a nested child chat its root chat's project agents", async () => {
 		const getChat = vi

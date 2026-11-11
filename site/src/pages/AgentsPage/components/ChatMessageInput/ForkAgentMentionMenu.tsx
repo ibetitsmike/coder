@@ -85,11 +85,13 @@ export const ForkAgentMentionMenu: React.FC<ForkAgentMentionMenuProps> = ({
 						</div>
 					</button>
 				))}
-				{status && (
-					<div className="px-2 py-2 text-content-secondary text-sm opacity-50">
-						{status}
-					</div>
-				)}
+				{/* Stays mounted so screen readers announce status changes. */}
+				<div
+					role="status"
+					className={cn(status && "px-2 py-2 text-content-secondary text-sm")}
+				>
+					{status}
+				</div>
 				{options.length === 0 && !status && (
 					<div className="py-6 text-center text-sm">
 						No agents match that query.
