@@ -10,10 +10,16 @@ package chatd
 // dropped too, which no current source type produces.
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -34,14 +40,91 @@ func isPackContribution(sourcePath string) bool {
 	return base == packContributionMarker
 }
 
-// filterPackResources drops pack-contributed resources when fork-plugin-packs is
-// off. The prompt builder and the context resource listing both call it, so
-// the flag gates every consumer of the pinned rows.
-func (p *Server) filterPackResources(resources []database.ChatContextResource) []database.ChatContextResource {
-	if p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
-		return resources
+// managedPackRoot is the workspace directory, relative to the home
+// directory, that coderd writes installed packs into, one subdirectory per
+// pack name. Keep in sync with defaultBuiltinRoots in
+// agent/agentcontext/defaults.go.
+const managedPackRoot = "/.coder/plugins/"
+
+// managedPackName returns the name of the installed pack a pack-contributed
+// row comes from, or false when the pack lives outside managedPackRoot. The
+// agent only treats a scan root and its immediate children as packs, so the
+// directory after managedPackRoot is the pack's directory.
+func managedPackName(sourcePath string) (string, bool) {
+	normalized := strings.ReplaceAll(sourcePath, `\`, "/")
+	i := strings.LastIndex(normalized, managedPackRoot)
+	if i < 0 {
+		return "", false
 	}
+	name, _, ok := strings.Cut(normalized[i+len(managedPackRoot):], "/")
+	return name, ok && name != ""
+}
+
+// filterPackResources drops pack-contributed resources when fork-plugin-packs is
+// off. With it on, it drops the rows of installed packs that are enabled
+// neither for the chat's project nor for its root chat: every workspace
+// receives the packs of all its chats, so each chat filters to its own set.
+// Packs the user placed outside managedPackRoot are kept. The prompt builder,
+// the context resource listing, and the agent type catalog all call it, so
+// the gate covers every consumer of the pinned rows.
+func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, resources []database.ChatContextResource) []database.ChatContextResource {
+	if !p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
+		return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
+			return isPackContribution(r.SourcePath)
+		})
+	}
+	var enabled map[string]bool
 	return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
-		return isPackContribution(r.SourcePath)
+		if !isPackContribution(r.SourcePath) {
+			return false
+		}
+		name, ok := managedPackName(r.SourcePath)
+		if !ok {
+			return false
+		}
+		if enabled == nil {
+			enabled = p.enabledPackNames(ctx, chat)
+		}
+		return !enabled[name]
 	})
+}
+
+// enabledPackNames returns the names of the packs enabled for the chat's
+// project, when the chat owner can use it, and for the chat's root chat, so
+// subagents see the packs of the chat that spawned them. A failed lookup is
+// logged and enables nothing, so the gate fails closed.
+func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[string]bool {
+	enabled := map[string]bool{}
+	logger := p.logger.With(slog.F("chat_id", chat.ID))
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		logger.Warn(ctx, "fork queries unavailable for plugin pack enablement", slog.Error(err))
+		return enabled
+	}
+	// Like project skills, enablement is read as chatd once the owner passes
+	// the usable-project check, so the gate does not depend on the caller.
+	//nolint:gocritic // Pack enablement applies to the chat owner, not the caller.
+	chatdCtx := dbauthz.AsChatd(ctx)
+	if projectID := p.resolveUsableChatProjectID(ctx, logger, chat); projectID.Valid {
+		rows, err := fdb.GetPluginPacksByProjectID(chatdCtx, projectID.UUID)
+		if err != nil {
+			logger.Warn(ctx, "failed to list project plugin packs", slog.F("project_id", projectID.UUID), slog.Error(err))
+		}
+		for _, row := range rows {
+			enabled[row.Name] = true
+		}
+	}
+	rootChatID := chat.ID
+	if chat.RootChatID.Valid {
+		rootChatID = chat.RootChatID.UUID
+	}
+	rows, err := fdb.GetPluginPacksByChatID(chatdCtx, rootChatID)
+	// The agent type catalog passes a chat that does not exist yet.
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		logger.Warn(ctx, "failed to list chat plugin packs", slog.F("root_chat_id", rootChatID), slog.Error(err))
+	}
+	for _, row := range rows {
+		enabled[row.Name] = true
+	}
+	return enabled
 }
