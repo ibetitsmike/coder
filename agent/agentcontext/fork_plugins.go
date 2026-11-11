@@ -59,13 +59,35 @@ const (
 // pluginManifest is the subset of the agent-plugins.org and Cursor plugin
 // manifest schemas the resolver needs. The Cursor manifest declares its
 // skill and agent directories ("skills": "./skills/"); the agent-plugins.org
-// schema leaves them at the defaults.
+// schema leaves them at the defaults. The Claude Code manifest accepts a
+// string or an array of strings for both (manifestPaths).
 type pluginManifest struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
-	Skills      string `json:"skills"`
-	Agents      string `json:"agents"`
+	Name        string        `json:"name"`
+	Version     string        `json:"version"`
+	Description string        `json:"description"`
+	Skills      manifestPaths `json:"skills"`
+	Agents      manifestPaths `json:"agents"`
+}
+
+// manifestPaths is a manifest path declaration: one string or an array of
+// strings. Any other shape decodes to no declaration, so a malformed skills
+// or agents field falls back to the default container instead of rejecting
+// the whole manifest.
+type manifestPaths []string
+
+func (p *manifestPaths) UnmarshalJSON(data []byte) error {
+	var one string
+	if err := json.Unmarshal(data, &one); err == nil {
+		*p = manifestPaths{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err == nil {
+		*p = many
+		return nil
+	}
+	*p = nil
+	return nil
 }
 
 // packRoot is a directory whose manifest exists and parsed cleanly.
@@ -98,14 +120,8 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 	if manifestPath == "" {
 		return packRoot{}, false
 	}
-	// Lstat (not Stat) so a symlinked or special manifest is never
-	// followed: a checked-in plugin.json -> /dev/zero or a FIFO must
-	// not be read at all, whatever its apparent size.
-	if info, err := os.Lstat(manifestPath); err != nil || !info.Mode().IsRegular() || info.Size() > maxManifestBytes {
-		return packRoot{}, false
-	}
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
+	data, ok := readCappedRegularFile(manifestPath)
+	if !ok {
 		return packRoot{}, false
 	}
 	var manifest pluginManifest
@@ -120,6 +136,21 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 		return packRoot{}, false
 	}
 	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest}, true
+}
+
+// readCappedRegularFile reads a file only when it is a regular file within
+// the manifest size cap. Lstat (not Stat) so a symlinked or special file is
+// never followed: a checked-in plugin.json -> /dev/zero or a FIFO must not
+// be read at all, whatever its apparent size.
+func readCappedRegularFile(path string) ([]byte, bool) {
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxManifestBytes {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // packRootsFor returns the pack roots of a scan root: rootPath itself when it
@@ -151,18 +182,105 @@ var claudePluginCacheRel = filepath.Join(".claude", "plugins", "cache")
 
 const claudeOrphanedMarker = ".orphaned_at"
 
+// claudePluginCacheDirEnv replaces the ~/.claude/plugins directory, so the
+// cache moves to $CLAUDE_CODE_PLUGIN_CACHE_DIR/cache.
+const claudePluginCacheDirEnv = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
+
+// claudePluginCacheOverride returns the cache directory selected by
+// claudePluginCacheDirEnv, or "" when it is unset or empty.
+func claudePluginCacheOverride() string {
+	dir := strings.TrimSpace(os.Getenv(claudePluginCacheDirEnv))
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "cache")
+}
+
+// claudePluginCacheRoot is the built-in scan root for the Claude Code plugin
+// cache.
+func claudePluginCacheRoot() string {
+	if override := claudePluginCacheOverride(); override != "" {
+		return override
+	}
+	return "~/" + filepath.ToSlash(claudePluginCacheRel)
+}
+
 func isClaudePluginCache(rootPath string) bool {
-	return strings.HasSuffix(filepath.Clean(rootPath), string(filepath.Separator)+claudePluginCacheRel)
+	clean := filepath.Clean(rootPath)
+	if strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
+		return true
+	}
+	override := claudePluginCacheOverride()
+	if override == "" {
+		return false
+	}
+	// The built-in root is canonicalized, so compare the resolved path too.
+	if clean == filepath.Clean(override) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(override)
+	return err == nil && clean == resolved
+}
+
+// claudeUserSettingsPath returns the user settings file next to the plugins
+// directory of cacheDir. A cache moved by claudePluginCacheDirEnv keeps its
+// settings in the home directory's .claude. ok is false when no location is
+// known.
+func claudeUserSettingsPath(cacheDir string) (string, bool) {
+	clean := filepath.Clean(cacheDir)
+	if strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
+		return filepath.Join(filepath.Dir(filepath.Dir(clean)), "settings.json"), true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(home, ".claude", "settings.json"), true
+}
+
+// claudeDisabledPlugins returns the plugin ids ("plugin@marketplace") that
+// the user settings file explicitly disables in enabledPlugins. A missing,
+// oversized or malformed file yields no information. Only the user settings
+// are read: project, local and managed settings depend on the session's
+// project, which the agent cannot know.
+func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
+	path, ok := claudeUserSettingsPath(cacheDir)
+	if !ok {
+		return nil
+	}
+	data, ok := readCappedRegularFile(path)
+	if !ok {
+		return nil
+	}
+	var settings struct {
+		EnabledPlugins map[string]any `json:"enabledPlugins"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil
+	}
+	disabled := make(map[string]struct{})
+	for id, enabled := range settings.EnabledPlugins {
+		if on, isBool := enabled.(bool); isBool && !on {
+			disabled[id] = struct{}{}
+		}
+	}
+	return disabled
 }
 
 // claudeCachePackRoots returns one pack root per cached plugin: its newest
 // version directory that is not orphaned and holds a manifest. Emitting
 // every cached version would serve a removed or superseded copy next to
-// the current one.
+// the current one. A plugin the user settings disable stays in the cache, so
+// it is skipped by id.
 func claudeCachePackRoots(cacheDir string) []packRoot {
 	var out []packRoot
+	disabled := claudeDisabledPlugins(cacheDir)
 	for _, marketplace := range childDirs(cacheDir) {
 		for _, plugin := range childDirs(marketplace) {
+			id := filepath.Base(plugin) + "@" + filepath.Base(marketplace)
+			if _, off := disabled[id]; off {
+				continue
+			}
 			if pack, ok := currentClaudeCacheVersion(plugin); ok {
 				out = append(out, pack)
 			}
@@ -239,24 +357,59 @@ func containerRelPath(declared, fallback string) string {
 	return cleaned
 }
 
-// packSkillContainers returns the existing skill-container directories of a
-// pack, honoring the manifest's declared skills directory.
-func (p packRoot) skillContainers() []string {
-	rel := containerRelPath(p.Manifest.Skills, defaultPackSkillsDir)
-	if rel == "" {
-		return nil
+// declaredRels returns the validated relative paths of a manifest
+// declaration. Invalid entries are dropped, and a declaration with no
+// non-empty entry keeps the default.
+func declaredRels(declared manifestPaths, fallback string) []string {
+	var out []string
+	anyDeclared := false
+	for _, d := range declared {
+		if strings.TrimSpace(d) == "" {
+			continue
+		}
+		anyDeclared = true
+		if rel := containerRelPath(d, ""); rel != "" {
+			out = append(out, rel)
+		}
 	}
-	return inPackContainers(p, rel)
+	if !anyDeclared {
+		return []string{fallback}
+	}
+	return out
 }
 
-// packAgentContainers returns the existing agent-container directories of a
-// pack, honoring the manifest's declared agents directory.
-func (p packRoot) agentContainers() []string {
-	rel := containerRelPath(p.Manifest.Agents, defaultPackAgentsDir)
-	if rel == "" {
-		return nil
+// skillContainers returns the existing skill-container directories of a
+// pack, honoring the manifest's declared skills directories.
+func (p packRoot) skillContainers() []string {
+	var out []string
+	for _, rel := range declaredRels(p.Manifest.Skills, defaultPackSkillsDir) {
+		out = append(out, inPackContainers(p, rel)...)
 	}
-	return inPackContainers(p, rel)
+	return out
+}
+
+// agentContainers returns the existing agent-container directories of a
+// pack, honoring the manifest's declared agents entries that are directories.
+func (p packRoot) agentContainers() []string {
+	var out []string
+	for _, rel := range declaredRels(p.Manifest.Agents, defaultPackAgentsDir) {
+		out = append(out, inPackContainers(p, rel)...)
+	}
+	return out
+}
+
+// agentFiles returns the declared agents entries that are single definition
+// files inside the pack. Claude Code manifests may name .md files instead of
+// directories.
+func (p packRoot) agentFiles() []string {
+	var out []string
+	for _, rel := range declaredRels(p.Manifest.Agents, defaultPackAgentsDir) {
+		if filepath.Ext(rel) != agentDefinitionExt {
+			continue
+		}
+		out = append(out, inPackFiles(p, rel)...)
+	}
+	return out
 }
 
 // inPackContainers returns container when it exists, is a directory, and
@@ -264,8 +417,17 @@ func (p packRoot) agentContainers() []string {
 // agentContainersFor applies to scan roots. Definitions are shipped whole,
 // so a symlinked container must not pull in outside files.
 func inPackContainers(p packRoot, rel string) []string {
-	container := filepath.Join(p.Dir, rel)
-	resolved, err := filepath.EvalSymlinks(container)
+	return inPackPaths(p, rel, true)
+}
+
+// inPackFiles is inPackContainers for a single regular file.
+func inPackFiles(p packRoot, rel string) []string {
+	return inPackPaths(p, rel, false)
+}
+
+func inPackPaths(p packRoot, rel string, wantDir bool) []string {
+	path := filepath.Join(p.Dir, rel)
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil
 	}
@@ -276,10 +438,11 @@ func inPackContainers(p packRoot, rel string) []string {
 	if !pathHasPrefix(resolved, packResolved) {
 		return nil
 	}
-	if info, err := os.Stat(resolved); err != nil || !info.IsDir() {
+	info, err := os.Stat(resolved)
+	if err != nil || info.IsDir() != wantDir {
 		return nil
 	}
-	return []string{container}
+	return []string{path}
 }
 
 // packRowsAdvertised reports whether the server's push-response
@@ -382,25 +545,32 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 			if e.IsDir() || filepath.Ext(e.Name()) != agentDefinitionExt {
 				continue
 			}
-			path := filepath.Join(container, e.Name())
-			// Lstat so a symlinked definition goes through
-			// resolveReadTarget's scan-root boundary check.
-			info, err := os.Lstat(path)
-			if err != nil {
-				continue
-			}
-			// The pack directory is the read boundary: a
-			// definition may symlink only within the pack, even
-			// when the target stays inside the enclosing scan
-			// root.
-			res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
-			if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
-				continue
-			}
-			res.SourcePath = pack.ManifestPath
-			appendResource(out, seenID, res)
+			r.emitPackAgentFile(pack, root, filepath.Join(container, e.Name()), out, seenID)
 		}
 	}
+	for _, path := range pack.agentFiles() {
+		r.emitPackAgentFile(pack, root, path, out, seenID)
+	}
+}
+
+// emitPackAgentFile emits the agent definition at path, stamped with the
+// pack's manifest path.
+func (r *Resolver) emitPackAgentFile(pack packRoot, root ScanRoot, path string, out *[]Resource, seenID map[string]int) {
+	// Lstat so a symlinked definition goes through
+	// resolveReadTarget's scan-root boundary check.
+	info, err := os.Lstat(path)
+	if err != nil {
+		return
+	}
+	// The pack directory is the read boundary: a definition may symlink
+	// only within the pack, even when the target stays inside the
+	// enclosing scan root.
+	res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
+	if !ok || hasSource(*out, res.Source) || (res.Status == StatusOK && hasOKSubagent(*out, res.Name)) {
+		return
+	}
+	res.SourcePath = pack.ManifestPath
+	appendResource(out, seenID, res)
 }
 
 // addPackWatchDirs adds every pack root and its declared skill and agent
@@ -435,6 +605,11 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		for _, container := range pack.agentContainers() {
 			out[container] = struct{}{}
 			agentDirs[container] = struct{}{}
+		}
+		for _, file := range pack.agentFiles() {
+			dir := filepath.Dir(file)
+			out[dir] = struct{}{}
+			agentDirs[dir] = struct{}{}
 		}
 		for _, rel := range pack.declaredContainerRels() {
 			if ancestor := existingAncestor(filepath.Join(pack.Dir, rel)); ancestor != "" {
@@ -492,14 +667,7 @@ func packManifestCandidateDirs(packDir string) []string {
 // disk. Invalid declarations ("../x", absolute) are rejected by
 // containerRelPath and skipped, matching discovery.
 func (p packRoot) declaredContainerRels() []string {
-	rels := make([]string, 0, 2)
-	if rel := containerRelPath(p.Manifest.Skills, defaultPackSkillsDir); rel != "" {
-		rels = append(rels, rel)
-	}
-	if rel := containerRelPath(p.Manifest.Agents, defaultPackAgentsDir); rel != "" {
-		rels = append(rels, rel)
-	}
-	return rels
+	return append(declaredRels(p.Manifest.Skills, defaultPackSkillsDir), declaredRels(p.Manifest.Agents, defaultPackAgentsDir)...)
 }
 
 // addPackImmediateSubdirs adds the immediate subdirectories of dir to out,

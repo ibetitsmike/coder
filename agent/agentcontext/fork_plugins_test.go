@@ -633,3 +633,183 @@ func TestResolver_PluginPacksClaudeCacheLayout(t *testing.T) {
 	}
 	require.Equal(t, []string{filepath.Join(current, "skills", "review-pr")}, sources)
 }
+
+func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		manifest   string
+		skillDirs  []string
+		agentFiles []string
+		wantSkills []string
+		wantAgents []string
+	}{
+		{
+			name:       "string declarations",
+			manifest:   `{"name": "pstack", "skills": "./extra-skills", "agents": "./extra-agents"}`,
+			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
+			agentFiles: []string{"agents/default-agent.md", "extra-agents/extra-agent.md"},
+			wantSkills: []string{"extra-skill"},
+			wantAgents: []string{"extra-agent"},
+		},
+		{
+			name:       "array declarations",
+			manifest:   `{"name": "pstack", "skills": ["./skills/", "./extra-skills"], "agents": ["./agents/", "./extra-agents"]}`,
+			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
+			agentFiles: []string{"agents/default-agent.md", "extra-agents/extra-agent.md"},
+			wantSkills: []string{"default-skill", "extra-skill"},
+			wantAgents: []string{"default-agent", "extra-agent"},
+		},
+		{
+			name:       "agent file entries serve only the named files",
+			manifest:   `{"name": "pstack", "agents": ["./agents/one.md", "./agents/two.md"]}`,
+			agentFiles: []string{"agents/one.md", "agents/two.md", "agents/three.md"},
+			wantAgents: []string{"one", "two"},
+		},
+		{
+			name:       "single agent file string",
+			manifest:   `{"name": "pstack", "agents": "./agents/one.md"}`,
+			agentFiles: []string{"agents/one.md", "agents/three.md"},
+			wantAgents: []string{"one"},
+		},
+		{
+			name:       "agent file entry mixed with a directory",
+			manifest:   `{"name": "pstack", "agents": ["./agents/", "./single/solo.md"]}`,
+			agentFiles: []string{"agents/one.md", "single/solo.md", "single/other.md"},
+			wantAgents: []string{"one", "solo"},
+		},
+		{
+			name:       "agent file entry escaping the pack is ignored",
+			manifest:   `{"name": "pstack", "agents": ["../outside.md", "./agents/one.md"]}`,
+			agentFiles: []string{"agents/one.md"},
+			wantAgents: []string{"one"},
+		},
+		{
+			name:       "unsupported shapes fall back to defaults",
+			manifest:   `{"name": "pstack", "skills": 5, "agents": {"path": "./x"}}`,
+			skillDirs:  []string{"skills/default-skill"},
+			agentFiles: []string{"agents/default-agent.md"},
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "array with a non-string element falls back to defaults",
+			manifest:   `{"name": "pstack", "skills": ["./extra-skills", 3], "agents": [null]}`,
+			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
+			agentFiles: []string{"agents/default-agent.md"},
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "null and empty array keep defaults",
+			manifest:   `{"name": "pstack", "skills": null, "agents": []}`,
+			skillDirs:  []string{"skills/default-skill"},
+			agentFiles: []string{"agents/default-agent.md"},
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			packDir := filepath.Join(root, "pstack")
+			mustWriteFile(t, filepath.Join(packDir, ".claude-plugin", "plugin.json"), tc.manifest)
+			for _, dir := range tc.skillDirs {
+				mustWriteFile(t, filepath.Join(packDir, filepath.FromSlash(dir), "SKILL.md"), skillName(filepath.Base(dir)))
+			}
+			for _, file := range tc.agentFiles {
+				mustWriteFile(t, filepath.Join(packDir, filepath.FromSlash(file)), packAgent(strings.TrimSuffix(filepath.Base(file), ".md")))
+			}
+			mustWriteFile(t, filepath.Join(root, "outside.md"), packAgent("outside"))
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			r.PackAgentDefinitionsAdvertised = func() bool { return true }
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+			var skills, agents []string
+			for _, res := range snap.Resources {
+				switch res.Kind {
+				case agentcontext.KindSkill:
+					skills = append(skills, res.Name)
+				case agentcontext.KindSubagent:
+					agents = append(agents, res.Name)
+				}
+			}
+			require.ElementsMatch(t, tc.wantSkills, skills)
+			require.ElementsMatch(t, tc.wantAgents, agents)
+		})
+	}
+}
+
+func TestResolver_PluginPacksClaudeCacheEnabledPlugins(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		settings string
+		want     []string
+	}{
+		{
+			name:     "explicitly disabled plugin is skipped",
+			settings: `{"enabledPlugins": {"alpha@market": false, "beta@market": true}}`,
+			want:     []string{"beta", "gamma"},
+		},
+		{
+			name:     "disabled id must match plugin and marketplace",
+			settings: `{"enabledPlugins": {"alpha@elsewhere": false, "beta": false}}`,
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:     "non-boolean value keeps the plugin",
+			settings: `{"enabledPlugins": {"alpha@market": ["^1.0"]}}`,
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:     "missing settings keeps every plugin",
+			settings: "",
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:     "invalid settings keeps every plugin",
+			settings: `{"enabledPlugins": {"alpha@market": false`,
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:     "malformed enabledPlugins keeps every plugin",
+			settings: `{"enabledPlugins": ["alpha@market"]}`,
+			want:     []string{"alpha", "beta", "gamma"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			cache := filepath.Join(home, ".claude", "plugins", "cache")
+			for _, plugin := range []string{"alpha", "beta", "gamma"} {
+				version := filepath.Join(cache, "market", plugin, "1.0.0")
+				mustWriteFile(t, filepath.Join(version, ".claude-plugin", "plugin.json"), `{"name": "`+plugin+`"}`)
+				mustWriteFile(t, filepath.Join(version, "skills", plugin, "SKILL.md"), skillName(plugin))
+			}
+			if tc.settings != "" {
+				mustWriteFile(t, filepath.Join(home, ".claude", "settings.json"), tc.settings)
+			}
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: cache}})
+
+			var skills []string
+			for _, res := range snap.Resources {
+				if res.Kind == agentcontext.KindSkill {
+					skills = append(skills, res.Name)
+				}
+			}
+			require.ElementsMatch(t, tc.want, skills)
+		})
+	}
+}

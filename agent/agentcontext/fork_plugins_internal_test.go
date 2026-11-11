@@ -65,3 +65,39 @@ func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
 	}
 	require.NotContains(t, dirs, orphaned)
 }
+
+//nolint:paralleltest,tparallel // Uses t.Setenv.
+func TestClaudePluginCacheDirOverride(t *testing.T) {
+	t.Setenv(claudePluginCacheDirEnv, "")
+	require.Equal(t, "~/.claude/plugins/cache", claudePluginCacheRoot())
+	require.Contains(t, defaultBuiltinRoots(), "~/.claude/plugins/cache")
+	require.False(t, isClaudePluginCache(filepath.Join(t.TempDir(), "custom", "cache")))
+
+	root := t.TempDir()
+	t.Setenv(claudePluginCacheDirEnv, root)
+	cache := filepath.Join(root, "cache")
+	require.Equal(t, cache, claudePluginCacheRoot())
+	require.Contains(t, defaultBuiltinRoots(), cache)
+	require.NotContains(t, defaultBuiltinRoots(), "~/.claude/plugins/cache")
+	require.True(t, isClaudePluginCache(cache))
+	require.True(t, isClaudePluginCache(filepath.Join(t.TempDir(), ".claude", "plugins", "cache")))
+	require.False(t, isClaudePluginCache(filepath.Join(root, "other")))
+}
+
+//nolint:paralleltest,tparallel // Uses t.Setenv.
+func TestClaudeUserSettingsPath(t *testing.T) {
+	t.Setenv(claudePluginCacheDirEnv, "")
+	cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
+	got, ok := claudeUserSettingsPath(cache)
+	require.True(t, ok)
+	require.Equal(t, filepath.Join(filepath.Dir(filepath.Dir(cache)), "settings.json"), got)
+
+	// A cache moved by the environment variable keeps its settings in the
+	// home directory.
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	got, ok = claudeUserSettingsPath(filepath.Join(t.TempDir(), "cache"))
+	require.True(t, ok)
+	require.Equal(t, filepath.Join(userHome, ".claude", "settings.json"), got)
+}
