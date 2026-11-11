@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -83,18 +85,29 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 			return false
 		}
 		if enabled == nil {
-			enabled = p.enabledPackNames(ctx, chat)
+			enabled = map[string]bool{}
+			for _, pack := range p.enabledPacks(ctx, chat) {
+				enabled[pack.Name] = true
+			}
 		}
 		return !enabled[name]
 	})
 }
 
-// enabledPackNames returns the names of the packs enabled for the chat's
-// project, when the chat owner can use it, and for the chat's root chat, so
-// subagents see the packs of the chat that spawned them. A failed lookup is
-// logged and enables nothing, so the gate fails closed.
-func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[string]bool {
-	enabled := map[string]bool{}
+// enabledPack is a plugin pack enabled for a chat.
+type enabledPack struct {
+	ID        uuid.UUID
+	Name      string
+	CommitSHA string
+}
+
+// enabledPacks returns the packs enabled for the chat's project, when the
+// chat owner can use it, and for the chat's root chat, so subagents see the
+// packs of the chat that spawned them. A pack enabled for both is listed
+// twice. A failed lookup is logged and enables nothing, so the gate fails
+// closed.
+func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabledPack {
+	var enabled []enabledPack
 	logger := p.logger.With(slog.F("chat_id", chat.ID))
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -111,7 +124,7 @@ func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[s
 			logger.Warn(ctx, "failed to list project plugin packs", slog.F("project_id", projectID.UUID), slog.Error(err))
 		}
 		for _, row := range rows {
-			enabled[row.Name] = true
+			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
 		}
 	}
 	rootChatID := chat.ID
@@ -124,7 +137,7 @@ func (p *Server) enabledPackNames(ctx context.Context, chat database.Chat) map[s
 		logger.Warn(ctx, "failed to list chat plugin packs", slog.F("root_chat_id", rootChatID), slog.Error(err))
 	}
 	for _, row := range rows {
-		enabled[row.Name] = true
+		enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
 	}
 	return enabled
 }
