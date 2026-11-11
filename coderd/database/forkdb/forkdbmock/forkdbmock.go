@@ -191,20 +191,6 @@ func (mr *MockStoreMockRecorder) DeleteChatSecretAnswer(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswer", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswer), ctx, arg)
 }
 
-// DeleteChatSecretAnswersByChatID mocks base method.
-func (m *MockStore) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteChatSecretAnswersByChatID", ctx, chatID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteChatSecretAnswersByChatID indicates an expected call of DeleteChatSecretAnswersByChatID.
-func (mr *MockStoreMockRecorder) DeleteChatSecretAnswersByChatID(ctx, chatID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswersByChatID", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswersByChatID), ctx, chatID)
-}
-
 // DeleteChatWakeupByID mocks base method.
 func (m *MockStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -497,6 +483,21 @@ func (m *MockStore) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb
 func (mr *MockStoreMockRecorder) GetChatWakeupByID(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByID", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByID), ctx, id)
+}
+
+// GetChatWakeupByIDForUpdate mocks base method.
+func (m *MockStore) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatWakeupByIDForUpdate", ctx, id)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatWakeupByIDForUpdate indicates an expected call of GetChatWakeupByIDForUpdate.
+func (mr *MockStoreMockRecorder) GetChatWakeupByIDForUpdate(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByIDForUpdate", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByIDForUpdate), ctx, id)
 }
 
 // GetFamilySubagentsAwaitingWorker mocks base method.

@@ -41,7 +41,6 @@ type Querier interface {
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
-	DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredPluginLinkCodes(ctx context.Context) error
 	// Deletes a batch of answers past the 24 hour TTL of
@@ -69,9 +68,10 @@ type Querier interface {
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
-	// Returns the agent type of each child chat in @chat_ids. A child spawned
-	// without a chat_subagents row gets its type from its mode, as
-	// subagentTypeFromChat in coderd/x/chatd derives it.
+	// Returns the agent type of each child chat in @chat_ids and of each root chat
+	// in @chat_ids that started as an agent type. A child spawned without a
+	// chat_subagents row gets its type from its mode, as subagentTypeFromChat in
+	// coderd/x/chatd derives it.
 	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.
@@ -79,6 +79,9 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Locks the wake-up until the transaction ends, so a worker that finishes its
+	// claim in between waits and then finds its lease gone.
+	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
 	// worker with a fresh heartbeat owns, with the predicate of
 	// GetChatAwaitingWorker. Each row carries the counts of
@@ -113,7 +116,8 @@ type Querier interface {
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
-	// Failed runs are left out, so a failed attempt never blocks a later run.
+	// A failed send of an events entry records its run under a key of its own,
+	// so it never blocks a later run of the entry.
 	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
 	// Lists the children of @parent_chat_id that wait for events of their own,

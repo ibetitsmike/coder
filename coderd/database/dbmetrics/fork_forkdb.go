@@ -102,11 +102,6 @@ func (f forkQueryMetricsStore) DeleteChatSecretAnswer(ctx context.Context, arg f
 	return f.s.DeleteChatSecretAnswer(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) DeleteChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) error {
-	defer f.observe(ctx, "DeleteChatSecretAnswersByChatID", time.Now())
-	return f.s.DeleteChatSecretAnswersByChatID(ctx, chatID)
-}
-
 func (f forkQueryMetricsStore) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
 	defer f.observe(ctx, "DeleteChatWakeupByID", time.Now())
 	return f.s.DeleteChatWakeupByID(ctx, id)
@@ -210,6 +205,11 @@ func (f forkQueryMetricsStore) GetChatSecretAnswersByChatID(ctx context.Context,
 func (f forkQueryMetricsStore) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "GetChatWakeupByID", time.Now())
 	return f.s.GetChatWakeupByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	defer f.observe(ctx, "GetChatWakeupByIDForUpdate", time.Now())
+	return f.s.GetChatWakeupByIDForUpdate(ctx, id)
 }
 
 func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {

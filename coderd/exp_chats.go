@@ -1464,8 +1464,9 @@ func (api *API) createChat(
 	}
 
 	modelConfigID, personalOverrideEffort, modelConfigStatus, modelConfigError := api.resolveCreateChatModelConfigID(ownerCtx, ownerID, req)
-	if modelConfigError != nil {
-		return database.Chat{}, codersdk.Chat{}, httperror.NewResponseError(modelConfigStatus, *modelConfigError)
+	rootAgent, modelConfigID, personalOverrideEffort, err := api.forkCreateChatRootAgent(ownerCtx, ownerID, projectID, req, modelConfigID, personalOverrideEffort, modelConfigStatus, modelConfigError)
+	if err != nil {
+		return database.Chat{}, codersdk.Chat{}, err
 	}
 
 	if !validateChatPlanMode(req.PlanMode) {
@@ -1592,6 +1593,7 @@ func (api *API) createChat(
 		InlineMCPServers:   req.InlineMCPServers,
 		Labels:             labels,
 		DynamicTools:       dynamicToolsJSON,
+		RootAgent:          rootAgent,
 		// IMPORTANT: users can only create root chats at the time of writing.
 		ParentChatID: uuid.NullUUID{},
 	})
@@ -1622,6 +1624,9 @@ func (api *API) createChat(
 
 	chatFiles := api.fetchChatFileMetadata(ownerCtx, chat.ID)
 	response := db2sdk.Chat(chat, nil, chatFiles)
+	if rootAgent != nil {
+		response.AgentType = rootAgent.Name
+	}
 	return chat, response, nil
 }
 
@@ -1798,6 +1803,9 @@ func (api *API) createChatError(err error) error {
 	}
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
+	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
 	}
 	if xerrors.Is(err, chatd.ErrInvalidModelConfigID) || database.IsForeignKeyViolation(
 		err,
@@ -3363,6 +3371,9 @@ func (api *API) sendChatMessageError(err error) error {
 	}
 	if skillErr := chatSkillInvocationError(err); skillErr != nil {
 		return skillErr
+	}
+	if loopErr := forkChatLoopError(err); loopErr != nil {
+		return loopErr
 	}
 	if xerrors.Is(err, chatd.ErrSecretQuestionPending) {
 		return secretQuestionPendingError(err)

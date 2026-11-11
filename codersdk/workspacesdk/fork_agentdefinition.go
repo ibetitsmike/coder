@@ -33,6 +33,10 @@ type AgentDefinition struct {
 	MCPServers []string
 	// BaseType is AgentDefinitionBaseGeneral or AgentDefinitionBaseExplore.
 	BaseType string
+	// Isolation is the spawn_agent isolation a spawn of this agent uses when
+	// the call sets none: "shared", "worktree" or "workspace". Empty means
+	// shared.
+	Isolation string
 	// Warnings lists non-fatal problems, sorted.
 	Warnings []string
 }
@@ -73,7 +77,12 @@ var agentDefinitionKnownKeys = map[string]struct{}{
 	"mcp":              {},
 	"mcpServers":       {},
 	"base_type":        {},
+	"isolation":        {},
 }
+
+// agentDefinitionIsolations are the values of the isolation key, matching
+// the spawn_agent isolation argument.
+var agentDefinitionIsolations = []string{"shared", "worktree", "workspace"}
 
 // agentDefinitionIgnoredKeys are known keys from other tools that have no
 // Coder equivalent and are dropped without a warning.
@@ -178,6 +187,12 @@ func ParseAgentDefinition(content, fallbackName string) (AgentDefinition, error)
 		def.BaseType = baseType
 	default:
 		return AgentDefinition{}, xerrors.Errorf("front-matter field \"base_type\" must be %q or %q, got %q", AgentDefinitionBaseGeneral, AgentDefinitionBaseExplore, baseType)
+	}
+	if def.Isolation, err = agentStringField(fm, "isolation"); err != nil {
+		return AgentDefinition{}, err
+	}
+	if def.Isolation != "" && !slices.Contains(agentDefinitionIsolations, def.Isolation) {
+		return AgentDefinition{}, xerrors.Errorf("front-matter field \"isolation\" must be one of %s, got %q", strings.Join(agentDefinitionIsolations, ", "), def.Isolation)
 	}
 
 	slices.Sort(warnings)

@@ -132,6 +132,16 @@ func (c *Client) ForkOrganizationAgentDefinitionACL(ctx context.Context, organiz
 	return requestJSON[OrganizationSkillACL](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl", http.StatusOK, nil)
 }
 
+// ForkOrganizationAgentDefinitionACLAvailable returns the organization members
+// and groups that can be granted read access to an organization agent
+// definition. Pass UsersRequest{} when no filtering is desired.
+func (c *Client) ForkOrganizationAgentDefinitionACLAvailable(ctx context.Context, organizationID uuid.UUID, name string, req UsersRequest) (ACLAvailable, error) {
+	return requestJSON[ACLAvailable](ctx, c, http.MethodGet, forkOrganizationAgentDefinitionPath(organizationID, name)+"/acl/available", http.StatusOK, nil,
+		req.Pagination.asRequestOption(),
+		req.asRequestOption(),
+	)
+}
+
 // UpdateForkOrganizationAgentDefinitionACL grants or revokes read access to
 // an organization agent definition for organization members and groups.
 func (c *Client) UpdateForkOrganizationAgentDefinitionACL(ctx context.Context, organizationID uuid.UUID, name string, req UpdateOrganizationSkillACLRequest) error {

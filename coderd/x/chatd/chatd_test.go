@@ -54,6 +54,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	dbpubsub "github.com/coder/coder/v2/coderd/database/pubsub"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/util/ptr"
@@ -11061,6 +11062,12 @@ type panicOnInTxDB struct {
 	panicked atomic.Bool
 }
 
+// ForkUnwrap and ForkWrap let forkdb.From reach the wrapped store's fork
+// queries, which a turn reads with the fork experiments on.
+func (d *panicOnInTxDB) ForkUnwrap() database.Store { return d.Store }
+
+func (*panicOnInTxDB) ForkWrap(s forkdb.Store) forkdb.Store { return s }
+
 func (d *panicOnInTxDB) enablePanic() { d.active.Store(true) }
 
 func (d *panicOnInTxDB) InTx(f func(database.Store) error, opts *database.TxOptions) error {
@@ -11800,6 +11807,12 @@ type overrideReadFailStore struct {
 	database.Store
 	fail *atomic.Bool
 }
+
+// ForkUnwrap and ForkWrap let forkdb.From reach the wrapped store's fork
+// queries, which a turn reads with the fork experiments on.
+func (s *overrideReadFailStore) ForkUnwrap() database.Store { return s.Store }
+
+func (*overrideReadFailStore) ForkWrap(s forkdb.Store) forkdb.Store { return s }
 
 func (s *overrideReadFailStore) GetChatOrganizationModelOverride(ctx context.Context, arg database.GetChatOrganizationModelOverrideParams) (database.ChatOrganizationModelOverride, error) {
 	if s.fail.Load() && arg.Context == "compaction" {

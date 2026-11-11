@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
@@ -274,6 +275,54 @@ func TestForkOrganizationAgentDefinitions(t *testing.T) {
 		_, err = client.PostOrganizationMember(ctx, orgID, granteeUser.ID.String())
 		require.NoError(t, err)
 		_, err = grantee.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("ACLAvailable", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		orgAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(orgID))
+		member, memberUser := coderdtest.CreateAnotherUser(t, client, orgID)
+		groupMember, groupMemberUser := coderdtest.CreateAnotherUser(t, client, orgID)
+		group := dbgen.Group(t, db, database.Group{OrganizationID: orgID})
+		dbgen.GroupMember(t, db, database.GroupMemberTable{GroupID: group.ID, UserID: groupMemberUser.ID})
+
+		_, err := orgAdmin.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+		require.NoError(t, err)
+
+		available, err := orgAdmin.ForkOrganizationAgentDefinitionACLAvailable(ctx, orgID, "reviewer", codersdk.UsersRequest{})
+		require.NoError(t, err)
+		require.Contains(t, aclAvailableUserIDs(available), memberUser.ID)
+		groupIDs := make([]uuid.UUID, 0, len(available.Groups))
+		for _, g := range available.Groups {
+			groupIDs = append(groupIDs, g.ID)
+		}
+		require.Contains(t, groupIDs, group.ID)
+
+		_, err = member.ForkOrganizationAgentDefinitionACLAvailable(ctx, orgID, "reviewer", codersdk.UsersRequest{})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = orgAdmin.ForkOrganizationAgentDefinitionACLAvailable(ctx, orgID, "missing", codersdk.UsersRequest{})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		// A group picked from the candidates grants read to its members only.
+		err = orgAdmin.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+			GroupRoles: map[string]codersdk.OrganizationSkillRole{
+				group.ID.String(): codersdk.OrganizationSkillRoleRead,
+				orgID.String():    codersdk.OrganizationSkillRoleDeleted,
+			},
+		})
+		require.NoError(t, err)
+		_, err = groupMember.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
+		require.NoError(t, err)
+		_, err = member.ForkOrganizationAgentDefinition(ctx, orgID, "reviewer")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
 

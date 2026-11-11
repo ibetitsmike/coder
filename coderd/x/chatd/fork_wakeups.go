@@ -28,6 +28,8 @@ const (
 	wakeupPollInterval = 15 * time.Second
 	wakeupLease        = 2 * time.Minute
 	wakeupClaimBatch   = 20
+
+	wakeupReasonArchived = "archived"
 )
 
 // startForkLoops starts the worker loops of fork experiments.
@@ -132,8 +134,8 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 
 	switch {
 	case chat.Archived:
-		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"})
-	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now):
+		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived})
+	case wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) && !eventsFinalPoll(wakeup, now):
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "expired"})
 	case chat.Status == database.ChatStatusRunning,
 		chat.Status == database.ChatStatusInterrupting,
@@ -310,15 +312,18 @@ func (p *Server) wakeupFailure(ctx context.Context, wakeup forkdb.ChatWakeup, no
 	}
 	switch {
 	case errors.Is(sendErr, ErrChatArchived), errors.Is(sendErr, chatstate.ErrChatFamilyArchived):
-		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: "archived"}
+		return forkdb.ChatWakeupRunStatusSkipped, wakeupFinish{status: forkdb.ChatWakeupStatusCanceled, reason: wakeupReasonArchived}
 	default:
 		// Includes hook dispatch failures, which are transient: the next
-		// occurrence tries again.
+		// occurrence tries again, and a final events poll is retried.
 		p.logger.Warn(ctx, "chat wake-up send failed",
 			slog.F("wakeup_id", wakeup.ID),
 			slog.F("chat_id", wakeup.ChatID),
 			slog.Error(sendErr),
 		)
+		if retry, ok := eventsFinalRetry(wakeup, now, now.Add(pullRequestErrorRetry)); ok {
+			return forkdb.ChatWakeupRunStatusFailed, retry
+		}
 		return forkdb.ChatWakeupRunStatusFailed, nextWakeupRun(wakeup, now, 0)
 	}
 }
@@ -344,7 +349,7 @@ func nextWakeupRun(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32) wake
 		}
 		next = schedule.Next(now)
 	case forkdb.ChatWakeupKindEvents:
-		next = now.Add(wakeupPollInterval)
+		return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(wakeupPollInterval))
 	default:
 		finish.status, finish.reason = forkdb.ChatWakeupStatusCompleted, "done"
 		return finish
@@ -377,6 +382,22 @@ func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, chat d
 	}
 	if finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish.reason)
+	}
+	return nil
+}
+
+// cancelArchivedWakeups cancels the active and paused wake-ups of the chats of
+// an archived family.
+func cancelArchivedWakeups(ctx context.Context, fdb forkdb.Store, chats []database.Chat, now time.Time) error {
+	for _, chat := range chats {
+		_, err := fdb.CancelChatWakeupsByChatID(ctx, forkdb.CancelChatWakeupsByChatIDParams{
+			ChatID:    chat.ID,
+			Reason:    wakeupReasonArchived,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			return xerrors.Errorf("cancel wake-ups of archived chat %s: %w", chat.ID, err)
+		}
 	}
 	return nil
 }

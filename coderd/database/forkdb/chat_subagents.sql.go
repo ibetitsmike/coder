@@ -44,7 +44,7 @@ SELECT
 FROM chats
 LEFT JOIN chat_subagents ON chat_subagents.chat_id = chats.id
 WHERE chats.id = ANY($1::uuid[])
-	AND chats.parent_chat_id IS NOT NULL
+	AND (chats.parent_chat_id IS NOT NULL OR chat_subagents.chat_id IS NOT NULL)
 `
 
 type GetChatSubagentTypesByChatIDsRow struct {
@@ -52,9 +52,10 @@ type GetChatSubagentTypesByChatIDsRow struct {
 	AgentType string    `db:"agent_type" json:"agent_type"`
 }
 
-// Returns the agent type of each child chat in @chat_ids. A child spawned
-// without a chat_subagents row gets its type from its mode, as
-// subagentTypeFromChat in coderd/x/chatd derives it.
+// Returns the agent type of each child chat in @chat_ids and of each root chat
+// in @chat_ids that started as an agent type. A child spawned without a
+// chat_subagents row gets its type from its mode, as subagentTypeFromChat in
+// coderd/x/chatd derives it.
 func (q *Queries) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getChatSubagentTypesByChatIDs, pq.Array(chatIds))
 	if err != nil {

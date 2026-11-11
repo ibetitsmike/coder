@@ -311,6 +311,90 @@ func TestForkSpawnIsolationStoredAgentType(t *testing.T) {
 	require.Contains(t, agentDefinitionsFixture{db: f.db}.systemPrompt(t, childID), "PLANNER-MARKER")
 }
 
+// TestForkSpawnIsolationDefinitionDefault checks that a custom agent's
+// isolation front-matter applies when the spawn sets no isolation, and that an
+// explicit isolation wins over it.
+func TestForkSpawnIsolationDefinitionDefault(t *testing.T) {
+	t.Parallel()
+
+	returned := workspacesdk.ForkWorktree{Path: "/home/coder/.coder/worktrees/child", Branch: "agent/returned-branch"}
+	for _, tc := range []struct {
+		name          string
+		experiments   codersdk.Experiments
+		args          map[string]any
+		wantIsolation string
+		wantRepoPath  string
+	}{
+		{
+			name:          "NoIsolationArg",
+			experiments:   codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions},
+			args:          map[string]any{"type": "personal/fixer", "title": "Fix"},
+			wantIsolation: "worktree",
+		},
+		{
+			name:          "RepoPathWithoutIsolationArg",
+			experiments:   codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions},
+			args:          map[string]any{"type": "personal/fixer", "title": "Fix", "repo_path": "/src/other"},
+			wantIsolation: "worktree",
+			wantRepoPath:  "/src/other",
+		},
+		{
+			name:          "ExplicitShared",
+			experiments:   codersdk.Experiments{codersdk.ExperimentForkSubagentIsolation, codersdk.ExperimentForkAgentDefinitions},
+			args:          map[string]any{"type": "personal/fixer", "title": "Fix", "isolation": "shared"},
+			wantIsolation: "shared",
+		},
+		{
+			name:          "IsolationExperimentOff",
+			experiments:   codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions},
+			args:          map[string]any{"type": "personal/fixer", "title": "Fix"},
+			wantIsolation: "shared",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newIsolationFixture(t, tc.experiments)
+			ctx := chatdTestContext(t)
+			conn := &fakeWorktreeConn{worktree: returned}
+			root := f.rootChat(t, conn)
+			_, err := f.fdb.InsertUserAgentDefinition(ctx, forkdb.InsertUserAgentDefinitionParams{
+				OrganizationID: root.OrganizationID,
+				UserID:         root.OwnerID,
+				Name:           "fixer",
+				Description:    "Fixes bugs.",
+				Content:        agentDefinitionMarkdown("name: fixer\nisolation: worktree", "Fix it."),
+			})
+			require.NoError(t, err)
+
+			resp := f.spawn(t, root, tc.args)
+			require.False(t, resp.IsError, resp.Content)
+			var result struct {
+				ChatID    string `json:"chat_id"`
+				Isolation string `json:"isolation"`
+				Branch    string `json:"branch"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(resp.Content), &result))
+			childID, err := uuid.Parse(result.ChatID)
+			require.NoError(t, err)
+			row, err := f.fdb.GetChatSubagentByChatID(ctx, childID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantIsolation, row.Isolation)
+			creates, _ := conn.calls()
+			if tc.wantIsolation == "worktree" {
+				require.Equal(t, "worktree", result.Isolation)
+				require.Equal(t, returned.Branch, result.Branch)
+				require.Len(t, creates, 1)
+				if tc.wantRepoPath != "" {
+					require.Equal(t, tc.wantRepoPath, creates[0].RepoPath)
+				}
+				return
+			}
+			require.Empty(t, result.Isolation)
+			require.Empty(t, creates)
+		})
+	}
+}
+
 func TestForkSpawnIsolationErrors(t *testing.T) {
 	t.Parallel()
 

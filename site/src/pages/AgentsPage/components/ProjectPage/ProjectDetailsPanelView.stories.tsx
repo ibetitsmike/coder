@@ -213,6 +213,39 @@ export const NoSkills: Story = {
 	args: { skillCount: 0 },
 };
 
+export const WithAgentDefinitions: Story = {
+	args: {
+		agentDefinitions: {
+			count: 2,
+			disabledCount: 1,
+			error: undefined,
+			onOpen: fn(),
+		},
+	},
+};
+
+export const AgentDefinitionsLoading: Story = {
+	args: {
+		agentDefinitions: {
+			count: undefined,
+			disabledCount: undefined,
+			error: undefined,
+			onOpen: fn(),
+		},
+	},
+};
+
+export const AgentDefinitionsError: Story = {
+	args: {
+		agentDefinitions: {
+			count: undefined,
+			disabledCount: undefined,
+			error: new Error("Failed to load agent definitions."),
+			onOpen: fn(),
+		},
+	},
+};
+
 export const Unset: Story = {
 	args: { instructions: MockUnsetChatProjectInstructions },
 };

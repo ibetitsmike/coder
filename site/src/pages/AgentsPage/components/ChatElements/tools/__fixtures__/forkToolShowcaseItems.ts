@@ -8,6 +8,12 @@ import {
 	MockChatTranscriptResult,
 	MockSearchChatsResult,
 } from "#/testHelpers/forkChatTodos";
+import {
+	MockNotifyUserArgs,
+	MockScheduleWakeupArgs,
+	MockScheduleWakeupResult,
+	MockWaitForEventsResult,
+} from "#/testHelpers/forkChatWakeups";
 import type { Tool } from "../Tool";
 
 type ForkToolShowcaseItem = Pick<
@@ -29,4 +35,11 @@ export const forkToolShowcaseItems: readonly ForkToolShowcaseItem[] = [
 		result: MockSearchChatsResult,
 	},
 	{ name: "read_chat_transcript", result: MockChatTranscriptResult },
+	{
+		name: "schedule_wakeup",
+		args: MockScheduleWakeupArgs,
+		result: MockScheduleWakeupResult,
+	},
+	{ name: "wait_for_events", result: MockWaitForEventsResult },
+	{ name: "notify_user", args: MockNotifyUserArgs, result: { sent: true } },
 ];

@@ -64,7 +64,7 @@ func TestParseAgentDefinition(t *testing.T) {
 		{
 			name: "CoderKeys",
 			content: "---\ndescription: Explores.\ntools:\n  - read_file\n  - execute\ndisallowed_tools: execute\n" +
-				"reasoning_effort: high\neffort: low\nmcp: none\nbase_type: explore\n---\nExplore.",
+				"reasoning_effort: high\neffort: low\nmcp: none\nbase_type: explore\nisolation: worktree\n---\nExplore.",
 			fallback: "explorer",
 			want: workspacesdk.AgentDefinition{
 				Name:            "explorer",
@@ -75,6 +75,7 @@ func TestParseAgentDefinition(t *testing.T) {
 				DisallowedTools: []string{"execute"},
 				MCPMode:         workspacesdk.AgentDefinitionMCPNone,
 				BaseType:        workspacesdk.AgentDefinitionBaseExplore,
+				Isolation:       "worktree",
 			},
 		},
 		{
@@ -119,6 +120,7 @@ func TestParseAgentDefinitionErrors(t *testing.T) {
 		{name: "NonKebabFallback", content: "---\ndescription: d\n---\nBody.", fallback: "My Agent", errMsg: `agent name "My Agent" is not kebab-case`},
 		{name: "EmptyBody", content: "---\nname: a\n---\n<!-- only a comment -->\n", errMsg: "agent definition has no prompt body"},
 		{name: "BadBaseType", content: "---\nname: a\nbase_type: plan\n---\nBody.", errMsg: `"base_type"`},
+		{name: "BadIsolation", content: "---\nname: a\nisolation: container\n---\nBody.", errMsg: `"isolation" must be one of shared, worktree, workspace`},
 		{name: "ReadonlyNotBool", content: "---\nname: a\nreadonly: \"yes\"\n---\nBody.", errMsg: `"readonly"`},
 		{name: "ToolsWrongType", content: "---\nname: a\ntools: {read: true}\n---\nBody.", errMsg: `"tools"`},
 		{name: "DisallowedToolsNonString", content: "---\nname: a\ndisallowedTools: [1]\n---\nBody.", errMsg: `"disallowedTools"`},

@@ -317,6 +317,57 @@ func TestWakeupEndsSchedule(t *testing.T) {
 	})
 }
 
+// Archiving a family cancels the wake-ups of every member at once, including
+// paused ones that the worker never claims, and unarchiving does not resume
+// them.
+func TestWakeupsCanceledOnArchive(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		experiments  codersdk.Experiments
+		wantCanceled bool
+	}{
+		{name: "Wakeups", experiments: codersdk.Experiments{codersdk.ExperimentForkChatWakeups}, wantCanceled: true},
+		{name: "WakeupsAndNestedSubagents", experiments: codersdk.Experiments{codersdk.ExperimentForkChatWakeups, codersdk.ExperimentForkNestedSubagents}, wantCanceled: true},
+		{name: "ExperimentOff", experiments: upstreamExperimentsKnown()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := chatdTestContext(t)
+			root := f.createWakeupChat(t)
+			child := f.createWakeupChild(t, root, database.ChatStatusWaiting)
+			active := f.insertWakeup(t, root, forkdb.InsertChatWakeupParams{
+				Kind:            forkdb.ChatWakeupKindInterval,
+				IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+			})
+			paused := f.insertWakeup(t, child, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+			_, err := f.sqlDB.ExecContext(ctx,
+				"UPDATE chat_wakeups SET status = 'paused', status_reason = 'hook_denied', next_run_at = NULL WHERE id = $1", paused.ID)
+			require.NoError(t, err)
+			server := newUnstartedServer(t, f.pubsub, f.db)
+			server.experiments = tc.experiments
+
+			require.NoError(t, server.ArchiveChat(ctx, root))
+			require.NoError(t, server.UnarchiveChat(ctx, root))
+			for id, status := range map[uuid.UUID]forkdb.ChatWakeupStatus{
+				active.ID: forkdb.ChatWakeupStatusActive,
+				paused.ID: forkdb.ChatWakeupStatusPaused,
+			} {
+				got := f.wakeup(t, id)
+				if !tc.wantCanceled {
+					require.Equal(t, status, got.Status)
+					continue
+				}
+				require.Equal(t, forkdb.ChatWakeupStatusCanceled, got.Status)
+				require.Equal(t, wakeupReasonArchived, got.StatusReason.String)
+				require.False(t, got.NextRunAt.Valid)
+			}
+		})
+	}
+}
+
 // The user prompt hook runs after the worker saw an idle chat and before the
 // send takes the chat lock, so it can change the world in between.
 func TestWakeupAdmissionRaces(t *testing.T) {
@@ -678,7 +729,7 @@ func TestNextWakeupRun(t *testing.T) {
 			wantNext:   slot.Add(10*time.Second + wakeupPollInterval),
 		},
 		{
-			name: "EventsExpired",
+			name: "EventsLastPollAtExpiry",
 			wakeup: forkdb.ChatWakeup{
 				Kind:      forkdb.ChatWakeupKindEvents,
 				NextRunAt: sql.NullTime{Time: slot, Valid: true},
@@ -686,6 +737,18 @@ func TestNextWakeupRun(t *testing.T) {
 				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
 			},
 			now:        slot.Add(10 * time.Second),
+			wantStatus: forkdb.ChatWakeupStatusActive,
+			wantNext:   slot.Add(20 * time.Second),
+		},
+		{
+			name: "EventsExpired",
+			wakeup: forkdb.ChatWakeup{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				NextRunAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+				Timezone:  "UTC",
+				ExpiresAt: sql.NullTime{Time: slot.Add(20 * time.Second), Valid: true},
+			},
+			now:        slot.Add(20 * time.Second),
 			wantStatus: forkdb.ChatWakeupStatusCompleted,
 			wantReason: "expired",
 		},

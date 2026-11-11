@@ -5,6 +5,7 @@
 import type React from "react";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { ChatTodoPill } from "./ChatTodoPill";
+import { ForkChatWakeupsPill } from "./ForkChatWakeupsPill";
 
 type ForkComposerSlotProps = {
 	chatId?: string;
@@ -17,10 +18,20 @@ type ForkComposerSlotProps = {
  */
 export const ForkComposerSlot: React.FC<ForkComposerSlotProps> = ({
 	chatId,
+	isDisabled,
 }) => {
 	const { experiments } = useDashboard();
-	if (!chatId || !experiments.includes("fork-chat-todos")) {
+	if (!chatId) {
 		return null;
 	}
-	return <ChatTodoPill chatId={chatId} />;
+	return (
+		<>
+			{experiments.includes("fork-chat-todos") && (
+				<ChatTodoPill chatId={chatId} />
+			)}
+			{experiments.includes("fork-chat-wakeups") && (
+				<ForkChatWakeupsPill chatId={chatId} isDisabled={isDisabled} />
+			)}
+		</>
+	);
 };

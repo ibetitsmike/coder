@@ -46,6 +46,11 @@ RETURNING *;
 -- name: GetChatWakeupByID :one
 SELECT * FROM chat_wakeups WHERE id = @id;
 
+-- Locks the wake-up until the transaction ends, so a worker that finishes its
+-- claim in between waits and then finds its lease gone.
+-- name: GetChatWakeupByIDForUpdate :one
+SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
+
 -- name: ListChatWakeupsByChatID :many
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
 
@@ -171,8 +176,9 @@ ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
 -- name: ListChatWakeupRunKeys :many
--- Failed runs are left out, so a failed attempt never blocks a later run.
-SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid AND status <> 'failed' ORDER BY created_at, id;
+-- A failed send of an events entry records its run under a key of its own,
+-- so it never blocks a later run of the entry.
+SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid ORDER BY created_at, id;
 
 -- name: UpdateChatWakeupRunStatus :one
 UPDATE chat_wakeup_runs

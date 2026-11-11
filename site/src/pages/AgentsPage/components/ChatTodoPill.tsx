@@ -6,7 +6,6 @@ import {
 	CircleXIcon,
 	ListTodoIcon,
 	type LucideIcon,
-	TriangleAlertIcon,
 } from "lucide-react";
 import type React from "react";
 import { useEffect } from "react";
@@ -15,12 +14,8 @@ import { getErrorMessage } from "#/api/errors";
 import { watchChatTodos } from "#/api/forkChatTodos";
 import { chatTodos, chatTodosKey } from "#/api/queries/forkChatTodos";
 import type { ChatTodo, ChatTodoStatus } from "#/api/typesGenerated";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "#/components/Popover/Popover";
 import { createReconnectingWebSocket } from "#/utils/reconnectingWebSocket";
+import { ComposerPillError, ComposerPillPopover } from "./ComposerPillPopover";
 
 const statusDisplay: Record<
 	ChatTodoStatus,
@@ -103,41 +98,13 @@ export const ChatTodoPillView: React.FC<ChatTodoPillViewProps> = ({
 	if (todos) {
 		return todos.length > 0 ? <ChatTodoListPill todos={todos} /> : null;
 	}
-	return error ? <ChatTodoErrorPill error={error} /> : null;
-};
-
-type ChatTodoPopoverProps = {
-	label: string;
-	trigger: React.ReactNode;
-	children: React.ReactNode;
-};
-
-const ChatTodoPopover: React.FC<ChatTodoPopoverProps> = ({
-	label,
-	trigger,
-	children,
-}) => {
-	return (
-		<Popover>
-			<PopoverTrigger asChild>
-				<button
-					type="button"
-					aria-label={label}
-					className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border-none bg-transparent px-1 text-xs outline-hidden transition-colors hover:bg-surface-secondary/60 focus-visible:ring-2 focus-visible:ring-content-link"
-				>
-					{trigger}
-				</button>
-			</PopoverTrigger>
-			<PopoverContent
-				side="top"
-				align="end"
-				className="mobile-full-width-dropdown w-76 p-3 text-xs font-normal text-content-primary"
-			>
-				<h3 className="m-0 text-sm font-semibold">Todos</h3>
-				{children}
-			</PopoverContent>
-		</Popover>
-	);
+	return error ? (
+		<ComposerPillError
+			label="Todo list failed to load"
+			heading="Todos"
+			message={getErrorMessage(error, "Failed to load the todo list.")}
+		/>
+	) : null;
 };
 
 /** Formats done items over the items that count, which excludes cancelled. */
@@ -155,8 +122,9 @@ const ChatTodoListPill: React.FC<ChatTodoListPillProps> = ({ todos }) => {
 	const progress = formatChatTodoProgress(todos);
 
 	return (
-		<ChatTodoPopover
+		<ComposerPillPopover
 			label={`Todo list, ${progress} done`}
+			heading="Todos"
 			trigger={
 				<>
 					<ListTodoIcon
@@ -170,7 +138,7 @@ const ChatTodoListPill: React.FC<ChatTodoListPillProps> = ({ todos }) => {
 			}
 		>
 			<ChatTodoChecklist todos={todos} className="mt-2" />
-		</ChatTodoPopover>
+		</ComposerPillPopover>
 	);
 };
 
@@ -216,27 +184,5 @@ const ChatTodoItem: React.FC<ChatTodoItemProps> = ({ todo }) => {
 				{todo.content}
 			</span>
 		</li>
-	);
-};
-
-type ChatTodoErrorPillProps = {
-	error: unknown;
-};
-
-const ChatTodoErrorPill: React.FC<ChatTodoErrorPillProps> = ({ error }) => {
-	return (
-		<ChatTodoPopover
-			label="Todo list failed to load"
-			trigger={
-				<TriangleAlertIcon
-					aria-hidden="true"
-					className="size-3.5 shrink-0 text-content-warning"
-				/>
-			}
-		>
-			<p className="mb-0 mt-2 text-content-secondary">
-				{getErrorMessage(error, "Failed to load the todo list.")}
-			</p>
-		</ChatTodoPopover>
 	);
 };

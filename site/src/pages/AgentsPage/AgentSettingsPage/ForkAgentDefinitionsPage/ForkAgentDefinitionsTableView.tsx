@@ -1,7 +1,6 @@
 // This file is fork code: the fork-agent-definitions experiment's table.
 
-import { EllipsisVerticalIcon } from "lucide-react";
-import { useRef } from "react";
+import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { ForkAgentDefinitionMetadata } from "#/api/typesGenerated";
 import { Alert, AlertDescription } from "#/components/Alert/Alert";
@@ -27,8 +26,14 @@ import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
 import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
+import { SkillEnabledStatus } from "../../components/SkillEnabledSwitch";
 import { formatUpdatedAt } from "../../components/SkillsTableView";
 import { useDialogFocusReturn } from "../../components/useDialogFocusReturn";
+import { fullSkillAccess, type SkillAccess } from "../../utils/skills";
+import {
+	ForkAgentDefinitionEditorDialog,
+	type ForkAgentDefinitionEditorState,
+} from "./ForkAgentDefinitionEditorDialog";
 
 const title = "Agent definitions";
 
@@ -38,14 +43,22 @@ const title = "Agent definitions";
  */
 export type ForkAgentDefinitionDeleteState = {
 	definition: ForkAgentDefinitionMetadata;
+	message: string;
 	error?: unknown;
 	isDeleting: boolean;
 	onConfirm: () => void;
 	onClose: () => void;
 };
 
-type ForkAgentDefinitionsTableViewProps = {
+export type ForkAgentDefinitionsTableViewProps = {
 	definitions: readonly ForkAgentDefinitionMetadata[];
+	description: string;
+	emptyMessage: string;
+	/**
+	 * Hides the create, edit, and delete controls the user may not use, and
+	 * shows the enabled state as a static status without update access.
+	 */
+	access?: SkillAccess;
 	/** Rendered in the section header, for example an organization picker. */
 	action?: React.ReactNode;
 	error: unknown;
@@ -55,14 +68,54 @@ type ForkAgentDefinitionsTableViewProps = {
 	/** The enabled value each in-flight toggle sends, keyed by name. */
 	pendingToggles?: Readonly<Record<string, boolean>>;
 	onToggleEnabled: (name: string, enabled: boolean) => void;
+	onCreate: () => void;
+	onEdit: (definition: ForkAgentDefinitionMetadata) => void;
 	onDelete: (definition: ForkAgentDefinitionMetadata) => void;
+	/**
+	 * The caller opens its own dialog and passes onCloseAutoFocus to it so
+	 * focus returns to the row's menu.
+	 */
+	onManagePermissions?: (
+		definition: ForkAgentDefinitionMetadata,
+		onCloseAutoFocus: (event: Event) => void,
+	) => void;
+	editorState?: ForkAgentDefinitionEditorState;
 	deleteState?: ForkAgentDefinitionDeleteState;
+};
+
+type EnabledCellProps = {
+	definition: ForkAgentDefinitionMetadata;
+	canUpdate: boolean;
+	pendingEnabled: boolean | undefined;
+	onToggleEnabled: (name: string, enabled: boolean) => void;
+};
+
+const EnabledCell: React.FC<EnabledCellProps> = ({
+	definition,
+	canUpdate,
+	pendingEnabled,
+	onToggleEnabled,
+}) => {
+	if (!canUpdate) {
+		return <SkillEnabledStatus enabled={definition.enabled} />;
+	}
+	return (
+		<Switch
+			aria-label={`Enable ${definition.name}`}
+			checked={pendingEnabled ?? definition.enabled}
+			disabled={pendingEnabled !== undefined}
+			onCheckedChange={(enabled) => onToggleEnabled(definition.name, enabled)}
+		/>
+	);
 };
 
 export const ForkAgentDefinitionsTableView: React.FC<
 	ForkAgentDefinitionsTableViewProps
 > = ({
 	definitions,
+	description,
+	emptyMessage,
+	access = fullSkillAccess,
 	action,
 	error,
 	isLoading,
@@ -70,24 +123,40 @@ export const ForkAgentDefinitionsTableView: React.FC<
 	onRetry,
 	pendingToggles = {},
 	onToggleEnabled,
+	onCreate,
+	onEdit,
 	onDelete,
+	onManagePermissions,
+	editorState,
 	deleteState,
 }) => {
-	const { rememberTrigger, restoreFocus, setPrimaryFallback } =
-		useDialogFocusReturn();
-	// Deleting the only row removes every button on the page in a
-	// single-organization deployment, so focus falls back to the table.
-	const tableRef = useRef<HTMLTableElement>(null);
-	const restoreDeleteFocus = (event: Event) => {
-		restoreFocus(event);
-		if (!event.defaultPrevented && tableRef.current?.isConnected) {
-			event.preventDefault();
-			tableRef.current.focus();
-		}
-	};
+	const {
+		rememberTrigger,
+		restoreFocus,
+		setPrimaryFallback,
+		setSecondaryFallback,
+	} = useDialogFocusReturn();
 	const deleteErrorDetail = deleteState?.error
 		? getErrorDetail(deleteState.error)
 		: undefined;
+
+	const createAction = (ref?: React.Ref<HTMLButtonElement>) =>
+		access.create && (
+			<Button
+				ref={ref}
+				variant="outline"
+				onClick={(event) => {
+					rememberTrigger(event);
+					onCreate();
+				}}
+			>
+				<PlusIcon aria-hidden="true" />
+				New agent definition
+			</Button>
+		);
+
+	const hasRowActions =
+		access.update || access.delete || Boolean(onManagePermissions);
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
@@ -107,7 +176,17 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		);
 	} else if (definitions.length === 0) {
 		tableBody = (
-			<TableEmpty message="No personal agent definitions in this organization yet." />
+			<TableEmpty
+				message={emptyMessage}
+				description={
+					<>
+						Chats can also use agents from their workspace. Add a Claude Code or
+						Cursor agent file at <code>.claude/agents/&lt;name&gt;.md</code> and
+						chats in that workspace can spawn it with spawn_agent.
+					</>
+				}
+				cta={createAction()}
+			/>
 		);
 	} else {
 		tableBody = definitions.map((definition, index) => {
@@ -126,44 +205,60 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						)}
 					</TableCell>
 					<TableCell>
-						<Switch
-							aria-label={`Enable ${definition.name}`}
-							checked={pendingEnabled ?? definition.enabled}
-							disabled={pendingEnabled !== undefined}
-							onCheckedChange={(enabled) =>
-								onToggleEnabled(definition.name, enabled)
-							}
+						<EnabledCell
+							definition={definition}
+							canUpdate={access.update}
+							pendingEnabled={pendingEnabled}
+							onToggleEnabled={onToggleEnabled}
 						/>
 					</TableCell>
 					<TableCell className="hidden whitespace-nowrap sm:table-cell">
 						{formatUpdatedAt(definition.updated_at)}
 					</TableCell>
-					<TableCell className="text-right">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									size="icon"
-									variant="subtle"
-									aria-label={`More actions for ${definition.name}`}
-									// A deleted row takes its menu button with it, so focus
-									// returns to the first remaining row's button.
-									ref={index === 0 ? setPrimaryFallback : undefined}
-									onPointerDown={rememberTrigger}
-									onKeyDown={rememberTrigger}
-								>
-									<EllipsisVerticalIcon aria-hidden="true" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								<DropdownMenuItem
-									className="text-content-destructive focus:text-content-destructive"
-									onClick={() => onDelete(definition)}
-								>
-									Delete&hellip;
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					</TableCell>
+					{hasRowActions && (
+						<TableCell className="text-right">
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										size="icon"
+										variant="subtle"
+										aria-label={`More actions for ${definition.name}`}
+										// A deleted row takes its menu button with it, so focus
+										// returns to the first remaining row's button.
+										ref={index === 0 ? setPrimaryFallback : undefined}
+										onPointerDown={rememberTrigger}
+										onKeyDown={rememberTrigger}
+									>
+										<EllipsisVerticalIcon aria-hidden="true" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end">
+									{access.update && (
+										<DropdownMenuItem onClick={() => onEdit(definition)}>
+											Edit
+										</DropdownMenuItem>
+									)}
+									{onManagePermissions && (
+										<DropdownMenuItem
+											onClick={() =>
+												onManagePermissions(definition, restoreFocus)
+											}
+										>
+											Manage permissions
+										</DropdownMenuItem>
+									)}
+									{access.delete && (
+										<DropdownMenuItem
+											className="text-content-destructive focus:text-content-destructive"
+											onClick={() => onDelete(definition)}
+										>
+											Delete&hellip;
+										</DropdownMenuItem>
+									)}
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</TableCell>
+					)}
 				</TableRow>
 			);
 		});
@@ -173,8 +268,13 @@ export const ForkAgentDefinitionsTableView: React.FC<
 		<div className="flex flex-col gap-8">
 			<SectionHeader
 				label={title}
-				description="Custom agent types your chats can spawn with spawn_agent in this organization. Each definition is a Claude Code or Cursor agent markdown file."
-				action={action}
+				description={description}
+				action={
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+						{action}
+						{createAction(setSecondaryFallback)}
+					</div>
+				}
 			/>
 
 			{Boolean(error) && (
@@ -188,7 +288,7 @@ export const ForkAgentDefinitionsTableView: React.FC<
 				/>
 			)}
 
-			<Table ref={tableRef} aria-label={title} tabIndex={-1}>
+			<Table aria-label={title}>
 				<TableHeader>
 					<TableRow>
 						<TableHead className="whitespace-nowrap">Name</TableHead>
@@ -197,29 +297,34 @@ export const ForkAgentDefinitionsTableView: React.FC<
 						<TableHead className="hidden whitespace-nowrap sm:table-cell">
 							Updated
 						</TableHead>
-						<TableHead className="w-14">
-							<span className="sr-only">Actions</span>
-						</TableHead>
+						{hasRowActions && (
+							<TableHead className="w-14">
+								<span className="sr-only">Actions</span>
+							</TableHead>
+						)}
 					</TableRow>
 				</TableHeader>
 				<TableBody size="lg">{tableBody}</TableBody>
 			</Table>
+
+			{editorState && (
+				<ForkAgentDefinitionEditorDialog
+					{...editorState}
+					onCloseAutoFocus={restoreFocus}
+				/>
+			)}
 
 			{deleteState && (
 				<ConfirmDialog
 					type="delete"
 					open
 					onClose={deleteState.onClose}
-					onCloseAutoFocus={restoreDeleteFocus}
+					onCloseAutoFocus={restoreFocus}
 					title={`Delete ${deleteState.definition.name}?`}
 					confirmText="Delete"
 					description={
 						<>
-							<p className="m-0">
-								Your personal definition {deleteState.definition.name} will be
-								deleted. Organization, project, and workspace definitions with
-								the same name are not affected. This action cannot be undone.
-							</p>
+							<p className="m-0">{deleteState.message}</p>
 							{Boolean(deleteState.error) && (
 								<Alert severity="error" className="mt-3">
 									<AlertDescription>

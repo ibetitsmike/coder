@@ -30,9 +30,12 @@ const (
 	descendantQuestionPollInterval = 2 * time.Second
 	descendantQuestionNote         = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
 		"Call wait_agent again to wait until the child resumes and finishes, or answer it yourself with message_agent."
-	// descendantSecretQuestionNote leaves out message_agent: a message
-	// would answer the question without the secret value.
-	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. Only the user can give it, in the root chat. " +
+	// descendantSecretQuestionNote leaves out message_agent, which would
+	// answer the question without the secret value, and forbids asking for
+	// the value in chat, which would put it in model context.
+	descendantSecretQuestionNote = "The child asked the user for a secret value and waits for it. " +
+		"The user enters it in the question panel above the root chat's input, which keeps it out of every model's context. " +
+		"Never ask the user to send the value as a chat message or to give it to you. " +
 		"Call wait_agent again to wait until the child resumes and finishes."
 )
 
@@ -62,10 +65,6 @@ type descendantQuestionTool struct {
 	fantasy.AgentTool
 	server *Server
 	chat   database.Chat
-	// secret offers secret questions, whose answers reach the chat's tools
-	// but never the model. It stays off until the root chat page can take
-	// a secret answer.
-	secret bool
 }
 
 func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestionTool {
@@ -80,7 +79,7 @@ func (p *Server) newDescendantQuestionTool(chat database.Chat) descendantQuestio
 // computer-use chat gets none, because its screenshots reach the model
 // without the secret answer scrub.
 func (t descendantQuestionTool) secretAllowed() bool {
-	return t.secret && (!t.chat.Mode.Valid || t.chat.Mode.ChatMode != database.ChatModeComputerUse)
+	return !t.chat.Mode.Valid || t.chat.Mode.ChatMode != database.ChatModeComputerUse
 }
 
 func (t descendantQuestionTool) Info() fantasy.ToolInfo {
@@ -96,16 +95,34 @@ func (t descendantQuestionTool) Info() fantasy.ToolInfo {
 	info.Description += " To ask for a value you must not see, such as a token or a password, send one question with secret true and no options. " +
 		"The answer never reaches you: write " + secretPlaceholder("<this call's ID>") + " in execute, write_file or edit_files input where the value belongs. " +
 		"Those tools get the value, and tool output shows the placeholder instead of it."
-	if questions, ok := info.Parameters["questions"].(map[string]any); ok {
-		if items, ok := questions["items"].(map[string]any); ok {
-			if properties, ok := items["properties"].(map[string]any); ok {
-				properties["secret"] = map[string]any{
-					"type":        "boolean",
-					"description": "Ask for a secret value. A secret question is the only question of its call and has no options.",
-				}
-			}
-			items["required"] = []string{"header", "question"}
-		}
+	questions, _ := info.Parameters["questions"].(map[string]any)
+	items, _ := questions["items"].(map[string]any)
+	properties, _ := items["properties"].(map[string]any)
+	options, _ := properties["options"].(map[string]any)
+	if options == nil {
+		return info
+	}
+	properties["secret"] = map[string]any{
+		"type":        "boolean",
+		"description": "Ask for a secret value. A secret question is the only question of its call and has no options.",
+	}
+	// Calls are validated against this schema before Run, so only the
+	// secret variant may leave out the 2-4 options.
+	minOptions := options["minItems"]
+	delete(options, "minItems")
+	items["required"] = []string{"header", "question"}
+	items["anyOf"] = []any{
+		map[string]any{
+			"required":   []string{"options"},
+			"properties": map[string]any{"options": map[string]any{"minItems": minOptions}},
+		},
+		map[string]any{
+			"required": []string{"secret"},
+			"properties": map[string]any{
+				"secret":  map[string]any{"const": true},
+				"options": map[string]any{"maxItems": 0},
+			},
+		},
 	}
 	return info
 }
@@ -168,10 +185,8 @@ func (t descendantQuestionTool) runSecretQuestion(ctx context.Context, call fant
 }
 
 func (t descendantQuestionTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	if t.secret {
-		if resp, handled := t.runSecretQuestion(ctx, call); handled {
-			return resp, nil
-		}
+	if resp, handled := t.runSecretQuestion(ctx, call); handled {
+		return resp, nil
 	}
 	resp, err := t.AgentTool.Run(ctx, call)
 	if err != nil || resp.IsError {
@@ -208,13 +223,14 @@ var errSecretQuestionQueued = xerrors.New("messages wait in the queue of this ch
 // new question.
 var errSecretAnswerQueued = xerrors.New("the user answered your secret question, and the message that says so waits in the queue of this chat; end your turn to read it, then ask again")
 
-// recordDescendantQuestion replaces the question of chatID and drops the
-// secret answers of its earlier questions. It takes the row lock of the
-// chat, which SendMessage holds while it refuses messages to a chat with a
-// pending secret question, so no message can reach the queue between the
-// check of the queue and the question. Only the report of an answer can
-// reach the queue while a secret question is pending, so a queued message
-// then refuses any new question.
+// recordDescendantQuestion replaces the question of chatID. The secret
+// answers of earlier questions stay until their TTL, so tool output that
+// shows a value a tool persisted, such as a file read back, stays scrubbed.
+// It takes the row lock of the chat, which SendMessage holds while it refuses
+// messages to a chat with a pending secret question, so no message can reach
+// the queue between the check of the queue and the question. Only the report
+// of an answer can reach the queue while a secret question is pending, so a
+// queued message then refuses any new question.
 func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage, secret bool) error {
 	return forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
 		if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
@@ -236,14 +252,12 @@ func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID,
 				return errSecretAnswerQueued
 			}
 		}
-		if _, err := ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		_, err = ftx.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
 			ChatID:     chatID,
 			ToolCallID: callID,
 			Questions:  questions,
-		}); err != nil {
-			return err
-		}
-		return ftx.DeleteChatSecretAnswersByChatID(ctx, chatID)
+		})
+		return err
 	}, nil)
 }
 
