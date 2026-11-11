@@ -168,6 +168,12 @@ func workspaceAgentDefinitions(ctx context.Context, p *Server, chat database.Cha
 			slog.F("chat_id", chat.ID), slog.Error(err))
 		return nil
 	}
+	return parseAgentDefinitionResources(resources)
+}
+
+// parseAgentDefinitionResources parses the OK agent definition files in
+// resources and skips the rest.
+func parseAgentDefinitionResources(resources []database.ChatContextResource) []workspacesdk.AgentDefinition {
 	var defs []workspacesdk.AgentDefinition
 	for _, resource := range resources {
 		if resource.BodyKind != database.WorkspaceAgentContextBodyKindSubagent ||
