@@ -340,6 +340,14 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 func addPackWatchDirs(rootPath string, out map[string]struct{}) {
 	for _, pack := range packRootsFor(rootPath) {
 		out[pack.Dir] = struct{}{}
+		// Nested manifests (.claude-plugin/plugin.json) live in their
+		// own directory: fsnotify reports edits there, and watching
+		// only the pack root never sees them, so declared container
+		// changes would stay stale until an unrelated event. The
+		// manifest exists, so its parent does too.
+		if parent := filepath.Dir(pack.ManifestPath); parent != pack.Dir {
+			out[parent] = struct{}{}
+		}
 		for _, container := range pack.skillContainers() {
 			out[container] = struct{}{}
 			addPackImmediateSubdirs(container, out)

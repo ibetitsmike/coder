@@ -557,6 +557,130 @@ func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
 	require.ErrorIs(t, <-done2, context.Canceled)
 }
 
+func TestRunPush_ResetFailureRetriesNegotiation(t *testing.T) {
+	t.Parallel()
+
+	// A reset whose resync fails (for example the connection's context
+	// is already canceled) must not leave the manager able to push the
+	// retained pack-bearing snapshot as settled inventory: the
+	// negotiation window stays open, so every publish inside it is a
+	// non-persisting capability probe and the next healthy connection
+	// retries the reset.
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+	writePack(t, dir, "plugin.json", `{"name": "pstack"}`, "skills", "agents")
+
+	m := newTestManager(t, agentcontext.ManagerOptions{
+		WorkingDir: func() string { return dir },
+	})
+
+	runCtx, runCancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	defer runCancel()
+	go func() { _ = m.Run(runCtx) }()
+
+	p1 := newFakePusher()
+	p1.mu.Lock()
+	p1.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p1.mu.Unlock()
+
+	ctx1, cancel1 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- m.RunPush(ctx1, p1, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push1"),
+		})
+	}()
+
+	<-p1.signal
+	require.Eventually(t, func() bool {
+		reqs := p1.snapshot()
+		if len(reqs) == 0 {
+			return false
+		}
+		for _, res := range reqs[len(reqs)-1].Resources {
+			if res.SourcePath != "" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the advertised connection must push pack rows")
+
+	cancel1()
+	require.ErrorIs(t, <-done1, context.Canceled)
+
+	// A connection whose context is already canceled cannot rebuild the
+	// snapshot: the reset fails, RunPush reports the error, and nothing
+	// is pushed.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	p2 := newFakePusher()
+	err2 := m.RunPush(ctx2, p2, agentcontext.PushOptions{
+		Logger: testutil.Logger(t).Named("push2"),
+	})
+	require.ErrorIs(t, err2, context.Canceled)
+	require.Empty(t, p2.snapshot(),
+		"the failed connection must not push the retained pack-bearing snapshot")
+
+	// Any resolve inside the open window publishes a probe, not
+	// settled inventory, so a concurrent change cannot settle chats
+	// against the temporary state.
+	snap, err := m.Resync(context.Background())
+	require.NoError(t, err)
+	require.NotZero(t, snap.CapabilityGeneration,
+		"publishes inside the negotiation window must stay probes")
+	require.Equal(t, "plugin-pack capability renegotiating", snap.SnapshotError)
+
+	// The next healthy connection retries the reset: its first push is
+	// a pack-free probe, and after the peer advertises, the settle push
+	// carries the pack rows as settled inventory.
+	p3 := newFakePusher()
+	p3.mu.Lock()
+	p3.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true}
+	p3.mu.Unlock()
+
+	ctx3, cancel3 := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done3 := make(chan error, 1)
+	go func() {
+		done3 <- m.RunPush(ctx3, p3, agentcontext.PushOptions{
+			Logger: testutil.Logger(t).Named("push3"),
+		})
+	}()
+
+	<-p3.signal
+	require.Eventually(t, func() bool {
+		return len(p3.snapshot()) >= 1
+	}, testutil.WaitShort, testutil.IntervalFast)
+	first3 := p3.snapshot()[0]
+	require.NotZero(t, first3.CapabilityGeneration,
+		"the retried reset's first push is a capability probe")
+	for _, res := range first3.Resources {
+		require.Empty(t, res.SourcePath,
+			"the probe push must be pack-free")
+	}
+
+	require.Eventually(t, func() bool {
+		reqs := p3.snapshot()
+		if len(reqs) < 2 {
+			return false
+		}
+		last := reqs[len(reqs)-1]
+		if last.CapabilityGeneration != 0 {
+			return false
+		}
+		for _, res := range last.Resources {
+			if res.SourcePath != "" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"after the peer advertises, the settle push must carry pack rows as settled inventory")
+
+	cancel3()
+	require.ErrorIs(t, <-done3, context.Canceled)
+}
+
 func TestRunPush_NilPusherErrors(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, agentcontext.ManagerOptions{

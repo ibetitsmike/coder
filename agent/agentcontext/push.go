@@ -25,10 +25,11 @@ type PushRequest struct {
 	Resources     []Resource
 	Initial       bool
 	SnapshotError string
-	// CapabilityGeneration is nonzero only on the per-connection
-	// negotiation push RunPush sends after a capability reset (see
-	// Manager.resyncNegotiating): the server persists the snapshot and
-	// rows but skips chat hydration and dirty marking, because the
+	// CapabilityGeneration is nonzero only on pushes sent inside a
+	// capability negotiation window (a new push connection reset the
+	// advertisement, until its first processed response; see
+	// Manager.resyncNegotiating): the push is a non-persisting
+	// capability probe the server stores nothing for, because the
 	// settling push that ends the negotiation defines the baseline
 	// chats refresh against.
 	CapabilityGeneration uint64
@@ -129,17 +130,28 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// peer reported says nothing about the peer now answering, and a
 	// snapshot that still carries pack rows must not lead this
 	// connection's initial push to a replica that never asked for them.
-	// The rebuilt snapshot is republished with a nonzero capability
-	// generation and a renegotiating SnapshotError, marking its push
-	// as a capability probe: coderd persists nothing and mutates no
-	// chat state for it, so the last settled snapshot and its
-	// resources stay the consistent pair that create- and
-	// refresh-time hydration consume. The settling push that follows
-	// (generation 0, once the peer's capabilities are known) defines
-	// the baseline chats refresh against.
-	if m.packRowsAdvertised.Swap(false) {
+	// The reset opens a negotiation window and rebuilds the snapshot
+	// pack-free; every snapshot published inside the window carries a
+	// nonzero capability generation, so any push before the peer's
+	// capabilities are known is a capability probe that coderd persists
+	// nothing for, concurrent resolves included. The window also stays
+	// open when a previous connection's reset never settled, so a
+	// retained pack-bearing snapshot can never be pushed as settled
+	// inventory. The settling push that ends the window (generation 0,
+	// once the peer's capabilities are known) defines the baseline
+	// chats refresh against.
+	if m.packRowsAdvertised.Swap(false) || m.negotiating.Load() {
 		if _, err := m.resyncNegotiating(ctx); err != nil {
-			logger.Warn(ctx, "resync after capability reset failed", slog.Error(err))
+			// The reset could not rebuild the snapshot (for example the
+			// connection's context was already canceled). The window
+			// stays open so the next connection retries the reset;
+			// returning the error keeps this connection from pushing
+			// the retained pack-bearing snapshot as settled inventory.
+			logger.Warn(ctx, "capability reset resync failed", slog.Error(err))
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			return xerrors.Errorf("capability reset resync: %w", err)
 		}
 	}
 	m.packAgentDefinitionsAdvertised.Swap(false)
@@ -147,20 +159,37 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	changes, unsub := m.SubscribeChanges()
 	defer unsub()
 
-	// advertise records the capability the server last reported and triggers
-	// a resync when it flips in either direction, so pack rows join the next
-	// snapshot after advertisement and leave it promptly on retraction.
-	advertise := func(resp *PushResponse) {
+	// advertise records the capability the server last reported, closes
+	// the connection's negotiation window once the push was processed,
+	// and triggers a resync when a capability flips in either direction
+	// or when the processed push was a negotiation probe: the triggered
+	// resync publishes the first generation-zero snapshot with the
+	// processed capabilities, which the push loop sends as settled
+	// inventory. Without it, a probe whose response flips nothing would
+	// leave the negotiation open and chats created while disconnected
+	// unhydrated.
+	advertise := func(resp *PushResponse, negotiated bool) {
+		if negotiated {
+			// End the window even when the response carries no
+			// capabilities: a nil response leaves the reset defaults in
+			// force, which is safe to settle on.
+			m.negotiating.Store(false)
+		}
 		if resp == nil {
 			return
 		}
+		settled := negotiated
 		was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
 		if resp.ForkPluginPacks != was {
 			logger.Debug(ctx, "server flipped plugin-pack advertisement; re-resolving")
-			m.Trigger()
+			settled = true
 		}
 		if resp.ForkAgentDefinitions != m.packAgentDefinitionsAdvertised.Swap(resp.ForkAgentDefinitions) {
 			logger.Debug(ctx, "server flipped the agent-definitions advertisement; re-resolving")
+			settled = true
+		}
+		if settled {
+			logger.Debug(ctx, "settling capability negotiation; re-resolving")
 			m.Trigger()
 		}
 	}
@@ -185,17 +214,7 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 		switch {
 		case err == nil:
 			initial = false
-			advertise(resp)
-			if req.CapabilityGeneration != 0 {
-				// The server skipped chat mutation for this
-				// negotiation push, so it must be settled by a
-				// generation-zero successor even when neither
-				// capability flipped: with no flip nothing else
-				// schedules a resync, and chats created while
-				// disconnected would stay unhydrated.
-				logger.Debug(ctx, "settling capability negotiation; re-resolving")
-				m.Trigger()
-			}
+			advertise(resp, req.CapabilityGeneration != 0)
 		case errors.Is(err, ErrPushUnimplemented):
 			logger.Warn(ctx, "coderd peer does not implement PushContextState; stopping")
 			return nil

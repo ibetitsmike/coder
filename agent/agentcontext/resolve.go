@@ -1088,18 +1088,18 @@ type Snapshot struct {
 	// degraded, ENOSPC, etc.). Empty when healthy. The push
 	// loop also sets it on connection-start negotiation
 	// snapshots ("plugin-pack capability renegotiating") so
-	// coderd hydration treats the push as negotiation input
-	// and keeps chat dirty timestamps instead of clearing
-	// them; the settling push at the end of the negotiation
-	// sends an empty SnapshotError again.
+	// the push reads as a capability probe: coderd persists
+	// nothing and mutates no chat state for it; the settling
+	// push at the end of the negotiation sends an empty
+	// SnapshotError again.
 	SnapshotError string
-	// CapabilityGeneration counts Manager-level capability
-	// renegotiations: it is bumped whenever the push loop
-	// republishes the snapshot because the plugin-pack
-	// advertisement was reset (new push connection), so the
-	// server can bind chats to the renegotiated version and
-	// distinguish settled snapshots from negotiation input.
-	// Zero on ordinary resolves.
+	// CapabilityGeneration marks Manager-level capability
+	// renegotiation: it is nonzero on snapshots published inside a
+	// negotiation window (a new push connection reset the
+	// advertisement, until its first processed response), making
+	// their push a capability probe that coderd persists nothing
+	// for. Zero on ordinary resolves, whose pushes are settled
+	// inventory.
 	CapabilityGeneration uint64
 }
 

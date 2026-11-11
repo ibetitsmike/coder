@@ -4752,12 +4752,13 @@ type PushContextStateRequest struct {
 	// Fork: capability_generation is nonzero only on the per-connection
 	// negotiation push a reconnecting agent sends after its push
 	// capability was reset (see agentcontext resyncNegotiating). The
-	// server persists that snapshot and its rows so the shared tables
-	// never hold rows the serving replica cannot interpret, but it
-	// skips chat hydration and dirty marking: the negotiation exchange
-	// is input, not a settled inventory, and the settling push that
-	// ends the negotiation (capability_generation = 0) defines the
-	// baseline chats refresh against.
+	// push is a non-persisting capability probe: the server stores
+	// nothing (no snapshot row, no resource rows, no stale deletes)
+	// and mutates no chat state, so create- and refresh-time hydration
+	// keep consuming the last settled snapshot and its resources as
+	// one consistent pair. The settling push that ends the negotiation
+	// (capability_generation = 0) is stored and defines the baseline
+	// chats refresh against.
 	CapabilityGeneration uint64 `protobuf:"varint,7,opt,name=capability_generation,json=capabilityGeneration,proto3" json:"capability_generation,omitempty"`
 }
 

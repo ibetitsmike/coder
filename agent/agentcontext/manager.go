@@ -127,6 +127,13 @@ type Manager struct {
 	// set, so a deployment without agent definitions never fills its
 	// snapshot caps with invisible pack agents.
 	packAgentDefinitionsAdvertised atomic.Bool
+	// negotiating marks the window between a connection's capability
+	// reset and its first processed push response. Every snapshot
+	// published inside the window carries a nonzero capability
+	// generation, so any push in that window is a capability probe
+	// (coderd persists nothing) and no concurrent resolve can settle
+	// chats against a temporary pack-free inventory.
+	negotiating atomic.Bool
 
 	watcher *Watcher
 }
@@ -495,6 +502,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	roots := m.scanRootsLocked()
 	resolver := m.resolver
 	watcher := m.watcher
+	negotiating := m.negotiating.Load()
 	m.resolveEpoch++
 	myEpoch := m.resolveEpoch
 	m.mu.Unlock()
@@ -539,6 +547,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	}
 	m.version++
 	snap.Version = m.version
+	m.stampNegotiating(&snap, negotiating)
 	m.snapshot = snap
 	subs := make([]chan struct{}, 0, len(m.subscribers))
 	for ch := range m.subscribers {
@@ -563,29 +572,34 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	return snap, nil
 }
 
-// resyncNegotiating republishes the snapshot as capability-negotiation
-// input rather than a settled inventory: the capability generation is
-// freshened so the push reads as a probe (coderd persists nothing and
-// mutates no chat state for it), and a non-empty SnapshotError marks
-// the snapshot as renegotiating. RunPush uses it for the pack-free
-// snapshot at connection start; nothing it publishes is final,
-// because the negotiation's outcome (capability on or off) determines
-// whether the next pack-bearing or pack-free snapshot defines the
-// baseline.
-// No-op when the Manager is not ready (nothing has been published).
+// resyncNegotiating opens the capability negotiation window and
+// republishes the snapshot: while the window is open every published
+// snapshot carries a nonzero capability generation, so its push is a
+// capability probe (coderd persists nothing and mutates no chat
+// state), and the SnapshotError marks the snapshot as renegotiating.
+// RunPush uses it for the pack-free snapshot at connection start;
+// nothing it publishes is final, because the negotiation's outcome
+// (capability on or off) determines whether the next pack-bearing or
+// pack-free snapshot defines the baseline. No-op when the Manager is
+// not ready (nothing has been published).
 func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
-	m.mu.Lock()
-	ready := m.ready && !m.closed
-	m.mu.Unlock()
-	if !ready {
-		return m.Resync(ctx)
-	}
-	snap, err := m.Resync(ctx)
-	if err != nil {
-		return snap, err
-	}
-	if snap.Version == 0 {
-		return snap, nil
+	m.negotiating.Store(true)
+	return m.Resync(ctx)
+}
+
+// stampNegotiating marks a freshly resolved snapshot as
+// capability-negotiation input when its resolve started inside the
+// negotiation window: a nonzero capability generation makes its push
+// a probe (coderd persists nothing and mutates no chat state), and a
+// renegotiating SnapshotError keeps the snapshot self-describing.
+// Capturing the flag when the resolve starts keeps concurrent
+// resolves inside the negotiation: a watcher event mid-negotiation
+// would otherwise publish an ordinary snapshot that the push loop
+// sends as settled inventory before the capability-complete successor
+// lands.
+func (m *Manager) stampNegotiating(snap *Snapshot, negotiating bool) {
+	if !negotiating {
+		return
 	}
 	if snap.CapabilityGeneration == 0 {
 		snap.CapabilityGeneration = 1
@@ -595,31 +609,6 @@ func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
 	if snap.SnapshotError == "" {
 		snap.SnapshotError = "plugin-pack capability renegotiating"
 	}
-	m.mu.Lock()
-	if m.closed || m.snapshot.Version != snap.Version {
-		// Resync published the snapshot this method is about to
-		// renegotiate, so an equal version still means our pass is
-		// the latest. Anything else is a concurrent pass that
-		// published a different snapshot; leave it alone.
-		m.mu.Unlock()
-		return m.Snapshot(), nil
-	}
-	m.version++
-	snap.Version = m.version
-	snap.AggregateHash = ComputeAggregateHash(driftResources(snap.Resources))
-	m.snapshot = snap
-	subs := make([]chan struct{}, 0, len(m.subscribers))
-	for ch := range m.subscribers {
-		subs = append(subs, ch)
-	}
-	m.mu.Unlock()
-	for _, ch := range subs {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
-	return snap, nil
 }
 
 // signal triggers a re-resolve. Sends are non-blocking; the
@@ -741,6 +730,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	roots := m.scanRootsLocked()
 	resolver := m.resolver
 	watcher := m.watcher
+	negotiating := m.negotiating.Load()
 	m.resolveEpoch++
 	myEpoch := m.resolveEpoch
 	m.mu.Unlock()
@@ -778,6 +768,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	}
 	m.version++
 	snap.Version = m.version
+	m.stampNegotiating(&snap, negotiating)
 	m.snapshot = snap
 	subs := make([]chan struct{}, 0, len(m.subscribers))
 	for ch := range m.subscribers {
