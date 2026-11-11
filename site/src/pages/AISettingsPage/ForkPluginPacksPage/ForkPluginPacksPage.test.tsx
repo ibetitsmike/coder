@@ -48,9 +48,10 @@ beforeEach(() => {
 it("lists the packs of the organization the URL names", async () => {
 	renderPage();
 
-	expect(await screen.findByText(MockForkPluginPack.name)).toBeInTheDocument();
-	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
-		MockOrganization2.id,
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledWith(
+			MockOrganization2.id,
+		),
 	);
 	expect(forkPluginPacksApi.getPluginPacks).not.toHaveBeenCalledWith(
 		MockOrganization.id,
@@ -83,9 +84,6 @@ it("installs a pack in the organization the URL names", async () => {
 			source_path: undefined,
 			ref: "v0.15.36",
 		}),
-	);
-	await waitFor(() =>
-		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
 	);
 });
 

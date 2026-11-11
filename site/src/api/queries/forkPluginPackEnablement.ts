@@ -8,7 +8,8 @@ import {
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
 
-const enabledPluginPacksKey = (target: PluginPackTarget) =>
+/** The query key of the plugin packs a project or chat enables directly. */
+export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
 		? ([
 				"chats",
