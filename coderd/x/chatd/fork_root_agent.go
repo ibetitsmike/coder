@@ -107,18 +107,25 @@ func (p *Server) ResolveRootAgent(ctx context.Context, opts RootAgentOptions) (R
 	if err != nil {
 		return RootAgent{}, &RootAgentError{Reason: err.Error()}
 	}
+	return p.rootAgentFromDefinition(ctx, chat, def, opts.ExplicitModel)
+}
+
+// rootAgentFromDefinition returns the root agent that def starts, with def's
+// model unless explicitModel. The chat is the new root chat.
+func (p *Server) rootAgentFromDefinition(ctx context.Context, chat database.Chat, def workspacesdk.AgentDefinition, explicitModel bool) (RootAgent, error) {
 	agent := RootAgent{Name: def.Name, prompt: def.Prompt}
 	if def.BaseType == workspacesdk.AgentDefinitionBaseExplore {
 		agent.mode = database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}
 	}
 	agent.noOrchestration = !keepsOrchestrationTools(agent.mode, &def)
-	if !opts.ExplicitModel && def.Model != "" {
+	if !explicitModel && def.Model != "" {
 		modelConfigID, err := p.resolveCustomAgentModel(ctx, chat, def)
 		if err != nil {
 			return RootAgent{}, &RootAgentError{Reason: err.Error()}
 		}
 		agent.ModelConfigID = uuid.NullUUID{UUID: modelConfigID, Valid: true}
 	}
+	var err error
 	agent.ReasoningEffort, err = customAgentReasoningEffort(def)
 	if err != nil {
 		return RootAgent{}, &RootAgentError{Reason: err.Error()}

@@ -4466,6 +4466,56 @@
 				}
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/agent-types": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List agent types",
+				"operationId": "list-agent-types",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Project ID",
+						"name": "project",
+						"in": "query"
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Workspace ID",
+						"name": "workspace",
+						"in": "query"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkAgentType"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/organizations/{organization}/members/{user}/agent-definitions": {
 			"get": {
 				"produces": ["application/json"],
@@ -26452,6 +26502,38 @@
 				"updated_at": {
 					"type": "string",
 					"format": "date-time"
+				}
+			}
+		},
+		"codersdk.ForkAgentType": {
+			"type": "object",
+			"properties": {
+				"base_type": {
+					"description": "BaseType is general or explore.",
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"model": {
+					"description": "Model is the definition's model, or empty when the type runs on the\nchat's model.",
+					"type": "string"
+				},
+				"name": {
+					"description": "Name is the type that spawn_agent and CreateChatRequest.AgentType\naccept: the bare name, or the source-qualified name, such as\npersonal/reviewer, when several sources define the name.",
+					"type": "string"
+				},
+				"root_available": {
+					"description": "RootAvailable reports whether a new root chat can start as the type.",
+					"type": "boolean"
+				},
+				"root_unavailable_reason": {
+					"description": "RootUnavailableReason says why a new root chat cannot start as the\ntype.",
+					"type": "string"
+				},
+				"source": {
+					"description": "Source is builtin, personal, org, project or workspace.",
+					"type": "string"
 				}
 			}
 		},
