@@ -166,6 +166,27 @@ export const InteractiveSingleQuestion: Story = {
 	},
 };
 
+// A descendant chat shows its secret question without a form, because
+// only the root chat's question panel takes the answer.
+export const SecretQuestion: Story = {
+	args: {
+		status: "completed",
+		result: JSON.stringify({
+			questions: [
+				{
+					header: "Token",
+					question: "Paste the API token.",
+					options: [],
+					secret: true,
+				},
+			],
+		}),
+		isChatCompleted: true,
+		isLatestAskUserQuestion: true,
+		onSendAskUserQuestionResponse: fn(),
+	},
+};
+
 export const InteractiveMarkdownQuestion: Story = {
 	args: {
 		status: "completed",

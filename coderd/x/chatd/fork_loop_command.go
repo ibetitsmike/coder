@@ -30,6 +30,16 @@ var (
 	loopIntervalUnitSeconds = map[string]int{"s": 1, "m": 60, "h": 3600, "d": 86400}
 )
 
+// InvalidLoopCommandError reports a /loop command that cannot be scheduled.
+// Reason tells the sender what is wrong with it.
+type InvalidLoopCommandError struct {
+	Reason string
+}
+
+func (e *InvalidLoopCommandError) Error() string {
+	return "invalid " + loopCommand + " command: " + e.Reason
+}
+
 // forkLoop is a parsed /loop command whose wake-up is created with its first
 // message.
 type forkLoop struct {
@@ -40,7 +50,8 @@ type forkLoop struct {
 // forkLoopCommand parses a /loop command. It returns the message parts to
 // store, which hold only the prompt, and the loop to schedule. Any other
 // message, or any message while the experiment is off, comes back unchanged
-// with a nil loop.
+// with a nil loop. An invalid /loop command returns an
+// *InvalidLoopCommandError.
 func (p *Server) forkLoopCommand(parts []codersdk.ChatMessagePart) ([]codersdk.ChatMessagePart, *forkLoop, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkChatWakeups) ||
 		len(parts) != 1 || parts[0].Type != codersdk.ChatMessagePartTypeText {
@@ -48,7 +59,7 @@ func (p *Server) forkLoopCommand(parts []codersdk.ChatMessagePart) ([]codersdk.C
 	}
 	spec, ok, err := parseLoopCommand(parts[0].Text)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &InvalidLoopCommandError{Reason: err.Error()}
 	}
 	if !ok {
 		return parts, nil, nil

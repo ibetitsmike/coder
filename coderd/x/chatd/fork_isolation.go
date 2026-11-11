@@ -7,6 +7,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,9 +41,9 @@ const (
 )
 
 type forkSpawnIsolationArgs struct {
-	Isolation  string `json:"isolation,omitempty" enum:"shared,worktree" description:"Where the child works: shared (default) uses this chat's workspace and checkout; worktree gives the child its own git worktree on a new branch in this chat's workspace, so parallel children can edit the same files without conflicts."`
-	RepoPath   string `json:"repo_path,omitempty" description:"With isolation worktree: absolute path of the git repository to branch from. Defaults to this chat's checkout: its worktree if it has one, else the workspace agent's directory."`
-	BaseBranch string `json:"base_branch,omitempty" description:"With isolation worktree: branch or commit the child's branch starts from. Defaults to the repository's current HEAD."`
+	Isolation  string `json:"isolation,omitempty" enum:"shared,worktree,workspace" description:"Where the child works: shared (default) uses this chat's workspace and checkout; worktree gives the child its own git worktree on a new branch in this chat's workspace, so parallel children can edit the same files without conflicts; workspace gives the child its own new workspace from this workspace's template and parameters, and the spawn waits until it is ready."`
+	RepoPath   string `json:"repo_path,omitempty" description:"With isolation worktree, from this call or the custom agent type's definition: absolute path of the git repository to branch from. Defaults to this chat's checkout: its worktree if it has one, else the workspace agent's directory."`
+	BaseBranch string `json:"base_branch,omitempty" description:"With isolation worktree, from this call or the custom agent type's definition: branch or commit the child's branch starts from. Defaults to the repository's current HEAD."`
 }
 
 type subagentIsolationKey struct{}
@@ -55,9 +56,23 @@ type subagentIsolationRequest struct {
 	baseBranch string
 }
 
-func subagentIsolationFromContext(ctx context.Context) (subagentIsolationRequest, bool) {
-	req, ok := ctx.Value(subagentIsolationKey{}).(subagentIsolationRequest)
-	return req, ok
+// subagentIsolationOf returns the isolation of a spawn: the one the
+// spawn_agent call asked for, else the custom agent definition's. ok is false
+// for a shared child. repo_path and base_branch are checked here, not in the
+// tool, because a call that sets them without an isolation can still get
+// worktree from the definition.
+func (p *Server) subagentIsolationOf(ctx context.Context, customAgent *workspacesdk.AgentDefinition) (req subagentIsolationRequest, ok bool, err error) {
+	req, _ = ctx.Value(subagentIsolationKey{}).(subagentIsolationRequest)
+	if req.isolation == "" && customAgent != nil && p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
+		switch customAgent.Isolation {
+		case subagentIsolationWorktree, subagentIsolationWorkspace:
+			req.isolation = customAgent.Isolation
+		}
+	}
+	if (req.repoPath != "" || req.baseBranch != "") && req.isolation != subagentIsolationWorktree {
+		return subagentIsolationRequest{}, false, xerrors.New("repo_path and base_branch need isolation worktree")
+	}
+	return req, req.isolation != "" && req.isolation != subagentIsolationShared, nil
 }
 
 // forkSpawnAgentTool is spawn_agent with the isolation option. It passes
@@ -81,7 +96,9 @@ func (p *Server) withForkSpawnIsolation(tools []fantasy.AgentTool, chat database
 
 func (t forkSpawnAgentTool) Info() fantasy.ToolInfo {
 	info := t.AgentTool.Info()
-	info.Description += " Set isolation to worktree to give the child its own git worktree and branch in this chat's workspace."
+	info.Description += " Set isolation to worktree to give the child its own git worktree and branch in this chat's workspace," +
+		" or to workspace to give it its own new workspace." +
+		" A custom agent type's definition can set the isolation its spawns use when this call sets none."
 	info.Parameters = maps.Clone(info.Parameters)
 	maps.Copy(info.Parameters, schema.ToParameters(schema.Generate(reflect.TypeFor[forkSpawnIsolationArgs]())))
 	return info
@@ -98,15 +115,13 @@ func (t forkSpawnAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		baseBranch: strings.TrimSpace(args.BaseBranch),
 	}
 	switch req.isolation {
-	case "", subagentIsolationShared:
-		if req.repoPath != "" || req.baseBranch != "" {
-			return fantasy.NewTextErrorResponse("repo_path and base_branch need isolation worktree"), nil
-		}
-		return t.AgentTool.Run(ctx, call)
-	case subagentIsolationWorktree:
+	case "", subagentIsolationWorktree, subagentIsolationWorkspace:
+	case subagentIsolationShared:
+		// An explicit shared wins over the agent definition's isolation.
+		return t.AgentTool.Run(context.WithValue(ctx, subagentIsolationKey{}, req), call)
 	default:
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("isolation must be one of: %s, %s",
-			subagentIsolationShared, subagentIsolationWorktree)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("isolation must be one of: %s, %s, %s",
+			subagentIsolationShared, subagentIsolationWorktree, subagentIsolationWorkspace)), nil
 	}
 	resp, err := t.AgentTool.Run(context.WithValue(ctx, subagentIsolationKey{}, req), call)
 	if err != nil || resp.IsError {
@@ -123,13 +138,24 @@ func (t forkSpawnAgentTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	}
 	row, err := t.server.subagentRow(ctx, childID)
 	if err != nil {
-		t.server.logger.Warn(ctx, "read isolation of spawned subagent",
-			slog.F("chat_id", t.chat.ID), slog.F("child_chat_id", childID), slog.Error(err))
+		// A shared child without nested subagents or a custom agent has
+		// no row.
+		if req.isolation != "" || !errors.Is(err, sql.ErrNoRows) {
+			t.server.logger.Warn(ctx, "read isolation of spawned subagent",
+				slog.F("chat_id", t.chat.ID), slog.F("child_chat_id", childID), slog.Error(err))
+		}
+		return resp, nil
+	}
+	if row.Isolation == subagentIsolationShared {
 		return resp, nil
 	}
 	result["isolation"] = row.Isolation
-	result["worktree_path"] = row.WorktreePath
-	result["branch"] = row.Branch
+	if row.Isolation == subagentIsolationWorkspace {
+		t.server.addSubagentWorkspaceName(ctx, result, row)
+	} else {
+		result["worktree_path"] = row.WorktreePath
+		result["branch"] = row.Branch
+	}
 	content, err := json.Marshal(result)
 	if err != nil {
 		return resp, nil
