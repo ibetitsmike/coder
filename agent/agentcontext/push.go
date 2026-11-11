@@ -104,6 +104,9 @@ type PushOptions struct {
 // server advertises the capability, a flip in either direction triggers
 // an immediate resync, and every new connection starts unadvertised so a
 // reconnect to an older replica never leads with a pack-bearing snapshot.
+// A negotiation push (nonzero capability generation) always settles with
+// a generation-zero successor resync, even when no capability flips, so
+// chat hydration resumes after the non-mutating exchange.
 func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error {
 	if p == nil {
 		return xerrors.New("agentcontext: Pusher is required")
@@ -181,6 +184,16 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 		case err == nil:
 			initial = false
 			advertise(resp)
+			if req.CapabilityGeneration != 0 {
+				// The server skipped chat mutation for this
+				// negotiation push, so it must be settled by a
+				// generation-zero successor even when neither
+				// capability flipped: with no flip nothing else
+				// schedules a resync, and chats created while
+				// disconnected would stay unhydrated.
+				logger.Debug(ctx, "settling capability negotiation; re-resolving")
+				m.Trigger()
+			}
 		case errors.Is(err, ErrPushUnimplemented):
 			logger.Warn(ctx, "coderd peer does not implement PushContextState; stopping")
 			return nil

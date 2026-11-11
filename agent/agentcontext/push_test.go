@@ -541,6 +541,18 @@ func TestRunPush_NewConnectionStartsUnadvertised(t *testing.T) {
 	require.NotEmpty(t, first2.SnapshotError,
 		"the negotiation push marks the snapshot as renegotiating so the server treats it as input")
 
+	// No capability flipped on the reconnect (the reset already cleared
+	// both atomics and the peer reports them off), so only the settle
+	// path can produce the generation-zero successor push.
+	require.Eventually(t, func() bool {
+		reqs := p2.snapshot()
+		return len(reqs) >= 2 && reqs[len(reqs)-1].CapabilityGeneration == 0
+	}, testutil.WaitShort, testutil.IntervalFast,
+		"the negotiation push must settle with a generation-zero push even without a capability flip")
+	settle2 := p2.snapshot()[len(p2.snapshot())-1]
+	require.Empty(t, settle2.SnapshotError,
+		"the settling push carries a settled snapshot, not renegotiation input")
+
 	cancel2()
 	require.ErrorIs(t, <-done2, context.Canceled)
 }

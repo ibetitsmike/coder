@@ -46,8 +46,9 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		return nil, err
 	}
 	return &PushResponse{
-		Accepted:        resp.GetAccepted(),
-		ForkPluginPacks: resp.GetForkPluginPacks(),
+		Accepted:             resp.GetAccepted(),
+		ForkPluginPacks:      resp.GetForkPluginPacks(),
+		ForkAgentDefinitions: resp.GetForkAgentDefinitions(),
 	}, nil
 }
 

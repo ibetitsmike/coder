@@ -168,6 +168,21 @@ func TestDRPCPusher_HappyPathSerializesAllFields(t *testing.T) {
 	require.Equal(t, "object", tool.GetInputSchema().GetFields()["type"].GetStringValue())
 }
 
+func TestDRPCPusher_ResponseCapabilitiesMapped(t *testing.T) {
+	t.Parallel()
+	client := &fakeDRPCClient{resp: &agentproto.PushContextStateResponse{
+		Accepted:             true,
+		ForkPluginPacks:      true,
+		ForkAgentDefinitions: true,
+	}}
+	pusher := agentcontext.NewDRPCPusher(client)
+
+	resp, err := pusher.PushContextState(context.Background(), &agentcontext.PushRequest{})
+	require.NoError(t, err)
+	require.True(t, resp.ForkPluginPacks, "the fork_plugin_packs response capability must reach the manager")
+	require.True(t, resp.ForkAgentDefinitions, "the fork_agent_definitions response capability must reach the manager")
+}
+
 func TestDRPCPusher_UnimplementedTranslated(t *testing.T) {
 	t.Parallel()
 	client := &fakeDRPCClient{err: drpcerr.WithCode(drpcerr.WithCode(context.Canceled, 0), drpcerr.Unimplemented)}
