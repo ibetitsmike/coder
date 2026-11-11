@@ -12,9 +12,12 @@ import type {
 	CreateForkPluginPackRequest,
 	ForkPluginPack,
 } from "#/api/typesGenerated";
-import { isResponseLost } from "./forkAgentDefinitions";
+import { invalidateList, isResponseLost } from "./forkAgentDefinitions";
 
-/** The query key of the plugin packs installed in an organization. */
+/**
+ * The query key of an organization's plugin pack list. It also prefixes the
+ * keys of the organization's projects' enabled pack lists.
+ */
 export const pluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId] as const;
 
@@ -28,30 +31,23 @@ export const pluginPacks = (organizationId: string) =>
 const invalidatePluginPacks = (
 	queryClient: QueryClient,
 	organizationId: string,
+	awaitRefetch: boolean,
 ) =>
-	queryClient.invalidateQueries({ queryKey: pluginPacksKey(organizationId) });
+	invalidateList(queryClient, pluginPacksKey(organizationId), {
+		exact: false,
+		awaitRefetch,
+	});
 
-/**
- * Invalidates the pack list after a create or update. A lost response leaves
- * the outcome unknown, so the mutation then stays pending until the refetch
- * settles and callers can reconcile against cachedPluginPacks.
- */
-const settlePluginPackChange = (
-	queryClient: QueryClient,
-	organizationId: string,
-	error: unknown,
-) => {
-	const refetch = invalidatePluginPacks(queryClient, organizationId);
-	return isResponseLost(error) ? refetch : undefined;
-};
-
-/** The organization's cached pack list, if it has loaded. */
+/** The organization's cached pack list, or undefined when it is not loaded. */
 export const cachedPluginPacks = (
 	queryClient: QueryClient,
 	organizationId: string,
 ) => queryClient.getQueryData(pluginPacks(organizationId).queryKey);
 
-/** Whether an organization's cached pack list no longer lists the pack. */
+/**
+ * Whether the cached pack list no longer lists the pack. False when the list
+ * is not loaded.
+ */
 export const isPluginPackGone = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -61,7 +57,48 @@ export const isPluginPackGone = (
 	return packs !== undefined && !packs.some((pack) => pack.id === packId);
 };
 
-/** The list with the pack replacing any copy of it, in name order. */
+/**
+ * After a lost response, a refetched copy of the pack with a new timestamp
+ * shows that the update went through.
+ */
+export const reconcileUpdatedPluginPack = (
+	queryClient: QueryClient,
+	organizationId: string,
+	pack: ForkPluginPack,
+	error: unknown,
+) => {
+	if (!isResponseLost(error)) {
+		return undefined;
+	}
+
+	return cachedPluginPacks(queryClient, organizationId)?.find(
+		(candidate) =>
+			candidate.id === pack.id && candidate.updated_at !== pack.updated_at,
+	);
+};
+
+/**
+ * After a lost response, a refetched pack with the submitted name that was not
+ * listed before the request shows that the install went through. Without that
+ * earlier list, a pack with the name may predate the request.
+ */
+export const reconcileInstalledPluginPack = (
+	queryClient: QueryClient,
+	organizationId: string,
+	name: string,
+	knownPackIds: readonly string[] | undefined,
+	error: unknown,
+) => {
+	if (!knownPackIds || !isResponseLost(error)) {
+		return undefined;
+	}
+
+	return cachedPluginPacks(queryClient, organizationId)?.find(
+		(candidate) =>
+			candidate.name === name && !knownPackIds.includes(candidate.id),
+	);
+};
+
 const withPluginPack = (
 	packs: readonly ForkPluginPack[],
 	pack: ForkPluginPack,
@@ -71,11 +108,7 @@ const withPluginPack = (
 		.concat(pack)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
-/**
- * Installs a pack. On success the returned pack goes into the cached list,
- * so a failed refetch cannot hide it. The list is then invalidated, and
- * after a lost response the mutation settles only once the refetch does.
- */
+/** Installs a pack and caches it, so a failed refetch cannot hide it. */
 export const createPluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -91,13 +124,10 @@ export const createPluginPackMutation = (
 			);
 		},
 		onSettled: (_data, error) =>
-			settlePluginPackChange(queryClient, organizationId, error),
+			invalidatePluginPacks(queryClient, organizationId, isResponseLost(error)),
 	});
 
-/**
- * Moves a pack to the latest commit of its ref. The cache and refetch work
- * as in createPluginPackMutation.
- */
+/** Moves a pack to the latest commit of its ref and caches the result. */
 export const updatePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -113,14 +143,10 @@ export const updatePluginPackMutation = (
 			);
 		},
 		onSettled: (_data, error) =>
-			settlePluginPackChange(queryClient, organizationId, error),
+			invalidatePluginPacks(queryClient, organizationId, isResponseLost(error)),
 	});
 
-/**
- * Deletes a pack. On success the pack leaves the cached list. After a 404 or
- * a lost response the mutation settles only once the refetch does, so
- * callers can check isPluginPackGone.
- */
+/** Deletes a pack and removes it from the cached list. */
 export const deletePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -132,11 +158,11 @@ export const deletePluginPackMutation = (
 				packs?.filter((pack) => pack.id !== packId),
 			);
 		},
-		onSettled: (_data, error) => {
-			const refetch = invalidatePluginPacks(queryClient, organizationId);
-			const mayBeGone =
+		onSettled: (_data, error) =>
+			invalidatePluginPacks(
+				queryClient,
+				organizationId,
 				isResponseLost(error) ||
-				(isAxiosError(error) && error.response?.status === 404);
-			return mayBeGone ? refetch : undefined;
-		},
+					(isAxiosError(error) && error.response?.status === 404),
+			),
 	});

@@ -25,7 +25,7 @@ export const ForkDeletePluginPackDialog: React.FC<
 		confirmText="Delete"
 		description={
 			<>
-				<p className="m-0">
+				<p>
 					Projects and chats that enabled this pack lose its skills and agents.
 				</p>
 				{Boolean(error) && <ErrorAlert className="mt-3" error={error} />}

@@ -42,15 +42,14 @@ export const ForkPluginPackTogglesView: React.FC<
 	pending,
 	onToggle,
 }) => {
+	const errorAlert = error ? (
+		<ErrorAlert
+			error={error}
+			actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+		/>
+	) : undefined;
 	if (!enabled) {
-		return error ? (
-			<ErrorAlert
-				error={error}
-				actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
-			/>
-		) : (
-			<Loader />
-		);
+		return errorAlert ?? <Loader />;
 	}
 	const isEnabled = (packId: string) =>
 		pending?.pack.id === packId
@@ -67,6 +66,7 @@ export const ForkPluginPackTogglesView: React.FC<
 	];
 	return (
 		<div className="flex flex-col gap-3">
+			{errorAlert}
 			{packs.length === 0 ? (
 				<p className="m-0 text-sm text-content-secondary">
 					{installed
@@ -139,17 +139,16 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	// Cached packs stay usable when a background refetch fails.
 	const installedStatus = getErrorStatus(installedQuery.error);
 	const installedError =
-		installedQuery.data || installedStatus === 403 || installedStatus === 404
+		installedStatus === 403 || installedStatus === 404
 			? undefined
 			: installedQuery.error;
+	const isInstalledBlocking =
+		installedQuery.isPending ||
+		(Boolean(installedError) && !installedQuery.data);
 	return (
 		<ForkPluginPackTogglesView
 			installed={installedQuery.data}
-			enabled={
-				installedQuery.isPending || installedError
-					? undefined
-					: enabledQuery.data
-			}
+			enabled={isInstalledBlocking ? undefined : enabledQuery.data}
 			error={enabledQuery.error ?? installedError}
 			isRetrying={enabledQuery.isFetching || installedQuery.isFetching}
 			onRetry={() => {

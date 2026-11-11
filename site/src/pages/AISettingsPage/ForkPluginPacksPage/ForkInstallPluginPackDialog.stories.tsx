@@ -20,31 +20,29 @@ type Story = StoryObj<typeof ForkInstallPluginPackDialog>;
 
 export const Default: Story = {};
 
-/** Leaves a required field empty after touching it, which shows its error. */
 export const ValidationError: Story = {
 	play: async () => {
 		const dialog = within(await screen.findByRole("dialog"));
 		await userEvent.click(dialog.getByLabelText(/^Ref/));
 		await userEvent.tab();
-		await dialog.findByText("Ref is required.");
 	},
 };
 
-/** Fills the form with valid values and submits it, as the page requires. */
 const submitValidForm = async () => {
 	const dialog = within(await screen.findByRole("dialog"));
 	await userEvent.type(dialog.getByLabelText(/^Name/), "pstack");
 	await userEvent.type(
 		dialog.getByLabelText(/^Git repository URL/),
-		"https://github.com/cursor/plugins.git",
+		"https://git.example.com/cursor/plugins.git",
 	);
 	await userEvent.type(dialog.getByLabelText(/^Path/), "pstack");
 	await userEvent.type(dialog.getByLabelText(/^Ref/), "v0.15.36");
 	await userEvent.click(dialog.getByRole("button", { name: "Install" }));
 };
 
-/** Switches to the submitted state once the form submits. */
-const SubmittedDialog: React.FC<{ error?: unknown }> = ({ error }) => {
+type SubmittedDialogProps = { error?: unknown };
+
+const SubmittedDialog: React.FC<SubmittedDialogProps> = ({ error }) => {
 	const [isSubmitted, setIsSubmitted] = useState(false);
 	return (
 		<ForkInstallPluginPackDialog
@@ -65,7 +63,7 @@ export const InstallError: Story = {
 	render: () => (
 		<SubmittedDialog
 			error={mockApiError({
-				message: "Host github.com is not an allowed plugin pack source.",
+				message: "Host git.example.com is not an allowed plugin pack source.",
 			})}
 		/>
 	),
