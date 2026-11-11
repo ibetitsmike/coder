@@ -40,6 +40,7 @@ type Querier interface {
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
+	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
@@ -48,6 +49,7 @@ type Querier interface {
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
 	DeletePluginPackByID(ctx context.Context, id uuid.UUID) error
+	DeletePluginPackProject(ctx context.Context, arg DeletePluginPackProjectParams) error
 	DeletePluginPackResources(ctx context.Context, packID uuid.UUID) error
 	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
@@ -99,7 +101,9 @@ type Querier interface {
 	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
 	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
 	GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error)
+	GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetPluginPacksByChatIDRow, error)
 	GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]PluginPack, error)
+	GetPluginPacksByProjectID(ctx context.Context, projectID uuid.UUID) ([]GetPluginPacksByProjectIDRow, error)
 	GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error)
 	GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error)
 	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
@@ -107,6 +111,9 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	// Enables a pack of the chat's organization for the chat. It returns no row
+	// for a pack that does not exist or is in another organization.
+	InsertChatPluginPack(ctx context.Context, arg InsertChatPluginPackParams) (ChatPluginPack, error)
 	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	// The organization comes from the chat.
@@ -119,6 +126,9 @@ type Querier interface {
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertPluginPack(ctx context.Context, arg InsertPluginPackParams) (PluginPack, error)
+	// Enables a pack of the project's organization for the project. It returns
+	// no row for a pack that does not exist or is in another organization.
+	InsertPluginPackProject(ctx context.Context, arg InsertPluginPackProjectParams) (PluginPackProject, error)
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)

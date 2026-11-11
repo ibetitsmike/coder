@@ -340,6 +340,50 @@ func TestForkQuerier(t *testing.T) {
 				Asserts(rbac.ResourceOrganizationSkill.InOrg(pack.OrganizationID), policy.ActionRead).
 				Returns([]forkdb.PluginPack{pack})
 		},
+		"InsertPluginPackProject": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.InsertPluginPackProjectParams{ProjectID: project.ID, PackID: uuid.New()}
+			row := forkdb.PluginPackProject{ProjectID: project.ID, PackID: arg.PackID}
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().InsertPluginPackProject(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(row)
+		},
+		"DeletePluginPackProject": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			arg := forkdb.DeletePluginPackProjectParams{ProjectID: project.ID, PackID: uuid.New()}
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().DeletePluginPackProject(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns()
+		},
+		"GetPluginPacksByProjectID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			project := testutil.Fake(t, faker, database.ChatProject{})
+			rows := []forkdb.GetPluginPacksByProjectIDRow{testutil.Fake(t, faker, forkdb.GetPluginPacksByProjectIDRow{})}
+			db.EXPECT().GetChatProjectByID(gomock.Any(), project.ID).Return(project, nil).AnyTimes()
+			fdb.EXPECT().GetPluginPacksByProjectID(gomock.Any(), project.ID).Return(rows, nil).AnyTimes()
+			check.Args(project.ID).Asserts(project, policy.ActionRead).Returns(rows)
+		},
+		"InsertChatPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
+			row := forkdb.ChatPluginPack{ChatID: chat.ID, PackID: arg.PackID}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().InsertChatPluginPack(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(row)
+		},
+		"DeleteChatPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.DeleteChatPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().DeleteChatPluginPack(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"GetPluginPacksByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.GetPluginPacksByChatIDRow{testutil.Fake(t, faker, forkdb.GetPluginPacksByChatIDRow{})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetPluginPacksByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"UpdatePluginPackCommit": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
 			arg := forkdb.UpdatePluginPackCommitParams{ID: pack.ID, Ref: "v2", CommitSha: pack.CommitSha}

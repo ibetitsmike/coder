@@ -6584,6 +6584,18 @@ export interface ForkChatFamilyCapacity {
 	readonly waiting_for_capacity: readonly string[];
 }
 
+// From codersdk/fork_plugin_pack_enablement.go
+/**
+ * ForkEnabledPluginPack is a plugin pack enabled for a chat project or a chat.
+ * It leaves out the source and the files, which only organization admins can
+ * read.
+ */
+export interface ForkEnabledPluginPack {
+	readonly id: string;
+	readonly name: string;
+	readonly commit_sha: string;
+}
+
 // From codersdk/fork_subagent_limits.go
 /**
  * ForkOrganizationSubagentLimits are the subagent limits of an organization.
