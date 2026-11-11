@@ -61,3 +61,21 @@ func ChatSubagent(t testing.TB, db database.Store, seed forkdb.ChatSubagent) for
 	require.NoError(t, err, "insert chat subagent")
 	return sub
 }
+
+// SandboxOperation inserts a sandbox operation intent row for the build
+// seed.WorkspaceBuildID through the fork queries of db.
+func SandboxOperation(t testing.TB, db database.Store, seed forkdb.SandboxOperation) forkdb.SandboxOperation {
+	t.Helper()
+
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err, "fork queries")
+	op, err := fdb.InsertSandboxOperation(genCtx, forkdb.InsertSandboxOperationParams{
+		ID:               takeFirst(seed.ID, uuid.New()),
+		WorkspaceID:      seed.WorkspaceID,
+		WorkspaceBuildID: seed.WorkspaceBuildID,
+		Operation:        takeFirst(seed.Operation, "create"),
+		Generation:       takeFirst(seed.Generation, 1),
+	})
+	require.NoError(t, err, "insert sandbox operation")
+	return op
+}

@@ -23,6 +23,11 @@ type Querier interface {
 	// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
 	// Archived chats are always claimed so the worker cancels their wake-ups.
 	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
+	// Claims the operation when its generation is the newest one of the
+	// workspace and it is still an intent. A stale generation cannot claim.
+	ClaimSandboxOperation(ctx context.Context, arg ClaimSandboxOperationParams) (SandboxOperation, error)
+	// Marks a claimed operation done or failed. Completing twice is rejected.
+	CompleteSandboxOperation(ctx context.Context, arg CompleteSandboxOperationParams) (SandboxOperation, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
 	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
@@ -101,6 +106,8 @@ type Querier interface {
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetSandboxOperation(ctx context.Context, id uuid.UUID) (SandboxOperation, error)
+	GetSandboxOperationsByBuildID(ctx context.Context, workspaceBuildID uuid.UUID) ([]SandboxOperation, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
@@ -114,6 +121,7 @@ type Querier interface {
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
+	InsertSandboxOperation(ctx context.Context, arg InsertSandboxOperationParams) (SandboxOperation, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
