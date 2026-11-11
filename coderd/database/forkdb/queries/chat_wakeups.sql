@@ -77,9 +77,6 @@ SET
 WHERE id = @id
 RETURNING *;
 
--- name: DeleteChatWakeupByID :exec
-DELETE FROM chat_wakeups WHERE id = @id;
-
 -- name: CancelChatWakeupsByChatID :many
 UPDATE chat_wakeups
 SET
@@ -179,15 +176,6 @@ RETURNING *;
 -- A failed send of an events entry records its run under a key of its own,
 -- so it never blocks a later run of the entry.
 SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid ORDER BY created_at, id;
-
--- name: UpdateChatWakeupRunStatus :one
-UPDATE chat_wakeup_runs
-SET
-    status = @status,
-    error = @error,
-    updated_at = @updated_at
-WHERE id = @id
-RETURNING *;
 
 -- name: CountChatWakeupRunsSince :one
 SELECT COUNT(*)

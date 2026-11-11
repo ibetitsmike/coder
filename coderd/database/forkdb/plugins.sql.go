@@ -111,15 +111,6 @@ func (q *Queries) ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLi
 	return i, err
 }
 
-const deleteExpiredPluginLinkCodes = `-- name: DeleteExpiredPluginLinkCodes :exec
-DELETE FROM plugin_link_codes WHERE expires_at <= now()
-`
-
-func (q *Queries) DeleteExpiredPluginLinkCodes(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredPluginLinkCodes)
-	return err
-}
-
 const deletePluginByID = `-- name: DeletePluginByID :exec
 DELETE FROM plugins WHERE id = $1
 `

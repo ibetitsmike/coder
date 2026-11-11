@@ -41,8 +41,6 @@ type Querier interface {
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
-	DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error
-	DeleteExpiredPluginLinkCodes(ctx context.Context) error
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
@@ -144,7 +142,6 @@ type Querier interface {
 	// chats that only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
-	UpdateChatWakeupRunStatus(ctx context.Context, arg UpdateChatWakeupRunStatusParams) (ChatWakeupRun, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)

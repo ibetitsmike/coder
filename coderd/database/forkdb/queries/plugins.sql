@@ -100,9 +100,6 @@ WHERE plugin_id = @plugin_id
     AND expires_at > now()
 RETURNING *;
 
--- name: DeleteExpiredPluginLinkCodes :exec
-DELETE FROM plugin_link_codes WHERE expires_at <= now();
-
 -- name: DeletePluginLinkCodesByUser :exec
 DELETE FROM plugin_link_codes WHERE plugin_id = @plugin_id AND user_id = @user_id;
 

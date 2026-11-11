@@ -238,15 +238,6 @@ func (q *Queries) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg 
 	return count, err
 }
 
-const deleteChatWakeupByID = `-- name: DeleteChatWakeupByID :exec
-DELETE FROM chat_wakeups WHERE id = $1
-`
-
-func (q *Queries) DeleteChatWakeupByID(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteChatWakeupByID, id)
-	return err
-}
-
 const finishChatWakeupClaim = `-- name: FinishChatWakeupClaim :one
 UPDATE chat_wakeups
 SET
@@ -715,45 +706,6 @@ func (q *Queries) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, 
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
-}
-
-const updateChatWakeupRunStatus = `-- name: UpdateChatWakeupRunStatus :one
-UPDATE chat_wakeup_runs
-SET
-    status = $1,
-    error = $2,
-    updated_at = $3
-WHERE id = $4
-RETURNING id, wakeup_id, chat_id, organization_id, run_key, status, error, created_at, updated_at
-`
-
-type UpdateChatWakeupRunStatusParams struct {
-	Status    ChatWakeupRunStatus `db:"status" json:"status"`
-	Error     sql.NullString      `db:"error" json:"error"`
-	UpdatedAt time.Time           `db:"updated_at" json:"updated_at"`
-	ID        uuid.UUID           `db:"id" json:"id"`
-}
-
-func (q *Queries) UpdateChatWakeupRunStatus(ctx context.Context, arg UpdateChatWakeupRunStatusParams) (ChatWakeupRun, error) {
-	row := q.db.QueryRowContext(ctx, updateChatWakeupRunStatus,
-		arg.Status,
-		arg.Error,
-		arg.UpdatedAt,
-		arg.ID,
-	)
-	var i ChatWakeupRun
-	err := row.Scan(
-		&i.ID,
-		&i.WakeupID,
-		&i.ChatID,
-		&i.OrganizationID,
-		&i.RunKey,
-		&i.Status,
-		&i.Error,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const updateChatWakeupStatus = `-- name: UpdateChatWakeupStatus :one
