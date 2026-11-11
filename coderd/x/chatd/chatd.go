@@ -614,7 +614,10 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		return database.Chat{}, xerrors.New("title is required")
 	}
 	opts.TitleSource = cmp.Or(opts.TitleSource, database.ChatTitleSourceFallback)
-	opts = withRootAgent(opts)
+	opts, err := withRootAgent(opts)
+	if err != nil {
+		return database.Chat{}, err
+	}
 	initialStatus := database.ChatStatusWaiting
 	if len(opts.InitialUserContent) > 0 {
 		initialStatus = database.ChatStatusRunning

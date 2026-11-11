@@ -747,14 +747,14 @@ func (p *Server) buildTurnEnvironment(
 	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID); err != nil {
 		return turnEnvironment{}, err
 	}
-	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
-		_, ok := tool.(acpSpawnTool)
-		return ok
-	})
 	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
 	if err != nil {
 		return turnEnvironment{}, err
 	}
+	acpSubagentsAvailable := !isExploreSubagent && slices.ContainsFunc(customAgentPolicy.keptTools(tools), func(tool fantasy.AgentTool) bool {
+		_, ok := tool.(acpSpawnTool)
+		return ok
+	})
 	if customAgentPolicy != nil && !customAgentPolicy.keepsSkillTools() {
 		initialResolvedSkills = nil
 	}
