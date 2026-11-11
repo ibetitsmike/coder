@@ -123,7 +123,8 @@ func TestForkRootAgent(t *testing.T) {
 		return system.String()
 	}
 	names := toolNames(env.Tools)
-	require.Contains(t, names, "execute")
+	require.Contains(t, names, "read_file")
+	require.NotContains(t, names, "execute")
 	require.NotContains(t, names, "write_file")
 	require.NotContains(t, names, spawnAgentToolName)
 	// readonly also removes acp_spawn_agent, and with it the ACP guidance.

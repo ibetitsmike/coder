@@ -32,7 +32,8 @@ import (
 // customAgentToolPolicy is the tool policy of a custom agent child, stored
 // as JSON in chat_subagents.tool_policy.
 type customAgentToolPolicy struct {
-	// ReadOnly limits the child to the explore allowlist.
+	// ReadOnly limits the child to the explore allowlist without its shell
+	// tools, which can write files.
 	ReadOnly bool `json:"read_only"`
 	// Tools allows only the listed non-MCP tools. Nil means no allowlist;
 	// an empty list allows no non-MCP tools.
@@ -174,6 +175,17 @@ func (policy *customAgentToolPolicy) keepDynamicToolNames(names map[string]bool,
 	}
 }
 
+// customAgentReadOnlyToolAllowed reports whether a readonly child keeps
+// tool: an explore tool other than execute and process_output, because chatd
+// cannot limit a shell command to reads.
+func customAgentReadOnlyToolAllowed(tool fantasy.AgentTool) bool {
+	switch tool.Info().Name {
+	case "execute", "process_output":
+		return false
+	}
+	return exploreToolAllowed(tool)
+}
+
 // filter returns the tools, deferred MCP candidates and provider tools that
 // policy allows, in their original order. readonly keeps web_search, the
 // provider tool that Explore children keep. mcpServerSlugs is only read in
@@ -188,7 +200,7 @@ func (policy customAgentToolPolicy) filter(
 	keepNonMCP := policy.allowsNonMCPTool
 	keep := func(tool fantasy.AgentTool) bool {
 		name := tool.Info().Name
-		if disallowed[name] || (policy.ReadOnly && !exploreToolAllowed(tool)) {
+		if disallowed[name] || (policy.ReadOnly && !customAgentReadOnlyToolAllowed(tool)) {
 			return false
 		}
 		if server, isMCP := customAgentMCPServer(tool, mcpServerSlugs); isMCP {
