@@ -50,6 +50,13 @@ func TestForkRootAgent(t *testing.T) {
 		Content:        agentDefinitionMarkdown("name: spawner\ndisallowed_tools: [acp_wait_agent]", "ROOT-SPAWNER-MARKER"),
 	})
 	require.NoError(t, err)
+	_, err = f.fdb.InsertUserAgentDefinition(ctx, forkdb.InsertUserAgentDefinitionParams{
+		OrganizationID: f.root.OrganizationID,
+		UserID:         f.root.OwnerID,
+		Name:           "blind",
+		Content:        agentDefinitionMarkdown("name: blind\nbase_type: explore\ndisallowed_tools: [read_file, execute, process_output, read_skill, read_skill_file]", "ROOT-BLIND-MARKER"),
+	})
+	require.NoError(t, err)
 	dynamicTools, err := json.Marshal([]codersdk.DynamicTool{{
 		Name:        "client_tool",
 		Description: "A tool the client runs.",
@@ -158,6 +165,36 @@ func TestForkRootAgent(t *testing.T) {
 	require.NotContains(t, names, "acp_wait_agent")
 	require.NotContains(t, systemText(spawnerEnv), acpSubagentPromptBlock)
 	require.Contains(t, (agentDefinitionsFixture{db: f.db}).systemPrompt(t, spawner.ID), workspaceAttachedAwareness)
+
+	// An Explore root whose policy removes every Explore tool gets no
+	// tool, not every tool.
+	blindAgent, err := f.server.ResolveRootAgent(ctx, RootAgentOptions{
+		OwnerID:        f.root.OwnerID,
+		OrganizationID: f.root.OrganizationID,
+		AgentType:      "blind",
+		ModelConfigID:  f.root.LastModelConfigID,
+	})
+	require.NoError(t, err)
+	blind, err := f.server.CreateChat(ctx, CreateOptions{
+		OrganizationID:     f.root.OrganizationID,
+		OwnerID:            f.root.OwnerID,
+		WorkspaceID:        f.root.WorkspaceID,
+		BuildID:            f.root.BuildID,
+		AgentID:            f.root.AgentID,
+		Title:              "blind root",
+		ModelConfigID:      f.root.LastModelConfigID,
+		InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("look")},
+		RootAgent:          &blindAgent,
+	})
+	require.NoError(t, err)
+	blind, err = f.db.GetChatByID(ctx, blind.ID)
+	require.NoError(t, err)
+	messages, err = f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: blind.ID})
+	require.NoError(t, err)
+	blindEnv, err := f.server.buildTurnEnvironment(ctx, generationPrepareInput{Chat: blind, Messages: messages})
+	require.NoError(t, err)
+	t.Cleanup(blindEnv.Close)
+	require.NotContains(t, toolNames(blindEnv.Tools), "write_file")
 
 	// A detached root that cannot create a workspace is not told to.
 	detached, err := f.server.CreateChat(ctx, CreateOptions{
