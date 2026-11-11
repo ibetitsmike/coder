@@ -9,13 +9,6 @@ import {
 } from "#/testHelpers/forkPluginPacks";
 import { ForkProjectPluginPacksDialog } from "./ForkProjectPluginPacksDialog";
 
-const enabledKey = enabledPluginPacksKey({
-	kind: "project",
-	organizationId: MockChatProject.organization_id,
-	projectId: MockChatProject.id,
-});
-const installedKey = pluginPacksKey(MockChatProject.organization_id);
-
 const meta: Meta<typeof ForkProjectPluginPacksDialog> = {
 	title: "pages/AgentsPage/ProjectPage/ForkProjectPluginPacksDialog",
 	component: ForkProjectPluginPacksDialog,
@@ -25,21 +18,29 @@ const meta: Meta<typeof ForkProjectPluginPacksDialog> = {
 		onOpenChange: fn(),
 		onCloseAutoFocus: fn(),
 	},
-	parameters: {
-		queries: [
-			{ key: enabledKey, data: [MockForkPluginPack] },
-			{
-				key: installedKey,
-				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
-			},
-		],
-	},
 };
 
 export default meta;
 type Story = StoryObj<typeof ForkProjectPluginPacksDialog>;
 
-export const Editable: Story = {};
+export const Editable: Story = {
+	parameters: {
+		queries: [
+			{
+				key: enabledPluginPacksKey({
+					kind: "project",
+					organizationId: MockChatProject.organization_id,
+					projectId: MockChatProject.id,
+				}),
+				data: [MockForkPluginPack],
+			},
+			{
+				key: pluginPacksKey(MockChatProject.organization_id),
+				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
+			},
+		],
+	},
+};
 
 export const ReadOnly: Story = {
 	args: {
@@ -47,5 +48,21 @@ export const ReadOnly: Story = {
 			...MockChatProject,
 			permissions: { ...MockChatProject.permissions, update: false },
 		},
+	},
+	parameters: {
+		queries: [
+			{
+				key: enabledPluginPacksKey({
+					kind: "project",
+					organizationId: MockChatProject.organization_id,
+					projectId: MockChatProject.id,
+				}),
+				data: [MockForkPluginPack],
+			},
+			{
+				key: pluginPacksKey(MockChatProject.organization_id),
+				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
+			},
+		],
 	},
 };
