@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { type QueryClient, useQueryClient } from "react-query";
-import { spyOn } from "storybook/test";
+import { screen, spyOn, userEvent } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { agentDefinitionsKey } from "#/api/queries/forkAgentDefinitions";
@@ -58,6 +58,43 @@ export const OrganizationAdmin: Story = {
 			},
 		],
 	},
+};
+
+const openRowMenu = async () => {
+	await userEvent.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkAgentDefinitionMetadata.name}`,
+		}),
+	);
+};
+
+export const AdminRowMenu: Story = {
+	parameters: OrganizationAdmin.parameters,
+	play: openRowMenu,
+};
+
+export const RowMenuWithoutShare: Story = {
+	parameters: {
+		queries: [
+			{
+				key: organizationsPermissions([MockDefaultOrganization.id]).queryKey,
+				data: {
+					[MockDefaultOrganization.id]: {
+						...MockOrganizationPermissions,
+						shareOrganizationSkill: false,
+					},
+				},
+			},
+			{
+				key: agentDefinitionsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkAgentDefinitionMetadata],
+			},
+		],
+	},
+	play: openRowMenu,
 };
 
 export const Empty: Story = {
