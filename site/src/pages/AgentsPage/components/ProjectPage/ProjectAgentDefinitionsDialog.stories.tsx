@@ -11,6 +11,17 @@ const projectScopeKey = agentDefinitionsKey({
 	projectId: MockChatProject.id,
 });
 
+const definitions = [
+	MockForkAgentDefinitionMetadata,
+	{
+		...MockForkAgentDefinitionMetadata,
+		id: "agent-definition-2",
+		name: "planner",
+		description: "Breaks a task into reviewable steps.",
+		enabled: false,
+	},
+];
+
 const meta: Meta<typeof ProjectAgentDefinitionsDialog> = {
 	title: "pages/AgentsPage/ProjectPage/ProjectAgentDefinitionsDialog",
 	component: ProjectAgentDefinitionsDialog,
@@ -21,32 +32,22 @@ const meta: Meta<typeof ProjectAgentDefinitionsDialog> = {
 		onCloseAutoFocus: fn(),
 		canEdit: true,
 	},
-	parameters: {
-		queries: [
-			{
-				key: projectScopeKey,
-				data: [
-					MockForkAgentDefinitionMetadata,
-					{
-						...MockForkAgentDefinitionMetadata,
-						id: "agent-definition-2",
-						name: "planner",
-						description: "Breaks a task into reviewable steps.",
-						enabled: false,
-					},
-				],
-			},
-		],
-	},
 };
 
 export default meta;
 type Story = StoryObj<typeof ProjectAgentDefinitionsDialog>;
 
-export const List: Story = {};
+export const List: Story = {
+	parameters: {
+		queries: [{ key: projectScopeKey, data: definitions }],
+	},
+};
 
 export const ReadOnly: Story = {
 	args: { canEdit: false },
+	parameters: {
+		queries: [{ key: projectScopeKey, data: definitions }],
+	},
 };
 
 export const Empty: Story = {

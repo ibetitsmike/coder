@@ -235,6 +235,17 @@ export const AgentDefinitionsLoading: Story = {
 	},
 };
 
+export const AgentDefinitionsError: Story = {
+	args: {
+		agentDefinitions: {
+			count: undefined,
+			disabledCount: undefined,
+			error: new Error("Failed to load agent definitions."),
+			onOpen: fn(),
+		},
+	},
+};
+
 export const Unset: Story = {
 	args: { instructions: MockUnsetChatProjectInstructions },
 };
