@@ -47,6 +47,46 @@ type forkQueryMetricsStore struct {
 
 var _ forkdb.Store = forkQueryMetricsStore{}
 
+func (f forkQueryMetricsStore) DeletePluginPackByID(ctx context.Context, id uuid.UUID) error {
+	defer f.observe(ctx, "DeletePluginPackByID", time.Now())
+	return f.s.DeletePluginPackByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) DeletePluginPackResources(ctx context.Context, packID uuid.UUID) error {
+	defer f.observe(ctx, "DeletePluginPackResources", time.Now())
+	return f.s.DeletePluginPackResources(ctx, packID)
+}
+
+func (f forkQueryMetricsStore) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
+	defer f.observe(ctx, "GetPluginPackByID", time.Now())
+	return f.s.GetPluginPackByID(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
+	defer f.observe(ctx, "GetPluginPackResources", time.Now())
+	return f.s.GetPluginPackResources(ctx, packID)
+}
+
+func (f forkQueryMetricsStore) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
+	defer f.observe(ctx, "GetPluginPacksByOrganizationID", time.Now())
+	return f.s.GetPluginPacksByOrganizationID(ctx, organizationID)
+}
+
+func (f forkQueryMetricsStore) InsertPluginPack(ctx context.Context, arg forkdb.InsertPluginPackParams) (forkdb.PluginPack, error) {
+	defer f.observe(ctx, "InsertPluginPack", time.Now())
+	return f.s.InsertPluginPack(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertPluginPackResources(ctx context.Context, arg forkdb.InsertPluginPackResourcesParams) error {
+	defer f.observe(ctx, "InsertPluginPackResources", time.Now())
+	return f.s.InsertPluginPackResources(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdatePluginPackCommit(ctx context.Context, arg forkdb.UpdatePluginPackCommitParams) (forkdb.PluginPack, error) {
+	defer f.observe(ctx, "UpdatePluginPackCommit", time.Now())
+	return f.s.UpdatePluginPackCommit(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) observe(ctx context.Context, query string, start time.Time) {
 	f.m.queryLatencies.WithLabelValues(query).Observe(time.Since(start).Seconds())
 	f.m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), query).Inc()

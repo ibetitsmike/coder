@@ -588,8 +588,12 @@ require (
 )
 
 require (
+	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-openapi/swag/pools v0.29.2 // indirect
 	github.com/pandatix/go-abnf v0.5.1 // indirect
+	github.com/pjbgf/sha1cd v0.6.0 // indirect
+	github.com/sergi/go-diff v1.4.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
 

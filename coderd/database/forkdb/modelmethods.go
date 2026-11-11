@@ -13,6 +13,12 @@ func (p Plugin) RBACObject() rbac.Object {
 	return rbac.ResourcePlugin.WithID(p.ID).InOrg(p.OrganizationID)
 }
 
+// RBACObject reuses the organization skill object, so only organization
+// admins and auditors read packs.
+func (p PluginPack) RBACObject() rbac.Object {
+	return rbac.ResourceOrganizationSkill.WithID(p.ID).InOrg(p.OrganizationID)
+}
+
 // RBACObject reuses the skill objects. A user-tier row has no InOrg, like a
 // personal skill, because policy.rego skips user permissions on objects with
 // an organization owner. dbauthz checks the organization membership instead.

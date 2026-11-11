@@ -47,6 +47,8 @@ type Querier interface {
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
+	DeletePluginPackByID(ctx context.Context, id uuid.UUID) error
+	DeletePluginPackResources(ctx context.Context, packID uuid.UUID) error
 	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
@@ -94,6 +96,9 @@ type Querier interface {
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
 	GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error)
+	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
+	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
+	GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]PluginPack, error)
 	GetPluginUserLink(ctx context.Context, arg GetPluginUserLinkParams) (PluginUserLink, error)
 	GetPluginUserLinksByPluginAndUser(ctx context.Context, arg GetPluginUserLinksByPluginAndUserParams) ([]PluginUserLink, error)
 	GetPluginUserLinksByPluginID(ctx context.Context, pluginID uuid.UUID) ([]PluginUserLink, error)
@@ -112,6 +117,8 @@ type Querier interface {
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
+	InsertPluginPack(ctx context.Context, arg InsertPluginPackParams) (PluginPack, error)
+	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	// A failed send of an events entry records its run under a key of its own,
@@ -151,6 +158,7 @@ type Querier interface {
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
 	UpdatePluginEnabled(ctx context.Context, arg UpdatePluginEnabledParams) (Plugin, error)
 	UpdatePluginLastError(ctx context.Context, arg UpdatePluginLastErrorParams) error
+	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
