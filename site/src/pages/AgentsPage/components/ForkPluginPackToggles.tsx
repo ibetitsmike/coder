@@ -131,10 +131,9 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	const toggleMutation = useMutation({
 		...setPluginPackEnabledMutation(queryClient, target),
 		onError: (error) =>
-			toast.error(
-				getErrorMessage(error, "Failed to update the plugin pack."),
-				{ description: getErrorDetail(error) },
-			),
+			toast.error(getErrorMessage(error, "Failed to update the plugin pack."), {
+				description: getErrorDetail(error),
+			}),
 	});
 	// Cached packs stay usable when a background refetch fails.
 	const installedError =
