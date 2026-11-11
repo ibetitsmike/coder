@@ -101,8 +101,20 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 				slog.F("chat_id", b.ChatID), slog.F("idle_links", len(idle)))
 			return true
 		}
+		// A chat a plugin started was made for the link that started it.
+		// No link following it means that link moved on, so giving it to
+		// the idle link would hand one identity's conversation to another.
+		chat, err := r.m.db.GetChatByID(sys(ctx), b.ChatID)
+		if err != nil {
+			r.logger.Warn(ctx, "get chat no link follows", slog.Error(err))
+			return false
+		}
+		if _, ok := chat.Labels[ChatLabelPlugin]; ok {
+			r.logger.Debug(ctx, "no link follows plugin chat", slog.F("chat_id", b.ChatID))
+			return true
+		}
 		target = &idle[0]
-		err := r.m.fdb.SetPluginUserLinkActiveChat(sys(ctx), forkdb.SetPluginUserLinkActiveChatParams{
+		err = r.m.fdb.SetPluginUserLinkActiveChat(sys(ctx), forkdb.SetPluginUserLinkActiveChatParams{
 			PluginID:     r.plugin.ID,
 			ExternalID:   target.ExternalID,
 			ActiveChatID: uuid.NullUUID{UUID: b.ChatID, Valid: true},

@@ -35,7 +35,8 @@ const bridgePluginPackage = "github.com/coder/coder/v2/coderd/x/plugins/testdata
 // chat, so broadcasting to every link of the owner would push one identity's
 // conversation to all of them. A chat no link follows yet goes to the
 // owner's one idle link, so a plugin that cannot create chats still reaches
-// its first chat, and to nobody when the pick would be a guess.
+// its first chat. It goes to nobody when the pick would be a guess or when a
+// plugin started the chat for a link that has moved on.
 func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 	t.Parallel()
 
@@ -47,6 +48,8 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 		// links are the owner's links; the first one is the expected
 		// recipient unless wantNone is set.
 		links []forkdb.PluginUserLink
+		// chat is what the chat lookup returns, when delivery needs it.
+		chat *database.Chat
 		// bootstrap expects the recipient to be given the chat first.
 		bootstrap bool
 		wantNone  bool
@@ -65,7 +68,17 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 				{ExternalID: "idle-link"},
 				{ExternalID: "other-chat-link", ActiveChatID: other},
 			},
+			chat:      &database.Chat{ID: chatID},
 			bootstrap: true,
+		},
+		{
+			name: "PluginChatNoLinkFollowsGetsNothing",
+			links: []forkdb.PluginUserLink{
+				{ExternalID: "idle-link"},
+				{ExternalID: "other-chat-link", ActiveChatID: other},
+			},
+			chat:     &database.Chat{ID: chatID, Labels: database.StringMap{ChatLabelPlugin: "bridge"}},
+			wantNone: true,
 		},
 		{
 			name: "SeveralIdleLinksGetNothing",
@@ -97,6 +110,9 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 				PluginID: r.plugin.ID,
 				UserID:   owner,
 			}).Return(tc.links, nil)
+			if tc.chat != nil {
+				db.EXPECT().GetChatByID(gomock.Any(), chatID).Return(*tc.chat, nil)
+			}
 			if tc.bootstrap {
 				fdb.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), forkdb.SetPluginUserLinkActiveChatParams{
 					PluginID:     r.plugin.ID,
