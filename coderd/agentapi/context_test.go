@@ -147,6 +147,46 @@ func TestPushContextState(t *testing.T) {
 		require.Equal(t, "watcher degraded", marker.gotErr)
 	})
 
+	t.Run("DriftHasherOverridesPushedHash", func(t *testing.T) {
+		t.Parallel()
+
+		api, dbm := makeAPI(t)
+		marker := &fakeDriftHasher{returnHash: []byte{0xde, 0xad}}
+		api.DirtyMarker = marker
+		expectInTx(dbm)
+
+		// A marker implementing the optional ContextDriftHasher capability
+		// owns the drift hash: the snapshot row stores the derived value,
+		// and the marker receives that same value back so hydration and
+		// dirty marking agree with what create-time and refresh pinning
+		// read from the snapshot row.
+		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+			Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+		dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params database.UpsertWorkspaceAgentContextSnapshotParams) (database.WorkspaceAgentContextSnapshot, error) {
+				require.Equal(t, []byte{0xde, 0xad}, params.AggregateHash)
+				return database.WorkspaceAgentContextSnapshot{}, nil
+			})
+		dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+			Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+		dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+			Version:       1,
+			AggregateHash: []byte{0xaa, 0xbb},
+			Initial:       true,
+			Resources: []*agentproto.ContextResource{
+				instructionResource("/home/coder/AGENTS.md", "hello"),
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, resp.GetAccepted())
+		require.Equal(t, []byte{0xde, 0xad}, marker.gotHash)
+		require.Len(t, marker.gotRows, 1)
+		require.Equal(t, "/home/coder/AGENTS.md", marker.gotRows[0].Source)
+	})
+
 	t.Run("DirtyMarkerSkippedOnDrop", func(t *testing.T) {
 		t.Parallel()
 
@@ -710,4 +750,20 @@ func (f *fakeDirtyMarker) HydrateAndMarkChatsDirty(_ context.Context, _ database
 	f.gotHash = aggregateHash
 	f.gotErr = snapshotError
 	return func() { f.published++ }, nil
+} // fakeDriftHasher is a test double that also implements the optional
+// agentapi.ContextDriftHasher capability so tests can assert the derived
+// hash is what gets stored on the snapshot row and handed back to the
+// dirty marker.
+type fakeDriftHasher struct {
+	fakeDirtyMarker
+	gotRows    []database.UpsertWorkspaceAgentContextResourceParams
+	returnHash []byte
+}
+
+func (f *fakeDriftHasher) DriftHash(rows []database.UpsertWorkspaceAgentContextResourceParams, aggregateHash []byte) []byte {
+	f.gotRows = rows
+	if f.returnHash == nil {
+		return aggregateHash
+	}
+	return f.returnHash
 }
