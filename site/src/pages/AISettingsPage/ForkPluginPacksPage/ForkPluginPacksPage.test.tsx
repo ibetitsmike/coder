@@ -162,12 +162,18 @@ it("closes the install dialog when a lost response did install the pack", async 
 		await screen.findByRole("button", { name: "Install plugin pack" }),
 	);
 	const dialog = await screen.findByRole("dialog");
-	await user.type(within(dialog).getByLabelText(/^Name/), MockForkPluginPack.name);
+	await user.type(
+		within(dialog).getByLabelText(/^Name/),
+		MockForkPluginPack.name,
+	);
 	await user.type(
 		within(dialog).getByLabelText(/^Git repository URL/),
 		MockForkPluginPack.source_url,
 	);
-	await user.type(within(dialog).getByLabelText(/^Ref/), MockForkPluginPack.ref);
+	await user.type(
+		within(dialog).getByLabelText(/^Ref/),
+		MockForkPluginPack.ref,
+	);
 	await user.click(within(dialog).getByRole("button", { name: "Install" }));
 
 	await waitFor(() =>
@@ -199,7 +205,9 @@ it("reports an update as done when a lost response did update the pack", async (
 		}),
 	);
 	await user.click(
-		await screen.findByRole("menuitem", { name: /Update to the latest commit/ }),
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		}),
 	);
 
 	await waitFor(() =>
