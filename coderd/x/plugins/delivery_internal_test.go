@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -35,8 +36,8 @@ const bridgePluginPackage = "github.com/coder/coder/v2/coderd/x/plugins/testdata
 // chat, so broadcasting to every link of the owner would push one identity's
 // conversation to all of them. A chat no link follows yet goes to the
 // owner's one idle link, so a plugin that cannot create chats still reaches
-// its first chat. It goes to nobody when the pick would be a guess or when a
-// plugin started the chat for a link that has moved on.
+// its first chat. It goes to nobody when the pick would be a guess, or when
+// the chat was made for or already reached a link that has moved on.
 func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 	t.Parallel()
 
@@ -50,6 +51,8 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 		links []forkdb.PluginUserLink
 		// chat is what the chat lookup returns, when delivery needs it.
 		chat *database.Chat
+		// delivered marks a chat whose events already reached a link.
+		delivered bool
 		// bootstrap expects the recipient to be given the chat first.
 		bootstrap bool
 		wantNone  bool
@@ -79,6 +82,15 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 			},
 			chat:     &database.Chat{ID: chatID, Labels: database.StringMap{ChatLabelPlugin: "bridge"}},
 			wantNone: true,
+		},
+		{
+			name: "DeliveredChatNoLinkFollowsGetsNothing",
+			links: []forkdb.PluginUserLink{
+				{ExternalID: "idle-link"},
+				{ExternalID: "other-chat-link", ActiveChatID: other},
+			},
+			delivered: true,
+			wantNone:  true,
 		},
 		{
 			name: "SeveralIdleLinksGetNothing",
@@ -120,7 +132,11 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 					ActiveChatID: active,
 				}).Return(nil)
 			}
-			fdb.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), gomock.Any()).Return(nil)
+			fdb.EXPECT().UpdatePluginChatBindingDelivered(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, arg forkdb.UpdatePluginChatBindingDeliveredParams) error {
+					require.Equal(t, !tc.wantNone, arg.Delivered, "binding must record whether a link got the event")
+					return nil
+				})
 
 			r.deliverChat(ctx, forkdb.GetPluginChatBindingsDueRow{
 				PluginID:    r.plugin.ID,
@@ -128,6 +144,7 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 				ChatStatus:  database.ChatStatusWaiting,
 				ChatTitle:   "delivery routing",
 				ChatOwnerID: owner,
+				Delivered:   tc.delivered,
 			})
 
 			delivered := logs.String()

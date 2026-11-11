@@ -61,11 +61,12 @@ func (r *runner) deliver(ctx context.Context) {
 }
 
 // deliverToActiveLink sends one event for chat b to the link that follows
-// it and reports whether delivery may advance the binding's cursor. A user
+// it. It reports whether a link got the event and whether delivery may
+// advance the binding's cursor. A user
 // may link several external identities to one plugin, and each follows its
 // own active chat; broadcasting would push one identity's conversation to
 // all of them.
-func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow, status database.ChatStatus, texts []*pluginproto.ChatText) bool {
+func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow, status database.ChatStatus, texts []*pluginproto.ChatText) (sent, advance bool) {
 	// Host calls move a link's active chat while an export runs under
 	// callMu, so hold it from the lookup through the event call; otherwise
 	// a concurrent webhook can move the link between the two.
@@ -77,7 +78,7 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 	})
 	if err != nil {
 		r.logger.Warn(ctx, "list links of chat owner", slog.Error(err))
-		return false
+		return false, false
 	}
 	var target *forkdb.PluginUserLink
 	var idle []forkdb.PluginUserLink
@@ -91,6 +92,12 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 		}
 	}
 	if target == nil {
+		// A chat that reached one identity never goes to another: the
+		// owner's links can reach different people.
+		if b.Delivered {
+			r.logger.Debug(ctx, "link that got chat no longer follows it", slog.F("chat_id", b.ChatID))
+			return false, true
+		}
 		// No identity follows the chat yet, for example one the user
 		// started in Coder. A plugin without the chats create grant can
 		// only reach a link through such a chat, so give it to the one
@@ -99,7 +106,7 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 		if len(idle) != 1 {
 			r.logger.Debug(ctx, "no single link follows chat",
 				slog.F("chat_id", b.ChatID), slog.F("idle_links", len(idle)))
-			return true
+			return false, true
 		}
 		// A chat a plugin started was made for the link that started it.
 		// No link following it means that link moved on, so giving it to
@@ -107,11 +114,11 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 		chat, err := r.m.db.GetChatByID(sys(ctx), b.ChatID)
 		if err != nil {
 			r.logger.Warn(ctx, "get chat no link follows", slog.Error(err))
-			return false
+			return false, false
 		}
 		if _, ok := chat.Labels[ChatLabelPlugin]; ok {
 			r.logger.Debug(ctx, "no link follows plugin chat", slog.F("chat_id", b.ChatID))
-			return true
+			return false, true
 		}
 		target = &idle[0]
 		err = r.m.fdb.SetPluginUserLinkActiveChat(sys(ctx), forkdb.SetPluginUserLinkActiveChatParams{
@@ -121,7 +128,7 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 		})
 		if err != nil {
 			r.logger.Warn(ctx, "set active chat of idle link", slog.Error(err))
-			return false
+			return false, false
 		}
 	}
 	err = r.invokeResultLocked(ctx, "coder_on_event", &pluginproto.ChatEvent{
@@ -133,9 +140,9 @@ func (r *runner) deliverToActiveLink(ctx context.Context, b forkdb.GetPluginChat
 	})
 	if err != nil {
 		r.deliveryFailed(ctx, b, err)
-		return false
+		return false, false
 	}
-	return true
+	return true, true
 }
 
 func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindingsDueRow) {
@@ -167,8 +174,13 @@ func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindings
 
 	send := (len(texts) > 0 && slices.Contains(r.grants.Events, codersdk.PluginEventChatMessagesAdded)) ||
 		(statusChanged && slices.Contains(r.grants.Events, codersdk.PluginEventChatStatusChanged))
-	if send && !r.deliverToActiveLink(ctx, b, status, texts) {
-		return
+	var sent bool
+	if send {
+		var advance bool
+		sent, advance = r.deliverToActiveLink(ctx, b, status, texts)
+		if !advance {
+			return
+		}
 	}
 	sentStatus := b.SentStatus
 	if len(msgs) < messagesPerEvent {
@@ -179,6 +191,7 @@ func (r *runner) deliverChat(ctx context.Context, b forkdb.GetPluginChatBindings
 		ChatID:        b.ChatID,
 		SentMessageID: cursor,
 		SentStatus:    sentStatus,
+		Delivered:     sent,
 	})
 	if err != nil {
 		r.logger.Warn(ctx, "store delivery cursor", slog.Error(err))

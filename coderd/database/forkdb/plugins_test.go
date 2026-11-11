@@ -139,14 +139,42 @@ func TestPluginChatBindings(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{freshChat.ID}, dueChatIDs())
 
+	freshDelivered := func() bool {
+		due, err := fdb.GetPluginChatBindingsDue(ctx, forkdb.GetPluginChatBindingsDueParams{
+			PluginID:   plugin.ID,
+			LimitCount: 100,
+		})
+		require.NoError(t, err)
+		require.Len(t, due, 1)
+		require.Equal(t, freshChat.ID, due[0].ChatID)
+		return due[0].Delivered
+	}
+	require.False(t, freshDelivered(), "a new binding has not reached a link")
+
 	// Delivering the fresh chat's status clears it.
 	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
 		PluginID:      plugin.ID,
 		ChatID:        freshChat.ID,
 		SentMessageID: 0,
 		SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusWaiting, Valid: true},
+		Delivered:     true,
 	}))
 	require.Empty(t, dueChatIDs())
+
+	// Once a link got the chat, a later cursor update that reached no link
+	// keeps the mark.
+	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: freshChat.ID, Status: database.ChatStatusError})
+	require.NoError(t, err)
+	require.True(t, freshDelivered())
+	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
+		PluginID:      plugin.ID,
+		ChatID:        freshChat.ID,
+		SentMessageID: 0,
+		SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusError, Valid: true},
+	}))
+	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: freshChat.ID, Status: database.ChatStatusWaiting})
+	require.NoError(t, err)
+	require.True(t, freshDelivered())
 }
 
 func TestPluginLinkCodes(t *testing.T) {
