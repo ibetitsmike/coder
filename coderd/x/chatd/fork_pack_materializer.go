@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,6 +61,9 @@ func (p *Server) materializePluginPacks(
 	var pending []enabledPack
 	for _, pack := range p.enabledPacks(ctx, chat) {
 		if commit, ok := p.materializedPacks.Load(materializedPackKey{agentID, pack.ID}); ok && commit == pack.CommitSHA {
+			continue
+		}
+		if slices.ContainsFunc(pending, func(other enabledPack) bool { return other.ID == pack.ID }) {
 			continue
 		}
 		pending = append(pending, pack)
