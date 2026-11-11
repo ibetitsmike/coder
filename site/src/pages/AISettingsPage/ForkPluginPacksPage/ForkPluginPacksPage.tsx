@@ -177,6 +177,12 @@ const ForkPluginPacksPage: React.FC = () => {
 			: undefined;
 		content = (
 			<RequirePermission isFeatureVisible={Boolean(organization)}>
+				{organizationPermissionsQuery.isRefetchError && (
+					<ErrorAlert
+						className="mb-4"
+						error={organizationPermissionsQuery.error}
+					/>
+				)}
 				{organization && (
 					<OrganizationPluginPacks
 						key={organization.id}

@@ -62,6 +62,14 @@ export const LoadError: Story = {
 	},
 };
 
+export const Retrying: Story = {
+	args: {
+		packs: [],
+		error: mockApiError({ message: "Failed to list plugin packs." }),
+		isRetrying: true,
+	},
+};
+
 export const RefetchError: Story = {
 	args: {
 		error: mockApiError({ message: "Failed to list plugin packs." }),
