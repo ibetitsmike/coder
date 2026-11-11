@@ -92,7 +92,7 @@ func TestFilterPackResources(t *testing.T) {
 		t.Parallel()
 		db, ps := dbtestutil.NewDB(t)
 		server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
-			withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkPluginPacks}))
+			withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkPluginPacks, codersdk.ExperimentForkNestedSubagents}))
 		fdb, err := forkdb.From(db)
 		require.NoError(t, err)
 		ctx := chatdTestContext(t)
@@ -127,6 +127,11 @@ func TestFilterPackResources(t *testing.T) {
 		})
 		_, err = fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: child.ID, PackID: childPack})
 		require.NoError(t, err)
+		grandchild := dbgen.Chat(t, db, database.Chat{
+			OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID,
+			ParentChatID: uuid.NullUUID{UUID: child.ID, Valid: true},
+			RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
+		})
 		plain := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
 
 		unmanaged := []string{"/home/u/.coder/skills/review-pr", "/home/u/.claude/plugins/cache/own/skills/review-pr"}
@@ -138,6 +143,9 @@ func TestFilterPackResources(t *testing.T) {
 		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
 			sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
 			"a subagent sees the packs of its root chat and its own")
+		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
+			sources(server.filterPackResources(ctx, grandchild, slices.Clone(resources))),
+			"a nested subagent sees the packs of every ancestor")
 		require.Equal(t, unmanaged, sources(server.filterPackResources(ctx, plain, slices.Clone(resources))),
 			"a chat with no enabled packs drops every installed pack")
 		// The agent type catalog filters for a chat that does not exist yet.

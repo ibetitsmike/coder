@@ -1227,6 +1227,7 @@ The generation goroutine supports:
   <!-- TODO(ibetitsmike): describe the descendant ask_user_question (fork-nested-subagents): a non-root chat that is not an explore subagent gets a blocking ask_user_question that records the question in `chatd.chat_descendant_questions` and ends the turn; the answer is the next user message. wait_agent reports needs_input while a child's question is unanswered and waits for the answer when called while it is pending. -->
   <!-- TODO(ibetitsmike): describe secret answers (fork-nested-subagents): `withSecretAnswers` wraps a descendant chat's tools, so execute, write_file and edit_files input get the value in place of `{{secret:<tool call ID>}}`, and every tool output, metadata and error shows the placeholder instead of the value. -->
   <!-- TODO(fork-chat-todos): document todo_write, todo_read, read_chat_transcript, chatd.chat_todos, the list_agents todos field, and the todo snapshot the system appends after compaction. -->
+  <!-- TODO(ibetitsmike): describe fork-plugin-packs gating: `filterPackResources` drops pinned resources of installed packs under `~/.coder/plugins/<name>/` unless the pack is enabled for the chat's usable project, the chat, or one of its ancestors, and the prompt builder, the context resource listing, spawn_agent's custom agent types and the agent type catalog all apply it, while `DriftHash` still covers every pack on the workspace. -->
 - file links
 - workspace binding
 - plan mode
