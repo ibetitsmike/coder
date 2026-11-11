@@ -28,7 +28,11 @@ import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDial
 
 const title = "Plugin packs";
 
-/** The plugin pack actions the user may take in the organization. */
+/**
+ * Which plugin pack actions to offer. The server checks plugin packs against
+ * the organization skill permissions, so each field mirrors the matching
+ * organization skill permission.
+ */
 export type ForkPluginPacksAccess = {
 	create: boolean;
 	update: boolean;
@@ -40,6 +44,8 @@ type ForkPluginPacksTableViewProps = {
 	access: ForkPluginPacksAccess;
 	action?: React.ReactNode;
 	error: unknown;
+	/** True when the first load failed, so no cached packs exist. */
+	isLoadingError: boolean;
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
@@ -57,7 +63,8 @@ type ForkPluginPacksTableViewProps = {
 /**
  * Lists an organization's installed plugin packs. It shows a loader while
  * `isLoading`, a retryable empty state when the first load fails, and a
- * retryable alert above the cached rows when a later refetch fails.
+ * retryable alert above the cached rows, even an empty list, when a later
+ * refetch fails.
  */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
@@ -66,6 +73,7 @@ export const ForkPluginPacksTableView: React.FC<
 	access,
 	action,
 	error,
+	isLoadingError,
 	isLoading,
 	isRetrying,
 	onRetry,
@@ -94,7 +102,7 @@ export const ForkPluginPacksTableView: React.FC<
 	let tableBody: React.ReactNode;
 	if (isLoading) {
 		tableBody = <TableLoader />;
-	} else if (packs.length === 0 && error) {
+	} else if (isLoadingError) {
 		tableBody = (
 			<TableEmpty
 				message="Failed to load plugin packs"
@@ -196,7 +204,7 @@ export const ForkPluginPacksTableView: React.FC<
 					</div>
 				}
 			/>
-			{Boolean(error) && packs.length > 0 && (
+			{Boolean(error) && !isLoadingError && (
 				<ErrorAlert
 					error={error}
 					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
