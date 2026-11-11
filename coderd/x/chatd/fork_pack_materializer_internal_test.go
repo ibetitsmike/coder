@@ -6,6 +6,7 @@ package chatd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -136,11 +137,13 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 		agentID := uuid.New()
 		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
-		require.Equal(t, []string{
+		require.Len(t, files.writes, 3)
+		require.ElementsMatch(t, []string{
 			"/home/coder/.coder/plugins/demo/.claude-plugin/plugin.json",
 			"/home/coder/.coder/plugins/demo/skills/review/SKILL.md",
-			"/home/coder/.coder/plugins/demo/" + packCommitMarker,
-		}, files.writes, "the commit marker is written after every pack file")
+		}, files.writes[:2], "pack files are written concurrently")
+		require.Equal(t, "/home/coder/.coder/plugins/demo/"+packCommitMarker, files.writes[2],
+			"the commit marker is written after every pack file")
 		require.Equal(t, "content of skills/review/SKILL.md", files.files["/home/coder/.coder/plugins/demo/skills/review/SKILL.md"])
 		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files["/home/coder/.coder/plugins/demo/"+packCommitMarker],
 			"the marker names the pack, so a pack reinstalled under the same name is written again")
@@ -159,44 +162,81 @@ func TestMaterializePluginPacks(t *testing.T) {
 	t.Run("RepinsEachDirtyChatOncePerWrite", func(t *testing.T) {
 		t.Parallel()
 		pack := insertPack("repin", "plugin.json")
+		job := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{OrganizationID: org.ID})
+		resource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{JobID: job.ID})
+		agent := dbgen.WorkspaceAgent(t, db, database.WorkspaceAgent{ResourceID: resource.ID})
+		pushSnapshot := func(hash string, sourcePaths ...string) {
+			now := dbtime.Now()
+			_, err := db.UpsertWorkspaceAgentContextSnapshot(ctx, database.UpsertWorkspaceAgentContextSnapshotParams{
+				WorkspaceAgentID: agent.ID, Version: 1, AggregateHash: []byte(hash), ReceivedAt: now,
+			})
+			require.NoError(t, err)
+			for _, sourcePath := range sourcePaths {
+				_, err := db.UpsertWorkspaceAgentContextResource(ctx, database.UpsertWorkspaceAgentContextResourceParams{
+					WorkspaceAgentID: agent.ID, Source: sourcePath, SourcePath: sourcePath,
+					BodyKind:    database.WorkspaceAgentContextBodyKindInstructionFile,
+					Body:        json.RawMessage(`{"instruction_file":{"content":"x"}}`),
+					ContentHash: []byte(hash), Status: database.WorkspaceAgentContextResourceStatusOk, Now: now,
+				})
+				require.NoError(t, err)
+			}
+		}
 		// Two pinned chats share the workspace and the pack; only the first
 		// one's turn writes it.
-		writer, other := newChat(pack), newChat(pack)
+		newAgentChat := func() database.Chat {
+			chat := dbgen.Chat(t, db, database.Chat{
+				OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID,
+				AgentID: uuid.NullUUID{UUID: agent.ID, Valid: true},
+			})
+			_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID})
+			require.NoError(t, err)
+			return chat
+		}
+		writer, other := newAgentChat(), newAgentChat()
 		pin := func(chat database.Chat, hash string) {
 			require.NoError(t, db.SetChatContextSnapshot(ctx, database.SetChatContextSnapshotParams{
 				ID: chat.ID, AggregateHash: []byte(hash),
 			}))
 		}
-		pinnedHash := func(chat database.Chat) []byte {
+		pinnedHash := func(chat database.Chat) string {
 			got, err := db.GetChatByID(ctx, chat.ID)
 			require.NoError(t, err)
-			return got.ContextAggregateHash
+			return string(got.ContextAggregateHash)
 		}
-		pin(writer, "pre-pack snapshot")
-		pin(other, "pre-pack snapshot")
+		pin(writer, "stale")
+		pin(other, "stale")
 		files := &fakeWorkspaceFiles{files: map[string]string{}}
 		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
 			return files.conn(t), func() {}, nil
 		}
 
-		agentID := uuid.New()
-		server.materializePluginPacks(ctx, server.logger, writer, agentID, dial)
-		server.materializePluginPacks(ctx, server.logger, writer, agentID, dial)
-		require.Equal(t, []byte("pre-pack snapshot"), pinnedHash(writer), "a chat the agent has not marked dirty keeps its pin")
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		require.Equal(t, "stale", pinnedHash(writer), "a chat the agent has not marked dirty keeps its pin")
 
-		// The agent's push of the written files marks both chats dirty, and
-		// each one's next turn re-pins it. The chats have no agent, so the
-		// re-pin clears the pinned hash.
+		// Other drift marks the chat dirty before the agent pushed the pack,
+		// so the re-pin takes no pack rows and the next dirty turn re-pins
+		// again.
+		pushSnapshot("before pack", "/home/coder/AGENTS.md")
 		writer.ContextDirtySince = sql.NullTime{Time: dbtime.Now(), Valid: true}
 		other.ContextDirtySince = writer.ContextDirtySince
-		server.materializePluginPacks(ctx, server.logger, writer, agentID, dial)
-		require.Empty(t, pinnedHash(writer), "the first dirty turn after a write re-pins the writer")
-		server.materializePluginPacks(ctx, server.logger, other, agentID, dial)
-		require.Empty(t, pinnedHash(other), "a chat that did not write the pack is re-pinned too")
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		require.Equal(t, "before pack", pinnedHash(writer), "a dirty turn after a write re-pins the writer")
+		pin(writer, "stale")
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		require.Equal(t, "before pack", pinnedHash(writer), "a re-pin that took no pack rows is retried")
+
+		// The agent's push of the written files marks both chats dirty, and
+		// each one's next turn re-pins it once.
+		pushSnapshot("with pack", "/home/coder/.coder/plugins/repin/plugin.json")
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		require.Equal(t, "with pack", pinnedHash(writer))
+		server.materializePluginPacks(ctx, server.logger, other, agent.ID, dial)
+		require.Equal(t, "with pack", pinnedHash(other), "a chat that did not write the pack is re-pinned too")
 
 		pin(writer, "later snapshot")
-		server.materializePluginPacks(ctx, server.logger, writer, agentID, dial)
-		require.Equal(t, []byte("later snapshot"), pinnedHash(writer), "a chat is re-pinned once per write")
+		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
+		require.Equal(t, "later snapshot", pinnedHash(writer), "a chat is re-pinned once per write")
 	})
 
 	t.Run("UnsafePathWritesNoMarker", func(t *testing.T) {
@@ -209,8 +249,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 		}
 
 		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
-		require.Equal(t, []string{"/home/coder/.coder/plugins/unsafe/plugin.json"}, files.writes,
-			"the unsafe path and the marker are not written")
+		require.Empty(t, files.writes, "a pack with an unsafe path writes no file and no marker")
 	})
 
 	t.Run("NothingEnabled", func(t *testing.T) {

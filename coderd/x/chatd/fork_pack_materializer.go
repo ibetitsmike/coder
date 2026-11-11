@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
@@ -34,6 +35,9 @@ const (
 	// packMaterializeTimeout bounds the work a turn waits for, so an
 	// unreachable workspace delays the turn by at most this much.
 	packMaterializeTimeout = 10 * time.Second
+	// packWriteConcurrency bounds the files of a pack written at once. Each
+	// write is one agent round trip, and a pack can hold 2,000 files.
+	packWriteConcurrency = 16
 )
 
 // forkPackState is the in-memory plugin pack state of a Server. It is lost on
@@ -145,7 +149,8 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 	if !chat.ContextDirtySince.Valid {
 		return
 	}
-	due := map[repinKey]string{}
+	type duePack struct{ marker, name string }
+	due := map[repinKey]duePack{}
 	for _, pack := range enabled {
 		marker := packMarker(pack)
 		if held, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); !ok || held != marker {
@@ -155,7 +160,7 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 		if last, ok := p.forkPacks.repinned.Load(key); ok && last == marker {
 			continue
 		}
-		due[key] = marker
+		due[key] = duePack{marker, pack.Name}
 	}
 	if len(due) == 0 {
 		return
@@ -165,10 +170,26 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 		logger.Warn(ctx, "failed to re-pin chat context after writing plugin packs", slog.Error(err))
 		return
 	}
-	for key, marker := range due {
-		p.forkPacks.repinned.Store(key, marker)
-	}
 	p.publishChatPubsubEvents([]database.Chat{updated}, codersdk.ChatWatchEventKindContextDirty)
+	// The chat can be dirty for other drift before the agent pushed the
+	// pack, so a pack counts as re-pinned only once its rows are pinned.
+	//nolint:gocritic // Chatd reads the pinned rows of a chat it re-pinned.
+	pinned, err := p.db.ListChatContextResourcesByChatID(dbauthz.AsChatd(ctx), chat.ID)
+	if err != nil {
+		logger.Warn(ctx, "failed to read chat context after re-pinning for plugin packs", slog.Error(err))
+		return
+	}
+	pinnedPacks := map[string]bool{}
+	for _, row := range pinned {
+		if name, ok := managedPackName(row.SourcePath); ok && isPackContribution(row.SourcePath) {
+			pinnedPacks[name] = true
+		}
+	}
+	for key, pack := range due {
+		if pinnedPacks[pack.name] {
+			p.forkPacks.repinned.Store(key, pack.marker)
+		}
+	}
 }
 
 // materializePack writes pack into <home>/.coder/plugins/<name>, unless its
@@ -190,13 +211,22 @@ func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentCon
 		return err
 	}
 	for _, resource := range resources {
-		rel, ok := packResourcePath(resource.Path)
-		if !ok {
+		if _, ok := packResourcePath(resource.Path); !ok {
 			return xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
 		}
-		if err := conn.WriteFile(ctx, dir+"/"+rel, bytes.NewReader(resource.Content)); err != nil {
-			return xerrors.Errorf("write %q: %w", rel, err)
-		}
+	}
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(packWriteConcurrency)
+	for _, resource := range resources {
+		eg.Go(func() error {
+			if err := conn.WriteFile(egCtx, dir+"/"+resource.Path, bytes.NewReader(resource.Content)); err != nil {
+				return xerrors.Errorf("write %q: %w", resource.Path, err)
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	if err := conn.WriteFile(ctx, marker, strings.NewReader(packMarker(pack))); err != nil {
 		return xerrors.Errorf("write commit marker: %w", err)
