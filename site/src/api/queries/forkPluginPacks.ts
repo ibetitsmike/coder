@@ -112,10 +112,7 @@ export const reconcileInstalledPluginPack = (
 	);
 };
 
-const withPluginPack = (
-	packs: readonly ForkPluginPack[],
-	pack: ForkPluginPack,
-) => {
+const withPluginPack = (packs: ForkPluginPack[], pack: ForkPluginPack) => {
 	const replaced = packs.filter(
 		(cached) => cached.id === pack.id || cached.name === pack.name,
 	);
