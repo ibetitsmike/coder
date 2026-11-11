@@ -33,11 +33,11 @@ CREATE INDEX chat_plugin_packs_pack_id_idx ON chat_plugin_packs (pack_id);
 
 COMMENT ON TABLE chat_plugin_packs IS 'Plugin packs enabled for one chat, in addition to the packs of its project.';
 
-CREATE FUNCTION enforce_plugin_pack_enablement_organization() RETURNS trigger
+CREATE FUNCTION enforce_plugin_pack_project_organization() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF TG_TABLE_NAME = 'plugin_pack_projects' AND NOT EXISTS (
+    IF NOT EXISTS (
         SELECT 1 FROM chat_projects
         WHERE id = NEW.project_id AND organization_id = NEW.organization_id
     ) THEN
@@ -45,7 +45,15 @@ BEGIN
             USING ERRCODE = 'check_violation',
                   CONSTRAINT = 'plugin_pack_projects_organization';
     END IF;
-    IF TG_TABLE_NAME = 'chat_plugin_packs' AND NOT EXISTS (
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION enforce_chat_plugin_pack_organization() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NOT EXISTS (
         SELECT 1 FROM chats
         WHERE id = NEW.chat_id AND organization_id = NEW.organization_id
     ) THEN
@@ -60,9 +68,9 @@ $$;
 CREATE TRIGGER trigger_plugin_pack_projects_organization
     BEFORE INSERT OR UPDATE ON plugin_pack_projects
     FOR EACH ROW
-    EXECUTE FUNCTION enforce_plugin_pack_enablement_organization();
+    EXECUTE FUNCTION enforce_plugin_pack_project_organization();
 
 CREATE TRIGGER trigger_chat_plugin_packs_organization
     BEFORE INSERT OR UPDATE ON chat_plugin_packs
     FOR EACH ROW
-    EXECUTE FUNCTION enforce_plugin_pack_enablement_organization();
+    EXECUTE FUNCTION enforce_chat_plugin_pack_organization();
