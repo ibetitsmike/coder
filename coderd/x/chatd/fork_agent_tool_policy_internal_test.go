@@ -116,7 +116,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "ReadOnly",
 			policy:       customAgentToolPolicy{ReadOnly: true, MCPMode: "inherit"},
-			want:         []string{"read_file", "execute", "process_output", "docs__search", "other__lookup", "ghost_x__lookup"},
+			want:         []string{"read_file", "docs__search", "other__lookup", "ghost_x__lookup"},
 			wantDeferred: []string{"docs__search", "other__lookup"},
 			wantProvider: []string{"web_search"},
 		},

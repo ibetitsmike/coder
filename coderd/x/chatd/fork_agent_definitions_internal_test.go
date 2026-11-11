@@ -328,9 +328,10 @@ func TestForkAgentDefinitionToolPolicy(t *testing.T) {
 		require.True(t, policy.ReadOnly)
 
 		names := turnToolNames(t, child)
-		require.Contains(t, names, "execute")
-		require.NotContains(t, names, "write_file")
-		require.NotContains(t, names, "edit_files")
+		require.Contains(t, names, "read_file")
+		for _, name := range []string{"execute", "process_output", "write_file", "edit_files"} {
+			require.NotContains(t, names, name)
+		}
 		require.NotContains(t, f.systemPrompt(t, child.ID), subagentOrchestrationPromptBlock)
 	})
 
