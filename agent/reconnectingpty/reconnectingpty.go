@@ -278,11 +278,16 @@ func readConnLoop(ctx context.Context, conn net.Conn, ptty pty.PTYCmd, metrics *
 			logger.Warn(ctx, "reconnecting pty failed with read error", slog.Error(err))
 			return
 		}
-		_, err = ptty.InputWriter().Write([]byte(req.Data))
-		if err != nil {
-			logger.Warn(ctx, "reconnecting pty failed with write error", slog.Error(err))
-			metrics.WithLabelValues("input_writer").Add(1)
-			return
+		// A resize-only request carries no data, and some runtimes, such as
+		// gVisor, block a zero-length write on a PTY, so write only when there
+		// is data. The resize below must run on every request either way.
+		if req.Data != "" {
+			_, err = ptty.InputWriter().Write([]byte(req.Data))
+			if err != nil {
+				logger.Warn(ctx, "reconnecting pty failed with write error", slog.Error(err))
+				metrics.WithLabelValues("input_writer").Add(1)
+				return
+			}
 		}
 		// Check if a resize needs to happen!
 		if req.Height == 0 || req.Width == 0 {
