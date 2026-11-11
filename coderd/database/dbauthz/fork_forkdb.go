@@ -103,6 +103,13 @@ func (f *forkQuerier) CountOrganizationChatWakeupRunsSince(ctx context.Context, 
 }
 
 // DeleteChatSecretAnswer authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatPluginPack(ctx, arg)
+}
+
 func (f *forkQuerier) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.DeleteChatSecretAnswerParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return err
@@ -144,6 +151,13 @@ func (f *forkQuerier) DeletePluginPackResources(ctx context.Context, packID uuid
 		return err
 	}
 	return f.db.DeletePluginPackResources(ctx, packID)
+}
+
+func (f *forkQuerier) DeletePluginPackProject(ctx context.Context, arg forkdb.DeletePluginPackProjectParams) error {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
+		return err
+	}
+	return f.db.DeletePluginPackProject(ctx, arg)
 }
 
 func (f *forkQuerier) DeletePluginUserLink(ctx context.Context, arg forkdb.DeletePluginUserLinkParams) error {
@@ -309,11 +323,30 @@ func (f *forkQuerier) GetPluginPackSources(ctx context.Context, organizationID u
 	return f.db.GetPluginPackSources(ctx, organizationID)
 }
 
+// GetPluginPacksByChatID authorizes through the owning chat. It returns only
+// the names and commits of packs, which members of the chat may see even
+// though they cannot read the packs.
+func (f *forkQuerier) GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetPluginPacksByChatIDRow, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPacksByChatID(ctx, chatID)
+}
+
 func (f *forkQuerier) GetPluginPacksByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.PluginPack, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceOrganizationSkill.InOrg(organizationID)); err != nil {
 		return nil, err
 	}
 	return f.db.GetPluginPacksByOrganizationID(ctx, organizationID)
+}
+
+// GetPluginPacksByProjectID authorizes through the project, like
+// GetPluginPacksByChatID.
+func (f *forkQuerier) GetPluginPacksByProjectID(ctx context.Context, projectID uuid.UUID) ([]forkdb.GetPluginPacksByProjectIDRow, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionRead, projectID); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPacksByProjectID(ctx, projectID)
 }
 
 func (f *forkQuerier) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
@@ -366,6 +399,16 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 }
 
 // InsertChatSecretAnswer authorizes as an update of the owning chat.
+// InsertChatPluginPack authorizes as an update of the chat and not as a read
+// of the pack: enabling a pack mirrors enabling a skill, and the query only
+// accepts a pack of the chat's organization.
+func (f *forkQuerier) InsertChatPluginPack(ctx context.Context, arg forkdb.InsertChatPluginPackParams) (forkdb.ChatPluginPack, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return forkdb.ChatPluginPack{}, err
+	}
+	return f.db.InsertChatPluginPack(ctx, arg)
+}
+
 func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.InsertChatSecretAnswerParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return err
@@ -433,6 +476,15 @@ func (f *forkQuerier) InsertPluginPackResources(ctx context.Context, arg forkdb.
 		return err
 	}
 	return f.db.InsertPluginPackResources(ctx, arg)
+}
+
+// InsertPluginPackProject authorizes as an update of the project, like
+// InsertChatPluginPack.
+func (f *forkQuerier) InsertPluginPackProject(ctx context.Context, arg forkdb.InsertPluginPackProjectParams) (forkdb.PluginPackProject, error) {
+	if err := f.q.authorizeChatProjectConfig(ctx, policy.ActionUpdate, arg.ProjectID); err != nil {
+		return forkdb.PluginPackProject{}, err
+	}
+	return f.db.InsertPluginPackProject(ctx, arg)
 }
 
 func (f *forkQuerier) InsertProjectAgentDefinition(ctx context.Context, arg forkdb.InsertProjectAgentDefinitionParams) (forkdb.AgentDefinition, error) {

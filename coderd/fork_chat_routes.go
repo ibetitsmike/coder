@@ -99,6 +99,24 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		orgPluginPacks.Delete(orgPluginPacksPath+"/{pluginPack}", api.deleteForkPluginPack)
 		orgPluginPacks.Post(orgPluginPacksPath+"/{pluginPack}/update", api.updateForkPluginPack)
 
+		projectPluginPacks := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkPluginPacks),
+			httpmw.ExtractOrganizationParam(api.Database),
+			httpmw.ExtractChatProjectParam(api.Database),
+		)
+		const projectPluginPacksPath = "/organizations/{organization}/projects/{project}/plugin-packs"
+		projectPluginPacks.Get(projectPluginPacksPath, api.forkProjectPluginPacks)
+		projectPluginPacks.Put(projectPluginPacksPath+"/{pluginPack}", api.putForkProjectPluginPack)
+		projectPluginPacks.Delete(projectPluginPacksPath+"/{pluginPack}", api.deleteForkProjectPluginPack)
+
+		chatPluginPacks := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkPluginPacks),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatPluginPacks.Get("/{chat}/plugin-packs", api.forkChatPluginPacks)
+		chatPluginPacks.Put("/{chat}/plugin-packs/{pluginPack}", api.putForkChatPluginPack)
+		chatPluginPacks.Delete("/{chat}/plugin-packs/{pluginPack}", api.deleteForkChatPluginPack)
+
 		projectAgentDefinitions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),
 			httpmw.ExtractOrganizationParam(api.Database),

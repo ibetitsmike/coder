@@ -47,6 +47,36 @@ type forkQueryMetricsStore struct {
 
 var _ forkdb.Store = forkQueryMetricsStore{}
 
+func (f forkQueryMetricsStore) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
+	defer f.observe(ctx, "DeleteChatPluginPack", time.Now())
+	return f.s.DeleteChatPluginPack(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeletePluginPackProject(ctx context.Context, arg forkdb.DeletePluginPackProjectParams) error {
+	defer f.observe(ctx, "DeletePluginPackProject", time.Now())
+	return f.s.DeletePluginPackProject(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetPluginPacksByChatIDRow, error) {
+	defer f.observe(ctx, "GetPluginPacksByChatID", time.Now())
+	return f.s.GetPluginPacksByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) GetPluginPacksByProjectID(ctx context.Context, projectID uuid.UUID) ([]forkdb.GetPluginPacksByProjectIDRow, error) {
+	defer f.observe(ctx, "GetPluginPacksByProjectID", time.Now())
+	return f.s.GetPluginPacksByProjectID(ctx, projectID)
+}
+
+func (f forkQueryMetricsStore) InsertChatPluginPack(ctx context.Context, arg forkdb.InsertChatPluginPackParams) (forkdb.ChatPluginPack, error) {
+	defer f.observe(ctx, "InsertChatPluginPack", time.Now())
+	return f.s.InsertChatPluginPack(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertPluginPackProject(ctx context.Context, arg forkdb.InsertPluginPackProjectParams) (forkdb.PluginPackProject, error) {
+	defer f.observe(ctx, "InsertPluginPackProject", time.Now())
+	return f.s.InsertPluginPackProject(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeletePluginPackByID(ctx context.Context, id uuid.UUID) error {
 	defer f.observe(ctx, "DeletePluginPackByID", time.Now())
 	return f.s.DeletePluginPackByID(ctx, id)

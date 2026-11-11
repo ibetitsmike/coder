@@ -23,6 +23,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1caef-7d98-7266-bb1b-1b72cfc1883c_plugin_chat_binding_delivered.up.sql"
       - "../migrations/chatdmig/nodes/01a1cb11-79e0-7209-811f-6789c162db26_plugin_packs.up.sql"
       - "../migrations/chatdmig/nodes/01a1cb1c-5809-7422-aefd-a4ced9de57ba_plugin_pack_sources.up.sql"
+      - "../migrations/chatdmig/nodes/01a1cb68-bbe7-7a46-a263-7aafc35993cc_plugin_pack_enablement.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

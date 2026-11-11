@@ -247,6 +247,14 @@ type ChatOrganizationSubagentLimit struct {
 	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
 }
 
+// Plugin packs enabled for one chat, in addition to the packs of its project.
+type ChatPluginPack struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	ChatID         uuid.UUID `db:"chat_id" json:"chat_id"`
+	PackID         uuid.UUID `db:"pack_id" json:"pack_id"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+}
+
 // Answers the user gave to secret ask_user_question calls of descendant chats. Tools of the asking chat read them; they are never written to chat messages.
 type ChatSecretAnswer struct {
 	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
@@ -358,6 +366,14 @@ type PluginPack struct {
 	CreatedBy uuid.UUID `db:"created_by" json:"created_by"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// Plugin packs enabled for every chat of a chat project.
+type PluginPackProject struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	ProjectID      uuid.UUID `db:"project_id" json:"project_id"`
+	PackID         uuid.UUID `db:"pack_id" json:"pack_id"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
 }
 
 type PluginPackResource struct {

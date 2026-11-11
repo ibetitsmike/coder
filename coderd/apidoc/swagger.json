@@ -5274,6 +5274,138 @@
 				}
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/projects/{project}/plugin-packs": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List plugin packs of a chat project",
+				"operationId": "list-plugin-packs-of-a-chat-project",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat project ID",
+						"name": "project",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkEnabledPluginPack"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/projects/{project}/plugin-packs/{pluginPack}": {
+			"put": {
+				"tags": ["Chats"],
+				"summary": "Enable a plugin pack for a chat project",
+				"operationId": "enable-a-plugin-pack-for-a-chat-project",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat project ID",
+						"name": "project",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Disable a plugin pack for a chat project",
+				"operationId": "disable-a-plugin-pack-for-a-chat-project",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat project ID",
+						"name": "project",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/organizations/{organization}/subagent-limits": {
 			"get": {
 				"produces": ["application/json"],
@@ -5367,6 +5499,117 @@
 						"schema": {
 							"$ref": "#/definitions/codersdk.ForkChatFamilyCapacity"
 						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/{chat}/plugin-packs": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List plugin packs of a chat",
+				"operationId": "list-plugin-packs-of-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkEnabledPluginPack"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/{chat}/plugin-packs/{pluginPack}": {
+			"put": {
+				"tags": ["Chats"],
+				"summary": "Enable a plugin pack for a chat",
+				"operationId": "enable-a-plugin-pack-for-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Disable a plugin pack for a chat",
+				"operationId": "disable-a-plugin-pack-for-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
 					}
 				},
 				"security": [
@@ -26885,6 +27128,21 @@
 						"type": "string",
 						"format": "uuid"
 					}
+				}
+			}
+		},
+		"codersdk.ForkEnabledPluginPack": {
+			"type": "object",
+			"properties": {
+				"commit_sha": {
+					"type": "string"
+				},
+				"id": {
+					"type": "string",
+					"format": "uuid"
+				},
+				"name": {
+					"type": "string"
 				}
 			}
 		},
