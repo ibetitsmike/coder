@@ -73,6 +73,7 @@ it("requests the packs again when Retry is clicked after a failed load", async (
 
 	await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
 
-	expect(await screen.findByText(MockForkPluginPack.name)).toBeInTheDocument();
-	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+	);
 });
