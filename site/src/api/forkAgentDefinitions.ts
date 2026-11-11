@@ -189,3 +189,76 @@ export const updateOrganizationAgentDefinitionACL = async (
 		req,
 	);
 };
+
+const projectAgentDefinitionsPath = (
+	organizationId: string,
+	projectId: string,
+) =>
+	`/api/v2/chats/fork/organizations/${organizationId}/projects/${projectId}/agent-definitions`;
+const projectAgentDefinitionPath = (
+	organizationId: string,
+	projectId: string,
+	name: string,
+) =>
+	`${projectAgentDefinitionsPath(organizationId, projectId)}/${encodeURIComponent(name)}`;
+
+/** Lists a project's agent definitions; anyone who can read the project may. */
+export const getProjectAgentDefinitions = async (
+	organizationId: string,
+	projectId: string,
+): Promise<ForkAgentDefinitionMetadata[]> => {
+	const response = await API.getAxiosInstance().get<
+		ForkAgentDefinitionMetadata[]
+	>(projectAgentDefinitionsPath(organizationId, projectId));
+	return response.data;
+};
+
+/** Gets one project agent definition with its content. */
+export const getProjectAgentDefinition = async (
+	organizationId: string,
+	projectId: string,
+	name: string,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().get<ForkAgentDefinition>(
+		projectAgentDefinitionPath(organizationId, projectId, name),
+	);
+	return response.data;
+};
+
+/** Creates a project agent definition; requires update access to the project. */
+export const createProjectAgentDefinition = async (
+	organizationId: string,
+	projectId: string,
+	req: CreateForkAgentDefinitionRequest,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().post<ForkAgentDefinition>(
+		projectAgentDefinitionsPath(organizationId, projectId),
+		req,
+	);
+	return response.data;
+};
+
+/** Updates a project agent definition; requires update access to the project. */
+export const updateProjectAgentDefinition = async (
+	organizationId: string,
+	projectId: string,
+	name: string,
+	req: UpdateForkAgentDefinitionRequest,
+): Promise<ForkAgentDefinition> => {
+	const response = await API.getAxiosInstance().patch<ForkAgentDefinition>(
+		projectAgentDefinitionPath(organizationId, projectId, name),
+		req,
+	);
+	return response.data;
+};
+
+/** Deletes a project agent definition; requires update access to the project. */
+export const deleteProjectAgentDefinition = async (
+	organizationId: string,
+	projectId: string,
+	name: string,
+): Promise<void> => {
+	await API.getAxiosInstance().delete(
+		projectAgentDefinitionPath(organizationId, projectId, name),
+	);
+};

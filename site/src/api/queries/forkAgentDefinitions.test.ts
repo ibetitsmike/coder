@@ -14,6 +14,7 @@ import {
 	createAgentDefinition,
 	deleteAgentDefinition,
 	isNewer,
+	isSameScope,
 	organizationAgentDefinitionACL,
 	updateAgentDefinition,
 	updateAgentDefinitionACL,
@@ -485,5 +486,113 @@ describe("updateAgentDefinitionACL", () => {
 			expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
 		}
 		expect(queryClient.getQueryState(userListKey)?.isInvalidated).toBe(false);
+	});
+});
+
+describe("project scope", () => {
+	const projectScope: AgentDefinitionScope = {
+		tier: "project",
+		organizationId: scope.organizationId,
+		projectId: "project-1",
+	};
+	const otherProjectScope: AgentDefinitionScope = {
+		...projectScope,
+		projectId: "project-2",
+	};
+	const listed = definitionAt("2029-01-01T00:00:00Z");
+
+	it("names a different scope for each project", () => {
+		expect(isSameScope(projectScope, { ...projectScope })).toBe(true);
+		expect(isSameScope(projectScope, otherProjectScope)).toBe(false);
+		expect(isSameScope(projectScope, { ...scope, tier: "organization" })).toBe(
+			false,
+		);
+	});
+
+	it("lists, reads, and creates definitions through the project endpoints", async () => {
+		const queryClient = createQueryClient();
+		const listProject = vi
+			.spyOn(forkAgentDefinitionsApi, "getProjectAgentDefinitions")
+			.mockResolvedValue([]);
+		const getProject = vi
+			.spyOn(forkAgentDefinitionsApi, "getProjectAgentDefinition")
+			.mockResolvedValue(listed);
+		const createProject = vi
+			.spyOn(forkAgentDefinitionsApi, "createProjectAgentDefinition")
+			.mockResolvedValue(listed);
+		queryClient.setQueryData(agentDefinitions(otherProjectScope).queryKey, []);
+
+		await queryClient.fetchQuery(agentDefinitions(projectScope));
+		await queryClient.fetchQuery(
+			agentDefinition(queryClient, projectScope, name),
+		);
+		await new MutationObserver(
+			queryClient,
+			createAgentDefinition(queryClient),
+		).mutate({ scope: projectScope, req: { content: "" } });
+
+		expect(listProject).toHaveBeenCalledWith(scope.organizationId, "project-1");
+		expect(getProject).toHaveBeenCalledWith(
+			scope.organizationId,
+			"project-1",
+			name,
+		);
+		expect(createProject).toHaveBeenCalledWith(
+			scope.organizationId,
+			"project-1",
+			{ content: "" },
+		);
+		expect(
+			queryClient.getQueryData(agentDefinitions(projectScope).queryKey),
+		).toEqual([metadataOf(listed)]);
+		expect(
+			queryClient.getQueryData(agentDefinitions(otherProjectScope).queryKey),
+		).toEqual([]);
+	});
+
+	it("updates and deletes the project definition and leaves another project's", async () => {
+		const queryClient = createQueryClient();
+		for (const listScope of [projectScope, otherProjectScope]) {
+			queryClient.setQueryData(agentDefinitions(listScope).queryKey, [
+				metadataOf(listed),
+			]);
+		}
+		const updated = definitionAt("2030-01-01T00:00:00Z");
+		const updateProject = vi
+			.spyOn(forkAgentDefinitionsApi, "updateProjectAgentDefinition")
+			.mockResolvedValue(updated);
+		const deleteProject = vi
+			.spyOn(forkAgentDefinitionsApi, "deleteProjectAgentDefinition")
+			.mockResolvedValue();
+
+		await new MutationObserver(
+			queryClient,
+			updateAgentDefinition(queryClient),
+		).mutate({ scope: projectScope, name, req: { enabled: false } });
+		expect(updateProject).toHaveBeenCalledWith(
+			scope.organizationId,
+			"project-1",
+			name,
+			{ enabled: false },
+		);
+		expect(
+			queryClient.getQueryData(agentDefinitions(projectScope).queryKey),
+		).toEqual([metadataOf(updated)]);
+
+		await new MutationObserver(
+			queryClient,
+			deleteAgentDefinition(queryClient),
+		).mutate({ scope: projectScope, name });
+		expect(deleteProject).toHaveBeenCalledWith(
+			scope.organizationId,
+			"project-1",
+			name,
+		);
+		expect(
+			queryClient.getQueryData(agentDefinitions(projectScope).queryKey),
+		).toEqual([]);
+		expect(
+			queryClient.getQueryData(agentDefinitions(otherProjectScope).queryKey),
+		).toEqual([metadataOf(listed)]);
 	});
 });
