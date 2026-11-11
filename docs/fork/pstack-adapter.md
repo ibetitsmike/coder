@@ -398,7 +398,8 @@ On every turn of the child while the experiment is on, Coder Agents removes the 
 A change to the definition doesn't change a child that already exists.
 pstack's agents set none of these fields, so their children keep every tool of `general`.
 
-- `readonly: true` keeps only the `explore` tools: `read_file`, `execute`, `process_output`, `read_skill`, `read_skill_file`, and the deployment MCP tools allowed in subagents.
+- `readonly: true` keeps only the `explore` tools without the shell tools: `read_file`, `read_skill`, `read_skill_file`, and the deployment MCP tools allowed in subagents.
+  It removes `execute` and `process_output`, because Coder Agents can't limit a shell command to reads.
   Of the provider tools, it keeps only `web_search`.
 - `tools` lists the non-MCP tools that the child keeps, and an empty list keeps none.
   Claude Code names work: `Read`, `Write`, `Edit`, `MultiEdit`, `Bash`, `Grep`, `Glob`, `WebSearch`, and `Task`, which stands for the subagent tools.
@@ -410,8 +411,7 @@ pstack's agents set none of these fields, so their children keep every tool of `
 
 A child without `spawn_agent`, `wait_agent`, or `list_agents` also loses the subagent orchestration guidance in its system prompt.
 A child without `read_skill` loses the skill index in its system prompt.
-`readonly` doesn't make a child read-only, because `execute` can change files.
-Do not rely on the policy as a sandbox, because a child that keeps `execute` can run any command that the workspace allows.
+Do not rely on the policy as a sandbox, because a child that keeps `execute` can run any command that the workspace allows, and an MCP tool can change state.
 
 ### Nested subagents
 
@@ -615,7 +615,7 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `b3c4911b16`:
+Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`, which is checked against #202, the change that removes `execute` from readonly agents:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -637,9 +637,9 @@ Checked against fork `main` at `b3c4911b16`:
   Definition files in the chat context, only with `fork-agent-definitions`, `coderd/x/chatd/context_prompt.go:321-325`, `:411-414`, `:444-445`, with the name, description, and warnings of an `ok` file, `fork_agent_definitions.go:445-462`, the status and reason of any other file, `context_prompt.go:359-368`, on the single-chat response, `coderd/exp_chats.go:1882-1883`, and custom types only from `ok` files, `fork_agent_definitions.go:179-182`.
   Listed in the context usage indicator, `site/src/pages/AgentsPage/components/ContextUsageIndicator.tsx:240-280`, `:393-406`, `:433-435`, `:721-727`, which turns to its warning color for a definition with warnings, `:446-458`.
   `computer_use` takes `model_config_id` and `reasoning_effort` only with the experiment, `coderd/x/chatd/subagent.go:618-620`, on a config that supports computer use, `fork_computer_use_overrides.go:36-77`.
-- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:312-320`, `:400`, loaded for a chat with a `chat_subagents` row, `coderd/x/chatd/fork_agent_tool_policy.go:218-235`, and applied in `buildTurnEnvironment`, `turn_environment.go:750-753`, `:943-946`.
-  The filter, with `readonly` and `web_search`, `fork_agent_tool_policy.go:181-212`, Claude Code aliases, `:49-62`, MCP IDs, `:77-90`, and MCP servers, `:96-115`.
-  Orchestration guidance dropped, `fork_subagents.go:513`, `:539-542`, `fork_agent_tool_policy.go:124-128`, and the skill index dropped, `turn_environment.go:755-757`.
+- Custom agent tool policy, only with `fork-agent-definitions`: stored at spawn, `fork_subagents.go:312-320`, `:400`, loaded for a chat with a `chat_subagents` row, `coderd/x/chatd/fork_agent_tool_policy.go:230-247`, and applied in `buildTurnEnvironment`, `turn_environment.go:750-753`, `:943-946`.
+  The filter, with `readonly`, `fork_agent_tool_policy.go:178-187`, and `web_search`, `:193-224`, Claude Code aliases, `:50-63`, MCP IDs, `:78-91`, and MCP servers, `:97-116`.
+  Orchestration guidance dropped, `fork_subagents.go:513`, `:539-542`, `fork_agent_tool_policy.go:125-129`, and the skill index dropped, `turn_environment.go:755-757`.
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:710-713`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
@@ -692,8 +692,8 @@ Checked against fork `main` at `b3c4911b16`:
   **Agent type:** on the `spawn_agent` card of a custom child, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:155-159`, `:166-170`.
   A root chat started as an agent type, set by `agent_type`, `codersdk/chats.go:933-937`, only with the experiment, `coderd/fork_chat_root_agent.go:43-47`, failing with status 400, `:56-63`, from `coderd/exp_chats.go:1467-1470`, and reported in the create response, `:1627-1629`.
   Resolved without workspace definitions or other built-in types, `coderd/x/chatd/fork_root_agent.go:26`, `:83-119`, on the definition's model and reasoning effort, `:134-145`, `coderd/fork_chat_root_agent.go:69-78`, even without a default model, `:37-39`, `:73-75`, with the effort kept on a chat created without a message, `fork_root_agent.go:184-193`, `coderd/x/chatd/chatd.go:777-779`.
-  With its prompt and mode, `fork_root_agent.go:126-129`, `:154-173`, `chatd.go:617`, without the orchestration guidance when it cannot spawn, `fork_root_agent.go:131`, `:175-182`, `chatd.go:653`, and with the workspace guidance limited to its tools, `fork_root_agent.go:132-133`, `:195-207`, `fork_agent_tool_policy.go:136-148`, `chatd.go:735`.
-  The ACP guidance only with every ACP tool, `fork_agent_tool_policy.go:150-161`, `turn_environment.go:754`, a removed dynamic tool failing as an unknown tool, `fork_agent_tool_policy.go:163-175`, `turn_environment.go:946`, and its `chat_subagents` row at depth 0 with `shared` isolation, `fork_root_agent.go:209-231`, `chatd.go:810`.
+  With its prompt and mode, `fork_root_agent.go:126-129`, `:154-173`, `chatd.go:617`, without the orchestration guidance when it cannot spawn, `fork_root_agent.go:131`, `:175-182`, `chatd.go:653`, and with the workspace guidance limited to its tools, `fork_root_agent.go:132-133`, `:195-207`, `fork_agent_tool_policy.go:137-149`, `chatd.go:735`.
+  The ACP guidance only with every ACP tool, `fork_agent_tool_policy.go:151-162`, `turn_environment.go:754`, a removed dynamic tool failing as an unknown tool, `fork_agent_tool_policy.go:164-176`, `turn_environment.go:946`, and its `chat_subagents` row at depth 0 with `shared` isolation, `fork_root_agent.go:209-231`, `chatd.go:810`.
   The agent types before a chat exists, only with the experiment, `coderd/fork_chat_routes.go:74-77`, `:87`, with the `project`, `workspace`, and `model_config_id` parameters, `coderd/fork_agent_types.go:37-105`, each type's root availability, `coderd/x/chatd/fork_agent_type_catalog.go:39-109`, and the fields, `codersdk/fork_agent_types.go:19-38`.
   The agent type picker of a new chat, only with `fork-agent-definitions` and an organization, `site/src/pages/AgentsPage/components/useForkAgentTypePicker.ts:29-30`, in the form's row of pickers, `site/src/pages/AgentsPage/components/AgentCreateForm.tsx:1003-1006`, `:1051-1056`, with the form's organization, project, workspace, and model, `:772-777`, `useForkAgentTypePicker.ts:32-39`, the **Default agent** label, `site/src/pages/AgentsPage/components/ChatElements/ForkCompactAgentTypeSelector.tsx:28`, `:71`, `:89-90`, the search and the groups by source, `:30-44`, `:108-113`, `:152-159`, the unavailable types, `:160`, `:168-170`, and the link, `:183-195`.
   The chosen type sent as `agent_type`, `AgentCreateForm.tsx:798`, `site/src/pages/AgentsPage/AgentCreatePage/AgentCreatePage.tsx:296`, `:319`, falling back to the default agent, `useForkAgentTypePicker.ts:40-46`, with the form's model, `AgentCreateForm.tsx:587-595`, `:789`, `AgentCreatePage.tsx:316`.
@@ -758,5 +758,5 @@ Checked against fork `main` at `b3c4911b16`:
   The daily limits, `coderd/x/chatd/fork_wakeup_caps.go:22-38`, `:51-96`, checked before each send, `fork_wakeups.go:152-154`, `fork_wait_for_events.go:408-410`, over delivered runs and every message cost, `coderd/database/forkdb/queries/chat_wakeups.sql:192-225`.
   The other pauses, `fork_wakeups.go:309-312`, `:344-349`, `fork_wait_for_events.go:325`, and the notification after each pause, `fork_wakeups.go:207-209`, `:301-303`, `:383-385`, with its title, reasons, and the chat title in its text, once per chat, reason, and title a UTC day, `fork_wakeup_caps.go:36-49`, `:98-128`, by the dedupe hash, `coderd/database/migrations/000245_notifications_dedupe.up.sql:13-26`.
   The limit of 10 counts active and paused wake-ups, `fork_schedule_wakeup.go:213-228`.
-- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-154`, and the send with a dedupe bucket per minute, `:124-143`, which enqueues nothing without a delivery method, `coderd/notifications/enqueuer.go:104-117`, removed by a custom agent tool policy, `fork_agent_tool_policy.go:251-272`, with pause notifications sent past the limit, `fork_wakeup_caps.go:102-128`, counted in `chat_wakeups.sql:228-234`.
+- Notifications, only with `fork-chat-wakeups`: `notify_user`, `fork_tools.go:38`, with its arguments, result, and hourly limit, `coderd/x/chatd/fork_notify_user.go:23-38`, `:40-56`, the checks and errors, with the default title cut to 120 bytes and pause notifications in the count, `:72-123`, `:147-154`, and the send with a dedupe bucket per minute, `:124-143`, which enqueues nothing without a delivery method, `coderd/notifications/enqueuer.go:104-117`, removed by a custom agent tool policy, `fork_agent_tool_policy.go:263-284`, with pause notifications sent past the limit, `fork_wakeup_caps.go:102-128`, counted in `chat_wakeups.sql:228-234`.
   The title and message limits, `codersdk/notifications.go:299-321`, the inbox and the deployment's method, `coderd/notifications/enqueuer.go:104-116`, and the notifications that a turned-off template or the dedupe drops without an error, `:138-165`.
