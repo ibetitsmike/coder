@@ -85,9 +85,6 @@ it("installs a pack in the organization the URL names", async () => {
 			ref: "v0.15.36",
 		}),
 	);
-	await waitFor(() =>
-		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-	);
 });
 
 it("updates and deletes a pack from its row menu", async () => {

@@ -1,5 +1,6 @@
 // This file is fork code: queries for the fork-plugin-packs experiment.
 
+import { isAxiosError } from "axios";
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
 	createPluginPack,
@@ -7,7 +8,11 @@ import {
 	getPluginPacks,
 	updatePluginPack,
 } from "#/api/forkPluginPacks";
-import type { CreateForkPluginPackRequest } from "#/api/typesGenerated";
+import type {
+	CreateForkPluginPackRequest,
+	ForkPluginPack,
+} from "#/api/typesGenerated";
+import { isResponseLost } from "./forkAgentDefinitions";
 
 const pluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId] as const;
@@ -25,6 +30,16 @@ const invalidatePluginPacks = (
 ) =>
 	queryClient.invalidateQueries({ queryKey: pluginPacksKey(organizationId) });
 
+/** Whether an organization's cached pack list no longer lists the pack. */
+export const isPluginPackGone = (
+	queryClient: QueryClient,
+	organizationId: string,
+	packId: string,
+) => {
+	const packs = queryClient.getQueryData(pluginPacks(organizationId).queryKey);
+	return packs !== undefined && !packs.some((pack) => pack.id === packId);
+};
+
 export const createPluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -40,8 +55,8 @@ export const updatePluginPackMutation = (
 	organizationId: string,
 ) =>
 	mutationOptions({
-		mutationFn: (packId: string) =>
-			updatePluginPack(organizationId, packId, {}),
+		mutationFn: (pack: ForkPluginPack) =>
+			updatePluginPack(organizationId, pack.id, {}),
 		onSuccess: () => invalidatePluginPacks(queryClient, organizationId),
 	});
 
@@ -51,5 +66,19 @@ export const deletePluginPackMutation = (
 ) =>
 	mutationOptions({
 		mutationFn: (packId: string) => deletePluginPack(organizationId, packId),
-		onSuccess: () => invalidatePluginPacks(queryClient, organizationId),
+		onSuccess: (_data, packId) => {
+			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
+				packs?.filter((pack) => pack.id !== packId),
+			);
+		},
+		// A 404 or a lost response can mean the pack is already gone, so the
+		// mutation stays pending until the refetch settles and callers can
+		// check the list with isPluginPackGone.
+		onSettled: (_data, error) => {
+			const refetch = invalidatePluginPacks(queryClient, organizationId);
+			const mayBeGone =
+				isResponseLost(error) ||
+				(isAxiosError(error) && error.response?.status === 404);
+			return mayBeGone ? refetch : undefined;
+		},
 	});

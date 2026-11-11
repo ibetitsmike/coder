@@ -8,6 +8,7 @@ import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
 	createPluginPackMutation,
 	deletePluginPackMutation,
+	isPluginPackGone,
 	pluginPacks,
 	updatePluginPackMutation,
 } from "#/api/queries/forkPluginPacks";
@@ -20,6 +21,7 @@ import { toast } from "#/components/Toaster/toast";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { RequirePermission } from "#/modules/permissions/RequirePermission";
+import { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
 import { pageTitle } from "#/utils/page";
 import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
 import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkillsOrganization";
@@ -46,14 +48,42 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const installMutation = useMutation(
 		createPluginPackMutation(queryClient, organization.id),
 	);
-	const updateMutation = useMutation(
-		updatePluginPackMutation(queryClient, organization.id),
+	// Every in-flight update keeps its row disabled. TanStack Query tracks
+	// only the latest call's variables, and per-call callbacks run only for
+	// the latest call, so the mutation-level callbacks track each pack.
+	const [updatingPackIds, setUpdatingPackIds] = useState<ReadonlySet<string>>(
+		new Set(),
 	);
+	const updateOptions = updatePluginPackMutation(queryClient, organization.id);
+	const updateMutation = useMutation({
+		...updateOptions,
+		onMutate: (pack) => {
+			setUpdatingPackIds((current) => new Set(current).add(pack.id));
+		},
+		onSuccess: (...args) => {
+			const [updated, pack] = args;
+			toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
+			return updateOptions.onSuccess?.(...args);
+		},
+		onError: (error, pack) => {
+			toast.error(getErrorMessage(error, `Failed to update ${pack.name}.`), {
+				description: getErrorDetail(error),
+			});
+		},
+		onSettled: (_data, _error, pack) => {
+			setUpdatingPackIds((current) => {
+				const next = new Set(current);
+				next.delete(pack.id);
+				return next;
+			});
+		},
+	});
 	const deleteMutation = useMutation(
 		deletePluginPackMutation(queryClient, organization.id),
 	);
 	const [isInstallOpen, setIsInstallOpen] = useState(false);
 	const [deleting, setDeleting] = useState<ForkPluginPack>();
+	const focusReturn = useDialogFocusReturn();
 
 	return (
 		<>
@@ -65,26 +95,13 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				isLoading={packsQuery.isLoading}
 				isRetrying={packsQuery.isFetching}
 				onRetry={() => void packsQuery.refetch()}
-				updatingPackId={
-					updateMutation.isPending ? updateMutation.variables : undefined
-				}
+				updatingPackIds={updatingPackIds}
+				focusReturn={focusReturn}
 				onInstall={() => {
 					installMutation.reset();
 					setIsInstallOpen(true);
 				}}
-				onUpdate={(pack) =>
-					updateMutation.mutate(pack.id, {
-						onSuccess: (updated) =>
-							toast.success(
-								`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`,
-							),
-						onError: (error) =>
-							toast.error(
-								getErrorMessage(error, `Failed to update ${pack.name}.`),
-								{ description: getErrorDetail(error) },
-							),
-					})
-				}
+				onUpdate={(pack) => updateMutation.mutate(pack)}
 				onDelete={(pack) => {
 					deleteMutation.reset();
 					setDeleting(pack);
@@ -95,6 +112,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					error={installMutation.error}
 					isInstalling={installMutation.isPending}
 					onClose={() => setIsInstallOpen(false)}
+					onCloseAutoFocus={focusReturn.restoreFocus}
 					onInstall={(req) =>
 						installMutation.mutate(req, {
 							onSuccess: (pack) => {
@@ -128,11 +146,19 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 							setDeleting(undefined);
 						}
 					}}
+					onCloseAutoFocus={focusReturn.restoreFocus}
 					onConfirm={() =>
 						deleteMutation.mutate(deleting.id, {
-							onSuccess: () => {
-								toast.success(`${deleting.name} deleted.`);
-								setDeleting(undefined);
+							// A lost response can still have deleted the pack, so the
+							// refetched list decides whether the delete is done.
+							onSettled: (_data, error, packId) => {
+								if (
+									!error ||
+									isPluginPackGone(queryClient, organization.id, packId)
+								) {
+									toast.success(`${deleting.name} deleted.`);
+									setDeleting(undefined);
+								}
 							},
 						})
 					}
