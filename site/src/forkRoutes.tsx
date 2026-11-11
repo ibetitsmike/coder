@@ -11,7 +11,22 @@ const ForkAgentDefinitionsPage = lazy(
 		),
 );
 
+const ForkOrganizationAgentDefinitionsPage = lazy(
+	() =>
+		import(
+			"./pages/AISettingsPage/ForkAgentDefinitionsPage/ForkOrganizationAgentDefinitionsPage"
+		),
+);
+
 /** Routes nested under /agents/settings. */
 export const forkAgentSettingsRoutes = (
 	<Route path="agent-definitions" element={<ForkAgentDefinitionsPage />} />
+);
+
+/** Routes nested under /ai/settings. */
+export const forkAISettingsRoutes = (
+	<Route
+		path="agent-definitions"
+		element={<ForkOrganizationAgentDefinitionsPage />}
+	/>
 );
