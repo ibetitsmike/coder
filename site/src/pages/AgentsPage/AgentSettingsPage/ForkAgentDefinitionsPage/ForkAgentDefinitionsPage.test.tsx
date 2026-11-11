@@ -1235,7 +1235,8 @@ describe("ForkAgentDefinitionsPage", () => {
 	});
 
 	describe("organization tier", () => {
-		const renderOrganizationTable = () => {
+		it("toggles an organization definition through the organization route", async () => {
+			const user = userEvent.setup();
 			vi.spyOn(
 				forkAgentDefinitionsApi,
 				"getOrganizationAgentDefinitions",
@@ -1251,12 +1252,6 @@ describe("ForkAgentDefinitionsPage", () => {
 					}}
 				/>,
 			);
-			return { update };
-		};
-
-		it("toggles an organization definition through the organization route", async () => {
-			const user = userEvent.setup();
-			const { update } = renderOrganizationTable();
 
 			await user.click(
 				await screen.findByRole("switch", {
