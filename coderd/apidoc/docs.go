@@ -29030,7 +29030,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "base_type": {
-                    "description": "BaseType is general or explore.",
+                    "description": "BaseType is general, explore or computer_use.",
                     "type": "string"
                 },
                 "description": {
