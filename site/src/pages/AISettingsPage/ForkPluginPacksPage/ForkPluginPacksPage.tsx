@@ -5,7 +5,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Navigate } from "react-router";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { isResponseLost } from "#/api/queries/forkAgentDefinitions";
 import {
+	cachedPluginPacks,
 	createPluginPackMutation,
 	deletePluginPackMutation,
 	isPluginPackGone,
@@ -60,17 +62,26 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 		onMutate: (pack) => {
 			setUpdatingPackIds((current) => new Set(current).add(pack.id));
 		},
-		onSuccess: (...args) => {
-			const [updated, pack] = args;
-			toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
-			return updateOptions.onSuccess?.(...args);
-		},
-		onError: (error, pack) => {
-			toast.error(getErrorMessage(error, `Failed to update ${pack.name}.`), {
-				description: getErrorDetail(error),
-			});
-		},
-		onSettled: (_data, _error, pack) => {
+		onSettled: async (...args) => {
+			await updateOptions.onSettled?.(...args);
+			const [data, error, pack] = args;
+			// After a lost response, a refetched pack with a new timestamp
+			// shows that the update went through.
+			const refreshed = isResponseLost(error)
+				? cachedPluginPacks(queryClient, organization.id)?.find(
+						(candidate) =>
+							candidate.id === pack.id &&
+							candidate.updated_at !== pack.updated_at,
+					)
+				: undefined;
+			const updated = data ?? refreshed;
+			if (updated) {
+				toast.success(`${pack.name} is at ${updated.commit_sha.slice(0, 10)}.`);
+			} else {
+				toast.error(getErrorMessage(error, `Failed to update ${pack.name}.`), {
+					description: getErrorDetail(error),
+				});
+			}
 			setUpdatingPackIds((current) => {
 				const next = new Set(current);
 				next.delete(pack.id);
@@ -92,6 +103,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				access={access}
 				action={picker}
 				error={packsQuery.error}
+				isLoadingError={packsQuery.isLoadingError}
 				isLoading={packsQuery.isLoading}
 				isRetrying={packsQuery.isFetching}
 				onRetry={() => void packsQuery.refetch()}
@@ -115,9 +127,20 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					onCloseAutoFocus={focusReturn.restoreFocus}
 					onInstall={(req) =>
 						installMutation.mutate(req, {
-							onSuccess: (pack) => {
-								toast.success(`${pack.name} installed.`);
-								setIsInstallOpen(false);
+							// A lost response can still have installed the pack, so
+							// the refetched list decides whether the install is done.
+							onSettled: (data, error) => {
+								const pack =
+									data ??
+									(isResponseLost(error)
+										? cachedPluginPacks(queryClient, organization.id)?.find(
+												(candidate) => candidate.name === req.name,
+											)
+										: undefined);
+								if (pack) {
+									toast.success(`${pack.name} installed.`);
+									setIsInstallOpen(false);
+								}
 							},
 						})
 					}
