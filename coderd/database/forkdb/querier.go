@@ -66,9 +66,10 @@ type Querier interface {
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
-	// Returns the agent type of each child chat in @chat_ids. A child spawned
-	// without a chat_subagents row gets its type from its mode, as
-	// subagentTypeFromChat in coderd/x/chatd derives it.
+	// Returns the agent type of each child chat in @chat_ids and of each root chat
+	// in @chat_ids that started as an agent type. A child spawned without a
+	// chat_subagents row gets its type from its mode, as subagentTypeFromChat in
+	// coderd/x/chatd derives it.
 	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
 	// Returns every descendant of @root_id through parent_chat_id, leaves first.

@@ -2210,8 +2210,8 @@ export interface Chat {
 	readonly children: readonly Chat[];
 	/**
 	 * AgentType is the subagent type of a child chat, such as explore or a
-	 * custom agent definition name. Only set with the
-	 * fork-agent-definitions experiment.
+	 * custom agent definition name, or the type a root chat started as.
+	 * Only set with the fork-agent-definitions experiment.
 	 */
 	readonly agent_type?: string;
 }
@@ -4732,6 +4732,13 @@ export interface CreateChatRequest {
 	readonly inline_mcp_servers?: readonly InlineMCPServerRequest[];
 	readonly plan_mode?: ChatPlanMode;
 	readonly client_type?: ChatClientType;
+	/**
+	 * AgentType starts the chat as an agent type, like spawn_agent's
+	 * type: general, explore, or a personal, organization or project
+	 * agent definition. It requires the fork-agent-definitions
+	 * experiment.
+	 */
+	readonly agent_type?: string;
 }
 
 // From codersdk/users.go
@@ -6442,6 +6449,64 @@ export interface ForkAgentDefinitionMetadata {
 	readonly enabled: boolean;
 	readonly created_at: string;
 	readonly updated_at: string;
+}
+
+// From codersdk/fork_agent_types.go
+/**
+ * ForkAgentType is an agent type that spawn_agent offers a chat.
+ */
+export interface ForkAgentType {
+	/**
+	 * Name is the type that spawn_agent and CreateChatRequest.AgentType
+	 * accept: the bare name, or the source-qualified name, such as
+	 * personal/reviewer, when several sources define the name.
+	 */
+	readonly name: string;
+	/**
+	 * Source is builtin, personal, org, project or workspace.
+	 */
+	readonly source: string;
+	readonly description: string;
+	/**
+	 * Model is the definition's model, or empty when the type runs on the
+	 * chat's model.
+	 */
+	readonly model?: string;
+	/**
+	 * BaseType is general, explore or computer_use.
+	 */
+	readonly base_type: string;
+	/**
+	 * RootAvailable reports whether a new root chat can start as the type.
+	 */
+	readonly root_available: boolean;
+	/**
+	 * RootUnavailableReason says why a new root chat cannot start as the
+	 * type.
+	 */
+	readonly root_unavailable_reason?: string;
+}
+
+// From codersdk/fork_agent_types.go
+/**
+ * ForkAgentTypeSourceBuiltin is the source of the built-in agent types. The
+ * sources of agent definitions are personal, org, project and workspace.
+ */
+export const ForkAgentTypeSourceBuiltin = "builtin";
+
+// From codersdk/fork_agent_types.go
+/**
+ * ForkAgentTypesRequest adds the agent definitions of a project or a
+ * workspace to ForkAgentTypes. A zero ID adds none.
+ */
+export interface ForkAgentTypesRequest {
+	readonly ProjectID: string;
+	readonly WorkspaceID: string;
+	/**
+	 * ModelConfigID is the new root chat's CreateChatRequest.ModelConfigID.
+	 * A zero ID means the model that chat creation picks by default.
+	 */
+	readonly ModelConfigID: string;
 }
 
 // From codersdk/fork_chat_config.go
