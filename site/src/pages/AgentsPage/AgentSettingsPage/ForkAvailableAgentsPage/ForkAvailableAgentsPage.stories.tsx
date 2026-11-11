@@ -1,9 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, spyOn, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
+import { API } from "#/api/api";
 import { infiniteChats } from "#/api/queries/chats";
 import { agentTypes } from "#/api/queries/forkAgentDefinitions";
+import type { Chat, ForkAgentType } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
-import { MockDefaultOrganization } from "#/testHelpers/entities";
+import {
+	MockDefaultOrganization,
+	MockUserMember,
+	mockApiError,
+} from "#/testHelpers/entities";
 import {
 	withAuthProvider,
 	withDashboardProvider,
@@ -15,6 +22,33 @@ import {
 import ForkAvailableAgentsPage from "./ForkAvailableAgentsPage";
 
 const agentTypesKey = agentTypes(MockDefaultOrganization.id, {}).queryKey;
+const chatsKey = infiniteChats(
+	getSidebarChatListInput(DEFAULT_AGENT_SIDEBAR_FILTERS),
+).queryKey;
+
+const mockGeneralAgentType: ForkAgentType = {
+	name: "general",
+	source: "builtin",
+	description: "A general purpose agent.",
+	base_type: "general",
+	root_available: true,
+};
+
+const mockReviewerAgentType: ForkAgentType = {
+	name: "personal/reviewer",
+	source: "personal",
+	description: "Reviews the diff.",
+	base_type: "general",
+	root_available: false,
+	root_unavailable_reason: "Its model is not available.",
+};
+
+const mockReviewChat: Chat = {
+	...MockChat,
+	title: "Review the login flow",
+	agent_type: "reviewer",
+	organization_id: MockDefaultOrganization.id,
+};
 
 const meta = {
 	title: "pages/AgentsPage/ForkAvailableAgentsPage",
@@ -22,6 +56,7 @@ const meta = {
 	decorators: [withAuthProvider, withDashboardProvider],
 	parameters: {
 		experiments: ["fork-agent-definitions"],
+		user: { ...MockUserMember, organization_ids: [MockDefaultOrganization.id] },
 		reactRouter: reactRouterParameters({
 			location: { path: "/agents/settings/available-agents" },
 			routing: { path: "/agents/settings/available-agents" },
@@ -32,52 +67,50 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const chatsQuery = {
-	key: infiniteChats(getSidebarChatListInput(DEFAULT_AGENT_SIDEBAR_FILTERS))
-		.queryKey,
-	data: {
-		pages: [
-			[
-				{
-					...MockChat,
-					title: "Review the login flow",
-					agent_type: "reviewer",
-					organization_id: MockDefaultOrganization.id,
-				},
-			],
-		],
-		pageParams: [0],
-	},
-};
-
 export const Loaded: Story = {
 	parameters: {
 		queries: [
-			chatsQuery,
+			{ key: chatsKey, data: { pages: [[mockReviewChat]], pageParams: [0] } },
 			{
 				key: agentTypesKey,
-				data: [
-					{
-						name: "general",
-						source: "builtin",
-						description: "A general purpose agent.",
-						base_type: "general",
-						root_available: true,
-					},
-					{
-						name: "personal/reviewer",
-						source: "personal",
-						description: "Reviews the diff.",
-						base_type: "general",
-						root_available: false,
-						root_unavailable_reason: "Its model is not available.",
-					},
-				],
+				data: [mockGeneralAgentType, mockReviewerAgentType],
 			},
 		],
 	},
 };
 
 export const NoAgents: Story = {
-	parameters: { queries: [chatsQuery, { key: agentTypesKey, data: [] }] },
+	parameters: {
+		queries: [
+			{ key: chatsKey, data: { pages: [[]], pageParams: [0] } },
+			{ key: agentTypesKey, data: [] },
+		],
+	},
+};
+
+export const Loading: Story = {
+	parameters: {
+		queries: [{ key: chatsKey, data: { pages: [[]], pageParams: [0] } }],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockReturnValue(new Promise(() => {}));
+	},
+};
+
+export const LoadError: Story = {
+	parameters: {
+		queries: [{ key: chatsKey, data: { pages: [[]], pageParams: [0] } }],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockRejectedValue(
+			mockApiError({ message: "Failed to load the agent types." }),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByText("Failed to load the agent types.");
+		await expect(
+			canvas.queryByText("No agents are available."),
+		).not.toBeInTheDocument();
+	},
 };

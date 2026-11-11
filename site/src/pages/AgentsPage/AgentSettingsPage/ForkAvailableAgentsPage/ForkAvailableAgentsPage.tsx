@@ -34,6 +34,7 @@ import {
 	getMemberOrganizations,
 	useDashboard,
 } from "#/modules/dashboard/useDashboard";
+import { agentTypeSourceLabels } from "../../components/ChatElements/ForkCompactAgentTypeSelector";
 import { SectionHeader } from "../../components/SectionHeader";
 import {
 	DEFAULT_AGENT_SIDEBAR_FILTERS,
@@ -42,14 +43,6 @@ import {
 
 const noneValue = "none";
 const recentChatLimit = 3;
-
-const tierLabels: Record<string, string> = {
-	builtin: "Built-in",
-	personal: "Personal",
-	org: "Organization",
-	project: "Project",
-	workspace: "Workspace",
-};
 
 // Chats store a definition's name without its source prefix, so a name that
 // several sources define matches the chats of each of them.
@@ -159,7 +152,9 @@ const ForkAvailableAgentsPage: React.FC = () => {
 						<div className="text-content-secondary">{type.description}</div>
 					</TableCell>
 					<TableCell>
-						<Badge size="sm">{tierLabels[type.source] ?? type.source}</Badge>
+						<Badge size="sm">
+							{agentTypeSourceLabels[type.source] ?? type.source}
+						</Badge>
 					</TableCell>
 					<TableCell className="text-content-secondary">
 						{type.root_available ? "Available" : type.root_unavailable_reason}
@@ -215,17 +210,19 @@ const ForkAvailableAgentsPage: React.FC = () => {
 				/>
 			</div>
 			{agentTypesQuery.error && <ErrorAlert error={agentTypesQuery.error} />}
-			<Table aria-label="Available agents">
-				<TableHeader>
-					<TableRow>
-						<TableHead className="w-full">Agent</TableHead>
-						<TableHead className="whitespace-nowrap">Tier</TableHead>
-						<TableHead className="whitespace-nowrap">Availability</TableHead>
-						<TableHead className="whitespace-nowrap">Recent chats</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody size="lg">{tableBody}</TableBody>
-			</Table>
+			{!agentTypesQuery.isLoadingError && (
+				<Table aria-label="Available agents">
+					<TableHeader>
+						<TableRow>
+							<TableHead className="w-full">Agent</TableHead>
+							<TableHead className="whitespace-nowrap">Tier</TableHead>
+							<TableHead className="whitespace-nowrap">Availability</TableHead>
+							<TableHead className="whitespace-nowrap">Recent chats</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody size="lg">{tableBody}</TableBody>
+				</Table>
+			)}
 		</div>
 	);
 };

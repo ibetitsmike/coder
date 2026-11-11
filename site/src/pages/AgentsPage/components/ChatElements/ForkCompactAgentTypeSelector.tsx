@@ -27,7 +27,8 @@ import { Spinner } from "#/components/Spinner/Spinner";
 
 const defaultAgentLabel = "Default agent";
 
-const sourceHeadings: Record<string, string> = {
+/** The label of each agent type source, in the order the picker groups them. */
+export const agentTypeSourceLabels: Record<string, string> = {
 	builtin: "Built-in",
 	personal: "Personal",
 	org: "Organization",
@@ -35,7 +36,7 @@ const sourceHeadings: Record<string, string> = {
 	workspace: "Workspace",
 };
 const groupBySource = (agentTypes: readonly ForkAgentType[]) =>
-	Object.entries(sourceHeadings)
+	Object.entries(agentTypeSourceLabels)
 		.map(([source, heading]) => ({
 			heading,
 			types: agentTypes.filter((type) => type.source === source),

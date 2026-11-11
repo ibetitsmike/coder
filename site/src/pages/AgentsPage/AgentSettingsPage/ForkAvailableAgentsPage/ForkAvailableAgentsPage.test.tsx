@@ -13,7 +13,7 @@ import {
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
 import ForkAvailableAgentsPage from "./ForkAvailableAgentsPage";
 
-const reviewer: ForkAgentType = {
+const mockReviewer: ForkAgentType = {
 	name: "personal/reviewer",
 	source: "personal",
 	description: "Reviews the diff.",
@@ -22,16 +22,37 @@ const reviewer: ForkAgentType = {
 	root_unavailable_reason: "Its model is not available.",
 };
 
-const chat = (id: string, overrides: Partial<Chat> = {}): Chat => ({
+const mockReviewerChildChat: Chat = {
 	...MockChat,
-	id,
-	title: `Chat ${id}`,
+	id: "child",
+	title: "Chat child",
 	organization_id: MockDefaultOrganization.id,
 	agent_type: "reviewer",
-	...overrides,
-});
+};
 
-const workspace = {
+const mockDefaultRootChat: Chat = {
+	...mockReviewerChildChat,
+	id: "root",
+	title: "Chat root",
+	agent_type: undefined,
+	children: [mockReviewerChildChat],
+};
+
+const mockExploreChat: Chat = {
+	...mockReviewerChildChat,
+	id: "other-type",
+	title: "Chat other-type",
+	agent_type: "explore",
+};
+
+const mockOtherOrgReviewerChat: Chat = {
+	...mockReviewerChildChat,
+	id: "other-org",
+	title: "Chat other-org",
+	organization_id: "another-org",
+};
+
+const mockWorkspaceDev = {
 	...MockWorkspace,
 	id: "ws-1",
 	name: "dev",
@@ -49,20 +70,17 @@ const renderPage = (experiments: Experiment[] = ["fork-agent-definitions"]) => {
 	]);
 	vi.spyOn(API.experimental, "getChatProjects").mockResolvedValue([]);
 	vi.spyOn(API, "getWorkspaces").mockResolvedValue({
-		workspaces: [workspace],
+		workspaces: [mockWorkspaceDev],
 		count: 1,
 	});
 	vi.spyOn(API.experimental, "getChats").mockResolvedValue([
-		chat("root", {
-			agent_type: undefined,
-			children: [chat("child")],
-		}),
-		chat("other-type", { agent_type: "explore" }),
-		chat("other-org", { organization_id: "another-org" }),
+		mockDefaultRootChat,
+		mockExploreChat,
+		mockOtherOrgReviewerChat,
 	]);
 	const getAgentTypes = vi
 		.spyOn(forkAgentDefinitionsApi, "getAgentTypes")
-		.mockResolvedValue([reviewer]);
+		.mockResolvedValue([mockReviewer]);
 	const { router } = renderWithAuth(<ForkAvailableAgentsPage />, {
 		path: "/agents/settings/available-agents",
 		route: "/agents/settings/available-agents",
@@ -79,15 +97,13 @@ afterEach(() => {
 });
 
 describe("ForkAvailableAgentsPage", () => {
-	it("lists each agent with its tier, availability, and recent chats", async () => {
+	it("links each agent's recent chats", async () => {
 		const { router } = renderPage();
 		const user = userEvent.setup();
 
 		const row = within(
-			(await screen.findByText("personal/reviewer")).closest("tr")!,
+			await screen.findByRole("row", { name: /personal\/reviewer/ }),
 		);
-		expect(row.getByText("Personal")).toBeInTheDocument();
-		expect(row.getByText("Its model is not available.")).toBeInTheDocument();
 		const links = await row.findAllByRole("link");
 		expect(links.map((link) => link.textContent)).toEqual(["Chat child"]);
 		await user.click(row.getByRole("link", { name: "Chat child" }));
@@ -106,7 +122,7 @@ describe("ForkAvailableAgentsPage", () => {
 		await waitFor(() =>
 			expect(getAgentTypes).toHaveBeenLastCalledWith(
 				MockDefaultOrganization.id,
-				{ project: undefined, workspace: workspace.id },
+				{ project: undefined, workspace: mockWorkspaceDev.id },
 			),
 		);
 	});
