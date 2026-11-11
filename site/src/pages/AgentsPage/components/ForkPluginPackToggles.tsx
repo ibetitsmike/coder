@@ -127,7 +127,7 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	// The error toast is a mutation-level callback, so it still shows when
 	// the dialog closes while the request is in flight.
 	const toggleMutation = useMutation({
-		...setPluginPackEnabledMutation(queryClient, target),
+		...setPluginPackEnabledMutation(queryClient, target, organizationId),
 		onError: (error) =>
 			toast.error(getErrorMessage(error, "Failed to update the plugin pack."), {
 				description: getErrorDetail(error),
@@ -135,17 +135,15 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	});
 	const installedStatus = getErrorStatus(installedQuery.error);
 	// Members who cannot list the organization's packs get a 403 or 404.
-	const installedError =
-		installedStatus === 403 || installedStatus === 404
-			? undefined
-			: installedQuery.error;
+	const isInstalledDenied = installedStatus === 403 || installedStatus === 404;
+	const installedError = isInstalledDenied ? undefined : installedQuery.error;
 	// Cached packs stay usable when a background refetch fails.
 	const isInstalledBlocking =
 		installedQuery.isPending ||
 		(Boolean(installedError) && !installedQuery.data);
 	return (
 		<ForkPluginPackTogglesView
-			installed={installedQuery.data}
+			installed={isInstalledDenied ? undefined : installedQuery.data}
 			enabled={isInstalledBlocking ? undefined : enabledQuery.data}
 			error={enabledQuery.error ?? installedError}
 			isRetrying={enabledQuery.isFetching || installedQuery.isFetching}

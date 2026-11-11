@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as enablementApi from "#/api/forkPluginPackEnablement";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
 import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
 import {
@@ -173,6 +174,86 @@ it("lists only enabled packs when the organization's packs cannot be listed", as
 			MockForkPluginPackWithoutPath.id,
 			false,
 		),
+	);
+});
+
+it("lists only enabled packs after the installed list becomes forbidden", async () => {
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks")
+		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
+		.mockRejectedValue({
+			...mockApiError({ message: "Forbidden." }),
+			status: 403,
+		});
+	const { queryClient } = render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+	await screen.findByRole("switch", {
+		name: `Enable ${MockForkPluginPack.name}`,
+	});
+
+	await queryClient.invalidateQueries({
+		queryKey: pluginPacksKey(MockForkPluginPack.organization_id),
+	});
+
+	await waitFor(() =>
+		expect(
+			screen.queryByRole("switch", {
+				name: `Enable ${MockForkPluginPack.name}`,
+			}),
+		).toBeNull(),
+	);
+	screen.getByRole("switch", {
+		name: `Enable ${MockForkPluginPackWithoutPath.name}`,
+	});
+});
+
+const toggleDeletedPack = async (
+	toggleTarget: enablementApi.PluginPackTarget,
+) => {
+	const user = userEvent.setup();
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+	]);
+	vi.mocked(enablementApi.setPluginPackEnabled).mockRejectedValueOnce({
+		...mockApiError({ message: "Resource not found." }),
+		status: 404,
+	});
+	render(
+		<ForkPluginPackToggles
+			target={toggleTarget}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+
+	await user.click(
+		await screen.findByRole("switch", {
+			name: `Enable ${MockForkPluginPack.name}`,
+		}),
+	);
+};
+
+it("refetches the installed packs when a chat toggle finds a deleted pack", async () => {
+	await toggleDeletedPack(target);
+
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+	);
+});
+
+it("refetches the installed packs when a project toggle finds a deleted pack", async () => {
+	await toggleDeletedPack({
+		kind: "project",
+		organizationId: MockForkPluginPack.organization_id,
+		projectId: "project-1",
+	});
+
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
 });
 
