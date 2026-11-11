@@ -60,6 +60,25 @@ export const isPluginPackGone = (
 	return packs !== undefined && !packs.some((pack) => pack.id === packId);
 };
 
+/** Puts a created or updated pack into the cached list, kept in name order. */
+const storePluginPack = (
+	queryClient: QueryClient,
+	organizationId: string,
+	pack: ForkPluginPack,
+) => {
+	queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
+		packs
+			?.filter((cached) => cached.id !== pack.id)
+			.concat(pack)
+			.sort((a, b) => a.name.localeCompare(b.name)),
+	);
+};
+
+/**
+ * Installs a pack. On success the returned pack goes into the cached list,
+ * so a failed refetch cannot hide it. The list is then invalidated, and
+ * after a lost response the mutation settles only once the refetch does.
+ */
 export const createPluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -67,10 +86,15 @@ export const createPluginPackMutation = (
 	mutationOptions({
 		mutationFn: (req: CreateForkPluginPackRequest) =>
 			createPluginPack(organizationId, req),
+		onSuccess: (pack) => storePluginPack(queryClient, organizationId, pack),
 		onSettled: (_data, error) =>
 			settlePluginPackChange(queryClient, organizationId, error),
 	});
 
+/**
+ * Moves a pack to the latest commit of its ref. The cache and refetch work
+ * as in createPluginPackMutation.
+ */
 export const updatePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -78,10 +102,17 @@ export const updatePluginPackMutation = (
 	mutationOptions({
 		mutationFn: (pack: ForkPluginPack) =>
 			updatePluginPack(organizationId, pack.id, {}),
+		onSuccess: (updated) =>
+			storePluginPack(queryClient, organizationId, updated),
 		onSettled: (_data, error) =>
 			settlePluginPackChange(queryClient, organizationId, error),
 	});
 
+/**
+ * Deletes a pack. On success the pack leaves the cached list. After a 404 or
+ * a lost response the mutation settles only once the refetch does, so
+ * callers can check isPluginPackGone.
+ */
 export const deletePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -93,9 +124,6 @@ export const deletePluginPackMutation = (
 				packs?.filter((pack) => pack.id !== packId),
 			);
 		},
-		// A 404 or a lost response can mean the pack is already gone, so the
-		// mutation stays pending until the refetch settles and callers can
-		// check the list with isPluginPackGone.
 		onSettled: (_data, error) => {
 			const refetch = invalidatePluginPacks(queryClient, organizationId);
 			const mayBeGone =

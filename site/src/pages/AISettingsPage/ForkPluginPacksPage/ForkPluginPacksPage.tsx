@@ -17,7 +17,6 @@ import {
 import { organizationsPermissions } from "#/api/queries/organizations";
 import type { ForkPluginPack, Organization } from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
-import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
 import { Loader } from "#/components/Loader/Loader";
 import { toast } from "#/components/Toaster/toast";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
@@ -28,6 +27,7 @@ import { pageTitle } from "#/utils/page";
 import { OrganizationPicker } from "../MCPServersPage/components/OrganizationPicker";
 import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkillsOrganization";
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
+import { ForkDeletePluginPackDialog } from "./ForkDeletePluginPackDialog";
 import { ForkInstallPluginPackDialog } from "./ForkInstallPluginPackDialog";
 import {
 	type ForkPluginPacksAccess,
@@ -125,16 +125,24 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					isInstalling={installMutation.isPending}
 					onClose={() => setIsInstallOpen(false)}
 					onCloseAutoFocus={focusReturn.restoreFocus}
-					onInstall={(req) =>
+					onInstall={(req) => {
+						const knownPackIds = new Set(
+							cachedPluginPacks(queryClient, organization.id)?.map(
+								(pack) => pack.id,
+							),
+						);
 						installMutation.mutate(req, {
-							// A lost response can still have installed the pack, so
-							// the refetched list decides whether the install is done.
+							// A lost response can still have installed the pack, so a
+							// pack with the submitted name that was not listed before
+							// the request shows that the install went through.
 							onSettled: (data, error) => {
 								const pack =
 									data ??
 									(isResponseLost(error)
 										? cachedPluginPacks(queryClient, organization.id)?.find(
-												(candidate) => candidate.name === req.name,
+												(candidate) =>
+													candidate.name === req.name &&
+													!knownPackIds.has(candidate.id),
 											)
 										: undefined);
 								if (pack) {
@@ -142,33 +150,16 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 									setIsInstallOpen(false);
 								}
 							},
-						})
-					}
+						});
+					}}
 				/>
 			)}
 			{deleting && (
-				<ConfirmDialog
-					type="delete"
-					open
-					title={`Delete ${deleting.name}?`}
-					confirmText="Delete"
-					description={
-						<>
-							<p className="m-0">
-								Projects and chats that enabled this pack lose its skills and
-								agents.
-							</p>
-							{Boolean(deleteMutation.error) && (
-								<ErrorAlert className="mt-3" error={deleteMutation.error} />
-							)}
-						</>
-					}
-					confirmLoading={deleteMutation.isPending}
-					onClose={() => {
-						if (!deleteMutation.isPending) {
-							setDeleting(undefined);
-						}
-					}}
+				<ForkDeletePluginPackDialog
+					pack={deleting}
+					error={deleteMutation.error}
+					isDeleting={deleteMutation.isPending}
+					onClose={() => setDeleting(undefined)}
 					onCloseAutoFocus={focusReturn.restoreFocus}
 					onConfirm={() =>
 						deleteMutation.mutate(deleting.id, {
