@@ -64,7 +64,11 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 		createReq.ModelConfigID = &modelConfigID
 	}
 	rootModelID, _, status, resp := api.resolveCreateChatModelConfigID(ctx, opts.OwnerID, createReq)
-	if resp != nil {
+	// Chat creation lets a definition's model replace a missing default
+	// model, so only the types without one become unavailable.
+	if resp != nil && resp.Message == noLocalChatModelResponse().Message {
+		opts.NoModelReason = resp.Message
+	} else if resp != nil {
 		httpapi.Write(ctx, rw, status, *resp)
 		return
 	}

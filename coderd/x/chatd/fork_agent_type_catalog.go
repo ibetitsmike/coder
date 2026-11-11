@@ -28,6 +28,9 @@ type AgentTypeCatalogOptions struct {
 	// reports that the request chose it, as RootAgentOptions does.
 	ModelConfigID uuid.UUID
 	ExplicitModel bool
+	// NoModelReason, when set, explains why the new root chat has no
+	// model. It is the root unavailable reason of each type that sets none.
+	NoModelReason string
 }
 
 // AgentTypeCatalog lists the agent types that spawn_agent offers a chat of
@@ -49,6 +52,8 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 			entry := codersdk.ForkAgentType{Name: def.id, Source: codersdk.ForkAgentTypeSourceBuiltin, Description: def.description, BaseType: def.id}
 			if _, err := p.ResolveRootAgent(ctx, RootAgentOptions{AgentType: def.id}); err != nil {
 				entry.RootUnavailableReason = err.Error()
+			} else {
+				entry.RootUnavailableReason = opts.NoModelReason
 			}
 			entry.RootAvailable = entry.RootUnavailableReason == ""
 			out = append(out, entry)
@@ -85,8 +90,12 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 		case agentType.Source == skillspkg.SourceWorkspace:
 			entry.RootUnavailableReason = rootAgentWorkspaceReason
 		default:
-			if _, err := p.rootAgentFromDefinition(ctx, chat, def, opts.ExplicitModel); err != nil {
-				entry.RootUnavailableReason = err.Error()
+			agent, rootErr := p.rootAgentFromDefinition(ctx, chat, def, opts.ExplicitModel)
+			switch {
+			case rootErr != nil:
+				entry.RootUnavailableReason = rootErr.Error()
+			case !agent.ModelConfigID.Valid:
+				entry.RootUnavailableReason = opts.NoModelReason
 			}
 		}
 		if err == nil {
