@@ -160,7 +160,31 @@ export const ForkAgentDefinitionsTableView: React.FC<
 			/>
 		);
 	} else if (definitions.length === 0) {
-		tableBody = <TableEmpty message={emptyMessage} />;
+		tableBody = (
+			<TableEmpty
+				message={emptyMessage}
+				description={
+					<>
+						Chats can also use agents from their workspace. Add a Claude Code or
+						Cursor agent file at <code>.claude/agents/&lt;name&gt;.md</code> and
+						chats in that workspace can spawn it with spawn_agent.
+					</>
+				}
+				cta={
+					access.create && (
+						<Button
+							onClick={(event) => {
+								rememberTrigger(event);
+								onCreate();
+							}}
+						>
+							<PlusIcon aria-hidden="true" />
+							Create agent definition
+						</Button>
+					)
+				}
+			/>
+		);
 	} else {
 		tableBody = definitions.map((definition, index) => {
 			const pendingEnabled = pendingToggles[definition.name];

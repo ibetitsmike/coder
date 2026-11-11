@@ -76,6 +76,7 @@ import {
 	getSectionToggleTestId,
 	PINNED_SECTION_KEY,
 } from "./ChatSectionHeader";
+import { ForkSidebarNavItems } from "./ForkSidebarNavItems";
 import { LoadMoreSentinel } from "./LoadMoreSentinel";
 import {
 	type DeleteProject,
@@ -568,6 +569,9 @@ export const ChatsPanel: React.FC<ChatsPanelProps> = ({
 						}
 					/>
 				)}
+				<ForkSidebarNavItems
+					state={{ from: location.pathname + locationSearch }}
+				/>
 			</nav>
 			<div className="relative min-h-0 flex-1 flex flex-col">
 				{!chatProjectsEnabled && chatsHeader}
