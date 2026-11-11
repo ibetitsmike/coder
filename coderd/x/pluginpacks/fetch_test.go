@@ -21,7 +21,7 @@ func TestFetch(t *testing.T) {
 	t.Parallel()
 
 	repo := newTestRepo(t)
-	srv, requests := serveRepo(t, repo.root)
+	srv, _ := serveRepo(t, repo.root)
 	fetcher := pluginpacks.Fetcher{
 		AllowedHosts: []string{"127.0.0.1"},
 		Transport:    srv.Client().Transport,
@@ -61,21 +61,28 @@ func TestFetch(t *testing.T) {
 	t.Run("Rejected", func(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitLong)
-		before := requests.Load()
+		// A server of its own, so the parallel subtests above cannot add
+		// requests while this one asserts that none arrived.
+		rejectSrv, rejectRequests := serveRepo(t, repo.root)
+		rejectFetcher := pluginpacks.Fetcher{
+			AllowedHosts: []string{"127.0.0.1"},
+			Transport:    rejectSrv.Client().Transport,
+		}
+		rejectURL := rejectSrv.URL + "/pack.git"
 
 		for _, src := range []pluginpacks.Source{
-			{URL: strings.Replace(repoURL, "127.0.0.1", "localhost", 1), Ref: "main"},
-			{URL: strings.Replace(repoURL, "https://", "http://", 1), Ref: "main"},
-			{URL: strings.Replace(repoURL, "https://", "https://user:pass@", 1), Ref: "main"},
+			{URL: strings.Replace(rejectURL, "127.0.0.1", "localhost", 1), Ref: "main"},
+			{URL: strings.Replace(rejectURL, "https://", "http://", 1), Ref: "main"},
+			{URL: strings.Replace(rejectURL, "https://", "https://user:pass@", 1), Ref: "main"},
 		} {
-			_, err := fetcher.Fetch(ctx, src)
+			_, err := rejectFetcher.Fetch(ctx, src)
 			require.Error(t, err, src.URL)
 		}
-		require.Equal(t, before, requests.Load(), "rejected sources must not reach the server")
+		require.Zero(t, rejectRequests.Load(), "rejected sources must not reach the server")
 
-		_, err := fetcher.Fetch(ctx, pluginpacks.Source{URL: repoURL, Ref: "missing"})
+		_, err := rejectFetcher.Fetch(ctx, pluginpacks.Source{URL: rejectURL, Ref: "missing"})
 		require.ErrorContains(t, err, `ref "missing"`)
-		_, err = fetcher.Fetch(ctx, pluginpacks.Source{URL: repoURL, Path: "big", Ref: "main"})
+		_, err = rejectFetcher.Fetch(ctx, pluginpacks.Source{URL: rejectURL, Path: "big", Ref: "main"})
 		require.ErrorContains(t, err, "larger than")
 	})
 }
