@@ -28,48 +28,170 @@ import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDial
 
 const title = "Plugin packs";
 
-/**
- * Which plugin pack actions to offer. The server checks plugin packs against
- * the organization skill permissions, so each field mirrors the matching
- * organization skill permission.
- */
+/** Which plugin pack actions the table offers. */
 export type ForkPluginPacksAccess = {
+	/** Shows the install button. */
 	create: boolean;
+	/** Shows the update item in each row's menu. */
 	update: boolean;
+	/** Shows the delete item in each row's menu. */
 	delete: boolean;
 };
+
+type FocusReturn = Pick<
+	ReturnType<typeof useDialogFocusReturn>,
+	"rememberTrigger" | "setPrimaryFallback" | "setSecondaryFallback"
+>;
 
 type ForkPluginPacksTableViewProps = {
 	packs: readonly ForkPluginPack[];
 	access: ForkPluginPacksAccess;
 	action?: React.ReactNode;
 	error: unknown;
-	/** True when the first load failed, so no cached packs exist. */
 	isLoadingError: boolean;
 	isLoading: boolean;
 	isRetrying: boolean;
 	onRetry: () => void;
 	updatingPackIds: ReadonlySet<string>;
 	/** Registers the buttons that open dialogs, so closing one restores focus. */
-	focusReturn?: Pick<
-		ReturnType<typeof useDialogFocusReturn>,
-		"rememberTrigger" | "setPrimaryFallback" | "setSecondaryFallback"
-	>;
-	/**
-	 * Focus target of last resort. It is focusable by script only, so closing a
-	 * dialog can land on it when no row or install button is left.
-	 */
+	focusReturn?: FocusReturn;
+	/** Focus target of last resort when no row or install button remains. */
 	tableRef?: React.Ref<HTMLTableElement>;
 	onInstall: () => void;
 	onUpdate: (pack: ForkPluginPack) => void;
 	onDelete: (pack: ForkPluginPack) => void;
 };
 
+type InstallPluginPackButtonProps = {
+	ref?: React.Ref<HTMLButtonElement>;
+	focusReturn?: FocusReturn;
+	onInstall: () => void;
+};
+
+const InstallPluginPackButton: React.FC<InstallPluginPackButtonProps> = ({
+	ref,
+	focusReturn,
+	onInstall,
+}) => (
+	<Button
+		ref={ref}
+		variant="outline"
+		onClick={(event) => {
+			focusReturn?.rememberTrigger(event);
+			onInstall();
+		}}
+	>
+		<PlusIcon aria-hidden="true" />
+		Install plugin pack
+	</Button>
+);
+
+type ForkPluginPackRowProps = {
+	pack: ForkPluginPack;
+	access: ForkPluginPacksAccess;
+	isUpdating: boolean;
+	isFirst: boolean;
+	focusReturn?: FocusReturn;
+	onUpdate: (pack: ForkPluginPack) => void;
+	onDelete: (pack: ForkPluginPack) => void;
+};
+
+const ForkPluginPackActions: React.FC<ForkPluginPackRowProps> = ({
+	pack,
+	access,
+	isUpdating,
+	isFirst,
+	focusReturn,
+	onUpdate,
+	onDelete,
+}) => (
+	<DropdownMenu>
+		<DropdownMenuTrigger asChild>
+			<Button
+				size="icon"
+				variant="subtle"
+				aria-label={`More actions for ${pack.name}`}
+				ref={isFirst ? focusReturn?.setPrimaryFallback : undefined}
+				onPointerDown={focusReturn?.rememberTrigger}
+				onKeyDown={focusReturn?.rememberTrigger}
+			>
+				<EllipsisVerticalIcon aria-hidden="true" />
+			</Button>
+		</DropdownMenuTrigger>
+		<DropdownMenuContent align="end">
+			{access.update && (
+				<DropdownMenuItem disabled={isUpdating} onClick={() => onUpdate(pack)}>
+					{isUpdating
+						? "Updating…"
+						: `Update to the latest commit of ${pack.ref}`}
+				</DropdownMenuItem>
+			)}
+			{access.delete && (
+				<DropdownMenuItem
+					className="text-content-destructive focus:text-content-destructive"
+					disabled={isUpdating}
+					onClick={() => onDelete(pack)}
+				>
+					Delete&hellip;
+				</DropdownMenuItem>
+			)}
+		</DropdownMenuContent>
+	</DropdownMenu>
+);
+
+const ForkPluginPackRow: React.FC<ForkPluginPackRowProps> = ({
+	pack,
+	access,
+	isUpdating,
+	isFirst,
+	focusReturn,
+	onUpdate,
+	onDelete,
+}) => (
+	<TableRow>
+		<TableCell className="max-w-48 truncate" title={pack.name}>
+			{pack.name}
+		</TableCell>
+		<TableCell
+			className="w-full max-w-0 truncate"
+			title={`${pack.source_url} ${pack.source_path}`.trim()}
+		>
+			{pack.source_url}
+			{pack.source_path && (
+				<span className="text-content-secondary">
+					{" "}
+					/ {pack.source_path}
+				</span>
+			)}
+		</TableCell>
+		<TableCell className="whitespace-nowrap">
+			{pack.ref}{" "}
+			<code className="text-content-secondary" title={pack.commit_sha}>
+				{pack.commit_sha.slice(0, 10)}
+			</code>
+		</TableCell>
+		<TableCell className="hidden whitespace-nowrap sm:table-cell">
+			{formatUpdatedAt(pack.updated_at)}
+		</TableCell>
+		{(access.update || access.delete) && (
+			<TableCell className="text-right">
+				<ForkPluginPackActions
+					pack={pack}
+					access={access}
+					isUpdating={isUpdating}
+					isFirst={isFirst}
+					focusReturn={focusReturn}
+					onUpdate={onUpdate}
+					onDelete={onDelete}
+				/>
+			</TableCell>
+		)}
+	</TableRow>
+);
+
 /**
- * Lists an organization's installed plugin packs. It shows a loader while
- * `isLoading`, a retryable empty state when the first load fails, and a
- * retryable alert above the cached rows, even an empty list, when a later
- * refetch fails.
+ * A failed refetch keeps the cached rows, even an empty list, and shows the
+ * alert above them.
  */
 export const ForkPluginPacksTableView: React.FC<
 	ForkPluginPacksTableViewProps
@@ -89,20 +211,6 @@ export const ForkPluginPacksTableView: React.FC<
 	onUpdate,
 	onDelete,
 }) => {
-	const installAction = (ref?: React.Ref<HTMLButtonElement>) =>
-		access.create && (
-			<Button
-				ref={ref}
-				variant="outline"
-				onClick={(event) => {
-					focusReturn?.rememberTrigger(event);
-					onInstall();
-				}}
-			>
-				<PlusIcon aria-hidden="true" />
-				Install plugin pack
-			</Button>
-		);
 	const hasRowActions = access.update || access.delete;
 
 	let tableBody: React.ReactNode;
@@ -126,84 +234,28 @@ export const ForkPluginPacksTableView: React.FC<
 			<TableEmpty
 				message="No plugin packs installed"
 				description="Install a Claude Code or Cursor plugin from Git, then enable it on a project or chat to use its skills and agents."
-				cta={installAction()}
+				cta={
+					access.create && (
+						<InstallPluginPackButton
+							focusReturn={focusReturn}
+							onInstall={onInstall}
+						/>
+					)
+				}
 			/>
 		);
 	} else {
 		tableBody = packs.map((pack, index) => (
-			<TableRow key={pack.id}>
-				<TableCell className="max-w-48 truncate" title={pack.name}>
-					{pack.name}
-				</TableCell>
-				<TableCell
-					className="w-full max-w-0 truncate"
-					title={`${pack.source_url} ${pack.source_path}`.trim()}
-				>
-					{pack.source_url}
-					{pack.source_path && (
-						<span className="text-content-secondary">
-							{" "}
-							/ {pack.source_path}
-						</span>
-					)}
-				</TableCell>
-				<TableCell className="whitespace-nowrap">
-					{pack.ref}{" "}
-					<code className="text-content-secondary" title={pack.commit_sha}>
-						{pack.commit_sha.slice(0, 10)}
-					</code>
-				</TableCell>
-				<TableCell className="hidden whitespace-nowrap sm:table-cell">
-					{formatUpdatedAt(pack.updated_at)}
-				</TableCell>
-				{hasRowActions && (
-					<TableCell className="text-right">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									size="icon"
-									variant="subtle"
-									aria-label={`More actions for ${pack.name}`}
-									// A deleted row takes its menu button with it, so focus
-									// returns to the first remaining row's button.
-									ref={
-										index === 0 ? focusReturn?.setPrimaryFallback : undefined
-									}
-									onPointerDown={focusReturn?.rememberTrigger}
-									onKeyDown={focusReturn?.rememberTrigger}
-								>
-									<EllipsisVerticalIcon aria-hidden="true" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								{access.update && (
-									<DropdownMenuItem
-										disabled={updatingPackIds.has(pack.id)}
-										onClick={() => {
-											if (!updatingPackIds.has(pack.id)) {
-												onUpdate(pack);
-											}
-										}}
-									>
-										{updatingPackIds.has(pack.id)
-											? "Updating…"
-											: `Update to the latest commit of ${pack.ref}`}
-									</DropdownMenuItem>
-								)}
-								{access.delete && (
-									<DropdownMenuItem
-										className="text-content-destructive focus:text-content-destructive"
-										disabled={updatingPackIds.has(pack.id)}
-										onClick={() => onDelete(pack)}
-									>
-										Delete&hellip;
-									</DropdownMenuItem>
-								)}
-							</DropdownMenuContent>
-						</DropdownMenu>
-					</TableCell>
-				)}
-			</TableRow>
+			<ForkPluginPackRow
+				key={pack.id}
+				pack={pack}
+				access={access}
+				isUpdating={updatingPackIds.has(pack.id)}
+				isFirst={index === 0}
+				focusReturn={focusReturn}
+				onUpdate={onUpdate}
+				onDelete={onDelete}
+			/>
 		));
 	}
 
@@ -215,7 +267,13 @@ export const ForkPluginPacksTableView: React.FC<
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
-						{installAction(focusReturn?.setSecondaryFallback)}
+						{access.create && (
+							<InstallPluginPackButton
+								ref={focusReturn?.setSecondaryFallback}
+								focusReturn={focusReturn}
+								onInstall={onInstall}
+							/>
+						)}
 					</div>
 				}
 			/>

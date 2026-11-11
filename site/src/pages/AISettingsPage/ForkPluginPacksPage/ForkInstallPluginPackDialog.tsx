@@ -37,7 +37,6 @@ type InstallFormValues = {
 const validationSchema = Yup.object({
 	name: Yup.string().trim().required("Name is required."),
 	source_url: Yup.string().trim().required("Git repository URL is required."),
-	source_path: Yup.string(),
 	ref: Yup.string().trim().required("Ref is required."),
 });
 
