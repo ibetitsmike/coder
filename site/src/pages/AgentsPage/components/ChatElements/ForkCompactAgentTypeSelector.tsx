@@ -96,6 +96,13 @@ export const ForkCompactAgentTypeSelector: React.FC<
 			<PopoverContent
 				align="start"
 				className="mobile-full-width-dropdown mobile-full-width-dropdown-bottom w-80 overflow-hidden p-0"
+				onOpenAutoFocus={(event) => {
+					// Focusing the search input on touch devices opens the software
+					// keyboard, which hides the list.
+					if (matchMedia("(pointer: coarse)").matches) {
+						event.preventDefault();
+					}
+				}}
 			>
 				<Command loop label="Search agent types">
 					<CommandInput placeholder="Search…" className="text-xs" />

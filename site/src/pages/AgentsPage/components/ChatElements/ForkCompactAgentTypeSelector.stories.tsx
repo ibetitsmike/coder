@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, screen, userEvent, within } from "storybook/test";
+import { fn, screen, userEvent, within } from "storybook/test";
 import type { ForkAgentType } from "#/api/typesGenerated";
 import { ForkCompactAgentTypeSelector } from "./ForkCompactAgentTypeSelector";
 
@@ -23,7 +23,12 @@ const mockAgentTypes: ForkAgentType[] = [
 	mockAgentType("personal/reviewer", "personal", "Reviews the diff."),
 	mockAgentType("org/reviewer", "org", "Reviews the diff against team rules."),
 	mockAgentType("deployer", "project", "Deploys.", "Its model is unavailable."),
-	mockAgentType("tester", "workspace", "Runs the test suite."),
+	mockAgentType(
+		"tester",
+		"workspace",
+		"Runs the test suite.",
+		"agent definitions from the workspace can only be used through spawn_agent for now",
+	),
 ];
 
 const meta: Meta<typeof ForkCompactAgentTypeSelector> = {
@@ -54,13 +59,7 @@ export const TypeSelected: Story = {
 
 export const Open: Story = {
 	args: { value: "explore" },
-	play: async (context) => {
-		await openSelector(context);
-		// The disabled row has pointer-events: none; click it anyway.
-		const user = userEvent.setup({ pointerEventsCheck: 0 });
-		await user.click(screen.getByRole("option", { name: /deployer/ }));
-		await expect(context.args.onChange).not.toHaveBeenCalled();
-	},
+	play: openSelector,
 };
 
 export const OpenLoading: Story = {

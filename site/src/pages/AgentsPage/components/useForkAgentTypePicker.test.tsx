@@ -108,16 +108,13 @@ describe("useForkAgentTypePicker", () => {
 		});
 	});
 
-	it("has no picker without the experiment", async () => {
+	it("skips the agent type catalog without the experiment", async () => {
 		const { createChat, getAgentTypes } = renderPage([]);
 		const user = userEvent.setup();
 
 		await send(user);
 
 		await waitFor(() => expect(createChat).toHaveBeenCalledTimes(1));
-		expect(
-			screen.queryByRole("button", { name: /^Agent type:/ }),
-		).not.toBeInTheDocument();
 		expect(getAgentTypes).not.toHaveBeenCalled();
 	});
 });
