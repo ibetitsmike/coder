@@ -114,13 +114,13 @@ func (q *Queries) GetPluginPacksByProjectID(ctx context.Context, projectID uuid.
 }
 
 const insertChatPluginPack = `-- name: InsertChatPluginPack :one
-INSERT INTO chat_plugin_packs (chat_id, pack_id)
-SELECT chats.id, plugin_packs.id
+INSERT INTO chat_plugin_packs (organization_id, chat_id, pack_id)
+SELECT chats.organization_id, chats.id, plugin_packs.id
 FROM chats
 JOIN plugin_packs ON plugin_packs.organization_id = chats.organization_id
 WHERE chats.id = $1 AND plugin_packs.id = $2
 ON CONFLICT (chat_id, pack_id) DO UPDATE SET created_at = chat_plugin_packs.created_at
-RETURNING chat_id, pack_id, created_at
+RETURNING organization_id, chat_id, pack_id, created_at
 `
 
 type InsertChatPluginPackParams struct {
@@ -133,18 +133,23 @@ type InsertChatPluginPackParams struct {
 func (q *Queries) InsertChatPluginPack(ctx context.Context, arg InsertChatPluginPackParams) (ChatPluginPack, error) {
 	row := q.db.QueryRowContext(ctx, insertChatPluginPack, arg.ChatID, arg.PackID)
 	var i ChatPluginPack
-	err := row.Scan(&i.ChatID, &i.PackID, &i.CreatedAt)
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ChatID,
+		&i.PackID,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const insertPluginPackProject = `-- name: InsertPluginPackProject :one
-INSERT INTO plugin_pack_projects (project_id, pack_id)
-SELECT chat_projects.id, plugin_packs.id
+INSERT INTO plugin_pack_projects (organization_id, project_id, pack_id)
+SELECT chat_projects.organization_id, chat_projects.id, plugin_packs.id
 FROM chat_projects
 JOIN plugin_packs ON plugin_packs.organization_id = chat_projects.organization_id
 WHERE chat_projects.id = $1 AND plugin_packs.id = $2
 ON CONFLICT (project_id, pack_id) DO UPDATE SET created_at = plugin_pack_projects.created_at
-RETURNING project_id, pack_id, created_at
+RETURNING organization_id, project_id, pack_id, created_at
 `
 
 type InsertPluginPackProjectParams struct {
@@ -157,6 +162,11 @@ type InsertPluginPackProjectParams struct {
 func (q *Queries) InsertPluginPackProject(ctx context.Context, arg InsertPluginPackProjectParams) (PluginPackProject, error) {
 	row := q.db.QueryRowContext(ctx, insertPluginPackProject, arg.ProjectID, arg.PackID)
 	var i PluginPackProject
-	err := row.Scan(&i.ProjectID, &i.PackID, &i.CreatedAt)
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.PackID,
+		&i.CreatedAt,
+	)
 	return i, err
 }

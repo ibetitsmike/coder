@@ -70,6 +70,7 @@ func TestFilterPackResources(t *testing.T) {
 			"/home/u/.claude/plugins/cache/own/plugin.json"),
 		managed("project-pack"),
 		managed("chat-pack"),
+		managed("child-pack"),
 		managed("disabled-pack"),
 	}
 	sources := func(rows []database.ChatContextResource) []string {
@@ -107,7 +108,7 @@ func TestFilterPackResources(t *testing.T) {
 			require.NoError(t, err)
 			return pack.ID
 		}
-		projectPack, chatPack := packID("project-pack"), packID("chat-pack")
+		projectPack, chatPack, childPack := packID("project-pack"), packID("chat-pack"), packID("child-pack")
 		_ = packID("disabled-pack")
 
 		project := dbgen.ChatProject(t, db, database.ChatProject{OrganizationID: org.ID, OwnerID: user.ID})
@@ -124,6 +125,8 @@ func TestFilterPackResources(t *testing.T) {
 			ParentChatID: uuid.NullUUID{UUID: root.ID, Valid: true},
 			RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
 		})
+		_, err = fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: child.ID, PackID: childPack})
+		require.NoError(t, err)
 		plain := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
 
 		unmanaged := []string{"/home/u/.coder/skills/review-pr", "/home/u/.claude/plugins/cache/own/skills/review-pr"}
@@ -132,8 +135,9 @@ func TestFilterPackResources(t *testing.T) {
 			"/home/u/.coder/plugins/chat-pack/skills/review-pr")
 		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, slices.Clone(resources))),
 			"the root chat sees its project's packs and its own")
-		require.Equal(t, enabled, sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
-			"a subagent sees the packs of its root chat")
+		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
+			sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
+			"a subagent sees the packs of its root chat and its own")
 		require.Equal(t, unmanaged, sources(server.filterPackResources(ctx, plain, slices.Clone(resources))),
 			"a chat with no enabled packs drops every installed pack")
 		// The agent type catalog filters for a chat that does not exist yet.
