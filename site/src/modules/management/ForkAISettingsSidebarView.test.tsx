@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
+import type { Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import {
 	MockAppearanceConfig,
@@ -17,7 +18,7 @@ import AISettingsSidebarView from "./AISettingsSidebarView";
 
 const selectedOrganizationSearch = `?org=${MockDefaultOrganization.name}`;
 
-describe.each([
+describe.each<[Experiment, string, string]>([
 	[
 		"fork-agent-definitions",
 		"Agent definitions",
