@@ -107,8 +107,9 @@ export const updatePluginPackMutation = (
 			updatePluginPack(organizationId, pack.id, {}),
 		// An unloaded list stays unloaded, because one pack is not a list.
 		onSuccess: (updated) => {
-			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
-				packs && withPluginPack(packs, updated),
+			queryClient.setQueryData(
+				pluginPacks(organizationId).queryKey,
+				(packs) => packs && withPluginPack(packs, updated),
 			);
 		},
 		onSettled: (_data, error) =>
