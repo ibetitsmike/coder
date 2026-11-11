@@ -66,9 +66,9 @@ func managedPackName(sourcePath string) (string, bool) {
 // filterPackResources drops pack-contributed resources when fork-plugin-packs is
 // off. With it on, it drops the rows of installed packs that are not enabled
 // for the chat: every workspace receives the packs of all its chats, so each
-// chat filters to its own set. It also drops rows whose file is no longer
-// part of the enabled pack's current commit, since an update leaves removed
-// files on disk.
+// chat filters to its own set. It also drops rows whose defining file or
+// manifest is not part of the enabled pack's current commit, since an update
+// leaves removed files on disk.
 // Packs the user placed outside managedPackRoot are kept. The prompt builder,
 // the context resource listing, and the agent type catalog all call it, so
 // the gate covers every consumer of the pinned rows.
@@ -95,14 +95,25 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 				}
 			}
 		}
-		paths, ok := enabled[name]
-		return !ok || !paths[packRelativePath(r.Source, name)]
+		files, ok := enabled[name]
+		return !ok || !files.defines(r, name)
 	})
 }
 
-// packPathSet holds the paths of a pack's files and of the directories that
-// contain them, relative to the pack directory.
+// packPathSet holds the paths of a pack's files, relative to the pack
+// directory.
 type packPathSet map[string]bool
+
+// defines reports whether a row of the installed pack name is backed by the
+// pack's files: its manifest, and its source file or, for a skill directory,
+// the directory's SKILL.md.
+func (files packPathSet) defines(r database.ChatContextResource, name string) bool {
+	if !files[packRelativePath(r.SourcePath, name)] {
+		return false
+	}
+	source := packRelativePath(r.Source, name)
+	return source != "" && (files[source] || files[path.Join(source, "SKILL.md")])
+}
 
 // packCommitKey identifies the files of a pack at one commit.
 type packCommitKey struct {
@@ -127,9 +138,7 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	}
 	paths := packPathSet{}
 	for _, resource := range resources {
-		for rel := resource.Path; rel != "." && rel != "/" && rel != ""; rel = path.Dir(rel) {
-			paths[rel] = true
-		}
+		paths[resource.Path] = true
 	}
 	p.forkPacks.paths.Store(key, paths)
 	return paths

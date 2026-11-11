@@ -39,11 +39,10 @@ const (
 // forkPackState is the in-memory plugin pack state of a Server. It is lost on
 // restart, which only costs a marker read per pack.
 type forkPackState struct {
-	// written maps materializedPackKey to the marker written.
+	// written maps materializedPackKey to the marker the agent holds.
 	written sync.Map
-	// repin holds the IDs of chats whose workspace received pack files
-	// after the chat's context may have been pinned.
-	repin sync.Map
+	// repinned maps repinKey to the marker a chat was last re-pinned for.
+	repinned sync.Map
 	// paths maps packCommitKey to packPathSet.
 	paths sync.Map
 }
@@ -51,6 +50,13 @@ type forkPackState struct {
 // materializedPackKey identifies a pack written to a workspace agent. Agent
 // IDs change on every build, so a rebuilt workspace is written again.
 type materializedPackKey struct {
+	agentID uuid.UUID
+	packID  uuid.UUID
+}
+
+// repinKey identifies a chat re-pinned after a pack reached its agent.
+type repinKey struct {
+	chatID  uuid.UUID
 	agentID uuid.UUID
 	packID  uuid.UUID
 }
@@ -66,7 +72,8 @@ func packMarker(pack enabledPack) string {
 // workspace agent does not hold at the pack's current commit. It is best
 // effort: failures are logged and retried on the next turn. The agent reports
 // new files on its next context push, which only marks a pinned chat dirty,
-// so the chat is re-pinned on its first dirty turn after a write. Files of
+// so every chat with the pack enabled is re-pinned on its first dirty turn
+// after the pack reached the agent. Files of
 // disabled packs and files a pack update removed stay on disk, and
 // filterPackResources hides them.
 //
@@ -83,12 +90,16 @@ func (p *Server) materializePluginPacks(
 	if !p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
 		return
 	}
-	p.repinChatAfterPackWrite(ctx, logger, chat)
-	if agentID == uuid.Nil || dial == nil {
+	if agentID == uuid.Nil {
+		return
+	}
+	enabled := p.enabledPacks(ctx, chat)
+	p.repinChatAfterPackWrite(ctx, logger, chat, agentID, enabled)
+	if dial == nil {
 		return
 	}
 	var pending []enabledPack
-	for _, pack := range p.enabledPacks(ctx, chat) {
+	for _, pack := range enabled {
 		if marker, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); ok && marker == packMarker(pack) {
 			continue
 		}
@@ -117,24 +128,36 @@ func (p *Server) materializePluginPacks(
 		return
 	}
 	for _, pack := range pending {
-		wrote, err := p.materializePack(ctx, conn, home, pack)
-		if err != nil {
+		if err := p.materializePack(ctx, conn, home, pack); err != nil {
 			logger.Warn(ctx, "failed to write plugin pack to workspace",
 				slog.F("pack_id", pack.ID), slog.F("pack_name", pack.Name), slog.Error(err))
 			continue
 		}
 		p.forkPacks.written.Store(materializedPackKey{agentID, pack.ID}, packMarker(pack))
-		if wrote {
-			p.forkPacks.repin.Store(chat.ID, struct{}{})
-		}
 	}
 }
 
-// repinChatAfterPackWrite re-pins a chat whose workspace received pack files
-// once the agent's push of those files has marked it dirty. Re-pinning also
-// takes in any other drift, as the refresh endpoint would.
-func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger, chat database.Chat) {
-	if _, ok := p.forkPacks.repin.Load(chat.ID); !ok || !chat.ContextDirtySince.Valid {
+// repinChatAfterPackWrite re-pins a dirty chat once for each enabled pack the
+// agent holds that the chat has not been re-pinned for: the agent's push of
+// the pack's files only marked the chat dirty. Re-pinning also takes in any
+// other drift, as the refresh endpoint would.
+func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger, chat database.Chat, agentID uuid.UUID, enabled []enabledPack) {
+	if !chat.ContextDirtySince.Valid {
+		return
+	}
+	due := map[repinKey]string{}
+	for _, pack := range enabled {
+		marker := packMarker(pack)
+		if held, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); !ok || held != marker {
+			continue
+		}
+		key := repinKey{chat.ID, agentID, pack.ID}
+		if last, ok := p.forkPacks.repinned.Load(key); ok && last == marker {
+			continue
+		}
+		due[key] = marker
+	}
+	if len(due) == 0 {
 		return
 	}
 	updated, err := p.RefreshChatContext(ctx, chat)
@@ -142,41 +165,43 @@ func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger
 		logger.Warn(ctx, "failed to re-pin chat context after writing plugin packs", slog.Error(err))
 		return
 	}
-	p.forkPacks.repin.Delete(chat.ID)
+	for key, marker := range due {
+		p.forkPacks.repinned.Store(key, marker)
+	}
 	p.publishChatPubsubEvents([]database.Chat{updated}, codersdk.ChatWatchEventKindContextDirty)
 }
 
 // materializePack writes pack into <home>/.coder/plugins/<name>, unless its
-// marker already matches. It reports whether it wrote the pack.
-func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) (bool, error) {
+// marker already matches.
+func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) error {
 	// Install validates names; checking again keeps a bad row from
 	// writing outside managedPackRoot.
 	if err := codersdk.NameValid(pack.Name); err != nil {
-		return false, xerrors.Errorf("invalid pack name: %w", err)
+		return xerrors.Errorf("invalid pack name: %w", err)
 	}
 	dir := strings.TrimRight(home, `/\`) + managedPackRoot + pack.Name
 	marker := dir + "/" + packCommitMarker
 	if content, err := readPackMarker(ctx, conn, marker); err == nil && content == packMarker(pack) {
-		return false, nil
+		return nil
 	}
 
 	resources, err := p.packResources(ctx, pack.ID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	for _, resource := range resources {
 		rel, ok := packResourcePath(resource.Path)
 		if !ok {
-			return false, xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
+			return xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
 		}
 		if err := conn.WriteFile(ctx, dir+"/"+rel, bytes.NewReader(resource.Content)); err != nil {
-			return false, xerrors.Errorf("write %q: %w", rel, err)
+			return xerrors.Errorf("write %q: %w", rel, err)
 		}
 	}
 	if err := conn.WriteFile(ctx, marker, strings.NewReader(packMarker(pack))); err != nil {
-		return false, xerrors.Errorf("write commit marker: %w", err)
+		return xerrors.Errorf("write commit marker: %w", err)
 	}
-	return true, nil
+	return nil
 }
 
 // packResources returns the stored files of a pack.

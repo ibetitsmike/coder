@@ -108,9 +108,9 @@ func TestFilterPackResources(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
 				PackID:        pack.ID,
-				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md"},
-				Contents:      [][]byte{[]byte("{}"), []byte("skill")},
-				ContentHashes: []string{"hash", "hash"},
+				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md", "skills/assets-only/run.sh"},
+				Contents:      [][]byte{[]byte("{}"), []byte("skill"), []byte("script")},
+				ContentHashes: []string{"hash", "hash", "hash"},
 			}))
 			return pack.ID
 		}
@@ -147,10 +147,16 @@ func TestFilterPackResources(t *testing.T) {
 		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, slices.Clone(resources))),
 			"the root chat sees its project's packs and its own")
 		// An update leaves files the new commit removed on disk.
-		removed := packRow("/home/u/.coder/plugins/chat-pack/skills/removed",
-			"/home/u/.coder/plugins/chat-pack/.claude-plugin/plugin.json")
-		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), removed))),
-			"a file that is not in the pack's current commit is dropped")
+		stale := []database.ChatContextResource{
+			packRow("/home/u/.coder/plugins/chat-pack/skills/removed",
+				"/home/u/.coder/plugins/chat-pack/.claude-plugin/plugin.json"),
+			packRow("/home/u/.coder/plugins/chat-pack/skills/assets-only",
+				"/home/u/.coder/plugins/chat-pack/.claude-plugin/plugin.json"),
+			packRow("/home/u/.coder/plugins/chat-pack/skills/review-pr",
+				"/home/u/.coder/plugins/chat-pack/plugin.json"),
+		}
+		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), stale...))),
+			"a row whose SKILL.md or manifest is not in the pack's current commit is dropped")
 		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
 			sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
 			"a subagent sees the packs of its root chat and its own")
