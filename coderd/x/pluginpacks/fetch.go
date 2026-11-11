@@ -2,6 +2,7 @@
 package pluginpacks
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -31,6 +32,9 @@ const (
 	maxFiles         = 2000
 	maxFileBytes     = 1 << 20
 	maxTotalBytes    = 16 << 20
+	// maxUnpackedBytes caps the inflated size of all fetched objects, so
+	// a small pack of highly compressible objects cannot exhaust memory.
+	maxUnpackedBytes = 256 << 20
 )
 
 var errTransferTooLarge = xerrors.Errorf("repository transfer exceeds %d bytes", maxTransferBytes)
@@ -116,8 +120,15 @@ func (f Fetcher) Fetch(ctx context.Context, src Source) (Snapshot, error) {
 	}
 	defer resp.Close()
 
+	pack, err := io.ReadAll(demux(req.Capabilities, resp))
+	if err != nil {
+		return Snapshot{}, xerrors.Errorf("read packfile: %w", err)
+	}
+	if err := checkUnpackedSize(pack, maxUnpackedBytes); err != nil {
+		return Snapshot{}, err
+	}
 	st := memory.NewStorage()
-	if err := packfile.UpdateObjectStorage(st, demux(req.Capabilities, resp)); err != nil {
+	if err := packfile.UpdateObjectStorage(st, bytes.NewReader(pack)); err != nil {
 		return Snapshot{}, xerrors.Errorf("read packfile: %w", err)
 	}
 	commit, err := object.GetCommit(st, want)
@@ -182,6 +193,81 @@ func demux(caps *capability.List, r io.Reader) io.Reader {
 	default:
 		return r
 	}
+}
+
+// checkUnpackedSize fails when the objects of pack would inflate to more
+// than limit bytes. It reads the size from each object header, and for a
+// delta also the size of the object the delta builds, before go-git inflates
+// anything into memory.
+func checkUnpackedSize(pack []byte, limit int64) error {
+	s := packfile.NewScanner(bytes.NewReader(pack))
+	_, count, err := s.Header()
+	if err != nil {
+		return xerrors.Errorf("read packfile header: %w", err)
+	}
+	errTooLarge := xerrors.Errorf("repository objects exceed %d bytes when unpacked", limit)
+	var total int64
+	for range count {
+		oh, err := s.NextObjectHeader()
+		if err != nil {
+			return xerrors.Errorf("read packfile object header: %w", err)
+		}
+		total += oh.Length
+		if oh.Length > limit || total > limit {
+			return errTooLarge
+		}
+		if oh.Type != plumbing.OFSDeltaObject && oh.Type != plumbing.REFDeltaObject {
+			if _, _, err := s.NextObject(io.Discard); err != nil {
+				return xerrors.Errorf("read packfile object: %w", err)
+			}
+			continue
+		}
+		var head deltaHead
+		if _, _, err := s.NextObject(&head); err != nil {
+			return xerrors.Errorf("read packfile delta: %w", err)
+		}
+		size, ok := head.targetSize()
+		if !ok {
+			return xerrors.New("read packfile delta: malformed header")
+		}
+		total += size
+		if size > limit || total > limit {
+			return errTooLarge
+		}
+	}
+	return nil
+}
+
+// deltaHead keeps the start of a delta, which holds the source and target
+// sizes as two little-endian base-128 varints, and discards the rest.
+type deltaHead struct {
+	buf []byte
+}
+
+func (d *deltaHead) Write(p []byte) (int, error) {
+	if n := min(len(p), 20-len(d.buf)); n > 0 {
+		d.buf = append(d.buf, p[:n]...)
+	}
+	return len(p), nil
+}
+
+func (d *deltaHead) targetSize() (int64, bool) {
+	b := d.buf
+	var size int64
+	for range 2 {
+		size = 0
+		for i := 0; ; i++ {
+			if i == len(b) || i == 9 {
+				return 0, false
+			}
+			size |= int64(b[i]&0x7f) << (7 * i)
+			if b[i]&0x80 == 0 {
+				b = b[i+1:]
+				break
+			}
+		}
+	}
+	return size, true
 }
 
 func readFiles(tree *object.Tree) ([]File, error) {
