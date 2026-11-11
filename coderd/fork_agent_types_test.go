@@ -94,11 +94,13 @@ func TestForkAgentTypes(t *testing.T) {
 	}
 
 	got := byName(client, codersdk.ForkAgentTypesRequest{WorkspaceID: workspace.Workspace.ID})
-	for _, name := range []string{"general", "explore"} {
+	// The test model supports computer use, so spawn_agent offers it.
+	require.Equal(t, `type "computer_use" cannot start a chat`, got["computer_use"].RootUnavailableReason)
+	for _, name := range []string{"general", "explore", "computer_use"} {
 		require.Equal(t, codersdk.ForkAgentTypeSourceBuiltin, got[name].Source, name)
 		require.Equal(t, name, got[name].BaseType, name)
 		require.NotEmpty(t, got[name].Description, name)
-		require.True(t, got[name].RootAvailable, name)
+		require.Equal(t, name != "computer_use", got[name].RootAvailable, name)
 		delete(got, name)
 	}
 	lost := got["lost"]
@@ -135,7 +137,7 @@ func TestForkAgentTypes(t *testing.T) {
 	// The member sees the shared organization definition under its bare
 	// name, and neither the owner's personal nor the unshared ones.
 	got = byName(memberClient, codersdk.ForkAgentTypesRequest{})
-	require.ElementsMatch(t, []string{"general", "explore", "reviewer"}, slices.Collect(maps.Keys(got)))
+	require.ElementsMatch(t, []string{"general", "explore", "computer_use", "reviewer"}, slices.Collect(maps.Keys(got)))
 	require.Equal(t, "org", got["reviewer"].Source)
 
 	memberProject, err := memberClient.CreateChatProject(ctx, user.OrganizationID, codersdk.CreateChatProjectRequest{Name: "member"})
