@@ -5,6 +5,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"os"
 	"strings"
@@ -128,30 +129,67 @@ func TestMaterializePluginPacks(t *testing.T) {
 		chat := newChat(pack)
 		files := &fakeWorkspaceFiles{files: map[string]string{}}
 		dials := 0
-		getConn := func(context.Context) (workspacesdk.AgentConn, error) {
+		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
 			dials++
-			return files.conn(t), nil
+			return files.conn(t), func() {}, nil
 		}
 
 		agentID := uuid.New()
-		server.materializePluginPacks(ctx, server.logger, chat, agentID, getConn)
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
 		require.Equal(t, []string{
 			"/home/coder/.coder/plugins/demo/.claude-plugin/plugin.json",
 			"/home/coder/.coder/plugins/demo/skills/review/SKILL.md",
 			"/home/coder/.coder/plugins/demo/" + packCommitMarker,
 		}, files.writes, "the commit marker is written after every pack file")
 		require.Equal(t, "content of skills/review/SKILL.md", files.files["/home/coder/.coder/plugins/demo/skills/review/SKILL.md"])
-		require.Equal(t, pack.CommitSha, files.files["/home/coder/.coder/plugins/demo/"+packCommitMarker])
+		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files["/home/coder/.coder/plugins/demo/"+packCommitMarker],
+			"the marker names the pack, so a pack reinstalled under the same name is written again")
 
-		server.materializePluginPacks(ctx, server.logger, chat, agentID, getConn)
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
 		require.Equal(t, 1, dials, "a pack written to this agent at this commit needs no connection")
 
 		// A new agent, as after a coderd restart, reads the marker and
 		// skips the write.
 		files.writes = nil
-		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), getConn)
+		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 		require.Equal(t, 2, dials)
 		require.Empty(t, files.writes, "a matching marker skips the write")
+	})
+
+	t.Run("RepinsOnFirstDirtyTurnAfterWrite", func(t *testing.T) {
+		t.Parallel()
+		pack := insertPack("repin", "plugin.json")
+		chat := newChat(pack)
+		require.NoError(t, db.SetChatContextSnapshot(ctx, database.SetChatContextSnapshotParams{
+			ID: chat.ID, AggregateHash: []byte("pre-pack snapshot"),
+		}))
+		pinnedHash := func() []byte {
+			got, err := db.GetChatByID(ctx, chat.ID)
+			require.NoError(t, err)
+			return got.ContextAggregateHash
+		}
+		files := &fakeWorkspaceFiles{files: map[string]string{}}
+		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+			return files.conn(t), func() {}, nil
+		}
+
+		agentID := uuid.New()
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, []byte("pre-pack snapshot"), pinnedHash(), "a chat the agent has not marked dirty keeps its pin")
+
+		// The agent's push of the written files marks the chat dirty, and
+		// the next turn re-pins it. The chat has no agent, so the re-pin
+		// clears the pinned hash.
+		chat.ContextDirtySince = sql.NullTime{Time: dbtime.Now(), Valid: true}
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Nil(t, pinnedHash(), "the first dirty turn after a write re-pins the chat")
+
+		require.NoError(t, db.SetChatContextSnapshot(ctx, database.SetChatContextSnapshotParams{
+			ID: chat.ID, AggregateHash: []byte("later snapshot"),
+		}))
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, []byte("later snapshot"), pinnedHash(), "the chat is re-pinned once per write")
 	})
 
 	t.Run("UnsafePathWritesNoMarker", func(t *testing.T) {
@@ -159,9 +197,11 @@ func TestMaterializePluginPacks(t *testing.T) {
 		pack := insertPack("unsafe", "plugin.json", "skills/../../escape")
 		chat := newChat(pack)
 		files := &fakeWorkspaceFiles{files: map[string]string{}}
-		getConn := func(context.Context) (workspacesdk.AgentConn, error) { return files.conn(t), nil }
+		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+			return files.conn(t), func() {}, nil
+		}
 
-		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), getConn)
+		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 		require.Equal(t, []string{"/home/coder/.coder/plugins/unsafe/plugin.json"}, files.writes,
 			"the unsafe path and the marker are not written")
 	})
@@ -169,10 +209,10 @@ func TestMaterializePluginPacks(t *testing.T) {
 	t.Run("NothingEnabled", func(t *testing.T) {
 		t.Parallel()
 		chat := newChat()
-		getConn := func(context.Context) (workspacesdk.AgentConn, error) {
+		dial := func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
 			t.Fatal("a chat with no enabled packs must not connect")
-			return nil, nil
+			return nil, nil, nil
 		}
-		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), getConn)
+		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 	})
 }

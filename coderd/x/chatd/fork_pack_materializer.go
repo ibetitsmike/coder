@@ -11,6 +11,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,14 +27,26 @@ import (
 )
 
 const (
-	// packCommitMarker holds the commit a pack directory was written at. It
-	// is written after every pack file, so a matching marker means the
-	// directory is complete.
+	// packCommitMarker records the pack and commit a pack directory was
+	// written at. It is written after every pack file, so a matching marker
+	// means the directory is complete.
 	packCommitMarker = ".coder-pack-commit"
 	// packMaterializeTimeout bounds the work a turn waits for, so an
 	// unreachable workspace delays the turn by at most this much.
 	packMaterializeTimeout = 10 * time.Second
 )
+
+// forkPackState is the in-memory plugin pack state of a Server. It is lost on
+// restart, which only costs a marker read per pack.
+type forkPackState struct {
+	// written maps materializedPackKey to the marker written.
+	written sync.Map
+	// repin holds the IDs of chats whose workspace received pack files
+	// after the chat's context may have been pinned.
+	repin sync.Map
+	// paths maps packCommitKey to packPathSet.
+	paths sync.Map
+}
 
 // materializedPackKey identifies a pack written to a workspace agent. Agent
 // IDs change on every build, so a rebuilt workspace is written again.
@@ -42,25 +55,41 @@ type materializedPackKey struct {
 	packID  uuid.UUID
 }
 
+// packMarker is the content of a pack directory's commit marker. It names
+// the pack, so a pack reinstalled under the same name at the same commit is
+// written again.
+func packMarker(pack enabledPack) string {
+	return pack.ID.String() + " " + pack.CommitSHA
+}
+
 // materializePluginPacks writes each pack enabled for the chat that the
 // workspace agent does not hold at the pack's current commit. It is best
 // effort: failures are logged and retried on the next turn. The agent reports
-// new files on its next context push, so a pack written during a turn reaches
-// the model from a later turn. Files of disabled packs and files a pack
-// update removed stay on disk, and filterPackResources hides them.
+// new files on its next context push, which only marks a pinned chat dirty,
+// so the chat is re-pinned on its first dirty turn after a write. Files of
+// disabled packs and files a pack update removed stay on disk, and
+// filterPackResources hides them.
+//
+// It dials its own connection without the chat headers: the agent records
+// paths written by a chat for the chat's git changes, and these writes are
+// not the chat's.
 func (p *Server) materializePluginPacks(
 	ctx context.Context,
 	logger slog.Logger,
 	chat database.Chat,
 	agentID uuid.UUID,
-	getConn func(context.Context) (workspacesdk.AgentConn, error),
+	dial AgentConnFunc,
 ) {
-	if !p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) || agentID == uuid.Nil {
+	if !p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
+		return
+	}
+	p.repinChatAfterPackWrite(ctx, logger, chat)
+	if agentID == uuid.Nil || dial == nil {
 		return
 	}
 	var pending []enabledPack
 	for _, pack := range p.enabledPacks(ctx, chat) {
-		if commit, ok := p.materializedPacks.Load(materializedPackKey{agentID, pack.ID}); ok && commit == pack.CommitSHA {
+		if marker, ok := p.forkPacks.written.Load(materializedPackKey{agentID, pack.ID}); ok && marker == packMarker(pack) {
 			continue
 		}
 		if slices.ContainsFunc(pending, func(other enabledPack) bool { return other.ID == pack.ID }) {
@@ -74,10 +103,13 @@ func (p *Server) materializePluginPacks(
 
 	ctx, cancel := context.WithTimeout(ctx, packMaterializeTimeout)
 	defer cancel()
-	conn, err := getConn(ctx)
+	conn, release, err := dial(ctx, agentID)
 	if err != nil {
 		logger.Warn(ctx, "failed to connect to workspace to write plugin packs", slog.Error(err))
 		return
+	}
+	if release != nil {
+		defer release()
 	}
 	home, err := chattool.ResolveWorkspaceHome(ctx, conn)
 	if err != nil {
@@ -85,53 +117,82 @@ func (p *Server) materializePluginPacks(
 		return
 	}
 	for _, pack := range pending {
-		if err := p.materializePack(ctx, conn, home, pack); err != nil {
+		wrote, err := p.materializePack(ctx, conn, home, pack)
+		if err != nil {
 			logger.Warn(ctx, "failed to write plugin pack to workspace",
 				slog.F("pack_id", pack.ID), slog.F("pack_name", pack.Name), slog.Error(err))
 			continue
 		}
-		p.materializedPacks.Store(materializedPackKey{agentID, pack.ID}, pack.CommitSHA)
+		p.forkPacks.written.Store(materializedPackKey{agentID, pack.ID}, packMarker(pack))
+		if wrote {
+			p.forkPacks.repin.Store(chat.ID, struct{}{})
+		}
 	}
 }
 
+// repinChatAfterPackWrite re-pins a chat whose workspace received pack files
+// once the agent's push of those files has marked it dirty. Re-pinning also
+// takes in any other drift, as the refresh endpoint would.
+func (p *Server) repinChatAfterPackWrite(ctx context.Context, logger slog.Logger, chat database.Chat) {
+	if _, ok := p.forkPacks.repin.Load(chat.ID); !ok || !chat.ContextDirtySince.Valid {
+		return
+	}
+	updated, err := p.RefreshChatContext(ctx, chat)
+	if err != nil {
+		logger.Warn(ctx, "failed to re-pin chat context after writing plugin packs", slog.Error(err))
+		return
+	}
+	p.forkPacks.repin.Delete(chat.ID)
+	p.publishChatPubsubEvents([]database.Chat{updated}, codersdk.ChatWatchEventKindContextDirty)
+}
+
 // materializePack writes pack into <home>/.coder/plugins/<name>, unless its
-// marker already names the pack's commit.
-func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) error {
+// marker already matches. It reports whether it wrote the pack.
+func (p *Server) materializePack(ctx context.Context, conn workspacesdk.AgentConn, home string, pack enabledPack) (bool, error) {
 	// Install validates names; checking again keeps a bad row from
 	// writing outside managedPackRoot.
 	if err := codersdk.NameValid(pack.Name); err != nil {
-		return xerrors.Errorf("invalid pack name: %w", err)
+		return false, xerrors.Errorf("invalid pack name: %w", err)
 	}
 	dir := strings.TrimRight(home, `/\`) + managedPackRoot + pack.Name
 	marker := dir + "/" + packCommitMarker
-	if commit, err := readPackMarker(ctx, conn, marker); err == nil && commit == pack.CommitSHA {
-		return nil
+	if content, err := readPackMarker(ctx, conn, marker); err == nil && content == packMarker(pack) {
+		return false, nil
 	}
 
-	fdb, err := forkdb.From(p.db)
+	resources, err := p.packResources(ctx, pack.ID)
 	if err != nil {
-		return xerrors.Errorf("fork queries unavailable: %w", err)
-	}
-	// Org members cannot read packs, and enabling one for a project or
-	// chat is what delivers its files to the chat's workspace.
-	//nolint:gocritic // chatd reads the content of a pack enabled for this chat.
-	resources, err := fdb.GetPluginPackResources(dbauthz.AsSystemRestricted(ctx), pack.ID)
-	if err != nil {
-		return xerrors.Errorf("get pack resources: %w", err)
+		return false, err
 	}
 	for _, resource := range resources {
 		rel, ok := packResourcePath(resource.Path)
 		if !ok {
-			return xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
+			return false, xerrors.Errorf("pack resource has unsafe path %q", resource.Path)
 		}
 		if err := conn.WriteFile(ctx, dir+"/"+rel, bytes.NewReader(resource.Content)); err != nil {
-			return xerrors.Errorf("write %q: %w", rel, err)
+			return false, xerrors.Errorf("write %q: %w", rel, err)
 		}
 	}
-	if err := conn.WriteFile(ctx, marker, strings.NewReader(pack.CommitSHA)); err != nil {
-		return xerrors.Errorf("write commit marker: %w", err)
+	if err := conn.WriteFile(ctx, marker, strings.NewReader(packMarker(pack))); err != nil {
+		return false, xerrors.Errorf("write commit marker: %w", err)
 	}
-	return nil
+	return true, nil
+}
+
+// packResources returns the stored files of a pack.
+func (p *Server) packResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return nil, xerrors.Errorf("fork queries unavailable: %w", err)
+	}
+	// Org members cannot read packs, and enabling one for a project or
+	// chat is what delivers its files to the chat's workspace.
+	//nolint:gocritic // chatd reads the content of a pack enabled for this chat.
+	resources, err := fdb.GetPluginPackResources(dbauthz.AsSystemRestricted(ctx), packID)
+	if err != nil {
+		return nil, xerrors.Errorf("get pack resources: %w", err)
+	}
+	return resources, nil
 }
 
 // readPackMarker returns the commit recorded in a pack directory's marker.

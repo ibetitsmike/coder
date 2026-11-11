@@ -106,6 +106,12 @@ func TestFilterPackResources(t *testing.T) {
 				CreatedAt: now, UpdatedAt: now,
 			})
 			require.NoError(t, err)
+			require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
+				PackID:        pack.ID,
+				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md"},
+				Contents:      [][]byte{[]byte("{}"), []byte("skill")},
+				ContentHashes: []string{"hash", "hash"},
+			}))
 			return pack.ID
 		}
 		projectPack, chatPack, childPack := packID("project-pack"), packID("chat-pack"), packID("child-pack")
@@ -140,6 +146,11 @@ func TestFilterPackResources(t *testing.T) {
 			"/home/u/.coder/plugins/chat-pack/skills/review-pr")
 		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, slices.Clone(resources))),
 			"the root chat sees its project's packs and its own")
+		// An update leaves files the new commit removed on disk.
+		removed := packRow("/home/u/.coder/plugins/chat-pack/skills/removed",
+			"/home/u/.coder/plugins/chat-pack/.claude-plugin/plugin.json")
+		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), removed))),
+			"a file that is not in the pack's current commit is dropped")
 		require.Equal(t, append(slices.Clone(enabled), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
 			sources(server.filterPackResources(ctx, child, slices.Clone(resources))),
 			"a subagent sees the packs of its root chat and its own")

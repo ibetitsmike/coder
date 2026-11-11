@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path"
 	"slices"
 	"strings"
 
@@ -65,7 +66,9 @@ func managedPackName(sourcePath string) (string, bool) {
 // filterPackResources drops pack-contributed resources when fork-plugin-packs is
 // off. With it on, it drops the rows of installed packs that are not enabled
 // for the chat: every workspace receives the packs of all its chats, so each
-// chat filters to its own set.
+// chat filters to its own set. It also drops rows whose file is no longer
+// part of the enabled pack's current commit, since an update leaves removed
+// files on disk.
 // Packs the user placed outside managedPackRoot are kept. The prompt builder,
 // the context resource listing, and the agent type catalog all call it, so
 // the gate covers every consumer of the pinned rows.
@@ -75,7 +78,7 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 			return isPackContribution(r.SourcePath)
 		})
 	}
-	var enabled map[string]bool
+	var enabled map[string]packPathSet
 	return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
 		if !isPackContribution(r.SourcePath) {
 			return false
@@ -85,13 +88,61 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 			return false
 		}
 		if enabled == nil {
-			enabled = map[string]bool{}
+			enabled = map[string]packPathSet{}
 			for _, pack := range p.enabledPacks(ctx, chat) {
-				enabled[pack.Name] = true
+				if _, ok := enabled[pack.Name]; !ok {
+					enabled[pack.Name] = p.packPaths(ctx, pack)
+				}
 			}
 		}
-		return !enabled[name]
+		paths, ok := enabled[name]
+		return !ok || !paths[packRelativePath(r.Source, name)]
 	})
+}
+
+// packPathSet holds the paths of a pack's files and of the directories that
+// contain them, relative to the pack directory.
+type packPathSet map[string]bool
+
+// packCommitKey identifies the files of a pack at one commit.
+type packCommitKey struct {
+	packID uuid.UUID
+	commit string
+}
+
+// packPaths returns the paths of the pack's files at its current commit. A
+// commit's files never change, so they are read once per commit. A failed
+// read is logged and returns no paths, so the gate fails closed.
+func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
+	key := packCommitKey{pack.ID, pack.CommitSHA}
+	if paths, ok := p.forkPacks.paths.Load(key); ok {
+		return paths.(packPathSet)
+	}
+	resources, err := p.packResources(ctx, pack.ID)
+	if err != nil {
+		p.logger.Warn(ctx, "failed to read plugin pack files", slog.F("pack_id", pack.ID), slog.Error(err))
+		return packPathSet{}
+	}
+	paths := packPathSet{}
+	for _, resource := range resources {
+		for rel := resource.Path; rel != "." && rel != "/" && rel != ""; rel = path.Dir(rel) {
+			paths[rel] = true
+		}
+	}
+	p.forkPacks.paths.Store(key, paths)
+	return paths
+}
+
+// packRelativePath returns source relative to the directory of the installed
+// pack name, or "" when source is outside it.
+func packRelativePath(source, name string) string {
+	normalized := strings.ReplaceAll(source, `\`, "/")
+	dir := managedPackRoot + name + "/"
+	i := strings.LastIndex(normalized, dir)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSuffix(normalized[i+len(dir):], "/")
 }
 
 // enabledPack is a plugin pack enabled for a chat.

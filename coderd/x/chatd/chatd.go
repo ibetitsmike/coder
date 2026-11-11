@@ -213,8 +213,7 @@ type Server struct {
 	chatLimits             Limits
 
 	forkPullRequestActivity ForkPullRequestActivityFunc
-	// materializedPacks maps materializedPackKey to the commit written.
-	materializedPacks sync.Map
+	forkPacks               forkPackState
 }
 
 // stripAdvisorGuidanceBlock removes any system message whose text content
