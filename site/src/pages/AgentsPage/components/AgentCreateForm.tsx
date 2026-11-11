@@ -58,6 +58,7 @@ import {
 import { getErrorTitle } from "./ChatConversation/chatStatusHelpers";
 import { CompactOrgSelector } from "./ChatElements/CompactOrgSelector";
 import { CompactProjectSelector } from "./ChatElements/CompactProjectSelector";
+import { ForkCompactAgentTypeSelector } from "./ChatElements/ForkCompactAgentTypeSelector";
 import { ChatProjectDialog } from "./ChatsSidebar/dialogs/ChatProjectDialog";
 import { getModelSelectorHelp } from "./ModelSelectorHelp";
 import { useForkAgentTypePicker } from "./useForkAgentTypePicker";
@@ -1001,7 +1002,7 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 				)}
 				{(showOrgSelector ||
 					showProjectSelector ||
-					forkAgentType.renderPicker) && (
+					forkAgentType.isEnabled) && (
 					<div className="flex min-w-0 items-center gap-1">
 						{showOrgSelector && (
 							<CompactOrgSelector
@@ -1047,7 +1048,12 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 								disabled={isSubmitPending}
 							/>
 						)}
-						{forkAgentType.renderPicker?.(isSubmitPending || isForbidden)}
+						{forkAgentType.isEnabled && (
+							<ForkCompactAgentTypeSelector
+								{...forkAgentType.selectorProps}
+								disabled={isSubmitPending || isForbidden}
+							/>
+						)}
 					</div>
 				)}
 				<AgentChatInput
