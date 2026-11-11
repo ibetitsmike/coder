@@ -38,6 +38,7 @@ export const WithOrganizationPicker: Story = {
 				className="w-full sm:w-60"
 				organizations={[MockOrganization, MockOrganization2]}
 				organization={MockOrganization}
+				onChange={fn()}
 				showLabel={false}
 			/>
 		),
