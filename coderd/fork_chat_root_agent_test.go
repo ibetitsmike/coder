@@ -147,7 +147,7 @@ func TestForkCreateChatAgentType(t *testing.T) {
 	}
 
 	// Without a default model, the definition's model still starts a chat.
-	_, err = client.UpdateChatModel(ctx, user.OrganizationID, defaultModel.ID, codersdk.UpdateChatModelRequest{IsDefault: ptr.Ref(false)})
+	_, err = client.UpdateAIProvider(ctx, defaultModel.AIProviderID.String(), codersdk.UpdateAIProviderRequest{Enabled: ptr.Ref(false)})
 	require.NoError(t, err)
 	noDefault, err := create(client, codersdk.CreateChatRequest{AgentType: "reviewer"})
 	require.NoError(t, err)
