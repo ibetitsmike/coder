@@ -14,7 +14,8 @@ import type {
 } from "#/api/typesGenerated";
 import { isResponseLost } from "./forkAgentDefinitions";
 
-const pluginPacksKey = (organizationId: string) =>
+/** The query key of the plugin packs installed in an organization. */
+export const pluginPacksKey = (organizationId: string) =>
 	["chats", "fork-plugin-packs", organizationId] as const;
 
 /** Query options for the plugin packs installed in an organization. */

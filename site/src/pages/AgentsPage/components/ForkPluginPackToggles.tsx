@@ -129,8 +129,9 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	const toggleMutation = useMutation(
 		setPluginPackEnabledMutation(queryClient, target),
 	);
+	// Cached packs stay usable when a background refetch fails.
 	const installedError =
-		getErrorStatus(installedQuery.error) === 403
+		installedQuery.data || getErrorStatus(installedQuery.error) === 403
 			? undefined
 			: installedQuery.error;
 	return (

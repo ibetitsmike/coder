@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { enabledPluginPacks } from "#/api/queries/forkPluginPackEnablement";
-import { pluginPacks } from "#/api/queries/forkPluginPacks";
+import { enabledPluginPacksKey } from "#/api/queries/forkPluginPackEnablement";
+import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
 import { MockChatProject } from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
@@ -9,12 +9,12 @@ import {
 } from "#/testHelpers/forkPluginPacks";
 import { ForkProjectPluginPacksDialog } from "./ForkProjectPluginPacksDialog";
 
-const enabledKey = enabledPluginPacks({
+const enabledKey = enabledPluginPacksKey({
 	kind: "project",
 	organizationId: MockChatProject.organization_id,
 	projectId: MockChatProject.id,
-}).queryKey;
-const installedKey = pluginPacks(MockChatProject.organization_id).queryKey;
+});
+const installedKey = pluginPacksKey(MockChatProject.organization_id);
 
 const meta: Meta<typeof ForkProjectPluginPacksDialog> = {
 	title: "pages/AgentsPage/ProjectPage/ForkProjectPluginPacksDialog",
