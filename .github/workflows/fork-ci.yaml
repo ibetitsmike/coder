@@ -76,8 +76,13 @@ jobs:
         run: ./.github/fork/start-postgres.sh
       - name: Chat and database packages
         run: go test -count=1 ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
+      # The fork's own tests in ./coderd run whatever they are named.
       - name: Chat API tests
-        run: go test -count=1 -run '(?i)chat|skill|mcp|plugin' ./coderd ./enterprise/coderd
+        run: |
+          fork_tests=$(./.github/fork/fork-go-tests.sh pattern coderd)
+          go test -count=1 -run "(?i)chat|skill|mcp|plugin|${fork_tests}" ./coderd ./enterprise/coderd
+      - name: Fork tests in other packages
+        run: ./.github/fork/fork-go-tests.sh run
       - name: Plugin CLI tests
         run: go test -count=1 -run TestExpPlugins ./cli
       - name: Swagger annotation tests
@@ -98,7 +103,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Agent context, agent git and SDK packages
-        run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./codersdk/
+        run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./codersdk/ ./codersdk/x/...
+      # The fork adds a Plugin case to this upstream test.
+      - name: RBAC role permissions
+        run: go test -count=1 -run '^TestRolePermissions$' ./coderd/rbac
 
   site:
     runs-on: ubuntu-latest
@@ -118,8 +126,11 @@ jobs:
       - name: Type check
         run: pnpm run lint:types
         working-directory: site
-      - name: Agents page unit tests
-        run: pnpm test:ci src/pages/AgentsPage
+      # The fork's test files outside AgentsPage are named Fork* or fork*.
+      - name: Agents page and fork unit tests
+        run: |
+          mapfile -t fork_tests < <(git ls-files -- 'src/*.test.ts' 'src/*.test.tsx' | grep -E '/[Ff]ork[^/]*\.test\.tsx?$')
+          pnpm test:ci src/pages/AgentsPage "${fork_tests[@]}"
         working-directory: site
 
   build:
