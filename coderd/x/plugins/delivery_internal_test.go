@@ -55,11 +55,14 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 		logLimiter: rate.NewLimiter(20, 100),
 	}
 	require.NoError(t, r.decode())
+	// Build before the deadline starts: a cold wasm build can exceed
+	// WaitSuperLong and does not observe the context.
+	wasm := plugintest.BuildWasm(t, bridgePluginPackage)
 	ctx := testutil.Context(t, testutil.WaitSuperLong)
 	client, err := pluginhost.StartInProcess(ctx, testutil.Logger(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
-	_, err = client.Load(ctx, plugintest.BuildWasm(t, bridgePluginPackage), sandbox.Limits{CallTimeout: testutil.WaitShort})
+	_, err = client.Load(ctx, wasm, sandbox.Limits{CallTimeout: testutil.WaitShort})
 	require.NoError(t, err)
 	r.client = client
 	r.ready = make(chan struct{})
