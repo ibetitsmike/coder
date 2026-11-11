@@ -4,6 +4,7 @@ package coderd
 // fork-agent-definitions experiment.
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ import (
 // @Param organization path string true "Organization ID or name"
 // @Param project query string false "Project ID" format(uuid)
 // @Param workspace query string false "Workspace ID" format(uuid)
+// @Param model_config_id query string false "Model config ID of the new root chat" format(uuid)
 // @Success 200 {array} codersdk.ForkAgentType
 // @Router /api/v2/chats/fork/organizations/{organization}/agent-types [get]
 // @x-apidocgen {"skip": true}
@@ -35,6 +37,7 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 	parser := httpapi.NewQueryParamParser()
 	projectID := parser.UUID(r.URL.Query(), uuid.Nil, "project")
 	workspaceID := parser.UUID(r.URL.Query(), uuid.Nil, "workspace")
+	modelConfigID := parser.UUID(r.URL.Query(), uuid.Nil, "model_config_id")
 	if len(parser.Errors) > 0 {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message:     "Query parameters have invalid values.",
@@ -47,17 +50,25 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 		OrganizationID: organization.ID,
 	}
 	if projectID != uuid.Nil {
-		project, err := api.Database.GetChatProjectByID(ctx, projectID)
-		if httpapi.Is404Error(err) || (err == nil && project.OrganizationID != organization.ID) {
-			httpapi.ResourceNotFound(rw)
+		project, status, resp := api.validateChatProjectSelection(ctx, projectID, opts.OwnerID, organization.ID)
+		if resp != nil {
+			httpapi.Write(ctx, rw, status, *resp)
 			return
 		}
-		if err != nil {
-			httpapi.InternalServerError(rw, err)
-			return
-		}
-		opts.ProjectID = uuid.NullUUID{UUID: projectID, Valid: true}
+		opts.ProjectID = project
 	}
+	// The root model decides whether a definition's model resolves, so pick
+	// it as chat creation does.
+	createReq := codersdk.CreateChatRequest{OrganizationID: organization.ID}
+	if modelConfigID != uuid.Nil {
+		createReq.ModelConfigID = &modelConfigID
+	}
+	rootModelID, _, status, resp := api.resolveCreateChatModelConfigID(ctx, opts.OwnerID, createReq)
+	if resp != nil {
+		httpapi.Write(ctx, rw, status, *resp)
+		return
+	}
+	opts.ModelConfigID, opts.ExplicitModel = rootModelID, createReq.ModelConfigID != nil
 	if workspaceID != uuid.Nil {
 		workspace, err := api.Database.GetWorkspaceByID(ctx, workspaceID)
 		if httpapi.Is404Error(err) || (err == nil && workspace.OrganizationID != organization.ID) {
@@ -74,8 +85,16 @@ func (api *API) forkAgentTypes(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// A workspace without a chat agent reports no agent definitions.
-		if agent, err := agentselect.FindChatAgent(agents); err == nil {
+		agent, err := agentselect.FindChatAgent(agents)
+		switch {
+		case err == nil:
 			opts.WorkspaceAgentID = uuid.NullUUID{UUID: agent.ID, Valid: true}
+		case !errors.Is(err, agentselect.ErrNoEligibleAgents):
+			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+				Message: chatWorkspaceUploadNoChatAgentMessage,
+				Detail:  err.Error(),
+			})
+			return
 		}
 	}
 	types, err := api.chatDaemon.AgentTypeCatalog(ctx, opts)

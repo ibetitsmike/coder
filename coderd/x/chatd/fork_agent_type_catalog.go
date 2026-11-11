@@ -24,18 +24,35 @@ type AgentTypeCatalogOptions struct {
 	// WorkspaceAgentID adds the agent definitions that this workspace agent
 	// reports. The caller in ctx must be able to read its workspace.
 	WorkspaceAgentID uuid.NullUUID
+	// ModelConfigID is the model of the new root chat. ExplicitModel
+	// reports that the request chose it, as RootAgentOptions does.
+	ModelConfigID uuid.UUID
+	ExplicitModel bool
 }
 
 // AgentTypeCatalog lists the agent types that spawn_agent offers a chat of
 // opts.OwnerID in opts, named as spawn_agent and ResolveRootAgent accept
 // them, and reports whether a new root chat can start as each.
 func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOptions) ([]codersdk.ForkAgentType, error) {
+	chat := database.Chat{
+		ID: uuid.New(), OwnerID: opts.OwnerID, OrganizationID: opts.OrganizationID, ProjectID: opts.ProjectID,
+		LastModelConfigID: opts.ModelConfigID,
+	}
 	var out []codersdk.ForkAgentType
-	for _, id := range []string{subagentTypeGeneral, subagentTypeExplore} {
-		def, _ := lookupSubagentDefinition(id)
-		out = append(out, codersdk.ForkAgentType{
-			Name: id, Source: codersdk.ForkAgentTypeSourceBuiltin, Description: def.description, BaseType: id, RootAvailable: true,
-		})
+	for _, def := range allSubagentDefinitions() {
+		// List a built-in type only when spawn_agent offers it.
+		reason, err := def.unavailableReasonText(ctx, p, chat)
+		if err != nil {
+			return nil, xerrors.Errorf("check agent type %q: %w", def.id, err)
+		}
+		if reason == "" {
+			entry := codersdk.ForkAgentType{Name: def.id, Source: codersdk.ForkAgentTypeSourceBuiltin, Description: def.description, BaseType: def.id}
+			if _, err := p.ResolveRootAgent(ctx, RootAgentOptions{AgentType: def.id}); err != nil {
+				entry.RootUnavailableReason = err.Error()
+			}
+			entry.RootAvailable = entry.RootUnavailableReason == ""
+			out = append(out, entry)
+		}
 	}
 	if !p.agentDefinitionsEnabled() {
 		return out, nil
@@ -54,7 +71,6 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 		}
 		workspace = parseAgentDefinitionResources(chatResources)
 	}
-	chat := database.Chat{ID: uuid.New(), OwnerID: opts.OwnerID, OrganizationID: opts.OrganizationID, ProjectID: opts.ProjectID}
 	for _, agentType := range mergeCustomAgentTypes(workspace, p.storedAgentTypes(ctx, chat)) {
 		entry := codersdk.ForkAgentType{
 			Name:        agentType.Alias,
@@ -69,7 +85,7 @@ func (p *Server) AgentTypeCatalog(ctx context.Context, opts AgentTypeCatalogOpti
 		case agentType.Source == skillspkg.SourceWorkspace:
 			entry.RootUnavailableReason = rootAgentWorkspaceReason
 		default:
-			if _, err := p.rootAgentFromDefinition(ctx, chat, def, false); err != nil {
+			if _, err := p.rootAgentFromDefinition(ctx, chat, def, opts.ExplicitModel); err != nil {
 				entry.RootUnavailableReason = err.Error()
 			}
 		}

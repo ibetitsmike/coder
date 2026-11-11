@@ -5028,6 +5028,13 @@ const docTemplate = `{
                         "description": "Workspace ID",
                         "name": "workspace",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Model config ID of the new root chat",
+                        "name": "model_config_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -29023,7 +29030,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "base_type": {
-                    "description": "BaseType is general or explore.",
+                    "description": "BaseType is general, explore or computer_use.",
                     "type": "string"
                 },
                 "description": {

@@ -6473,7 +6473,7 @@ export interface ForkAgentType {
 	 */
 	readonly model?: string;
 	/**
-	 * BaseType is general or explore.
+	 * BaseType is general, explore or computer_use.
 	 */
 	readonly base_type: string;
 	/**
@@ -6502,6 +6502,11 @@ export const ForkAgentTypeSourceBuiltin = "builtin";
 export interface ForkAgentTypesRequest {
 	readonly ProjectID: string;
 	readonly WorkspaceID: string;
+	/**
+	 * ModelConfigID is the new root chat's CreateChatRequest.ModelConfigID.
+	 * A zero ID means the model that chat creation picks by default.
+	 */
+	readonly ModelConfigID: string;
 }
 
 // From codersdk/fork_chat_config.go
