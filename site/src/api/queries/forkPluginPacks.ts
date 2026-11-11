@@ -60,19 +60,15 @@ export const isPluginPackGone = (
 	return packs !== undefined && !packs.some((pack) => pack.id === packId);
 };
 
-/** Puts a created or updated pack into the cached list, kept in name order. */
-const storePluginPack = (
-	queryClient: QueryClient,
-	organizationId: string,
+/** The list with the pack replacing any copy of it, in name order. */
+const withPluginPack = (
+	packs: readonly ForkPluginPack[],
 	pack: ForkPluginPack,
-) => {
-	queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
-		packs
-			?.filter((cached) => cached.id !== pack.id)
-			.concat(pack)
-			.sort((a, b) => a.name.localeCompare(b.name)),
-	);
-};
+) =>
+	packs
+		.filter((cached) => cached.id !== pack.id)
+		.concat(pack)
+		.sort((a, b) => a.name.localeCompare(b.name));
 
 /**
  * Installs a pack. On success the returned pack goes into the cached list,
@@ -86,7 +82,13 @@ export const createPluginPackMutation = (
 	mutationOptions({
 		mutationFn: (req: CreateForkPluginPackRequest) =>
 			createPluginPack(organizationId, req),
-		onSuccess: (pack) => storePluginPack(queryClient, organizationId, pack),
+		// An unloaded list still gets the pack, so a failed first load cannot
+		// hide it. A refetch replaces the one-pack list with the full list.
+		onSuccess: (pack) => {
+			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
+				withPluginPack(packs ?? [], pack),
+			);
+		},
 		onSettled: (_data, error) =>
 			settlePluginPackChange(queryClient, organizationId, error),
 	});
@@ -102,8 +104,12 @@ export const updatePluginPackMutation = (
 	mutationOptions({
 		mutationFn: (pack: ForkPluginPack) =>
 			updatePluginPack(organizationId, pack.id, {}),
-		onSuccess: (updated) =>
-			storePluginPack(queryClient, organizationId, updated),
+		// An unloaded list stays unloaded, because one pack is not a list.
+		onSuccess: (updated) => {
+			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
+				packs && withPluginPack(packs, updated),
+			);
+		},
 		onSettled: (_data, error) =>
 			settlePluginPackChange(queryClient, organizationId, error),
 	});

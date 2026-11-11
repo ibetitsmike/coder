@@ -58,6 +58,18 @@ export const Updating: Story = {
 	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
 };
 
+export const UpdatingMenuOpen: Story = {
+	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: "Updating…" });
+	},
+};
+
 export const WithOrganizationPicker: Story = {
 	args: {
 		action: (

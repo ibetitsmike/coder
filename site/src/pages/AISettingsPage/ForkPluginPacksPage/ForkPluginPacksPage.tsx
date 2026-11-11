@@ -1,7 +1,7 @@
 // This file is fork code: the fork-plugin-packs experiment's organization
 // plugin packs page in AI settings.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Navigate } from "react-router";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
@@ -50,7 +50,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const installMutation = useMutation(
 		createPluginPackMutation(queryClient, organization.id),
 	);
-	// Every in-flight update keeps its row disabled. TanStack Query tracks
+	// Every in-flight update keeps its row's actions disabled. TanStack Query tracks
 	// only the latest call's variables, and per-call callbacks run only for
 	// the latest call, so the mutation-level callbacks track each pack.
 	const [updatingPackIds, setUpdatingPackIds] = useState<ReadonlySet<string>>(
@@ -95,6 +95,16 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const [isInstallOpen, setIsInstallOpen] = useState(false);
 	const [deleting, setDeleting] = useState<ForkPluginPack>();
 	const focusReturn = useDialogFocusReturn();
+	const tableRef = useRef<HTMLTableElement>(null);
+	// Without a create permission, deleting the last pack leaves neither a row
+	// button nor an install button, so focus falls back to the table.
+	const restoreFocus = (event: Event) => {
+		focusReturn.restoreFocus(event);
+		if (!event.defaultPrevented && tableRef.current) {
+			event.preventDefault();
+			tableRef.current.focus();
+		}
+	};
 
 	return (
 		<>
@@ -109,6 +119,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				onRetry={() => void packsQuery.refetch()}
 				updatingPackIds={updatingPackIds}
 				focusReturn={focusReturn}
+				tableRef={tableRef}
 				onInstall={() => {
 					installMutation.reset();
 					setIsInstallOpen(true);
@@ -124,25 +135,24 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					error={installMutation.error}
 					isInstalling={installMutation.isPending}
 					onClose={() => setIsInstallOpen(false)}
-					onCloseAutoFocus={focusReturn.restoreFocus}
+					onCloseAutoFocus={restoreFocus}
 					onInstall={(req) => {
-						const knownPackIds = new Set(
-							cachedPluginPacks(queryClient, organization.id)?.map(
-								(pack) => pack.id,
-							),
-						);
+						const listed = cachedPluginPacks(queryClient, organization.id);
+						const knownPackIds = listed?.map((pack) => pack.id);
 						installMutation.mutate(req, {
 							// A lost response can still have installed the pack, so a
 							// pack with the submitted name that was not listed before
-							// the request shows that the install went through.
+							// the request shows that the install went through. Without a
+							// list from before the request, a pack with that name may
+							// predate it, so nothing is reconciled.
 							onSettled: (data, error) => {
 								const pack =
 									data ??
-									(isResponseLost(error)
+									(knownPackIds && isResponseLost(error)
 										? cachedPluginPacks(queryClient, organization.id)?.find(
 												(candidate) =>
 													candidate.name === req.name &&
-													!knownPackIds.has(candidate.id),
+													!knownPackIds.includes(candidate.id),
 											)
 										: undefined);
 								if (pack) {
@@ -160,7 +170,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					error={deleteMutation.error}
 					isDeleting={deleteMutation.isPending}
 					onClose={() => setDeleting(undefined)}
-					onCloseAutoFocus={focusReturn.restoreFocus}
+					onCloseAutoFocus={restoreFocus}
 					onConfirm={() =>
 						deleteMutation.mutate(deleting.id, {
 							// A lost response can still have deleted the pack, so the

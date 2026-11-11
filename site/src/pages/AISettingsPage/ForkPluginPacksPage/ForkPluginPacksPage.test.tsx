@@ -5,6 +5,7 @@ import { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import type { ForkPluginPack } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import {
 	MockNoPermissions,
@@ -257,4 +258,122 @@ it("does not report an install when a lost response leaves only an older same-na
 	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
 	expect(create).toHaveBeenCalledTimes(1);
 	expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+it("does not report an install when a lost response follows a failed first load", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	const create = vi
+		.spyOn(forkPluginPacksApi, "createPluginPack")
+		.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
+	vi.mocked(forkPluginPacksApi.getPluginPacks).mockRejectedValueOnce(
+		mockApiError({ message: "Failed to list plugin packs." }),
+	);
+	renderPage();
+	await screen.findByRole("button", { name: "Retry" });
+
+	await user.click(
+		await screen.findByRole("button", { name: "Install plugin pack" }),
+	);
+	const dialog = await screen.findByRole("dialog");
+	await user.type(
+		within(dialog).getByLabelText(/^Name/),
+		MockForkPluginPack.name,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Git repository URL/),
+		MockForkPluginPack.source_url,
+	);
+	await user.type(
+		within(dialog).getByLabelText(/^Ref/),
+		MockForkPluginPack.ref,
+	);
+	await user.click(within(dialog).getByRole("button", { name: "Install" }));
+
+	// The refetch lists a pack with the submitted name, but no list from before
+	// the request shows that it is new.
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+	);
+	await waitFor(() =>
+		expect(
+			within(dialog).getByRole("button", { name: "Install" }),
+		).toBeEnabled(),
+	);
+	expect(create).toHaveBeenCalledTimes(1);
+	expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+it("moves focus to the table when the last pack is deleted without permission to install", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
+		Object.fromEntries(
+			Object.keys(checks).map((key) => [
+				key,
+				!key.endsWith(".createOrganizationSkill"),
+			]),
+		),
+	);
+	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockResolvedValue();
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPack])
+		.mockResolvedValue([]);
+	renderPage();
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+	await user.click(
+		within(await screen.findByRole("dialog")).getByRole("button", {
+			name: "Delete",
+		}),
+	);
+
+	await waitFor(() =>
+		expect(document.activeElement).toBe(
+			screen.getByRole("table", { name: "Plugin packs" }),
+		),
+	);
+});
+
+it("keeps the row menu reachable and starts no second update while one is pending", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	let finishUpdate: (pack: ForkPluginPack) => void = () => {};
+	const update = vi
+		.spyOn(forkPluginPacksApi, "updatePluginPack")
+		.mockReturnValue(
+			new Promise((resolve) => {
+				finishUpdate = resolve;
+			}),
+		);
+	renderPage();
+	const menu = await screen.findByRole("button", {
+		name: `More actions for ${MockForkPluginPack.name}`,
+	});
+
+	await user.click(menu);
+	await user.click(
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		}),
+	);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	expect(menu).toBeEnabled();
+
+	await user.click(menu);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Updating…" }),
+	);
+	expect(update).toHaveBeenCalledTimes(1);
+
+	finishUpdate(MockForkPluginPack);
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} is at 0123456789.`,
+		),
+	);
 });
