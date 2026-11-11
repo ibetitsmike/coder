@@ -5028,6 +5028,13 @@ const docTemplate = `{
                         "description": "Workspace ID",
                         "name": "workspace",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Model config ID of the new root chat",
+                        "name": "model_config_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {

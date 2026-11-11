@@ -28,7 +28,7 @@ type ForkAgentType struct {
 	// Model is the definition's model, or empty when the type runs on the
 	// chat's model.
 	Model string `json:"model,omitempty"`
-	// BaseType is general or explore.
+	// BaseType is general, explore or computer_use.
 	BaseType string `json:"base_type"`
 	// RootAvailable reports whether a new root chat can start as the type.
 	RootAvailable bool `json:"root_available"`
@@ -42,6 +42,9 @@ type ForkAgentType struct {
 type ForkAgentTypesRequest struct {
 	ProjectID   uuid.UUID
 	WorkspaceID uuid.UUID
+	// ModelConfigID is the new root chat's CreateChatRequest.ModelConfigID.
+	// A zero ID means the model that chat creation picks by default.
+	ModelConfigID uuid.UUID
 }
 
 // ForkAgentTypes lists the agent types that spawn_agent offers the caller's
@@ -53,6 +56,9 @@ func (c *Client) ForkAgentTypes(ctx context.Context, organizationID uuid.UUID, r
 	}
 	if req.WorkspaceID != uuid.Nil {
 		query.Set("workspace", req.WorkspaceID.String())
+	}
+	if req.ModelConfigID != uuid.Nil {
+		query.Set("model_config_id", req.ModelConfigID.String())
 	}
 	path := fmt.Sprintf("/api/v2/chats/fork/organizations/%s/agent-types", organizationID)
 	if len(query) > 0 {

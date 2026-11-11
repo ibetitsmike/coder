@@ -340,7 +340,7 @@ A root chat ignores the definition's `isolation`.
 A workspace definition can't start a chat, because Coder reads a chat's workspace definitions only after its workspace agent connects.
 Such a name, an unknown name, and a definition that you can't read fail with status 400, and so does `agent_type` without the `fork-agent-definitions` experiment.
 To list the types before a chat exists, call `GET /api/v2/chats/fork/organizations/{organization}/agent-types` with the experiment on.
-Add `project=<id>` for the project's definitions, and `workspace=<id>` for the definitions that the workspace's agent reports.
+Add `project=<id>` for the project's definitions, `workspace=<id>` for the definitions that the workspace's agent reports, and `model_config_id=<id>` for the model that the chat would set, which wins over a definition's model as it does at creation.
 Each row gives the `name` to pass, with the same prefixes as `spawn_agent`, and its `source`, `description`, `model`, and `base_type`.
 `root_available` reports whether `agent_type` can start a chat as the type, and when it can't, `root_unavailable_reason` says why, as for every workspace definition.
 When you create an organization definition, Coder shares it with the whole organization, and a member who can share it can narrow who reads it with `PATCH /api/v2/chats/fork/organizations/{organization}/agent-definitions/{agentDefinition}/acl`.

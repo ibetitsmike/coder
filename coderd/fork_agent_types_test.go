@@ -16,7 +16,9 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/x/chatd/agentselect"
 	"github.com/coder/coder/v2/codersdk"
+	sdkproto "github.com/coder/coder/v2/provisionersdk/proto"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -28,7 +30,7 @@ func TestForkAgentTypes(t *testing.T) {
 		o.DeploymentValues.Experiments = append(o.DeploymentValues.Experiments, string(codersdk.ExperimentForkAgentDefinitions))
 	})
 	user := coderdtest.CreateFirstUser(t, client.Client)
-	_ = createChatModel(t, client)
+	defaultModel := createChatModel(t, client)
 	_ = createAdditionalChatModel(t, client, "openai", "gpt-4.1")
 	memberRaw, _ := coderdtest.CreateAnotherUser(t, client.Client, user.OrganizationID)
 	memberClient := codersdk.NewExperimentalClient(memberRaw)
@@ -115,12 +117,38 @@ func TestForkAgentTypes(t *testing.T) {
 		"helper":            {Name: "helper", Source: "workspace", Description: "Workspace helper.", BaseType: "general"},
 	}, got)
 
+	// An alias of two providers resolves on the default model's provider,
+	// and a chosen model wins over the definition's, as in chat creation.
+	aliases := &codersdk.ChatModelCallConfig{Aliases: []string{"shared"}}
+	_, err = client.UpdateChatModel(ctx, defaultModel.OrganizationID, defaultModel.ID, codersdk.UpdateChatModelRequest{ModelConfig: aliases})
+	require.NoError(t, err)
+	anthropicModel := createAdditionalChatModelWithCallConfig(t, client, "anthropic", "claude-shared", aliases)
+	_, err = client.CreateForkUserAgentDefinition(ctx, user.OrganizationID, codersdk.Me, codersdk.CreateForkAgentDefinitionRequest{
+		Content: "---\nname: aliased\nmodel: shared\n---\nAliased.\n",
+	})
+	require.NoError(t, err)
+	for _, modelConfigID := range []uuid.UUID{uuid.Nil, anthropicModel.ID} {
+		aliased := byName(client, codersdk.ForkAgentTypesRequest{ModelConfigID: modelConfigID})["aliased"]
+		require.True(t, aliased.RootAvailable, aliased.RootUnavailableReason)
+	}
+
 	// The member sees the shared organization definition under its bare
 	// name, and neither the owner's personal nor the unshared ones.
 	got = byName(memberClient, codersdk.ForkAgentTypesRequest{})
 	require.ElementsMatch(t, []string{"general", "explore", "reviewer"}, slices.Collect(maps.Keys(got)))
 	require.Equal(t, "org", got["reviewer"].Source)
 
+	memberProject, err := memberClient.CreateChatProject(ctx, user.OrganizationID, codersdk.CreateChatProjectRequest{Name: "member"})
+	require.NoError(t, err)
+	twoChatAgents := dbfake.WorkspaceBuild(t, db, database.WorkspaceTable{
+		OrganizationID: user.OrganizationID,
+		OwnerID:        user.UserID,
+	}).WithAgent(func(agents []*sdkproto.Agent) []*sdkproto.Agent {
+		agents[0].Name = "a" + agentselect.Suffix
+		return append(agents, &sdkproto.Agent{
+			Id: uuid.NewString(), Name: "b" + agentselect.Suffix, Auth: &sdkproto.Agent_Token{Token: uuid.NewString()},
+		})
+	}).Do()
 	for _, tc := range []struct {
 		name   string
 		client *codersdk.ExperimentalClient
@@ -129,6 +157,8 @@ func TestForkAgentTypes(t *testing.T) {
 	}{
 		{name: "WorkspaceNotReadable", client: memberClient, req: codersdk.ForkAgentTypesRequest{WorkspaceID: workspace.Workspace.ID}, status: http.StatusNotFound},
 		{name: "ProjectNotFound", client: client, req: codersdk.ForkAgentTypesRequest{ProjectID: uuid.New()}, status: http.StatusNotFound},
+		{name: "ProjectNotUsable", client: client, req: codersdk.ForkAgentTypesRequest{ProjectID: memberProject.ID}, status: http.StatusNotFound},
+		{name: "MultipleChatAgents", client: client, req: codersdk.ForkAgentTypesRequest{WorkspaceID: twoChatAgents.Workspace.ID}, status: http.StatusConflict},
 	} {
 		_, err := tc.client.ForkAgentTypes(ctx, user.OrganizationID, tc.req)
 		var sdkErr *codersdk.Error
