@@ -27,15 +27,13 @@ from `public` to `chatd`:
 `SET SCHEMA` changes the catalog only. No row is copied, so the move takes
 seconds on a large database.
 
-Fork nodes add these objects:
-
-- [`nodes/01a1bc7b-…_plugins.up.sql`](nodes/), for chat plugins
-  (`coderd/x/plugins`): the tables `plugins`, `plugin_user_links`,
-  `plugin_link_codes` and `plugin_chat_bindings` in chatd, and the values
-  `plugin:*`, `plugin:{create,read,update,delete}` and `coder:chats.converse`
-  of the core enum `public.api_key_scope`.
-- [`nodes/01a1bd31-…_chat_subagents.up.sql`](nodes/), the table
-  `chat_subagents` (one row per subagent chat the fork tracks).
+Fork nodes in [`nodes/`](nodes/) add the fork's own chatd tables, such as
+`chat_subagents`, `chat_wakeups`, `agent_definitions` and `plugin_packs`.
+`coderd/database/forkdb/sqlc.yaml` lists every fork node in graph order, and
+`chatdmig check` validates the graph. The chat plugins node,
+[`nodes/01a1bc7b-…_plugins.up.sql`](nodes/), also adds the values `plugin:*`,
+`plugin:{create,read,update,delete}` and `coder:chats.converse` to the core
+enum `public.api_key_scope`.
 
 A fork node may create objects in chatd and add values to an enum, and
 nothing else, so upstream's `dump.sql` still describes every core object. The
@@ -312,15 +310,15 @@ The `chat_subagents` node and its queries are a complete example.
 
 ## Upstream sync
 
-`.github/workflows/fork-sync.yaml` runs at 05:00 UTC and on demand:
+`coder-local-sync` on Mike's Mac syncs upstream daily at 06:00 local time and
+on demand. It runs the "Merge upstream" step of
+`.github/workflows/fork-sync.yaml` as Mike:
 
-1. It runs `fork-quiet` when fork-sync runs on GitHub. See
-   [Upstream workflows](#upstream-workflows).
-2. It stops if a sync PR is open. It labels a red one `needs-mike`.
-3. It merges the newest upstream `main` commit that is at least 24 hours old.
+1. It stops if a sync PR is open. It labels a red one `needs-mike`.
+2. It merges the newest upstream `main` commit that is at least 24 hours old.
    Upstream fixes a duplicate migration number within hours.
-4. It runs `chatdmig route` and commits `routes.txt`.
-5. It opens a PR labeled `sync` from `sync/<date>-<sha>`. A clean PR merges
+3. It runs `chatdmig route` and commits `routes.txt`.
+4. It opens a PR labeled `sync` from `sync/<date>-<sha>`. A clean PR merges
    itself with a merge commit when fork-ci passes.
 
 A person takes over in four cases:
@@ -341,10 +339,13 @@ A person takes over in four cases:
   move the migration on a branch, update `early.txt`, and open a PR (see
   [Migrations taken early](#migrations-taken-early)).
 
-The job pushes with the `FORK_SYNC_TOKEN` secret, a fine-grained token for
-this repository with Contents, Pull requests, Issues and Workflows write
-access. `GITHUB_TOKEN` cannot push upstream's workflow changes, and a PR that
-it opens starts no workflows.
+The `fork-sync` workflow stays disabled on GitHub. `GITHUB_TOKEN` cannot push
+upstream's workflow changes, and a PR that it opens or merges starts no
+workflows, so fork-ci would not run and nothing would deploy. The sync
+therefore runs locally with Mike's credentials. Change the sync by editing the
+"Merge upstream" step in a fork PR. Keep the step `run:`-only, with no
+`${{ }}` expressions, because the local runner reads the script from the
+YAML and refuses them.
 
 ## Upstream workflows
 

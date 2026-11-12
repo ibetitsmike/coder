@@ -29,8 +29,12 @@ func TestWakeupCaps(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		seed func(t *testing.T, f *workerTestFixture, chat database.Chat, wakeup forkdb.ChatWakeup)
+		// caps, when set, are the caps that the organization stores.
+		caps *forkdb.UpsertChatOrganizationWakeupCapsParams
 		// wantReason is the pause reason, or "" when the wake-up delivers.
 		wantReason string
+		// wantText is the pause text, when it differs from the default.
+		wantText string
 	}{
 		{
 			name: "ChatRunsAtCap",
@@ -83,12 +87,64 @@ func TestWakeupCaps(t *testing.T) {
 				f.insertCostMessage(t, f.createWakeupChat(t), cost(maxOrganizationWakeupSpendMicrosPerDay), recent)
 			},
 		},
+		{
+			name: "OrganizationLowersChatRuns",
+			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxChatRunsPerDay: sql.NullInt32{Int32: 2, Valid: true}},
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, wakeup forkdb.ChatWakeup) {
+				f.seedDeliveredRuns(t, wakeup, 2, recent)
+			},
+			wantReason: wakeupReasonDailyRunCap,
+			wantText:   "it reached the daily limit of 2 runs",
+		},
+		{
+			name: "OrganizationRaisesChatRuns",
+			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxChatRunsPerDay: sql.NullInt32{Int32: maxChatWakeupRunsPerDay + 1, Valid: true}},
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, wakeup forkdb.ChatWakeup) {
+				f.seedDeliveredRuns(t, wakeup, maxChatWakeupRunsPerDay, recent)
+			},
+		},
+		{
+			name: "OrganizationLowersOrganizationRuns",
+			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxOrganizationRunsPerDay: sql.NullInt32{Int32: 3, Valid: true}},
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, f.createWakeupChat(t)), 3, recent)
+			},
+			wantReason: wakeupReasonOrgDailyRunCap,
+			wantText:   "the organization reached its daily limit of 3 wake-up runs",
+		},
+		{
+			name: "OrganizationLowersChatSpend",
+			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxChatSpendMicrosPerDay: cost(1_500_000)},
+			seed: func(t *testing.T, f *workerTestFixture, chat database.Chat, _ forkdb.ChatWakeup) {
+				f.insertCostMessage(t, chat, cost(1_500_000), recent)
+			},
+			wantReason: wakeupReasonDailySpendCap,
+			wantText:   "the chat reached its daily spend limit of $1.50",
+		},
+		{
+			name: "OrganizationLowersOrganizationSpend",
+			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxOrganizationSpendMicrosPerDay: cost(5_000_000)},
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
+				other := f.createWakeupChat(t)
+				f.insertDoneWakeup(t, other)
+				f.insertCostMessage(t, other, cost(5_000_000), recent)
+			},
+			wantReason: wakeupReasonOrgDailySpendCap,
+			wantText:   "the organization reached its daily wake-up spend limit of $5",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newWorkerTestFixture(t)
 			ctx := testutil.Context(t, testutil.WaitLong)
 			chat := f.createWakeupChat(t)
+			if tc.caps != nil {
+				fdb, err := forkdb.From(f.db)
+				require.NoError(t, err)
+				tc.caps.OrganizationID = f.org.ID
+				_, err = fdb.UpsertChatOrganizationWakeupCaps(ctx, *tc.caps)
+				require.NoError(t, err)
+			}
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:            forkdb.ChatWakeupKindInterval,
 				IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
@@ -114,7 +170,12 @@ func TestWakeupCaps(t *testing.T) {
 			require.False(t, got.NextRunAt.Valid)
 			require.False(t, got.LeaseExpiresAt.Valid)
 			require.Zero(t, got.RunCount)
-			requireWakeupPausedNotification(t, sent, chat, tc.wantReason)
+			if tc.wantText == "" {
+				requireWakeupPausedNotification(t, sent, chat, tc.wantReason)
+				return
+			}
+			require.Len(t, sent, 1)
+			require.Equal(t, `A wake-up of chat "`+chat.Title+`" is paused: `+tc.wantText+".", sent[0].Labels["custom_message"])
 		})
 	}
 
@@ -191,7 +252,7 @@ func requireWakeupPausedNotification(t *testing.T, sent []*notificationstest.Fak
 	require.Equal(t, chat.OwnerID, sent[0].UserID)
 	require.Equal(t, map[string]string{
 		"custom_title":   wakeupPausedNotificationTitle,
-		"custom_message": `A wake-up of chat "` + chat.Title + `" is paused: ` + wakeupPauseReasonText[reason] + ".",
+		"custom_message": `A wake-up of chat "` + chat.Title + `" is paused: ` + defaultWakeupCaps.pauseText(reason) + ".",
 	}, sent[0].Labels)
 	require.Equal(t, map[string]any{"chat_id": chat.ID, "reason": reason}, sent[0].Data)
 }

@@ -57,24 +57,32 @@ const matchAgentMention: TriggerFn = (text) => {
 	};
 };
 
+type ResolvedAgentMention = AgentMention & { qualifiedName: string };
+
 /**
  * Lists the built-in types, then each source's agents. Like chatd, custom
  * agents skip reserved names and keep the first of a name in a source, and a
  * name that more than one source defines is offered only by its
- * tier-qualified name, as is every name while a list is unknown.
+ * tier-qualified name, as is every name while a list is unknown. chatd
+ * accepts the qualified name of a custom agent either way.
  */
 const resolveAgentMentions = (
 	lists: readonly {
 		source: ChatSkillSource;
 		agents: readonly { name: string; description: string }[] | undefined;
 	}[],
-): AgentMention[] => {
+): ResolvedAgentMention[] => {
 	const hasUnknownList = lists.some((list) => !list.agents);
 	const custom = lists.flatMap(({ source, agents = [] }) => {
-		const byName = new Map<string, AgentMention>();
+		const byName = new Map<string, ResolvedAgentMention>();
 		for (const { name, description } of agents) {
 			if (!reservedAgentTypeNames.has(name) && !byName.has(name)) {
-				byName.set(name, { name, source, description });
+				byName.set(name, {
+					name,
+					source,
+					description,
+					qualifiedName: `${source}/${name}`,
+				});
 			}
 		}
 		return [...byName.values()];
@@ -85,10 +93,11 @@ const resolveAgentMentions = (
 		...builtinAgentTypes.map((type) => ({
 			...type,
 			source: "built-in" as const,
+			qualifiedName: type.name,
 		})),
 		...custom.map((agent) =>
 			hasUnknownList || isShared(agent.name)
-				? { ...agent, name: `${agent.source}/${agent.name}` }
+				? { ...agent, name: agent.qualifiedName }
 				: agent,
 		),
 	];
@@ -147,8 +156,8 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const isNestingEnabled = useForkExperiment("fork-nested-subagents");
 	const [editor] = useLexicalComposerContext();
 	const [query, setQuery] = useState<string | null>(null);
-	const isMenuOpen = query !== null;
-	// Escape closes the menu but leaves the query, so Enter checks this.
+	// Escape closes the menu but leaves the query, so Enter and the agent
+	// queries check this, and reopening the menu retries a failed load.
 	const [isMenuShown, setIsMenuShown] = useState(false);
 	// The chat page loads the chat; the menu only reads its cached copy.
 	const { agentId } = useParams();
@@ -164,7 +173,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const rootChatId = isChildChat ? currentChat?.root_chat_id : undefined;
 	const rootChat = useQuery({
 		...chat(rootChatId ?? ""),
-		enabled: isMenuOpen && rootChatId !== undefined,
+		enabled: isMenuShown && rootChatId !== undefined,
 	});
 	const chatProjectId = rootChatId ? rootChat.data?.project_id : projectId;
 	const project = { source: "project", tier: "project" } as const;
@@ -178,7 +187,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const storedQueries = useQueries({
 		queries: scopes.map(({ source: _, ...scope }) => ({
 			...agentDefinitions(scope),
-			enabled: isMenuOpen && organizationId !== "",
+			enabled: isMenuShown && organizationId !== "",
 			staleTime: 60_000,
 		})),
 	});
@@ -196,11 +205,14 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			agents: workspaceAgents(currentChat?.context, hasWorkspace),
 		},
 	]);
+	const search = (query ?? "").toLocaleLowerCase("en-US");
+	// Only a query with a slash searches tier prefixes, so a short query
+	// doesn't match every agent of a tier.
 	const options = mentions
-		.filter(({ name }) =>
-			name
+		.filter(({ name, qualifiedName }) =>
+			(search.includes("/") ? qualifiedName : name)
 				.toLocaleLowerCase("en-US")
-				.includes((query ?? "").toLocaleLowerCase("en-US")),
+				.includes(search),
 		)
 		.map((mention) => new AgentMentionOption(mention));
 	const unresolved = [

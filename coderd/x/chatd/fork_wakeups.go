@@ -121,6 +121,9 @@ type wakeupFinish struct {
 	reason    string
 	nextRunAt sql.NullTime
 	runDelta  int32
+	// pauseText, when set, explains reason with the caps that paused the
+	// wake-up.
+	pauseText string
 }
 
 // deliverWakeup sends the prompt of a claimed wake-up to its chat as the chat
@@ -205,7 +208,7 @@ func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, chat da
 		return xerrors.Errorf("record failed wake-up run: %w", err)
 	}
 	if finish.status == forkdb.ChatWakeupStatusPaused {
-		p.notifyWakeupPaused(ctx, chat, finish.reason)
+		p.notifyWakeupPaused(ctx, chat, finish)
 	}
 	return nil
 }
@@ -299,7 +302,7 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 		},
 	})
 	if err == nil && finish.status == forkdb.ChatWakeupStatusPaused {
-		p.notifyWakeupPaused(ctx, chat, finish.reason)
+		p.notifyWakeupPaused(ctx, chat, finish)
 	}
 	return err
 }
@@ -381,7 +384,7 @@ func (p *Server) finishWakeupClaim(ctx context.Context, fdb forkdb.Store, chat d
 		return xerrors.Errorf("finish wake-up claim: %w", err)
 	}
 	if finish.status == forkdb.ChatWakeupStatusPaused {
-		p.notifyWakeupPaused(ctx, chat, finish.reason)
+		p.notifyWakeupPaused(ctx, chat, finish)
 	}
 	return nil
 }

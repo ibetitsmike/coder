@@ -16,7 +16,10 @@ import {
 	type Permissions,
 } from "#/modules/permissions";
 import { modelOrganizationSearchParam } from "#/pages/AISettingsPage/ModelsPage/organizationModels";
-import { useForkAgentDefinitionsPath } from "./forkAISettingsNav";
+import {
+	useForkAgentDefinitionsPath,
+	useForkPluginPacksPath,
+} from "./forkAISettingsNav";
 
 type AISettingsSidebarViewProps = {
 	/** Site-wide permissions. */
@@ -135,6 +138,10 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 		skillOrganizations,
 		organizationName,
 	);
+	const pluginPacksPath = useForkPluginPacksPath(
+		skillOrganizations,
+		organizationName,
+	);
 
 	return (
 		<BaseSidebar>
@@ -179,6 +186,9 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 								Agent definitions
 							</SubNavItem>
 						)}
+						{permissions.viewAnyOrganizationSkills && pluginPacksPath && (
+							<SubNavItem href={pluginPacksPath}>Plugin packs</SubNavItem>
+						)}
 						<SubNavItem href="/ai/settings/lifecycle">Lifecycle</SubNavItem>
 					</SubNavGroup>
 				)}
@@ -222,6 +232,9 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 								<SubNavItem href={agentDefinitionsPath}>
 									Agent definitions
 								</SubNavItem>
+							)}
+							{pluginPacksPath && (
+								<SubNavItem href={pluginPacksPath}>Plugin packs</SubNavItem>
 							)}
 						</SubNavGroup>
 					)}
