@@ -76,6 +76,9 @@ func (w *workflowProgram) run(ctx context.Context, r *workflowRun) (json.RawMess
 	if err != nil {
 		return nil, scriptError(err)
 	}
+	if err := workflowValueBudget(out, maxResultBytes/6); err != nil {
+		return nil, xerrors.Errorf("main(args) must return a JSON value: %w", err)
+	}
 	raw, err := jsonEncode(thread, out)
 	if err != nil {
 		return nil, xerrors.Errorf("main(args) must return a JSON value: %w", err)
@@ -108,6 +111,99 @@ func jsonEncode(thread *starlark.Thread, value starlark.Value) (string, error) {
 		return "", xerrors.Errorf("json.encode returned %s", out.Type())
 	}
 	return string(s), nil
+}
+
+// maxWorkflowValueDepth bounds the budget walk. A value that nests deeper
+// cannot be built without recursion, which the file options disable.
+const maxWorkflowValueDepth = 64
+
+// workflowValueBudget fails before jsonEncode runs when the JSON encoding of
+// value could exceed budget. A script builds a huge value with few execution
+// steps, for example by doubling a string, so the size error must not wait
+// for json.encode to allocate the encoded copy. The walk counts string bytes
+// with a 6x headroom (every byte can escape to \uXXXX), so a value that
+// passes always encodes to at most budget bytes.
+func workflowValueBudget(value starlark.Value, budget int) error {
+	const what = "the value is larger than %d bytes; at most %d bytes are allowed"
+	if _, err := workflowValueCost(value, budget, 0); err != nil {
+		return xerrors.Errorf(what, budget, budget)
+	}
+	return nil
+}
+
+var errWorkflowValueTooLarge = xerrors.New("value too large")
+
+// workflowValueCost estimates the encoded size of value and fails when the
+// running total passes budget.
+func workflowValueCost(value starlark.Value, budget int, depth int) (int, error) {
+	if depth > maxWorkflowValueDepth {
+		return 0, xerrors.New("the value nests too deeply or is cyclic")
+	}
+	cost := func(n int) (int, error) {
+		if n > budget {
+			return 0, errWorkflowValueTooLarge
+		}
+		return n, nil
+	}
+	switch v := value.(type) {
+	case starlark.String:
+		return cost(len(v) + 2)
+	case starlark.Bytes:
+		// base64 in JSON, if the json module accepts it at all.
+		return cost(2 + (len(v)+2)/3*4)
+	case starlark.Int:
+		if _, err := starlark.AsInt32(v); err == nil {
+			return cost(12)
+		}
+		return cost(v.BigInt().BitLen()/3 + 3)
+	case *starlark.List:
+		total := 2
+		for i := 0; i < v.Len(); i++ {
+			n, err := workflowValueCost(v.Index(i), budget, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			total += n + 1
+			if total > budget {
+				return 0, errWorkflowValueTooLarge
+			}
+		}
+		return total, nil
+	case starlark.Tuple:
+		total := 2
+		for _, x := range v {
+			n, err := workflowValueCost(x, budget, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			total += n + 1
+			if total > budget {
+				return 0, errWorkflowValueTooLarge
+			}
+		}
+		return total, nil
+	case *starlark.Dict:
+		total := 2
+		for _, item := range v.Items() {
+			k, err := workflowValueCost(item[0], budget, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			n, err := workflowValueCost(item[1], budget, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			total += k + n + 2
+			if total > budget {
+				return 0, errWorkflowValueTooLarge
+			}
+		}
+		return total, nil
+	default:
+		// bool and None encode to a few bytes; anything else (a function, a
+		// set) fails in json.encode with the real reason.
+		return cost(8)
+	}
 }
 
 // workflowHandle is the value that spawn() returns.
@@ -152,6 +248,9 @@ func (*workflowHost) stepSpec(
 	}
 	spec := stepSpec{Prompt: prompt, Type: strings.TrimSpace(typ), Title: title}
 	if schema != starlark.None {
+		if err := workflowValueBudget(schema, maxResultBytes/6); err != nil {
+			return stepSpec{}, xerrors.Errorf("%s: schema: %w", b.Name(), err)
+		}
 		raw, err := jsonEncode(thread, schema)
 		if err != nil {
 			return stepSpec{}, xerrors.Errorf("%s: schema: %w", b.Name(), err)

@@ -572,7 +572,9 @@ func forkStopAfterWorkflowReport(stop map[string]struct{}, chat database.Chat) m
 // when the child already got the reminder. The initial user message (the
 // step prompt) is excluded from the reminder scan: an author could write
 // or a hook could rewrite it to the reminder text, and that must not
-// consume the runtime's retry reminder.
+// consume the runtime's retry reminder. The scan matches the reminder
+// text, so a hook can also rewrite a reminder the runtime sent; the run
+// tracks its own send in workflowStep.sentReminder.
 func workflowStepReport(
 	ctx context.Context, db database.Store, chatID uuid.UUID,
 ) (value json.RawMessage, reminded bool, err error) {

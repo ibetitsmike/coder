@@ -284,6 +284,10 @@ type workflowStep struct {
 	status string
 	value  json.RawMessage
 	err    string
+	// sentReminder records that this run sent the one retry reminder. The
+	// scan in workflowStepReport also detects a reminder, but it matches the
+	// message text, which a user_prompt_submit hook can rewrite.
+	sentReminder bool
 }
 
 type workflowRun struct {
@@ -384,6 +388,10 @@ func (p *Server) startWorkflowRun(
 // execute runs the script and builds the final result.
 func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 	value, err := r.program.run(ctx, r)
+	// Whatever the script outcome, a step that is still running has nobody
+	// waiting for its report, so the run stops it instead of leaving the
+	// child chat (and its descendants) working to a deadline.
+	r.interruptOpenSteps(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
@@ -623,14 +631,14 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.mu.Lock()
 			step.status, step.value = stepStatusReported, value
 			r.mu.Unlock()
-		case !reminded:
+		case !reminded && !step.sentReminder:
 			if _, err := r.p.sendSubagentMessage(ctx, r.parent.ID, step.chatID,
 				workflowReminder); err != nil {
 				r.failStep(step, "send reminder: "+err.Error())
 				return nil
 			}
 			r.mu.Lock()
-			step.status = stepStatusReminded
+			step.status, step.sentReminder = stepStatusReminded, true
 			r.mu.Unlock()
 		default:
 			r.failStep(step, "the step stopped without a "+workflowReportToolName+" call")
@@ -643,6 +651,39 @@ func (r *workflowRun) failStep(step *workflowStep, reason string) {
 	defer r.mu.Unlock()
 	step.status, step.err = stepStatusFailed, reason
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
+}
+
+// interruptOpenSteps stops the child chats of steps that the script left
+// unreported: a failed, timed-out, or returning script never reads their
+// value, so they must not keep consuming model capacity until their step
+// timeout. waitStep has already returned when this runs, so the step fields
+// have no other writer.
+func (r *workflowRun) interruptOpenSteps(ctx context.Context) {
+	r.mu.Lock()
+	var open []*workflowStep
+	for _, s := range r.steps {
+		if s.status == stepStatusRunning || s.status == stepStatusReminded {
+			s.status, s.err = stepStatusFailed, "the workflow ended before the step reported"
+			open = append(open, s)
+		}
+	}
+	r.mu.Unlock()
+	for _, step := range open {
+		child, err := r.p.db.GetChatByID(ctx, step.chatID)
+		if err != nil {
+			r.p.logger.Warn(ctx, "load workflow step chat",
+				slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
+			continue
+		}
+		if child.Status == database.ChatStatusWaiting || child.Status == database.ChatStatusError ||
+			child.Status == database.ChatStatusPaused {
+			continue // nothing runs in the child
+		}
+		if _, _, err := r.p.InterruptChat(ctx, child); err != nil {
+			r.p.logger.Warn(ctx, "interrupt workflow step chat",
+				slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
+		}
+	}
 }
 
 // stepValue returns the value of a finished step. ok is false for a

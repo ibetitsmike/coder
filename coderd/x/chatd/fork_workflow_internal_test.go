@@ -262,6 +262,62 @@ def main(args):
 		assert.JSONEq(t, `{"text":"hi"}`, string(res.Result))
 	})
 
+	t.Run("ReminderFlagOutlivesScanBlindness", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A step child built by hand, so the test drives waitStep
+		// directly.
+		child := dbgen.Chat(t, f.db, database.Chat{
+			OrganizationID: f.org.ID,
+			OwnerID:        f.user.ID,
+			ParentChatID:   uuid.NullUUID{UUID: parent.ID, Valid: true},
+			Status:         database.ChatStatusWaiting,
+		})
+		run := &workflowRun{
+			p:      f.server,
+			id:     uuid.New(),
+			parent: parent,
+			seen:   map[string]int{},
+			done:   make(chan struct{}),
+		}
+		step := &workflowStep{chatID: child.ID, title: "hooked", status: stepStatusRunning}
+		run.mu.Lock()
+		run.steps = []*workflowStep{step}
+		run.mu.Unlock()
+
+		sentReminder := func() bool {
+			for _, text := range f.userTexts(ctx, t, child.ID) {
+				if strings.TrimSpace(text) == workflowReminder {
+					return true
+				}
+			}
+			return false
+		}
+		// A user_prompt_submit hook rewrote the reminder before chatd
+		// persisted it, so the scan cannot recognize it. The run's own
+		// flag must keep the reminder at one: waitStep fails the step
+		// without sending another reminder.
+		f.insert(t, child.ID, database.ChatMessageRoleUser,
+			codersdk.ChatMessageText(workflowReminder+"\u200b"))
+		run.mu.Lock()
+		step.sentReminder = true
+		run.mu.Unlock()
+		require.NoError(t, run.waitStep(ctx, step))
+		run.mu.Lock()
+		status := step.status
+		run.mu.Unlock()
+		require.Equal(t, stepStatusFailed, status)
+		assert.False(t, sentReminder(), "the flag must stop a second reminder")
+
+		// With the flag unset, the same blind scan sends the reminder.
+		run.mu.Lock()
+		step.status, step.sentReminder = stepStatusRunning, false
+		run.mu.Unlock()
+		require.NoError(t, run.waitStep(ctx, step))
+		assert.True(t, sentReminder(), "a blind scan without the flag sends the reminder")
+	})
+
 	t.Run("NoReportGivesNone", func(t *testing.T) {
 		t.Parallel()
 		ctx := chatdTestContext(t)
@@ -350,6 +406,55 @@ def main(args):
 		require.Equal(t, workflowStatusFailed, res.Status)
 		assert.Contains(t, res.Error, "can create 50 steps at most")
 		assert.Len(t, res.Steps, maxWorkflowSteps)
+	})
+
+	t.Run("ResultSizeBeforeEncode", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// Doubling builds a huge value with few execution steps, so the
+		// size error must come from the budget walk, not from json.encode
+		// materializing the string first.
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    s = "x"
+    for i in range(20):
+        s = s + s
+    return s
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "the result encodes to more than")
+	})
+
+	t.Run("SchemaSizeBeforeEncode", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    spawn("Big schema.", schema = {"type": "object", "properties": {"pad": {"description": "x" * 20000}}})
+    return {}
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "the schema encodes to more than")
+	})
+
+	t.Run("UnwaitedStepsFail", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    spawn("Unwaited.")
+    return {}
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		require.Len(t, res.Steps, 1)
+		assert.Equal(t, stepStatusFailed, res.Steps[0].Status)
+		assert.Contains(t, res.Steps[0].Error, "ended before the step reported")
 	})
 
 	t.Run("CompileErrors", func(t *testing.T) {
