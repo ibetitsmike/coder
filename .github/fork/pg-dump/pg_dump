@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Runs pg_dump from the fork-ci Postgres container (start-postgres.sh), so
+# the client always matches the server major. A runner pg_dump of a newer
+# major adds output (for example pg_attver column options in 18) that the
+# chatdmig schema comparisons would read as drift. The container shares the
+# server's network namespace, so 127.0.0.1:5432 DSNs reach the same server.
+set -euo pipefail
+exec docker exec fork-ci-postgres pg_dump "$@"
