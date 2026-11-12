@@ -25,6 +25,7 @@ const meta = {
 		onRetry: fn(),
 		updatingPackIds: new Set(),
 		onInstall: fn(),
+		onEditSources: fn(),
 		onUpdate: fn(),
 		onDelete: fn(),
 	},

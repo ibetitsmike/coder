@@ -1,7 +1,7 @@
 // This file is fork code: the fork-plugin-packs experiment's organization
 // plugin pack table.
 
-import { EllipsisVerticalIcon, PlusIcon } from "lucide-react";
+import { EllipsisVerticalIcon, GlobeIcon, PlusIcon } from "lucide-react";
 import type { ForkPluginPack } from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
@@ -49,6 +49,7 @@ type ForkPluginPacksTableViewProps = {
 	/** Focus target of last resort when no row or install button remains. */
 	tableRef?: React.Ref<HTMLTableElement>;
 	onInstall: () => void;
+	onEditSources: () => void;
 	onUpdate: (pack: ForkPluginPack) => void;
 	onDelete: (pack: ForkPluginPack) => void;
 };
@@ -179,6 +180,7 @@ export const ForkPluginPacksTableView: React.FC<
 	focusReturn,
 	tableRef,
 	onInstall,
+	onEditSources,
 	onUpdate,
 	onDelete,
 }) => {
@@ -230,6 +232,18 @@ export const ForkPluginPacksTableView: React.FC<
 				action={
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
+						{access.update && (
+							<Button
+								variant="outline"
+								onClick={(event) => {
+									focusReturn?.rememberTrigger(event);
+									onEditSources();
+								}}
+							>
+								<GlobeIcon aria-hidden="true" />
+								Sources
+							</Button>
+						)}
 						{access.create && (
 							<Button
 								ref={focusReturn?.setSecondaryFallback}
