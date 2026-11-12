@@ -353,7 +353,7 @@ func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
 // directory that is not orphaned and loads as a pack. Emitting every cached
 // version would serve a removed or superseded copy next to the current one.
 // A plugin the user settings disable stays in the cache, so it is skipped by
-// id.
+// id, as is one installed only at project or local scope.
 func claudeCachePackRoots(cacheDir string) []packRoot {
 	var out []packRoot
 	disabled := claudeDisabledPlugins(cacheDir)
@@ -364,7 +364,11 @@ func claudeCachePackRoots(cacheDir string) []packRoot {
 			if _, off := disabled[id]; off {
 				continue
 			}
-			if pack, ok := installedClaudeCacheVersion(plugin, installed[id]); ok {
+			install := installed[id]
+			if install.projectOnly {
+				continue
+			}
+			if pack, ok := installedClaudeCacheVersion(plugin, install.path); ok {
 				out = append(out, pack)
 				continue
 			}
@@ -389,11 +393,23 @@ type claudeInstallRecord struct {
 	InstallPath string `json:"installPath"`
 }
 
-// claudeInstalledPaths returns the install path Claude Code recorded for each
-// plugin id in installed_plugins.json, next to the cache. Only user-scope
-// records count: project and local installs belong to a project the agent
-// cannot identify. A missing, oversized or malformed file yields nothing.
-func claudeInstalledPaths(cacheDir string) map[string]string {
+// claudeInstall is what installed_plugins.json says about one plugin id.
+type claudeInstall struct {
+	// path is the install path of the first user or unscoped record that
+	// has one. It is empty when those records name no path.
+	path string
+	// projectOnly is set when the id has records but none is user or
+	// unscoped. Project and local installs belong to a project the agent
+	// cannot identify, so the plugin must not load for every chat.
+	projectOnly bool
+}
+
+// claudeInstalledPaths returns what Claude Code recorded for each plugin id in
+// installed_plugins.json, next to the cache. Only user and unscoped records
+// activate a plugin. An id absent from the map has no usable record: a
+// missing, oversized or malformed file yields an empty map, and the caller
+// falls back to the newest cached version.
+func claudeInstalledPaths(cacheDir string) map[string]claudeInstall {
 	pluginsDir := claudePluginsDirFor(cacheDir)
 	if pluginsDir == "" {
 		return nil
@@ -406,7 +422,7 @@ func claudeInstalledPaths(cacheDir string) map[string]string {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil
 	}
-	out := make(map[string]string, len(file.Plugins))
+	out := make(map[string]claudeInstall, len(file.Plugins))
 	for id, raw := range file.Plugins {
 		var records []claudeInstallRecord
 		if err := json.Unmarshal(raw, &records); err != nil {
@@ -416,12 +432,21 @@ func claudeInstalledPaths(cacheDir string) map[string]string {
 			}
 			records = []claudeInstallRecord{one}
 		}
+		if len(records) == 0 {
+			continue
+		}
+		install := claudeInstall{projectOnly: true}
 		for _, record := range records {
-			if (record.Scope == "" || record.Scope == "user") && record.InstallPath != "" {
-				out[id] = record.InstallPath
+			if record.Scope != "" && record.Scope != "user" {
+				continue
+			}
+			install.projectOnly = false
+			if record.InstallPath != "" {
+				install.path = record.InstallPath
 				break
 			}
 		}
+		out[id] = install
 	}
 	return out
 }

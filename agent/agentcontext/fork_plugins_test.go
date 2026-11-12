@@ -924,6 +924,7 @@ func TestResolver_PluginPacksClaudeInstallRecord(t *testing.T) {
 		name     string
 		registry func(older, newer, outside string) string
 		wantOld  bool
+		wantNone bool
 	}{
 		{
 			name: "user-scope record in an array",
@@ -957,9 +958,36 @@ func TestResolver_PluginPacksClaudeInstallRecord(t *testing.T) {
 			wantOld: true,
 		},
 		{
-			name: "project-only record falls back to the newest version",
+			name: "user record wins over a newer project record",
+			registry: func(older, newer, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {
+					{"scope": "user", "installPath": older},
+					{"scope": "project", "installPath": newer},
+				}})
+			},
+			wantOld: true,
+		},
+		{
+			name: "project-only record skips the plugin",
 			registry: func(older, _, _ string) string {
 				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "project", "installPath": older}}})
+			},
+			wantNone: true,
+		},
+		{
+			name: "local-only record skips the plugin",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "local", "installPath": older}}})
+			},
+			wantNone: true,
+		},
+		{
+			name: "user record with an invalid path falls back despite a project record",
+			registry: func(older, _, outside string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {
+					{"scope": "project", "installPath": older},
+					{"scope": "user", "installPath": outside},
+				}})
 			},
 		},
 		{
@@ -1009,6 +1037,10 @@ func TestResolver_PluginPacksClaudeInstallRecord(t *testing.T) {
 				mustWriteFile(t, filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), registry)
 			}
 
+			if tc.wantNone {
+				require.Empty(t, resolveSkillSources(cache))
+				return
+			}
 			want := newer
 			if tc.wantOld {
 				want = older
