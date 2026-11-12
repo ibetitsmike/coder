@@ -6065,6 +6065,7 @@ export type Experiment =
 	| "fork-pinned-skills"
 	| "fork-plugin-packs"
 	| "fork-subagent-isolation"
+	| "fork-workflows"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
@@ -6152,6 +6153,7 @@ export const Experiments: Experiment[] = [
 	"fork-pinned-skills",
 	"fork-plugin-packs",
 	"fork-subagent-isolation",
+	"fork-workflows",
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",

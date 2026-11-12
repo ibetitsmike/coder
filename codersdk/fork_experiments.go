@@ -17,6 +17,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkChatWakeups,
 	ExperimentForkPluginPacks,
 	ExperimentForkPinnedSkills,
+	ExperimentForkWorkflows,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -47,6 +48,11 @@ const ExperimentForkPluginPacks Experiment = "fork-plugin-packs"
 // ExperimentForkPinnedSkills lets a user pin skills to a chat, so chatd puts
 // their bodies in the prompt of every turn until they are unpinned.
 const ExperimentForkPinnedSkills Experiment = "fork-pinned-skills"
+
+// ExperimentForkWorkflows enables the run_workflow and await_workflow tools
+// for root chats: a Starlark script runs sub-agent steps and combines their
+// results (fork PR 1a ships the report tool and step plumbing).
+const ExperimentForkWorkflows Experiment = "fork-workflows"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

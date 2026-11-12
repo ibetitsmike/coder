@@ -22,6 +22,12 @@ import (
 // the way chatd gates upstream experiments, so with no fork experiment enabled
 // the list is exactly the upstream list.
 func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool, chat database.Chat, modelConfigID uuid.UUID) ([]fantasy.AgentTool, error) {
+	// A workflow step child gets workflow_report before the dynamic tools,
+	// so the server tool wins the name (fork-workflows).
+	tools, err := appendWorkflowReportTool(tools, chat)
+	if err != nil {
+		return nil, err
+	}
 	nested, err := p.nestedSubagentTools(ctx, chat, modelConfigID)
 	if err != nil {
 		return nil, err
