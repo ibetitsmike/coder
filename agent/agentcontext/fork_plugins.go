@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,13 +71,17 @@ const (
 // manifest schemas the resolver needs. The Cursor manifest declares its
 // skill and agent directories ("skills": "./skills/"); the agent-plugins.org
 // schema leaves them at the defaults. The Claude Code manifest accepts a
-// string or an array of strings for both (manifestPaths).
+// string or an array of strings for both (manifestPaths), and may set
+// defaultEnabled and dependencies, which decide whether a cached plugin loads
+// (enabledClaudePacks).
 type pluginManifest struct {
-	Name        string        `json:"name"`
-	Version     string        `json:"version"`
-	Description string        `json:"description"`
-	Skills      manifestPaths `json:"skills"`
-	Agents      manifestPaths `json:"agents"`
+	Name           string               `json:"name"`
+	Version        string               `json:"version"`
+	Description    string               `json:"description"`
+	Skills         manifestPaths        `json:"skills"`
+	Agents         manifestPaths        `json:"agents"`
+	DefaultEnabled manifestFlag         `json:"defaultEnabled"`
+	Dependencies   manifestDependencies `json:"dependencies"`
 }
 
 // manifestPaths is a manifest path declaration: one string or an array of
@@ -99,6 +104,78 @@ func (p *manifestPaths) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	*p = nil
+	return nil
+}
+
+// manifestFlag is an optional boolean field. Any value other than true or
+// false decodes to unset, so a mistyped field keeps the default.
+type manifestFlag struct {
+	set   bool
+	value bool
+}
+
+func (f *manifestFlag) UnmarshalJSON(data []byte) error {
+	*f = manifestFlag{}
+	var value bool
+	if !bytes.Equal(bytes.TrimSpace(data), []byte("null")) && json.Unmarshal(data, &value) == nil {
+		*f = manifestFlag{set: true, value: value}
+	}
+	return nil
+}
+
+// orDefault returns the flag's value, or fallback when it is unset.
+func (f manifestFlag) orDefault(fallback bool) bool {
+	if f.set {
+		return f.value
+	}
+	return fallback
+}
+
+// claudeDependency is one plugin a Claude plugin depends on. An empty
+// marketplace means the declaring plugin's own marketplace.
+type claudeDependency struct {
+	name        string
+	marketplace string
+}
+
+// id returns the dependency's plugin id ("plugin@marketplace"), resolving a
+// bare name in the declaring plugin's marketplace.
+func (d claudeDependency) id(declaringMarketplace string) string {
+	if d.marketplace == "" {
+		return d.name + "@" + declaringMarketplace
+	}
+	return d.name + "@" + d.marketplace
+}
+
+// manifestDependencies is a dependencies declaration: an array whose entries
+// are "name", "name@marketplace", or an object with a name and an optional
+// marketplace. Malformed entries, and any other shape, decode to nothing, so
+// a mistyped field never rejects the manifest.
+type manifestDependencies []claudeDependency
+
+func (d *manifestDependencies) UnmarshalJSON(data []byte) error {
+	*d = nil
+	var items []json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil
+	}
+	for _, item := range items {
+		var spec string
+		if err := json.Unmarshal(item, &spec); err == nil {
+			name, marketplace, _ := strings.Cut(strings.TrimSpace(spec), "@")
+			if name != "" {
+				*d = append(*d, claudeDependency{name: name, marketplace: marketplace})
+			}
+			continue
+		}
+		var object struct {
+			Name        string `json:"name"`
+			Marketplace string `json:"marketplace"`
+		}
+		if err := json.Unmarshal(item, &object); err == nil && strings.TrimSpace(object.Name) != "" {
+			*d = append(*d, claudeDependency{name: strings.TrimSpace(object.Name), marketplace: strings.TrimSpace(object.Marketplace)})
+		}
+	}
 	return nil
 }
 
@@ -388,12 +465,13 @@ func claudeUserSettingsPath(cacheDir string) (string, bool) {
 	return filepath.Join(home, ".claude", "settings.json"), true
 }
 
-// claudeDisabledPlugins returns the plugin ids ("plugin@marketplace") that
-// the user settings file explicitly disables in enabledPlugins. A missing,
-// oversized or malformed file yields no information. Only the user settings
-// are read: project, local and managed settings depend on the session's
-// project, which the agent cannot know.
-func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
+// claudeEnabledPluginSettings returns the plugin ids ("plugin@marketplace")
+// that the user settings file sets in enabledPlugins, with their boolean
+// value; a non-boolean value is no setting. A missing, oversized or malformed
+// file yields no information. Only the user settings are read: project, local
+// and managed settings depend on the session's project, which the agent
+// cannot know.
+func claudeEnabledPluginSettings(cacheDir string) map[string]bool {
 	path, ok := claudeUserSettingsPath(cacheDir)
 	if !ok {
 		return nil
@@ -408,30 +486,65 @@ func claudeDisabledPlugins(cacheDir string) map[string]struct{} {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil
 	}
-	disabled := make(map[string]struct{})
+	out := make(map[string]bool)
 	for id, enabled := range settings.EnabledPlugins {
-		if on, isBool := enabled.(bool); isBool && !on {
-			disabled[id] = struct{}{}
+		if on, isBool := enabled.(bool); isBool {
+			out[id] = on
 		}
 	}
-	return disabled
+	return out
 }
 
-// claudeCachePackRoots returns one pack root per cached plugin: the version
-// directory Claude Code's install record names, else the newest version
-// directory that is not orphaned and loads as a pack. Emitting every cached
-// version would serve a removed or superseded copy next to the current one.
-// A plugin the user settings disable stays in the cache, so it is skipped by
-// id, as is one installed only at project or local scope.
+// claudeCandidate is a plugin Claude Code keeps on disk for every session,
+// before enabledPlugins and the dependency graph decide whether it loads.
+type claudeCandidate struct {
+	id             string
+	pack           packRoot
+	defaultEnabled bool
+	// dependencies holds the plugin ids the plugin depends on, from its
+	// manifest and its marketplace entry.
+	dependencies []string
+}
+
+// newClaudeCandidate describes the pack of plugin id from marketplace. The
+// entry's defaultEnabled overrides the manifest's, which defaults to true.
+func newClaudeCandidate(id, marketplace string, pack packRoot, entry claudeMarketplaceEntry) claudeCandidate {
+	candidate := claudeCandidate{
+		id:             id,
+		pack:           pack,
+		defaultEnabled: entry.defaultEnabled.orDefault(pack.Manifest.DefaultEnabled.orDefault(true)),
+	}
+	for _, dep := range slices.Concat(pack.Manifest.Dependencies, entry.dependencies) {
+		if depID := dep.id(marketplace); !slices.Contains(candidate.dependencies, depID) {
+			candidate.dependencies = append(candidate.dependencies, depID)
+		}
+	}
+	return candidate
+}
+
+// claudeCachePackRoots returns one pack root per installed plugin that loads.
+// A cached plugin's pack is the version directory Claude Code's install
+// record names, else the newest version directory that is not orphaned and
+// loads as a pack: emitting every cached version would serve a removed or
+// superseded copy next to the current one. A plugin installed only at project
+// or local scope is skipped. A relative-path plugin of a marketplace added
+// from a local directory or file loads in place instead of from the cache
+// (claudeInPlaceCandidates). enabledClaudePacks then applies the user
+// settings and the dependency graph.
 func claudeCachePackRoots(cacheDir string) []packRoot {
-	var out []packRoot
-	disabled := claudeDisabledPlugins(cacheDir)
 	installed := claudeInstalledPaths(cacheDir)
+	inPlace := claudeInPlaceCandidates(cacheDir, installed)
+	local := make(map[string]struct{}, len(inPlace))
+	for _, candidate := range inPlace {
+		local[candidate.id] = struct{}{}
+	}
+	var candidates []claudeCandidate
 	for _, marketplace := range childDirs(cacheDir) {
-		entries := claudeMarketplaceEntries(cacheDir, filepath.Base(marketplace))
+		name := filepath.Base(marketplace)
+		entries := claudeMarketplaceEntries(cacheDir, name)
 		for _, plugin := range childDirs(marketplace) {
-			id := filepath.Base(plugin) + "@" + filepath.Base(marketplace)
-			if _, off := disabled[id]; off {
+			id := filepath.Base(plugin) + "@" + name
+			if _, isLocal := local[id]; isLocal {
 				continue
 			}
 			install := installed[id]
@@ -440,13 +553,80 @@ func claudeCachePackRoots(cacheDir string) []packRoot {
 			}
 			// The cache directory is named after the marketplace entry.
 			entry := entries[filepath.Base(plugin)]
-			if pack, ok := installedClaudeCacheVersion(plugin, install.path, entry); ok {
-				out = append(out, pack)
+			pack, ok := installedClaudeCacheVersion(plugin, install.path, entry)
+			if !ok {
+				pack, ok = currentClaudeCacheVersion(plugin, entry)
+			}
+			if ok {
+				candidates = append(candidates, newClaudeCandidate(id, name, pack, entry))
+			}
+		}
+	}
+	return enabledClaudePacks(append(candidates, inPlace...), claudeEnabledPluginSettings(cacheDir))
+}
+
+// enabledClaudePacks returns the packs of the candidates that load, in order.
+// A plugin with an enabledPlugins setting follows it, and an explicit false
+// always wins. One without a setting follows its defaultEnabled, except that
+// a plugin an enabled plugin depends on, directly or through other plugins,
+// starts enabled regardless. An enabled plugin that depends on a disabled
+// one does not load, and neither does anything depending on it
+// (https://code.claude.com/docs/en/plugins/troubleshooting#dependency-errors).
+// A dependency that is not on disk is not held against the plugin: its
+// install may live at a scope this view does not cover.
+func enabledClaudePacks(candidates []claudeCandidate, settings map[string]bool) []packRoot {
+	byID := make(map[string]claudeCandidate, len(candidates))
+	for _, candidate := range candidates {
+		byID[candidate.id] = candidate
+	}
+	disabled := func(id string) bool {
+		on, set := settings[id]
+		return set && !on
+	}
+	// Walk the dependency graph from the plugins enabled on their own. The
+	// enabled set doubles as the visited set, so cycles end the walk.
+	enabled := make(map[string]bool, len(candidates))
+	var queue []string
+	for _, candidate := range candidates {
+		on, set := settings[candidate.id]
+		if (set && on) || (!set && candidate.defaultEnabled) {
+			enabled[candidate.id] = true
+			queue = append(queue, candidate.id)
+		}
+	}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, dep := range byID[id].dependencies {
+			if _, known := byID[dep]; !known || enabled[dep] || disabled(dep) {
 				continue
 			}
-			if pack, ok := currentClaudeCacheVersion(plugin, entry); ok {
-				out = append(out, pack)
+			enabled[dep] = true
+			queue = append(queue, dep)
+		}
+	}
+	// A failed dependency fails its dependents in turn; failures only grow,
+	// so the loop ends even on a cycle.
+	failed := make(map[string]bool)
+	for changed := true; changed; {
+		changed = false
+		for id := range enabled {
+			if failed[id] {
+				continue
 			}
+			for _, dep := range byID[id].dependencies {
+				if disabled(dep) || failed[dep] {
+					failed[id] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	var out []packRoot
+	for _, candidate := range candidates {
+		if enabled[candidate.id] && !failed[candidate.id] {
+			out = append(out, candidate.pack)
 		}
 	}
 	return out
@@ -565,8 +745,13 @@ type claudeMarketplaceEntry struct {
 	declaresComponents bool
 	// rootSource is set when the entry's source is the marketplace root.
 	rootSource bool
-	skills     manifestPaths
-	agents     manifestPaths
+	// relSource is the plugin directory relative to the marketplace root
+	// when the entry's source is a relative path, and "" otherwise.
+	relSource      string
+	skills         manifestPaths
+	agents         manifestPaths
+	defaultEnabled manifestFlag
+	dependencies   manifestDependencies
 }
 
 // skipsDefaultSkills reports whether the entry limits the plugin to the
@@ -582,45 +767,144 @@ func (e claudeMarketplaceEntry) skipsDefaultSkills() bool {
 // marketplaces/<name>/.
 func claudeMarketplaceFiles(pluginsDir, marketplace string) []string {
 	var out []string
-	if location, rel, ok := claudeKnownMarketplaceLocation(pluginsDir, marketplace); ok {
-		if info, err := os.Stat(location); err == nil && !info.IsDir() {
-			// A marketplace added from a local file records the file.
-			out = append(out, location)
-		} else if rel != "" {
-			out = append(out, filepath.Join(location, rel))
+	if known, ok := claudeKnownMarketplaces(pluginsDir)[marketplace]; ok {
+		if catalog := known.catalogPath(); catalog != "" {
+			out = append(out, catalog)
 		}
 	}
 	return append(out, filepath.Join(pluginsDir, "marketplaces", marketplace, claudeMarketplaceFileRel))
 }
 
-// claudeKnownMarketplaceLocation returns the recorded install location of a
-// marketplace and the catalog path inside it. A git or GitHub source may name
-// a catalog path other than the default; one that escapes the clone yields
-// an empty rel. ok is false when no usable record exists.
-func claudeKnownMarketplaceLocation(pluginsDir, marketplace string) (location, rel string, ok bool) {
+// claudeKnownMarketplace is a known_marketplaces.json record: the source type
+// and catalog path the marketplace was added with, and where Claude Code
+// keeps it.
+type claudeKnownMarketplace struct {
+	sourceType string
+	sourcePath string
+	// installLocation is absolute and cleaned.
+	installLocation string
+}
+
+// claudeKnownMarketplaces returns the usable records of
+// known_marketplaces.json keyed by marketplace name. A missing, oversized or
+// malformed file, and a record without an absolute installLocation, yield
+// nothing for that marketplace.
+func claudeKnownMarketplaces(pluginsDir string) map[string]claudeKnownMarketplace {
 	data, ok := readCappedFollowingSymlink(filepath.Join(pluginsDir, claudeKnownMarketplacesFile), maxSettingsBytes)
 	if !ok {
-		return "", "", false
+		return nil
 	}
 	var known map[string]json.RawMessage
 	if err := json.Unmarshal(data, &known); err != nil {
-		return "", "", false
+		return nil
 	}
-	var record struct {
-		Source struct {
-			Source string `json:"source"`
-			Path   string `json:"path"`
-		} `json:"source"`
-		InstallLocation string `json:"installLocation"`
+	out := make(map[string]claudeKnownMarketplace, len(known))
+	for name, raw := range known {
+		var record struct {
+			Source struct {
+				Source string `json:"source"`
+				Path   string `json:"path"`
+			} `json:"source"`
+			InstallLocation string `json:"installLocation"`
+		}
+		if err := json.Unmarshal(raw, &record); err != nil || !filepath.IsAbs(record.InstallLocation) {
+			continue
+		}
+		out[name] = claudeKnownMarketplace{
+			sourceType:      record.Source.Source,
+			sourcePath:      strings.TrimSpace(record.Source.Path),
+			installLocation: filepath.Clean(record.InstallLocation),
+		}
 	}
-	if raw, found := known[marketplace]; !found || json.Unmarshal(raw, &record) != nil || !filepath.IsAbs(record.InstallLocation) {
-		return "", "", false
+	return out
+}
+
+// catalogPath returns the marketplace.json of a known marketplace, or "" when
+// a git or GitHub source names a catalog path that escapes the clone. A
+// marketplace added from a local file records the file itself.
+func (m claudeKnownMarketplace) catalogPath() string {
+	if info, err := os.Stat(m.installLocation); err == nil && !info.IsDir() {
+		return m.installLocation
 	}
-	rel = claudeMarketplaceFileRel
-	if path := strings.TrimSpace(record.Source.Path); path != "" && (record.Source.Source == "github" || record.Source.Source == "git") {
-		rel = containerRelPath(path, "")
+	rel := claudeMarketplaceFileRel
+	if m.sourcePath != "" && (m.sourceType == "github" || m.sourceType == "git") {
+		if rel = containerRelPath(m.sourcePath, ""); rel == "" {
+			return ""
+		}
 	}
-	return filepath.Clean(record.InstallLocation), rel, true
+	return filepath.Join(m.installLocation, rel)
+}
+
+// localRoot returns the root of a marketplace added from a local directory or
+// file, whose relative-path plugins Claude Code loads in place. ok is false
+// for any other source. A file source keeps its catalog at
+// <root>/.claude-plugin/marketplace.json, so the root is two levels up.
+func (m claudeKnownMarketplace) localRoot() (string, bool) {
+	switch m.sourceType {
+	case "directory":
+		return m.installLocation, true
+	case "file":
+		return filepath.Dir(filepath.Dir(m.installLocation)), true
+	default:
+		return "", false
+	}
+}
+
+// claudeInPlaceCandidates returns the installed relative-path plugins of the
+// marketplaces added from a local directory or file. Claude Code loads those
+// from the marketplace folder instead of copying them into the cache
+// (https://code.claude.com/docs/en/plugins/loading#in-place-and-copied-plugins).
+// A plugin counts as installed when installed_plugins.json holds a global
+// record for it; a plugin directory that resolves outside the marketplace
+// root is skipped.
+func claudeInPlaceCandidates(cacheDir string, installed map[string]claudeInstall) []claudeCandidate {
+	pluginsDir := claudePluginsDirFor(cacheDir)
+	if pluginsDir == "" {
+		return nil
+	}
+	known := claudeKnownMarketplaces(pluginsDir)
+	var out []claudeCandidate
+	for _, marketplace := range slices.Sorted(maps.Keys(known)) {
+		record := known[marketplace]
+		root, ok := record.localRoot()
+		if !ok {
+			continue
+		}
+		data, ok := readCappedFollowingSymlink(record.catalogPath(), maxMarketplaceBytes)
+		if !ok {
+			continue
+		}
+		entries := parseClaudeMarketplaceEntries(data)
+		for _, name := range slices.Sorted(maps.Keys(entries)) {
+			entry := entries[name]
+			id := name + "@" + marketplace
+			if install, ok := installed[id]; !ok || install.projectOnly || entry.relSource == "" {
+				continue
+			}
+			dir := filepath.Join(root, entry.relSource)
+			if !dirInside(dir, root) {
+				continue
+			}
+			if pack, ok := readClaudePluginDir(dir, name, entry); ok {
+				out = append(out, newClaudeCandidate(id, marketplace, pack, entry))
+			}
+		}
+	}
+	return out
+}
+
+// dirInside reports whether dir is a directory that resolves inside root.
+func dirInside(dir, root string) bool {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil || !pathHasPrefix(resolved, resolvedRoot) {
+		return false
+	}
+	info, err := os.Stat(resolved)
+	return err == nil && info.IsDir()
 }
 
 // claudeMarketplaceEntries returns the plugin entries of a cached
@@ -642,7 +926,8 @@ func claudeMarketplaceEntries(cacheDir, marketplace string) map[string]claudeMar
 
 // parseClaudeMarketplaceEntries decodes the plugin entries of a catalog.
 // Claude Code validates each entry on its own, so an entry without a name or
-// with a mistyped skills or agents field is skipped without failing the rest.
+// a valid source (isMarketplaceSource), or with a mistyped skills or agents
+// field, is skipped without failing the rest.
 func parseClaudeMarketplaceEntries(data []byte) map[string]claudeMarketplaceEntry {
 	var catalog struct {
 		Plugins []json.RawMessage `json:"plugins"`
@@ -650,6 +935,14 @@ func parseClaudeMarketplaceEntries(data []byte) map[string]claudeMarketplaceEntr
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil
 	}
+	var metadata struct {
+		Metadata struct {
+			PluginRoot string `json:"pluginRoot"`
+		} `json:"metadata"`
+	}
+	// A mistyped metadata object leaves pluginRoot unset without hiding the
+	// entries.
+	_ = json.Unmarshal(data, &metadata)
 	out := make(map[string]claudeMarketplaceEntry, len(catalog.Plugins))
 	for _, raw := range catalog.Plugins {
 		var fields map[string]json.RawMessage
@@ -660,14 +953,16 @@ func parseClaudeMarketplaceEntries(data []byte) map[string]claudeMarketplaceEntr
 		if err := json.Unmarshal(fields["name"], &name); err != nil || name == "" {
 			continue
 		}
-		if _, dup := out[name]; dup || !claudePathFieldsTyped(raw) {
+		if _, dup := out[name]; dup || !isMarketplaceSource(fields["source"]) || !claudePathFieldsTyped(raw) {
 			continue
 		}
-		var paths struct {
-			Skills manifestPaths `json:"skills"`
-			Agents manifestPaths `json:"agents"`
+		var decoded struct {
+			Skills         manifestPaths        `json:"skills"`
+			Agents         manifestPaths        `json:"agents"`
+			DefaultEnabled manifestFlag         `json:"defaultEnabled"`
+			Dependencies   manifestDependencies `json:"dependencies"`
 		}
-		if err := json.Unmarshal(raw, &paths); err != nil {
+		if err := json.Unmarshal(raw, &decoded); err != nil {
 			continue
 		}
 		entry := claudeMarketplaceEntry{
@@ -675,8 +970,11 @@ func parseClaudeMarketplaceEntries(data []byte) map[string]claudeMarketplaceEntr
 			strict:             true,
 			declaresComponents: declaresClaudeComponents(fields),
 			rootSource:         isMarketplaceRootSource(fields["source"]),
-			skills:             paths.Skills,
-			agents:             paths.Agents,
+			relSource:          relativeMarketplaceSource(fields["source"], metadata.Metadata.PluginRoot),
+			skills:             decoded.Skills,
+			agents:             decoded.Agents,
+			defaultEnabled:     decoded.DefaultEnabled,
+			dependencies:       decoded.Dependencies,
 		}
 		var strict bool
 		if err := json.Unmarshal(fields["strict"], &strict); err == nil && !strict {
@@ -705,6 +1003,49 @@ func declaresClaudeComponents(fields map[string]json.RawMessage) bool {
 func isDeclaredJSON(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+// isMarketplaceSource reports whether an entry's source has a valid shape: a
+// non-empty relative path string, or an object whose source field names its
+// type. Claude Code requires a source, so an entry without one is invalid.
+func isMarketplaceSource(raw json.RawMessage) bool {
+	var path string
+	if err := json.Unmarshal(raw, &path); err == nil {
+		return strings.TrimSpace(path) != ""
+	}
+	var object struct {
+		Source *string `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &object); err != nil || object.Source == nil {
+		return false
+	}
+	return strings.TrimSpace(*object.Source) != ""
+}
+
+// relativeMarketplaceSource returns the plugin directory of an entry whose
+// source is a relative path, relative to the marketplace root, or "" for any
+// other source. A path must start with "./" or be "."; a bare name resolves
+// under the catalog's metadata.pluginRoot when one is set
+// (https://code.claude.com/docs/en/plugins/marketplace-reference#relative-path-plugin-source).
+// A path that escapes the marketplace yields "".
+func relativeMarketplaceSource(raw json.RawMessage, pluginRoot string) string {
+	var source string
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return ""
+	}
+	source = strings.TrimSpace(source)
+	switch {
+	case source == ".", strings.HasPrefix(source, "./"):
+		return containerRelPath(source, "")
+	case source != "" && !strings.ContainsAny(source, `/\`) && strings.TrimSpace(pluginRoot) != "":
+		root := containerRelPath(pluginRoot, "")
+		if root == "" {
+			return ""
+		}
+		return containerRelPath(filepath.Join(root, source), "")
+	default:
+		return ""
+	}
 }
 
 // isMarketplaceRootSource reports whether an entry's source is the relative
@@ -750,17 +1091,23 @@ func installedClaudeCacheVersion(pluginDir, installPath string, entry claudeMark
 // manifest that exists but does not load still rejects the version, and so
 // does a conflict with the entry (withMarketplaceEntry).
 func readClaudeCacheVersion(versionDir string, entry claudeMarketplaceEntry) (packRoot, bool) {
-	if pack, ok := readPluginManifest(versionDir); ok {
+	return readClaudePluginDir(versionDir, filepath.Base(filepath.Dir(versionDir)), entry)
+}
+
+// readClaudePluginDir reads a Claude plugin directory as a pack, named name
+// when it has no manifest; see readClaudeCacheVersion.
+func readClaudePluginDir(dir, name string, entry claudeMarketplaceEntry) (packRoot, bool) {
+	if pack, ok := readPluginManifest(dir); ok {
 		return pack.withMarketplaceEntry(entry)
 	}
-	if findPackManifest(versionDir) != "" {
+	if findPackManifest(dir) != "" {
 		return packRoot{}, false
 	}
 	return packRoot{
-		Dir:          versionDir,
-		ManifestPath: filepath.Join(versionDir, claudePluginManifestRelPath),
+		Dir:          dir,
+		ManifestPath: filepath.Join(dir, claudePluginManifestRelPath),
 		Manifest: pluginManifest{
-			Name:   filepath.Base(filepath.Dir(versionDir)),
+			Name:   name,
 			Skills: entry.skills,
 			Agents: entry.agents,
 		},
@@ -1480,11 +1827,30 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 		if pluginsDir != "" {
 			dirs = append(dirs, pluginsDir)
 		}
-		// enabledPlugins in the user settings disables cached plugins
-		// (claudeDisabledPlugins).
+		// enabledPlugins in the user settings selects the plugins that
+		// load (claudeEnabledPluginSettings).
 		if settings, ok := claudeUserSettingsPath(rootPath); ok {
 			dirs = append(dirs, filepath.Dir(settings))
 			watch.settingsFiles[settings] = struct{}{}
+			// A dotfile manager's symlinked settings file is edited
+			// through its target, which fires events only in the
+			// target's directory and under the target's path.
+			if target, err := filepath.EvalSymlinks(settings); err == nil && target != settings {
+				dirs = append(dirs, filepath.Dir(target))
+				watch.settingsFiles[target] = struct{}{}
+			}
+		}
+		// The catalog of a marketplace added from a local directory or
+		// file lists its in-place plugins, which have no cache
+		// directory; the plugins themselves are packs above.
+		if pluginsDir != "" {
+			for _, known := range claudeKnownMarketplaces(pluginsDir) {
+				if _, local := known.localRoot(); local {
+					if catalog := known.catalogPath(); catalog != "" {
+						dirs = append(dirs, filepath.Dir(catalog))
+					}
+				}
+			}
 		}
 		// Watching every level down to the version directories
 		// fires the events for a new install, a new version, and

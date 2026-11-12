@@ -137,6 +137,55 @@ func TestCollectDirsWatchesClaudeUserSettings(t *testing.T) {
 	require.Empty(t, other.settingsFiles)
 }
 
+func TestCollectDirsWatchesSymlinkedClaudeUserSettings(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cache := filepath.Join(home, ".claude", "plugins", "cache")
+	require.NoError(t, os.MkdirAll(filepath.Join(cache, "market", "pstack", "1.0.0"), 0o755))
+	dotfiles := filepath.Join(t.TempDir(), "dotfiles")
+	require.NoError(t, os.MkdirAll(dotfiles, 0o755))
+	target := filepath.Join(dotfiles, "settings.json")
+	require.NoError(t, os.WriteFile(target, []byte(`{}`), 0o600))
+	if err := os.Symlink(target, filepath.Join(home, ".claude", "settings.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	require.NoError(t, err)
+
+	w := &Watcher{}
+	dirs, pack := w.collectDirs([]ScanRoot{{Path: cache}})
+	// An edit through the link fires only in the target's directory.
+	require.Contains(t, dirs, filepath.Dir(resolved))
+	w.pack = pack
+	require.True(t, w.eventRelevant(fsnotify.Event{Name: resolved, Op: fsnotify.Write}))
+	require.False(t, w.eventRelevant(fsnotify.Event{Name: filepath.Join(filepath.Dir(resolved), "notes.txt"), Op: fsnotify.Write}))
+}
+
+func TestCollectDirsWatchesClaudeLocalMarketplace(t *testing.T) {
+	t.Parallel()
+	plugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+	cache := filepath.Join(plugins, "cache")
+	require.NoError(t, os.MkdirAll(cache, 0o755))
+	root := filepath.Join(t.TempDir(), "local-market")
+	catalogDir := filepath.Join(root, ".claude-plugin")
+	pluginDir := filepath.Join(root, "plugins", "inplace")
+	require.NoError(t, os.MkdirAll(catalogDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "skills"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(catalogDir, claudeMarketplaceFileName),
+		[]byte(`{"name": "local", "plugins": [{"name": "inplace", "source": "./plugins/inplace"}]}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(plugins, claudeKnownMarketplacesFile),
+		[]byte(fmt.Sprintf(`{"local": {"source": {"source": "directory", "path": %q}, "installLocation": %q}}`, root, root)), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(plugins, claudeInstalledPluginsFile),
+		[]byte(`{"version": 2, "plugins": {"inplace@local": [{"scope": "user"}]}}`), 0o600))
+
+	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: cache}})
+	// The catalog lists the in-place plugins, and each one is a pack
+	// watched where it lives.
+	for _, dir := range []string{catalogDir, pluginDir, filepath.Join(pluginDir, "skills")} {
+		require.Contains(t, dirs, dir)
+	}
+}
+
 func TestNestedAgentDirsBounds(t *testing.T) {
 	t.Parallel()
 	container := t.TempDir()
