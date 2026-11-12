@@ -54,11 +54,9 @@ type Watcher struct {
 	closedCh  chan struct{}
 	runDoneCh chan struct{}
 
-	// agentDirs holds the declared pack agent containers (guarded by
-	// mu). A manifest may name any contained directory, so a Markdown
-	// write there is relevant even when the directory is not called
-	// "agents".
-	agentDirs map[string]struct{}
+	// pack holds the pack paths whose writes are relevant (guarded by
+	// mu, see packWatchPaths).
+	pack packWatchPaths
 }
 
 // NewWatcher constructs a recursive watcher. The watcher does
@@ -165,14 +163,14 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	// scan root and skill container). Compute the desired set
 	// outside the mutex so it does not block the run goroutine,
 	// Close, or schedule.
-	desired, agentDirs := w.collectDirs(roots)
+	desired, pack := w.collectDirs(roots)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
 		return
 	}
-	w.agentDirs = agentDirs
+	w.pack = pack
 
 	// Remove directories no longer wanted.
 	for path := range w.watched {
@@ -286,7 +284,7 @@ func (w *Watcher) run() {
 func (w *Watcher) eventRelevant(ev fsnotify.Event) bool {
 	name := filepath.Base(ev.Name)
 	if recognizedInstructionFile(name) || name == mcpConfigFileName || name == skillMetaFileName ||
-		name == packManifestBaseName || isAgentDefinitionPath(ev.Name) || w.inPackAgentDir(ev.Name) {
+		name == packManifestBaseName || isClaudePluginStateFile(name) || isAgentDefinitionPath(ev.Name) || w.inPackWatch(ev.Name) {
 		return true
 	}
 	// Directory create/remove flips re-resolve so new subtrees
@@ -297,16 +295,13 @@ func (w *Watcher) eventRelevant(ev fsnotify.Event) bool {
 	return false
 }
 
-// inPackAgentDir reports whether path is an agent definition file in a
-// declared pack agent container.
-func (w *Watcher) inPackAgentDir(path string) bool {
-	if filepath.Ext(path) != agentDefinitionExt {
-		return false
-	}
+// inPackWatch reports whether path is a pack path whose writes are
+// relevant: an agent definition in a pack agent container, or a Claude
+// Code user settings file.
+func (w *Watcher) inPackWatch(path string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, ok := w.agentDirs[filepath.Dir(path)]
-	return ok
+	return w.pack.relevant(path)
 }
 
 // schedule arms or resets the debounce timer.
@@ -337,9 +332,9 @@ func (w *Watcher) schedule() {
 // and .mcp.json changes), plus every existing skill container and
 // its immediate skill subdirectories (catching skill add/remove
 // and SKILL.md writes). The watcher never recurses the tree.
-func (*Watcher) collectDirs(roots []ScanRoot) (dirs, agentDirs map[string]struct{}) {
+func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack packWatchPaths) {
 	out := make(map[string]struct{})
-	agentDirs = make(map[string]struct{})
+	pack = newPackWatchPaths()
 	for _, root := range roots {
 		if root.Path == "" {
 			continue
@@ -361,7 +356,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs, agentDirs map[string]struct
 		addAgentWatchDirs(root.Path, out)
 		// Watch pack roots and their declared containers so
 		// plugin pack changes re-resolve (fork_plugins.go).
-		addPackWatchDirs(root.Path, out, agentDirs)
+		addPackWatchDirs(root.Path, out, pack)
 		for _, container := range skillContainersFor(root.Path) {
 			out[container] = struct{}{}
 			entries, err := os.ReadDir(container)
@@ -375,7 +370,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs, agentDirs map[string]struct
 			}
 		}
 	}
-	return out, agentDirs
+	return out, pack
 }
 
 // existingAncestor returns the deepest existing ancestor of

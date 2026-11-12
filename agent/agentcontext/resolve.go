@@ -665,7 +665,13 @@ func (r *Resolver) readFileResource(kind ResourceKind, scanRoot, path string, in
 // front-matter must match the parent directory's basename to
 // be considered valid; otherwise Status is StatusInvalid.
 func (r *Resolver) readSkillMeta(scanRoot, path string, info fs.FileInfo, userSource string) (Resource, bool) {
-	parent := filepath.Base(filepath.Dir(path))
+	return r.readSkillMetaNamed(scanRoot, path, info, userSource, filepath.Base(filepath.Dir(path)))
+}
+
+// readSkillMetaNamed is readSkillMeta with the directory name the
+// front-matter name must match. An empty parent accepts any name: a
+// fork plugin-root skill has no skill directory (fork_plugins.go).
+func (r *Resolver) readSkillMetaNamed(scanRoot, path string, info fs.FileInfo, userSource, parent string) (Resource, bool) {
 	res := Resource{
 		ID:         resourceID(KindSkill, filepath.Dir(path)),
 		Kind:       KindSkill,
@@ -705,7 +711,7 @@ func (r *Resolver) readSkillMeta(scanRoot, path string, info fs.FileInfo, userSo
 		res.Error = err.Error()
 		return res, true
 	}
-	if name != parent {
+	if parent != "" && name != parent {
 		res.Status = StatusInvalid
 		res.Error = fmt.Sprintf("front-matter name %q does not match directory %q", name, parent)
 		return res, true
