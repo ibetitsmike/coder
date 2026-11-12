@@ -9587,6 +9587,66 @@ func TestChatMessageWithFiles(t *testing.T) {
 	})
 }
 
+// TestForkWorkflowStepChatImmutability covers the API guards that keep a
+// workflow step chat's history the cached execution of its step spec: the
+// owner can neither edit its messages nor send it direct messages.
+func TestForkWorkflowStepChatImmutability(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db := newChatClientWithDatabase(t)
+	firstUser := coderdtest.CreateFirstUser(t, client.Client)
+	model := createChatModel(t, client)
+
+	parent, err := db.InsertChat(dbauthz.AsSystemRestricted(ctx), database.InsertChatParams{
+		OrganizationID:    firstUser.OrganizationID,
+		Status:            database.ChatStatusWaiting,
+		ClientType:        database.ChatClientTypeUi,
+		OwnerID:           firstUser.UserID,
+		LastModelConfigID: model.ID,
+		Title:             "workflow-root",
+	})
+	require.NoError(t, err)
+	labels, err := json.Marshal(database.StringMap{chatd.WorkflowRunLabel: uuid.NewString()})
+	require.NoError(t, err)
+	step, err := db.InsertChat(dbauthz.AsSystemRestricted(ctx), database.InsertChatParams{
+		OrganizationID:    firstUser.OrganizationID,
+		Status:            database.ChatStatusWaiting,
+		ClientType:        database.ChatClientTypeUi,
+		OwnerID:           firstUser.UserID,
+		LastModelConfigID: model.ID,
+		Title:             "workflow-step",
+		ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+		RootChatID:        uuid.NullUUID{UUID: parent.ID, Valid: true},
+		Labels:            pqtype.NullRawMessage{RawMessage: labels, Valid: true},
+	})
+	require.NoError(t, err)
+
+	// An edit soft-deletes the history after the message, and a reused
+	// step reads its accepted report from that history, so editing could
+	// replace the step's specification or fabricate its result.
+	_, err = client.EditChatMessage(ctx, step.ID, 1, codersdk.EditChatMessageRequest{
+		Content: []codersdk.ChatInputPart{{
+			Type: codersdk.ChatInputPartTypeText,
+			Text: "tampered prompt",
+		}},
+	})
+	sdkErr := requireSDKError(t, err, http.StatusBadRequest)
+	require.Equal(t, "Workflow step chat messages cannot be edited.", sdkErr.Message)
+
+	// A direct message could produce a report for content the step spec
+	// never asked for, which a resumed run would then read as the step's
+	// accepted result.
+	_, err = client.CreateChatMessage(ctx, step.ID, codersdk.CreateChatMessageRequest{
+		Content: []codersdk.ChatInputPart{{
+			Type: codersdk.ChatInputPartTypeText,
+			Text: "report something else instead",
+		}},
+	})
+	sdkErr = requireSDKError(t, err, http.StatusBadRequest)
+	require.Equal(t, "A workflow step chat does not accept direct messages.", sdkErr.Message)
+}
+
 func TestPatchChatMessage(t *testing.T) {
 	t.Parallel()
 

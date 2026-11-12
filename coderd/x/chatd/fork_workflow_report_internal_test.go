@@ -195,6 +195,19 @@ func TestForkWorkflowReport(t *testing.T) {
 			`"properties":{"a":{"type":"string"}},"required":["a"]}`))
 		require.NoError(t, err)
 
+		// A nested $id starts a new schema resource: references under it resolve
+		// against that base in Run's resolver while the contract copy resolves
+		// against the document root, so a reachable embedded resource is
+		// refused instead of shipped with a diverging meaning.
+		_, err = newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"a":{"type":"object","$id":"https://example.com/embedded","$defs":{"kind":{"type":"integer"}}}}}`))
+		require.ErrorContains(t, err, `nested "$id" cannot be represented`)
+
+		// $id inside a data keyword is literal JSON, not a schema resource.
+		_, err = newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"pick":{"const":{"$id":"https://example.com/pick"}}}}`))
+		require.NoError(t, err)
+
 		// Only the property subtree is inlined: definitions the properties
 		// never reach cannot reach the provider contract, so an unused
 		// recursive definition does not block the step.
@@ -611,6 +624,36 @@ func TestForkWorkflowReportScan(t *testing.T) {
 			}},
 		})
 		assert.Nil(t, value)
+	})
+
+	t.Run("OrdinaryResultInBatchDoesNotConsumeReportArgs", func(t *testing.T) {
+		t.Parallel()
+		// One batch with an ordinary tool call before an invalid
+		// workflow_report call under the same call ID: the runtime keeps
+		// both occurrences and persists results in call order, so the
+		// ordinary tool's success must not consume the stored report
+		// arguments before the report's own error result arrives.
+		value, _ := scan(t, "do the thing", []stepMessage{
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageToolCall("c1", "other_tool", json.RawMessage(`{}`)),
+				reportCall("c1", `{"text":"invalid"}`),
+				codersdk.ChatMessageToolResult("c1", "other_tool", json.RawMessage(`"ok"`), false, false),
+				reportResult("c1", true),
+			}},
+		})
+		assert.Nil(t, value)
+
+		// The report's own result still pairs with its call when it
+		// succeeds after the ordinary tool's result.
+		value, _ = scan(t, "do the thing", []stepMessage{
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageToolCall("c1", "other_tool", json.RawMessage(`{}`)),
+				reportCall("c1", `{"text":"good"}`),
+				codersdk.ChatMessageToolResult("c1", "other_tool", json.RawMessage(`"ok"`), false, false),
+				reportResult("c1", false),
+			}},
+		})
+		assert.JSONEq(t, `{"text":"good"}`, string(value))
 	})
 
 	t.Run("ReminderAfterInitialPromptOnly", func(t *testing.T) {

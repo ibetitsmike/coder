@@ -3237,6 +3237,18 @@ func (api *API) sendChatMessage(
 	chat database.Chat,
 	req codersdk.CreateChatMessageRequest,
 ) (codersdk.CreateChatMessageResponse, error) {
+	// A step chat's conversation is the cached execution of its step spec:
+	// the runtime and the run's parent agent drive it, and a resumed run
+	// reads the step's report from this history. A direct owner message
+	// could produce a report for content the spec never asked for, so the
+	// API refuses to write into step chats; the workflow reminder and the
+	// parent agent's subagent messages use their own paths.
+	if chatd.IsWorkflowStepChat(chat) {
+		return codersdk.CreateChatMessageResponse{}, httperror.NewResponseError(http.StatusBadRequest, codersdk.Response{
+			Message: "A workflow step chat does not accept direct messages.",
+		})
+	}
+
 	contentBlocks, _, inputError := createChatInputFromParts(ctx, api.Database, chat.ID, chat.WorkspaceID, req.Content, "content")
 	if inputError != nil {
 		return codersdk.CreateChatMessageResponse{}, httperror.NewResponseError(http.StatusBadRequest, codersdk.Response{
@@ -3475,6 +3487,17 @@ func (api *API) patchChatMessage(rw http.ResponseWriter, r *http.Request) {
 	if apiKey.UserID != chat.OwnerID {
 		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
 			Message: "Only the chat owner may edit messages.",
+		})
+		return
+	}
+
+	// An edit soft-deletes the history after the message, and a reused
+	// workflow step reads its accepted report from that history, so an edit
+	// could replace the step's specification or fabricate its result. Step
+	// chats are machine-driven; their content is immutable over the API.
+	if chatd.IsWorkflowStepChat(chat) {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "Workflow step chat messages cannot be edited.",
 		})
 		return
 	}

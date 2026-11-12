@@ -298,6 +298,15 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 // exponentially even though they are acyclic, so the budget bounds the
 // work an O(n) schema can force.
 func inlineStepRefs(node map[string]any, root map[string]any, seen []string, budget *int) (map[string]any, error) {
+	// A nested $id starts a new schema resource: fragment references under
+	// it resolve against that base in Run's resolver, while the inlined
+	// contract copy resolves everything against the document root. The two
+	// would disagree, so refuse the schema instead of shipping a contract
+	// Run reads differently.
+	if _, ok := node["$id"]; ok {
+		return nil, xerrors.Errorf(
+			`nested "$id" cannot be represented in the report tool contract: keep the schema resource at the document top level`)
+	}
 	if ref, ok := node["$ref"].(string); ok {
 		if len(node) > 1 {
 			return nil, xerrors.Errorf("$ref %q cannot be combined with sibling keywords: move them into the referenced schema", ref)
@@ -571,7 +580,7 @@ func workflowStepReport(
 	if err != nil {
 		return nil, false, xerrors.Errorf("get step messages: %w", err)
 	}
-	calls := map[string]json.RawMessage{}
+	calls := map[string][]json.RawMessage{}
 	firstUser := true
 	for _, msg := range msgs {
 		parts, err := chatprompt.ParseContent(msg)
@@ -591,15 +600,31 @@ func workflowStepReport(
 				}
 			case part.Type == codersdk.ChatMessagePartTypeToolCall &&
 				part.ToolName == workflowReportToolName:
-				calls[part.ToolCallID] = part.Args
-			case part.Type == codersdk.ChatMessagePartTypeToolResult:
-				// A result consumes its call entry whatever it says: a
+				// The runtime keeps duplicate call IDs within one batch,
+				// so a queue pairs results with their own call occurrence
+				// instead of letting the latest args answer an earlier
+				// result.
+				calls[part.ToolCallID] = append(calls[part.ToolCallID], part.Args)
+			case part.Type == codersdk.ChatMessagePartTypeToolResult &&
+				part.ToolName == workflowReportToolName:
+				// A result consumes its queued entry whatever it says: a
 				// rejected report must not answer a later, different tool
-				// call that happens to reuse the call ID.
-				args, ok := calls[part.ToolCallID]
-				delete(calls, part.ToolCallID)
-				if ok && !part.IsError {
-					value = args // a later accepted call wins
+				// call that happens to reuse the call ID. The name must
+				// match too, because results persist in call order and an
+				// ordinary tool in the same batch may share the ID; an
+				// ID-only lookup would let that ordinary result consume
+				// the stored report arguments.
+				queue := calls[part.ToolCallID]
+				if len(queue) == 0 {
+					continue
+				}
+				if !part.IsError {
+					value = queue[0] // a later accepted call wins
+				}
+				if len(queue) > 1 {
+					calls[part.ToolCallID] = queue[1:]
+				} else {
+					delete(calls, part.ToolCallID)
 				}
 			}
 		}
