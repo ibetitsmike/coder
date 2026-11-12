@@ -144,3 +144,31 @@ export const SkillsLoadError: Story = {
 	},
 	play: Expanded.play,
 };
+
+export const SkillsPartiallyLoaded: Story = {
+	args: {
+		children: (
+			<ForkPinnableSkillListView
+				{...pickerProps}
+				skillLists={mockSkillLists.map((list) =>
+					list.source === "org" ? { ...list, skills: undefined } : list,
+				)}
+			/>
+		),
+	},
+	play: Expanded.play,
+};
+
+export const NoSkillsAvailable: Story = {
+	args: {
+		pins: [],
+		children: (
+			<ForkPinnableSkillListView
+				{...pickerProps}
+				pins={[]}
+				skillLists={mockSkillLists.map((list) => ({ ...list, skills: [] }))}
+			/>
+		),
+	},
+	play: Expanded.play,
+};

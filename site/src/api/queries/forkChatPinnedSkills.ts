@@ -7,6 +7,9 @@ import {
 } from "#/api/forkChatPinnedSkills";
 import type { ChatPinnedSkill } from "#/api/typesGenerated";
 
+/** Matches chatd.MaxPinnedSkillsPerChat, which the API enforces. */
+export const MAX_PINNED_SKILLS_PER_CHAT = 8;
+
 export const chatPinnedSkillsKey = (chatId: string) =>
 	["chats", "fork-pinned-skills", chatId] as const;
 

@@ -18,6 +18,7 @@ import { chatProject } from "#/api/queries/chatProjects";
 import { chat } from "#/api/queries/chats";
 import {
 	chatPinnedSkills,
+	MAX_PINNED_SKILLS_PER_CHAT,
 	updateChatPinnedSkillsMutation,
 } from "#/api/queries/forkChatPinnedSkills";
 import {
@@ -41,7 +42,6 @@ import { getSkillAlias, type SkillSourceList } from "../utils/skillAliases";
 import { activeOrganizationSkills } from "../utils/skills";
 import { canManageChat } from "./ChatActionsMenuItems";
 import { EditableSkillChip, SkillChip } from "./ChatMessageInput/SkillChip";
-import { MAX_SKILL_INVOCATIONS_PER_MESSAGE } from "./ChatMessageInput/SkillInvocationNode";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ComposerPillPopover } from "./ComposerPillPopover";
 import { RetryButton } from "./RetryButton";
@@ -324,7 +324,7 @@ export const ForkPinnableSkillListView: React.FC<
 		(count, list) => count + (list.skills?.length ?? 0),
 		0,
 	);
-	const isFull = pins.length >= MAX_SKILL_INVOCATIONS_PER_MESSAGE;
+	const isFull = pins.length >= MAX_PINNED_SKILLS_PER_CHAT;
 
 	return (
 		<div className="mt-3 flex flex-col gap-2">
@@ -383,7 +383,7 @@ export const ForkPinnableSkillListView: React.FC<
 			)}
 			{isFull && (
 				<p className="m-0 text-content-secondary">
-					A chat can pin at most {MAX_SKILL_INVOCATIONS_PER_MESSAGE} skills.
+					A chat can pin at most {MAX_PINNED_SKILLS_PER_CHAT} skills.
 				</p>
 			)}
 		</div>
