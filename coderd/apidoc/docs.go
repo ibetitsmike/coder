@@ -6264,6 +6264,98 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/{chat}/pinned-skills": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the pinned skills of a chat",
+                "operationId": "get-the-pinned-skills-of-a-chat",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatPinnedSkill"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Replace the pinned skills of a chat",
+                "operationId": "replace-the-pinned-skills-of-a-chat",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateChatPinnedSkillsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ChatPinnedSkill"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/plugin-packs": {
             "get": {
                 "produces": [
@@ -26110,6 +26202,17 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatPinnedSkill": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/codersdk.ChatSkillSource"
+                }
+            }
+        },
         "codersdk.ChatPlanMode": {
             "type": "string",
             "enum": [
@@ -29242,6 +29345,7 @@ const docTemplate = `{
                 "fork-chat-todos",
                 "fork-nested-subagents",
                 "fork-plugin-packs",
+                "fork-pinned-skills",
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
                 "fork-workflows",
@@ -29291,6 +29395,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29313,6 +29418,7 @@ const docTemplate = `{
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
                 "ExperimentForkPluginPacks",
+                "ExperimentForkPinnedSkills",
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
                 "ExperimentForkWorkflows",
@@ -36455,6 +36561,17 @@ const docTemplate = `{
             "properties": {
                 "allow_users": {
                     "type": "boolean"
+                }
+            }
+        },
+        "codersdk.UpdateChatPinnedSkillsRequest": {
+            "type": "object",
+            "properties": {
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatPinnedSkill"
+                    }
                 }
             }
         },
