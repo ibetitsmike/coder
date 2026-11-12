@@ -13,6 +13,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -47,6 +48,11 @@ func TestForkPluginPackEnablement(t *testing.T) {
 
 		outsider, _ := coderdtest.CreateAnotherUser(t, client, dbgen.Organization(t, db, database.Organization{}).ID)
 		_, err = outsider.ForkAvailablePluginPacks(ctx, orgID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		// A site-wide role reads every organization but is not a member.
+		templateAdmin, _ := coderdtest.CreateAnotherUser(t, client, dbgen.Organization(t, db, database.Organization{}).ID, rbac.RoleTemplateAdmin())
+		_, err = templateAdmin.ForkAvailablePluginPacks(ctx, orgID)
 		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
 

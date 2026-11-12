@@ -39,8 +39,12 @@ func (api *API) forkAvailablePluginPacks(rw http.ResponseWriter, r *http.Request
 		return
 	}
 	// Members enable packs but cannot read the organization skill object
-	// packs reuse. ExtractOrganizationParam already required a read of the
-	// organization, and only names and commits leave this handler.
+	// packs reuse, so membership gates this projection instead. A
+	// site-wide role can read every organization without being a member.
+	if !api.isOrganizationMember(r, organization.ID) {
+		httpapi.ResourceNotFound(rw)
+		return
+	}
 	//nolint:gocritic // Member-safe projection of the organization's packs.
 	rows, err := fdb.GetPluginPacksByOrganizationID(dbauthz.AsSystemRestricted(ctx), organization.ID)
 	if err != nil {
