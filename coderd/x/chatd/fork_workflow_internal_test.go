@@ -432,7 +432,7 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
 		tools := f.server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
-		require.Len(t, tools, 1)
+		require.Len(t, tools, 2)
 		ctx := workspacesdk.WithToolCallID(chatdTestContext(t), uuid.New())
 		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"script_path":"/home/coder/w.star"}`})
 		require.NoError(t, err)
