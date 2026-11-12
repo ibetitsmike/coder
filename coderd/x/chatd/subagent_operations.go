@@ -256,6 +256,8 @@ type childSubagentChatOptions struct {
 	inheritedMCPServerIDs   []uuid.UUID
 	// customAgent is the custom agent definition, nil for built-in types.
 	customAgent *workspacesdk.AgentDefinition
+	// fork carries fork-only child chat overrides; nil keeps upstream behavior.
+	fork *forkChildChatOverrides
 }
 
 // resolveExploreToolSnapshot computes the child chat's inherited MCP
@@ -463,7 +465,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	if publisher == nil {
 		publisher = dbpubsub.NewInMemory()
 	}
-	result, err := p.createSubagentChatWithID(ctx, publisher, childChatID, parent, opts.customAgent, chatstate.CreateChatInput{
+	result, err := opts.forkCreate(ctx, p, publisher, childChatID, parent, chatstate.CreateChatInput{
 		OrganizationID:    parent.OrganizationID,
 		OwnerID:           parent.OwnerID,
 		WorkspaceID:       parent.WorkspaceID,
