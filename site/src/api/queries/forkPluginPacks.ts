@@ -14,12 +14,16 @@ import type {
 } from "#/api/typesGenerated";
 import { invalidateList, isNewer, isResponseLost } from "./forkListCache";
 
+/** The key prefix shared by every plugin pack query. */
+export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
+
 /**
- * Scopes the plugin pack cache to one organization. The pack mutations
- * invalidate every query under this key, and no other organization's.
+ * Scopes the plugin pack cache to one organization. It also prefixes the keys
+ * of the organization's projects' enabled pack lists, so the pack mutations
+ * invalidate those lists too, and no other organization's.
  */
 export const pluginPacksKey = (organizationId: string) =>
-	["chats", "fork-plugin-packs", organizationId] as const;
+	[...pluginPacksRootKey, organizationId] as const;
 
 /** Query options for the plugin packs installed in an organization. */
 export const pluginPacks = (organizationId: string) =>

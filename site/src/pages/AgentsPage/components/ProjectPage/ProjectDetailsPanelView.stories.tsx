@@ -246,6 +246,39 @@ export const AgentDefinitionsError: Story = {
 	},
 };
 
+export const WithPluginPacks: Story = {
+	args: {
+		pluginPacks: { count: 2, error: undefined, onOpen: fn() },
+	},
+};
+
+export const PluginPacksLoading: Story = {
+	args: {
+		pluginPacks: { count: undefined, error: undefined, onOpen: fn() },
+	},
+};
+
+export const PluginPacksError: Story = {
+	args: {
+		pluginPacks: {
+			count: undefined,
+			error: new Error("Failed to load plugin packs."),
+			onOpen: fn(),
+		},
+	},
+};
+
+/** A failed refetch keeps the cached count and flags it as stale. */
+export const PluginPacksRefetchError: Story = {
+	args: {
+		pluginPacks: {
+			count: 2,
+			error: new Error("Failed to load plugin packs."),
+			onOpen: fn(),
+		},
+	},
+};
+
 export const Unset: Story = {
 	args: { instructions: MockUnsetChatProjectInstructions },
 };
