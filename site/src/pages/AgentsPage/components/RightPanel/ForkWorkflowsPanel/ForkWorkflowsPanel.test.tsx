@@ -10,7 +10,6 @@ import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
 	MockChatWorkflowRunDetail,
-	MockForkWorkflowChatId,
 } from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
@@ -18,13 +17,14 @@ import {
 } from "#/testHelpers/renderHelpers";
 import { ForkWorkflowsPanel } from "./ForkWorkflowsPanel";
 
-const renderPanel = () => {
-	const chatPath = `/agents/${MockForkWorkflowChatId}`;
+// The panel remembers the open run per chat, so each test uses its own chat.
+const renderPanel = (chatId: string) => {
+	const chatPath = `/agents/${chatId}`;
 	const router = createMemoryRouter(
 		[
 			{
 				path: chatPath,
-				element: <ForkWorkflowsPanel chatId={MockForkWorkflowChatId} />,
+				element: <ForkWorkflowsPanel chatId={chatId} />,
 			},
 			{ path: "/agents/:chatId", element: null },
 		],
@@ -40,8 +40,10 @@ const renderPanel = () => {
 
 describe("ForkWorkflowsPanel", () => {
 	it("stops a running run after the user confirms", async () => {
+		const chatId = crypto.randomUUID();
 		let run: WorkflowRunDetail = {
 			...MockChatWorkflowRunDetail,
+			chat_id: chatId,
 			status: "running",
 			result: undefined,
 			finished_at: undefined,
@@ -58,7 +60,7 @@ describe("ForkWorkflowsPanel", () => {
 				run = { ...run, status: "stopped", error: "stopped by user" };
 				return run;
 			});
-		renderPanel();
+		renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(
@@ -68,17 +70,16 @@ describe("ForkWorkflowsPanel", () => {
 		expect(stopRun).not.toHaveBeenCalled();
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
-		expect(stopRun).toHaveBeenCalledWith(
-			MockForkWorkflowChatId,
-			MockChatWorkflowRunDetail.id,
-		);
+		expect(stopRun).toHaveBeenCalledWith(chatId, MockChatWorkflowRunDetail.id);
 		// The stop refreshes the run list, so its badge and counts update.
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {
+		const chatId = crypto.randomUUID();
 		const runningRun: WorkflowRunDetail = {
 			...MockChatWorkflowRunDetail,
+			chat_id: chatId,
 			status: "running",
 			result: undefined,
 			finished_at: undefined,
@@ -93,7 +94,7 @@ describe("ForkWorkflowsPanel", () => {
 			mockApiError({ message: "The workflow run already ended." }),
 		);
 		const toastError = vi.spyOn(toast, "error");
-		renderPanel();
+		renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(
@@ -112,21 +113,22 @@ describe("ForkWorkflowsPanel", () => {
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 
-	it("opens a run, then a step's child chat", async () => {
+	it("opens a run, then a step's child chat, and back again", async () => {
+		const chatId = crypto.randomUUID();
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
 			MockChatWorkflowRun,
 		]);
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
 			.mockResolvedValue(MockChatWorkflowRunDetail);
-		const router = renderPanel();
+		const router = renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
 		expect(getRun).toHaveBeenCalledWith(
-			MockForkWorkflowChatId,
+			chatId,
 			MockChatWorkflowRun.id,
 			expect.anything(),
 		);
@@ -136,5 +138,9 @@ describe("ForkWorkflowsPanel", () => {
 		expect(router.state.location.pathname).toBe(
 			`/agents/${MockChatWorkflowRunDetail.steps[1].id}`,
 		);
+
+		// Browser back remounts the panel on the run that was open.
+		await router.navigate(-1);
+		await screen.findByRole("button", { name: "All runs" });
 	});
 });
