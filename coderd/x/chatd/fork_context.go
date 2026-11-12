@@ -52,6 +52,12 @@ func (s *taskStarter) syncForkContext(
 	message, ok, err := s.server.todoSnapshotMessage(ctx, chat)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat todo snapshot", slog.F("chat_id", chat.ID), slog.Error(err))
+	} else if ok {
+		return s.commitForkContextMessage(ctx, machine, input, message)
+	}
+	message, ok, err = s.server.pinnedSkillsMessage(ctx, chat, history)
+	if err != nil {
+		s.server.logger.Warn(ctx, "failed to sync chat pinned skills", slog.F("chat_id", chat.ID), slog.Error(err))
 		return sessionStartResult{}, nil
 	}
 	if !ok {
@@ -120,21 +126,8 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
 	}
-	if currentTurnStepCount(promptRows) > 0 {
-		if lastActiveMessageRole(promptRows) == database.ChatMessageRoleAssistant {
-			return chatstate.Message{}, false, nil
-		}
-		// A step can commit some tool results while others, such as
-		// client-executed dynamic tools, are still pending. Providers reject a
-		// message between a tool call and its result, so wait until every call
-		// is resolved.
-		localCalls, dynamicCalls, _, err := unresolvedToolCallsFromHistory(promptRows, dynamicToolNamesFromChat(chat))
-		if err != nil {
-			return chatstate.Message{}, false, xerrors.Errorf("find unresolved tool calls: %w", err)
-		}
-		if len(localCalls) > 0 || len(dynamicCalls) > 0 {
-			return chatstate.Message{}, false, nil
-		}
+	if deferred, err := forkContextDeferred(chat, promptRows); err != nil || deferred {
+		return chatstate.Message{}, false, err
 	}
 	shown, found, err := promptTodoVersion(promptRows)
 	if err != nil {
@@ -160,11 +153,38 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	if err != nil {
 		return chatstate.Message{}, false, err
 	}
+	message, err := forkContextTextMessage(chat, text)
+	if err != nil {
+		return chatstate.Message{}, false, xerrors.Errorf("marshal todo snapshot: %w", err)
+	}
+	return message, true, nil
+}
+
+// forkContextDeferred reports whether a fork context message must wait. A
+// step can commit some tool results while others, such as client-executed
+// dynamic tools, are still pending, and providers reject a message between a
+// tool call and its result, so it waits until every call is resolved.
+func forkContextDeferred(chat database.Chat, promptRows []database.ChatMessage) (bool, error) {
+	if currentTurnStepCount(promptRows) == 0 {
+		return false, nil
+	}
+	if lastActiveMessageRole(promptRows) == database.ChatMessageRoleAssistant {
+		return true, nil
+	}
+	localCalls, dynamicCalls, _, err := unresolvedToolCallsFromHistory(promptRows, dynamicToolNamesFromChat(chat))
+	if err != nil {
+		return false, xerrors.Errorf("find unresolved tool calls: %w", err)
+	}
+	return len(localCalls) > 0 || len(dynamicCalls) > 0, nil
+}
+
+// forkContextTextMessage returns a model-only user message that holds text.
+func forkContextTextMessage(chat database.Chat, text string) (chatstate.Message, error) {
 	content, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
 		codersdk.ChatMessageText(text),
 	})
 	if err != nil {
-		return chatstate.Message{}, false, xerrors.Errorf("marshal todo snapshot: %w", err)
+		return chatstate.Message{}, err
 	}
 	return chatstate.Message{
 		Role:           database.ChatMessageRoleUser,
@@ -172,7 +192,7 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 		Visibility:     database.ChatMessageVisibilityModel,
 		ModelConfigID:  uuid.NullUUID{UUID: chat.LastModelConfigID, Valid: chat.LastModelConfigID != uuid.Nil},
 		ContentVersion: chatprompt.CurrentContentVersion,
-	}, true, nil
+	}, nil
 }
 
 // promptTodoVersion returns the version of the todo list the prompt last showed

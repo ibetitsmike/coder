@@ -177,6 +177,20 @@ func (mr *MockStoreMockRecorder) CountOrganizationChatWakeupRunsSince(ctx, arg a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountOrganizationChatWakeupRunsSince", reflect.TypeOf((*MockStore)(nil).CountOrganizationChatWakeupRunsSince), ctx, arg)
 }
 
+// DeleteChatPinnedSkills mocks base method.
+func (m *MockStore) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatPinnedSkills", ctx, chatID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatPinnedSkills indicates an expected call of DeleteChatPinnedSkills.
+func (mr *MockStoreMockRecorder) DeleteChatPinnedSkills(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatPinnedSkills", reflect.TypeOf((*MockStore)(nil).DeleteChatPinnedSkills), ctx, chatID)
+}
+
 // DeleteChatPluginPack mocks base method.
 func (m *MockStore) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
 	m.ctrl.T.Helper()
@@ -421,6 +435,21 @@ func (m *MockStore) GetChatOrganizationWakeupCaps(ctx context.Context, organizat
 func (mr *MockStoreMockRecorder) GetChatOrganizationWakeupCaps(ctx, organizationID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatOrganizationWakeupCaps", reflect.TypeOf((*MockStore)(nil).GetChatOrganizationWakeupCaps), ctx, organizationID)
+}
+
+// GetChatPinnedSkillsByChatID mocks base method.
+func (m *MockStore) GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatPinnedSkill, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatPinnedSkillsByChatID", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.ChatPinnedSkill)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatPinnedSkillsByChatID indicates an expected call of GetChatPinnedSkillsByChatID.
+func (mr *MockStoreMockRecorder) GetChatPinnedSkillsByChatID(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatPinnedSkillsByChatID", reflect.TypeOf((*MockStore)(nil).GetChatPinnedSkillsByChatID), ctx, chatID)
 }
 
 // GetChatSecretAnswersByChatID mocks base method.
@@ -826,6 +855,20 @@ func (m *MockStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb
 func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetUserAgentDefinitionByName), ctx, arg)
+}
+
+// InsertChatPinnedSkills mocks base method.
+func (m *MockStore) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatPinnedSkills", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertChatPinnedSkills indicates an expected call of InsertChatPinnedSkills.
+func (mr *MockStoreMockRecorder) InsertChatPinnedSkills(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatPinnedSkills", reflect.TypeOf((*MockStore)(nil).InsertChatPinnedSkills), ctx, arg)
 }
 
 // InsertChatPluginPack mocks base method.

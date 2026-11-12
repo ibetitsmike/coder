@@ -16,6 +16,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkSubagentIsolation,
 	ExperimentForkChatWakeups,
 	ExperimentForkPluginPacks,
+	ExperimentForkPinnedSkills,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -42,6 +43,10 @@ const ExperimentForkChatWakeups Experiment = "fork-chat-wakeups"
 // manifest-honored skills and agents, installed packs, and (in later PRs)
 // their rules and surfacing controls.
 const ExperimentForkPluginPacks Experiment = "fork-plugin-packs"
+
+// ExperimentForkPinnedSkills lets a user pin skills to a chat, so chatd puts
+// their bodies in the prompt of every turn until they are unpinned.
+const ExperimentForkPinnedSkills Experiment = "fork-pinned-skills"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

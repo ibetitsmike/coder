@@ -47,6 +47,21 @@ type forkQueryMetricsStore struct {
 
 var _ forkdb.Store = forkQueryMetricsStore{}
 
+func (f forkQueryMetricsStore) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
+	defer f.observe(ctx, "DeleteChatPinnedSkills", time.Now())
+	return f.s.DeleteChatPinnedSkills(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatPinnedSkill, error) {
+	defer f.observe(ctx, "GetChatPinnedSkillsByChatID", time.Now())
+	return f.s.GetChatPinnedSkillsByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
+	defer f.observe(ctx, "InsertChatPinnedSkills", time.Now())
+	return f.s.InsertChatPinnedSkills(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
 	defer f.observe(ctx, "DeleteChatPluginPack", time.Now())
 	return f.s.DeleteChatPluginPack(ctx, arg)
