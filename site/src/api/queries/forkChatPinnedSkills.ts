@@ -7,15 +7,13 @@ import {
 } from "#/api/forkChatPinnedSkills";
 import type { ChatPinnedSkill } from "#/api/typesGenerated";
 
-/** The query key of a chat's pinned skills. */
 export const chatPinnedSkillsKey = (chatId: string) =>
 	["chats", "fork-pinned-skills", chatId] as const;
 
-/** Query options for a chat's pinned skills. */
 export const chatPinnedSkills = (chatId: string) =>
 	queryOptions({
 		queryKey: chatPinnedSkillsKey(chatId),
-		queryFn: () => getChatPinnedSkills(chatId),
+		queryFn: ({ signal }) => getChatPinnedSkills(chatId, signal),
 	});
 
 /**

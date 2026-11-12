@@ -428,7 +428,11 @@ describe("ForkComposerSlot plugin packs", () => {
 });
 
 describe("ForkComposerSlot pinned skills", () => {
-	const docsPin: ChatPinnedSkill = { source: "personal", name: "docs" };
+	const mockDocsPin: ChatPinnedSkill = { source: "personal", name: "docs" };
+	const mockReviewerPin: ChatPinnedSkill = {
+		source: "personal",
+		name: "reviewer",
+	};
 
 	const mockPinnedSkillsOfChat = (pins: ChatPinnedSkill[]) => {
 		vi.spyOn(API.experimental, "getChat").mockResolvedValue(MockChat);
@@ -458,7 +462,7 @@ describe("ForkComposerSlot pinned skills", () => {
 
 	it("pins a skill from the picker", async () => {
 		const user = userEvent.setup();
-		const updatePins = mockPinnedSkillsOfChat([docsPin]);
+		const updatePins = mockPinnedSkillsOfChat([mockDocsPin]);
 
 		renderSlot(["fork-pinned-skills"]);
 		await user.click(
@@ -468,20 +472,19 @@ describe("ForkComposerSlot pinned skills", () => {
 			await screen.findByRole("option", { name: "/personal/reviewer" }),
 		);
 
-		await waitFor(() =>
-			expect(updatePins).toHaveBeenCalledWith(MockChat.id, {
-				skills: [docsPin, { source: "personal", name: "reviewer" }],
-			}),
-		);
+		await waitFor(() => expect(updatePins).toHaveBeenCalledTimes(1));
+		expect(updatePins).toHaveBeenCalledWith(MockChat.id, {
+			skills: [mockDocsPin, mockReviewerPin],
+		});
 	});
 
 	it("unpins a skill from its chip", async () => {
 		const user = userEvent.setup();
-		const updatePins = mockPinnedSkillsOfChat([docsPin]);
+		const updatePins = mockPinnedSkillsOfChat([mockDocsPin, mockReviewerPin]);
 
 		renderSlot(["fork-pinned-skills"]);
 		await user.click(
-			await screen.findByRole("button", { name: "Pinned skills, 1 pinned" }),
+			await screen.findByRole("button", { name: "Pinned skills, 2 pinned" }),
 		);
 		await user.click(
 			await screen.findByRole("button", {
@@ -489,8 +492,32 @@ describe("ForkComposerSlot pinned skills", () => {
 			}),
 		);
 
-		await waitFor(() =>
-			expect(updatePins).toHaveBeenCalledWith(MockChat.id, { skills: [] }),
+		await waitFor(() => expect(updatePins).toHaveBeenCalledTimes(1));
+		expect(updatePins).toHaveBeenCalledWith(MockChat.id, {
+			skills: [mockReviewerPin],
+		});
+	});
+
+	it("disables chip removal while a change is saving", async () => {
+		const user = userEvent.setup();
+		const updatePins = mockPinnedSkillsOfChat([mockDocsPin, mockReviewerPin]);
+		updatePins.mockReturnValue(new Promise(() => {}));
+
+		renderSlot(["fork-pinned-skills"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Pinned skills, 2 pinned" }),
 		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Remove skill /personal/docs",
+			}),
+		);
+
+		const removeReviewer = screen.getByRole("button", {
+			name: "Remove skill /personal/reviewer",
+		});
+		await waitFor(() => expect(removeReviewer).toBeDisabled());
+		await user.click(removeReviewer);
+		expect(updatePins).toHaveBeenCalledTimes(1);
 	});
 });

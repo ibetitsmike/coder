@@ -1,6 +1,6 @@
 // This file is fork code: it is the only place fork features add composer
 // controls. Upstream's AgentChatInput.tsx renders ForkComposerSlot once and
-// only passes composer state to it, so an upstream sync of that file stays
+// only forwards values it already has in scope, so an upstream sync stays
 // clean.
 
 import type React from "react";
@@ -14,7 +14,7 @@ import { ForkPluginPacksPill } from "./ForkPluginPacksPill";
 type ForkComposerSlotProps = {
 	chatId?: string;
 	isDisabled: boolean;
-	workspaceSkills?: readonly SkillMetadata[];
+	workspaceSkills: readonly SkillMetadata[] | undefined;
 };
 
 /**

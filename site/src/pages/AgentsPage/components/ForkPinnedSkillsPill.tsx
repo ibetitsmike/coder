@@ -34,6 +34,7 @@ import { toast } from "#/components/Toaster/toast";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { getSkillAlias, type SkillSourceList } from "../utils/skillAliases";
 import { activeOrganizationSkills } from "../utils/skills";
+import { canManageChat } from "./ChatActionsMenuItems";
 import { EditableSkillChip, SkillChip } from "./ChatMessageInput/SkillChip";
 import { MAX_SKILL_INVOCATIONS_PER_MESSAGE } from "./ChatMessageInput/SkillInvocationNode";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
@@ -67,92 +68,134 @@ export const ForkPinnedSkillsPill: React.FC<ForkPinnedSkillsPillProps> = ({
 	});
 	const pins = pinsQuery.data;
 	const editableChat =
-		chatQuery.data?.owner_id === user.id ? chatQuery.data : undefined;
-	// Each request replaces the whole list, so a second one sent before the
-	// first settles would drop the first change.
-	const savePins = (next: readonly ChatPinnedSkill[]) => {
-		if (!updateMutation.isPending) {
-			updateMutation.mutate(next);
-		}
-	};
+		chatQuery.data && canManageChat(chatQuery.data, user.id)
+			? chatQuery.data
+			: undefined;
 
 	return (
-		<ComposerPillPopover
-			label={pins ? `Pinned skills, ${pins.length} pinned` : "Pinned skills"}
-			heading="Pinned skills"
-			trigger={
-				<>
-					<PinIcon
-						aria-hidden="true"
-						className="size-3.5 shrink-0 text-content-secondary"
-					/>
-					{pins && pins.length > 0 && (
-						<span className="text-content-secondary tabular-nums">
-							{pins.length}
-						</span>
-					)}
-				</>
+		<ForkPinnedSkillsPillView
+			pins={pins}
+			error={pinsQuery.error}
+			isRetrying={pinsQuery.isFetching}
+			onRetry={() => void pinsQuery.refetch()}
+			canEdit={Boolean(editableChat)}
+			isPending={updateMutation.isPending}
+			onUnpin={(pin) =>
+				updateMutation.mutate(pins?.filter((p) => !isSamePin(p, pin)) ?? [])
 			}
 		>
-			<p className="mb-3 mt-1 text-content-secondary">
-				Pinned skills apply to every message in this chat until they are
-				unpinned.
-			</p>
-			{pinsQuery.error ? (
-				<ErrorAlert
-					error={pinsQuery.error}
-					actions={
-						<RetryButton
-							isRetrying={pinsQuery.isFetching}
-							onRetry={() => void pinsQuery.refetch()}
-						/>
+			{editableChat && pins && (
+				<PinnableSkillList
+					chat={editableChat}
+					workspaceSkills={workspaceSkills}
+					pins={pins}
+					disabled={updateMutation.isPending}
+					onToggle={(skill, pinned) =>
+						updateMutation.mutate(
+							pinned
+								? [...pins, skill]
+								: pins.filter((p) => !isSamePin(p, skill)),
+						)
 					}
 				/>
-			) : !pins ? (
-				<Loader />
-			) : (
-				<>
-					{pins.length === 0 ? (
-						<p className="m-0 text-content-secondary">No skills are pinned.</p>
-					) : (
-						<ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-							{pins.map((pin) => (
-								<li key={getSkillAlias(pin.source, pin.name)}>
-									{editableChat ? (
-										<EditableSkillChip
-											source={pin.source}
-											name={pin.name}
-											data-selected={false}
-											onRemove={() =>
-												savePins(pins.filter((p) => !isSamePin(p, pin)))
-											}
-										/>
-									) : (
-										<SkillChip source={pin.source} name={pin.name} />
-									)}
-								</li>
-							))}
-						</ul>
-					)}
-					{editableChat && (
-						<PinnableSkillList
-							chat={editableChat}
-							workspaceSkills={workspaceSkills}
-							pins={pins}
-							disabled={updateMutation.isPending}
-							onToggle={(skill, pinned) =>
-								savePins(
-									pinned
-										? [...pins, skill]
-										: pins.filter((p) => !isSamePin(p, skill)),
-								)
-							}
-						/>
-					)}
-				</>
 			)}
-		</ComposerPillPopover>
+		</ForkPinnedSkillsPillView>
 	);
+};
+
+type ForkPinnedSkillsPillViewProps = {
+	/** `undefined` while the pins load or after loading fails. */
+	pins: readonly ChatPinnedSkill[] | undefined;
+	error: unknown;
+	isRetrying: boolean;
+	onRetry: () => void;
+	canEdit: boolean;
+	/**
+	 * True while a change is saving. Each change replaces the whole list, so
+	 * the next one waits for it.
+	 */
+	isPending: boolean;
+	onUnpin: (pin: ChatPinnedSkill) => void;
+	/** The skill picker, shown below the pins. */
+	children?: React.ReactNode;
+};
+
+/**
+ * The composer pill for a chat's pinned skills. The popover lists the pins
+ * as chips, removable when `canEdit`, above `children`.
+ */
+export const ForkPinnedSkillsPillView: React.FC<
+	ForkPinnedSkillsPillViewProps
+> = ({
+	pins,
+	error,
+	isRetrying,
+	onRetry,
+	canEdit,
+	isPending,
+	onUnpin,
+	children,
+}) => (
+	<ComposerPillPopover
+		label={pins ? `Pinned skills, ${pins.length} pinned` : "Pinned skills"}
+		heading="Pinned skills"
+		trigger={
+			<>
+				<PinIcon
+					aria-hidden="true"
+					className="size-3.5 shrink-0 text-content-secondary"
+				/>
+				{pins && pins.length > 0 && (
+					<span className="text-content-secondary tabular-nums">
+						{pins.length}
+					</span>
+				)}
+			</>
+		}
+	>
+		<p className="mb-3 mt-1 text-content-secondary">
+			Pinned skills apply to every message in this chat until they are unpinned.
+		</p>
+		{error ? (
+			<ErrorAlert
+				error={error}
+				actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+			/>
+		) : !pins ? (
+			<Loader />
+		) : (
+			<>
+				{pins.length === 0 ? (
+					<p className="m-0 text-content-secondary">No skills are pinned.</p>
+				) : (
+					<ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+						{pins.map((pin) => (
+							<li key={getSkillAlias(pin.source, pin.name)}>
+								{canEdit ? (
+									<EditableSkillChip
+										source={pin.source}
+										name={pin.name}
+										data-selected={false}
+										disabled={isPending}
+										onRemove={() => onUnpin(pin)}
+									/>
+								) : (
+									<SkillChip source={pin.source} name={pin.name} />
+								)}
+							</li>
+						))}
+					</ul>
+				)}
+				{children}
+			</>
+		)}
+	</ComposerPillPopover>
+);
+
+type SkillSourceQuery = {
+	error: unknown;
+	isFetching: boolean;
+	refetch: () => unknown;
 };
 
 type PinnableSkillListProps = {
@@ -163,10 +206,7 @@ type PinnableSkillListProps = {
 	onToggle: (skill: ChatPinnedSkill, pinned: boolean) => void;
 };
 
-/**
- * Lists the skills the chat's turns can load. The chat page already runs
- * these queries, so opening the list rarely fetches anything new.
- */
+/** Loads the skills the chat's turns can use and lists them for pinning. */
 const PinnableSkillList: React.FC<PinnableSkillListProps> = ({
 	chat,
 	workspaceSkills,
@@ -177,6 +217,8 @@ const PinnableSkillList: React.FC<PinnableSkillListProps> = ({
 	const organizationId = chat.organization_id;
 	const projectId = chat.project_id;
 	const hasProject = Boolean(projectId);
+	// The chat page reads these keys with the same staleTime, so opening the
+	// picker reuses its cache.
 	const personalQuery = useQuery({ ...userSkills(), staleTime: 60_000 });
 	const organizationSkillsQuery = useQuery({
 		...organizationSkills(organizationId),
@@ -195,47 +237,110 @@ const PinnableSkillList: React.FC<PinnableSkillListProps> = ({
 		...chatProject(projectId),
 		enabled: hasProject,
 	});
-	const skillLists: SkillSourceList<SkillMetadata>[] = [
+	const sources: {
+		list: SkillSourceList<SkillMetadata>;
+		queries: readonly SkillSourceQuery[];
+	}[] = [
 		{
-			source: "personal",
-			skills: personalQuery.data?.filter((skill) => skill.enabled),
+			list: {
+				source: "personal",
+				skills: personalQuery.data?.filter((skill) => skill.enabled),
+			},
+			queries: [personalQuery],
 		},
 		{
-			source: "org",
-			skills: activeOrganizationSkills(
-				organizationSkillsQuery.data,
-				organizationPreferencesQuery.data,
-			),
+			list: {
+				source: "org",
+				skills: activeOrganizationSkills(
+					organizationSkillsQuery.data,
+					organizationPreferencesQuery.data,
+				),
+			},
+			queries: [organizationSkillsQuery, organizationPreferencesQuery],
 		},
 		{
-			source: "project",
-			skills: hasProject
-				? usableChatProjectSkills(
-						chatProjectUsability(projectQuery, projectSkillsQuery.error),
-						projectSkillsQuery.data?.filter((skill) => skill.enabled),
-					)
-				: [],
+			list: {
+				source: "project",
+				skills: hasProject
+					? usableChatProjectSkills(
+							chatProjectUsability(projectQuery, projectSkillsQuery.error),
+							projectSkillsQuery.data?.filter((skill) => skill.enabled),
+						)
+					: [],
+			},
+			queries: hasProject ? [projectSkillsQuery, projectQuery] : [],
 		},
-		{ source: "workspace", skills: workspaceSkills },
+		{ list: { source: "workspace", skills: workspaceSkills }, queries: [] },
 	];
+	const failedQueries = sources
+		.filter(({ list }) => list.skills === undefined)
+		.flatMap(({ queries }) => queries)
+		.filter((query) => Boolean(query.error));
+
+	return (
+		<ForkPinnableSkillListView
+			skillLists={sources.map(({ list }) => list)}
+			pins={pins}
+			disabled={disabled}
+			error={failedQueries[0]?.error}
+			isRetrying={failedQueries.some((query) => query.isFetching)}
+			onRetry={() => {
+				for (const query of failedQueries) {
+					void query.refetch();
+				}
+			}}
+			onToggle={onToggle}
+		/>
+	);
+};
+
+type ForkPinnableSkillListViewProps = {
+	/** A list whose `skills` is `undefined` has not loaded. */
+	skillLists: readonly SkillSourceList<SkillMetadata>[];
+	pins: readonly ChatPinnedSkill[];
+	disabled: boolean;
+	/** The error of a source that has not loaded, if any. */
+	error: unknown;
+	isRetrying: boolean;
+	onRetry: () => void;
+	onToggle: (skill: ChatPinnedSkill, pinned: boolean) => void;
+};
+
+/**
+ * A searchable list of skills, where selecting one pins or unpins it. Only
+ * pinned skills stay selectable once the chat has the most pins it can hold.
+ */
+export const ForkPinnableSkillListView: React.FC<
+	ForkPinnableSkillListViewProps
+> = ({ skillLists, pins, disabled, error, isRetrying, onRetry, onToggle }) => {
 	const isUnresolved = skillLists.some((list) => list.skills === undefined);
-	const isFetching =
-		personalQuery.isFetching ||
-		organizationSkillsQuery.isFetching ||
-		organizationPreferencesQuery.isFetching ||
-		projectSkillsQuery.isFetching ||
-		projectQuery.isFetching;
+	const skillCount = skillLists.reduce(
+		(count, list) => count + (list.skills?.length ?? 0),
+		0,
+	);
 	const isFull = pins.length >= MAX_SKILL_INVOCATIONS_PER_MESSAGE;
 
 	return (
 		<div className="mt-3 flex flex-col gap-2">
+			{Boolean(error) && (
+				<ErrorAlert
+					error={error}
+					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
+				/>
+			)}
 			<Command className="rounded-md border border-solid border-border">
 				<CommandInput
 					aria-label="Search skills to pin"
 					placeholder="Search skills to pin"
 				/>
 				<CommandList className="max-h-56">
-					{!isUnresolved && <CommandEmpty>No skills found.</CommandEmpty>}
+					{!isUnresolved && (
+						<CommandEmpty>
+							{skillCount === 0
+								? "No skills available to pin."
+								: "No skills found."}
+						</CommandEmpty>
+					)}
 					{skillLists.flatMap(({ source, skills }) =>
 						(skills ?? []).map((skill) => {
 							const alias = getSkillAlias(source, skill.name);
@@ -267,12 +372,8 @@ const PinnableSkillList: React.FC<PinnableSkillListProps> = ({
 					)}
 				</CommandList>
 			</Command>
-			{isUnresolved && (
-				<p className="m-0 text-content-secondary">
-					{isFetching
-						? "Loading skills..."
-						: "Some skills could not be loaded."}
-				</p>
+			{isUnresolved && !error && (
+				<p className="m-0 text-content-secondary">Loading skills...</p>
 			)}
 			{isFull && (
 				<p className="m-0 text-content-secondary">

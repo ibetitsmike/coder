@@ -6,12 +6,13 @@ import type {
 	UpdateChatPinnedSkillsRequest,
 } from "./typesGenerated";
 
-/** Lists the skills pinned to the chat. */
 export const getChatPinnedSkills = async (
 	chatId: string,
+	signal?: AbortSignal,
 ): Promise<ChatPinnedSkill[]> => {
 	const response = await API.getAxiosInstance().get<ChatPinnedSkill[]>(
 		`/api/v2/chats/fork/${chatId}/pinned-skills`,
+		{ signal },
 	);
 	return response.data;
 };
