@@ -42,13 +42,13 @@ const invalidatePluginPacks = (
 export const cachedPluginPacks = (
 	queryClient: QueryClient,
 	organizationId: string,
-) => queryClient.getQueryData(pluginPacks(organizationId).queryKey);
+) => queryClient.getQueryData<ForkPluginPack[]>(pluginPacksKey(organizationId));
 
 /**
  * Whether the cached pack list no longer lists the pack. False when the list
- * is not loaded.
+ * is not loaded, so it never confirms that the pack still exists on the server.
  */
-export const isPluginPackGone = (
+export const isPluginPackAbsentFromCache = (
 	queryClient: QueryClient,
 	organizationId: string,
 	packId: string,
@@ -131,7 +131,11 @@ const withPluginPack = (packs: ForkPluginPack[], pack: ForkPluginPack) => {
 		: [...packs.slice(0, at), row, ...packs.slice(at)];
 };
 
-/** Installs a pack and caches it, so a failed refetch cannot hide it. */
+/**
+ * Installs a pack and caches it, so a failed refetch cannot hide it. When the
+ * response is lost, the mutation settles only after the list refetch
+ * completes, so the caller can reconcile against the refetched list.
+ */
 export const createPluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -142,15 +146,20 @@ export const createPluginPackMutation = (
 		// An unloaded list still gets the pack, so a failed first load cannot
 		// hide it. A refetch replaces the one-pack list with the full list.
 		onSuccess: (pack) => {
-			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
-				withPluginPack(packs ?? [], pack),
+			queryClient.setQueryData<ForkPluginPack[]>(
+				pluginPacksKey(organizationId),
+				(packs) => withPluginPack(packs ?? [], pack),
 			);
 		},
 		onSettled: (_data, error) =>
 			invalidatePluginPacks(queryClient, organizationId, isResponseLost(error)),
 	});
 
-/** Moves a pack to the latest commit of its ref and caches the result. */
+/**
+ * Moves a pack to the latest commit of its ref and caches the result. When the
+ * response is lost, the mutation settles only after the list refetch
+ * completes, so the caller can reconcile against the refetched list.
+ */
 export const updatePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -160,8 +169,8 @@ export const updatePluginPackMutation = (
 			updatePluginPack(organizationId, pack.id, {}),
 		// An unloaded list stays unloaded, because one pack is not a list.
 		onSuccess: (updated) => {
-			queryClient.setQueryData(
-				pluginPacks(organizationId).queryKey,
+			queryClient.setQueryData<ForkPluginPack[]>(
+				pluginPacksKey(organizationId),
 				(packs) => packs && withPluginPack(packs, updated),
 			);
 		},
@@ -169,7 +178,11 @@ export const updatePluginPackMutation = (
 			invalidatePluginPacks(queryClient, organizationId, isResponseLost(error)),
 	});
 
-/** Deletes a pack and removes it from the cached list. */
+/**
+ * Deletes a pack and removes it from the cached list. When the response is
+ * lost or the server reports the pack missing, the mutation settles only after
+ * the list refetch completes, so the caller can check whether the pack is gone.
+ */
 export const deletePluginPackMutation = (
 	queryClient: QueryClient,
 	organizationId: string,
@@ -177,8 +190,9 @@ export const deletePluginPackMutation = (
 	mutationOptions({
 		mutationFn: (packId: string) => deletePluginPack(organizationId, packId),
 		onSuccess: (_data, packId) => {
-			queryClient.setQueryData(pluginPacks(organizationId).queryKey, (packs) =>
-				packs?.filter((pack) => pack.id !== packId),
+			queryClient.setQueryData<ForkPluginPack[]>(
+				pluginPacksKey(organizationId),
+				(packs) => packs?.filter((pack) => pack.id !== packId),
 			);
 		},
 		onSettled: (_data, error) =>
