@@ -57,8 +57,8 @@ describe("forkWorkflowStepProgress", () => {
 
 describe("forkWorkflowRunStatusMeta", () => {
 	it("shows a status it does not know as a neutral badge", () => {
-		expect(forkWorkflowRunStatusMeta("stopped")).toEqual({
-			label: "Stopped",
+		expect(forkWorkflowRunStatusMeta("queued")).toEqual({
+			label: "Queued",
 			tone: "muted",
 		});
 	});
