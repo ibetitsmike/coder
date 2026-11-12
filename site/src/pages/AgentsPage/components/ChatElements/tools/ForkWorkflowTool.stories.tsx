@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent, within } from "storybook/test";
+import { spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
+import { API } from "#/api/api";
 import {
+	MockChatWorkflowRunDetail,
 	MockForkWorkflowArgs,
+	MockForkWorkflowChatId,
 	MockForkWorkflowCompletedResult,
 	MockForkWorkflowFailedResult,
 	MockForkWorkflowRunId,
@@ -51,6 +54,17 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 	);
 };
 
+const mockStoppedResult = {
+	...MockForkWorkflowRunningResult,
+	status: "stopped",
+	error: "stopped by user",
+	steps: MockForkWorkflowRunningResult.steps.map((step, index) =>
+		index === 0
+			? step
+			: { ...step, status: "failed", error: "stopped by user" },
+	),
+};
+
 const mockRunWorkflowArgs = {
 	script: MockForkWorkflowScript,
 	args: MockForkWorkflowArgs,
@@ -90,6 +104,44 @@ export const Resumed: Story = {
 export const StillRunning: Story = {
 	args: { result: MockForkWorkflowRunningResult },
 	play: expand,
+};
+
+export const Stopped: Story = {
+	args: { result: mockStoppedResult },
+	play: expand,
+};
+
+export const Interrupted: Story = {
+	args: {
+		result: { ...MockForkWorkflowRunningResult, status: "interrupted" },
+	},
+	play: expand,
+};
+
+/** A run that was running when the tool returned shows its current state. */
+export const StartedThenCompleted: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		reactRouter: reactRouterParameters({
+			location: { pathParams: { agentId: MockForkWorkflowChatId } },
+			routing: { path: "/agents/:agentId" },
+		}),
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+	},
+	play: async (context) => {
+		await within(context.canvasElement).findByRole("button", {
+			name: /workflow completed/i,
+		});
+		await expand(context);
+	},
 };
 
 export const Completed: Story = { play: expand };

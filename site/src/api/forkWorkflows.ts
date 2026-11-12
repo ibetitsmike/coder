@@ -28,3 +28,14 @@ export const getChatWorkflowRun = async (
 	);
 	return response.data;
 };
+
+/** Stops a running workflow run and returns the run as it ended. */
+export const stopChatWorkflowRun = async (
+	chatId: string,
+	runId: string,
+): Promise<WorkflowRunDetail> => {
+	const response = await API.getAxiosInstance().post<WorkflowRunDetail>(
+		`/api/v2/chats/fork/${chatId}/workflow-runs/${runId}/stop`,
+	);
+	return response.data;
+};

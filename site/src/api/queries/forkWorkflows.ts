@@ -1,5 +1,10 @@
-import { queryOptions } from "react-query";
-import { getChatWorkflowRun, getChatWorkflowRuns } from "#/api/forkWorkflows";
+import { mutationOptions, type QueryClient, queryOptions } from "react-query";
+import {
+	getChatWorkflowRun,
+	getChatWorkflowRuns,
+	stopChatWorkflowRun,
+} from "#/api/forkWorkflows";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 
 /** Also prefixes each run's key, so invalidating it refetches the details. */
 export const chatWorkflowRunsKey = (chatId: string) =>
@@ -15,10 +20,29 @@ export const chatWorkflowRuns = (chatId: string) =>
 			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
 	});
 
+const chatWorkflowRunKey = (chatId: string, runId: string) =>
+	[...chatWorkflowRunsKey(chatId), runId] as const;
+
 export const chatWorkflowRun = (chatId: string, runId: string) =>
 	queryOptions({
-		queryKey: [...chatWorkflowRunsKey(chatId), runId],
+		queryKey: chatWorkflowRunKey(chatId, runId),
 		queryFn: ({ signal }) => getChatWorkflowRun(chatId, runId, signal),
 		refetchInterval: ({ state }) =>
 			state.data?.status === "running" ? 3_000 : false,
+	});
+
+/** Stops a run, then refreshes the chat's runs and their details. */
+export const stopWorkflowRun = (
+	queryClient: QueryClient,
+	chatId: string,
+	runId: string,
+) =>
+	mutationOptions({
+		mutationFn: () => stopChatWorkflowRun(chatId, runId),
+		onSuccess: (run: WorkflowRunDetail) => {
+			queryClient.setQueryData(chatWorkflowRunKey(chatId, runId), run);
+		},
+		// A 409 means the run is no longer stoppable, so refetch either way.
+		onSettled: () =>
+			queryClient.invalidateQueries({ queryKey: chatWorkflowRunsKey(chatId) }),
 	});

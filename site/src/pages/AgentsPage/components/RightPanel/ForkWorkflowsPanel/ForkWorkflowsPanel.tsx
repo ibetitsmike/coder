@@ -10,6 +10,10 @@ import { useTabPanelState } from "../../ChatsSidebar/tabs/SidebarTabView";
 import { ForkWorkflowRunDetail } from "./ForkWorkflowRunDetail";
 import { ForkWorkflowRunList } from "./ForkWorkflowRunList";
 
+// The panel remounts when the user opens a step's child chat, so the open
+// run is kept per chat for the session: navigating back shows it again.
+const openRunIdByChat = new Map<string, string>();
+
 type ForkWorkflowsPanelProps = {
 	chatId: string;
 };
@@ -19,7 +23,17 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 	chatId,
 }) => {
 	const { isActive, isPanelOpen } = useTabPanelState();
-	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+	const [selectedRunId, setSelectedRunId] = useState(
+		() => openRunIdByChat.get(chatId) ?? null,
+	);
+	const selectRun = (runId: string | null) => {
+		if (runId) {
+			openRunIdByChat.set(chatId, runId);
+		} else {
+			openRunIdByChat.delete(chatId);
+		}
+		setSelectedRunId(runId);
+	};
 	const runsQuery = useQuery(chatWorkflowRuns(chatId));
 
 	return (
@@ -34,13 +48,13 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 						chatId={chatId}
 						runId={selectedRunId}
 						isVisible={isActive && isPanelOpen}
-						onBack={() => setSelectedRunId(null)}
+						onBack={() => selectRun(null)}
 					/>
 				) : (
 					<ForkWorkflowRunList
 						runs={runsQuery.data}
 						error={runsQuery.error}
-						onSelectRun={setSelectedRunId}
+						onSelectRun={selectRun}
 					/>
 				)}
 			</div>

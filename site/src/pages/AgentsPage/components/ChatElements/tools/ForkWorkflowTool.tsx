@@ -2,11 +2,15 @@
 // tools of the fork-workflows experiment.
 
 import type React from "react";
+import { useQuery } from "react-query";
+import { useParams } from "react-router";
+import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
 	type ForkWorkflowRunSnapshot,
+	forkWorkflowRunDetailSnapshot,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
 	formatForkWorkflowValue,
@@ -37,6 +41,10 @@ const toolLabel = (
 			return "Workflow completed";
 		case "failed":
 			return "Workflow failed";
+		case "stopped":
+			return "Workflow stopped";
+		case "interrupted":
+			return "Workflow interrupted";
 		default:
 			return "Workflow";
 	}
@@ -47,11 +55,59 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	fallback: Fallback,
 	...props
 }) => {
-	const { name, status, isError } = props;
-	const snapshot = isError ? null : parseForkWorkflowRunSnapshot(props.result);
-	if (!isError && !snapshot && status !== "running") {
+	const { agentId } = useParams();
+	const snapshot = props.isError
+		? null
+		: parseForkWorkflowRunSnapshot(props.result);
+	if (!props.isError && !snapshot && props.status !== "running") {
 		return <Fallback {...props} />;
 	}
+	if (agentId && snapshot?.status === "running") {
+		return (
+			<LiveForkWorkflowTool
+				{...props}
+				chatId={agentId}
+				resultSnapshot={snapshot}
+			/>
+		);
+	}
+	return <ForkWorkflowTool {...props} snapshot={snapshot} />;
+};
+
+type ForkWorkflowToolProps = Omit<ForkToolRendererProps, "fallback"> & {
+	snapshot: ForkWorkflowRunSnapshot | null;
+};
+
+type LiveForkWorkflowToolProps = Omit<ForkWorkflowToolProps, "snapshot"> & {
+	chatId: string;
+	resultSnapshot: ForkWorkflowRunSnapshot;
+};
+
+const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
+	chatId,
+	resultSnapshot,
+	...props
+}) => {
+	// Shares the Workflows panel's cache. A failed request (403 or 404 for a
+	// viewer who cannot read runs) keeps the tool result, as while loading.
+	const runQuery = useQuery(chatWorkflowRun(chatId, resultSnapshot.runId));
+	return (
+		<ForkWorkflowTool
+			{...props}
+			snapshot={
+				runQuery.data
+					? forkWorkflowRunDetailSnapshot(runQuery.data)
+					: resultSnapshot
+			}
+		/>
+	);
+};
+
+const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
+	snapshot,
+	...props
+}) => {
+	const { name, status, isError } = props;
 	const args = parseArgs(props.args);
 	const isRunWorkflow = name === "run_workflow";
 	const scriptPath = isRunWorkflow ? asString(args?.script_path).trim() : "";
