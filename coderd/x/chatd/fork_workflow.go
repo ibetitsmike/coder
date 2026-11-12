@@ -605,6 +605,10 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 		}
 		if !r.p.clock.Now().Before(deadline) {
 			r.failStep(step, "the step ran longer than "+workflowStepTimeout.String())
+			// Nobody reads the child's value now, so stop it instead of
+			// leaving it running to its own end: interruptOpenSteps no
+			// longer sees a failed step.
+			r.interruptStepChild(ctx, step)
 			return nil
 		}
 		_, _, err := r.p.awaitSubagentCompletion(ctx, r.parent.ID, step.chatID, defaultSubagentWaitTimeout)
@@ -669,20 +673,26 @@ func (r *workflowRun) interruptOpenSteps(ctx context.Context) {
 	}
 	r.mu.Unlock()
 	for _, step := range open {
-		child, err := r.p.db.GetChatByID(ctx, step.chatID)
-		if err != nil {
-			r.p.logger.Warn(ctx, "load workflow step chat",
-				slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
-			continue
-		}
-		if child.Status == database.ChatStatusWaiting || child.Status == database.ChatStatusError ||
-			child.Status == database.ChatStatusPaused {
-			continue // nothing runs in the child
-		}
-		if _, _, err := r.p.InterruptChat(ctx, child); err != nil {
-			r.p.logger.Warn(ctx, "interrupt workflow step chat",
-				slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
-		}
+		r.interruptStepChild(ctx, step)
+	}
+}
+
+// interruptStepChild stops the child chat of a step the run no longer waits
+// for. InterruptChat cascades to the child's own descendants.
+func (r *workflowRun) interruptStepChild(ctx context.Context, step *workflowStep) {
+	child, err := r.p.db.GetChatByID(ctx, step.chatID)
+	if err != nil {
+		r.p.logger.Warn(ctx, "load workflow step chat",
+			slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
+		return
+	}
+	if child.Status == database.ChatStatusWaiting || child.Status == database.ChatStatusError ||
+		child.Status == database.ChatStatusPaused {
+		return // nothing runs in the child
+	}
+	if _, _, err := r.p.InterruptChat(ctx, child); err != nil {
+		r.p.logger.Warn(ctx, "interrupt workflow step chat",
+			slog.F("chat_id", step.chatID), slog.F("run_id", r.id), slog.Error(err))
 	}
 }
 

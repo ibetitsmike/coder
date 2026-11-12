@@ -7,6 +7,7 @@ package chatd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -76,7 +77,10 @@ func (w *workflowProgram) run(ctx context.Context, r *workflowRun) (json.RawMess
 	if err != nil {
 		return nil, scriptError(err)
 	}
-	if err := workflowValueBudget(out, maxResultBytes/6); err != nil {
+	if err := workflowValueBudget(out, maxResultBytes); err != nil {
+		if errors.Is(err, errWorkflowValueTooLarge) {
+			err = xerrors.Errorf("the result encodes to more than %d bytes; at most %d bytes are allowed", maxResultBytes, maxResultBytes)
+		}
 		return nil, xerrors.Errorf("main(args) must return a JSON value: %w", err)
 	}
 	raw, err := jsonEncode(thread, out)
@@ -117,27 +121,47 @@ func jsonEncode(thread *starlark.Thread, value starlark.Value) (string, error) {
 // cannot be built without recursion, which the file options disable.
 const maxWorkflowValueDepth = 64
 
-// workflowValueBudget fails before jsonEncode runs when the JSON encoding of
-// value could exceed budget. A script builds a huge value with few execution
-// steps, for example by doubling a string, so the size error must not wait
-// for json.encode to allocate the encoded copy. The walk counts string bytes
-// with a 6x headroom (every byte can escape to \uXXXX), so a value that
-// passes always encodes to at most budget bytes.
+var (
+	errWorkflowValueTooLarge = xerrors.New("value too large")
+	errWorkflowValueTooDeep  = xerrors.New("the value nests too deeply or is cyclic")
+)
+
+// workflowValueBudget fails when the JSON encoding of value could exceed
+// budget. A script builds a huge value with few execution steps, for
+// example by doubling a string, so the size error must not wait for
+// json.encode to allocate the encoded copy. The walk never under-counts:
+// a string byte that needs escaping counts 6, so a value that passes
+// always encodes to at most budget bytes.
 func workflowValueBudget(value starlark.Value, budget int) error {
-	const what = "the value is larger than %d bytes; at most %d bytes are allowed"
-	if _, err := workflowValueCost(value, budget, 0); err != nil {
-		return xerrors.Errorf(what, budget, budget)
-	}
-	return nil
+	_, err := workflowValueCost(value, budget, 0)
+	return err
 }
 
-var errWorkflowValueTooLarge = xerrors.New("value too large")
+// encodedStringSize returns the size of the JSON string that the json
+// module writes for s. The module quotes printable ASCII with
+// strconv.AppendQuote and hands everything else to json.Marshal, so a
+// byte that escapes costs at most six output bytes (\uXXXX) and any other
+// byte costs one.
+func encodedStringSize(s string, budget int) int {
+	size := 2
+	for i := 0; i < len(s); i++ {
+		if b := s[i]; b < 0x20 || b == '"' || b == '\\' || b == '<' || b == '>' || b == '&' || b >= 0x80 {
+			size += 6
+		} else {
+			size++
+		}
+		if size > budget {
+			return size
+		}
+	}
+	return size
+}
 
 // workflowValueCost estimates the encoded size of value and fails when the
 // running total passes budget.
 func workflowValueCost(value starlark.Value, budget int, depth int) (int, error) {
 	if depth > maxWorkflowValueDepth {
-		return 0, xerrors.New("the value nests too deeply or is cyclic")
+		return 0, errWorkflowValueTooDeep
 	}
 	cost := func(n int) (int, error) {
 		if n > budget {
@@ -147,7 +171,7 @@ func workflowValueCost(value starlark.Value, budget int, depth int) (int, error)
 	}
 	switch v := value.(type) {
 	case starlark.String:
-		return cost(len(v) + 2)
+		return cost(encodedStringSize(string(v), budget))
 	case starlark.Bytes:
 		// base64 in JSON, if the json module accepts it at all.
 		return cost(2 + (len(v)+2)/3*4)
@@ -248,7 +272,10 @@ func (*workflowHost) stepSpec(
 	}
 	spec := stepSpec{Prompt: prompt, Type: strings.TrimSpace(typ), Title: title}
 	if schema != starlark.None {
-		if err := workflowValueBudget(schema, maxResultBytes/6); err != nil {
+		if err := workflowValueBudget(schema, maxResultBytes); err != nil {
+			if errors.Is(err, errWorkflowValueTooLarge) {
+				err = xerrors.Errorf("the schema encodes to more than %d bytes; at most %d bytes are allowed", maxResultBytes, maxResultBytes)
+			}
 			return stepSpec{}, xerrors.Errorf("%s: schema: %w", b.Name(), err)
 		}
 		raw, err := jsonEncode(thread, schema)

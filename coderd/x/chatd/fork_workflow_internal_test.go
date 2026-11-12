@@ -269,10 +269,11 @@ def main(args):
 		// A step child built by hand, so the test drives waitStep
 		// directly.
 		child := dbgen.Chat(t, f.db, database.Chat{
-			OrganizationID: f.org.ID,
-			OwnerID:        f.user.ID,
-			ParentChatID:   uuid.NullUUID{UUID: parent.ID, Valid: true},
-			Status:         database.ChatStatusWaiting,
+			OrganizationID:    f.org.ID,
+			OwnerID:           f.user.ID,
+			ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+			LastModelConfigID: f.model.ID,
+			Status:            database.ChatStatusWaiting,
 		})
 		run := &workflowRun{
 			p:      f.server,
