@@ -511,7 +511,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
-	golang.org/x/time v0.16.0 // indirect
+	golang.org/x/time v0.16.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
@@ -583,6 +583,7 @@ require (
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tidwall/sjson v1.2.5
 	gitlab.com/gitlab-org/api/client-go v1.46.0
+	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.6
 	mvdan.cc/sh/v3 v3.14.0
 )

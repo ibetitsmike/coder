@@ -214,6 +214,9 @@ type Server struct {
 
 	forkPullRequestActivity ForkPullRequestActivityFunc
 	forkPacks               forkPackState
+
+	// workflows holds the workflow runs that this replica runs (fork-workflows).
+	workflows workflowRegistry
 }
 
 // stripAdvisorGuidanceBlock removes any system message whose text content
