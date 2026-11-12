@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { ComponentProps } from "react";
 import { fn, userEvent, within } from "storybook/test";
 import type { ChatPinnedSkill } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
@@ -48,7 +47,7 @@ const mockFullPins: ChatPinnedSkill[] = [
 	{ source: "personal", name: "changelog" },
 ];
 
-const pickerProps: ComponentProps<typeof ForkPinnableSkillListView> = {
+const pickerProps: React.ComponentProps<typeof ForkPinnableSkillListView> = {
 	skillLists: mockSkillLists,
 	pins: mockPins,
 	disabled: false,

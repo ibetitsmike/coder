@@ -200,7 +200,7 @@ export const ForkPinnedSkillsPillView: React.FC<
 );
 
 type SkillSourceQuery = Pick<
-	UseQueryResult<unknown>,
+	UseQueryResult<unknown, unknown>,
 	"error" | "isFetching" | "refetch"
 >;
 
