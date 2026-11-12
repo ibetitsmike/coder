@@ -20,6 +20,7 @@ type ForkProjectPluginPacksDialogProps = {
 	readonly onCloseAutoFocus: (event: Event) => void;
 };
 
+/** Dialog that edits which plugin packs a project enables directly. */
 export const ForkProjectPluginPacksDialog: React.FC<
 	ForkProjectPluginPacksDialogProps
 > = ({ project, open, onOpenChange, onCloseAutoFocus }) => (
