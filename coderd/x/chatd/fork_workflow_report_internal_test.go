@@ -86,7 +86,8 @@ func TestForkWorkflowReportCollision(t *testing.T) {
 			})
 		sink := runAppend(t, []fantasy.AgentTool{builtIn}, otherTools)
 		require.Len(t, sink.warns, 1)
-		assert.Contains(t, sink.warns[0], "other_tool")
+		// The message carries no name: the tool name is a log field.
+		assert.Contains(t, sink.warns[0], "collides with built-in tool")
 	})
 }
 
