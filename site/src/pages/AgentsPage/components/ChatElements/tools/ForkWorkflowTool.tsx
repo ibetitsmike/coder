@@ -18,7 +18,7 @@ import { ToolCall } from "./ToolCall";
 import { asString, parseArgs } from "./utils";
 
 const toolLabel = (
-	props: ForkToolRendererProps,
+	props: Pick<ForkToolRendererProps, "name" | "status" | "isError">,
 	snapshot: ForkWorkflowRunSnapshot | null,
 ): string => {
 	const isRunWorkflow = props.name === "run_workflow";
@@ -26,7 +26,9 @@ const toolLabel = (
 		return isRunWorkflow ? "Starting workflow…" : "Waiting for workflow…";
 	}
 	if (props.isError || !snapshot) {
-		return isRunWorkflow ? "Failed to start workflow" : "Failed to read workflow";
+		return isRunWorkflow
+			? "Failed to start workflow"
+			: "Failed to read workflow";
 	}
 	switch (snapshot.status) {
 		case "running":
@@ -67,7 +69,10 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 			isError={isError}
 			errorMessage={errorMessage || label}
 			hasContent={
-				Boolean(snapshot) || errorMessage !== "" || script !== "" || scriptPath !== ""
+				Boolean(snapshot) ||
+				errorMessage !== "" ||
+				script !== "" ||
+				scriptPath !== ""
 			}
 		>
 			<ToolCall.Header
