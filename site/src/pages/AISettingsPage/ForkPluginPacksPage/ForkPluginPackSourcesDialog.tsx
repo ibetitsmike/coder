@@ -35,24 +35,25 @@ const parseHosts = (text: string) => [
 ];
 
 const validationSchema = Yup.object({
-	hosts: Yup.string().test("hosts", (text, context) => {
-		const hosts = parseHosts(text ?? "");
-		const invalid = hosts.find(
-			(host) =>
-				host.length > maxHostLength || invalidHostCharacters.test(host),
-		);
-		if (invalid) {
-			return context.createError({
-				message: `"${invalid}" must be a host name without a scheme, port or path.`,
-			});
-		}
-		if (hosts.length > maxHosts) {
-			return context.createError({
-				message: `At most ${maxHosts} hosts are allowed.`,
-			});
-		}
-		return true;
-	}),
+	hosts: Yup.string()
+		.test("hosts", (text, context) => {
+			const hosts = parseHosts(text ?? "");
+			const invalid = hosts.find(
+				(host) =>
+					host.length > maxHostLength || invalidHostCharacters.test(host),
+			);
+			if (invalid) {
+				return context.createError({
+					message: `"${invalid}" must be a host name without a scheme, port or path.`,
+				});
+			}
+			if (hosts.length > maxHosts) {
+				return context.createError({
+					message: `At most ${maxHosts} hosts are allowed.`,
+				});
+			}
+			return true;
+		}),
 });
 
 type SourcesFormProps = {
@@ -78,7 +79,11 @@ const SourcesForm: React.FC<SourcesFormProps> = ({
 	const getFieldHelpers = getFormHelpers(form, error);
 
 	return (
-		<form className="flex flex-col gap-4" onSubmit={form.handleSubmit} noValidate>
+		<form
+			className="flex flex-col gap-4"
+			onSubmit={form.handleSubmit}
+			noValidate
+		>
 			<FormField
 				field={getFieldHelpers("hosts")}
 				label="Source hosts"
