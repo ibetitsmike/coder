@@ -48,7 +48,10 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	);
 
 	return (
-		<section aria-label={label} className="mt-1.5 flex min-w-0 flex-col gap-0.5">
+		<section
+			aria-label={label}
+			className="mt-1.5 flex min-w-0 flex-col gap-0.5"
+		>
 			<div className="text-xs font-medium text-content-secondary">{label}</div>
 			{preview === null ? (
 				<pre className={textClassName}>{text}</pre>

@@ -10,7 +10,9 @@ export const MockForkWorkflowScript = `def main(args):
     return agent("Summarize these reviews: %s" % json.encode(reviews), title = "Summary")
 `;
 
-export const MockForkWorkflowArgs = { files: ["coderd/chats.go", "coderd/users.go"] };
+export const MockForkWorkflowArgs = {
+	files: ["coderd/chats.go", "coderd/users.go"],
+};
 
 export const MockForkWorkflowStartedResult = {
 	run_id: MockForkWorkflowRunId,

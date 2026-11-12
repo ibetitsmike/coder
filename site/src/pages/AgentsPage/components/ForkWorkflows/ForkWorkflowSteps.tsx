@@ -17,11 +17,16 @@ type ForkWorkflowStepsProps = {
 export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 	steps,
 }) => (
-	<ol aria-label="Workflow steps" className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
+	<ol
+		aria-label="Workflow steps"
+		className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0"
+	>
 		{steps.map((step) => (
 			<li key={step.chatId} className="flex min-w-0 flex-col gap-0.5">
 				<div className="flex min-w-0 items-center gap-1.5">
-					<ForkWorkflowStatusBadge {...forkWorkflowStepStatusMeta(step.status)} />
+					<ForkWorkflowStatusBadge
+						{...forkWorkflowStepStatusMeta(step.status)}
+					/>
 					<ForkChatLink chatId={step.chatId}>
 						{step.title || "Untitled step"}
 					</ForkChatLink>
