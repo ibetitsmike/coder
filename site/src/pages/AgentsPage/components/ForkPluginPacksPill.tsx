@@ -76,7 +76,7 @@ export const ForkPluginPacksPillView: React.FC<
 		label={
 			enabledCount === undefined
 				? "Plugin packs"
-				: `Plugin packs, ${enabledCount} enabled`
+				: `Plugin packs, ${enabledCount} enabled on this chat`
 		}
 		heading="Chat plugin packs"
 		trigger={

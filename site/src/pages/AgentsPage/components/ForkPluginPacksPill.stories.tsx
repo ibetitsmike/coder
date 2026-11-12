@@ -68,6 +68,24 @@ export const NoneEnabled: Story = {
 	play: Expanded.play,
 };
 
+export const ReadOnlyExpanded: Story = {
+	args: {
+		children: (
+			<ForkPluginPackTogglesView
+				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
+				enabled={[MockForkPluginPack]}
+				error={undefined}
+				isRetrying={false}
+				onRetry={fn()}
+				canEdit={false}
+				pending={undefined}
+				onToggle={fn()}
+			/>
+		),
+	},
+	play: Expanded.play,
+};
+
 export const SubagentExpanded: Story = {
 	args: { isSubagent: true },
 	play: Expanded.play,
