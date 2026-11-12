@@ -167,6 +167,13 @@ func TestSetPackSourcesReloads(t *testing.T) {
 		return ok && entry.client != before && entry.config.Pack.Revision == "r2"
 	}, testutil.WaitLong, testutil.IntervalFast, "a new pack revision restarts the pack's servers")
 
+	renamed, err := json.Marshal(map[string]mcpServerEntry{"renamed-srv": entry})
+	require.NoError(t, err)
+	m.SetPackSources([]PackSource{{ManifestPath: manifest, Dir: dir, Revision: "r2", Configs: []PackConfig{{Path: manifest, Inline: renamed}}}})
+	awaitTools(ctx, t, m, func(tools []catalogTool) bool {
+		return len(tools) == 1 && tools[0].server == "renamed-srv"
+	})
+
 	m.SetPackSources(nil)
 	awaitTools(ctx, t, m, func(tools []catalogTool) bool { return len(tools) == 0 })
 }
