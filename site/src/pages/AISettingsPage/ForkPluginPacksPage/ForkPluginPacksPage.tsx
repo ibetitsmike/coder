@@ -5,11 +5,12 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Navigate } from "react-router";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { isNewer } from "#/api/queries/forkListCache";
 import {
 	cachedPluginPacks,
 	createPluginPackMutation,
 	deletePluginPackMutation,
-	isPluginPackGone,
+	isPluginPackAbsentFromCache,
 	pluginPacks,
 	reconcileInstalledPluginPack,
 	reconcileUpdatedPluginPack,
@@ -41,12 +42,6 @@ type OrganizationPluginPacksProps = {
 	organization: Organization;
 	access: SkillAccess;
 	picker: React.ReactNode;
-};
-
-const withoutPackId = (ids: ReadonlySet<string>, packId: string) => {
-	const next = new Set(ids);
-	next.delete(packId);
-	return next;
 };
 
 const toastUpdateResult = (
@@ -90,11 +85,22 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 		onSettled: async (...args) => {
 			await updateOptions.onSettled?.(...args);
 			const [data, error, pack] = args;
-			const updated =
-				data ??
-				reconcileUpdatedPluginPack(queryClient, organization.id, pack, error);
+			// A later update that another administrator made may already be
+			// cached, and the toast names the commit the table shows.
+			const cached = cachedPluginPacks(queryClient, organization.id)?.find(
+				(candidate) => candidate.id === pack.id,
+			);
+			const updated = data
+				? cached && isNewer(cached, data)
+					? cached
+					: data
+				: reconcileUpdatedPluginPack(queryClient, organization.id, pack, error);
 			toastUpdateResult(pack, updated, error);
-			setUpdatingPackIds((current) => withoutPackId(current, pack.id));
+			setUpdatingPackIds((current) => {
+				const next = new Set(current);
+				next.delete(pack.id);
+				return next;
+			});
 		},
 	});
 	const deleteMutation = useMutation(
@@ -141,7 +147,7 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const deletePack = (pack: ForkPluginPack) => {
 		deleteMutation.mutate(pack.id, {
 			onSettled: (_data, error) => {
-				if (error && !isPluginPackGone(queryClient, organization.id, pack.id)) {
+				if (error && !isPluginPackAbsentFromCache(queryClient, organization.id, pack.id)) {
 					return;
 				}
 
