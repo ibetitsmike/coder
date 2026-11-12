@@ -101,6 +101,31 @@ func TestForkPluginPackEnablement(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, packs)
 	})
+
+	t.Run("ChatExcluded", func(t *testing.T) {
+		t.Parallel()
+		model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: orgID})
+		chat := dbgen.Chat(t, db, database.Chat{OrganizationID: orgID, OwnerID: memberUser.ID, LastModelConfigID: model.ID})
+
+		// Turning a pack off twice is a no-op.
+		require.NoError(t, member.ExcludeForkChatPluginPack(ctx, chat.ID, pack.ID))
+		require.NoError(t, member.ExcludeForkChatPluginPack(ctx, chat.ID, pack.ID))
+		packs, err := member.ForkChatExcludedPluginPacks(ctx, chat.ID)
+		require.NoError(t, err)
+		require.Equal(t, want, packs)
+
+		err = member.ExcludeForkChatPluginPack(ctx, chat.ID, foreign.ID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = other.ExcludeForkChatPluginPack(ctx, chat.ID, pack.ID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = other.ForkChatExcludedPluginPacks(ctx, chat.ID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		require.NoError(t, member.IncludeForkChatPluginPack(ctx, chat.ID, pack.ID))
+		packs, err = member.ForkChatExcludedPluginPacks(ctx, chat.ID)
+		require.NoError(t, err)
+		require.Empty(t, packs)
+	})
 }
 
 func insertForkPluginPack(t *testing.T, db database.Store, organizationID, createdBy uuid.UUID, name string) forkdb.PluginPack {

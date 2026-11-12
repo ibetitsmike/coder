@@ -110,6 +110,14 @@ func (f *forkQuerier) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UU
 	return f.db.DeleteChatPinnedSkills(ctx, chatID)
 }
 
+// DeleteChatExcludedPluginPack authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatExcludedPluginPack(ctx context.Context, arg forkdb.DeleteChatExcludedPluginPackParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatExcludedPluginPack(ctx, arg)
+}
+
 // DeleteChatSecretAnswer authorizes as an update of the owning chat.
 func (f *forkQuerier) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
@@ -346,6 +354,15 @@ func (f *forkQuerier) GetPluginPackSources(ctx context.Context, organizationID u
 	return f.db.GetPluginPackSources(ctx, organizationID)
 }
 
+// GetExcludedPluginPacksByChatID authorizes through the owning chat, like
+// GetPluginPacksByChatID.
+func (f *forkQuerier) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetExcludedPluginPacksByChatIDRow, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetExcludedPluginPacksByChatID(ctx, chatID)
+}
+
 // GetPluginPacksByChatID authorizes through the owning chat. It returns only
 // the names and commits of packs, which members of the chat may see even
 // though they cannot read the packs.
@@ -428,6 +445,15 @@ func (f *forkQuerier) InsertChatPinnedSkills(ctx context.Context, arg forkdb.Ins
 		return err
 	}
 	return f.db.InsertChatPinnedSkills(ctx, arg)
+}
+
+// InsertChatExcludedPluginPack authorizes as an update of the chat, like
+// InsertChatPluginPack.
+func (f *forkQuerier) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return forkdb.ChatExcludedPluginPack{}, err
+	}
+	return f.db.InsertChatExcludedPluginPack(ctx, arg)
 }
 
 // InsertChatPluginPack authorizes as an update of the chat and not as a read

@@ -206,6 +206,27 @@ func TestFilterPackResources(t *testing.T) {
 		require.Equal(t, append(slices.Clone(unmanaged), "/home/u/.coder/plugins/project-pack/skills/review-pr"),
 			sources(server.filterPackResources(ctx, draft, slices.Clone(resources))),
 			"a new chat sees its project's packs")
+
+		sibling := dbgen.Chat(t, db, database.Chat{
+			OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID,
+			ProjectID: uuid.NullUUID{UUID: project.ID, Valid: true},
+		})
+		for _, pack := range []uuid.UUID{projectPack, chatPack} {
+			_, err = fdb.InsertChatExcludedPluginPack(ctx, forkdb.InsertChatExcludedPluginPackParams{ChatID: root.ID, PackID: pack})
+			require.NoError(t, err)
+		}
+		require.Equal(t, unmanaged, sources(server.filterPackResources(ctx, root, slices.Clone(resources))),
+			"a chat drops the packs it turned off, whether its project or the chat enables them")
+		require.Equal(t, append(slices.Clone(unmanaged), "/home/u/.coder/plugins/child-pack/skills/review-pr"),
+			sources(server.filterPackResources(ctx, grandchild, slices.Clone(resources))),
+			"a nested subagent drops the packs an ancestor turned off")
+		require.Equal(t, append(slices.Clone(unmanaged), "/home/u/.coder/plugins/project-pack/skills/review-pr"),
+			sources(server.filterPackResources(ctx, sibling, slices.Clone(resources))),
+			"another chat of the project keeps the project's packs")
+		require.NoError(t, fdb.DeleteChatExcludedPluginPack(ctx, forkdb.DeleteChatExcludedPluginPackParams{ChatID: root.ID, PackID: projectPack}))
+		require.Equal(t, append(slices.Clone(unmanaged), "/home/u/.coder/plugins/project-pack/skills/review-pr"),
+			sources(server.filterPackResources(ctx, root, slices.Clone(resources))),
+			"turning a pack back on restores the project's pack")
 	})
 }
 
