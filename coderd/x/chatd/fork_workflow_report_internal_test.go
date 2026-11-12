@@ -158,15 +158,19 @@ func TestForkWorkflowReport(t *testing.T) {
 			require.ErrorContains(t, err, "cannot be represented", constraint)
 		}
 
-		// A boolean additionalProperties adds nothing fantasy would drop:
-		// false closes the object, and true is the default. Typed values
-		// are refused by the additionalProperties check itself.
+		// Only the default additionalProperties is faithful: the property-only
+		// provider contract cannot carry the keyword, so false (and typed
+		// values, refused above) would be enforced by Run and invisible to
+		// the child.
 		var err error
-		for _, value := range []string{"false", "true"} {
+		for _, value := range []string{"false", `{"type":"string"}`} {
 			raw := json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":` + value + `,"required":["a"]}`)
 			_, err = newWorkflowReportTool(raw)
-			require.NoError(t, err, value)
+			require.ErrorContains(t, err, "cannot be represented", value)
 		}
+		_, err = newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":true,"required":["a"]}`))
+		require.NoError(t, err)
 
 		// A lone "*" property is Fantasy's free-form wildcard spelling:
 		// the provider schema would accept arbitrary keys the schema forbids.
@@ -230,6 +234,65 @@ func TestForkWorkflowReport(t *testing.T) {
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":-9007199254740993}`})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
+	})
+
+	t.Run("ResolvesArrayPointers", func(t *testing.T) {
+		t.Parallel()
+		// A JSON Pointer can index arrays: #/$defs/value/anyOf/0 is a valid
+		// reference the JSON Schema resolver accepts, so the inliner must
+		// resolve it too.
+		raw := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"value":{"anyOf":[{"type":"string"},{"type":"integer"}]}},` +
+			`"required":["v"],` +
+			`"properties":{"v":{"$ref":"#/$defs/value/anyOf/0"}}}`)
+		tool, err := newWorkflowReportTool(raw)
+		require.NoError(t, err)
+
+		resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"v":"text"}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"v":3}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, "anyOf/0 is the string branch")
+
+		// Out-of-range and non-numeric segments still refuse.
+		_, err = newWorkflowReportTool(json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"value":{"anyOf":[{"type":"string"}]}},` +
+			`"properties":{"v":{"$ref":"#/$defs/value/anyOf/1"}}}`))
+		require.ErrorContains(t, err, "does not resolve")
+		_, err = newWorkflowReportTool(json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"value":{"anyOf":[{"type":"string"}]}},` +
+			`"properties":{"v":{"$ref":"#/$defs/value/anyOf/x"}}}`))
+		require.ErrorContains(t, err, "does not resolve")
+	})
+
+	t.Run("BoundsNumberTokens", func(t *testing.T) {
+		t.Parallel()
+		// A number with a huge exponent would make the exact parse
+		// materialize a million-bit denominator; tokens beyond the exact
+		// work bound are refused before parsing.
+		schema := json.RawMessage(`{"type":"object","properties":{"n":{"type":"number"}}}`)
+		tool, err := newWorkflowReportTool(schema)
+		require.NoError(t, err)
+
+		resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1e-1000000}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "too large to validate exactly")
+
+		// A long plain mantissa is refused the same way.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{
+			Input: `{"n":` + strings.Repeat("1", 65) + `}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+
+		// Ordinary exponents and sizes keep working.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1.5e-10}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
 
 		// The bound itself is exactly representable and passes.
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":9007199254740992}`})

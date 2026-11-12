@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"io"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"charm.land/fantasy"
@@ -88,7 +89,7 @@ func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fant
 	// cannot validate json.Number instances (they surface as strings), so
 	// an integer beyond the float64 range would be compared rounded while
 	// the workflow receives the original token below.
-	if err := rejectOutOfRangeIntegers(call.Input); err != nil {
+	if err := rejectOutOfRangeNumbers(call.Input); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error() +
 			". Call workflow_report again with a corrected value."), nil
 	}
@@ -106,11 +107,21 @@ func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fant
 // workflow still receives the original token.
 const maxExactInteger = 1 << 53
 
-// rejectOutOfRangeIntegers fails when the input carries an integer outside
-// the exact validation range, in plain, exponent, or trailing-zero form.
-// Genuine fractions validate as their (rounded) float64 decode, which the
-// report semantics tolerate.
-func rejectOutOfRangeIntegers(input string) error {
+// maxNumberDigits bounds the mantissa digits of one report number, and
+// maxNumberExponent its exponent magnitude, so the exact big.Rat parse
+// below does bounded work: a token like 1e-1000000 would otherwise
+// materialize a million-bit denominator per occurrence.
+const (
+	maxNumberDigits   = 64
+	maxNumberExponent = 512
+)
+
+// rejectOutOfRangeNumbers fails when the input carries a number the float64
+// validation pipeline cannot judge faithfully: integers beyond the exact
+// range in any spelling (plain, exponent, trailing zero), or mantissas and
+// exponents too large to parse exactly. Smaller fractions validate as their
+// float64 decode, which the report semantics tolerate.
+func rejectOutOfRangeNumbers(input string) error {
 	bound := new(big.Int).Lsh(big.NewInt(1), 53)
 	decoder := json.NewDecoder(strings.NewReader(input))
 	decoder.UseNumber()
@@ -128,9 +139,16 @@ func rejectOutOfRangeIntegers(input string) error {
 			continue
 		}
 		text := number.String()
-		// Parse exactly with big.Rat: an integer can hide in exponent or
-		// trailing-zero form (9007199254740993e0, 9007199254740992.0), and
-		// the float64 decode would round it before any comparison.
+		mantissa, exponent, ok := splitNumber(text)
+		if !ok {
+			continue
+		}
+		if len(mantissa) > maxNumberDigits || abs(exponent) > maxNumberExponent {
+			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
+		}
+		// Parse exactly: an integer can hide in exponent or trailing-zero
+		// form (9007199254740993e0, 9007199254740992.0), and the float64
+		// decode would round it before any comparison.
 		ratio, ok := new(big.Rat).SetString(text)
 		if !ok || !ratio.IsInt() {
 			continue
@@ -140,6 +158,38 @@ func rejectOutOfRangeIntegers(input string) error {
 			return xerrors.Errorf("the report contains the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", text, maxExactInteger)
 		}
 	}
+}
+
+// splitNumber splits a JSON number into mantissa digits (no sign, dot, or
+// exponent; the sign does not affect the count) and the decimal exponent.
+// ok is false for tokens Go cannot parse; the float64 decode reports those.
+func splitNumber(text string) (mantissa string, exponent int, ok bool) {
+	text = strings.TrimPrefix(text, "-")
+	mantissaPart, expPart, hasExp := strings.Cut(text, "e")
+	if !hasExp {
+		mantissaPart, expPart, hasExp = strings.Cut(text, "E")
+	}
+	if !hasExp {
+		expPart = "0"
+	}
+	exp, err := strconv.Atoi(expPart)
+	if err != nil {
+		return "", 0, false
+	}
+	intPart, fracPart, _ := strings.Cut(mantissaPart, ".")
+	digits := intPart + fracPart
+	if digits == "" {
+		return "", 0, false
+	}
+	return digits, exp, true
+}
+
+// abs returns the absolute value of n.
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // checkStepSchema accepts a JSON Schema whose top level is an object. The
@@ -197,12 +247,17 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 				"top-level %q cannot be represented in the report tool contract: put the object constraints directly in properties", key)
 		}
 	}
-	// additionalProperties carries a schema per its value, not its name: a
-	// boolean closes or opens the object, which the property-only contract
-	// reproduces, but a typed value would be enforced by Run and invisible
-	// to the child. Refuse the typed forms.
-	switch inlined["additionalProperties"].(type) {
-	case nil, bool:
+	// additionalProperties carries a schema per its value, not its name. The
+	// property-only provider contract cannot carry the keyword, so only the
+	// default (absent or true, keys unrestricted) is faithful: false and any
+	// typed value would be enforced by Run and invisible to the child.
+	switch ap := inlined["additionalProperties"].(type) {
+	case nil:
+	case bool:
+		if !ap {
+			return nil, nil, xerrors.Errorf(
+				`"additionalProperties": false cannot be represented in the report tool contract: model the allowed keys as properties instead`)
+		}
 	default:
 		return nil, nil, xerrors.Errorf(
 			"typed additionalProperties cannot be represented in the report tool contract: name the keys as properties instead")
@@ -369,19 +424,28 @@ func inlineStepValue(key string, value any, root map[string]any, seen []string, 
 
 // resolveSchemaPointer walks ref (like "#/$defs/result") through root.
 func resolveSchemaPointer(root map[string]any, ref string) (map[string]any, error) {
+	notFound := xerrors.Errorf("$ref %q does not resolve in the step schema", ref)
 	current := any(root)
 	for _, part := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
 		part = strings.ReplaceAll(part, "~1", "/")
 		part = strings.ReplaceAll(part, "~0", "~")
-		node, ok := current.(map[string]any)
-		if !ok {
-			return nil, xerrors.Errorf("$ref %q does not resolve in the step schema", ref)
+		switch node := current.(type) {
+		case map[string]any:
+			next, ok := node[part]
+			if !ok {
+				return nil, notFound
+			}
+			current = next
+		case []any:
+			// A JSON Pointer can index arrays, like #/$defs/value/anyOf/0.
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(node) {
+				return nil, notFound
+			}
+			current = node[index]
+		default:
+			return nil, notFound
 		}
-		next, ok := node[part]
-		if !ok {
-			return nil, xerrors.Errorf("$ref %q does not resolve in the step schema", ref)
-		}
-		current = next
 	}
 	target, ok := current.(map[string]any)
 	if !ok {
