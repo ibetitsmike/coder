@@ -209,6 +209,13 @@ func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, org
 	return f.db.GetChatOrganizationSubagentLimits(ctx, organizationID)
 }
 
+func (f *forkQuerier) GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationWakeupCap, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
+		return forkdb.ChatOrganizationWakeupCap{}, err
+	}
+	return f.db.GetChatOrganizationWakeupCaps(ctx, organizationID)
+}
+
 // GetChatSubagentByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
 	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
@@ -700,6 +707,13 @@ func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, 
 		return forkdb.ChatOrganizationSubagentLimit{}, err
 	}
 	return f.db.UpsertChatOrganizationSubagentLimits(ctx, arg)
+}
+
+func (f *forkQuerier) UpsertChatOrganizationWakeupCaps(ctx context.Context, arg forkdb.UpsertChatOrganizationWakeupCapsParams) (forkdb.ChatOrganizationWakeupCap, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChatModelConfig.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.ChatOrganizationWakeupCap{}, err
+	}
+	return f.db.UpsertChatOrganizationWakeupCaps(ctx, arg)
 }
 
 // UpsertChatTodos authorizes as an update of the owning chat, like

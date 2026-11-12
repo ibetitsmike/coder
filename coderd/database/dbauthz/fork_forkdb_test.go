@@ -87,6 +87,21 @@ func TestForkQuerier(t *testing.T) {
 				Asserts(rbac.ResourceChatModelConfig.InOrg(limits.OrganizationID), policy.ActionRead).
 				Returns(limits)
 		},
+		"GetChatOrganizationWakeupCaps": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			caps := testutil.Fake(t, faker, forkdb.ChatOrganizationWakeupCap{})
+			fdb.EXPECT().GetChatOrganizationWakeupCaps(gomock.Any(), caps.OrganizationID).Return(caps, nil).AnyTimes()
+			check.Args(caps.OrganizationID).
+				Asserts(rbac.ResourceChatModelConfig.InOrg(caps.OrganizationID), policy.ActionRead).
+				Returns(caps)
+		},
+		"UpsertChatOrganizationWakeupCaps": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			caps := testutil.Fake(t, faker, forkdb.ChatOrganizationWakeupCap{})
+			arg := forkdb.UpsertChatOrganizationWakeupCapsParams{OrganizationID: caps.OrganizationID, MaxChatRunsPerDay: caps.MaxChatRunsPerDay}
+			fdb.EXPECT().UpsertChatOrganizationWakeupCaps(gomock.Any(), arg).Return(caps, nil).AnyTimes()
+			check.Args(arg).
+				Asserts(rbac.ResourceChatModelConfig.InOrg(caps.OrganizationID), policy.ActionUpdate).
+				Returns(caps)
+		},
 		"UpsertChatOrganizationSubagentLimits": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			limits := testutil.Fake(t, faker, forkdb.ChatOrganizationSubagentLimit{})
 			arg := forkdb.UpsertChatOrganizationSubagentLimitsParams{OrganizationID: limits.OrganizationID, MaxDepth: limits.MaxDepth}
