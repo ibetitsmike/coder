@@ -9,6 +9,7 @@ import { ForkScheduleWakeupToolRenderer } from "./ForkScheduleWakeupTool";
 import { ForkSearchChatsToolRenderer } from "./ForkSearchChatsTool";
 import { ForkTodoToolRenderer } from "./ForkTodoTool";
 import { ForkWaitForEventsToolRenderer } from "./ForkWaitForEventsTool";
+import { ForkWorkflowToolRenderer } from "./ForkWorkflowTool";
 import { useForkExperiment } from "./forkToolUtils";
 import type { toolRenderers } from "./Tool";
 
@@ -44,6 +45,11 @@ export const createForkToolRenderers = (
 	fallback: ToolRenderer,
 ): Record<string, ToolRenderer> => {
 	const todoRenderer = gate("fork-chat-todos", ForkTodoToolRenderer, fallback);
+	const workflowRenderer = gate(
+		"fork-workflows",
+		ForkWorkflowToolRenderer,
+		fallback,
+	);
 	return {
 		todo_write: todoRenderer,
 		todo_read: todoRenderer,
@@ -72,5 +78,7 @@ export const createForkToolRenderers = (
 			ForkNotifyUserToolRenderer,
 			fallback,
 		),
+		run_workflow: workflowRenderer,
+		await_workflow: workflowRenderer,
 	};
 };
