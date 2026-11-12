@@ -3,8 +3,8 @@
 
 import { API } from "./api";
 
-// TODO(workflows-ui): these types mirror the agreed PR2b contract. Import
-// them from typesGenerated.ts once the codersdk types land.
+// TODO(workflows-ui): replace these hand-written types with the generated
+// codersdk types in typesGenerated.ts.
 
 export type ChatWorkflowRunStatus =
 	| "running"

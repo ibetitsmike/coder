@@ -15,7 +15,6 @@ export const chatWorkflowRuns = (chatId: string) =>
 			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
 	});
 
-/** Polls the run every 3 s until it leaves the running status. */
 export const chatWorkflowRun = (chatId: string, runId: string) =>
 	queryOptions({
 		queryKey: [...chatWorkflowRunsKey(chatId), runId],

@@ -56,40 +56,43 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					</p>
 				</Alert>
 			)}
-			<ul aria-label="Workflow runs" className="m-0 flex list-none flex-col gap-1 p-0">
-					{runs.map((run) => (
-						<li key={run.id}>
-							<button
-								type="button"
-								className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
-								onClick={() => onSelectRun(run.id)}
-							>
-								<span className="flex w-full min-w-0 items-center gap-1.5">
-									<ForkWorkflowStatusBadge
-										{...forkWorkflowRunStatusMeta(run.status)}
-									/>
-									<span className="min-w-0 truncate text-sm text-content-primary">
-										{run.title || `${run.script_preview}…`}
-									</span>
+			<ul
+				aria-label="Workflow runs"
+				className="m-0 flex list-none flex-col gap-1 p-0"
+			>
+				{runs.map((run) => (
+					<li key={run.id}>
+						<button
+							type="button"
+							className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
+							onClick={() => onSelectRun(run.id)}
+						>
+							<span className="flex w-full min-w-0 items-center gap-1.5">
+								<ForkWorkflowStatusBadge
+									{...forkWorkflowRunStatusMeta(run.status)}
+								/>
+								<span className="min-w-0 truncate text-sm text-content-primary">
+									{run.title || `${run.script_preview}…`}
 								</span>
-								<span className="text-xs text-content-secondary">
-									{[
-										`Started ${timeFrom(run.created_at, now)}`,
-										forkWorkflowRunDuration(run.created_at, run.finished_at, now),
-										forkWorkflowStepCountProgress(
-											run.step_counts.done,
-											run.step_counts.total,
-										),
-										run.step_counts.failed > 0 &&
-											`${run.step_counts.failed} failed`,
-									]
-										.filter(Boolean)
-										.join(" · ")}
-								</span>
-							</button>
-						</li>
-					))}
-				</ul>
+							</span>
+							<span className="text-xs text-content-secondary">
+								{[
+									`Started ${timeFrom(run.created_at, now)}`,
+									forkWorkflowRunDuration(run.created_at, run.finished_at, now),
+									forkWorkflowStepCountProgress(
+										run.step_counts.done,
+										run.step_counts.total,
+									),
+									run.step_counts.failed > 0 &&
+										`${run.step_counts.failed} failed`,
+								]
+									.filter(Boolean)
+									.join(" · ")}
+							</span>
+						</button>
+					</li>
+				))}
+			</ul>
 		</div>
 	);
 };

@@ -75,7 +75,12 @@ export const ForkWorkflowRunDetailView: React.FC<
 	}
 	return (
 		<div className="flex flex-col gap-2 p-4">
-			<Button variant="subtle" size="sm" className="w-fit px-1" onClick={onBack}>
+			<Button
+				variant="subtle"
+				size="sm"
+				className="w-fit px-1"
+				onClick={onBack}
+			>
 				<ChevronLeftIcon />
 				All runs
 			</Button>

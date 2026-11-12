@@ -38,7 +38,12 @@ const meta: Meta<typeof ForkWorkflowRunList> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunList",
 	component: ForkWorkflowRunList,
 	args: {
-		runs: [mockRunningRun, MockChatWorkflowRun, mockFailedRun, mockInterruptedRun],
+		runs: [
+			mockRunningRun,
+			MockChatWorkflowRun,
+			mockFailedRun,
+			mockInterruptedRun,
+		],
 		error: null,
 		onSelectRun: fn(),
 	},

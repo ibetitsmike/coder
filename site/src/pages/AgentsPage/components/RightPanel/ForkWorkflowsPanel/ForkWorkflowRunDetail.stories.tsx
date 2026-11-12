@@ -30,7 +30,8 @@ const mockFailedRunDetail: ChatWorkflowRunDetail = {
 			? {
 					...step,
 					status: "failed",
-					error: "the step ended its turn twice without calling workflow_report",
+					error:
+						"the step ended its turn twice without calling workflow_report",
 				}
 			: step,
 	),
