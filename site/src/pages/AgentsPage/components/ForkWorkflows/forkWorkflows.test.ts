@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	MockChatWorkflowRun,
+	MockChatWorkflowRunDetail,
 	MockForkWorkflowCompletedResult,
 	MockForkWorkflowNow,
 	MockForkWorkflowRunId,
@@ -9,6 +10,7 @@ import {
 	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
+	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "./forkWorkflows";
 
@@ -83,5 +85,45 @@ describe("forkWorkflowRunDuration", () => {
 				MockForkWorkflowNow,
 			),
 		).toBe("5m");
+	});
+});
+
+describe("mergeForkWorkflowRunDetail", () => {
+	it("keeps the result's logs and reused steps that a running detail lacks", () => {
+		const snapshot = parseForkWorkflowRunSnapshot({
+			...MockForkWorkflowCompletedResult,
+			status: "running",
+			result: undefined,
+			logs: ["checked 2 files"],
+		});
+		if (!snapshot) {
+			throw new Error("the tool result did not parse");
+		}
+		const runningDetail = {
+			...MockChatWorkflowRunDetail,
+			status: "running",
+			logs: [],
+			steps: MockChatWorkflowRunDetail.steps.map((step) => ({
+				...step,
+				reused: false,
+			})),
+		};
+
+		const merged = mergeForkWorkflowRunDetail(snapshot, runningDetail);
+		expect(merged.status).toBe("running");
+		expect(merged.logs).toEqual(["checked 2 files"]);
+		expect(merged.steps.map((step) => step.reused)).toEqual([
+			true,
+			false,
+			false,
+		]);
+
+		const endedDetail = { ...runningDetail, status: "completed" };
+		expect(
+			mergeForkWorkflowRunDetail(snapshot, {
+				...endedDetail,
+				logs: ["2 reviews"],
+			}).logs,
+		).toEqual(["2 reviews"]);
 	});
 });

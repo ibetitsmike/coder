@@ -2,18 +2,20 @@
 // tools of the fork-workflows experiment.
 
 import type React from "react";
+import { useState } from "react";
 import { useQuery } from "react-query";
 import { useParams } from "react-router";
+import { getErrorStatus } from "#/api/errors";
 import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
 	type ForkWorkflowRunSnapshot,
-	forkWorkflowRunDetailSnapshot,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
 	formatForkWorkflowValue,
+	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "../../ForkWorkflows/forkWorkflows";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
@@ -88,15 +90,34 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 	resultSnapshot,
 	...props
 }) => {
+	const [mountedAt] = useState(Date.now);
 	// Shares the Workflows panel's cache. A failed request (403 or 404 for a
 	// viewer who cannot read runs) keeps the tool result, as while loading.
-	const runQuery = useQuery(chatWorkflowRun(chatId, resultSnapshot.runId));
+	// The app disables retries, so the card polls through other errors until
+	// a detail loads.
+	const runQuery = useQuery({
+		...chatWorkflowRun(chatId, resultSnapshot.runId),
+		refetchInterval: ({ state }) => {
+			if (state.data) {
+				return state.data.status === "running" ? 3_000 : false;
+			}
+			const errorStatus = getErrorStatus(state.error);
+			return errorStatus === 403 || errorStatus === 404 ? false : 3_000;
+		},
+	});
+	// A resume keeps the run ID, so a cached "interrupted" detail can predate
+	// this running result. It applies only once the card has refetched it.
+	const detail =
+		runQuery.data?.status === "interrupted" &&
+		runQuery.dataUpdatedAt < mountedAt
+			? undefined
+			: runQuery.data;
 	return (
 		<ForkWorkflowTool
 			{...props}
 			snapshot={
-				runQuery.data
-					? forkWorkflowRunDetailSnapshot(runQuery.data)
+				detail
+					? mergeForkWorkflowRunDetail(resultSnapshot, detail)
 					: resultSnapshot
 			}
 		/>
