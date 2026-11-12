@@ -10,6 +10,7 @@ import (
 	"errors"
 	"html"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -81,7 +82,10 @@ func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat) (c
 	if found && shown == fingerprint {
 		return chatstate.Message{}, false, nil
 	}
-	if !found && list == pinnedSkillsNone {
+	// A compaction summary can keep the instructions of skills unpinned
+	// before it, so a compacted prompt gets the empty list once as well.
+	compacted := slices.ContainsFunc(promptRows, func(m database.ChatMessage) bool { return m.Compressed })
+	if !found && list == pinnedSkillsNone && !compacted {
 		return chatstate.Message{}, false, nil
 	}
 	message, err := forkContextTextMessage(chat, pinnedSkillsHeader+"\n"+pinnedSkillsFingerprintLine+fingerprint+"\n"+list)

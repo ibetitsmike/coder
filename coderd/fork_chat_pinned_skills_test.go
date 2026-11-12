@@ -80,6 +80,14 @@ func TestForkChatPinnedSkills(t *testing.T) {
 	_, err = other.UpdateChatPinnedSkills(ctx, chat.ID, codersdk.UpdateChatPinnedSkillsRequest{})
 	_ = requireSDKError(t, err, http.StatusNotFound)
 
+	// The site owner can see the chat but cannot change its pins, since
+	// they run with the chat owner's tools and credentials.
+	_, err = client.UpdateChatPinnedSkills(ctx, chat.ID, codersdk.UpdateChatPinnedSkillsRequest{})
+	_ = requireSDKError(t, err, http.StatusForbidden)
+	pins, err = client.ChatPinnedSkills(ctx, chat.ID)
+	require.NoError(t, err)
+	require.Equal(t, []codersdk.ChatPinnedSkill{deploy}, pins)
+
 	pins, err = member.UpdateChatPinnedSkills(ctx, chat.ID, codersdk.UpdateChatPinnedSkillsRequest{})
 	require.NoError(t, err)
 	require.Empty(t, pins)
