@@ -54,16 +54,18 @@ export const setPluginPackEnabledMutation = (
 		mutationFn: ({ pack, enabled }: PluginPackToggle) =>
 			setPluginPackEnabled(target, pack.id, enabled),
 		onSuccess: (_data, { pack, enabled }) => {
-			const queryKey = enabledPluginPacks(target).queryKey;
-			queryClient.setQueryData(queryKey, (packs) => {
-				const others = packs?.filter((cached) => cached.id !== pack.id);
-				return enabled && others
-					? [
-							...others,
-							{ id: pack.id, name: pack.name, commit_sha: pack.commit_sha },
-						]
-					: others;
-			});
+			queryClient.setQueryData<ForkEnabledPluginPack[]>(
+				enabledPluginPacksKey(target),
+				(packs) => {
+					const others = packs?.filter((cached) => cached.id !== pack.id);
+					return enabled && others
+						? [
+								...others,
+								{ id: pack.id, name: pack.name, commit_sha: pack.commit_sha },
+							]
+						: others;
+				},
+			);
 		},
 		onSettled: async (_data, error) => {
 			await Promise.all([
