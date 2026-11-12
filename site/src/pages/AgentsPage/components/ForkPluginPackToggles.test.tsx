@@ -19,6 +19,8 @@ beforeEach(() => {
 		MockForkPluginPackWithoutPath,
 	]);
 	vi.spyOn(enablementApi, "setPluginPackEnabled").mockResolvedValue();
+	vi.spyOn(enablementApi, "getExcludedPluginPacks").mockResolvedValue([]);
+	vi.spyOn(enablementApi, "setPluginPackExcluded").mockResolvedValue();
 	vi.spyOn(enablementApi, "getAvailablePluginPacks").mockResolvedValue([
 		MockForkPluginPack,
 		MockForkPluginPackWithoutPath,
@@ -246,4 +248,54 @@ it("reports a failed toggle after the switches unmount", async () => {
 			expect.objectContaining({}),
 		),
 	);
+});
+
+it("turns a project pack off for a chat and back on", async () => {
+	const user = userEvent.setup();
+	const projectTarget = {
+		kind: "project",
+		organizationId: MockForkPluginPack.organization_id,
+		projectId: "project-1",
+	} as const;
+	vi.mocked(enablementApi.getEnabledPluginPacks).mockImplementation(
+		async (enabledTarget) =>
+			enabledTarget.kind === "project" ? [MockForkPluginPack] : [],
+	);
+	render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+			projectId={projectTarget.projectId}
+		/>,
+	);
+
+	const toggle = await screen.findByRole("switch", {
+		name: `Enable ${MockForkPluginPack.name}`,
+	});
+	await waitFor(() => expect(toggle).toBeChecked());
+	expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledWith(
+		projectTarget,
+	);
+	await user.click(toggle);
+
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackExcluded).toHaveBeenCalledWith(
+			target.chatId,
+			MockForkPluginPack.id,
+			true,
+		),
+	);
+	await waitFor(() => expect(toggle).not.toBeChecked());
+	await waitFor(() => expect(toggle).toBeEnabled());
+	await user.click(toggle);
+
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackExcluded).toHaveBeenLastCalledWith(
+			target.chatId,
+			MockForkPluginPack.id,
+			false,
+		),
+	);
+	expect(enablementApi.setPluginPackEnabled).not.toHaveBeenCalled();
 });

@@ -52,3 +52,33 @@ export const setPluginPackEnabled = async (
 		await API.getAxiosInstance().delete(path);
 	}
 };
+
+const excludedPluginPacksPath = (chatId: string) =>
+	`/api/v2/chats/fork/${chatId}/excluded-plugin-packs`;
+
+/**
+ * Lists the plugin packs turned off for a chat. A turned-off pack stays off
+ * for the chat and its subagents even when the project or the chat enables it.
+ */
+export const getExcludedPluginPacks = async (
+	chatId: string,
+): Promise<ForkEnabledPluginPack[]> => {
+	const response = await API.getAxiosInstance().get<ForkEnabledPluginPack[]>(
+		excludedPluginPacksPath(chatId),
+	);
+	return response.data;
+};
+
+/** Turns one plugin pack off for a chat, or stops turning it off. */
+export const setPluginPackExcluded = async (
+	chatId: string,
+	packId: string,
+	excluded: boolean,
+): Promise<void> => {
+	const path = `${excludedPluginPacksPath(chatId)}/${packId}`;
+	if (excluded) {
+		await API.getAxiosInstance().put(path);
+	} else {
+		await API.getAxiosInstance().delete(path);
+	}
+};

@@ -7,7 +7,10 @@ import type { PluginPackTarget } from "#/api/forkPluginPackEnablement";
 import {
 	availablePluginPacks,
 	enabledPluginPacks,
+	excludedPluginPacks,
+	type PluginPackState,
 	type PluginPackToggle,
+	pluginPackToggle,
 	setPluginPackEnabledMutation,
 } from "#/api/queries/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
@@ -21,24 +24,32 @@ import { SkillEnabledStatus } from "./SkillEnabledSwitch";
 type ForkPluginPackTogglesViewProps = {
 	installed: readonly ForkEnabledPluginPack[] | undefined;
 	enabled: readonly ForkEnabledPluginPack[] | undefined;
+	/** The packs a chat's project enables; empty for a project. */
+	inherited: readonly ForkEnabledPluginPack[] | undefined;
+	/** The packs a chat turns off; empty for a project. */
+	excluded: readonly ForkEnabledPluginPack[] | undefined;
 	error: unknown;
 	isRetrying: boolean;
 	onRetry: () => void;
 	canEdit: boolean;
 	pending: PluginPackToggle | undefined;
-	onToggle: (pack: ForkEnabledPluginPack, enabled: boolean) => void;
+	onToggle: (toggle: PluginPackToggle) => void;
 };
 
 /**
  * Lists the plugin packs in `installed`, one switch per pack, and reports
- * toggles through `onToggle`. `enabled` only sets each switch's state, so a
- * pack enabled for the target but missing from `installed` is not shown.
+ * toggles through `onToggle`. A switch is on when the target or the chat's
+ * project enables the pack and the chat does not turn it off. The other lists
+ * only set each switch's state, so a pack missing from `installed` is not
+ * shown.
  */
 export const ForkPluginPackTogglesView: React.FC<
 	ForkPluginPackTogglesViewProps
 > = ({
 	installed,
 	enabled,
+	inherited,
+	excluded,
 	error,
 	isRetrying,
 	onRetry,
@@ -52,13 +63,23 @@ export const ForkPluginPackTogglesView: React.FC<
 			actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 		/>
 	) : undefined;
-	if (!installed || !enabled) {
+	if (!installed || !enabled || !inherited || !excluded) {
 		return errorAlert ?? <Loader />;
 	}
-	const isEnabled = (packId: string) =>
-		pending?.pack.id === packId
-			? pending.enabled
-			: enabled.some((pack) => pack.id === packId);
+	const has = (packs: readonly ForkEnabledPluginPack[], packId: string) =>
+		packs.some((pack) => pack.id === packId);
+	const stateOf = (packId: string): PluginPackState => ({
+		direct: has(enabled, packId),
+		inherited: has(inherited, packId),
+		excluded: has(excluded, packId),
+	});
+	const isEnabled = (packId: string) => {
+		if (pending?.pack.id === packId) {
+			return pending.enabled;
+		}
+		const state = stateOf(packId);
+		return (state.direct || state.inherited) && !state.excluded;
+	};
 	return (
 		<div className="flex flex-col gap-3">
 			{errorAlert}
@@ -73,6 +94,9 @@ export const ForkPluginPackTogglesView: React.FC<
 							<span className="min-w-0 flex-1 truncate" title={pack.name}>
 								{pack.name}
 							</span>
+							{has(inherited, pack.id) && (
+								<span className="text-xs text-content-secondary">Project</span>
+							)}
 							<code className="text-xs text-content-secondary">
 								{pack.commit_sha.slice(0, 10)}
 							</code>
@@ -81,7 +105,9 @@ export const ForkPluginPackTogglesView: React.FC<
 									aria-label={`Enable ${pack.name}`}
 									checked={isEnabled(pack.id)}
 									disabled={pending !== undefined}
-									onCheckedChange={(checked) => onToggle(pack, checked)}
+									onCheckedChange={(checked) =>
+										onToggle(pluginPackToggle(pack, checked, stateOf(pack.id)))
+									}
 								/>
 							) : (
 								<SkillEnabledStatus enabled={isEnabled(pack.id)} />
@@ -98,21 +124,45 @@ type ForkPluginPackTogglesProps = {
 	target: PluginPackTarget;
 	organizationId: string;
 	canEdit: boolean;
+	/** The project of a chat target, whose packs the chat inherits. */
+	projectId?: string;
 };
 
 /**
  * Loads a chat or project target's plugin pack enablements and the packs
  * available to the caller in the organization, and saves each toggle for
- * that target.
+ * that target. A chat target also loads the packs it turns off and those its
+ * project enables.
  */
 export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	target,
 	organizationId,
 	canEdit,
+	projectId,
 }) => {
 	const queryClient = useQueryClient();
+	const chatId = target.kind === "chat" ? target.chatId : undefined;
+	const inheritsPacks = chatId !== undefined && projectId !== undefined;
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	const availableQuery = useQuery(availablePluginPacks(organizationId));
+	const excludedQuery = useQuery({
+		...excludedPluginPacks(chatId ?? ""),
+		enabled: chatId !== undefined,
+	});
+	const inheritedQuery = useQuery({
+		...enabledPluginPacks({
+			kind: "project",
+			organizationId,
+			projectId: projectId ?? "",
+		}),
+		enabled: inheritsPacks,
+	});
+	const queries = [
+		enabledQuery,
+		availableQuery,
+		...(chatId !== undefined ? [excludedQuery] : []),
+		...(inheritsPacks ? [inheritedQuery] : []),
+	];
 	// The error toast is a mutation-level callback, so it still shows when
 	// the dialog closes while the request is in flight.
 	const toggleMutation = useMutation({
@@ -126,15 +176,18 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 		<ForkPluginPackTogglesView
 			installed={availableQuery.data}
 			enabled={enabledQuery.data}
-			error={enabledQuery.error ?? availableQuery.error}
-			isRetrying={enabledQuery.isFetching || availableQuery.isFetching}
+			inherited={inheritsPacks ? inheritedQuery.data : []}
+			excluded={chatId !== undefined ? excludedQuery.data : []}
+			error={queries.find((query) => query.error)?.error}
+			isRetrying={queries.some((query) => query.isFetching)}
 			onRetry={() => {
-				void enabledQuery.refetch();
-				void availableQuery.refetch();
+				for (const query of queries) {
+					void query.refetch();
+				}
 			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}
-			onToggle={(pack, enabled) => toggleMutation.mutate({ pack, enabled })}
+			onToggle={(toggle) => toggleMutation.mutate(toggle)}
 		/>
 	);
 };

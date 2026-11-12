@@ -21,6 +21,8 @@ const meta: Meta<typeof ForkPluginPacksPillView> = {
 			<ForkPluginPackTogglesView
 				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
 				enabled={[MockForkPluginPack]}
+				inherited={[]}
+				excluded={[]}
 				error={undefined}
 				isRetrying={false}
 				onRetry={fn()}
@@ -56,6 +58,8 @@ export const NoneEnabled: Story = {
 			<ForkPluginPackTogglesView
 				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
 				enabled={[]}
+				inherited={[]}
+				excluded={[]}
 				error={undefined}
 				isRetrying={false}
 				onRetry={fn()}
@@ -74,6 +78,8 @@ export const ReadOnlyExpanded: Story = {
 			<ForkPluginPackTogglesView
 				installed={[MockForkPluginPack, MockForkPluginPackWithoutPath]}
 				enabled={[MockForkPluginPack]}
+				inherited={[]}
+				excluded={[]}
 				error={undefined}
 				isRetrying={false}
 				onRetry={fn()}
