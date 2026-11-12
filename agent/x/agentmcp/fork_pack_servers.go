@@ -75,9 +75,9 @@ func (m *Manager) SetPackSources(sources []PackSource) {
 	}
 	m.packSources = slices.Clone(sources)
 	// The declarations can change while every file stat stays the same
-	// (an inline map or a revision), so an empty snapshot makes the next
-	// Reload parse them again.
-	m.snapshot = make(map[string]fileSnapshot)
+	// (an inline map or a revision), so Reload skips only once it has
+	// loaded this generation.
+	m.packGen++
 	started := m.reloadRequested
 	m.mu.Unlock()
 	if !started {
@@ -86,8 +86,8 @@ func (m *Manager) SetPackSources(sources []PackSource) {
 	go func() {
 		// A Reload that joins a reload already in flight returns once
 		// that reload installs the previous sources. The second call
-		// then sees the changed pack files and reloads again; otherwise
-		// it is a no-op.
+		// then sees the newer pack generation and reloads again;
+		// otherwise it is a no-op.
 		for range 2 {
 			m.mu.RLock()
 			paths := slices.Clone(m.lastPaths)
@@ -100,11 +100,29 @@ func (m *Manager) SetPackSources(sources []PackSource) {
 	}()
 }
 
-// currentPackSources returns the pack declarations for one reload.
+// currentPackSources returns the current pack declarations.
 func (m *Manager) currentPackSources() []PackSource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.packSources
+}
+
+// packSourcesForReload returns the pack declarations for one reload and
+// records their generation, which installServers then marks as loaded.
+// Reload bodies never overlap (singleflight), so one field is enough.
+func (m *Manager) packSourcesForReload() []PackSource {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.parsedPackGen = m.packGen
+	return m.packSources
+}
+
+// packSourcesLoaded reports whether the installed servers come from the
+// latest SetPackSources call.
+func (m *Manager) packSourcesLoaded() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.loadedPackGen == m.packGen
 }
 
 // withPackFiles adds the files the current pack declarations read to the

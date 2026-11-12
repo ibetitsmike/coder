@@ -200,3 +200,40 @@ func TestSetPackSourcesAfterEmptyReload(t *testing.T) {
 		return len(tools) == 1 && tools[0].server == "pack-srv"
 	})
 }
+
+func TestReloadAfterStalePackInstall(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	logger := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
+	dir := t.TempDir()
+
+	workspace := writeMCPConfig(t, dir, map[string]mcpServerEntry{})
+	manifest := filepath.Join(dir, "plugin.json")
+	writeTestFile(t, manifest, `{"name": "p"}`)
+	_, entry := fakeMCPServerConfig(t, "old-srv")
+	old, err := json.Marshal(map[string]mcpServerEntry{"old-srv": entry})
+	require.NoError(t, err)
+	renamed, err := json.Marshal(map[string]mcpServerEntry{"new-srv": entry})
+	require.NoError(t, err)
+
+	m := NewManager(ctx, logger, agentexec.DefaultExecer, nil, nil, nil, nil)
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetPackSources([]PackSource{{ManifestPath: manifest, Dir: dir, Configs: []PackConfig{{Path: manifest, Inline: old}}}})
+	require.NoError(t, m.Reload(ctx, []string{workspace}))
+	awaitTools(ctx, t, m, func(tools []catalogTool) bool {
+		return len(tools) == 1 && tools[0].server == "old-srv"
+	})
+
+	// The state an in-flight reload leaves when SetPackSources lands
+	// between its parse and its install: newer sources, while the
+	// installed snapshot still matches every file stat.
+	m.mu.Lock()
+	m.packSources = []PackSource{{ManifestPath: manifest, Dir: dir, Configs: []PackConfig{{Path: manifest, Inline: renamed}}}}
+	m.packGen++
+	m.mu.Unlock()
+
+	require.NoError(t, m.Reload(ctx, []string{workspace}))
+	awaitTools(ctx, t, m, func(tools []catalogTool) bool {
+		return len(tools) == 1 && tools[0].server == "new-srv"
+	})
+}
