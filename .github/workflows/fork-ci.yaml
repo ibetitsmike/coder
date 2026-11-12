@@ -98,7 +98,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Agent context, agent git and SDK packages
-        run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./codersdk/
+        run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./agent/x/agentmcp/... ./codersdk/
 
   site:
     runs-on: ubuntu-latest
