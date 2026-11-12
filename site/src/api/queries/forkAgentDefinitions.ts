@@ -165,8 +165,11 @@ export const isNewer = (a: Timestamped, b: Timestamped) =>
 export const isResponseLost = (error: unknown) =>
 	isAxiosError(error) && error.response === undefined;
 
-// Callers reconcile an unknown outcome against the refetched list, so only
-// then does the mutation stay pending until the refetch settles.
+/**
+ * Invalidates a list query. Callers reconcile an unknown outcome against the
+ * refetched list, so only then (`awaitRefetch`) does the mutation stay pending
+ * until the refetch settles.
+ */
 export const invalidateList = (
 	queryClient: QueryClient,
 	queryKey: QueryKey,
