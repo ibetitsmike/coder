@@ -125,7 +125,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			<div className="flex min-w-0 items-center gap-1.5">
 				<ForkWorkflowStatusBadge {...forkWorkflowRunStatusMeta(run.status)} />
 				<h3 className="m-0 min-w-0 truncate text-sm font-medium text-content-primary">
-					{run.title || "Untitled run"}
+					{run.title || run.script.slice(0, 200) || "Untitled run"}
 				</h3>
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">

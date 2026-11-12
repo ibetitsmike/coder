@@ -11,6 +11,7 @@ import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
 const mockRunningRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "running",
+	title: "",
 	result: undefined,
 	logs: [],
 	finished_at: undefined,
