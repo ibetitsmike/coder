@@ -141,14 +141,11 @@ func ruleProjectRoot(source, directory string) string {
 	return directory
 }
 
-// ruleGlobMatch matches a Cursor glob against a root-relative path. A glob
-// without a slash matches at any depth, like a gitignore pattern, because
-// Cursor rules commonly use "*.ts" for every TypeScript file.
+// ruleGlobMatch matches a Cursor glob verbatim against a root-relative path,
+// so "*.ts" matches only files at the rule's project root and "**/*.ts"
+// matches every depth.
 func ruleGlobMatch(glob, rel string) bool {
 	glob = strings.TrimPrefix(strings.TrimPrefix(glob, "./"), "/")
-	if !strings.Contains(glob, "/") {
-		glob = "**/" + glob
-	}
 	ok, err := doublestar.Match(glob, rel)
 	return err == nil && ok
 }

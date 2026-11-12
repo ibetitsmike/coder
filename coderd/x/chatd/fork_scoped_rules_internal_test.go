@@ -83,7 +83,9 @@ func TestContextResourcesToPrompt_ScopedRules(t *testing.T) {
 		attach  bool
 	}{
 		{name: "UnrelatedFile", source: projectRule, globs: []string{"*.ts"}, dir: dir, touched: []string{"/home/coder/proj/README.md"}},
-		{name: "MatchingFileAtAnyDepth", source: projectRule, globs: []string{"*.ts"}, dir: dir, touched: []string{"/home/coder/proj/README.md", "/home/coder/proj/src/app.ts"}, attach: true},
+		{name: "SlashlessGlobAtRoot", source: projectRule, globs: []string{"*.ts"}, dir: dir, touched: []string{"/home/coder/proj/README.md", "/home/coder/proj/app.ts"}, attach: true},
+		{name: "SlashlessGlobNotNested", source: projectRule, globs: []string{"*.ts"}, dir: dir, touched: []string{"/home/coder/proj/src/app.ts"}},
+		{name: "DoubleStarGlobAtAnyDepth", source: projectRule, globs: []string{"**/*.ts"}, dir: dir, touched: []string{"/home/coder/proj/src/app.ts"}, attach: true},
 		{name: "RelativeToProjectRoot", source: projectRule, globs: []string{"src/*.ts"}, dir: dir, touched: []string{"/home/coder/proj/src/app.ts"}, attach: true},
 		{name: "AnchoredGlobOutsidePrefix", source: projectRule, globs: []string{"src/*.ts"}, dir: dir, touched: []string{"/home/coder/src/app.ts", "/home/coder/proj/lib/src/app.ts"}},
 		{name: "OutsideProjectRoot", source: projectRule, globs: []string{"**/*.ts"}, dir: dir, touched: []string{"/home/coder/other/app.ts"}},
