@@ -9,6 +9,7 @@ import {
 	type LucideIcon,
 	MessagesSquareIcon,
 	SearchIcon,
+	WorkflowIcon,
 } from "lucide-react";
 
 /** Keys are fork iconNames, never tool names, so flag-off rows keep upstream's icon. */
@@ -19,4 +20,5 @@ export const forkToolIcons: Record<string, LucideIcon> = {
 	fork_wakeup: AlarmClockIcon,
 	fork_wait_for_events: HourglassIcon,
 	fork_notify_user: BellIcon,
+	fork_workflow: WorkflowIcon,
 };
