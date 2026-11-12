@@ -118,6 +118,9 @@ type Manager struct {
 	// packSources holds the plugin pack MCP declarations
 	// (fork_pack_servers.go), reloaded next to lastPaths.
 	packSources []PackSource
+	// reloadRequested is set by the first Reload, even one with no
+	// paths, so pack sources set later still start.
+	reloadRequested bool
 
 	// watcher fires a debounced Reload when any watched config
 	// file is created, written, removed, or renamed. It is armed
@@ -209,8 +212,9 @@ func (m *Manager) Reconnect(ctx context.Context) error {
 	paths := slices.Clone(m.lastPaths)
 	// An empty snapshot makes Reload treat the config as changed.
 	m.snapshot = make(map[string]fileSnapshot)
+	noPacks := len(m.packSources) == 0
 	m.mu.Unlock()
-	if len(paths) == 0 {
+	if len(paths) == 0 && noPacks {
 		return nil
 	}
 	return m.Reload(ctx, paths)
@@ -309,6 +313,7 @@ func (m *Manager) armWatcher(paths []string) {
 
 	m.mu.Lock()
 	m.lastPaths = slices.Clone(paths)
+	m.reloadRequested = true
 	w := m.watcher
 	closed := m.closed
 	m.mu.Unlock()
@@ -327,8 +332,9 @@ func (m *Manager) handleWatchedConfigChange() {
 	m.mu.RLock()
 	paths := slices.Clone(m.lastPaths)
 	closed := m.closed
+	noPacks := len(m.packSources) == 0
 	m.mu.RUnlock()
-	if closed || len(paths) == 0 {
+	if closed || (len(paths) == 0 && noPacks) {
 		return
 	}
 
