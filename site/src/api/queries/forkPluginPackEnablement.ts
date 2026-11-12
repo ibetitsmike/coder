@@ -1,7 +1,12 @@
 // This file is fork code: queries for enabling plugin packs in the
 // fork-plugin-packs experiment.
 
-import { mutationOptions, type QueryClient, queryOptions } from "react-query";
+import {
+	mutationOptions,
+	type QueryClient,
+	queryOptions,
+	skipToken,
+} from "react-query";
 import { getErrorStatus } from "#/api/errors";
 import {
 	getAvailablePluginPacks,
@@ -23,6 +28,11 @@ import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
 export const availablePluginPacksKey = (organizationId: string) =>
 	[...pluginPacksKey(organizationId), "available"] as const;
 
+const projectPluginPacksKey = (
+	organizationId: string,
+	projectId: string | undefined,
+) => [...pluginPacksKey(organizationId), "projects", projectId] as const;
+
 /**
  * The query key of the plugin packs a project or chat enables directly. A
  * project's key extends pluginPacksKey of its organization, but a chat's key
@@ -30,19 +40,15 @@ export const availablePluginPacksKey = (organizationId: string) =>
  */
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
-		? ([
-				...pluginPacksKey(target.organizationId),
-				"projects",
-				target.projectId,
-			] as const)
+		? projectPluginPacksKey(target.organizationId, target.projectId)
 		: ([...pluginPacksRootKey, "chats", target.chatId] as const);
 
 /**
- * The query key of the plugin packs turned off for a chat. It extends the
- * chat's enabledPluginPacksKey, so invalidating that key refreshes it too.
+ * Extends the target's enabledPluginPacksKey, so invalidating that key
+ * refreshes it too.
  */
-export const excludedPluginPacksKey = (chatId: string) =>
-	[...enabledPluginPacksKey({ kind: "chat", chatId }), "excluded"] as const;
+export const excludedPluginPacksKey = (target: PluginPackTarget) =>
+	[...enabledPluginPacksKey(target), "excluded"] as const;
 
 /** Query options for the plugin packs any organization member may enable. */
 export const availablePluginPacks = (organizationId: string) =>
@@ -58,11 +64,34 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 		queryFn: () => getEnabledPluginPacks(target),
 	});
 
-/** Query options for the plugin packs turned off for a chat. */
-export const excludedPluginPacks = (chatId: string) =>
+/**
+ * Query options for the plugin packs a chat inherits from its project. It
+ * does not run without a project.
+ */
+export const projectPluginPacks = (
+	organizationId: string,
+	projectId: string | undefined,
+) =>
 	queryOptions({
-		queryKey: excludedPluginPacksKey(chatId),
-		queryFn: () => getExcludedPluginPacks(chatId),
+		queryKey: projectPluginPacksKey(organizationId, projectId),
+		queryFn:
+			projectId === undefined
+				? skipToken
+				: () =>
+						getEnabledPluginPacks({ kind: "project", organizationId, projectId }),
+	});
+
+/**
+ * Query options for the plugin packs turned off for a chat. A project turns
+ * nothing off, so its query does not run.
+ */
+export const excludedPluginPacks = (target: PluginPackTarget) =>
+	queryOptions({
+		queryKey: excludedPluginPacksKey(target),
+		queryFn:
+			target.kind === "chat"
+				? () => getExcludedPluginPacks(target.chatId)
+				: skipToken,
 	});
 
 /** Where a pack's switch gets its state for a project or chat. */
@@ -78,7 +107,7 @@ export type PluginPackState = {
 /**
  * A request to switch a plugin pack. `pack` is the snapshot used to reconcile
  * the cached lists, `enabled` is the desired state of the switch and `writes`
- * holds the rows to change; a missing row stays as it is.
+ * holds the rows to write; an absent field means no write.
  */
 export type PluginPackToggle = {
 	pack: ForkEnabledPluginPack;
@@ -148,9 +177,9 @@ export const setPluginPackEnabledMutation = (
 					(packs) => withPack(packs, pack, direct),
 				);
 			}
-			if (excluded !== undefined && target.kind === "chat") {
+			if (excluded !== undefined) {
 				queryClient.setQueryData<ForkEnabledPluginPack[]>(
-					excludedPluginPacksKey(target.chatId),
+					excludedPluginPacksKey(target),
 					(packs) => withPack(packs, pack, excluded),
 				);
 			}

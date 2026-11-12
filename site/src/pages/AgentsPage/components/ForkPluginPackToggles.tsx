@@ -1,6 +1,7 @@
 // This file is fork code: the fork-plugin-packs experiment's list of plugin
 // pack switches.
 
+import { useId } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { PluginPackTarget } from "#/api/forkPluginPackEnablement";
@@ -11,6 +12,7 @@ import {
 	type PluginPackState,
 	type PluginPackToggle,
 	pluginPackToggle,
+	projectPluginPacks,
 	setPluginPackEnabledMutation,
 } from "#/api/queries/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
@@ -20,6 +22,9 @@ import { Switch } from "#/components/Switch/Switch";
 import { toast } from "#/components/Toaster/toast";
 import { RetryButton } from "./RetryButton";
 import { SkillEnabledStatus } from "./SkillEnabledSwitch";
+
+const has = (packs: readonly ForkEnabledPluginPack[], packId: string) =>
+	packs.some((pack) => pack.id === packId);
 
 type ForkPluginPackTogglesViewProps = {
 	installed: readonly ForkEnabledPluginPack[] | undefined;
@@ -41,7 +46,8 @@ type ForkPluginPackTogglesViewProps = {
  * toggles through `onToggle`. A switch is on when the target or the chat's
  * project enables the pack and the chat does not turn it off. The other lists
  * only set each switch's state, so a pack missing from `installed` is not
- * shown.
+ * shown. A subagent's switches ignore the packs its ancestor chats enable or
+ * turn off.
  */
 export const ForkPluginPackTogglesView: React.FC<
 	ForkPluginPackTogglesViewProps
@@ -63,11 +69,10 @@ export const ForkPluginPackTogglesView: React.FC<
 			actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 		/>
 	) : undefined;
+	const projectLabelId = useId();
 	if (!installed || !enabled || !inherited || !excluded) {
 		return errorAlert ?? <Loader />;
 	}
-	const has = (packs: readonly ForkEnabledPluginPack[], packId: string) =>
-		packs.some((pack) => pack.id === packId);
 	const stateOf = (packId: string): PluginPackState => ({
 		direct: has(enabled, packId),
 		inherited: has(inherited, packId),
@@ -95,7 +100,12 @@ export const ForkPluginPackTogglesView: React.FC<
 								{pack.name}
 							</span>
 							{has(inherited, pack.id) && (
-								<span className="text-xs text-content-secondary">Project</span>
+								<span
+									id={`${projectLabelId}-${pack.id}`}
+									className="text-xs text-content-secondary"
+								>
+									Project
+								</span>
 							)}
 							<code className="text-xs text-content-secondary">
 								{pack.commit_sha.slice(0, 10)}
@@ -103,6 +113,11 @@ export const ForkPluginPackTogglesView: React.FC<
 							{canEdit ? (
 								<Switch
 									aria-label={`Enable ${pack.name}`}
+									aria-describedby={
+										has(inherited, pack.id)
+											? `${projectLabelId}-${pack.id}`
+											: undefined
+									}
 									checked={isEnabled(pack.id)}
 									disabled={pending !== undefined}
 									onCheckedChange={(checked) =>
@@ -141,27 +156,18 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	projectId,
 }) => {
 	const queryClient = useQueryClient();
-	const chatId = target.kind === "chat" ? target.chatId : undefined;
-	const inheritsPacks = chatId !== undefined && projectId !== undefined;
+	const isChat = target.kind === "chat";
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	const availableQuery = useQuery(availablePluginPacks(organizationId));
-	const excludedQuery = useQuery({
-		...excludedPluginPacks(chatId ?? ""),
-		enabled: chatId !== undefined,
-	});
-	const inheritedQuery = useQuery({
-		...enabledPluginPacks({
-			kind: "project",
-			organizationId,
-			projectId: projectId ?? "",
-		}),
-		enabled: inheritsPacks,
-	});
+	const excludedQuery = useQuery(excludedPluginPacks(target));
+	const inheritedQuery = useQuery(projectPluginPacks(organizationId, projectId));
+	// Refetching a skipped query throws, so Retry covers only the queries
+	// that run.
 	const queries = [
 		enabledQuery,
 		availableQuery,
-		...(chatId !== undefined ? [excludedQuery] : []),
-		...(inheritsPacks ? [inheritedQuery] : []),
+		...(isChat ? [excludedQuery] : []),
+		...(projectId !== undefined ? [inheritedQuery] : []),
 	];
 	// The error toast is a mutation-level callback, so it still shows when
 	// the dialog closes while the request is in flight.
@@ -176,8 +182,8 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 		<ForkPluginPackTogglesView
 			installed={availableQuery.data}
 			enabled={enabledQuery.data}
-			inherited={inheritsPacks ? inheritedQuery.data : []}
-			excluded={chatId !== undefined ? excludedQuery.data : []}
+			inherited={projectId !== undefined ? inheritedQuery.data : []}
+			excluded={isChat ? excludedQuery.data : []}
 			error={queries.find((query) => query.error)?.error}
 			isRetrying={queries.some((query) => query.isFetching)}
 			onRetry={() => {
@@ -187,7 +193,7 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}
-			onToggle={(toggle) => toggleMutation.mutate(toggle)}
+			onToggle={toggleMutation.mutate}
 		/>
 	);
 };

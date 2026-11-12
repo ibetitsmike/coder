@@ -261,6 +261,19 @@ it("turns a project pack off for a chat and back on", async () => {
 		async (enabledTarget) =>
 			enabledTarget.kind === "project" ? [MockForkPluginPack] : [],
 	);
+	const excludedIds = new Set<string>();
+	vi.mocked(enablementApi.setPluginPackExcluded).mockImplementation(
+		async (_chatId, packId, excluded) => {
+			if (excluded) {
+				excludedIds.add(packId);
+			} else {
+				excludedIds.delete(packId);
+			}
+		},
+	);
+	vi.mocked(enablementApi.getExcludedPluginPacks).mockImplementation(
+		async () => [MockForkPluginPack].filter((pack) => excludedIds.has(pack.id)),
+	);
 	render(
 		<ForkPluginPackToggles
 			target={target}
@@ -274,6 +287,7 @@ it("turns a project pack off for a chat and back on", async () => {
 		name: `Enable ${MockForkPluginPack.name}`,
 	});
 	await waitFor(() => expect(toggle).toBeChecked());
+	expect(toggle).toHaveAccessibleDescription("Project");
 	expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledWith(
 		projectTarget,
 	);
