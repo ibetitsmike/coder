@@ -127,6 +127,9 @@ type Manager struct {
 	// set, so a deployment without agent definitions never fills its
 	// snapshot caps with invisible pack agents.
 	packAgentDefinitionsAdvertised atomic.Bool
+	// globRulesAdvertised mirrors the fork-glob-rules capability, read by
+	// the resolver through GlobRulesAdvertised.
+	globRulesAdvertised atomic.Bool
 	// negotiating marks the window between a connection's capability
 	// reset and its first processed push response. Every snapshot
 	// published inside the window carries a nonzero capability
@@ -203,6 +206,9 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 	resolver.PackAgentDefinitionsAdvertised = func() bool {
 		return m.packAgentDefinitionsAdvertised.Load()
+	}
+	resolver.GlobRulesAdvertised = func() bool {
+		return m.globRulesAdvertised.Load()
 	}
 
 	for _, s := range opts.InitialSources {

@@ -468,7 +468,7 @@ func (p *Server) buildTurnEnvironment(
 
 		agent = p.forkWorktreeAgent(ctx, chat, agent)
 		var resolveErr error
-		instruction, workspaceSkills, resolveErr = p.resolveTurnWorkspaceContext(ctx, chat, agent)
+		instruction, workspaceSkills, resolveErr = p.resolveTurnWorkspaceContext(ctx, chat, agent, touchedFilePaths(promptRows)...)
 		if resolveErr != nil {
 			return turnEnvironment{}, resolveErr
 		}

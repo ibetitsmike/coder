@@ -660,6 +660,11 @@ message ContextResource {
 // limit).
 message InstructionFileBody {
 	bytes content = 1;
+	// Fork: globs is set on Cursor rules that apply only to matching
+	// files. Agents send such rules only to servers that advertise
+	// fork_glob_rules, since older readers would inject them on every
+	// turn.
+	repeated string globs = 100;
 }
 
 // SkillMetaBody carries the SKILL.md meta file content plus the
@@ -747,6 +752,10 @@ message PushContextStateResponse {
 	// agent emits visible pack agent rows as excluded: chatd drops every
 	// subagent row, so the rows would only occupy snapshot caps.
 	bool fork_agent_definitions = 101;
+	// Fork: fork_glob_rules advertises that the serving coderd attaches
+	// instruction files carrying InstructionFileBody.globs only to turns
+	// that touched a matching file.
+	bool fork_glob_rules = 102;
 }
 
 service Agent {
