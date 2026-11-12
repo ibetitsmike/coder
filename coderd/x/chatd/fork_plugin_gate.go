@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"cdr.dev/slog/v3"
+	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -71,7 +72,10 @@ func managedPackName(sourcePath string) (string, bool) {
 // leaves removed files on disk.
 // Packs the user placed outside managedPackRoot are kept. The prompt builder,
 // the context resource listing, and the agent type catalog all call it, so
-// the gate covers every consumer of the pinned rows.
+// the gate covers every consumer of the pinned rows. The surviving rows of
+// managed packs are then deduplicated by skill and agent name, so a pack that
+// is not enabled for the chat cannot hide the same-named resource of one that
+// is.
 func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, resources []database.ChatContextResource) []database.ChatContextResource {
 	if !p.experiments.Enabled(codersdk.ExperimentForkPluginPacks) {
 		return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
@@ -79,7 +83,7 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 		})
 	}
 	var enabled map[string]packPathSet
-	return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
+	resources = slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
 		if !isPackContribution(r.SourcePath) {
 			return false
 		}
@@ -97,6 +101,93 @@ func (p *Server) filterPackResources(ctx context.Context, chat database.Chat, re
 		}
 		files, ok := enabled[name]
 		return !ok || !files.defines(r, name)
+	})
+	return dedupePackResourceNames(resources)
+}
+
+// contextResourceNameKey identifies a skill or custom agent by kind and name.
+type contextResourceNameKey struct {
+	kind database.WorkspaceAgentContextBodyKind
+	name string
+}
+
+// contextResourceNameKeyOf returns the name key of an OK skill or custom
+// agent row. ok is false for any other row, and for a row whose body cannot
+// be decoded or has no name; those are never deduplicated.
+func contextResourceNameKeyOf(r database.ChatContextResource) (key contextResourceNameKey, ok bool) {
+	if r.Status != database.WorkspaceAgentContextResourceStatusOk {
+		return contextResourceNameKey{}, false
+	}
+	var name string
+	switch r.BodyKind {
+	case database.WorkspaceAgentContextBodyKindSkill:
+		body, decoded := decodeSkillMetaBody(r.Body)
+		if !decoded {
+			return contextResourceNameKey{}, false
+		}
+		name = body.GetName()
+	case database.WorkspaceAgentContextBodyKindSubagent:
+		var body agentproto.SubagentBody
+		if err := contextBodyUnmarshalOptions.Unmarshal(r.Body, &body); err != nil {
+			return contextResourceNameKey{}, false
+		}
+		name = body.GetName()
+	default:
+		return contextResourceNameKey{}, false
+	}
+	return contextResourceNameKey{kind: r.BodyKind, name: name}, name != ""
+}
+
+// isManagedPackRow reports whether a row comes from a pack installed under
+// managedPackRoot, the packs filterPackResources filters per chat.
+func isManagedPackRow(r database.ChatContextResource) bool {
+	if !isPackContribution(r.SourcePath) {
+		return false
+	}
+	_, ok := managedPackName(r.SourcePath)
+	return ok
+}
+
+// dedupePackResourceNames keeps one skill or custom agent row per name among
+// the rows of managed packs. The workspace agent leaves same-named rows of
+// different managed packs in place because it cannot know which packs a chat
+// has enabled, so the choice is made here, among the rows filterPackResources
+// kept.
+//
+// Every other row wins: ordinary rows and the rows of packs outside
+// managedPackRoot are never filtered per chat, and the agent has already
+// settled their collisions first-wins in scan-root order, which is what lets
+// an earlier unmanaged pack beat a managed one. Among managed rows, the first
+// in resources order wins. That is source order, so the pack whose directory
+// name sorts first, the same order the agent scans in. The order is
+// deterministic but arbitrary: pack priority is not persisted, so a chat that
+// enables two packs with the same name sees the first.
+func dedupePackResourceNames(resources []database.ChatContextResource) []database.ChatContextResource {
+	if !slices.ContainsFunc(resources, isManagedPackRow) {
+		return resources
+	}
+	seen := map[contextResourceNameKey]struct{}{}
+	for _, r := range resources {
+		if isManagedPackRow(r) {
+			continue
+		}
+		if key, ok := contextResourceNameKeyOf(r); ok {
+			seen[key] = struct{}{}
+		}
+	}
+	return slices.DeleteFunc(resources, func(r database.ChatContextResource) bool {
+		if !isManagedPackRow(r) {
+			return false
+		}
+		key, ok := contextResourceNameKeyOf(r)
+		if !ok {
+			return false
+		}
+		if _, dup := seen[key]; dup {
+			return true
+		}
+		seen[key] = struct{}{}
+		return false
 	})
 }
 
