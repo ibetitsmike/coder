@@ -15,6 +15,7 @@ import {
 	createTestQueryClient,
 	renderComponent,
 } from "#/testHelpers/renderHelpers";
+import { generateUUID } from "#/utils/random";
 import { ForkWorkflowsPanel } from "./ForkWorkflowsPanel";
 
 // The panel remembers the open run per chat, so each test uses its own chat.
@@ -40,7 +41,7 @@ const renderPanel = (chatId: string) => {
 
 describe("ForkWorkflowsPanel", () => {
 	it("stops a running run after the user confirms", async () => {
-		const chatId = crypto.randomUUID();
+		const chatId = generateUUID();
 		let run: WorkflowRunDetail = {
 			...MockChatWorkflowRunDetail,
 			chat_id: chatId,
@@ -76,7 +77,7 @@ describe("ForkWorkflowsPanel", () => {
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {
-		const chatId = crypto.randomUUID();
+		const chatId = generateUUID();
 		const runningRun: WorkflowRunDetail = {
 			...MockChatWorkflowRunDetail,
 			chat_id: chatId,
@@ -114,7 +115,7 @@ describe("ForkWorkflowsPanel", () => {
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {
-		const chatId = crypto.randomUUID();
+		const chatId = generateUUID();
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
 			MockChatWorkflowRun,
 		]);
