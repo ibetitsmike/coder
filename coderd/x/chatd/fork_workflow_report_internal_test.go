@@ -182,6 +182,26 @@ func TestForkWorkflowReport(t *testing.T) {
 			`{"type":"object","properties":{"*":{"type":"string"},"other":{"type":"string"}}}`))
 		require.NoError(t, err)
 
+		// Validation-neutral annotations pass: dropping them loses metadata,
+		// not constraints.
+		_, err = newWorkflowReportTool(json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$comment":"why the schema looks like this",` +
+			`"default":{"a":"x"},` +
+			`"examples":[{"a":"x"}],` +
+			`"deprecated":true,"readOnly":true,"writeOnly":true,` +
+			`"properties":{"a":{"type":"string"}},"required":["a"]}`))
+		require.NoError(t, err)
+
+		// Only the property subtree is inlined: definitions the properties
+		// never reach cannot reach the provider contract, so an unused
+		// recursive definition does not block the step.
+		_, err = newWorkflowReportTool(json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"node":{"type":"object","properties":{"child":{"$ref":"#/$defs/node"}}}},` +
+			`"properties":{"text":{"type":"string"}}}`))
+		require.NoError(t, err)
+
 		// Composition nested inside a property is carried verbatim by the
 		// parameter shape, so it stays allowed.
 		_, err = newWorkflowReportTool(json.RawMessage(

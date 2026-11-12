@@ -231,17 +231,15 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, nil, xerrors.Errorf("parse report schema: %w", err)
 	}
-	inlined, err := inlineStepRefs(root, root, nil, new(int))
-	if err != nil {
-		return nil, nil, err
-	}
 	// Fantasy rebuilds the provider schema as
 	// {type: object, properties: ..., required: ...} and the providers keep
 	// only those keys, so any other top-level constraint (composition,
-	// minProperties, propertyNames, typed additionalProperties, ...) would
-	// silently vanish from the tool contract the child sees while Run still
-	// enforces it. Refuse instead of shipping a weaker contract.
-	for key := range inlined {
+	// minProperties, propertyNames, non-default additionalProperties, ...)
+	// would silently vanish from the tool contract the child sees while Run
+	// still enforces it. Refuse instead of shipping a weaker contract. The
+	// check reads the raw root: inlining transforms values, never the
+	// top-level key set.
+	for key := range root {
 		if !representableTopLevelKeywords[key] {
 			return nil, nil, xerrors.Errorf(
 				"top-level %q cannot be represented in the report tool contract: put the object constraints directly in properties", key)
@@ -251,7 +249,7 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 	// property-only provider contract cannot carry the keyword, so only the
 	// default (absent or true, keys unrestricted) is faithful: false and any
 	// typed value would be enforced by Run and invisible to the child.
-	switch ap := inlined["additionalProperties"].(type) {
+	switch ap := root["additionalProperties"].(type) {
 	case nil:
 	case bool:
 		if !ap {
@@ -266,17 +264,24 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 	// normalizeToolMapSchemas would read the parameters as
 	// additionalProperties and the provider would accept keys the schema
 	// forbids. Reject the name; escaping is impossible in JSON Schema.
-	if props, ok := inlined["properties"].(map[string]any); ok {
+	if props, ok := root["properties"].(map[string]any); ok {
 		if _, star := props["*"]; star && len(props) == 1 {
 			return nil, nil, xerrors.Errorf(
 				`property name "*" is reserved by the tool contract: rename the property`)
 		}
 	}
-	props, _ := inlined["properties"].(map[string]any)
-	if props == nil {
-		props = map[string]any{}
+	// Only the property subtree is inlined: definitions the properties never
+	// reach, recursive or otherwise, cannot reach the provider contract, and
+	// Run's resolver keeps them in the original schema where they are valid.
+	rawProps, _ := root["properties"].(map[string]any)
+	if rawProps == nil {
+		rawProps = map[string]any{}
 	}
-	if reqs, ok := inlined["required"].([]any); ok {
+	props, err := inlineStepRefs(rawProps, root, nil, new(int))
+	if err != nil {
+		return nil, nil, err
+	}
+	if reqs, ok := root["required"].([]any); ok {
 		for _, r := range reqs {
 			if name, ok := r.(string); ok {
 				required = append(required, name)
@@ -337,11 +342,12 @@ func inlineStepRefs(node map[string]any, root map[string]any, seen []string, bud
 // payload would be unreadable long before this bound matters.
 const maxInlinedNodes = 4096
 
-// representableTopLevelKeywords are the keys of an inlined step schema the
-// report tool contract can carry: type, the property keywords fantasy
-// rebuilds the provider schema from, documentation, and the definition
-// keywords the inliner has already flattened. Anything else at the top level
-// would be enforced by Run but invisible to the child.
+// representableTopLevelKeywords are the keys of a step schema the report
+// tool contract can carry: type, the property keywords fantasy rebuilds the
+// provider schema from, documentation, the definition keywords the inliner
+// flattens, and the validation-neutral annotations (dropping them loses
+// metadata, not constraints). Anything else at the top level would be
+// enforced by Run but invisible to the child.
 var representableTopLevelKeywords = map[string]bool{
 	"$schema":              true,
 	"$defs":                true,
@@ -352,6 +358,14 @@ var representableTopLevelKeywords = map[string]bool{
 	"title":                true,
 	"description":          true,
 	"additionalProperties": true,
+	"$comment":             true,
+	"default":              true,
+	"examples":             true,
+	"deprecated":           true,
+	"readOnly":             true,
+	"writeOnly":            true,
+	"contentMediaType":     true,
+	"contentEncoding":      true,
 }
 
 // schemaDataFields are keywords whose values are data, not schemas: an
