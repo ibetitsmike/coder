@@ -184,14 +184,15 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 		return nil, nil, err
 	}
 	// Fantasy rebuilds the provider schema as
-	// {type: object, properties: ..., required: ...}, so top-level
-	// composition would silently vanish from the tool contract the child
-	// sees, while Run still enforces it. Refuse instead of shipping a
-	// weaker contract.
-	for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
-		if branches, ok := inlined[keyword].([]any); ok && len(branches) > 0 {
+	// {type: object, properties: ..., required: ...} and the providers keep
+	// only those keys, so any other top-level constraint (composition,
+	// minProperties, propertyNames, typed additionalProperties, ...) would
+	// silently vanish from the tool contract the child sees while Run still
+	// enforces it. Refuse instead of shipping a weaker contract.
+	for key := range inlined {
+		if !representableTopLevelKeywords[key] {
 			return nil, nil, xerrors.Errorf(
-				"top-level %s cannot be represented in the report tool contract: put the object constraints directly in properties", keyword)
+				"top-level %q cannot be represented in the report tool contract: put the object constraints directly in properties", key)
 		}
 	}
 	// A lone property named "*" is Fantasy's free-form wildcard spelling:
@@ -268,6 +269,23 @@ func inlineStepRefs(node map[string]any, root map[string]any, seen []string, bud
 // It is generous: real report schemas are a few dozen nodes, and the provider
 // payload would be unreadable long before this bound matters.
 const maxInlinedNodes = 4096
+
+// representableTopLevelKeywords are the keys of an inlined step schema the
+// report tool contract can carry: type, the property keywords fantasy
+// rebuilds the provider schema from, documentation, and the definition
+// keywords the inliner has already flattened. Anything else at the top level
+// would be enforced by Run but invisible to the child.
+var representableTopLevelKeywords = map[string]bool{
+	"$schema":              true,
+	"$defs":                true,
+	"definitions":          true,
+	"type":                 true,
+	"properties":           true,
+	"required":             true,
+	"title":                true,
+	"description":          true,
+	"additionalProperties": true,
+}
 
 // schemaDataFields are keywords whose values are data, not schemas: an
 // object or array under them is the asserted value itself, so a $ref-shaped

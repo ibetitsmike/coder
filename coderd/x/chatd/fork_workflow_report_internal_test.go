@@ -135,18 +135,38 @@ func TestForkWorkflowReport(t *testing.T) {
 
 	t.Run("RejectsUnrepresentableContract", func(t *testing.T) {
 		t.Parallel()
-		// Fantasy rebuilds the provider schema as properties+required, so a
-		// top-level composition would silently vanish from the tool contract
+		// Fantasy rebuilds the provider schema as properties+required and the
+		// providers keep only those keys, so ANY other top-level constraint
+		// (compositions, size bounds, propertyNames, typed
+		// additionalProperties) would silently vanish from the tool contract
 		// while Run still enforced it. Refuse the schema instead.
 		for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
 			raw := json.RawMessage(`{"type":"object","` + keyword + `":[{"properties":{"a":{"type":"string"}}}]}`)
 			_, err := newWorkflowReportTool(raw)
 			require.ErrorContains(t, err, "cannot be represented", keyword)
 		}
+		for _, constraint := range []string{
+			`"minProperties":1`,
+			`"maxProperties":2`,
+			`"propertyNames":{"pattern":"^[a-z]+$"}`,
+			`"patternProperties":{"^s_":{"type":"string"}}`,
+			`"dependentRequired":{"a":["b"]}`,
+			`"additionalProperties":{"type":"string"}`,
+		} {
+			raw := json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}},` + constraint + `}`)
+			_, err := newWorkflowReportTool(raw)
+			require.ErrorContains(t, err, "cannot be represented", constraint)
+		}
+
+		// A boolean additionalProperties:false adds nothing fantasy would
+		// drop: the provider contract is closed either way.
+		_, err := newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false,"required":["a"]}`))
+		require.NoError(t, err)
 
 		// A lone "*" property is Fantasy's free-form wildcard spelling:
 		// the provider schema would accept arbitrary keys the schema forbids.
-		_, err := newWorkflowReportTool(json.RawMessage(`{"type":"object","properties":{"*":{"type":"string"}}}`))
+		_, err = newWorkflowReportTool(json.RawMessage(`{"type":"object","properties":{"*":{"type":"string"}}}`))
 		require.ErrorContains(t, err, "reserved")
 
 		// "*", among other properties, is a literal property name and works.
