@@ -57,6 +57,46 @@ func (f forkQueryMetricsStore) GetChatPinnedSkillsByChatID(ctx context.Context, 
 	return f.s.GetChatPinnedSkillsByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, error) {
+	defer f.observe(ctx, "GetWorkflowRun", time.Now())
+	return f.s.GetWorkflowRun(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
+	defer f.observe(ctx, "GetWorkflowStep", time.Now())
+	return f.s.GetWorkflowStep(ctx, id)
+}
+
+func (f forkQueryMetricsStore) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
+	defer f.observe(ctx, "GetWorkflowStepsByRun", time.Now())
+	return f.s.GetWorkflowStepsByRun(ctx, runID)
+}
+
+func (f forkQueryMetricsStore) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWorkflowRunParams) error {
+	defer f.observe(ctx, "InsertWorkflowRun", time.Now())
+	return f.s.InsertWorkflowRun(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
+	defer f.observe(ctx, "InsertWorkflowStep", time.Now())
+	return f.s.InsertWorkflowStep(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
+	defer f.observe(ctx, "MarkOpenWorkflowRunsInterrupted", time.Now())
+	return f.s.MarkOpenWorkflowRunsInterrupted(ctx, errText)
+}
+
+func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
+	defer f.observe(ctx, "UpdateWorkflowRunStatus", time.Now())
+	return f.s.UpdateWorkflowRunStatus(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+	defer f.observe(ctx, "UpdateWorkflowStep", time.Now())
+	return f.s.UpdateWorkflowStep(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
 	defer f.observe(ctx, "InsertChatPinnedSkills", time.Now())
 	return f.s.InsertChatPinnedSkills(ctx, arg)

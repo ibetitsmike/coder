@@ -219,6 +219,7 @@ type Server struct {
 	forkPacks               forkPackState
 
 	// workflows holds the workflow runs that this replica runs (fork-workflows).
+	// forkInitWorkflowJournal journals their state, so a restart resumes a run.
 	workflows workflowRegistry
 }
 
@@ -1509,6 +1510,9 @@ func New(ps pubsub.Pubsub, cfg Config) (*Server, error) {
 	}
 
 	p.ctx = ctx
+
+	// The workflow journal marks the open runs of previous processes interrupted (fork-workflows).
+	p.forkInitWorkflowJournal()
 
 	// Spawn background goroutines that all servers need.
 
