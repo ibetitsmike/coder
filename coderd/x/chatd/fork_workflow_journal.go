@@ -296,6 +296,11 @@ func terminalWorkflowRun(p *Server, chat database.Chat, row forkdb.WorkflowRun) 
 			return nil, xerrors.Errorf("unmarshal the journal result of run %s: %w", row.ID, err)
 		}
 	}
+	// A run reaches this constructor only after the registry lost it, so
+	// every step in the stored result is replayed, never re-executed.
+	for i := range res.Steps {
+		res.Steps[i].Reused = true
+	}
 	run := &workflowRun{
 		p:        p,
 		id:       row.ID,
