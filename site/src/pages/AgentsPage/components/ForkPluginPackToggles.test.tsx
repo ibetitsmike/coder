@@ -271,8 +271,8 @@ it("turns a project pack off for a chat and back on", async () => {
 			}
 		},
 	);
-	vi.mocked(enablementApi.getExcludedPluginPacks).mockImplementation(
-		async () => [MockForkPluginPack].filter((pack) => excludedIds.has(pack.id)),
+	vi.mocked(enablementApi.getExcludedPluginPacks).mockImplementation(async () =>
+		[MockForkPluginPack].filter((pack) => excludedIds.has(pack.id)),
 	);
 	render(
 		<ForkPluginPackToggles

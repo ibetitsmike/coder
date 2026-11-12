@@ -78,7 +78,11 @@ export const projectPluginPacks = (
 			projectId === undefined
 				? skipToken
 				: () =>
-						getEnabledPluginPacks({ kind: "project", organizationId, projectId }),
+						getEnabledPluginPacks({
+							kind: "project",
+							organizationId,
+							projectId,
+						}),
 	});
 
 /**
@@ -143,10 +147,7 @@ const withPack = (
 ) => {
 	const others = packs?.filter((cached) => cached.id !== pack.id);
 	return present && others
-		? [
-				...others,
-				{ id: pack.id, name: pack.name, commit_sha: pack.commit_sha },
-			]
+		? [...others, { id: pack.id, name: pack.name, commit_sha: pack.commit_sha }]
 		: others;
 };
 

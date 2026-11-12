@@ -160,7 +160,9 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	const enabledQuery = useQuery(enabledPluginPacks(target));
 	const availableQuery = useQuery(availablePluginPacks(organizationId));
 	const excludedQuery = useQuery(excludedPluginPacks(target));
-	const inheritedQuery = useQuery(projectPluginPacks(organizationId, projectId));
+	const inheritedQuery = useQuery(
+		projectPluginPacks(organizationId, projectId),
+	);
 	// Refetching a skipped query throws, so Retry covers only the queries
 	// that run.
 	const queries = [

@@ -96,8 +96,9 @@ export const ForkPluginPacksPillView: React.FC<
 	>
 		<p className="mb-3 mt-1 text-content-secondary">
 			{isSubagent && "Packs enabled or turned off on a parent chat apply too. "}
-			If this chat belongs to a project, turning off one of its packs here
-			turns it off only for this chat and its subagents. Skills from a newly enabled pack appear after the chat's next message.
+			If this chat belongs to a project, turning off one of its packs here turns
+			it off only for this chat and its subagents. Skills from a newly enabled
+			pack appear after the chat's next message.
 		</p>
 		{children}
 	</ComposerPillPopover>
