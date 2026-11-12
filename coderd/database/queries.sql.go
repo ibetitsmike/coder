@@ -19148,7 +19148,11 @@ SELECT
 	wbp.value,
 	COUNT(wbp.value) AS count
 FROM unique_template_params utp
-JOIN workspace_build_parameters wbp ON (utp.workspace_build_ids @> ARRAY[wbp.workspace_build_id] AND utp.name = wbp.name)
+	-- Each build ID appears at most once per group (one parameter row per version
+	-- and name, one latest build per workspace), so unnest cannot double count.
+	-- The equality join lets Postgres use the (workspace_build_id, name) index.
+CROSS JOIN LATERAL unnest(utp.workspace_build_ids) AS b(id)
+JOIN workspace_build_parameters wbp ON (wbp.workspace_build_id = b.id AND wbp.name = utp.name)
 GROUP BY utp.num, utp.template_ids, utp.name, utp.type, utp.display_name, utp.description, utp.options, wbp.value
 `
 
@@ -24725,6 +24729,8 @@ WITH filtered_builds AS (
 	WHERE tvp.desired_instances IS NOT NULL -- Consider only presets that have a prebuild configuration.
 		AND wlb.transition = 'start'::workspace_transition
 		AND w.owner_id = 'c42fdf75-3097-471c-8c33-fb52454d81c0'
+		-- Rank only finished builds, so an in-flight build cannot hold a slot in the last hard_limit.
+		AND wlb.job_status IN ('succeeded'::provisioner_job_status, 'failed'::provisioner_job_status, 'canceled'::provisioner_job_status)
 ),
 time_sorted_builds AS (
 	-- Group builds by preset, then sort each group by created_at.
@@ -24749,7 +24755,7 @@ type GetPresetsAtFailureLimitRow struct {
 
 // GetPresetsAtFailureLimit groups workspace builds by preset ID.
 // Each preset is associated with exactly one template version ID.
-// For each preset, the query checks the last hard_limit builds.
+// For each preset, the query checks the last hard_limit finished builds.
 // If all of them failed, the preset is considered to have hit the hard failure limit.
 // The query returns a list of preset IDs that have reached this failure threshold.
 // Only active template versions with configured presets are considered.

@@ -1332,7 +1332,6 @@ func (s *taskStarter) generateCompaction(
 			logger,
 			compactionOpts.Messages,
 			overrideModel.model,
-			overrideModel.resolvedProvider,
 			prepared.Compaction.ChatModelConfig,
 			overrideModel.dbConfig,
 			prepared.ReasoningProvenance.Model,
