@@ -78,7 +78,7 @@ func (m *Manager) SetPackSources(sources []PackSource) {
 	// (an inline map or a revision), so an empty snapshot makes the next
 	// Reload parse them again.
 	m.snapshot = make(map[string]fileSnapshot)
-	started := len(m.lastPaths) > 0
+	started := m.reloadRequested
 	m.mu.Unlock()
 	if !started {
 		return

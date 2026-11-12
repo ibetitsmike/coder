@@ -177,3 +177,26 @@ func TestSetPackSourcesReloads(t *testing.T) {
 	m.SetPackSources(nil)
 	awaitTools(ctx, t, m, func(tools []catalogTool) bool { return len(tools) == 0 })
 }
+
+func TestSetPackSourcesAfterEmptyReload(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	logger := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
+	dir := t.TempDir()
+
+	// An agent without a working directory reloads with no config paths.
+	m := NewManager(ctx, logger, agentexec.DefaultExecer, nil, nil, nil, nil)
+	t.Cleanup(func() { _ = m.Close() })
+	require.NoError(t, m.Reload(ctx, nil))
+
+	_, entry := fakeMCPServerConfig(t, "pack-srv")
+	inline, err := json.Marshal(map[string]mcpServerEntry{"pack-srv": entry})
+	require.NoError(t, err)
+	manifest := filepath.Join(dir, "plugin.json")
+	writeTestFile(t, manifest, `{"name": "p"}`)
+	m.SetPackSources([]PackSource{{ManifestPath: manifest, Dir: dir, Configs: []PackConfig{{Path: manifest, Inline: inline}}}})
+
+	awaitTools(ctx, t, m, func(tools []catalogTool) bool {
+		return len(tools) == 1 && tools[0].server == "pack-srv"
+	})
+}
