@@ -3588,6 +3588,17 @@ export interface ChatPersonalModelOverridesAdminSettings {
 	readonly allow_users: boolean;
 }
 
+// From codersdk/fork_chat_pinned_skills.go
+/**
+ * ChatPinnedSkill names a skill pinned to a chat. chatd puts its body in the
+ * prompt of every turn until it is unpinned, and skips a pinned skill that the
+ * chat owner cannot use, such as one that was deleted or disabled.
+ */
+export interface ChatPinnedSkill {
+	readonly source: ChatSkillSource;
+	readonly name: string;
+}
+
 // From codersdk/chats.go
 export type ChatPlanMode = "plan";
 
@@ -6051,6 +6062,7 @@ export type Experiment =
 	| "fork-chat-todos"
 	| "fork-chat-wakeups"
 	| "fork-nested-subagents"
+	| "fork-pinned-skills"
 	| "fork-plugin-packs"
 	| "fork-subagent-isolation"
 	| "fork-workflows"
@@ -6138,6 +6150,7 @@ export const Experiments: Experiment[] = [
 	"fork-chat-todos",
 	"fork-chat-wakeups",
 	"fork-nested-subagents",
+	"fork-pinned-skills",
 	"fork-plugin-packs",
 	"fork-subagent-isolation",
 	"fork-workflows",
@@ -11778,6 +11791,15 @@ export interface UpdateChatModelRequest {
  */
 export interface UpdateChatPersonalModelOverridesAdminSettingsRequest {
 	readonly allow_users: boolean;
+}
+
+// From codersdk/fork_chat_pinned_skills.go
+/**
+ * UpdateChatPinnedSkillsRequest replaces every pinned skill of a chat. An
+ * empty list unpins them all.
+ */
+export interface UpdateChatPinnedSkillsRequest {
+	readonly skills: readonly ChatPinnedSkill[];
 }
 
 // From codersdk/chats.go

@@ -257,6 +257,14 @@ type ChatOrganizationWakeupCap struct {
 	UpdatedAt                        time.Time     `db:"updated_at" json:"updated_at"`
 }
 
+// Skills pinned to a chat. chatd puts their bodies in the prompt of every turn until they are unpinned.
+type ChatPinnedSkill struct {
+	ChatID      uuid.UUID `db:"chat_id" json:"chat_id"`
+	SkillSource string    `db:"skill_source" json:"skill_source"`
+	SkillName   string    `db:"skill_name" json:"skill_name"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+}
+
 // Plugin packs enabled for one chat, in addition to the packs of its project.
 type ChatPluginPack struct {
 	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`

@@ -40,6 +40,7 @@ type Querier interface {
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
+	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	// Deletes a batch of answers past the 24 hour TTL of
@@ -68,6 +69,7 @@ type Querier interface {
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
+	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
@@ -112,6 +114,7 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	InsertChatPinnedSkills(ctx context.Context, arg InsertChatPinnedSkillsParams) error
 	// Enables a pack of the chat's organization for the chat. It returns no row
 	// for a pack that does not exist or is in another organization.
 	InsertChatPluginPack(ctx context.Context, arg InsertChatPluginPackParams) (ChatPluginPack, error)
