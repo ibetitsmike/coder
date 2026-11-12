@@ -158,11 +158,15 @@ func TestForkWorkflowReport(t *testing.T) {
 			require.ErrorContains(t, err, "cannot be represented", constraint)
 		}
 
-		// A boolean additionalProperties:false adds nothing fantasy would
-		// drop: the provider contract is closed either way.
-		_, err := newWorkflowReportTool(json.RawMessage(
-			`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false,"required":["a"]}`))
-		require.NoError(t, err)
+		// A boolean additionalProperties adds nothing fantasy would drop:
+		// false closes the object, and true is the default. Typed values
+		// are refused by the additionalProperties check itself.
+		var err error
+		for _, value := range []string{"false", "true"} {
+			raw := json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":` + value + `,"required":["a"]}`)
+			_, err = newWorkflowReportTool(raw)
+			require.NoError(t, err, value)
+		}
 
 		// A lone "*" property is Fantasy's free-form wildcard spelling:
 		// the provider schema would accept arbitrary keys the schema forbids.
@@ -213,6 +217,15 @@ func TestForkWorkflowReport(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Contains(t, resp.Content, "exceeds the exact validation range")
+
+		// Exponent and trailing-zero spellings of the same integers parse
+		// exactly, not as their rounded float64 decode.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":9007199254740993e0}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":9007199254740992.0}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
 
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":-9007199254740993}`})
 		require.NoError(t, err)

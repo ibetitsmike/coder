@@ -106,9 +106,10 @@ func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fant
 // workflow still receives the original token.
 const maxExactInteger = 1 << 53
 
-// rejectOutOfRangeIntegers fails when the input carries an integer literal
-// outside the exact validation range. Floats beyond float64 range are
-// rejected by the decode itself.
+// rejectOutOfRangeIntegers fails when the input carries an integer outside
+// the exact validation range, in plain, exponent, or trailing-zero form.
+// Genuine fractions validate as their (rounded) float64 decode, which the
+// report semantics tolerate.
 func rejectOutOfRangeIntegers(input string) error {
 	bound := new(big.Int).Lsh(big.NewInt(1), 53)
 	decoder := json.NewDecoder(strings.NewReader(input))
@@ -127,13 +128,14 @@ func rejectOutOfRangeIntegers(input string) error {
 			continue
 		}
 		text := number.String()
-		if strings.ContainsAny(text, ".eE") {
+		// Parse exactly with big.Rat: an integer can hide in exponent or
+		// trailing-zero form (9007199254740993e0, 9007199254740992.0), and
+		// the float64 decode would round it before any comparison.
+		ratio, ok := new(big.Rat).SetString(text)
+		if !ok || !ratio.IsInt() {
 			continue
 		}
-		integer, ok := new(big.Int).SetString(text, 10)
-		if !ok {
-			continue
-		}
+		integer := ratio.Num()
 		if integer.Abs(integer).Cmp(bound) > 0 {
 			return xerrors.Errorf("the report contains the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", text, maxExactInteger)
 		}
@@ -194,6 +196,16 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 			return nil, nil, xerrors.Errorf(
 				"top-level %q cannot be represented in the report tool contract: put the object constraints directly in properties", key)
 		}
+	}
+	// additionalProperties carries a schema per its value, not its name: a
+	// boolean closes or opens the object, which the property-only contract
+	// reproduces, but a typed value would be enforced by Run and invisible
+	// to the child. Refuse the typed forms.
+	switch inlined["additionalProperties"].(type) {
+	case nil, bool:
+	default:
+		return nil, nil, xerrors.Errorf(
+			"typed additionalProperties cannot be represented in the report tool contract: name the keys as properties instead")
 	}
 	// A lone property named "*" is Fantasy's free-form wildcard spelling:
 	// normalizeToolMapSchemas would read the parameters as
