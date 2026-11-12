@@ -5,11 +5,37 @@ import { API } from "./api";
 import type {
 	CreateForkPluginPackRequest,
 	ForkPluginPack,
+	ForkPluginPackSources,
 	UpdateForkPluginPackRequest,
 } from "./typesGenerated";
 
 const pluginPacksPath = (organizationId: string) =>
 	`/api/v2/chats/fork/organizations/${organizationId}/plugin-packs`;
+
+const pluginPackSourcesPath = (organizationId: string) =>
+	`/api/v2/chats/fork/organizations/${organizationId}/plugin-pack-sources`;
+
+/** Returns the Git hosts an organization can install plugin packs from. */
+export const getPluginPackSources = async (
+	organizationId: string,
+): Promise<ForkPluginPackSources> => {
+	const response = await API.getAxiosInstance().get<ForkPluginPackSources>(
+		pluginPackSourcesPath(organizationId),
+	);
+	return response.data;
+};
+
+/** Replaces the Git hosts an organization can install plugin packs from. */
+export const updatePluginPackSources = async (
+	organizationId: string,
+	req: ForkPluginPackSources,
+): Promise<ForkPluginPackSources> => {
+	const response = await API.getAxiosInstance().put<ForkPluginPackSources>(
+		pluginPackSourcesPath(organizationId),
+		req,
+	);
+	return response.data;
+};
 
 /** Lists the plugin packs installed in an organization. */
 export const getPluginPacks = async (

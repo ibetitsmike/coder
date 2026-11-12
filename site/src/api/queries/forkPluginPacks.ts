@@ -5,12 +5,15 @@ import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
 	createPluginPack,
 	deletePluginPack,
+	getPluginPackSources,
 	getPluginPacks,
 	updatePluginPack,
+	updatePluginPackSources,
 } from "#/api/forkPluginPacks";
 import type {
 	CreateForkPluginPackRequest,
 	ForkPluginPack,
+	ForkPluginPackSources,
 } from "#/api/typesGenerated";
 import { invalidateList, isNewer, isResponseLost } from "./forkListCache";
 
@@ -207,4 +210,27 @@ export const deletePluginPackMutation = (
 				isResponseLost(error) ||
 					(isAxiosError(error) && error.response?.status === 404),
 			),
+	});
+
+const pluginPackSourcesKey = (organizationId: string) =>
+	["chats", "fork-plugin-pack-sources", organizationId] as const;
+
+/** Query options for the Git hosts an organization installs packs from. */
+export const pluginPackSources = (organizationId: string) =>
+	queryOptions({
+		queryKey: pluginPackSourcesKey(organizationId),
+		queryFn: () => getPluginPackSources(organizationId),
+	});
+
+/** Replaces the organization's source hosts and caches the saved list. */
+export const updatePluginPackSourcesMutation = (
+	queryClient: QueryClient,
+	organizationId: string,
+) =>
+	mutationOptions({
+		mutationFn: (req: ForkPluginPackSources) =>
+			updatePluginPackSources(organizationId, req),
+		onSuccess: (sources) => {
+			queryClient.setQueryData(pluginPackSourcesKey(organizationId), sources);
+		},
 	});

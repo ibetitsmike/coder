@@ -107,6 +107,56 @@ it("installs a pack in the organization the URL names", async () => {
 	);
 });
 
+it("saves the source hosts an administrator edits", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(forkPluginPacksApi, "getPluginPackSources").mockResolvedValue({
+		hosts: ["github.com"],
+	});
+	const save = vi
+		.spyOn(forkPluginPacksApi, "updatePluginPackSources")
+		.mockResolvedValue({ hosts: ["github.com", "gitlab.example.com"] });
+	renderPage();
+
+	await user.click(await screen.findByRole("button", { name: "Sources" }));
+	const dialog = await screen.findByRole("dialog");
+	const field = await within(dialog).findByLabelText(/^Source hosts/);
+	expect(field).toHaveValue("github.com");
+	await user.type(field, "{Enter} GitLab.example.com {Enter}github.com");
+	await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+	await waitFor(() =>
+		expect(save).toHaveBeenCalledWith(MockOrganization2.id, {
+			hosts: ["github.com", "gitlab.example.com"],
+		}),
+	);
+	await waitFor(() =>
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+	);
+});
+
+it("does not save a source host with a scheme", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(forkPluginPacksApi, "getPluginPackSources").mockResolvedValue({
+		hosts: [],
+	});
+	const save = vi.spyOn(forkPluginPacksApi, "updatePluginPackSources");
+	renderPage();
+
+	await user.click(await screen.findByRole("button", { name: "Sources" }));
+	const dialog = await screen.findByRole("dialog");
+	const field = await within(dialog).findByLabelText(/^Source hosts/);
+	await user.type(field, "https://github.com");
+	await user.tab();
+
+	expect(
+		await within(dialog).findByText(
+			'"https://github.com" must be a host name without a scheme, port or path.',
+		),
+	).toBeInTheDocument();
+	expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+	expect(save).not.toHaveBeenCalled();
+});
+
 it("updates and deletes a pack from its row menu", async () => {
 	const user = userEvent.setup();
 	const update = vi
