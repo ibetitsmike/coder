@@ -1,6 +1,7 @@
 // This file is fork code: it parses the Starlark workflow tool results of
 // the fork-workflows experiment and maps their statuses to display values.
 
+import { humanDurationShort } from "#/utils/time";
 import { asRecord, asString } from "../ChatElements/runtimeTypeUtils";
 import { parseArgs, parseArray } from "../ChatElements/tools/utils";
 
@@ -36,6 +37,9 @@ const runStatusMeta: Record<string, StatusMeta> = {
 	running: { label: "Running", tone: "running" },
 	completed: { label: "Completed", tone: "success" },
 	failed: { label: "Failed", tone: "destructive" },
+	// coderd restarted while the run was running.
+	interrupted: { label: "Interrupted", tone: "warning" },
+	stopped: { label: "Stopped", tone: "muted" },
 };
 
 const stepStatusMeta: Record<string, StatusMeta> = {
@@ -98,15 +102,33 @@ export const parseForkWorkflowRunSnapshot = (
 };
 
 /** Summarizes step progress, for example "2 of 3 steps reported". */
-export const forkWorkflowStepProgress = (
-	steps: readonly ForkWorkflowStep[],
+export const forkWorkflowStepCountProgress = (
+	reported: number,
+	total: number,
 ): string => {
-	if (steps.length === 0) {
+	if (total === 0) {
 		return "No steps yet";
 	}
-	const reported = steps.filter((step) => step.status === "reported").length;
-	const noun = steps.length === 1 ? "step" : "steps";
-	return `${reported} of ${steps.length} ${noun} reported`;
+	const noun = total === 1 ? "step" : "steps";
+	return `${reported} of ${total} ${noun} reported`;
+};
+
+export const forkWorkflowStepProgress = (
+	steps: readonly ForkWorkflowStep[],
+): string =>
+	forkWorkflowStepCountProgress(
+		steps.filter((step) => step.status === "reported").length,
+		steps.length,
+	);
+
+/** Formats how long a run took, or has run so far while it runs. */
+export const forkWorkflowRunDuration = (
+	createdAt: string,
+	finishedAt: string | undefined,
+	now: number,
+): string => {
+	const end = finishedAt ? Date.parse(finishedAt) : now;
+	return humanDurationShort(Math.max(0, end - Date.parse(createdAt)));
 };
 
 /** Formats a JSON value for display; strings show as they are. */

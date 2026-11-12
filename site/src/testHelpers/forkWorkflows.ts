@@ -1,3 +1,5 @@
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
+
 export const MockForkWorkflowRunId = "3f6d2c1a-9b4e-4f0a-8c7d-1e2f3a4b5c6d";
 
 export const MockForkWorkflowScript = `def main(args):
@@ -86,4 +88,47 @@ export const MockForkWorkflowFailedResult = {
 			error: "the step ended its turn twice without calling workflow_report",
 		},
 	],
+};
+
+/** A fixed "now" a few minutes after the mock runs start. */
+export const MockForkWorkflowNow = Date.parse("2026-11-12T10:05:00Z");
+
+export const MockForkWorkflowChatId = "dd444444-4444-4444-8444-444444444444";
+
+export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
+	id: MockForkWorkflowRunId,
+	chat_id: MockForkWorkflowChatId,
+	status: "completed",
+	title: "Review changed files",
+	error: "",
+	result: MockForkWorkflowCompletedResult.result,
+	created_at: "2026-11-12T10:00:00Z",
+	updated_at: "2026-11-12T10:03:20Z",
+	finished_at: "2026-11-12T10:03:20Z",
+	script: MockForkWorkflowScript,
+	logs: ["2 reviews"],
+	steps: MockForkWorkflowCompletedResult.steps.map((step, ordinal) => ({
+		id: step.chat_id,
+		run_id: MockForkWorkflowRunId,
+		title: step.title,
+		status: step.status,
+		reused: step.reused === true,
+		error: "",
+		ordinal,
+		started_at: "2026-11-12T10:00:05Z",
+		finished_at: "2026-11-12T10:03:00Z",
+	})),
+};
+
+export const MockChatWorkflowRun: WorkflowRun = {
+	id: MockChatWorkflowRunDetail.id,
+	chat_id: MockChatWorkflowRunDetail.chat_id,
+	status: MockChatWorkflowRunDetail.status,
+	title: MockChatWorkflowRunDetail.title,
+	error: MockChatWorkflowRunDetail.error,
+	created_at: MockChatWorkflowRunDetail.created_at,
+	updated_at: MockChatWorkflowRunDetail.updated_at,
+	finished_at: MockChatWorkflowRunDetail.finished_at,
+	script_preview: MockForkWorkflowScript.slice(0, 200),
+	step_counts: { total: 3, running: 0, done: 3, failed: 0 },
 };

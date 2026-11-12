@@ -40,6 +40,8 @@ import { GitPanel } from "../components/GitPanel/GitPanel";
 import { AppPanel } from "../components/RightPanel/AppPanel";
 import { DebugPanel } from "../components/RightPanel/DebugPanel/DebugPanel";
 import { DesktopPanel } from "../components/RightPanel/DesktopPanel";
+import { ForkWorkflowsPanel } from "../components/RightPanel/ForkWorkflowsPanel/ForkWorkflowsPanel";
+import { useForkWorkflowsTab } from "../components/RightPanel/ForkWorkflowsPanel/useForkWorkflowsTab";
 import { RightPanel } from "../components/RightPanel/RightPanel";
 import { RightPanelAddTabControl } from "../components/RightPanel/RightPanelAddTabControl";
 import { UserTabPanel } from "../components/RightPanel/UserTabPanel";
@@ -226,6 +228,7 @@ export const AgentChatPageView: React.FC<AgentChatPageViewProps> = ({
 }) => {
 	const { proxy } = useProxy();
 	const { user: currentUser } = useAuthenticated();
+	const showForkWorkflowsTab = useForkWorkflowsTab(chat);
 	const wildcardHostname = proxy.preferredWildcardHostname;
 	const agentId = chat.id;
 	const organizationId = chat.organization_id;
@@ -775,6 +778,12 @@ export const AgentChatPageView: React.FC<AgentChatPageViewProps> = ({
 									chatInputRef={editing.chatInputRef}
 								/>
 							</SidebarTab>
+
+							{showForkWorkflowsTab && (
+								<SidebarTab id="fork-workflows" label="Workflows">
+									<ForkWorkflowsPanel chatId={agentId} />
+								</SidebarTab>
+							)}
 
 							{isSingletonTabShown("debug") && (
 								<SidebarTab
