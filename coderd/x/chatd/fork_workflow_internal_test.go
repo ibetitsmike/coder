@@ -581,11 +581,15 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		})
 		assert.Empty(t, f.server.forkWorkflowTools(ctx, memberChat, uuid.Nil, nil), "a member-owned chat never runs workflows")
 
-		unknown := dbgen.Chat(t, f.db, database.Chat{
+		// A chat row cannot carry a missing owner (foreign key), so the
+		// stale-owner case is an in-memory value; the gate only reads the
+		// value and looks the owner up.
+		unknown := database.Chat{
+			ID:                uuid.New(),
 			OrganizationID:    f.org.ID,
 			OwnerID:           uuid.New(),
 			LastModelConfigID: f.model.ID,
-		})
+		}
 		assert.Empty(t, f.server.forkWorkflowTools(ctx, unknown, uuid.Nil, nil), "a missing owner row fails closed")
 	})
 

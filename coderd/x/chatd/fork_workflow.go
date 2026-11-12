@@ -157,8 +157,11 @@ func (p *Server) forkWorkflowTools(
 	// experimental the tools stay limited to chats owned by a deployment
 	// owner; widening to members is a later decision. One primary-key read
 	// per gated turn, failing closed, and a role change applies on the
-	// owner's next turn.
-	owner, err := p.db.GetUserByID(ctx, chat.OwnerID)
+	// owner's next turn. The turn runs under the daemon subject, which has
+	// only read_personal on users, so the owner row is read as the
+	// system-restricted actor, the way UserRBACSubject reads roles.
+	//nolint:gocritic // chatd reads the owner row to gate its own tools.
+	owner, err := p.db.GetUserByID(dbauthz.AsSystemRestricted(ctx), chat.OwnerID)
 	if err != nil {
 		p.logger.Warn(ctx, "workflow owner gate: load chat owner",
 			slog.F("chat_id", chat.ID), slog.F("owner_id", chat.OwnerID), slog.Error(err))
