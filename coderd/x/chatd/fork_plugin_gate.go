@@ -275,9 +275,10 @@ type enabledPack struct {
 
 // enabledPacks returns the packs enabled for the chat's project, when the
 // chat owner can use it, for the chat, and for its ancestors, so subagents
-// also see the packs of the chats that spawned them. A pack enabled in more
-// than one place is listed more than once. A failed lookup is logged and
-// enables nothing, so the gate fails closed.
+// also see the packs of the chats that spawned them. A pack that the chat or
+// an ancestor turned off is left out, even when another place enables it. A
+// pack enabled in more than one place is listed more than once. A failed
+// lookup is logged and enables nothing, so the gate fails closed.
 func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabledPack {
 	var enabled []enabledPack
 	logger := p.logger.With(slog.F("chat_id", chat.ID))
@@ -311,6 +312,7 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 	if chat.RootChatID.Valid && !slices.Contains(chatIDs, chat.RootChatID.UUID) {
 		chatIDs = append(chatIDs, chat.RootChatID.UUID)
 	}
+	excluded := make(map[uuid.UUID]bool)
 	for _, chatID := range chatIDs {
 		rows, err := fdb.GetPluginPacksByChatID(chatdCtx, chatID)
 		// The agent type catalog passes a chat that does not exist yet.
@@ -320,6 +322,14 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 		for _, row := range rows {
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
 		}
+		excludedRows, err := fdb.GetExcludedPluginPacksByChatID(chatdCtx, chatID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			logger.Warn(ctx, "failed to list excluded chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
+			return nil
+		}
+		for _, row := range excludedRows {
+			excluded[row.ID] = true
+		}
 	}
-	return enabled
+	return slices.DeleteFunc(enabled, func(pack enabledPack) bool { return excluded[pack.ID] })
 }

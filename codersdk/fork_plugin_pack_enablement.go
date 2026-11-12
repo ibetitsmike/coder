@@ -29,6 +29,10 @@ func forkChatPluginPacksPath(chatID uuid.UUID) string {
 	return fmt.Sprintf("/api/v2/chats/fork/%s/plugin-packs", chatID)
 }
 
+func forkChatExcludedPluginPacksPath(chatID uuid.UUID) string {
+	return fmt.Sprintf("/api/v2/chats/fork/%s/excluded-plugin-packs", chatID)
+}
+
 // ForkAvailablePluginPacks returns the plugin packs installed in an
 // organization, for any member who may enable them.
 func (c *Client) ForkAvailablePluginPacks(ctx context.Context, organizationID uuid.UUID) ([]ForkEnabledPluginPack, error) {
@@ -65,4 +69,20 @@ func (c *Client) EnableForkChatPluginPack(ctx context.Context, chatID, packID uu
 // DisableForkChatPluginPack disables a plugin pack for a chat.
 func (c *Client) DisableForkChatPluginPack(ctx context.Context, chatID, packID uuid.UUID) error {
 	return requestNoContent(ctx, c, http.MethodDelete, fmt.Sprintf("%s/%s", forkChatPluginPacksPath(chatID), packID), nil)
+}
+
+// ForkChatExcludedPluginPacks returns the plugin packs turned off for a chat.
+func (c *Client) ForkChatExcludedPluginPacks(ctx context.Context, chatID uuid.UUID) ([]ForkEnabledPluginPack, error) {
+	return requestJSON[[]ForkEnabledPluginPack](ctx, c, http.MethodGet, forkChatExcludedPluginPacksPath(chatID), http.StatusOK, nil)
+}
+
+// ExcludeForkChatPluginPack turns off a plugin pack for a chat and its
+// subagents, even when the chat's project or the chat enables it.
+func (c *Client) ExcludeForkChatPluginPack(ctx context.Context, chatID, packID uuid.UUID) error {
+	return requestNoContent(ctx, c, http.MethodPut, fmt.Sprintf("%s/%s", forkChatExcludedPluginPacksPath(chatID), packID), nil)
+}
+
+// IncludeForkChatPluginPack stops turning off a plugin pack for a chat.
+func (c *Client) IncludeForkChatPluginPack(ctx context.Context, chatID, packID uuid.UUID) error {
+	return requestNoContent(ctx, c, http.MethodDelete, fmt.Sprintf("%s/%s", forkChatExcludedPluginPacksPath(chatID), packID), nil)
 }
