@@ -26,7 +26,7 @@ export const getEnabledPluginPacks = async (
 	return response.data;
 };
 
-/** True sends PUT, false sends DELETE. */
+/** Enables or disables one plugin pack for the target. */
 export const setPluginPackEnabled = async (
 	target: PluginPackTarget,
 	packId: string,
