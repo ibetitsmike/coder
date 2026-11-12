@@ -968,6 +968,13 @@ func TestResolver_PluginPacksClaudeInstallRecord(t *testing.T) {
 			wantOld: true,
 		},
 		{
+			name: "managed record applies everywhere",
+			registry: func(older, _, _ string) string {
+				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "managed", "installPath": older}}})
+			},
+			wantOld: true,
+		},
+		{
 			name: "project-only record skips the plugin",
 			registry: func(older, _, _ string) string {
 				return installRecords(map[string][]map[string]string{"pstack@market": {{"scope": "project", "installPath": older}}})

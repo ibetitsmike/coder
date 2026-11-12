@@ -301,12 +301,18 @@ func isClaudePluginCache(rootPath string) bool {
 }
 
 // claudeUserSettingsPath returns the user settings file next to the plugins
-// directory of cacheDir. A cache elsewhere keeps its settings in
-// claudeConfigDirEnv when set, and in the home directory's .claude otherwise.
-// ok is false when no location is known.
+// directory of cacheDir. The cache selected by claudePluginCacheDirEnv, and a
+// cache elsewhere, keep their settings in claudeConfigDirEnv when set, and in
+// the home directory's .claude otherwise: the cache variable moves only the
+// plugins, even to a path that ends like a default cache. ok is false when no
+// location is known.
 func claudeUserSettingsPath(cacheDir string) (string, bool) {
 	clean := filepath.Clean(cacheDir)
-	if strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
+	envCache := ""
+	if dir := strings.TrimSpace(os.Getenv(claudePluginCacheDirEnv)); dir != "" {
+		envCache = filepath.Join(filepath.Clean(dir), "cache")
+	}
+	if clean != envCache && strings.HasSuffix(clean, string(filepath.Separator)+claudePluginCacheRel) {
 		return filepath.Join(filepath.Dir(filepath.Dir(clean)), "settings.json"), true
 	}
 	if dir := claudeConfigDir(); dir != "" {
@@ -393,20 +399,28 @@ type claudeInstallRecord struct {
 	InstallPath string `json:"installPath"`
 }
 
+// isGlobalClaudeInstallScope reports whether an install record applies to
+// every session. User and unscoped records do, and so do managed records,
+// which an organization distributes to every machine it manages. Project and
+// local records belong to a project the agent cannot identify.
+func isGlobalClaudeInstallScope(scope string) bool {
+	return scope == "" || scope == "user" || scope == "managed"
+}
+
 // claudeInstall is what installed_plugins.json says about one plugin id.
 type claudeInstall struct {
-	// path is the install path of the first user or unscoped record that
-	// has one. It is empty when those records name no path.
+	// path is the install path of the first global record that has one
+	// (see isGlobalClaudeInstallScope). It is empty when those records name
+	// no path.
 	path string
-	// projectOnly is set when the id has records but none is user or
-	// unscoped. Project and local installs belong to a project the agent
-	// cannot identify, so the plugin must not load for every chat.
+	// projectOnly is set when the id has records but none is global, so the
+	// plugin must not load for every chat.
 	projectOnly bool
 }
 
 // claudeInstalledPaths returns what Claude Code recorded for each plugin id in
-// installed_plugins.json, next to the cache. Only user and unscoped records
-// activate a plugin. An id absent from the map has no usable record: a
+// installed_plugins.json, next to the cache. Only global records activate a
+// plugin. An id absent from the map has no usable record: a
 // missing, oversized or malformed file yields an empty map, and the caller
 // falls back to the newest cached version.
 func claudeInstalledPaths(cacheDir string) map[string]claudeInstall {
@@ -437,7 +451,7 @@ func claudeInstalledPaths(cacheDir string) map[string]claudeInstall {
 		}
 		install := claudeInstall{projectOnly: true}
 		for _, record := range records {
-			if record.Scope != "" && record.Scope != "user" {
+			if !isGlobalClaudeInstallScope(record.Scope) {
 				continue
 			}
 			install.projectOnly = false

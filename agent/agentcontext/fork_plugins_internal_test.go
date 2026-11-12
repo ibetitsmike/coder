@@ -156,6 +156,14 @@ func TestClaudeUserSettingsPathConfigDir(t *testing.T) {
 	got, ok = claudeUserSettingsPath(filepath.Join(t.TempDir(), "cache"))
 	require.True(t, ok)
 	require.Equal(t, filepath.Join(configDir, "settings.json"), got)
+	// The cache variable moves only the plugins, even to a path that ends
+	// like a default cache, so the settings stay in the configuration
+	// directory.
+	sharedPlugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+	t.Setenv(claudePluginCacheDirEnv, sharedPlugins)
+	got, ok = claudeUserSettingsPath(filepath.Join(sharedPlugins, "cache"))
+	require.True(t, ok)
+	require.Equal(t, filepath.Join(configDir, "settings.json"), got)
 }
 
 //nolint:paralleltest,tparallel // Uses t.Setenv.
