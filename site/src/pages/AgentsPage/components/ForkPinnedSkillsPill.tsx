@@ -2,7 +2,12 @@
 
 import { CheckIcon, PinIcon } from "lucide-react";
 import type React from "react";
-import { useMutation, useQuery, useQueryClient } from "react-query";
+import {
+	type UseQueryResult,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import {
 	chatProjectSkills,
@@ -80,9 +85,12 @@ export const ForkPinnedSkillsPill: React.FC<ForkPinnedSkillsPillProps> = ({
 			onRetry={() => void pinsQuery.refetch()}
 			canEdit={Boolean(editableChat)}
 			isPending={updateMutation.isPending}
-			onUnpin={(pin) =>
-				updateMutation.mutate(pins?.filter((p) => !isSamePin(p, pin)) ?? [])
-			}
+			onUnpin={(pin) => {
+				if (!pins) {
+					return;
+				}
+				updateMutation.mutate(pins.filter((p) => !isSamePin(p, pin)));
+			}}
 		>
 			{editableChat && pins && (
 				<PinnableSkillList
@@ -110,10 +118,7 @@ type ForkPinnedSkillsPillViewProps = {
 	isRetrying: boolean;
 	onRetry: () => void;
 	canEdit: boolean;
-	/**
-	 * True while a change is saving. Each change replaces the whole list, so
-	 * the next one waits for it.
-	 */
+	/** Each change replaces the whole list, so the next one waits for it. */
 	isPending: boolean;
 	onUnpin: (pin: ChatPinnedSkill) => void;
 	/** The skill picker, shown below the pins. */
@@ -156,14 +161,14 @@ export const ForkPinnedSkillsPillView: React.FC<
 		<p className="mb-3 mt-1 text-content-secondary">
 			Pinned skills apply to every message in this chat until they are unpinned.
 		</p>
-		{error ? (
+		{Boolean(error) && (
 			<ErrorAlert
+				className={pins ? "mb-3" : undefined}
 				error={error}
 				actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 			/>
-		) : !pins ? (
-			<Loader />
-		) : (
+		)}
+		{pins ? (
 			<>
 				{pins.length === 0 ? (
 					<p className="m-0 text-content-secondary">No skills are pinned.</p>
@@ -188,15 +193,16 @@ export const ForkPinnedSkillsPillView: React.FC<
 				)}
 				{children}
 			</>
+		) : (
+			!error && <Loader />
 		)}
 	</ComposerPillPopover>
 );
 
-type SkillSourceQuery = {
-	error: unknown;
-	isFetching: boolean;
-	refetch: () => unknown;
-};
+type SkillSourceQuery = Pick<
+	UseQueryResult<unknown>,
+	"error" | "isFetching" | "refetch"
+>;
 
 type PinnableSkillListProps = {
 	chat: Chat;
@@ -328,7 +334,7 @@ export const ForkPinnableSkillListView: React.FC<
 					actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 				/>
 			)}
-			<Command className="rounded-md border border-solid border-border">
+			<Command className="border border-solid border-border">
 				<CommandInput
 					aria-label="Search skills to pin"
 					placeholder="Search skills to pin"

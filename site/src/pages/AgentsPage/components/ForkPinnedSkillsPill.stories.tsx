@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { ComponentProps } from "react";
 import { fn, userEvent, within } from "storybook/test";
 import type { ChatPinnedSkill } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
@@ -10,17 +11,25 @@ import {
 	ForkPinnedSkillsPillView,
 } from "./ForkPinnedSkillsPill";
 
+const mockTriageSkill = {
+	...MockSkills[0],
+	id: "skill-triage",
+	name: "triage",
+	description: "Triage incoming issues.",
+};
+
+const mockDeploySkill = {
+	...MockSkills[0],
+	id: "skill-deploy",
+	name: "deploy",
+	description: "Deploy the workspace app.",
+};
+
 const mockSkillLists: SkillSourceList<SkillMetadata>[] = [
 	{ source: "personal", skills: MockSkills },
-	{
-		source: "org",
-		skills: [{ name: "triage", description: "Triage incoming issues." }],
-	},
+	{ source: "org", skills: [mockTriageSkill] },
 	{ source: "project", skills: [] },
-	{
-		source: "workspace",
-		skills: [{ name: "deploy", description: "Deploy the workspace app." }],
-	},
+	{ source: "workspace", skills: [mockDeploySkill] },
 ];
 
 const mockPins: ChatPinnedSkill[] = [
@@ -39,6 +48,16 @@ const mockFullPins: ChatPinnedSkill[] = [
 	{ source: "personal", name: "changelog" },
 ];
 
+const pickerProps: ComponentProps<typeof ForkPinnableSkillListView> = {
+	skillLists: mockSkillLists,
+	pins: mockPins,
+	disabled: false,
+	error: undefined,
+	isRetrying: false,
+	onRetry: fn(),
+	onToggle: fn(),
+};
+
 const meta: Meta<typeof ForkPinnedSkillsPillView> = {
 	title: "pages/AgentsPage/ForkPinnedSkillsPill",
 	component: ForkPinnedSkillsPillView,
@@ -50,17 +69,7 @@ const meta: Meta<typeof ForkPinnedSkillsPillView> = {
 		canEdit: true,
 		isPending: false,
 		onUnpin: fn(),
-		children: (
-			<ForkPinnableSkillListView
-				skillLists={mockSkillLists}
-				pins={mockPins}
-				disabled={false}
-				error={undefined}
-				isRetrying={false}
-				onRetry={fn()}
-				onToggle={fn()}
-			/>
-		),
+		children: <ForkPinnableSkillListView {...pickerProps} />,
 	},
 };
 
@@ -94,17 +103,7 @@ export const LoadError: Story = {
 export const NonePinned: Story = {
 	args: {
 		pins: [],
-		children: (
-			<ForkPinnableSkillListView
-				skillLists={mockSkillLists}
-				pins={[]}
-				disabled={false}
-				error={undefined}
-				isRetrying={false}
-				onRetry={fn()}
-				onToggle={fn()}
-			/>
-		),
+		children: <ForkPinnableSkillListView {...pickerProps} pins={[]} />,
 	},
 	play: Expanded.play,
 };
@@ -114,19 +113,19 @@ export const ReadOnly: Story = {
 	play: Expanded.play,
 };
 
+export const Saving: Story = {
+	args: {
+		isPending: true,
+		children: <ForkPinnableSkillListView {...pickerProps} disabled />,
+	},
+	play: Expanded.play,
+};
+
 export const PinLimit: Story = {
 	args: {
 		pins: mockFullPins,
 		children: (
-			<ForkPinnableSkillListView
-				skillLists={mockSkillLists}
-				pins={mockFullPins}
-				disabled={false}
-				error={undefined}
-				isRetrying={false}
-				onRetry={fn()}
-				onToggle={fn()}
-			/>
+			<ForkPinnableSkillListView {...pickerProps} pins={mockFullPins} />
 		),
 	},
 	play: Expanded.play,
@@ -136,15 +135,11 @@ export const SkillsLoadError: Story = {
 	args: {
 		children: (
 			<ForkPinnableSkillListView
+				{...pickerProps}
 				skillLists={mockSkillLists.map((list) =>
 					list.source === "org" ? { ...list, skills: undefined } : list,
 				)}
-				pins={mockPins}
-				disabled={false}
 				error={mockApiError({ message: "Failed to load organization skills." })}
-				isRetrying={false}
-				onRetry={fn()}
-				onToggle={fn()}
 			/>
 		),
 	},

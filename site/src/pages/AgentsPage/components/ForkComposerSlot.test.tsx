@@ -433,8 +433,10 @@ describe("ForkComposerSlot pinned skills", () => {
 		source: "personal",
 		name: "reviewer",
 	};
+	const mockDocsPins = [mockDocsPin];
+	const mockDocsAndReviewerPins = [mockDocsPin, mockReviewerPin];
 
-	const mockPinnedSkillsOfChat = (pins: ChatPinnedSkill[]) => {
+	const mockPinnedSkillSources = () => {
 		vi.spyOn(API.experimental, "getChat").mockResolvedValue(MockChat);
 		vi.spyOn(API.experimental, "getUserSkills").mockResolvedValue(MockSkills);
 		vi.spyOn(API.experimental, "getOrganizationSkills").mockResolvedValue([]);
@@ -442,12 +444,6 @@ describe("ForkComposerSlot pinned skills", () => {
 			API.experimental,
 			"getOrganizationSkillPreferences",
 		).mockResolvedValue(MockOrganizationSkillPreferences);
-		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
-			pins,
-		);
-		return vi
-			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
-			.mockImplementation(async (_chatId, req) => [...req.skills]);
 	};
 
 	it("does not request pinned skills while fork-pinned-skills is off", () => {
@@ -462,7 +458,13 @@ describe("ForkComposerSlot pinned skills", () => {
 
 	it("pins a skill from the picker", async () => {
 		const user = userEvent.setup();
-		const updatePins = mockPinnedSkillsOfChat([mockDocsPin]);
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockImplementation(async (_chatId, req) => [...req.skills]);
 
 		renderSlot(["fork-pinned-skills"]);
 		await user.click(
@@ -480,7 +482,13 @@ describe("ForkComposerSlot pinned skills", () => {
 
 	it("unpins a skill from its chip", async () => {
 		const user = userEvent.setup();
-		const updatePins = mockPinnedSkillsOfChat([mockDocsPin, mockReviewerPin]);
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsAndReviewerPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockImplementation(async (_chatId, req) => [...req.skills]);
 
 		renderSlot(["fork-pinned-skills"]);
 		await user.click(
@@ -500,8 +508,13 @@ describe("ForkComposerSlot pinned skills", () => {
 
 	it("disables chip removal while a change is saving", async () => {
 		const user = userEvent.setup();
-		const updatePins = mockPinnedSkillsOfChat([mockDocsPin, mockReviewerPin]);
-		updatePins.mockReturnValue(new Promise(() => {}));
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsAndReviewerPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockReturnValue(new Promise(() => {}));
 
 		renderSlot(["fork-pinned-skills"]);
 		await user.click(

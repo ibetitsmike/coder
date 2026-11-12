@@ -17,7 +17,7 @@ export const getChatPinnedSkills = async (
 	return response.data;
 };
 
-/** Replaces every pinned skill of the chat and returns the new list. */
+/** Replaces every pinned skill of the chat. */
 export const updateChatPinnedSkills = async (
 	chatId: string,
 	req: UpdateChatPinnedSkillsRequest,
