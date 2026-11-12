@@ -1219,6 +1219,7 @@ The generation goroutine supports:
 
 - chat compaction (automatic and manual, see [Manual compaction](#manual-compaction))
 - MCP tools
+  <!-- TODO(ibetitsmike): describe plugin pack MCP servers (fork-plugin-packs): `pinnedWorkspaceMCPTools` applies `filterPackResources`, so a pack server's tools reach only chats that have the pack enabled, and no chat while the experiment is off. A pack server row's source is its declaring file and server name joined by `#`, and the gate checks that file against the pack's current commit. -->
 - memory tools (`read_memory`, `save_memory`, `delete_memory`) for root chats in a project, see [Project memory](#project-memory)
   <!-- TODO(f0ssel): add `consolidate_memory` to this tool list. -->
 - subagents (`spawn_agent`, `wait_agent`, `message_agent`, `interrupt_agent`, `list_agents`, `list_subagent_models`)

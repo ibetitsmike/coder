@@ -378,6 +378,7 @@ func (p *Server) pinnedWorkspaceMCPTools(
 	if err != nil {
 		return nil, xerrors.Errorf("list chat context resources: %w", err)
 	}
+	resources = p.filterPackResources(ctx, chat, resources)
 	infos := workspaceMCPToolInfosFromResources(resources)
 	return chattool.NewWorkspaceMCPTools(infos, getConn), nil
 }

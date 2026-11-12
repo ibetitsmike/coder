@@ -51,6 +51,10 @@ type ManagerOptions struct {
 	MCPReconnect func(context.Context) error
 	// ACPResources supplies the cached workspace-local harness catalog.
 	ACPResources func() []Resource
+	// PackMCPSources, when non-nil, receives the plugin pack MCP
+	// declarations after every published resolve outside a capability
+	// negotiation (fork_pack_mcp.go). It must not block.
+	PackMCPSources func([]PackMCPSource)
 	// Debounce overrides the watcher's debounce window.
 	Debounce time.Duration
 }
@@ -145,6 +149,8 @@ type Manager struct {
 	pushConnected atomic.Bool
 
 	watcher *Watcher
+
+	packMCP packMCPPublisher
 }
 
 // NewManager validates options and canonicalizes initial sources. The
@@ -180,6 +186,7 @@ func NewManager(opts ManagerOptions) *Manager {
 		closedCh:     make(chan struct{}),
 		runDoneCh:    make(chan struct{}),
 		runStartedCh: make(chan struct{}),
+		packMCP:      packMCPPublisher{deliver: opts.PackMCPSources},
 	}
 
 	if resolver.ACPResources == nil {
@@ -194,7 +201,7 @@ func NewManager(opts ManagerOptions) *Manager {
 	// the first resolve.
 	if resolver.MCPResources == nil && opts.MCPCatalog != nil {
 		resolver.MCPResources = func() []Resource {
-			return buildMCPServerResources(opts.MCPCatalog())
+			return m.gatePackMCPResources(buildMCPServerResources(opts.MCPCatalog()))
 		}
 	}
 
@@ -566,6 +573,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 		subs = append(subs, ch)
 	}
 	m.mu.Unlock()
+	m.packMCP.publish(resolver, roots, myEpoch, negotiating)
 
 	// The broadcast is unconditional: Resync waiters that
 	// triggered the pass without an actual content change
@@ -787,6 +795,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 		subs = append(subs, ch)
 	}
 	m.mu.Unlock()
+	m.packMCP.publish(resolver, roots, myEpoch, negotiating)
 
 	for _, ch := range subs {
 		select {
