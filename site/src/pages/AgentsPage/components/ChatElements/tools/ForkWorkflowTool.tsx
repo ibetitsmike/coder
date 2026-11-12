@@ -17,22 +17,6 @@ import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
 import { asString, parseArgs } from "./utils";
 
-const snapshotLabel = (
-	isRunWorkflow: boolean,
-	snapshot: ForkWorkflowRunSnapshot,
-): string => {
-	switch (snapshot.status) {
-		case "running":
-			return isRunWorkflow ? "Started workflow" : "Workflow still running";
-		case "completed":
-			return "Workflow completed";
-		case "failed":
-			return "Workflow failed";
-		default:
-			return "Workflow";
-	}
-};
-
 const toolLabel = (
 	props: ForkToolRendererProps,
 	snapshot: ForkWorkflowRunSnapshot | null,
@@ -44,7 +28,16 @@ const toolLabel = (
 	if (props.isError || !snapshot) {
 		return isRunWorkflow ? "Failed to start workflow" : "Failed to read workflow";
 	}
-	return snapshotLabel(isRunWorkflow, snapshot);
+	switch (snapshot.status) {
+		case "running":
+			return isRunWorkflow ? "Started workflow" : "Workflow still running";
+		case "completed":
+			return "Workflow completed";
+		case "failed":
+			return "Workflow failed";
+		default:
+			return "Workflow";
+	}
 };
 
 /** The run and its steps come from the result, the script from the args. */
