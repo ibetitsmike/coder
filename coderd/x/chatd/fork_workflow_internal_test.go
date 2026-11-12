@@ -312,10 +312,18 @@ def main(args):
 		assert.False(t, sentReminder(), "the flag must stop a second reminder")
 
 		// With the flag unset, the same blind scan sends the reminder.
+		// The server is passive, so only the test can end the child's
+		// turn that the reminder queues; waitStep blocks on it.
 		run.mu.Lock()
 		step.status, step.sentReminder = stepStatusRunning, false
 		run.mu.Unlock()
-		require.NoError(t, run.waitStep(ctx, step))
+		waited := make(chan error, 1)
+		go func() { waited <- run.waitStep(ctx, step) }()
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return sentReminder()
+		}, testutil.IntervalFast)
+		f.endTurn(ctx, t, child.ID)
+		require.NoError(t, <-waited)
 		assert.True(t, sentReminder(), "a blind scan without the flag sends the reminder")
 	})
 
@@ -432,14 +440,45 @@ def main(args):
 		t.Parallel()
 		ctx := chatdTestContext(t)
 		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// Plain ASCII encodes one byte per character, so the payload must
+		// pass 64 KiB on its own.
 		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
 def main(args):
-    spawn("Big schema.", schema = {"type": "object", "properties": {"pad": {"description": "x" * 20000}}})
+    spawn("Big schema.", schema = {"type": "object", "properties": {"pad": {"description": "x" * 70000}}})
     return {}
 `})
 		res := run.await(ctx, testutil.WaitLong)
 		require.Equal(t, workflowStatusFailed, res.Status)
 		assert.Contains(t, res.Error, "the schema encodes to more than")
+	})
+
+	t.Run("IntegersChargeTheirWidth", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return [0] * 6000
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	})
+
+	t.Run("LogLinesBounded", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("x" * 1000000)
+    log("kept")
+    return {}
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		require.Len(t, res.Logs, 2)
+		assert.Equal(t, maxWorkflowLogLine, len(res.Logs[0]))
+		assert.Equal(t, "kept", res.Logs[1])
 	})
 
 	t.Run("UnwaitedStepsFail", func(t *testing.T) {

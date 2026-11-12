@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	starlarkjson "go.starlark.net/lib/json"
@@ -176,8 +177,8 @@ func workflowValueCost(value starlark.Value, budget int, depth int) (int, error)
 		// base64 in JSON, if the json module accepts it at all.
 		return cost(2 + (len(v)+2)/3*4)
 	case starlark.Int:
-		if _, err := starlark.AsInt32(v); err == nil {
-			return cost(12)
+		if n, err := starlark.AsInt32(v); err == nil {
+			return cost(len(strconv.Itoa(int(n))))
 		}
 		return cost(v.BigInt().BitLen()/3 + 3)
 	case *starlark.List:

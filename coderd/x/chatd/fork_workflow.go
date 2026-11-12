@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
@@ -34,11 +35,14 @@ const (
 	runWorkflowToolName   = "run_workflow"
 	awaitWorkflowToolName = "await_workflow"
 
-	maxWorkflowSteps    = 50         // child chats per run, reused ones included
-	maxScriptBytes      = 64 << 10   // the script in the tool input
-	maxScriptSteps      = 10_000_000 // Starlark execution steps per run
-	maxResultBytes      = 64 << 10   // the JSON that main(args) returns
-	maxWorkflowLogs     = 50         // log() lines that a result keeps
+	maxWorkflowSteps   = 50         // child chats per run, reused ones included
+	maxScriptBytes     = 64 << 10   // the script in the tool input
+	maxScriptSteps     = 10_000_000 // Starlark execution steps per run
+	maxResultBytes     = 64 << 10   // the JSON that main(args) returns
+	maxWorkflowLogs    = 50         // log() lines that a result keeps
+	maxWorkflowLogLine = 4 << 10    // bytes of one log() line that a result keeps
+	// The result encodes the retained logs on every snapshot, so the line
+	// and byte caps below bound that encoding to maxResultBytes too.
 	defaultWorkflowWait = 600 * time.Second
 	// maxWorkflowWait leaves 2 minutes below defaultTaskTimeout, because
 	// turn setup uses the same task attempt.
@@ -304,6 +308,7 @@ type workflowRun struct {
 	mu           sync.Mutex
 	steps        []*workflowStep
 	logs         []string
+	logBytes     int // the bytes of the retained logs
 	result       *runWorkflowResult
 	done         chan struct{}
 	awaiters     int
@@ -546,10 +551,25 @@ func (r *workflowRun) log(msg string) {
 }
 
 func (r *workflowRun) appendLogLocked(msg string) {
+	msg = truncateLogLine(msg, maxWorkflowLogLine)
 	r.logs = append(r.logs, msg)
-	if len(r.logs) > maxWorkflowLogs {
-		r.logs = r.logs[len(r.logs)-maxWorkflowLogs:]
+	r.logBytes += len(msg)
+	for len(r.logs) > maxWorkflowLogs || r.logBytes > maxResultBytes {
+		r.logBytes -= len(r.logs[0])
+		r.logs = r.logs[1:]
 	}
+}
+
+// truncateLogLine cuts msg to at most max bytes on a rune boundary, so the
+// result JSON keeps valid UTF-8.
+func truncateLogLine(msg string, max int) string {
+	if len(msg) <= max {
+		return msg
+	}
+	for max > 0 && !utf8.RuneStart(msg[max]) {
+		max--
+	}
+	return msg[:max]
 }
 
 // startStep reuses the child chat of a step that an earlier runner started,
