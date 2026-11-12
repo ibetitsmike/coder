@@ -57,8 +57,30 @@ export const ReadOnly: Story = {
 	args: { access: { create: false, update: false, delete: false } },
 };
 
-export const UpdateOnly: Story = {
+export const UpdateOnlyMenuOpen: Story = {
 	args: { access: { create: false, update: true, delete: false } },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		});
+	},
+};
+
+export const DeleteOnlyMenuOpen: Story = {
+	args: { access: { create: false, update: false, delete: true } },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: /Delete/ });
+	},
 };
 
 export const UpdatingMenuOpen: Story = {

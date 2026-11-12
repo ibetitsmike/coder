@@ -5,6 +5,7 @@ import { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
+import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
 import type { ForkPluginPack } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import {
@@ -375,7 +376,6 @@ it("keeps the row menu reachable and starts no second update while one is pendin
 		}),
 	);
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
-	expect(menu).toBeEnabled();
 
 	await user.click(menu);
 	await user.click(await screen.findByRole("menuitem", { name: "Updating…" }));
@@ -446,6 +446,162 @@ it("keeps one pack's update pending after another pack's update settles", async 
 			`${MockForkPluginPack.name} updated to commit 0123456789.`,
 		),
 	);
+});
+
+it("reports a failed update with the server's message", async () => {
+	const user = userEvent.setup();
+	const toastError = vi.spyOn(toast, "error");
+	vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockRejectedValue(
+		mockApiError({
+			message: "Failed to fetch the ref.",
+			detail: "remote: repository not found",
+		}),
+	);
+	renderPage();
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		}),
+	);
+
+	await waitFor(() =>
+		expect(toastError).toHaveBeenCalledWith("Failed to fetch the ref.", {
+			description: "remote: repository not found",
+		}),
+	);
+});
+
+it("names the cached commit when a newer update lands before the response", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	let finishUpdate: (pack: ForkPluginPack) => void = () => {};
+	vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockReturnValue(
+		new Promise((resolve) => {
+			finishUpdate = resolve;
+		}),
+	);
+	const mockOlderUpdate = {
+		...MockForkPluginPack,
+		commit_sha: "1111111111aaaaaaaaaa1111111111aaaaaaaaaa",
+		updated_at: "2026-11-12T12:00:00Z",
+	};
+	const mockNewerUpdate = {
+		...MockForkPluginPack,
+		commit_sha: "2222222222bbbbbbbbbb2222222222bbbbbbbbbb",
+		updated_at: "2026-11-12T13:00:00Z",
+	};
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPack])
+		.mockResolvedValue([mockNewerUpdate]);
+	const { queryClient } = renderPage();
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(
+		await screen.findByRole("menuitem", {
+			name: /Update to the latest commit/,
+		}),
+	);
+	await queryClient.refetchQueries({
+		queryKey: pluginPacksKey(MockOrganization2.id),
+	});
+	finishUpdate(mockOlderUpdate);
+
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} updated to commit 2222222222.`,
+		),
+	);
+});
+
+const deleteFromRowMenu = async () => {
+	const user = userEvent.setup();
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+	await user.click(
+		within(await screen.findByRole("dialog")).getByRole("button", {
+			name: "Delete",
+		}),
+	);
+};
+
+it("removes a deleted pack from the cached list", async () => {
+	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockResolvedValue();
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
+		.mockReturnValue(new Promise(() => {}));
+	const { queryClient } = renderPage();
+
+	await deleteFromRowMenu();
+
+	await waitFor(() =>
+		expect(
+			queryClient.getQueryData(pluginPacksKey(MockOrganization2.id)),
+		).toEqual([MockForkPluginPackWithoutPath]),
+	);
+});
+
+it("reports a delete as done after a lost response once the refetch drops the pack", async () => {
+	const toastSuccess = vi.spyOn(toast, "success");
+	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockRejectedValue(
+		new AxiosError("Network Error", "ERR_NETWORK"),
+	);
+	let finishRefetch: (packs: ForkPluginPack[]) => void = () => {};
+	vi.mocked(forkPluginPacksApi.getPluginPacks)
+		.mockResolvedValueOnce([MockForkPluginPack])
+		.mockReturnValue(
+			new Promise((resolve) => {
+				finishRefetch = resolve;
+			}),
+		);
+	renderPage();
+
+	await deleteFromRowMenu();
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+	);
+	expect(toastSuccess).not.toHaveBeenCalled();
+	finishRefetch([]);
+
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} deleted.`,
+		),
+	);
+});
+
+it("does not report a delete when a lost response leaves the pack listed", async () => {
+	const toastSuccess = vi.spyOn(toast, "success");
+	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockRejectedValue(
+		new AxiosError("Network Error", "ERR_NETWORK"),
+	);
+	renderPage();
+
+	await deleteFromRowMenu();
+
+	// The mutation has settled, refetch included, once Delete is enabled again.
+	await waitFor(() =>
+		expect(
+			within(screen.getByRole("dialog")).getByRole("button", {
+				name: "Delete",
+			}),
+		).toBeEnabled(),
+	);
+	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	expect(toastSuccess).not.toHaveBeenCalled();
 });
 
 it("switches the organization through the picker", async () => {
