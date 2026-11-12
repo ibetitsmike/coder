@@ -24,10 +24,22 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 	const chatQuery = useQuery({ ...chat(chatId), refetchOnMount: false });
 	const target = { kind: "chat", chatId } as const;
 	const enabledQuery = useQuery(enabledPluginPacks(target));
-	if (!chatQuery.data) {
-		return chatQuery.error ? (
-			<ForkPluginPacksPillError error={chatQuery.error} />
-		) : null;
+	// Subagent chats carry no project and inherit the root chat's, so the
+	// project's packs come from the root.
+	const rootChatId =
+		chatQuery.data &&
+		!chatQuery.data.project_id &&
+		chatQuery.data.root_chat_id !== chatId
+			? chatQuery.data.root_chat_id
+			: undefined;
+	const rootChatQuery = useQuery({
+		...chat(rootChatId ?? ""),
+		enabled: rootChatId !== undefined,
+		refetchOnMount: false,
+	});
+	if (!chatQuery.data || (rootChatId && !rootChatQuery.data)) {
+		const error = chatQuery.error ?? rootChatQuery.error;
+		return error ? <ForkPluginPacksPillError error={error} /> : null;
 	}
 	return (
 		<ForkPluginPacksPillView
@@ -38,7 +50,7 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 				target={target}
 				organizationId={chatQuery.data.organization_id}
 				canEdit={chatQuery.data.owner_id === user.id}
-				projectId={chatQuery.data.project_id}
+				projectId={chatQuery.data.project_id ?? rootChatQuery.data?.project_id}
 			/>
 		</ForkPluginPacksPillView>
 	);
@@ -46,7 +58,7 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 
 type ForkPluginPacksPillErrorProps = { error: unknown };
 
-/** The pill shown when the chat, and so its organization, fails to load. */
+/** The pill shown when the chat or its root chat fails to load. */
 export const ForkPluginPacksPillError: React.FC<
 	ForkPluginPacksPillErrorProps
 > = ({ error }) => (
