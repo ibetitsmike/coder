@@ -165,7 +165,7 @@ func (j workflowJournal) failOpenSteps(ctx context.Context, runID uuid.UUID) (in
 	})
 }
 
-// updateStep journals a step transition, best effort like updateRunStatus.// updateStep journals a step transition, best effort like updateRunStatus.
+// updateStep journals a step transition, best effort like updateRunStatus.
 func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 	fdb, err := j.store(ctx)
 	if err != nil {
