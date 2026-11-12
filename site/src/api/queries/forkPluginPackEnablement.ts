@@ -9,6 +9,7 @@ import {
 	setPluginPackEnabled,
 } from "#/api/forkPluginPackEnablement";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
+import { chatEntityKey } from "./chats";
 import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
 
 /**
@@ -75,6 +76,15 @@ export const setPluginPackEnabledMutation = (
 				getErrorStatus(error) === 404 &&
 					queryClient.invalidateQueries({
 						queryKey: pluginPacksKey(organizationId),
+					}),
+				// The chat's context lists only resources from enabled packs, and
+				// waiting chats are not polled, so refetch it for the slash menu.
+				// A pack the workspace does not hold yet is written on the chat's
+				// next turn, so its resources appear only after that turn.
+				target.kind === "chat" &&
+					queryClient.invalidateQueries({
+						queryKey: chatEntityKey(target.chatId),
+						exact: true,
 					}),
 			]);
 		},
