@@ -598,3 +598,167 @@ func TestResolver_PluginPacksRootRequiresAdvertisedCapability(t *testing.T) {
 	require.Equal(t, filepath.Join(root, "plugin.json"), instruction.SourcePath)
 	findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(root, "skills", "review-pr"))
 }
+
+// writeNamedPack lays out a pack directory dir/name that defines the review
+// skill and the reviewer agent, and returns its manifest path.
+func writeNamedPack(t *testing.T, dir, name string) string {
+	t.Helper()
+	packDir := filepath.Join(dir, name)
+	manifest := filepath.Join(packDir, "plugin.json")
+	mustWriteFile(t, manifest, fmt.Sprintf(`{"name": %q}`, name))
+	mustWriteFile(t, filepath.Join(packDir, "skills", "review", "SKILL.md"), skillName("review"))
+	mustWriteFile(t, filepath.Join(packDir, "agents", "reviewer.md"), packAgent("reviewer"))
+	return manifest
+}
+
+func TestResolver_PluginPacksSameNameAcrossPacks(t *testing.T) {
+	t.Parallel()
+
+	// Packs that coderd installs under ~/.coder/plugins include ones disabled
+	// for a chat or removed from a commit, so the agent keeps same-named
+	// resources of different managed packs and coderd picks the live one after
+	// its per-chat filtering. Any other source is always live, so it shadows
+	// managed packs whatever the scan-root order.
+	tests := []struct {
+		name  string
+		roots []string
+		want  []string
+	}{
+		{name: "ManagedPacksOnly", roots: []string{"managed"}, want: []string{"managed:alpha", "managed:beta"}},
+		{name: "OrdinaryRootBeforeManaged", roots: []string{"ordinary", "managed"}, want: []string{"ordinary"}},
+		{name: "OrdinaryRootAfterManaged", roots: []string{"managed", "ordinary"}, want: []string{"ordinary"}},
+		{name: "UnmanagedPackBeforeManaged", roots: []string{"unmanaged", "managed"}, want: []string{"unmanaged"}},
+		{name: "UnmanagedPackAfterManaged", roots: []string{"managed", "unmanaged"}, want: []string{"unmanaged"}},
+		{name: "UnmanagedPacksFirstWins", roots: []string{"unmanaged", "unmanaged2"}, want: []string{"unmanaged"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			managedRoot := filepath.Join(t.TempDir(), ".coder", "plugins")
+			writeNamedPack(t, managedRoot, "alpha")
+			writeNamedPack(t, managedRoot, "beta")
+			unmanagedRoot := t.TempDir()
+			writeNamedPack(t, unmanagedRoot, "gamma")
+			unmanagedRoot2 := t.TempDir()
+			writeNamedPack(t, unmanagedRoot2, "delta")
+			ordinaryRoot := t.TempDir()
+			mustWriteSkill(t, filepath.Join(ordinaryRoot, "skills"), "review", "ordinary skill")
+			mustWriteFile(t, filepath.Join(ordinaryRoot, "agents", "reviewer.md"),
+				"---\nname: reviewer\ndescription: ordinary agent\n---\nOrdinary.")
+
+			byName := map[string]string{
+				"managed": managedRoot, "unmanaged": unmanagedRoot, "unmanaged2": unmanagedRoot2, "ordinary": ordinaryRoot,
+			}
+			var roots []agentcontext.ScanRoot
+			for _, name := range tt.roots {
+				roots = append(roots, agentcontext.ScanRoot{Path: byName[name]})
+			}
+
+			r := &agentcontext.Resolver{}
+			r.PackRowsAdvertised = func() bool { return true }
+			r.PackAgentDefinitionsAdvertised = func() bool { return true }
+			snap := r.Resolve(roots)
+
+			origin := func(res agentcontext.Resource) string {
+				switch {
+				case res.SourcePath == "":
+					return "ordinary"
+				case strings.HasPrefix(res.SourcePath, managedRoot):
+					return "managed:" + filepath.Base(filepath.Dir(res.SourcePath))
+				case strings.HasPrefix(res.SourcePath, unmanagedRoot):
+					return "unmanaged"
+				default:
+					return "unmanaged2"
+				}
+			}
+			var skills, agents []string
+			for _, res := range snap.Resources {
+				switch {
+				case res.Status != agentcontext.StatusOK:
+				case res.Kind == agentcontext.KindSkill && res.Name == "review":
+					skills = append(skills, origin(res))
+				case res.Kind == agentcontext.KindSubagent && res.Name == "reviewer":
+					agents = append(agents, origin(res))
+				}
+			}
+			require.ElementsMatch(t, tt.want, skills)
+			require.ElementsMatch(t, tt.want, agents)
+		})
+	}
+}
+
+func TestResolver_PluginPacksStaleAgentFileKept(t *testing.T) {
+	t.Parallel()
+
+	// An update that renames agents/a.md to agents/z.md leaves a.md on
+	// disk with the same frontmatter name. Both rows must reach coderd,
+	// which drops the one the commit no longer defines.
+	root := filepath.Join(t.TempDir(), ".coder", "plugins")
+	packDir := filepath.Join(root, "pstack")
+	mustWriteFile(t, filepath.Join(packDir, "plugin.json"), `{"name": "pstack"}`)
+	mustWriteFile(t, filepath.Join(packDir, "agents", "a.md"), packAgent("bar"))
+	mustWriteFile(t, filepath.Join(packDir, "agents", "z.md"), packAgent("bar"))
+
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+	var sources []string
+	for _, res := range snap.Resources {
+		if res.Kind == agentcontext.KindSubagent && res.Status == agentcontext.StatusOK && res.Name == "bar" {
+			sources = append(sources, res.Source)
+		}
+	}
+	require.ElementsMatch(t, []string{
+		filepath.Join(packDir, "agents", "a.md"),
+		filepath.Join(packDir, "agents", "z.md"),
+	}, sources)
+}
+
+func TestResolver_PluginPackDuplicatesUseSpareCapacity(t *testing.T) {
+	t.Parallel()
+
+	// Two managed packs define the same three skills. The first pack's rows
+	// are the ones that count against the resource cap; the second pack's are
+	// copies for a chat that enables only it, so they never displace
+	// anything and a push stays within twice the cap.
+	tests := []struct {
+		name         string
+		maxResources int
+		wantTotal    int
+		wantOK       int
+	}{
+		{name: "RoomForCopies", maxResources: 4, wantTotal: 6, wantOK: 6},
+		{name: "SomeCopiesOmitted", maxResources: 2, wantTotal: 4, wantOK: 3},
+		{name: "NoCopiesWhenPrimariesExceedTwiceTheCap", maxResources: 1, wantTotal: 3, wantOK: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := filepath.Join(t.TempDir(), ".coder", "plugins")
+			for _, pack := range []string{"alpha", "beta"} {
+				mustWriteFile(t, filepath.Join(root, pack, "plugin.json"), fmt.Sprintf(`{"name": %q}`, pack))
+				for _, skill := range []string{"one", "two", "three"} {
+					mustWriteFile(t, filepath.Join(root, pack, "skills", skill, "SKILL.md"), skillName(skill))
+				}
+			}
+
+			r := &agentcontext.Resolver{MaxResources: tt.maxResources}
+			r.PackRowsAdvertised = func() bool { return true }
+			snap := r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+
+			require.Len(t, snap.Resources, tt.wantTotal)
+			var ok int
+			for _, res := range snap.Resources {
+				if res.Status == agentcontext.StatusOK {
+					ok++
+				}
+			}
+			require.Equal(t, tt.wantOK, ok)
+		})
+	}
+}

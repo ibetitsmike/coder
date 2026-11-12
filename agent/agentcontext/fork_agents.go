@@ -147,9 +147,12 @@ func hasSource(resources []Resource, source string) bool {
 	return false
 }
 
+// hasOKSubagent reports whether a valid agent already uses name. Agents of
+// managed packs are skipped: they are never first-wins winners, see
+// splitManagedPackDuplicates.
 func hasOKSubagent(resources []Resource, name string) bool {
 	for _, existing := range resources {
-		if existing.Kind == KindSubagent && existing.Status == StatusOK && existing.Name == name {
+		if existing.Kind == KindSubagent && existing.Status == StatusOK && existing.Name == name && !isManagedPackContribution(existing) {
 			return true
 		}
 	}
