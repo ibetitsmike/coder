@@ -60,6 +60,12 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		)
 		chatWakeups.Get("/{chat}/wakeups", api.getChatWakeups)
 		chatWakeups.Patch("/{chat}/wakeups/{wakeup}", api.patchChatWakeup)
+		orgWakeups := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkChatWakeups),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		orgWakeups.Get("/organizations/{organization}/wakeup-caps", api.forkOrganizationWakeupCaps)
+		orgWakeups.Put("/organizations/{organization}/wakeup-caps", api.updateForkOrganizationWakeupCaps)
 
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
