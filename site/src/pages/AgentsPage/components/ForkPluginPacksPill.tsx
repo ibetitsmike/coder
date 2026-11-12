@@ -38,6 +38,7 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 				target={target}
 				organizationId={chatQuery.data.organization_id}
 				canEdit={chatQuery.data.owner_id === user.id}
+				projectId={chatQuery.data.project_id}
 			/>
 		</ForkPluginPacksPillView>
 	);
@@ -94,10 +95,11 @@ export const ForkPluginPacksPillView: React.FC<
 		}
 	>
 		<p className="mb-3 mt-1 text-content-secondary">
-			{isSubagent
-				? "Packs enabled on a parent chat apply too, and so do the project's packs if the chat belongs to a project."
-				: "If this chat belongs to a project, packs enabled on the project apply too."}{" "}
-			Skills from a newly enabled pack appear after the chat's next message.
+			{isSubagent &&
+				"Packs enabled on an ancestor chat apply too, and packs turned off on one stay off. "}
+			If this chat belongs to a project, turning off one of the project's packs
+			here turns it off only for this chat and its subagents. Skills from a
+			newly enabled pack appear after the chat's next message.
 		</p>
 		{children}
 	</ComposerPillPopover>

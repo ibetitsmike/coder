@@ -16,6 +16,14 @@ const enabledPluginPacksPath = (target: PluginPackTarget) =>
 		? `/api/v2/chats/fork/organizations/${target.organizationId}/projects/${target.projectId}/plugin-packs`
 		: `/api/v2/chats/fork/${target.chatId}/plugin-packs`;
 
+const putOrDelete = async (path: string, put: boolean) => {
+	if (put) {
+		await API.getAxiosInstance().put(path);
+	} else {
+		await API.getAxiosInstance().delete(path);
+	}
+};
+
 /** Lists the plugin packs any organization member may enable. */
 export const getAvailablePluginPacks = async (
 	organizationId: string,
@@ -44,11 +52,29 @@ export const setPluginPackEnabled = async (
 	target: PluginPackTarget,
 	packId: string,
 	enabled: boolean,
-): Promise<void> => {
-	const path = `${enabledPluginPacksPath(target)}/${packId}`;
-	if (enabled) {
-		await API.getAxiosInstance().put(path);
-	} else {
-		await API.getAxiosInstance().delete(path);
-	}
+): Promise<void> =>
+	putOrDelete(`${enabledPluginPacksPath(target)}/${packId}`, enabled);
+
+const excludedPluginPacksPath = (chatId: string) =>
+	`/api/v2/chats/fork/${chatId}/excluded-plugin-packs`;
+
+/**
+ * A turned-off pack stays off for the chat and its subagents even when the
+ * project or the chat enables it.
+ */
+export const getExcludedPluginPacks = async (
+	chatId: string,
+): Promise<ForkEnabledPluginPack[]> => {
+	const response = await API.getAxiosInstance().get<ForkEnabledPluginPack[]>(
+		excludedPluginPacksPath(chatId),
+	);
+	return response.data;
 };
+
+/** Turns one plugin pack off for a chat, or stops turning it off. */
+export const setPluginPackExcluded = async (
+	chatId: string,
+	packId: string,
+	excluded: boolean,
+): Promise<void> =>
+	putOrDelete(`${excludedPluginPacksPath(chatId)}/${packId}`, excluded);
