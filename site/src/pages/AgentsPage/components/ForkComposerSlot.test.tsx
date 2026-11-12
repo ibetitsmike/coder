@@ -381,6 +381,10 @@ describe("ForkComposerSlot plugin packs", () => {
 			forkPluginPackEnablementApi,
 			"getAvailablePluginPacks",
 		).mockResolvedValue([MockForkPluginPack]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getExcludedPluginPacks",
+		).mockResolvedValue([]);
 		return vi
 			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
 			.mockResolvedValue();

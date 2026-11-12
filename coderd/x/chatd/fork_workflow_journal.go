@@ -3,7 +3,7 @@ package chatd
 // This file is fork code: the durable journal of the fork-workflows
 // experiment. The registry (fork_workflow.go) holds a run in memory on one
 // replica; the workflow_runs and workflow_steps tables (chatdmig node
-// 7b2d1587) let a restart resume a run and replay its finished steps without
+// 01a1d041) let a restart resume a run and replay its finished steps without
 // running them again. The engine writes every state transition through, and
 // a resume compiles the journaled script and rehydrates the journaled steps.
 

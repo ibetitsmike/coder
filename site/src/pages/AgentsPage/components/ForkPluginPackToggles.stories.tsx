@@ -13,6 +13,8 @@ const meta = {
 	args: {
 		installed: [MockForkPluginPack, MockForkPluginPackWithoutPath],
 		enabled: [MockForkPluginPack],
+		inherited: [],
+		excluded: [],
 		error: undefined,
 		isRetrying: false,
 		onRetry: fn(),
@@ -33,7 +35,19 @@ export const ReadOnly: Story = {
 
 export const Toggling: Story = {
 	args: {
-		pending: { pack: MockForkPluginPackWithoutPath, enabled: true },
+		pending: {
+			pack: MockForkPluginPackWithoutPath,
+			enabled: true,
+			writes: { direct: true },
+		},
+	},
+};
+
+export const ProjectPackTurnedOff: Story = {
+	args: {
+		enabled: [],
+		inherited: [MockForkPluginPack, MockForkPluginPackWithoutPath],
+		excluded: [MockForkPluginPackWithoutPath],
 	},
 };
 
