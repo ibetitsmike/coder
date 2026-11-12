@@ -1747,6 +1747,9 @@ func newPackWatchPaths() packWatchPaths {
 
 // relevant reports whether a write to path can change the pack rows.
 func (p packWatchPaths) relevant(path string) bool {
+	if filepath.Base(path) == packCommitMarkerName {
+		return true
+	}
 	if filepath.Ext(path) == agentDefinitionExt {
 		if _, ok := p.agentDirs[filepath.Dir(path)]; ok {
 			return true

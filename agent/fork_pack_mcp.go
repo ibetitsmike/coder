@@ -29,6 +29,7 @@ func packMCPSourcesToAgentMCP(sources []agentcontext.PackMCPSource) []agentmcp.P
 			ManifestPath:     source.ManifestPath,
 			Dir:              source.Dir,
 			ExpandPluginRoot: source.Claude,
+			Revision:         source.Revision,
 			Configs:          make([]agentmcp.PackConfig, 0, len(source.Configs)),
 		}
 		for _, cfg := range source.Configs {

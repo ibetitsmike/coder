@@ -166,6 +166,7 @@ func TestResolverPackMCPSources(t *testing.T) {
 	writePackFiles(t, dir, map[string]string{
 		".claude-plugin/plugin.json": `{"name": "p"}`,
 		".mcp.json":                  `{"mcpServers": {"deploy": {"command": "deploy"}}}`,
+		packCommitMarkerName:         "pack-id abc123\n",
 	})
 	// A pack without MCP servers contributes no source.
 	writePackFiles(t, filepath.Join(root, "plain"), map[string]string{
@@ -181,8 +182,10 @@ func TestResolverPackMCPSources(t *testing.T) {
 		ManifestPath: filepath.Join(dir, ".claude-plugin", "plugin.json"),
 		Dir:          dir,
 		Claude:       true,
+		Revision:     "pack-id abc123",
 		Configs:      []PackMCPConfig{{Path: filepath.Join(dir, ".mcp.json")}},
 	}}, r.packMCPSources(roots))
+	require.True(t, packWatchPaths{}.relevant(filepath.Join(dir, packCommitMarkerName)), "rewriting the commit marker re-resolves")
 }
 
 func TestPackMCPPublisher(t *testing.T) {

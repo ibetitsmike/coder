@@ -8,6 +8,7 @@ package agentcontext
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -89,8 +90,24 @@ type PackMCPSource struct {
 	Dir string
 	// Claude marks a Claude Code pack, whose configs expand
 	// ${CLAUDE_PLUGIN_ROOT}.
-	Claude  bool
-	Configs []PackMCPConfig
+	Claude bool
+	// Revision is the pack's commit marker, empty for a pack coderd did
+	// not write. It changes when an update replaces the pack's files.
+	Revision string
+	Configs  []PackMCPConfig
+}
+
+// packCommitMarkerName is the file coderd writes into a pack directory
+// after all of its files (coderd/x/chatd/fork_pack_materializer.go).
+const packCommitMarkerName = ".coder-pack-commit"
+
+// packRevision reads the commit marker of the pack in dir.
+func packRevision(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, packCommitMarkerName))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // PackMCPConfig is one mcpServers declaration of a pack.
@@ -181,7 +198,7 @@ func (r *Resolver) packMCPSources(roots []ScanRoot) []PackMCPSource {
 			}
 			seen[pack.ManifestPath] = struct{}{}
 			if configs := pack.mcpConfigs(); len(configs) > 0 {
-				out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Configs: configs})
+				out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Revision: packRevision(pack.Dir), Configs: configs})
 			}
 		}
 	}
