@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
+	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
@@ -23,6 +25,71 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
+
+// warningSink records the messages of warn-and-worse entries.
+type warningSink struct {
+	mu    sync.Mutex
+	warns []string
+}
+
+func (s *warningSink) LogEntry(_ context.Context, e slog.SinkEntry) {
+	if e.Level >= slog.LevelWarn {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.warns = append(s.warns, e.Message)
+	}
+}
+
+func (*warningSink) Sync() {}
+
+// TestForkWorkflowReportCollision covers the dynamic tool parsing of a step
+// chat's own workflow_report definition: the built-in server tool injected
+// from that same column owns the name by design, so the deliberate
+// collision stays silent while a real one keeps its warning.
+func TestForkWorkflowReportCollision(t *testing.T) {
+	t.Parallel()
+
+	schema := json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`)
+	stepTools, err := workflowStepTools(schema)
+	require.NoError(t, err)
+	// A caller-supplied def that collides with a different built-in.
+	otherTools, err := json.Marshal([]codersdk.DynamicTool{{
+		Name:        "other_tool",
+		Description: "a caller-supplied tool",
+		InputSchema: schema,
+	}})
+	require.NoError(t, err)
+
+	runAppend := func(t *testing.T, tools []fantasy.AgentTool, raw json.RawMessage) *warningSink {
+		t.Helper()
+		sink := &warningSink{}
+		_, _, err := appendDynamicTools(context.Background(), slog.Make(sink), tools,
+			pqtype.NullRawMessage{RawMessage: raw, Valid: true},
+			database.NullChatPlanMode{}, database.NullChatMode{})
+		require.NoError(t, err)
+		return sink
+	}
+
+	t.Run("StepChatCollisionIsSilent", func(t *testing.T) {
+		t.Parallel()
+		tool, err := newWorkflowReportTool(schema)
+		require.NoError(t, err)
+		sink := runAppend(t, []fantasy.AgentTool{tool}, stepTools)
+		assert.Empty(t, sink.warns, sink.warns)
+	})
+
+	t.Run("OtherCollisionsStillWarn", func(t *testing.T) {
+		t.Parallel()
+		builtIn := fantasy.NewAgentTool("other_tool", "a built-in",
+			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			})
+		sink := runAppend(t, []fantasy.AgentTool{builtIn}, otherTools)
+		require.Len(t, sink.warns, 1)
+		// The message carries no name: the tool name is a log field.
+		assert.Contains(t, sink.warns[0], "collides with built-in tool")
+	})
+}
 
 func TestForkWorkflowReport(t *testing.T) {
 	t.Parallel()
@@ -375,7 +442,7 @@ func TestForkWorkflowReport(t *testing.T) {
 		tools := pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 
 		root := database.Chat{ID: uuid.New(), DynamicTools: tools}
-		got, err := appendWorkflowReportTool(nil, root)
+		got, err := (&Server{}).appendWorkflowReportTool(nil, root)
 		require.NoError(t, err)
 		assert.Empty(t, got, "a root chat must not get workflow_report")
 		assert.Empty(t, forkStopAfterWorkflowReport(nil, root), "a root chat must not stop after workflow_report")
@@ -383,7 +450,7 @@ func TestForkWorkflowReport(t *testing.T) {
 		child := root
 		child.ParentChatID = uuid.NullUUID{UUID: uuid.New(), Valid: true}
 		child.Labels = database.StringMap{workflowRunLabel: uuid.NewString()}
-		got, err = appendWorkflowReportTool(nil, child)
+		got, err = (&Server{}).appendWorkflowReportTool(nil, child)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		assert.Equal(t, workflowReportToolName, got[0].Info().Name)
@@ -401,7 +468,7 @@ func TestForkWorkflowReport(t *testing.T) {
 		// behavior.
 		noLabel := child
 		noLabel.Labels = nil
-		got, err = appendWorkflowReportTool(nil, noLabel)
+		got, err = (&Server{}).appendWorkflowReportTool(nil, noLabel)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 		assert.Empty(t, forkStopAfterWorkflowReport(nil, noLabel))
@@ -421,7 +488,7 @@ func TestForkWorkflowReport(t *testing.T) {
 			ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true},
 			DynamicTools: pqtype.NullRawMessage{RawMessage: []byte("{broken"), Valid: true},
 		}
-		got, err := appendWorkflowReportTool(nil, child)
+		got, err := (&Server{}).appendWorkflowReportTool(nil, child)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 		assert.Empty(t, forkStopAfterWorkflowReport(nil, child))

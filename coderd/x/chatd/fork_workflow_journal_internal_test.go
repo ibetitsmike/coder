@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sqlc-dev/pqtype"
+
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
@@ -38,6 +40,15 @@ func (f *forkWorkflowFixture) restartWorkflowServer(t *testing.T) *forkWorkflowF
 	server := newInternalTestServer(t, f.db, f.ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
 	return &forkWorkflowFixture{db: f.db, ps: f.ps, server: server, user: f.user, org: f.org, model: f.model}
+}
+
+// stepTools returns the dynamic tools column of a workflow step child with
+// the default step schema.
+func (*forkWorkflowFixture) stepTools(t *testing.T) pqtype.NullRawMessage {
+	t.Helper()
+	raw, err := workflowStepTools(json.RawMessage(defaultStepSchema))
+	require.NoError(t, err)
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 }
 
 // journalRunStatus reads the status of the run's journal row.
@@ -289,5 +300,119 @@ func TestForkWorkflowStop(t *testing.T) {
 		for _, srow := range stepRows {
 			assert.NotEqual(t, stepStatusFailed, srow.Status, "an interrupted run keeps its open steps")
 		}
+	})
+}
+
+// TestForkWorkflowReportJournal covers workflow_report on a step child
+// whose run is no longer live: after a restart, chat recovery re-runs the
+// child while its run sits interrupted in the journal.
+func TestForkWorkflowReportJournal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("RecoveredStepChildJournalsItsReport", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: `def main(args):
+    return agent("Say hi.", title = "hi")
+`,
+		})
+		step := f.steps(ctx, t, run, 1)[0]
+
+		restarted := f.restartWorkflowServer(t)
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+
+		// The recovered turn builds workflow_report from the chat, the way
+		// the turn environment does.
+		chatID := uuid.MustParse(step.ChatID)
+		child, err := f.db.GetChatByID(ctx, chatID)
+		require.NoError(t, err)
+		tools, err := restarted.server.appendWorkflowReportTool(nil, child)
+		require.NoError(t, err)
+		require.Len(t, tools, 1)
+		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"text":"hi"}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+
+		// The journal holds the value while the run stays interrupted.
+		stepRow, err := fdb.GetWorkflowStep(ctx, chatID)
+		require.NoError(t, err)
+		assert.Equal(t, stepStatusReported, stepRow.Status)
+		require.True(t, stepRow.Value.Valid)
+		assert.JSONEq(t, `{"text":"hi"}`, string(stepRow.Value.RawMessage))
+		assert.Equal(t, workflowStatusInterrupted, journalRunStatus(ctx, t, fdb, run.id))
+
+		// The resume replays the journaled value without running the child
+		// again.
+		promptsBefore := len(f.userTexts(ctx, t, chatID))
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.JSONEq(t, `{"text":"hi"}`, string(res.Result))
+		require.Len(t, res.Steps, 1)
+		assert.True(t, res.Steps[0].Reused)
+		assert.Equal(t, promptsBefore, len(f.userTexts(ctx, t, chatID)),
+			"the resumed run must not re-run the reported child")
+	})
+
+	t.Run("ReportOnEndedRunFails", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: `def main(args):
+    return agent("Say hi.", title = "hi")
+`,
+		})
+		step := f.steps(ctx, t, run, 1)[0]
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, run))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+
+		chatID := uuid.MustParse(step.ChatID)
+		child, err := f.db.GetChatByID(ctx, chatID)
+		require.NoError(t, err)
+		tools, err := f.server.appendWorkflowReportTool(nil, child)
+		require.NoError(t, err)
+		require.Len(t, tools, 1)
+		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"text":"late"}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "already ended")
+
+		fdb := forkWorkflowDB(t, f.db)
+		stepRow, err := fdb.GetWorkflowStep(ctx, chatID)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"text":"hi"}`, string(stepRow.Value.RawMessage),
+			"a late report must not overwrite the journaled value")
+	})
+
+	t.Run("ReportWithoutJournalRowFails", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+
+		// A step child whose run row the journal lost cannot answer a
+		// report with acceptance: there is nothing to record the value on.
+		tools, err := f.server.appendWorkflowReportTool(nil, database.Chat{
+			ID:           uuid.New(),
+			ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true},
+			Labels:       database.StringMap{workflowRunLabel: uuid.NewString()},
+			DynamicTools: f.stepTools(t),
+		})
+		require.NoError(t, err)
+		require.Len(t, tools, 1)
+		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"text":"hi"}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "not in the journal")
 	})
 }
