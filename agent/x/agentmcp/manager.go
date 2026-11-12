@@ -121,6 +121,10 @@ type Manager struct {
 	// reloadRequested is set by the first Reload, even one with no
 	// paths, so pack sources set later still start.
 	reloadRequested bool
+	// packGen counts SetPackSources changes. A reload records the
+	// generation it parsed and marks it loaded on install, and Reload
+	// skips only when the loaded generation is current.
+	packGen, parsedPackGen, loadedPackGen uint64
 
 	// watcher fires a debounced Reload when any watched config
 	// file is created, written, removed, or renamed. It is armed
@@ -262,7 +266,7 @@ func (m *Manager) startReloadIfNeeded(paths []string) (<-chan reloadResult, bool
 	// is running when parseAndDedup returns the empty snapshot.
 	m.armWatcher(paths)
 
-	if firstSyncSettled && !m.SnapshotChanged(paths) {
+	if firstSyncSettled && m.packSourcesLoaded() && !m.SnapshotChanged(paths) {
 		return nil, false, nil
 	}
 
@@ -526,7 +530,7 @@ func (m *Manager) parseAndDedup(ctx context.Context, mcpConfigFiles []string) ([
 	// on the next check, and triggers a re-read. False positives
 	// (extra reload) are safe; false negatives (missed change)
 	// are not.
-	packs := m.currentPackSources()
+	packs := m.packSourcesForReload()
 	snap := captureSnapshot(withPackFiles(mcpConfigFiles, packs))
 
 	var allConfigs []ServerConfig
@@ -685,6 +689,7 @@ func (m *Manager) installServers(
 	m.servers = newServers
 	m.serverGen++
 	m.snapshot = snap
+	m.loadedPackGen = m.parsedPackGen
 	return replaced, nil
 }
 
