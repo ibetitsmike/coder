@@ -128,6 +128,7 @@ func TestIsRulePath(t *testing.T) {
 		want bool
 	}{
 		{path: "/w/.cursor/rules/go.mdc", want: true},
+		{path: "/w/.cursor/rules/frontend/components.mdc", want: true},
 		{path: "/home/u/.coder/rules/go.mdc", want: true},
 		{path: "/w/.cursor/rules/go.md", want: false},
 		{path: "/w/.cursor/go.mdc", want: false},

@@ -132,10 +132,29 @@ func ruleContainersFor(rootPath string) []string {
 	return out
 }
 
+// ruleDirsFor returns rootPath's rule directories and their subfolders,
+// where Cursor lets users organize rules. WalkDir does not follow
+// symlinked folders, so the walk stays inside each container.
+func ruleDirsFor(rootPath string) []string {
+	var out []string
+	for _, container := range ruleContainersFor(rootPath) {
+		_ = filepath.WalkDir(container, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				out = append(out, path)
+			}
+			return nil
+		})
+	}
+	return out
+}
+
 // emitRules appends one resource per always-apply or glob-scoped rule in
 // root's rule directories. Rules without either are ignored.
 func (r *Resolver) emitRules(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	for _, container := range ruleContainersFor(root.Path) {
+	for _, container := range ruleDirsFor(root.Path) {
 		entries, err := os.ReadDir(container)
 		if err != nil {
 			continue
@@ -224,10 +243,11 @@ func splitScopedRules(resources []Resource) (rest, scoped []Resource) {
 	return rest, scoped
 }
 
-// addRuleWatchDirs adds rootPath's rule directories to out, plus an
-// existing .cursor so creating .cursor/rules later triggers a re-resolve.
+// addRuleWatchDirs adds rootPath's rule directories and their subfolders to
+// out, plus an existing .cursor so creating .cursor/rules later triggers a
+// re-resolve.
 func addRuleWatchDirs(rootPath string, out map[string]struct{}) {
-	for _, container := range ruleContainersFor(rootPath) {
+	for _, container := range ruleDirsFor(rootPath) {
 		out[container] = struct{}{}
 	}
 	parent := filepath.Dir(filepath.Join(rootPath, ruleContainerRelPath))
@@ -239,5 +259,8 @@ func addRuleWatchDirs(rootPath string, out map[string]struct{}) {
 // isRulePath reports whether path could be a rule file, so the watcher
 // re-resolves on writes to it.
 func isRulePath(path string) bool {
-	return filepath.Ext(path) == ruleFileExt && filepath.Base(filepath.Dir(path)) == ruleContainerDir
+	if filepath.Ext(path) != ruleFileExt {
+		return false
+	}
+	return slices.Contains(strings.Split(filepath.ToSlash(filepath.Dir(path)), "/"), ruleContainerDir)
 }

@@ -38,6 +38,7 @@ func TestResolver_RuleDirectories(t *testing.T) {
 
 	always := "---\ndescription: Go style\nalwaysApply: true\n---\nUse gofmt.\n"
 	mustWriteFile(t, filepath.Join(projectRules, "go.mdc"), always)
+	mustWriteFile(t, filepath.Join(projectRules, "frontend", "components.mdc"), "---\nalwaysApply: true\n---\nNamed exports")
 	mustWriteFile(t, filepath.Join(projectRules, "ts.mdc"), "---\nglobs: **/*.ts, *.tsx\nalwaysApply: false\n---\nTS rules")
 	mustWriteFile(t, filepath.Join(projectRules, "manual.mdc"), "---\ndescription: Ask for it\nalwaysApply: false\n---\nManual")
 	mustWriteFile(t, filepath.Join(projectRules, "plain.mdc"), "No front-matter")
@@ -54,9 +55,11 @@ func TestResolver_RuleDirectories(t *testing.T) {
 		{Path: project},
 	})
 
-	require.Len(t, instructionResources(snap.Resources), 4, "manual, plain, nested and non-.mdc files are not rules")
+	require.Len(t, instructionResources(snap.Resources), 5, "manual, plain, nested and non-.mdc files are not rules")
+	got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(projectRules, "frontend", "components.mdc"))
+	require.Equal(t, []byte("Named exports"), got.Payload, "rules in subfolders of a rule directory load")
 
-	got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(projectRules, "go.mdc"))
+	got = findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(projectRules, "go.mdc"))
 	require.Equal(t, agentcontext.StatusOK, got.Status)
 	require.Equal(t, []byte("Use gofmt."), got.Payload, "the payload is the body without front-matter")
 	require.Equal(t, "Go style", got.Description)
@@ -193,6 +196,15 @@ func TestWatcher_Rules(t *testing.T) {
 			// Rewrite the existing file so only a Write event fires.
 			change: func(dir string) error {
 				return os.WriteFile(filepath.Join(dir, ".cursor", "rules", "go.mdc"), []byte("---\nalwaysApply: true\n---\nv2"), 0o600)
+			},
+		},
+		{
+			name: "NestedRuleEdit",
+			setup: func(t *testing.T, dir string) {
+				mustWriteFile(t, filepath.Join(dir, ".cursor", "rules", "frontend", "ui.mdc"), "---\nalwaysApply: true\n---\nv1")
+			},
+			change: func(dir string) error {
+				return os.WriteFile(filepath.Join(dir, ".cursor", "rules", "frontend", "ui.mdc"), []byte("---\nalwaysApply: true\n---\nv2"), 0o600)
 			},
 		},
 		{
