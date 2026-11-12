@@ -9,9 +9,10 @@ import {
 } from "../MCPServersPage/organizationParam";
 
 /**
- * Resolves the `org` search parameter among the readable organizations. A named
- * organization the user cannot read resolves to undefined instead of falling
- * back to the default.
+ * Resolves the organization named by the `org` search parameter among the
+ * readable organizations, defaulting when the parameter is absent. A named
+ * organization the user cannot read resolves to undefined rather than a
+ * fallback, so a write never lands in an organization the URL did not name.
  */
 export const useRequestedSkillsOrganization = (
 	readableOrganizations: readonly Organization[],
