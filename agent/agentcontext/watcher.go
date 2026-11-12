@@ -284,7 +284,7 @@ func (w *Watcher) run() {
 func (w *Watcher) eventRelevant(ev fsnotify.Event) bool {
 	name := filepath.Base(ev.Name)
 	if recognizedInstructionFile(name) || name == mcpConfigFileName || name == skillMetaFileName ||
-		name == packManifestBaseName || isClaudePluginStateFile(name) || isAgentDefinitionPath(ev.Name) || w.inPackWatch(ev.Name) {
+		name == packManifestBaseName || isClaudePluginStateFile(name) || isAgentDefinitionPath(ev.Name) || isRulePath(ev.Name) || w.inPackWatch(ev.Name) {
 		return true
 	}
 	// Directory create/remove flips re-resolve so new subtrees
@@ -354,6 +354,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		}
 		out[root.Path] = struct{}{}
 		addAgentWatchDirs(root.Path, out)
+		addRuleWatchDirs(root.Path, out)
 		// Watch pack roots and their declared containers so
 		// plugin pack changes re-resolve (fork_plugins.go).
 		addPackWatchDirs(root.Path, out, pack)

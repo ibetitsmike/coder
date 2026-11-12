@@ -15,6 +15,10 @@ func defaultBuiltinRoots() []string {
 		// plugin packs, PRD 6.7); fork_plugins.go reads their
 		// manifests.
 		"~/.coder/plugins",
+		// User rule directories (fork rules, PRD 6.9); fork_rules.go
+		// reads their .mdc files.
+		"~/.coder/rules",
+		"~/.cursor/rules",
 		// Claude Code plugin cache, picked up by the plugin
 		// RFC follow-up. v1 ignores plugin manifests, but
 		// watching the directory now prevents a surprise
