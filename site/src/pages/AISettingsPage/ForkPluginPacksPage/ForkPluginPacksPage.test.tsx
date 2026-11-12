@@ -245,7 +245,7 @@ it("does not report an install when a lost response leaves only an older same-na
 	const create = vi
 		.spyOn(forkPluginPacksApi, "createPluginPack")
 		.mockRejectedValue(new AxiosError("Network Error", "ERR_NETWORK"));
-	renderPage();
+	const { queryClient } = renderPage();
 
 	await user.click(
 		await screen.findByRole("button", { name: "Install plugin pack" }),
@@ -265,13 +265,10 @@ it("does not report an install when a lost response leaves only an older same-na
 	);
 	await user.click(within(dialog).getByRole("button", { name: "Install" }));
 
-	// The mutation has settled, refetch included, once Install is enabled again.
 	await waitFor(() =>
-		expect(
-			within(dialog).getByRole("button", { name: "Install" }),
-		).toBeEnabled(),
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
-	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	await waitFor(() => expect(queryClient.isMutating()).toBe(0));
 	expect(create).toHaveBeenCalledTimes(1);
 	expect(toastSuccess).not.toHaveBeenCalled();
 });
@@ -285,7 +282,7 @@ it("does not report an install when a lost response follows a failed first load"
 	vi.mocked(forkPluginPacksApi.getPluginPacks).mockRejectedValueOnce(
 		mockApiError({ message: "Failed to list plugin packs." }),
 	);
-	renderPage();
+	const { queryClient } = renderPage();
 	await screen.findByRole("button", { name: "Retry" });
 
 	await user.click(
@@ -309,11 +306,7 @@ it("does not report an install when a lost response follows a failed first load"
 	await waitFor(() =>
 		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
-	await waitFor(() =>
-		expect(
-			within(dialog).getByRole("button", { name: "Install" }),
-		).toBeEnabled(),
-	);
+	await waitFor(() => expect(queryClient.isMutating()).toBe(0));
 	expect(create).toHaveBeenCalledTimes(1);
 	expect(toastSuccess).not.toHaveBeenCalled();
 });
@@ -588,19 +581,14 @@ it("does not report a delete when a lost response leaves the pack listed", async
 	vi.spyOn(forkPluginPacksApi, "deletePluginPack").mockRejectedValue(
 		new AxiosError("Network Error", "ERR_NETWORK"),
 	);
-	renderPage();
+	const { queryClient } = renderPage();
 
 	await deleteFromRowMenu();
 
-	// The mutation has settled, refetch included, once Delete is enabled again.
 	await waitFor(() =>
-		expect(
-			within(screen.getByRole("dialog")).getByRole("button", {
-				name: "Delete",
-			}),
-		).toBeEnabled(),
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
-	expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+	await waitFor(() => expect(queryClient.isMutating()).toBe(0));
 	expect(toastSuccess).not.toHaveBeenCalled();
 });
 

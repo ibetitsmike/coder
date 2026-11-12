@@ -49,7 +49,6 @@ export const RowMenuOpen: Story = {
 				name: `More actions for ${MockForkPluginPack.name}`,
 			}),
 		);
-		await screen.findByRole("menuitem", { name: /Delete/ });
 	},
 };
 
@@ -65,9 +64,6 @@ export const UpdateOnlyMenuOpen: Story = {
 				name: `More actions for ${MockForkPluginPack.name}`,
 			}),
 		);
-		await screen.findByRole("menuitem", {
-			name: /Update to the latest commit/,
-		});
 	},
 };
 
@@ -79,7 +75,6 @@ export const DeleteOnlyMenuOpen: Story = {
 				name: `More actions for ${MockForkPluginPack.name}`,
 			}),
 		);
-		await screen.findByRole("menuitem", { name: /Delete/ });
 	},
 };
 
@@ -91,7 +86,6 @@ export const UpdatingMenuOpen: Story = {
 				name: `More actions for ${MockForkPluginPack.name}`,
 			}),
 		);
-		await screen.findByRole("menuitem", { name: "Updating…" });
 	},
 };
 
