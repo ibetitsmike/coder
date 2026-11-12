@@ -3,7 +3,10 @@
 import { API } from "./api";
 import type { ForkEnabledPluginPack } from "./typesGenerated";
 
-/** Where plugin packs are enabled: a chat project or a single chat. */
+/**
+ * The scope whose direct plugin pack enablements are listed or changed. A chat
+ * target never covers the packs the chat inherits from its project.
+ */
 export type PluginPackTarget =
 	| { kind: "project"; organizationId: string; projectId: string }
 	| { kind: "chat"; chatId: string };
