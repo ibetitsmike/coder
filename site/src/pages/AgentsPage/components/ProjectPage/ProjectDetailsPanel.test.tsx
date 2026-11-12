@@ -696,9 +696,6 @@ describe("ProjectDetailsPanel", () => {
 		const getEnabled = vi
 			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
 			.mockResolvedValue([MockForkPluginPackWithoutPath]);
-		vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-			MockForkPluginPackWithoutPath,
-		]);
 		const { queryClient } = renderPanel();
 		await screen.findByRole("button", { name: "Plugin packs: 1 pack" });
 
