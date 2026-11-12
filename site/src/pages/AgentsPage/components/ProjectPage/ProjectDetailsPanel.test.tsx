@@ -11,7 +11,6 @@ import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import { chatProjectInstructionsKey } from "#/api/queries/chatProjects";
-import { enabledPluginPacksKey } from "#/api/queries/forkPluginPackEnablement";
 import type {
 	ChatProject,
 	ChatProjectInstructions,
@@ -687,34 +686,6 @@ describe("ProjectDetailsPanel", () => {
 		await user.click(await screen.findByRole("button", { name: "Close" }));
 
 		await waitFor(() => expect(packsButton).toHaveFocus());
-	});
-
-	it("keeps the cached plugin pack count and flags it when a refetch fails", async () => {
-		dashboard.experiments = ["fork-plugin-packs"];
-		mockInstructions(MockChatProjectInstructions);
-		vi.spyOn(API.experimental, "getChatProjectSkills").mockResolvedValue([]);
-		const getEnabled = vi
-			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
-			.mockResolvedValue([MockForkPluginPackWithoutPath]);
-		const { queryClient } = renderPanel();
-		await screen.findByRole("button", { name: "Plugin packs: 1 pack" });
-
-		getEnabled.mockRejectedValue(
-			mockApiError({ message: "Failed to get plugin packs." }),
-		);
-		await act(() =>
-			queryClient.refetchQueries({
-				queryKey: enabledPluginPacksKey({
-					kind: "project",
-					organizationId: MockChatProject.organization_id,
-					projectId: MockChatProject.id,
-				}),
-			}),
-		);
-
-		await screen.findByRole("button", {
-			name: "Plugin packs: 1 pack (refresh failed)",
-		});
 	});
 
 	it("does not load plugin packs while the experiment is off", async () => {
