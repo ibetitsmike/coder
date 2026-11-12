@@ -49,11 +49,14 @@ type workflowReportTool struct {
 var _ fantasy.AgentTool = (*workflowReportTool)(nil)
 
 func newWorkflowReportTool(raw json.RawMessage) (*workflowReportTool, error) {
-	resolved, err := checkStepSchema(raw)
+	// The ref policy runs before the schema resolves: checkStepSchema hands
+	// remote references to the JSON Schema resolver, whose error names a
+	// missing loader instead of the unsupported reference.
+	properties, required, err := stepReportParameters(raw)
 	if err != nil {
 		return nil, err
 	}
-	properties, required, err := stepReportParameters(raw)
+	resolved, err := checkStepSchema(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +184,17 @@ func inlineStepRefs(node map[string]any, root map[string]any, seen []string) (ma
 	return out, nil
 }
 
+// schemaDataFields are keywords whose values are data, not schemas: an
+// object or array under them is the asserted value itself, so a $ref-shaped
+// field inside is literal JSON and must be copied verbatim instead of
+// resolved or inlined.
+var schemaDataFields = map[string]bool{
+	"const":    true,
+	"default":  true,
+	"enum":     true,
+	"examples": true,
+}
+
 // schemaNameMapFields are keywords whose value maps names to schemas, so
 // their keys are property or definition names, never schema keywords.
 var schemaNameMapFields = map[string]bool{
@@ -191,10 +205,14 @@ var schemaNameMapFields = map[string]bool{
 	"properties":        true,
 }
 
-// inlineStepValue walks one keyword's value. Maps under schemaNameMapFields
-// are name-to-schema maps; every other map is a schema node, and array
+// inlineStepValue walks one keyword's value. Values under schemaDataFields
+// are data and are copied verbatim. Maps under schemaNameMapFields are
+// name-to-schema maps; every other map is a schema node, and array
 // elements are schemas where they are objects.
 func inlineStepValue(key string, value any, root map[string]any, seen []string) (any, error) {
+	if schemaDataFields[key] {
+		return value, nil
+	}
 	switch typed := value.(type) {
 	case map[string]any:
 		if schemaNameMapFields[key] {
@@ -281,6 +299,16 @@ func workflowStepTools(schema json.RawMessage) (json.RawMessage, error) {
 // the fork did not create.
 func chatIsWorkflowStep(chat database.Chat) bool {
 	return chat.ParentChatID.Valid && chat.Labels[workflowRunLabel] != ""
+}
+
+// WorkflowRunLabel is the chat label chatd sets on workflow step children.
+const WorkflowRunLabel = workflowRunLabel
+
+// IsWorkflowStepChat reports whether chat is a workflow step child the fork
+// created. The public API guards the label and plan-mode writes a step chat
+// must not receive with it.
+func IsWorkflowStepChat(chat database.Chat) bool {
+	return chatIsWorkflowStep(chat)
 }
 
 // workflowStepDef returns the workflow_report definition of a workflow step

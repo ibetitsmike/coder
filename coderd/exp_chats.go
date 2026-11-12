@@ -2767,6 +2767,13 @@ func (api *API) updateChat(
 		}
 		resolvedPlanMode := planModeToNullChatPlanMode(*req.PlanMode)
 		planModeUpdate = &resolvedPlanMode
+		// A step's system prompt requires workflow_report, which plan-mode
+		// turns filter out, so a step chat must never enter plan mode.
+		if planModeUpdate.Valid && chatd.IsWorkflowStepChat(chat) {
+			return database.Chat{}, httperror.NewResponseError(http.StatusBadRequest, codersdk.Response{
+				Message: "A workflow step chat cannot enter plan mode.",
+			})
+		}
 	}
 
 	// The read cursor is owner-scoped, so an admin with update
@@ -2802,6 +2809,17 @@ func (api *API) updateChat(
 				Message:     "Invalid labels.",
 				Validations: errs,
 			})
+		}
+		// The workflow runtime classifies a step chat by its run label and
+		// loses the server tool when the label changes, so the label is
+		// reserved: a step chat's update must keep its current value, and no
+		// other chat may claim it.
+		if _, ok := (*req.Labels)[chatd.WorkflowRunLabel]; ok || chatd.IsWorkflowStepChat(chat) {
+			if (*req.Labels)[chatd.WorkflowRunLabel] != chat.Labels[chatd.WorkflowRunLabel] {
+				return database.Chat{}, httperror.NewResponseError(http.StatusBadRequest, codersdk.Response{
+					Message: "The coder_workflow_run label is managed by the workflow runtime and cannot be changed.",
+				})
+			}
 		}
 		var err error
 		labelsJSON, err = json.Marshal(*req.Labels)
@@ -3268,6 +3286,13 @@ func (api *API) sendChatMessage(
 	if req.PlanMode != nil {
 		resolvedPlanMode := planModeToNullChatPlanMode(*req.PlanMode)
 		sendPlanMode = &resolvedPlanMode
+		// A step's system prompt requires workflow_report, which plan-mode
+		// turns filter out, so a step chat must never enter plan mode.
+		if sendPlanMode.Valid && chatd.IsWorkflowStepChat(chat) {
+			return codersdk.CreateChatMessageResponse{}, httperror.NewResponseError(http.StatusBadRequest, codersdk.Response{
+				Message: "A workflow step chat cannot enter plan mode.",
+			})
+		}
 	}
 
 	var busyBehavior chatd.SendMessageBusyBehavior

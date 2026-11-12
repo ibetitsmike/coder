@@ -105,6 +105,31 @@ func TestForkWorkflowReport(t *testing.T) {
 		require.ErrorContains(t, err, "not a local reference")
 	})
 
+	t.Run("PreservesDataKeywords", func(t *testing.T) {
+		t.Parallel()
+		// const, default, enum and examples carry data, not schemas: a
+		// $ref-shaped object inside them is literal JSON, so the inliner must
+		// copy it verbatim, and the resolver must not load it as a reference.
+		data := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"literal":{"type":"string"}},` +
+			`"properties":{` +
+			`"pick":{"const":{"$ref":"https://example.com/const.json"}},` +
+			`"one":{"enum":[{"$ref":"#/$defs/literal"},"plain"]},` +
+			`"fallback":{"default":{"$ref":"#/$defs/literal"}},` +
+			`"samples":{"examples":[{"$ref":"#/$defs/literal"}]}}}`)
+		tool, err := newWorkflowReportTool(data)
+		require.NoError(t, err)
+
+		raw, err := json.Marshal(tool.Info().Parameters)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{`+
+			`"pick":{"const":{"$ref":"https://example.com/const.json"}},`+
+			`"one":{"enum":[{"$ref":"#/$defs/literal"},"plain"]},`+
+			`"fallback":{"default":{"$ref":"#/$defs/literal"}},`+
+			`"samples":{"examples":[{"$ref":"#/$defs/literal"}]}}`, string(raw))
+	})
+
 	t.Run("OnlyStepChildrenGetTool", func(t *testing.T) {
 		t.Parallel()
 		raw, err := workflowStepTools(schema)
