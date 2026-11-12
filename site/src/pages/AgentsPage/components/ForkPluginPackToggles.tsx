@@ -30,8 +30,9 @@ type ForkPluginPackTogglesViewProps = {
 };
 
 /**
- * Lists the installed plugin packs merged with the target's direct
- * enablements, one switch per pack, and reports toggles through `onToggle`.
+ * Lists the plugin packs in `installed`, one switch per pack, and reports
+ * toggles through `onToggle`. `enabled` only sets each switch's state, so a
+ * pack enabled for the target but missing from `installed` is not shown.
  */
 export const ForkPluginPackTogglesView: React.FC<
 	ForkPluginPackTogglesViewProps
@@ -100,8 +101,9 @@ type ForkPluginPackTogglesProps = {
 };
 
 /**
- * Loads a chat or project target's plugin pack enablements and the
- * organization's installed packs, and saves each toggle for that target.
+ * Loads a chat or project target's plugin pack enablements and the packs
+ * available to the caller in the organization, and saves each toggle for
+ * that target.
  */
 export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	target,
