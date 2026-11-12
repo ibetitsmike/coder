@@ -20,6 +20,7 @@ import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockAppearanceConfig,
 	MockBuildInfo,
+	MockChatProject,
 	MockDefaultOrganization,
 	MockEntitlements,
 	MockUserOwner,
@@ -428,6 +429,61 @@ describe("ForkComposerSlot plugin packs", () => {
 
 		await screen.findByText(MockForkPluginPack.name);
 		expect(screen.queryByRole("switch")).toBeNull();
+	});
+
+	it("turns off the root chat's project pack for a subagent", async () => {
+		const user = userEvent.setup();
+		const mockRootChat = {
+			...MockChat,
+			id: "root-chat",
+			project_id: MockChatProject.id,
+		};
+		vi.spyOn(API.experimental, "getChat").mockImplementation(async (chatId) =>
+			chatId === mockRootChat.id
+				? mockRootChat
+				: {
+						...MockChat,
+						parent_chat_id: mockRootChat.id,
+						root_chat_id: mockRootChat.id,
+					},
+		);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getEnabledPluginPacks",
+		).mockImplementation(async (target) =>
+			target.kind === "project" ? [MockForkPluginPack] : [],
+		);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		).mockResolvedValue([MockForkPluginPack]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getExcludedPluginPacks",
+		).mockResolvedValue([]);
+		const setExcluded = vi
+			.spyOn(forkPluginPackEnablementApi, "setPluginPackExcluded")
+			.mockResolvedValue();
+
+		renderSlot(["fork-plugin-packs"]);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Plugin packs, 0 enabled on this chat",
+			}),
+		);
+		await user.click(
+			await screen.findByRole("switch", {
+				name: `Enable ${MockForkPluginPack.name}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(setExcluded).toHaveBeenCalledWith(
+				MockChat.id,
+				MockForkPluginPack.id,
+				true,
+			),
+		);
 	});
 });
 
