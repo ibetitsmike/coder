@@ -11,10 +11,12 @@ import {
 	createPluginPackMutation,
 	deletePluginPackMutation,
 	isPluginPackAbsentFromCache,
+	pluginPackSources,
 	pluginPacks,
 	reconcileInstalledPluginPack,
 	reconcileUpdatedPluginPack,
 	updatePluginPackMutation,
+	updatePluginPackSourcesMutation,
 } from "#/api/queries/forkPluginPacks";
 import { organizationsPermissions } from "#/api/queries/organizations";
 import type {
@@ -36,6 +38,7 @@ import { useRequestedSkillsOrganization } from "../SkillsPage/forkRequestedSkill
 import { readableSkillsOrganizations } from "../SkillsPage/readableSkillsOrganizations";
 import { ForkDeletePluginPackDialog } from "./ForkDeletePluginPackDialog";
 import { ForkInstallPluginPackDialog } from "./ForkInstallPluginPackDialog";
+import { ForkPluginPackSourcesDialog } from "./ForkPluginPackSourcesDialog";
 import { ForkPluginPacksTableView } from "./ForkPluginPacksTableView";
 
 type OrganizationPluginPacksProps = {
@@ -107,6 +110,14 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 		deletePluginPackMutation(queryClient, organization.id),
 	);
 	const [isInstallOpen, setIsInstallOpen] = useState(false);
+	const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+	const sourcesQuery = useQuery({
+		...pluginPackSources(organization.id),
+		enabled: isSourcesOpen,
+	});
+	const sourcesMutation = useMutation(
+		updatePluginPackSourcesMutation(queryClient, organization.id),
+	);
 	const [packToDelete, setPackToDelete] = useState<ForkPluginPack>();
 	const focusReturn = useDialogFocusReturn();
 	const tableRef = useRef<HTMLTableElement>(null);
@@ -178,6 +189,16 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					installMutation.reset();
 					setIsInstallOpen(true);
 				}}
+				onEditSources={() => {
+					sourcesMutation.reset();
+					// The form saves a full replacement list, so it starts from a
+					// fresh read rather than a cached list another admin may have
+					// changed since.
+					queryClient.removeQueries({
+						queryKey: pluginPackSources(organization.id).queryKey,
+					});
+					setIsSourcesOpen(true);
+				}}
 				onUpdate={(pack) => updateMutation.mutate(pack)}
 				onDelete={(pack) => {
 					deleteMutation.reset();
@@ -191,6 +212,27 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 					onClose={() => setIsInstallOpen(false)}
 					onCloseAutoFocus={restoreFocus}
 					onInstall={installPack}
+				/>
+			)}
+			{isSourcesOpen && (
+				<ForkPluginPackSourcesDialog
+					hosts={sourcesQuery.data?.hosts}
+					loadError={sourcesQuery.error}
+					saveError={sourcesMutation.error}
+					isSaving={sourcesMutation.isPending}
+					onClose={() => setIsSourcesOpen(false)}
+					onCloseAutoFocus={restoreFocus}
+					onSave={(hosts) =>
+						sourcesMutation.mutate(
+							{ hosts },
+							{
+								onSuccess: () => {
+									toast.success("Plugin pack sources saved.");
+									setIsSourcesOpen(false);
+								},
+							},
+						)
+					}
 				/>
 			)}
 			{packToDelete && (
