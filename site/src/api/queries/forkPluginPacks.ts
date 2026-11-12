@@ -12,19 +12,16 @@ import type {
 	CreateForkPluginPackRequest,
 	ForkPluginPack,
 } from "#/api/typesGenerated";
-import {
-	invalidateList,
-	isNewer,
-	isResponseLost,
-} from "./forkAgentDefinitions";
+import { invalidateList, isNewer, isResponseLost } from "./forkListCache";
 
 /** The key prefix shared by every plugin pack query. */
 export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
 
 /**
- * The query key of an organization's plugin pack list. It also prefixes the
- * keys of the organization's available pack list and its projects' enabled
- * pack lists.
+ * Scopes the plugin pack cache to one organization. It also prefixes the keys
+ * of the organization's available pack list and its projects' enabled pack
+ * lists, so the pack mutations invalidate those lists too, and no other
+ * organization's.
  */
 export const pluginPacksKey = (organizationId: string) =>
 	[...pluginPacksRootKey, organizationId] as const;
@@ -113,6 +110,10 @@ export const reconcileInstalledPluginPack = (
 	);
 };
 
+// The server orders the list by name in its database collation, which the
+// browser cannot reproduce. A replaced row keeps its place, and a new row goes
+// before the first name that sorts after it by code unit, until the refetch
+// settles the final order.
 const withPluginPack = (packs: ForkPluginPack[], pack: ForkPluginPack) => {
 	const replaced = packs.filter(
 		(cached) => cached.id === pack.id || cached.name === pack.name,
@@ -121,10 +122,18 @@ const withPluginPack = (packs: ForkPluginPack[], pack: ForkPluginPack) => {
 		return packs;
 	}
 
-	return packs
-		.filter((cached) => !replaced.includes(cached))
-		.concat(pack)
-		.sort((a, b) => a.name.localeCompare(b.name));
+	// The list endpoint omits the detail-only files, so the cache does too.
+	const { files: _files, ...row } = pack;
+	const replacedAt = packs.findIndex((cached) => replaced.includes(cached));
+	if (replacedAt >= 0) {
+		return packs.flatMap((cached, i) =>
+			i === replacedAt ? [row] : replaced.includes(cached) ? [] : [cached],
+		);
+	}
+	const at = packs.findIndex((cached) => cached.name > row.name);
+	return at < 0
+		? [...packs, row]
+		: [...packs.slice(0, at), row, ...packs.slice(at)];
 };
 
 /** Installs a pack and caches it, so a failed refetch cannot hide it. */
