@@ -62,8 +62,8 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	if (!props.isError && !snapshot && props.status !== "running") {
 		return <Fallback {...props} />;
 	}
-	// The result is the run as the tool call saw it. A run that was still
-	// running follows the run API, which shares the Workflows panel's cache.
+	// A run that was still running follows the run API, which shares the
+	// Workflows panel's cache.
 	if (agentId && snapshot?.status === "running") {
 		return (
 			<LiveForkWorkflowTool

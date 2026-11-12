@@ -123,7 +123,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				<h3 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-content-primary">
 					{run.title || run.script.slice(0, 200) || "Untitled run"}
 				</h3>
-				{isRunning && <ForkWorkflowRunStopButton run={run} />}
+				<ForkWorkflowRunStopButton run={run} />
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">
 				{[
@@ -192,24 +192,25 @@ const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 
 	return (
 		<>
-			<Button
-				ref={stopButtonRef}
-				variant="outline"
-				size="sm"
-				className="shrink-0"
-				onClick={() => setIsConfirmOpen(true)}
-			>
-				<SquareIcon />
-				Stop
-			</Button>
+			{run.status === "running" && (
+				<Button
+					ref={stopButtonRef}
+					variant="outline"
+					size="sm"
+					onClick={() => setIsConfirmOpen(true)}
+				>
+					<SquareIcon />
+					Stop
+				</Button>
+			)}
 			<ConfirmDialog
 				open={isConfirmOpen}
 				onClose={() => setIsConfirmOpen(false)}
 				onConfirm={handleStop}
-				// The button unmounts once the stop succeeds; focus returns to it
-				// only while it still exists.
+				// The button unmounts once the run ends, and the dialog stays
+				// mounted so a run that ends while it is open does not drop focus.
 				onCloseAutoFocus={(event) => {
-					if (stopButtonRef.current?.isConnected) {
+					if (stopButtonRef.current) {
 						event.preventDefault();
 						stopButtonRef.current.focus();
 					}

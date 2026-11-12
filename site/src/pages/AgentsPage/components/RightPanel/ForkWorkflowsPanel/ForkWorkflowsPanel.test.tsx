@@ -5,6 +5,8 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { toast } from "#/components/Toaster/toast";
+import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
 	MockChatWorkflowRunDetail,
@@ -71,6 +73,42 @@ describe("ForkWorkflowsPanel", () => {
 			MockChatWorkflowRunDetail.id,
 		);
 		// The stop refreshes the run list, so its badge and counts update.
+		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+	});
+
+	it("reports a failed stop and refreshes the runs", async () => {
+		const runningRun: WorkflowRunDetail = {
+			...MockChatWorkflowRunDetail,
+			status: "running",
+			result: undefined,
+			finished_at: undefined,
+		};
+		const getRuns = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
+			.mockResolvedValue([{ ...MockChatWorkflowRun, status: "running" }]);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			runningRun,
+		);
+		vi.spyOn(forkWorkflowsApi, "stopChatWorkflowRun").mockRejectedValue(
+			mockApiError({ message: "The workflow run already ended." }),
+		);
+		const toastError = vi.spyOn(toast, "error");
+		renderPanel();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: /review changed files/i }),
+		);
+		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop run" }));
+
+		await waitFor(() =>
+			expect(toastError).toHaveBeenCalledWith(
+				"The workflow run already ended.",
+				expect.anything(),
+			),
+		);
+		// The run may have ended on its own, so the list refreshes anyway.
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 

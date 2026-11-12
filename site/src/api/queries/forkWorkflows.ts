@@ -41,7 +41,7 @@ export const stopWorkflowRun = (
 		onSuccess: (run: WorkflowRunDetail) => {
 			queryClient.setQueryData(chatWorkflowRunKey(chatId, runId), run);
 		},
-		// A 409 means the run ended on its own, so refetch either way.
+		// A 409 means the run is no longer stoppable, so refetch either way.
 		onSettled: () =>
 			queryClient.invalidateQueries({ queryKey: chatWorkflowRunsKey(chatId) }),
 	});
