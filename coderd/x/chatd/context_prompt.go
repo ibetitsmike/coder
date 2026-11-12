@@ -183,6 +183,7 @@ func (server *Server) pinnedWorkspaceContext(
 	ctx context.Context,
 	chat database.Chat,
 	agent database.WorkspaceAgent,
+	touchedPaths ...string,
 ) (instruction string, skills []chattool.SkillMeta, err error) {
 	resources, err := server.db.ListChatContextResourcesByChatID(ctx, chat.ID)
 	if err != nil {
@@ -197,7 +198,7 @@ func (server *Server) pinnedWorkspaceContext(
 	if directory == "" {
 		directory = agent.Directory
 	}
-	instruction, skills, malformed := contextResourcesToPrompt(resources, agent.OperatingSystem, directory)
+	instruction, skills, malformed := contextResourcesToPrompt(resources, agent.OperatingSystem, directory, touchedPaths...)
 	if malformed > 0 {
 		// A status-OK resource whose body cannot be decoded means the pin
 		// hydrated content that is now unreadable; surface it so a proto
@@ -226,11 +227,12 @@ func (server *Server) resolveTurnWorkspaceContext(
 	ctx context.Context,
 	chat database.Chat,
 	agent database.WorkspaceAgent,
+	touchedPaths ...string,
 ) (instruction string, skills []chattool.SkillMeta, err error) {
 	if !chat.WorkspaceID.Valid {
 		return "", nil, nil
 	}
-	return server.pinnedWorkspaceContext(ctx, chat, agent)
+	return server.pinnedWorkspaceContext(ctx, chat, agent, touchedPaths...)
 }
 
 // contextResourcesToPrompt converts a chat's pinned context resources into
@@ -243,18 +245,25 @@ func (server *Server) resolveTurnWorkspaceContext(
 // counts OK resources whose body failed to decode, so the caller can surface
 // an otherwise silent drop. The header is emitted only when at least one
 // instruction file has content, so a skill-only pin produces no instruction
-// block, matching the per-turn path.
+// block, matching the per-turn path. Glob-scoped rules join the block only
+// when one of touchedPaths matches (fork_scoped_rules.go).
 func contextResourcesToPrompt(
 	resources []database.ChatContextResource,
 	operatingSystem, directory string,
+	touchedPaths ...string,
 ) (instruction string, skills []chattool.SkillMeta, malformed int) {
 	var contextFileParts []codersdk.ChatMessagePart
+	var scopedRules []database.ChatContextResource
 	for _, r := range resources {
 		if r.Status != database.WorkspaceAgentContextResourceStatusOk {
 			continue
 		}
 		switch r.BodyKind {
 		case database.WorkspaceAgentContextBodyKindInstructionFile:
+			if len(instructionGlobs(r.Body)) > 0 {
+				scopedRules = append(scopedRules, r)
+				continue
+			}
 			content, decoded := decodeInstructionContent(r.Body)
 			if !decoded {
 				malformed++
@@ -288,6 +297,7 @@ func contextResourcesToPrompt(
 			})
 		}
 	}
+	contextFileParts = append(contextFileParts, scopedRuleParts(scopedRules, directory, touchedPaths)...)
 
 	if len(contextFileParts) == 0 {
 		return "", skills, malformed

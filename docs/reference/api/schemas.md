@@ -5074,6 +5074,22 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |---------------|---------|----------|--------------|-------------|
 | `allow_users` | boolean | false    |              |             |
 
+## codersdk.ChatPinnedSkill
+
+```json
+{
+  "name": "string",
+  "source": "personal"
+}
+```
+
+### Properties
+
+| Name     | Type                                                 | Required | Restrictions | Description |
+|----------|------------------------------------------------------|----------|--------------|-------------|
+| `name`   | string                                               | false    |              |             |
+| `source` | [codersdk.ChatSkillSource](#codersdkchatskillsource) | false    |              |             |
+
 ## codersdk.ChatPlanMode
 
 ```json
@@ -10341,9 +10357,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-nested-subagents`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -18066,6 +18082,25 @@ Restarts will only happen on weekdays in this list on weeks which line up with W
 | Name          | Type    | Required | Restrictions | Description |
 |---------------|---------|----------|--------------|-------------|
 | `allow_users` | boolean | false    |              |             |
+
+## codersdk.UpdateChatPinnedSkillsRequest
+
+```json
+{
+  "skills": [
+    {
+      "name": "string",
+      "source": "personal"
+    }
+  ]
+}
+```
+
+### Properties
+
+| Name     | Type                                                          | Required | Restrictions | Description |
+|----------|---------------------------------------------------------------|----------|--------------|-------------|
+| `skills` | array of [codersdk.ChatPinnedSkill](#codersdkchatpinnedskill) | false    |              |             |
 
 ## codersdk.UpdateChatPlanModeInstructionsRequest
 

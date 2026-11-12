@@ -50,6 +50,10 @@ type PushResponse struct {
 	// only occupy snapshot caps. Servers that predate the capability
 	// leave it false.
 	ForkAgentDefinitions bool
+	// ForkGlobRules mirrors the fork-glob-rules capability: glob-scoped
+	// rules are pushed only while it is set, because a server that
+	// predates it would inject them on every turn.
+	ForkGlobRules bool
 }
 
 // Pusher delivers snapshots to coderd. Concrete implementations
@@ -145,7 +149,8 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// once the peer's capabilities are known) defines the baseline
 	// chats refresh against.
 	firstConnection := !m.pushConnected.Swap(true)
-	if m.packRowsAdvertised.Swap(false) || m.negotiating.Load() || firstConnection {
+	globRulesWere := m.globRulesAdvertised.Swap(false)
+	if m.packRowsAdvertised.Swap(false) || globRulesWere || m.negotiating.Load() || firstConnection {
 		snap, err := m.resyncNegotiating(ctx)
 		if err != nil {
 			// The reset could not rebuild the snapshot (for example the
@@ -198,6 +203,10 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 			}
 			if resp.ForkAgentDefinitions != m.packAgentDefinitionsAdvertised.Swap(resp.ForkAgentDefinitions) {
 				logger.Debug(ctx, "server flipped the agent-definitions advertisement; re-resolving")
+				flipped = true
+			}
+			if resp.ForkGlobRules != m.globRulesAdvertised.Swap(resp.ForkGlobRules) {
+				logger.Debug(ctx, "server flipped the glob-rules advertisement; re-resolving")
 				flipped = true
 			}
 		}

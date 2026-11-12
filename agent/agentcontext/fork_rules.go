@@ -1,8 +1,9 @@
 package agentcontext
 
 // This file is fork code: it discovers Cursor-style .mdc rule files. Rules
-// with alwaysApply join the instruction files; glob-scoped rules are parsed
-// and kept on the snapshot until chatd can attach them by touched files.
+// with alwaysApply join the instruction files; glob-scoped rules are pushed
+// with their globs, so chatd can attach them by touched files, only to
+// servers that advertise the capability.
 
 import (
 	"errors"
@@ -231,10 +232,13 @@ func (r *Resolver) readRule(root ScanRoot, path string, info fs.FileInfo) (Resou
 	return res, true
 }
 
-// splitScopedRules moves glob-scoped rules out of resources. They are not
-// pushed: chatd would otherwise inject them on every turn as instruction
-// files.
-func splitScopedRules(resources []Resource) (rest, scoped []Resource) {
+// splitScopedRules moves glob-scoped rules out of resources unless the
+// server advertises glob rules: an older chatd would inject them on every
+// turn as instruction files. Kept rules go through the shared caps.
+func (r *Resolver) splitScopedRules(resources []Resource) (rest, scoped []Resource) {
+	if r.GlobRulesAdvertised != nil && r.GlobRulesAdvertised() {
+		return resources, nil
+	}
 	rest = resources[:0]
 	for _, res := range resources {
 		if len(res.Globs) > 0 {

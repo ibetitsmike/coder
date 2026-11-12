@@ -102,6 +102,14 @@ func (f *forkQuerier) CountOrganizationChatWakeupRunsSince(ctx context.Context, 
 	return f.db.CountOrganizationChatWakeupRunsSince(ctx, arg)
 }
 
+// DeleteChatPinnedSkills authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, chatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatPinnedSkills(ctx, chatID)
+}
+
 // DeleteChatSecretAnswer authorizes as an update of the owning chat.
 func (f *forkQuerier) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
@@ -265,6 +273,14 @@ func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chat
 	return f.db.GetPendingChatDescendantQuestion(ctx, chatID)
 }
 
+// GetChatPinnedSkillsByChatID authorizes through the owning chat.
+func (f *forkQuerier) GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatPinnedSkill, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatPinnedSkillsByChatID(ctx, chatID)
+}
+
 // GetChatSecretAnswersByChatID returns secret values, so it requires update
 // access to the owning chat, not read access.
 func (f *forkQuerier) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
@@ -406,6 +422,14 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 }
 
 // InsertChatSecretAnswer authorizes as an update of the owning chat.
+// InsertChatPinnedSkills authorizes as an update of the owning chat.
+func (f *forkQuerier) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return err
+	}
+	return f.db.InsertChatPinnedSkills(ctx, arg)
+}
+
 // InsertChatPluginPack authorizes as an update of the chat and not as a read
 // of the pack: enabling a pack mirrors enabling a skill, and the query only
 // accepts a pack of the chat's organization.

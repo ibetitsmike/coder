@@ -16,6 +16,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkSubagentIsolation,
 	ExperimentForkChatWakeups,
 	ExperimentForkPluginPacks,
+	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 }
 
@@ -43,6 +44,10 @@ const ExperimentForkChatWakeups Experiment = "fork-chat-wakeups"
 // manifest-honored skills and agents, installed packs, and (in later PRs)
 // their rules and surfacing controls.
 const ExperimentForkPluginPacks Experiment = "fork-plugin-packs"
+
+// ExperimentForkPinnedSkills lets a user pin skills to a chat, so chatd puts
+// their bodies in the prompt of every turn until they are unpinned.
+const ExperimentForkPinnedSkills Experiment = "fork-pinned-skills"
 
 // ExperimentForkWorkflows enables the run_workflow and await_workflow tools
 // for root chats: a Starlark script runs sub-agent steps and combines their
