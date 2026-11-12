@@ -102,15 +102,11 @@ export const parseForkWorkflowRunSnapshot = (
 	};
 };
 
-/** Maps a run detail to the snapshot that the tool cards render. */
-export const forkWorkflowRunDetailSnapshot = (
+/** Lists a run detail's steps in spawn order. */
+export const forkWorkflowRunDetailSteps = (
 	run: WorkflowRunDetail,
-): ForkWorkflowRunSnapshot => ({
-	runId: run.id,
-	status: run.status,
-	result: run.result,
-	error: run.error,
-	steps: run.steps
+): ForkWorkflowStep[] =>
+	run.steps
 		.toSorted((left, right) => left.ordinal - right.ordinal)
 		.map((step) => ({
 			chatId: step.id,
@@ -118,7 +114,17 @@ export const forkWorkflowRunDetailSnapshot = (
 			status: step.status,
 			reused: step.reused,
 			error: step.error,
-		})),
+		}));
+
+/** Converts a run detail from the run API to a tool result snapshot. */
+export const forkWorkflowRunDetailSnapshot = (
+	run: WorkflowRunDetail,
+): ForkWorkflowRunSnapshot => ({
+	runId: run.id,
+	status: run.status,
+	result: run.result,
+	error: run.error,
+	steps: forkWorkflowRunDetailSteps(run),
 	logs: run.logs,
 });
 

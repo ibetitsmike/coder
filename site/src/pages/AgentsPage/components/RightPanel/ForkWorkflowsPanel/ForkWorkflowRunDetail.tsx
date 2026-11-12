@@ -3,7 +3,7 @@
 
 import { ChevronLeftIcon, SquareIcon } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import { chatWorkflowRun, stopWorkflowRun } from "#/api/queries/forkWorkflows";
@@ -20,7 +20,7 @@ import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
-	forkWorkflowRunDetailSnapshot,
+	forkWorkflowRunDetailSteps,
 	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
@@ -104,7 +104,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 }) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
-	const { steps } = forkWorkflowRunDetailSnapshot(run);
+	const steps = forkWorkflowRunDetailSteps(run);
 
 	return (
 		<section aria-label="Workflow run" className="flex min-w-0 flex-col">
@@ -164,29 +164,36 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 	);
 };
 
-const ForkWorkflowRunStopButton: React.FC<{ run: WorkflowRunDetail }> = ({
+type ForkWorkflowRunStopButtonProps = {
+	run: WorkflowRunDetail;
+};
+
+const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 	run,
 }) => {
 	const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+	const stopButtonRef = useRef<HTMLButtonElement>(null);
 	const queryClient = useQueryClient();
 	const stopMutation = useMutation(
 		stopWorkflowRun(queryClient, run.chat_id, run.id),
 	);
 
-	const handleStop = async () => {
-		try {
-			await stopMutation.mutateAsync();
-		} catch (error) {
-			toast.error(getErrorMessage(error, "Failed to stop the workflow run."), {
-				description: getErrorDetail(error),
-			});
-		}
-		setIsConfirmOpen(false);
+	const handleStop = () => {
+		stopMutation.mutate(undefined, {
+			onError: (error) => {
+				toast.error(
+					getErrorMessage(error, "Failed to stop the workflow run."),
+					{ description: getErrorDetail(error) },
+				);
+			},
+			onSettled: () => setIsConfirmOpen(false),
+		});
 	};
 
 	return (
 		<>
 			<Button
+				ref={stopButtonRef}
 				variant="outline"
 				size="sm"
 				className="shrink-0"
@@ -199,6 +206,14 @@ const ForkWorkflowRunStopButton: React.FC<{ run: WorkflowRunDetail }> = ({
 				open={isConfirmOpen}
 				onClose={() => setIsConfirmOpen(false)}
 				onConfirm={handleStop}
+				// The button unmounts once the stop succeeds; focus returns to it
+				// only while it still exists.
+				onCloseAutoFocus={(event) => {
+					if (stopButtonRef.current?.isConnected) {
+						event.preventDefault();
+						stopButtonRef.current.focus();
+					}
+				}}
 				title="Stop workflow run"
 				description="The script stops, and steps that are still running fail and stop their child chats. This cannot be undone."
 				confirmText="Stop run"

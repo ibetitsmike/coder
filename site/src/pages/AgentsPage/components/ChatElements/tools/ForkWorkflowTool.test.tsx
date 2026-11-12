@@ -92,9 +92,8 @@ describe("ForkWorkflowTool", () => {
 			.mockResolvedValue(MockChatWorkflowRunDetail);
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
-		expect(
-			await screen.findByRole("button", { name: /workflow completed/i }),
-		).toBeInTheDocument();
+		// The header label comes from the run API, not the tool result.
+		await screen.findByRole("button", { name: /workflow completed/i });
 		expect(getRun).toHaveBeenCalledWith(
 			MockForkWorkflowChatId,
 			MockForkWorkflowStartedResult.run_id,

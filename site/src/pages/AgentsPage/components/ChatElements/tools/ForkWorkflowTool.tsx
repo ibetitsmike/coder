@@ -55,23 +55,59 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	fallback: Fallback,
 	...props
 }) => {
-	const { name, status, isError } = props;
-	const resultSnapshot = isError
+	const { agentId } = useParams();
+	const snapshot = props.isError
 		? null
 		: parseForkWorkflowRunSnapshot(props.result);
-	// The result is the run as the tool call saw it. A run that was still
-	// running follows the run API, which shares the Workflows panel's cache.
-	const { agentId: chatId = "" } = useParams();
-	const liveRunQuery = useQuery({
-		...chatWorkflowRun(chatId, resultSnapshot?.runId ?? ""),
-		enabled: chatId !== "" && resultSnapshot?.status === "running",
-	});
-	const snapshot = liveRunQuery.data
-		? forkWorkflowRunDetailSnapshot(liveRunQuery.data)
-		: resultSnapshot;
-	if (!isError && !snapshot && status !== "running") {
+	if (!props.isError && !snapshot && props.status !== "running") {
 		return <Fallback {...props} />;
 	}
+	// The result is the run as the tool call saw it. A run that was still
+	// running follows the run API, which shares the Workflows panel's cache.
+	if (agentId && snapshot?.status === "running") {
+		return (
+			<LiveForkWorkflowTool
+				{...props}
+				chatId={agentId}
+				resultSnapshot={snapshot}
+			/>
+		);
+	}
+	return <ForkWorkflowTool {...props} snapshot={snapshot} />;
+};
+
+type ForkWorkflowToolProps = Omit<ForkToolRendererProps, "fallback"> & {
+	snapshot: ForkWorkflowRunSnapshot | null;
+};
+
+type LiveForkWorkflowToolProps = Omit<ForkWorkflowToolProps, "snapshot"> & {
+	chatId: string;
+	resultSnapshot: ForkWorkflowRunSnapshot;
+};
+
+const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
+	chatId,
+	resultSnapshot,
+	...props
+}) => {
+	const runQuery = useQuery(chatWorkflowRun(chatId, resultSnapshot.runId));
+	return (
+		<ForkWorkflowTool
+			{...props}
+			snapshot={
+				runQuery.data
+					? forkWorkflowRunDetailSnapshot(runQuery.data)
+					: resultSnapshot
+			}
+		/>
+	);
+};
+
+const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
+	snapshot,
+	...props
+}) => {
+	const { name, status, isError } = props;
 	const args = parseArgs(props.args);
 	const isRunWorkflow = name === "run_workflow";
 	const scriptPath = isRunWorkflow ? asString(args?.script_path).trim() : "";

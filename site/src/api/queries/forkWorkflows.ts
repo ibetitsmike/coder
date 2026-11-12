@@ -1,4 +1,4 @@
-import { type QueryClient, queryOptions } from "react-query";
+import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import {
 	getChatWorkflowRun,
 	getChatWorkflowRuns,
@@ -35,12 +35,13 @@ export const stopWorkflowRun = (
 	queryClient: QueryClient,
 	chatId: string,
 	runId: string,
-) => ({
-	mutationFn: () => stopChatWorkflowRun(chatId, runId),
-	onSuccess: (run: WorkflowRunDetail) => {
-		queryClient.setQueryData(chatWorkflowRunKey(chatId, runId), run);
-	},
-	// A 409 means the run ended on its own, so refetch either way.
-	onSettled: () =>
-		queryClient.invalidateQueries({ queryKey: chatWorkflowRunsKey(chatId) }),
-});
+) =>
+	mutationOptions({
+		mutationFn: () => stopChatWorkflowRun(chatId, runId),
+		onSuccess: (run: WorkflowRunDetail) => {
+			queryClient.setQueryData(chatWorkflowRunKey(chatId, runId), run);
+		},
+		// A 409 means the run ended on its own, so refetch either way.
+		onSettled: () =>
+			queryClient.invalidateQueries({ queryKey: chatWorkflowRunsKey(chatId) }),
+	});

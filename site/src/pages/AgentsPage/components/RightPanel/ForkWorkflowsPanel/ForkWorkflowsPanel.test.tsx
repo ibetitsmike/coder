@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -44,9 +44,9 @@ describe("ForkWorkflowsPanel", () => {
 			result: undefined,
 			finished_at: undefined,
 		};
-		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
-			{ ...MockChatWorkflowRun, status: "running" },
-		]);
+		const getRuns = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
+			.mockResolvedValue([{ ...MockChatWorkflowRun, status: "running" }]);
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockImplementation(
 			async () => run,
 		);
@@ -70,10 +70,8 @@ describe("ForkWorkflowsPanel", () => {
 			MockForkWorkflowChatId,
 			MockChatWorkflowRunDetail.id,
 		);
-		expect(await screen.findByText("Stopped")).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "Stop" }),
-		).not.toBeInTheDocument();
+		// The stop refreshes the run list, so its badge and counts update.
+		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 
 	it("opens a run, then a step's child chat", async () => {

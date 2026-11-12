@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, screen, spyOn, userEvent } from "storybook/test";
+import { fn, screen, spyOn, userEvent } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
+import { API } from "#/api/api";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import {
 	MockChatWorkflowRunDetail,
@@ -89,9 +90,22 @@ export const RunningStopConfirm: Story = {
 	args: { run: mockRunningRunDetail },
 	play: async ({ canvas }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
-		await expect(
-			await screen.findByRole("dialog", { name: "Stop workflow run" }),
-		).toBeVisible();
+		await screen.findByRole("dialog", { name: "Stop workflow run" });
+	},
+};
+
+export const RunningStopPending: Story = {
+	args: { run: mockRunningRunDetail },
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockReturnValue(
+			new Promise(() => {}),
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Stop run" }),
+		);
 	},
 };
 
