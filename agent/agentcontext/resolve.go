@@ -178,6 +178,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 		return Snapshot{SnapshotError: err.Error()}
 	}
 	resources = deduplicateSkills(resources)
+	resources, packDuplicates := splitManagedPackDuplicates(resources)
 	resources, totalBytes := res.applyCaps(resources)
 
 	// Append discovered resources after the filesystem caps so providers
@@ -198,6 +199,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 		}
 	}
 	resources, snapErrs = res.applyProviderCaps(resources, startIdx, totalBytes, snapErrs)
+	resources = res.appendManagedPackDuplicates(resources, packDuplicates)
 
 	// Deterministic order by ID for stable IDs and hashes.
 	slices.SortFunc(resources, func(a, b Resource) int {
@@ -290,12 +292,13 @@ func (r *Resolver) walk(ctx context.Context, roots []ScanRoot) (resources []Reso
 
 // deduplicateSkills keeps the first valid skill with each name. walk returns
 // resources in scan-root order, so this selects the winner before deterministic
-// sorting and persistence discard root ordering.
+// sorting and persistence discard root ordering. Skills of managed packs are
+// exempt: see splitManagedPackDuplicates.
 func deduplicateSkills(resources []Resource) []Resource {
 	seen := make(map[string]struct{})
 	out := resources[:0]
 	for _, resource := range resources {
-		if resource.Kind == KindSkill && resource.Status == StatusOK {
+		if resource.Kind == KindSkill && resource.Status == StatusOK && !isManagedPackContribution(resource) {
 			if _, ok := seen[resource.Name]; ok {
 				continue
 			}
