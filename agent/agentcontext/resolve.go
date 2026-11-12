@@ -177,6 +177,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 	if err := ctx.Err(); err != nil {
 		return Snapshot{SnapshotError: err.Error()}
 	}
+	resources, scopedRules := splitScopedRules(resources)
 	resources = deduplicateSkills(resources)
 	resources, packDuplicates := splitManagedPackDuplicates(resources)
 	resources, totalBytes := res.applyCaps(resources)
@@ -220,6 +221,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 		Resources:     resources,
 		AggregateHash: hash,
 		PayloadBytes:  payloadBytes,
+		ScopedRules:   scopedRules,
 	}
 	if len(snapErrs) > 0 {
 		// Pick the most severe single error. Today every
@@ -382,6 +384,7 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 		r.emitSkillsFromContainer(container, root, out, seenID)
 	}
 	r.emitAgents(root, out, seenID)
+	r.emitRules(root, out, seenID)
 	r.emitPacks(root, out, seenID)
 }
 
@@ -1064,6 +1067,9 @@ type Resource struct {
 	// ACPHarness contains capabilities and options without the ACP adapter
 	// launch command.
 	ACPHarness *workspacesdk.ACPHarness
+	// Globs is set on glob-scoped rule files (fork_rules.go), which
+	// resolve into Snapshot.ScopedRules instead of Resources.
+	Globs []string
 }
 
 // MCPTool mirrors the wire MCPTool message. InputSchema is the
@@ -1110,6 +1116,9 @@ type Snapshot struct {
 	// for. Zero on ordinary resolves, whose pushes are settled
 	// inventory.
 	CapabilityGeneration uint64
+	// ScopedRules holds glob-scoped rule files (fork_rules.go), sorted by
+	// ID. They are not pushed or hashed.
+	ScopedRules []Resource
 }
 
 // driftResources excludes MCP and ACP resources because agents discover them
