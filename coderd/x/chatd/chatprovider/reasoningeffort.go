@@ -127,6 +127,7 @@ func applyReasoningEffort(
 		if compatEffort, ok := googleCompatReasoningEffort(model.ModelID(), *effort); ok {
 			providerEffort = fantasyopenai.ReasoningEffort(compatEffort)
 		}
+		providerEffort = forkOpenAICompatReasoningEffort(model.ModelID(), *effort, providerEffort)
 		providerOptions := ensureProviderOptions[fantasyopenaicompat.ProviderOptions](options, fantasyopenaicompat.Name)
 		providerOptions.ReasoningEffort = &providerEffort
 	}
