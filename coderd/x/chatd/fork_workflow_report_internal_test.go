@@ -207,6 +207,20 @@ func TestForkWorkflowReport(t *testing.T) {
 		_, err = newWorkflowReportTool(json.RawMessage(
 			`{"type":"object","properties":{"a":{"allOf":[{"type":"string"}]}}}`))
 		require.NoError(t, err)
+
+		// draft-07 dependencies is a name-to-schema-or-array map: a schema
+		// dependency named like a data keyword (const) must still inline its
+		// references, not copy them verbatim as literal data.
+		deps := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"dep":{"type":"string"}},` +
+			`"properties":{"a":{"type":"object","dependencies":{"const":{"$ref":"#/$defs/dep"}}}}}`)
+		tool, err := newWorkflowReportTool(deps)
+		require.NoError(t, err)
+		rawParams, err := json.Marshal(tool.Info().Parameters)
+		require.NoError(t, err)
+		assert.NotContains(t, string(rawParams), "$ref", "the dependency schema must inline")
+		assert.Contains(t, string(rawParams), `"dependencies"`)
 	})
 
 	t.Run("BoundsRefExpansion", func(t *testing.T) {
@@ -308,6 +322,13 @@ func TestForkWorkflowReport(t *testing.T) {
 			Input: `{"n":` + strings.Repeat("1", 65) + `}`})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
+
+		// An exponent too large for int is valid JSON with any magnitude,
+		// so it must fail closed instead of skipping the exact-number guard.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1e-999999999999999999999999}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "too large to validate exactly")
 
 		// Ordinary exponents and sizes keep working.
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1.5e-10}`})

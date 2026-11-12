@@ -141,7 +141,10 @@ func rejectOutOfRangeNumbers(input string) error {
 		text := number.String()
 		mantissa, exponent, ok := splitNumber(text)
 		if !ok {
-			continue
+			// The token is valid JSON, so only an overflowing exponent can
+			// land here: a giant exponent hides any magnitude, and the
+			// float64 decode of it says nothing about the exact value.
+			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
 		}
 		if len(mantissa) > maxNumberDigits || abs(exponent) > maxNumberExponent {
 			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
@@ -381,9 +384,12 @@ var schemaDataFields = map[string]bool{
 
 // schemaNameMapFields are keywords whose value maps names to schemas, so
 // their keys are property or definition names, never schema keywords.
+// dependencies (draft-07) maps names to schemas OR string arrays, so its
+// non-array values are schemas and the arrays are data.
 var schemaNameMapFields = map[string]bool{
 	"$defs":             true,
 	"definitions":       true,
+	"dependencies":      true,
 	"dependentSchemas":  true,
 	"patternProperties": true,
 	"properties":        true,
