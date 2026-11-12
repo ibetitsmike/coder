@@ -427,3 +427,29 @@ type PluginUserLink struct {
 	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
 	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }
+
+// Workflow runs of the fork-workflows experiment. chatd journals run state here so a restart resumes a run.
+type WorkflowRun struct {
+	ID            uuid.UUID             `db:"id" json:"id"`
+	ChatID        uuid.UUID             `db:"chat_id" json:"chat_id"`
+	ModelConfigID uuid.UUID             `db:"model_config_id" json:"model_config_id"`
+	Script        string                `db:"script" json:"script"`
+	Args          json.RawMessage       `db:"args" json:"args"`
+	Status        string                `db:"status" json:"status"`
+	Error         string                `db:"error" json:"error"`
+	Result        pqtype.NullRawMessage `db:"result" json:"result"`
+	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
+}
+
+// Workflow steps (child chats) of a fork-workflows run. Finished steps replay from this table without running again.
+type WorkflowStep struct {
+	ID         uuid.UUID             `db:"id" json:"id"`
+	RunID      uuid.UUID             `db:"run_id" json:"run_id"`
+	SpecKey    string                `db:"spec_key" json:"spec_key"`
+	Occurrence int32                 `db:"occurrence" json:"occurrence"`
+	Ordinal    int32                 `db:"ordinal" json:"ordinal"`
+	Title      string                `db:"title" json:"title"`
+	Status     string                `db:"status" json:"status"`
+	Value      pqtype.NullRawMessage `db:"value" json:"value"`
+	Error      string                `db:"error" json:"error"`
+}
