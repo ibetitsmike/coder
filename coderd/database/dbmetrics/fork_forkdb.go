@@ -62,6 +62,11 @@ func (f forkQueryMetricsStore) InsertChatPinnedSkills(ctx context.Context, arg f
 	return f.s.InsertChatPinnedSkills(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) DeleteChatExcludedPluginPack(ctx context.Context, arg forkdb.DeleteChatExcludedPluginPackParams) error {
+	defer f.observe(ctx, "DeleteChatExcludedPluginPack", time.Now())
+	return f.s.DeleteChatExcludedPluginPack(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) DeleteChatPluginPack(ctx context.Context, arg forkdb.DeleteChatPluginPackParams) error {
 	defer f.observe(ctx, "DeleteChatPluginPack", time.Now())
 	return f.s.DeleteChatPluginPack(ctx, arg)
@@ -72,6 +77,11 @@ func (f forkQueryMetricsStore) DeletePluginPackProject(ctx context.Context, arg 
 	return f.s.DeletePluginPackProject(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetExcludedPluginPacksByChatIDRow, error) {
+	defer f.observe(ctx, "GetExcludedPluginPacksByChatID", time.Now())
+	return f.s.GetExcludedPluginPacksByChatID(ctx, chatID)
+}
+
 func (f forkQueryMetricsStore) GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetPluginPacksByChatIDRow, error) {
 	defer f.observe(ctx, "GetPluginPacksByChatID", time.Now())
 	return f.s.GetPluginPacksByChatID(ctx, chatID)
@@ -80,6 +90,11 @@ func (f forkQueryMetricsStore) GetPluginPacksByChatID(ctx context.Context, chatI
 func (f forkQueryMetricsStore) GetPluginPacksByProjectID(ctx context.Context, projectID uuid.UUID) ([]forkdb.GetPluginPacksByProjectIDRow, error) {
 	defer f.observe(ctx, "GetPluginPacksByProjectID", time.Now())
 	return f.s.GetPluginPacksByProjectID(ctx, projectID)
+}
+
+func (f forkQueryMetricsStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
+	defer f.observe(ctx, "InsertChatExcludedPluginPack", time.Now())
+	return f.s.InsertChatExcludedPluginPack(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) InsertChatPluginPack(ctx context.Context, arg forkdb.InsertChatPluginPackParams) (forkdb.ChatPluginPack, error) {

@@ -397,6 +397,28 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().InsertChatPinnedSkills(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
+		"InsertChatExcludedPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.InsertChatExcludedPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
+			row := forkdb.ChatExcludedPluginPack{ChatID: chat.ID, PackID: arg.PackID}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().InsertChatExcludedPluginPack(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(row)
+		},
+		"DeleteChatExcludedPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.DeleteChatExcludedPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().DeleteChatExcludedPluginPack(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"GetExcludedPluginPacksByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.GetExcludedPluginPacksByChatIDRow{testutil.Fake(t, faker, forkdb.GetExcludedPluginPacksByChatIDRow{})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetExcludedPluginPacksByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"InsertChatPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
