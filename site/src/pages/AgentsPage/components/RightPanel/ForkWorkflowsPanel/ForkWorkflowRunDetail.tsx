@@ -1,22 +1,26 @@
 // This file is fork code: one run in the Workflows tab
 // (fork-workflows experiment).
 
-import { ChevronLeftIcon } from "lucide-react";
+import { ChevronLeftIcon, SquareIcon } from "lucide-react";
 import type React from "react";
-import { useQuery } from "react-query";
-import { getErrorMessage } from "#/api/errors";
-import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "react-query";
+import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { chatWorkflowRun, stopWorkflowRun } from "#/api/queries/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
+import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
 import { Spinner } from "#/components/Spinner/Spinner";
+import { toast } from "#/components/Toaster/toast";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
+	forkWorkflowRunDetailSnapshot,
 	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
@@ -100,15 +104,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 }) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
-	const steps = run.steps
-		.toSorted((left, right) => left.ordinal - right.ordinal)
-		.map((step) => ({
-			chatId: step.id,
-			title: step.title,
-			status: step.status,
-			reused: step.reused,
-			error: step.error,
-		}));
+	const { steps } = forkWorkflowRunDetailSnapshot(run);
 
 	return (
 		<section aria-label="Workflow run" className="flex min-w-0 flex-col">
@@ -124,14 +120,15 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			<div className="flex min-w-0 items-center gap-1.5">
 				<ForkWorkflowStatusBadge {...forkWorkflowRunStatusMeta(run.status)} />
-				<h3 className="m-0 min-w-0 truncate text-sm font-medium text-content-primary">
+				<h3 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-content-primary">
 					{run.title || run.script.slice(0, 200) || "Untitled run"}
 				</h3>
+				{isRunning && <ForkWorkflowRunStopButton run={run} />}
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">
 				{[
 					`Started ${timeFrom(run.created_at, now)}`,
-					forkWorkflowRunDuration(run.created_at, run.finished_at, now),
+					forkWorkflowRunDuration(run, now),
 					forkWorkflowStepProgress(steps),
 				].join(" · ")}
 			</div>
@@ -164,5 +161,50 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			<ForkWorkflowLongText label="Script" text={run.script} />
 		</section>
+	);
+};
+
+const ForkWorkflowRunStopButton: React.FC<{ run: WorkflowRunDetail }> = ({
+	run,
+}) => {
+	const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+	const queryClient = useQueryClient();
+	const stopMutation = useMutation(
+		stopWorkflowRun(queryClient, run.chat_id, run.id),
+	);
+
+	const handleStop = async () => {
+		try {
+			await stopMutation.mutateAsync();
+		} catch (error) {
+			toast.error(getErrorMessage(error, "Failed to stop the workflow run."), {
+				description: getErrorDetail(error),
+			});
+		}
+		setIsConfirmOpen(false);
+	};
+
+	return (
+		<>
+			<Button
+				variant="outline"
+				size="sm"
+				className="shrink-0"
+				onClick={() => setIsConfirmOpen(true)}
+			>
+				<SquareIcon />
+				Stop
+			</Button>
+			<ConfirmDialog
+				open={isConfirmOpen}
+				onClose={() => setIsConfirmOpen(false)}
+				onConfirm={handleStop}
+				title="Stop workflow run"
+				description="The script stops, and steps that are still running fail and stop their child chats. This cannot be undone."
+				confirmText="Stop run"
+				confirmLoading={stopMutation.isPending}
+				type="delete"
+			/>
+		</>
 	);
 };

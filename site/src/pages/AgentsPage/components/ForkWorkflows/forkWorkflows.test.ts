@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+	MockChatWorkflowRun,
 	MockForkWorkflowCompletedResult,
+	MockForkWorkflowNow,
 	MockForkWorkflowRunId,
 } from "#/testHelpers/forkWorkflows";
 import {
+	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
 	parseForkWorkflowRunSnapshot,
@@ -61,5 +64,24 @@ describe("forkWorkflowRunStatusMeta", () => {
 			label: "Queued",
 			tone: "muted",
 		});
+	});
+});
+
+describe("forkWorkflowRunDuration", () => {
+	it("ends an interrupted run at its last update", () => {
+		// Created 10:00:00, updated 10:03:20, now 10:05:00.
+		const run = { ...MockChatWorkflowRun, finished_at: undefined };
+		expect(
+			forkWorkflowRunDuration(
+				{ ...run, status: "interrupted" },
+				MockForkWorkflowNow,
+			),
+		).toBe("3m 20s");
+		expect(
+			forkWorkflowRunDuration(
+				{ ...run, status: "running" },
+				MockForkWorkflowNow,
+			),
+		).toBe("5m");
 	});
 });

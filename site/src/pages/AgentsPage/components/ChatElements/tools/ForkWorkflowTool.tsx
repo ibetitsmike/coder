@@ -2,11 +2,15 @@
 // tools of the fork-workflows experiment.
 
 import type React from "react";
+import { useQuery } from "react-query";
+import { useParams } from "react-router";
+import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
 	type ForkWorkflowRunSnapshot,
+	forkWorkflowRunDetailSnapshot,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
 	formatForkWorkflowValue,
@@ -37,6 +41,10 @@ const toolLabel = (
 			return "Workflow completed";
 		case "failed":
 			return "Workflow failed";
+		case "stopped":
+			return "Workflow stopped";
+		case "interrupted":
+			return "Workflow interrupted";
 		default:
 			return "Workflow";
 	}
@@ -48,7 +56,19 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	...props
 }) => {
 	const { name, status, isError } = props;
-	const snapshot = isError ? null : parseForkWorkflowRunSnapshot(props.result);
+	const resultSnapshot = isError
+		? null
+		: parseForkWorkflowRunSnapshot(props.result);
+	// The result is the run as the tool call saw it. A run that was still
+	// running follows the run API, which shares the Workflows panel's cache.
+	const { agentId: chatId = "" } = useParams();
+	const liveRunQuery = useQuery({
+		...chatWorkflowRun(chatId, resultSnapshot?.runId ?? ""),
+		enabled: chatId !== "" && resultSnapshot?.status === "running",
+	});
+	const snapshot = liveRunQuery.data
+		? forkWorkflowRunDetailSnapshot(liveRunQuery.data)
+		: resultSnapshot;
 	if (!isError && !snapshot && status !== "running") {
 		return <Fallback {...props} />;
 	}

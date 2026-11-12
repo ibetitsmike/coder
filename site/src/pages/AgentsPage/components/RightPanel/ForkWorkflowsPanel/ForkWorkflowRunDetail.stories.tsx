@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, spyOn } from "storybook/test";
+import { expect, fn, screen, spyOn, userEvent } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import {
@@ -45,6 +45,18 @@ const mockInterruptedRunDetail: WorkflowRunDetail = {
 	finished_at: undefined,
 };
 
+const mockStoppedRunDetail: WorkflowRunDetail = {
+	...MockChatWorkflowRunDetail,
+	status: "stopped",
+	result: undefined,
+	error: "stopped by user",
+	steps: MockChatWorkflowRunDetail.steps.map((step, index) =>
+		index === 0
+			? step
+			: { ...step, status: "failed", error: "stopped by user" },
+	),
+};
+
 const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunDetail",
 	component: ForkWorkflowRunDetailView,
@@ -71,6 +83,20 @@ export const Completed: Story = {};
 
 export const Running: Story = {
 	args: { run: mockRunningRunDetail },
+};
+
+export const RunningStopConfirm: Story = {
+	args: { run: mockRunningRunDetail },
+	play: async ({ canvas }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await expect(
+			await screen.findByRole("dialog", { name: "Stop workflow run" }),
+		).toBeVisible();
+	},
+};
+
+export const Stopped: Story = {
+	args: { run: mockStoppedRunDetail },
 };
 
 export const Failed: Story = {

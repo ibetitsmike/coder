@@ -78,7 +78,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 							<span className="text-xs text-content-secondary">
 								{[
 									`Started ${timeFrom(run.created_at, now)}`,
-									forkWorkflowRunDuration(run.created_at, run.finished_at, now),
+									forkWorkflowRunDuration(run, now),
 									forkWorkflowStepCountProgress(
 										run.step_counts.done,
 										run.step_counts.total,

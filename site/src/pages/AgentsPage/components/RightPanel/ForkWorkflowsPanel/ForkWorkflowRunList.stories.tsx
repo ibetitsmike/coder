@@ -33,6 +33,15 @@ const mockInterruptedRun: WorkflowRun = {
 	finished_at: undefined,
 };
 
+const mockStoppedRun: WorkflowRun = {
+	...MockChatWorkflowRun,
+	id: "run-stopped",
+	status: "stopped",
+	title: "Rename the audit fields",
+	error: "stopped by user",
+	step_counts: { total: 2, running: 0, done: 1, failed: 1 },
+};
+
 const meta: Meta<typeof ForkWorkflowRunList> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunList",
 	component: ForkWorkflowRunList,
@@ -42,6 +51,7 @@ const meta: Meta<typeof ForkWorkflowRunList> = {
 			MockChatWorkflowRun,
 			mockFailedRun,
 			mockInterruptedRun,
+			mockStoppedRun,
 		],
 		error: null,
 		onSelectRun: fn(),

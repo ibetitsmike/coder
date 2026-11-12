@@ -1,6 +1,7 @@
 // This file is fork code: it parses the Starlark workflow tool results of
 // the fork-workflows experiment and maps their statuses to display values.
 
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { humanDurationShort } from "#/utils/time";
 import { asRecord, asString } from "../ChatElements/runtimeTypeUtils";
 import { parseArgs, parseArray } from "../ChatElements/tools/utils";
@@ -101,6 +102,26 @@ export const parseForkWorkflowRunSnapshot = (
 	};
 };
 
+/** Maps a run detail to the snapshot that the tool cards render. */
+export const forkWorkflowRunDetailSnapshot = (
+	run: WorkflowRunDetail,
+): ForkWorkflowRunSnapshot => ({
+	runId: run.id,
+	status: run.status,
+	result: run.result,
+	error: run.error,
+	steps: run.steps
+		.toSorted((left, right) => left.ordinal - right.ordinal)
+		.map((step) => ({
+			chatId: step.id,
+			title: step.title,
+			status: step.status,
+			reused: step.reused,
+			error: step.error,
+		})),
+	logs: run.logs,
+});
+
 /** Summarizes step progress, for example "2 of 3 steps reported". */
 export const forkWorkflowStepCountProgress = (
 	reported: number,
@@ -123,12 +144,21 @@ export const forkWorkflowStepProgress = (
 
 /** Formats how long a run took, or has run so far while it runs. */
 export const forkWorkflowRunDuration = (
-	createdAt: string,
-	finishedAt: string | undefined,
+	run: Pick<
+		WorkflowRun,
+		"status" | "created_at" | "updated_at" | "finished_at"
+	>,
 	now: number,
 ): string => {
-	const end = finishedAt ? Date.parse(finishedAt) : now;
-	return humanDurationShort(Math.max(0, end - Date.parse(createdAt)));
+	let end = now;
+	if (run.finished_at) {
+		end = Date.parse(run.finished_at);
+	} else if (run.status !== "running") {
+		// An interrupted run has no end until a resume ends it, but it stopped
+		// making progress at its last update.
+		end = Date.parse(run.updated_at);
+	}
+	return humanDurationShort(Math.max(0, end - Date.parse(run.created_at)));
 };
 
 /** Formats a JSON value for display; strings show as they are. */
