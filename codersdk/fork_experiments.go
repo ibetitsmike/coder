@@ -16,6 +16,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkSubagentIsolation,
 	ExperimentForkChatWakeups,
 	ExperimentForkPluginPacks,
+	ExperimentForkWorkflows,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -42,6 +43,11 @@ const ExperimentForkChatWakeups Experiment = "fork-chat-wakeups"
 // manifest-honored skills and agents, installed packs, and (in later PRs)
 // their rules and surfacing controls.
 const ExperimentForkPluginPacks Experiment = "fork-plugin-packs"
+
+// ExperimentForkWorkflows enables the run_workflow and await_workflow tools
+// for root chats: a Starlark script runs sub-agent steps and combines their
+// results (fork PR 1a ships the report tool and step plumbing).
+const ExperimentForkWorkflows Experiment = "fork-workflows"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

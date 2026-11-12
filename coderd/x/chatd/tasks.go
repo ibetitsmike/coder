@@ -714,9 +714,13 @@ func dynamicToolNamesFromChat(chat database.Chat) map[string]bool {
 		return nil
 	}
 	names := make(map[string]bool, len(tools))
+	// Fork: a workflow step's workflow_report calls are server-side, so the
+	// parsers must not treat them as client actions. Other chats keep the
+	// upstream behavior for caller-supplied tools of the same name.
+	reportIsServerTool := chatIsWorkflowStep(chat)
 	for _, tool := range tools {
 		name := strings.TrimSpace(tool.Name)
-		if name != "" {
+		if name != "" && (name != workflowReportToolName || !reportIsServerTool) {
 			names[name] = true
 		}
 	}
