@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
@@ -678,6 +679,7 @@ func TestForkWorkflowReportScan(t *testing.T) {
 // experiment on, the way the workflow tests drive steps without a live turn.
 type forkWorkflowFixture struct {
 	db     database.Store
+	ps     pubsub.Pubsub
 	server *Server
 	user   database.User
 	org    database.Organization
@@ -690,7 +692,7 @@ func newForkWorkflowFixture(t *testing.T) *forkWorkflowFixture {
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
 	user, org, model := seedInternalChatDeps(t, db)
-	return &forkWorkflowFixture{db: db, server: server, user: user, org: org, model: model}
+	return &forkWorkflowFixture{db: db, ps: ps, server: server, user: user, org: org, model: model}
 }
 
 func (f *forkWorkflowFixture) parent(ctx context.Context, t *testing.T) database.Chat {
