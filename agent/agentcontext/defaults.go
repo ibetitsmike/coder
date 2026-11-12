@@ -20,7 +20,7 @@ func defaultBuiltinRoots() []string {
 		// watching the directory now prevents a surprise
 		// dirty bit when the resolver eventually classifies
 		// them.
-		"~/.claude/plugins/cache",
+		claudePluginCacheRoot(),
 	}
 }
 
