@@ -3,6 +3,8 @@ package chatd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -128,6 +131,77 @@ func TestForkWorkflowReport(t *testing.T) {
 			`"one":{"enum":[{"$ref":"#/$defs/literal"},"plain"]},`+
 			`"fallback":{"default":{"$ref":"#/$defs/literal"}},`+
 			`"samples":{"examples":[{"$ref":"#/$defs/literal"}]}}`, string(raw))
+	})
+
+	t.Run("RejectsUnrepresentableContract", func(t *testing.T) {
+		t.Parallel()
+		// Fantasy rebuilds the provider schema as properties+required, so a
+		// top-level composition would silently vanish from the tool contract
+		// while Run still enforced it. Refuse the schema instead.
+		for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
+			raw := json.RawMessage(`{"type":"object","` + keyword + `":[{"properties":{"a":{"type":"string"}}}]}`)
+			_, err := newWorkflowReportTool(raw)
+			require.ErrorContains(t, err, "cannot be represented", keyword)
+		}
+
+		// A lone "*" property is Fantasy's free-form wildcard spelling:
+		// the provider schema would accept arbitrary keys the schema forbids.
+		_, err := newWorkflowReportTool(json.RawMessage(`{"type":"object","properties":{"*":{"type":"string"}}}`))
+		require.ErrorContains(t, err, "reserved")
+
+		// "*", among other properties, is a literal property name and works.
+		_, err = newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"*":{"type":"string"},"other":{"type":"string"}}}`))
+		require.NoError(t, err)
+
+		// Composition nested inside a property is carried verbatim by the
+		// parameter shape, so it stays allowed.
+		_, err = newWorkflowReportTool(json.RawMessage(
+			`{"type":"object","properties":{"a":{"allOf":[{"type":"string"}]}}}`))
+		require.NoError(t, err)
+	})
+
+	t.Run("BoundsRefExpansion", func(t *testing.T) {
+		t.Parallel()
+		// A diamond reference chain doubles the materialized copy at every
+		// level while staying acyclic, so the inliner needs a budget: 40
+		// levels would otherwise expand to trillions of maps.
+		defs := make([]string, 0, 40)
+		defs = append(defs, `"d0":{"type":"string"}`)
+		for i := 1; i < 40; i++ {
+			defs = append(defs, fmt.Sprintf(`"d%d":{"anyOf":[{"$ref":"#/$defs/d%d"},{"$ref":"#/$defs/d%d"}]}`, i, i-1, i-1))
+		}
+		raw := json.RawMessage(`{"type":"object","$defs":{` + strings.Join(defs, ",") +
+			`},"properties":{"x":{"$ref":"#/$defs/d39"}}}`)
+		_, err := newWorkflowReportTool(raw)
+		require.ErrorContains(t, err, "schema nodes")
+	})
+
+	t.Run("ValidatesExactIntegers", func(t *testing.T) {
+		t.Parallel()
+		// Reports are validated against the float64 decode of the input, so
+		// an integer beyond 2^53 would be compared rounded while the
+		// workflow receives the original token. Reject the exact range.
+		schema := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"properties":{"n":{"type":"integer","maximum":9007199254740992}},` +
+			`"required":["n"]}`)
+		tool, err := newWorkflowReportTool(schema)
+		require.NoError(t, err)
+
+		resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":9007199254740993}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "exceeds the exact validation range")
+
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":-9007199254740993}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+
+		// The bound itself is exactly representable and passes.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":9007199254740992}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
 	})
 
 	t.Run("OnlyStepChildrenGetTool", func(t *testing.T) {
@@ -293,6 +367,116 @@ func TestForkWorkflowStepChat(t *testing.T) {
 		_, _, err = createWorkflowStepChat(ctx, f.server, parent, f.model.ID, runID,
 			workflowStepID(runID, "k", 0), stepSpec{Prompt: "x", Schema: json.RawMessage(`{"type":"array"}`)})
 		require.ErrorContains(t, err, `"type": "object"`)
+
+		// A schema that resolves but cannot inline into the provider
+		// contract must fail before the child is persisted.
+		recursive := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"node":{"type":"object","properties":{"child":{"$ref":"#/$defs/node"}}}},` +
+			`"properties":{"node":{"$ref":"#/$defs/node"}}}`)
+		_, _, err = createWorkflowStepChat(ctx, f.server, parent, f.model.ID, runID,
+			workflowStepID(runID, "k", 0), stepSpec{Prompt: "x", Schema: recursive})
+		require.ErrorContains(t, err, "recursive")
+	})
+}
+
+// TestForkWorkflowReportScan covers the history scan workflowStepReport:
+// which report values count, and when the reminder counts as consumed.
+func TestForkWorkflowReportScan(t *testing.T) {
+	t.Parallel()
+
+	type stepMessage struct {
+		role  database.ChatMessageRole
+		parts []codersdk.ChatMessagePart
+	}
+	scan := func(t *testing.T, msgs []stepMessage) (value json.RawMessage, reminded bool) {
+		t.Helper()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parent(ctx, t)
+		params := database.InsertChatMessagesParams{ChatID: parent.ID}
+		for _, msg := range msgs {
+			content, err := chatprompt.MarshalParts(msg.parts)
+			require.NoError(t, err)
+			params.CreatedBy = append(params.CreatedBy, uuid.Nil)
+			params.ModelConfigID = append(params.ModelConfigID, f.model.ID)
+			params.ReasoningEffort = append(params.ReasoningEffort, "")
+			params.Role = append(params.Role, msg.role)
+			params.Content = append(params.Content, string(content.RawMessage))
+			params.ContentVersion = append(params.ContentVersion, chatprompt.CurrentContentVersion)
+			params.Visibility = append(params.Visibility, database.ChatMessageVisibilityBoth)
+			params.InputTokens = append(params.InputTokens, 0)
+			params.OutputTokens = append(params.OutputTokens, 0)
+			params.TotalTokens = append(params.TotalTokens, 0)
+			params.ReasoningTokens = append(params.ReasoningTokens, 0)
+			params.CacheCreationTokens = append(params.CacheCreationTokens, 0)
+			params.CacheReadTokens = append(params.CacheReadTokens, 0)
+			params.ContextLimit = append(params.ContextLimit, 0)
+			params.Compressed = append(params.Compressed, false)
+			params.RuntimeMs = append(params.RuntimeMs, 0)
+		}
+		_, err := f.db.InsertChatMessages(ctx, params)
+		require.NoError(t, err)
+		value, reminded, err = workflowStepReport(ctx, f.db, parent.ID)
+		require.NoError(t, err)
+		return value, reminded
+	}
+	reportCall := func(id string, args string) codersdk.ChatMessagePart {
+		return codersdk.ChatMessageToolCall(id, workflowReportToolName, json.RawMessage(args))
+	}
+	reportResult := func(id string, isError bool) codersdk.ChatMessagePart {
+		return codersdk.ChatMessageToolResult(id, workflowReportToolName, json.RawMessage(`"done"`), isError, false)
+	}
+
+	t.Run("AcceptedValueWins", func(t *testing.T) {
+		t.Parallel()
+		value, _ := scan(t, []stepMessage{
+			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do the thing")}},
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
+			}},
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				reportCall("c2", `{"text":"good"}`), reportResult("c2", false),
+			}},
+		})
+		assert.JSONEq(t, `{"text":"good"}`, string(value))
+	})
+
+	t.Run("RejectedReportDoesNotAnswerAnotherTool", func(t *testing.T) {
+		t.Parallel()
+		// A rejected report's arguments must not surface as the accepted
+		// value when a later, different tool call reuses the call ID.
+		value, _ := scan(t, []stepMessage{
+			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do the thing")}},
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
+			}},
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageToolCall("c1", "other_tool", json.RawMessage(`{}`)),
+				codersdk.ChatMessageToolResult("c1", "other_tool", json.RawMessage(`"ok"`), false, false),
+			}},
+		})
+		assert.Nil(t, value)
+	})
+
+	t.Run("ReminderAfterInitialPromptOnly", func(t *testing.T) {
+		t.Parallel()
+		// The step prompt itself may equal the reminder text (author-written
+		// or hook-rewritten); that must not consume the retry reminder.
+		_, reminded := scan(t, []stepMessage{
+			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText(workflowReminder)}},
+		})
+		assert.False(t, reminded)
+
+		// A reminder arriving in a later user message is the runtime's.
+		_, reminded = scan(t, []stepMessage{
+			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText(workflowReminder)}},
+			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
+				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
+			}},
+			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText(workflowReminder)}},
+		})
+		assert.True(t, reminded)
 	})
 }
 

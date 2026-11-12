@@ -9,6 +9,8 @@ package chatd
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"math/big"
 	"strings"
 
 	"charm.land/fantasy"
@@ -82,11 +84,60 @@ func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fant
 	if err := json.Unmarshal([]byte(call.Input), &value); err != nil {
 		return fantasy.NewTextErrorResponse("The input is not valid JSON: " + err.Error()), nil
 	}
+	// Validate the float64 decode against exactness first: jsonschema-go
+	// cannot validate json.Number instances (they surface as strings), so
+	// an integer beyond the float64 range would be compared rounded while
+	// the workflow receives the original token below.
+	if err := rejectOutOfRangeIntegers(call.Input); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error() +
+			". Call workflow_report again with a corrected value."), nil
+	}
 	if err := t.resolved.Validate(value); err != nil {
 		return fantasy.NewTextErrorResponse("The value does not match the schema: " + err.Error() +
 			". Call workflow_report again with a corrected value."), nil
 	}
 	return fantasy.NewTextResponse("Value accepted. The workflow has your result."), nil
+}
+
+// maxExactInteger is the largest magnitude an integer report can carry.
+// Reports are validated against the float64 decode of the raw input, so a
+// bigger integer would be compared rounded (9007199254740993 decodes to
+// 9007199254740992 and passes a maximum of 9007199254740992) while the
+// workflow still receives the original token.
+const maxExactInteger = 1 << 53
+
+// rejectOutOfRangeIntegers fails when the input carries an integer literal
+// outside the exact validation range. Floats beyond float64 range are
+// rejected by the decode itself.
+func rejectOutOfRangeIntegers(input string) error {
+	bound := new(big.Int).Lsh(big.NewInt(1), 53)
+	decoder := json.NewDecoder(strings.NewReader(input))
+	decoder.UseNumber()
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			// The decode above already accepted the input.
+			return nil
+		}
+		number, ok := token.(json.Number)
+		if !ok {
+			continue
+		}
+		text := number.String()
+		if strings.ContainsAny(text, ".eE") {
+			continue
+		}
+		integer, ok := new(big.Int).SetString(text, 10)
+		if !ok {
+			continue
+		}
+		if integer.Abs(integer).Cmp(bound) > 0 {
+			return xerrors.Errorf("the report contains the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", text, maxExactInteger)
+		}
+	}
 }
 
 // checkStepSchema accepts a JSON Schema whose top level is an object. The
@@ -128,9 +179,30 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, nil, xerrors.Errorf("parse report schema: %w", err)
 	}
-	inlined, err := inlineStepRefs(root, root, nil)
+	inlined, err := inlineStepRefs(root, root, nil, new(int))
 	if err != nil {
 		return nil, nil, err
+	}
+	// Fantasy rebuilds the provider schema as
+	// {type: object, properties: ..., required: ...}, so top-level
+	// composition would silently vanish from the tool contract the child
+	// sees, while Run still enforces it. Refuse instead of shipping a
+	// weaker contract.
+	for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
+		if branches, ok := inlined[keyword].([]any); ok && len(branches) > 0 {
+			return nil, nil, xerrors.Errorf(
+				"top-level %s cannot be represented in the report tool contract: put the object constraints directly in properties", keyword)
+		}
+	}
+	// A lone property named "*" is Fantasy's free-form wildcard spelling:
+	// normalizeToolMapSchemas would read the parameters as
+	// additionalProperties and the provider would accept keys the schema
+	// forbids. Reject the name; escaping is impossible in JSON Schema.
+	if props, ok := inlined["properties"].(map[string]any); ok {
+		if _, star := props["*"]; star && len(props) == 1 {
+			return nil, nil, xerrors.Errorf(
+				`property name "*" is reserved by the tool contract: rename the property`)
+		}
 	}
 	props, _ := inlined["properties"].(map[string]any)
 	if props == nil {
@@ -151,7 +223,11 @@ func stepReportParameters(raw json.RawMessage) (properties map[string]any, requi
 // currently being inlined, so recursive references are refused instead of
 // looping. Remote references and $ref nodes with sibling keywords cannot be
 // inlined faithfully and are refused as well.
-func inlineStepRefs(node map[string]any, root map[string]any, seen []string) (map[string]any, error) {
+// budget counts the maps the inlining materializes; diamond references
+// (every definition referring to the previous one twice) grow the copy
+// exponentially even though they are acyclic, so the budget bounds the
+// work an O(n) schema can force.
+func inlineStepRefs(node map[string]any, root map[string]any, seen []string, budget *int) (map[string]any, error) {
 	if ref, ok := node["$ref"].(string); ok {
 		if len(node) > 1 {
 			return nil, xerrors.Errorf("$ref %q cannot be combined with sibling keywords: move them into the referenced schema", ref)
@@ -171,11 +247,15 @@ func inlineStepRefs(node map[string]any, root map[string]any, seen []string) (ma
 		chain := make([]string, len(seen)+1)
 		copy(chain, seen)
 		chain[len(seen)] = ref
-		return inlineStepRefs(target, root, chain)
+		return inlineStepRefs(target, root, chain, budget)
+	}
+	*budget++
+	if *budget > maxInlinedNodes {
+		return nil, xerrors.Errorf("step schema inlines to more than %d schema nodes: shrink or share the definitions", maxInlinedNodes)
 	}
 	out := make(map[string]any, len(node))
 	for key, value := range node {
-		inlined, err := inlineStepValue(key, value, root, seen)
+		inlined, err := inlineStepValue(key, value, root, seen, budget)
 		if err != nil {
 			return nil, err
 		}
@@ -183,6 +263,11 @@ func inlineStepRefs(node map[string]any, root map[string]any, seen []string) (ma
 	}
 	return out, nil
 }
+
+// maxInlinedNodes bounds how many schema maps one step schema may expand to.
+// It is generous: real report schemas are a few dozen nodes, and the provider
+// payload would be unreadable long before this bound matters.
+const maxInlinedNodes = 4096
 
 // schemaDataFields are keywords whose values are data, not schemas: an
 // object or array under them is the asserted value itself, so a $ref-shaped
@@ -209,7 +294,7 @@ var schemaNameMapFields = map[string]bool{
 // are data and are copied verbatim. Maps under schemaNameMapFields are
 // name-to-schema maps; every other map is a schema node, and array
 // elements are schemas where they are objects.
-func inlineStepValue(key string, value any, root map[string]any, seen []string) (any, error) {
+func inlineStepValue(key string, value any, root map[string]any, seen []string, budget *int) (any, error) {
 	if schemaDataFields[key] {
 		return value, nil
 	}
@@ -223,7 +308,7 @@ func inlineStepValue(key string, value any, root map[string]any, seen []string) 
 					out[name] = schema
 					continue
 				}
-				inlined, err := inlineStepRefs(sub, root, seen)
+				inlined, err := inlineStepRefs(sub, root, seen, budget)
 				if err != nil {
 					return nil, err
 				}
@@ -231,7 +316,7 @@ func inlineStepValue(key string, value any, root map[string]any, seen []string) 
 			}
 			return out, nil
 		}
-		return inlineStepRefs(typed, root, seen)
+		return inlineStepRefs(typed, root, seen, budget)
 	case []any:
 		out := make([]any, len(typed))
 		for i, element := range typed {
@@ -240,7 +325,7 @@ func inlineStepValue(key string, value any, root map[string]any, seen []string) 
 				out[i] = element
 				continue
 			}
-			inlined, err := inlineStepRefs(sub, root, seen)
+			inlined, err := inlineStepRefs(sub, root, seen, budget)
 			if err != nil {
 				return nil, err
 			}
@@ -364,7 +449,10 @@ func forkStopAfterWorkflowReport(stop map[string]struct{}, chat database.Chat) m
 
 // workflowStepReport reads a step child's history. value is the input of
 // the last workflow_report call with a successful result. reminded is true
-// when the child already got the reminder.
+// when the child already got the reminder. The initial user message (the
+// step prompt) is excluded from the reminder scan: an author could write
+// or a hook could rewrite it to the reminder text, and that must not
+// consume the runtime's retry reminder.
 func workflowStepReport(
 	ctx context.Context, db database.Store, chatID uuid.UUID,
 ) (value json.RawMessage, reminded bool, err error) {
@@ -373,6 +461,7 @@ func workflowStepReport(
 		return nil, false, xerrors.Errorf("get step messages: %w", err)
 	}
 	calls := map[string]json.RawMessage{}
+	firstUser := true
 	for _, msg := range msgs {
 		parts, err := chatprompt.ParseContent(msg)
 		if err != nil {
@@ -383,15 +472,28 @@ func workflowStepReport(
 			case msg.Role == database.ChatMessageRoleUser &&
 				part.Type == codersdk.ChatMessagePartTypeText &&
 				strings.TrimSpace(part.Text) == workflowReminder:
-				reminded = true
+				// The step prompt is the first user message and is
+				// user-authored (and hook-rewritable), so only a later
+				// message can be the runtime's retry reminder.
+				if !firstUser {
+					reminded = true
+				}
 			case part.Type == codersdk.ChatMessagePartTypeToolCall &&
 				part.ToolName == workflowReportToolName:
 				calls[part.ToolCallID] = part.Args
-			case part.Type == codersdk.ChatMessagePartTypeToolResult && !part.IsError:
-				if args, ok := calls[part.ToolCallID]; ok {
+			case part.Type == codersdk.ChatMessagePartTypeToolResult:
+				// A result consumes its call entry whatever it says: a
+				// rejected report must not answer a later, different tool
+				// call that happens to reuse the call ID.
+				args, ok := calls[part.ToolCallID]
+				delete(calls, part.ToolCallID)
+				if ok && !part.IsError {
 					value = args // a later accepted call wins
 				}
 			}
+		}
+		if msg.Role == database.ChatMessageRoleUser {
+			firstUser = false
 		}
 	}
 	return value, reminded, nil

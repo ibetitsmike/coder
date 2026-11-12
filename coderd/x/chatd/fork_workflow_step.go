@@ -134,7 +134,11 @@ func createWorkflowStepChat(
 	if len(spec.Schema) == 0 {
 		spec.Schema = json.RawMessage(defaultStepSchema)
 	}
-	if _, err := checkStepSchema(spec.Schema); err != nil {
+	// Validate the exact tool the turn loop builds for this child, not just
+	// the raw schema: a schema that resolves but cannot inline into the
+	// provider contract would otherwise persist an unusable child every
+	// turn preparation then fails to build the tool for.
+	if _, err := newWorkflowReportTool(spec.Schema); err != nil {
 		return database.Chat{}, false, err
 	}
 
