@@ -188,6 +188,33 @@ func TestResolverPackMCPSources(t *testing.T) {
 	require.True(t, packWatchPaths{}.relevant(filepath.Join(dir, packCommitMarkerName)), "rewriting the commit marker re-resolves")
 }
 
+// coderd empties the marker of a managed pack no chat on the workspace
+// enables, and writes it last, so a managed pack without one starts no
+// servers.
+func TestResolverPackMCPSourcesSkipsUnmarkedManagedPacks(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), ".coder", "plugins")
+	pack := func(name string, extra map[string]string) {
+		files := map[string]string{
+			".claude-plugin/plugin.json": `{"name": "` + name + `"}`,
+			".mcp.json":                  `{"mcpServers": {"deploy": {"command": "deploy"}}}`,
+		}
+		for rel, content := range extra {
+			files[rel] = content
+		}
+		writePackFiles(t, filepath.Join(root, name), files)
+	}
+	pack("marked", map[string]string{packCommitMarkerName: "pack-id abc123\n"})
+	pack("emptied", map[string]string{packCommitMarkerName: "\n"})
+	pack("unmarked", nil)
+
+	r := &Resolver{PackRowsAdvertised: func() bool { return true }}
+	sources := r.packMCPSources([]ScanRoot{{Path: root}})
+	require.Len(t, sources, 1)
+	require.Equal(t, filepath.Join(root, "marked"), sources[0].Dir)
+	require.Equal(t, "pack-id abc123", sources[0].Revision)
+}
+
 func TestPackMCPPublisher(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
