@@ -58,7 +58,14 @@ func (l *partitionableLimiter) Admit(ctx context.Context, store database.Store, 
 	if l.partitioned.Load() {
 		return false, xerrors.New("replica is partitioned from the database")
 	}
-	return l.refusalCountingLimiter.Admit(ctx, store, chat)
+	admitted, err := l.refusalCountingLimiter.Admit(ctx, store, chat)
+	// An acquisition pass that passed the check above before the partition
+	// can count capacity after the test made a lease stale, and would admit
+	// a chat into the freed slot. Failing it here rolls that admission back.
+	if l.partitioned.Load() {
+		return false, xerrors.New("replica is partitioned from the database")
+	}
+	return admitted, err
 }
 
 // runningFreshLeases counts chats that are running and hold a fresh lease
