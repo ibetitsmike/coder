@@ -822,6 +822,31 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
+		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.GetWorkflowRunsByChatParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRunsByChat(gomock.Any(), arg).Return([]forkdb.WorkflowRun{run}, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns([]forkdb.WorkflowRun{run})
+		},
+		"GetWorkflowRunStepCountsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			counts := []forkdb.GetWorkflowRunStepCountsByChatRow{{RunID: run.ID, Status: "reported", StepCount: 1}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRunStepCountsByChat(gomock.Any(), chat.ID).Return(counts, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(counts)
+		},
+		"FailOpenWorkflowStepsOfRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := forkdb.FailOpenWorkflowStepsOfRunParams{RunID: run.ID, ErrText: "stopped by user"}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(2))
+		},
 	}
 
 	// Every fork query needs a case, like MethodTestSuite's accounting of
