@@ -59,7 +59,23 @@ type fakeWorkspaceFiles struct {
 func (f *fakeWorkspaceFiles) conn(t *testing.T) workspacesdk.AgentConn {
 	conn := agentconnmock.NewMockAgentConn(gomock.NewController(t))
 	conn.EXPECT().LS(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(workspacesdk.LSResponse{AbsolutePathString: "/home/coder"}, nil).AnyTimes()
+		DoAndReturn(func(_ context.Context, _ string, req workspacesdk.LSRequest) (workspacesdk.LSResponse, error) {
+			dir := strings.Join(append([]string{"/home/coder"}, req.Path...), "/")
+			resp := workspacesdk.LSResponse{AbsolutePathString: dir}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			seen := map[string]bool{}
+			for path := range f.files {
+				rest, ok := strings.CutPrefix(path, dir+"/")
+				name, _, nested := strings.Cut(rest, "/")
+				if !ok || !nested || seen[name] {
+					continue
+				}
+				seen[name] = true
+				resp.Contents = append(resp.Contents, workspacesdk.LSFile{Name: name, AbsolutePathString: dir + "/" + name, IsDir: true})
+			}
+			return resp, nil
+		}).AnyTimes()
 	conn.EXPECT().ReadFile(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, path string, _, _ int64) (io.ReadCloser, string, error) {
 			f.mu.Lock()
@@ -132,6 +148,28 @@ func TestMaterializePluginPacks(t *testing.T) {
 			require.NoError(t, err)
 		}
 		return chat
+	}
+	newWorkspace := func(t *testing.T) uuid.UUID {
+		version := dbgen.TemplateVersion(t, db, database.TemplateVersion{OrganizationID: org.ID, CreatedBy: user.ID})
+		tmpl := dbgen.Template(t, db, database.Template{OrganizationID: org.ID, ActiveVersionID: version.ID, CreatedBy: user.ID})
+		return dbgen.Workspace(t, db, database.WorkspaceTable{OwnerID: user.ID, OrganizationID: org.ID, TemplateID: tmpl.ID}).ID
+	}
+	newWorkspaceChat := func(ctx context.Context, t *testing.T, workspaceID uuid.UUID, packs ...forkdb.PluginPack) database.Chat {
+		chat := dbgen.Chat(t, db, database.Chat{
+			OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID,
+			WorkspaceID: uuid.NullUUID{UUID: workspaceID, Valid: true},
+		})
+		for _, pack := range packs {
+			_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID})
+			require.NoError(t, err)
+		}
+		return chat
+	}
+	countingDial := func(t *testing.T, files *fakeWorkspaceFiles, dials *int) AgentConnFunc {
+		return func(context.Context, uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+			*dials++
+			return files.conn(t), func() {}, nil
+		}
 	}
 
 	t.Run("WritesOncePerAgentAndCommit", func(t *testing.T) {
@@ -280,6 +318,83 @@ func TestMaterializePluginPacks(t *testing.T) {
 		pin(writer, "later snapshot")
 		server.materializePluginPacks(ctx, server.logger, writer, agent.ID, dial)
 		require.Equal(t, "later snapshot", pinnedHash(writer), "a chat is re-pinned once per write")
+	})
+
+	t.Run("ClearsMarkerOfPackNoWorkspaceChatEnables", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "cleared", "plugin.json")
+		chat := newWorkspaceChat(ctx, t, newWorkspace(t), pack)
+		files := &fakeWorkspaceFiles{files: map[string]string{}}
+		dials := 0
+		dial := countingDial(t, files, &dials)
+		agentID := uuid.New()
+		marker := "/home/coder/.coder/plugins/cleared/" + packCommitMarker
+
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files[marker])
+
+		require.NoError(t, fdb.DeleteChatPluginPack(ctx, forkdb.DeleteChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID}))
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		content, ok := files.files[marker]
+		require.True(t, ok)
+		require.Empty(t, content, "the marker of a pack no chat on the workspace enables is emptied")
+		require.Equal(t, "content of plugin.json", files.files["/home/coder/.coder/plugins/cleared/plugin.json"])
+		require.Equal(t, 2, dials)
+
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, 2, dials, "a cleared pack needs no further connection")
+
+		_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID})
+		require.NoError(t, err)
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files[marker], "enabling the pack again rewrites it")
+	})
+
+	t.Run("KeepsMarkerOfPackAnotherWorkspaceChatEnables", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		pack := insertPack(ctx, t, "shared", "plugin.json")
+		workspaceID := newWorkspace(t)
+		chat := newWorkspaceChat(ctx, t, workspaceID, pack)
+		newWorkspaceChat(ctx, t, workspaceID, pack)
+		files := &fakeWorkspaceFiles{files: map[string]string{}}
+		dials := 0
+		dial := countingDial(t, files, &dials)
+		agentID := uuid.New()
+		marker := "/home/coder/.coder/plugins/shared/" + packCommitMarker
+
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.NoError(t, fdb.DeleteChatPluginPack(ctx, forkdb.DeleteChatPluginPackParams{ChatID: chat.ID, PackID: pack.ID}))
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, pack.ID.String()+" "+pack.CommitSha, files.files[marker],
+			"a pack another chat on the workspace enables keeps its marker")
+		require.Equal(t, 1, dials, "keeping the pack needs no connection")
+	})
+
+	t.Run("SweepsUnknownDisabledPacksOncePerAgent", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		kept := insertPack(ctx, t, "kept", "plugin.json")
+		chat := newWorkspaceChat(ctx, t, newWorkspace(t), kept)
+		// A pack written before this server started, which no chat enables.
+		stale := "/home/coder/.coder/plugins/stale/" + packCommitMarker
+		files := &fakeWorkspaceFiles{files: map[string]string{stale: uuid.NewString() + " " + kept.CommitSha}}
+		dials := 0
+		dial := countingDial(t, files, &dials)
+		agentID := uuid.New()
+
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Empty(t, files.files[stale], "the first connection to an agent clears unknown disabled packs")
+		require.Equal(t, kept.ID.String()+" "+kept.CommitSha, files.files["/home/coder/.coder/plugins/kept/"+packCommitMarker])
+
+		files.files[stale] = "restored"
+		second := insertPack(ctx, t, "second", "plugin.json")
+		_, err := fdb.InsertChatPluginPack(ctx, forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: second.ID})
+		require.NoError(t, err)
+		server.materializePluginPacks(ctx, server.logger, chat, agentID, dial)
+		require.Equal(t, 2, dials)
+		require.Equal(t, "restored", files.files[stale], "an agent is swept once")
 	})
 
 	t.Run("UnsafePathWritesNoMarker", func(t *testing.T) {
