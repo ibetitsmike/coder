@@ -10,9 +10,13 @@ import {
 	forkWorkflowStepStatusMeta,
 } from "./forkWorkflows";
 
-export const ForkWorkflowSteps: React.FC<{
+type ForkWorkflowStepsProps = {
 	steps: readonly ForkWorkflowStep[];
-}> = ({ steps }) => (
+};
+
+export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
+	steps,
+}) => (
 	<ol aria-label="Workflow steps" className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
 		{steps.map((step) => (
 			<li key={step.chatId} className="flex min-w-0 flex-col gap-0.5">

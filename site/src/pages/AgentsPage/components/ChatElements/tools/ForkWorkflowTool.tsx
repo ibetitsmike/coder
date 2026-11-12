@@ -110,7 +110,7 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 				)}
 				{isResume && snapshot?.steps.length === 0 && (
 					<div className="mt-1.5 text-xs text-content-secondary">
-						Resumed run: reused steps show when the run is awaited.
+						This run resumed. Reused steps show when the run is awaited.
 					</div>
 				)}
 				{snapshot && snapshot.result !== undefined && (

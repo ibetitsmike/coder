@@ -47,12 +47,21 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
 
+	const header = (
+		<div className="text-xs font-medium text-content-secondary">{label}</div>
+	);
+	if (preview === null) {
+		return (
+			<section aria-label={label} className="mt-1.5 flex min-w-0 flex-col gap-0.5">
+				{header}
+				<pre className={textClassName}>{text}</pre>
+			</section>
+		);
+	}
 	return (
 		<section aria-label={label} className="mt-1.5 flex min-w-0 flex-col gap-0.5">
-			<div className="text-xs font-medium text-content-secondary">{label}</div>
-			{preview === null ? (
-				<pre className={textClassName}>{text}</pre>
-			) : expanded ? (
+			{header}
+			{expanded ? (
 				<ScrollArea
 					className="rounded-md border"
 					viewportClassName="max-h-96 p-2"
@@ -64,17 +73,15 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 			) : (
 				<pre className={textClassName}>{`${preview}…`}</pre>
 			)}
-			{preview !== null && (
-				<Button
-					variant="subtle"
-					size="xs"
-					className="w-fit px-0"
-					aria-expanded={expanded}
-					onClick={() => setExpanded((value) => !value)}
-				>
-					{expanded ? "Show less" : "Show more"}
-				</Button>
-			)}
+			<Button
+				variant="subtle"
+				size="xs"
+				className="w-fit px-0"
+				aria-expanded={expanded}
+				onClick={() => setExpanded((value) => !value)}
+			>
+				{expanded ? "Show less" : "Show more"}
+			</Button>
 		</section>
 	);
 };

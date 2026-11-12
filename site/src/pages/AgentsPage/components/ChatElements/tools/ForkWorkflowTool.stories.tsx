@@ -51,7 +51,7 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 	);
 };
 
-const runWorkflowArgs = {
+const mockRunWorkflowArgs = {
 	script: MockForkWorkflowScript,
 	args: MockForkWorkflowArgs,
 };
@@ -59,7 +59,7 @@ const runWorkflowArgs = {
 export const Started: Story = {
 	args: {
 		name: "run_workflow",
-		args: runWorkflowArgs,
+		args: mockRunWorkflowArgs,
 		result: MockForkWorkflowStartedResult,
 	},
 	play: expand,
@@ -69,7 +69,7 @@ export const Starting: Story = {
 	args: {
 		name: "run_workflow",
 		status: "running",
-		args: runWorkflowArgs,
+		args: mockRunWorkflowArgs,
 		result: undefined,
 	},
 };
@@ -116,6 +116,16 @@ export const NotFound: Story = {
 	args: {
 		result:
 			"The run is not found on this coderd replica, for example because coderd restarted.",
+		isError: true,
+	},
+	play: expand,
+};
+
+export const StartFailed: Story = {
+	args: {
+		name: "run_workflow",
+		args: { script: "def main(args):\n    return agent(" },
+		result: "compile script: workflow.star:2:18: got end of file, want )",
 		isError: true,
 	},
 	play: expand,
