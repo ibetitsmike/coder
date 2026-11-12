@@ -156,6 +156,17 @@ func TestSetPackSourcesReloads(t *testing.T) {
 	require.Len(t, catalog, 1)
 	require.Equal(t, PackOrigin{Manifest: manifest, File: manifest}, catalog[0].Pack)
 
+	m.mu.RLock()
+	before := m.servers["pack-srv"].client
+	m.mu.RUnlock()
+	m.SetPackSources([]PackSource{{ManifestPath: manifest, Dir: dir, Revision: "r2", Configs: []PackConfig{{Path: manifest, Inline: inline}}}})
+	require.Eventually(t, func() bool {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		entry, ok := m.servers["pack-srv"]
+		return ok && entry.client != before && entry.config.Pack.Revision == "r2"
+	}, testutil.WaitLong, testutil.IntervalFast, "a new pack revision restarts the pack's servers")
+
 	m.SetPackSources(nil)
 	awaitTools(ctx, t, m, func(tools []catalogTool) bool { return len(tools) == 0 })
 }
