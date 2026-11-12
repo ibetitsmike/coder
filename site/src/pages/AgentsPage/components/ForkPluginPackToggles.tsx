@@ -46,8 +46,8 @@ type ForkPluginPackTogglesViewProps = {
  * toggles through `onToggle`. A switch is on when the target or the chat's
  * project enables the pack and the chat does not turn it off. The other lists
  * only set each switch's state, so a pack missing from `installed` is not
- * shown. A subagent's switches ignore the packs its ancestor chats enable or
- * turn off.
+ * shown. A subagent's switches show its root chat's project packs but ignore
+ * the packs its ancestor chats enable or turn off.
  */
 export const ForkPluginPackTogglesView: React.FC<
 	ForkPluginPackTogglesViewProps
