@@ -308,7 +308,7 @@ const BadgeDismissButton: React.FC<{
 		type="button"
 		onClick={onClick}
 		disabled={isDisabled}
-		className="group -mx-1 -my-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-content-secondary focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50"
+		className="group -mx-1 -my-1 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full bg-transparent p-0 text-content-secondary focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50"
 		aria-label={ariaLabel}
 	>
 		<span className="inline-flex size-3.5 items-center justify-center rounded-full transition-colors group-hover:bg-surface-tertiary group-hover:text-content-primary group-focus-visible:bg-surface-tertiary group-focus-visible:text-content-primary">
@@ -344,7 +344,7 @@ const MCPGroupBadge: React.FC<MCPGroupBadgeProps> = ({
 					aria-label={label}
 					className={cn(
 						className,
-						"cursor-pointer border-0 transition-colors hover:bg-surface-tertiary hover:text-content-primary",
+						"cursor-pointer transition-colors hover:bg-surface-tertiary hover:text-content-primary",
 						pillFocusRingClasses,
 					)}
 				>
@@ -1402,8 +1402,8 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 			{queuedMessages.length > 0 && (
 				<QueuedMessagesList
 					messages={queuedMessages}
-					onDelete={(id) => onDeleteQueuedMessage?.(id)}
-					onPromote={(id) => onPromoteQueuedMessage?.(id)}
+					onDelete={onDeleteQueuedMessage}
+					onPromote={onPromoteQueuedMessage}
 					onEdit={onEditQueuedMessage}
 					onEndEdit={onEndQueuedMessageEdit}
 					isChatPaused={isChatPaused}
@@ -1445,7 +1445,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 					isDragging && "ring-2 ring-content-link/40",
 					(isEditingMessage || warning) &&
 						"shadow-[0_0_0_2px_hsla(var(--border-warning),0.6)]",
-					isReadOnlyView && "border border-solid border-border",
+					isReadOnlyView && "border",
 				)}
 				onKeyDown={handleComposerKeyDown}
 				onDragOver={onAttach ? handleDragOver : undefined}
@@ -1462,7 +1462,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 				{warning && (
 					<div
 						id={warningId}
-						className="flex items-start gap-1.5 border-b border-border/70 px-3 py-1.5 text-xs font-medium text-content-warning"
+						className="flex items-start gap-1.5 border-b border-border/70 px-3 py-1.5 text-xs text-content-warning"
 					>
 						<TriangleAlertIcon className="mt-px size-3.5 shrink-0" />
 						{warning}
@@ -1470,7 +1470,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 				)}
 				{isEditingMessage && (
 					<div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
-						<span className="flex items-center gap-1.5 text-xs font-medium text-content-warning">
+						<span className="flex items-center gap-1.5 text-xs text-content-warning">
 							<PencilIcon className="size-3.5" />
 							{editingKind === "queued"
 								? "Editing a queued message. It is not sent until you save or cancel."
@@ -1527,7 +1527,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 						onPaste={resetPromptCycle}
 						aria-label="Chat message"
 						aria-describedby={warning ? warningId : undefined}
-						className="min-h-[60px] sm:min-h-24 w-full resize-none bg-transparent px-3 py-2 font-sans text-[13px] leading-relaxed text-content-primary placeholder:text-content-secondary disabled:cursor-not-allowed disabled:opacity-70"
+						className="min-h-15 sm:min-h-24 w-full resize-none bg-transparent px-3 py-2 font-sans text-[13px] leading-relaxed text-content-primary placeholder:text-content-secondary disabled:cursor-not-allowed disabled:opacity-70"
 						placeholder={placeholder}
 						initialValue={initialValue}
 						initialEditorState={initialEditorState}
@@ -1624,7 +1624,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 							<PopoverContent
 								side="bottom"
 								align="start"
-								className="mobile-full-width-dropdown mobile-full-width-dropdown-bottom w-auto min-w-[200px] p-1"
+								className="mobile-full-width-dropdown mobile-full-width-dropdown-bottom w-auto min-w-50 p-1"
 							>
 								{plusMenuView !== "main" ? (
 									plusMenuSubmenuPanel
@@ -1761,7 +1761,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 						{isModelCatalogLoading ? (
 							<Skeleton className="h-6 w-24 rounded" />
 						) : isReadOnlyView ? (
-							<span className="inline-flex min-w-0 shrink items-center gap-1 rounded-full bg-surface-secondary px-2 py-0.5 text-xs font-medium text-content-secondary">
+							<span className="inline-flex min-w-0 shrink items-center gap-1 rounded-full bg-surface-secondary px-2 py-0.5 text-xs text-content-secondary">
 								{readOnlyModel && (
 									<ProviderIcon
 										provider={readOnlyModel.provider}
@@ -1864,7 +1864,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 									<button
 										type="button"
 										className={cn(
-											"inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border-0 bg-surface-secondary px-2 py-0.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-tertiary hover:text-content-primary",
+											"inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-surface-secondary px-2 py-0.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-tertiary hover:text-content-primary",
 											pillFocusRingClasses,
 											overflowCount === 0 && "invisible",
 										)}
@@ -1948,6 +1948,9 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 									usage={contextUsage}
 									onRefreshContext={onRefreshContext}
 									isRefreshingContext={isRefreshingContext}
+									onManageServers={
+										isReadOnlyView ? undefined : handleManageConnections
+									}
 								/>
 							</div>
 						)}
@@ -2081,7 +2084,7 @@ const WorkspacePickerList: React.FC<WorkspacePickerListProps> = ({
 	onSelect,
 }) => {
 	return (
-		<Command loop>
+		<Command loop label="Search workspaces">
 			<CommandInput placeholder="Search workspaces..." className="text-xs" />
 			<CommandList>
 				<CommandEmpty className="text-xs">No workspaces found</CommandEmpty>

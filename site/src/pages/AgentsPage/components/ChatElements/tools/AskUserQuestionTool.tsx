@@ -491,10 +491,8 @@ export const AskUserQuestionForm: React.FC<AskUserQuestionFormProps> = ({
 			)}
 
 			{showSubmittedAnswer && hasSubmittedResponse && (
-				<div className="mt-4 rounded-md border border-solid border-border bg-surface-secondary px-3 py-2">
-					<p className="text-xs font-medium text-content-secondary">
-						Submitted answer
-					</p>
+				<div className="mt-4 rounded-md border bg-surface-secondary px-3 py-2">
+					<p className="text-xs text-content-secondary">Submitted answer</p>
 					<p className="mt-1 whitespace-pre-wrap text-[13px] text-content-primary">
 						{displayedSubmittedResponseText || "No answer recorded."}
 					</p>
