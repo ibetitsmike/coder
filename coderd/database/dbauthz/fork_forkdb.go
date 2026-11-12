@@ -339,7 +339,9 @@ func (f *forkQuerier) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID
 		return nil, err
 	}
 	return f.db.GetWorkflowStepsByRun(ctx, runID)
-} // GetWorkflowStep authorizes through the step's run's chat.
+}
+
+// GetWorkflowStep authorizes through the step's run's chat.
 func (f *forkQuerier) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
 	step, err := f.db.GetWorkflowStep(ctx, id)
 	if err != nil {
@@ -833,7 +835,50 @@ func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateW
 		return err
 	}
 	return f.db.UpdateWorkflowStep(ctx, arg)
-} // UpsertChatDescendantQuestion authorizes as an update of the owning chat.
+}
+
+// GetWorkflowRunsByChat authorizes through the owning chat.
+func (f *forkQuerier) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetWorkflowRunsByChat(ctx, arg)
+}
+
+// GetWorkflowRunStepCountsByChat authorizes through the owning chat.
+func (f *forkQuerier) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetWorkflowRunStepCountsByChatRow, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.GetWorkflowRunStepCountsByChat(ctx, chatID)
+}
+
+// FailOpenWorkflowStepsOfRun authorizes as an update of the run's chat: the
+// API stop of a run fails its open steps, like the engine's own stop does.
+func (f *forkQuerier) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.FailOpenWorkflowStepsOfRunParams) (int64, error) {
+	run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+		return 0, err
+	}
+	return f.db.FailOpenWorkflowStepsOfRun(ctx, arg)
+}
+
+// UpdateWorkflowRunStatus authorizes as an update of the run's chat.
+func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
+	run, err := f.db.GetWorkflowRun(ctx, arg.ID)
+	if err != nil {
+		return err
+	}
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+		return err
+	}
+	return f.db.UpdateWorkflowRunStatus(ctx, arg)
+}
+
+// UpsertChatDescendantQuestion authorizes as an update of the owning chat.
 func (f *forkQuerier) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
 	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
 	if err != nil {

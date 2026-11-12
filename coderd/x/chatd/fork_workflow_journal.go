@@ -151,7 +151,21 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 	})
 }
 
-// updateStep journals a step transition, best effort like updateRunStatus.
+// failOpenSteps journals the open steps of a run that is being stopped as
+// failed. The caller interrupts each child chat first, so the row state and
+// the child state land together.
+func (j workflowJournal) failOpenSteps(ctx context.Context, runID uuid.UUID) (int64, error) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return fdb.FailOpenWorkflowStepsOfRun(journalCtx(ctx), forkdb.FailOpenWorkflowStepsOfRunParams{
+		RunID:   runID,
+		ErrText: workflowStopError,
+	})
+}
+
+// updateStep journals a step transition, best effort like updateRunStatus.// updateStep journals a step transition, best effort like updateRunStatus.
 func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 	fdb, err := j.store(ctx)
 	if err != nil {
@@ -223,6 +237,9 @@ func (p *Server) resumeWorkflowRun(
 	// resume leaves the row resumable.
 	p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusRunning, "", nil)
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), chat) //nolint:gocritic // see startWorkflowRun
+	run.mu.Lock()
+	run.cancel = stop
+	run.mu.Unlock()
 	err = p.goInflight(func() {
 		defer stop()
 		run.finish(runCtx, run.execute(runCtx))
