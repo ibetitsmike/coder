@@ -760,9 +760,9 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	}
 	r.mu.Unlock()
 	if journaled != nil {
-		if journaled.status == stepStatusReported || journaled.status == stepStatusFailed {
-			return journaled, nil
-		}
+		// The step came from the journal: whether it finished before the
+		// restart or is still open, the script does not run it again, so
+		// the await result reports it as reused.
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
