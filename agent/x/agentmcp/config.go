@@ -18,6 +18,9 @@ type ServerConfig struct {
 	Env       map[string]string `json:"env"`
 	URL       string            `json:"url"`
 	Headers   map[string]string `json:"headers"`
+
+	// Pack is set for a server a plugin pack declares (fork_pack_servers.go).
+	Pack PackOrigin `json:"-"`
 }
 
 // mcpConfigFile mirrors the on-disk .mcp.json schema.
@@ -48,16 +51,25 @@ func ParseConfig(path string) ([]ServerConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, xerrors.Errorf("parse mcp config %q: %w", path, err)
 	}
+	return parseServerEntries(cfg.MCPServers, path, nil)
+}
 
-	if len(cfg.MCPServers) == 0 {
+// parseServerEntries validates the entries of an mcpServers map declared in
+// path and returns them sorted by name. prepare, when non-nil, rewrites each
+// entry before validation and before ${VAR} references in env values expand.
+func parseServerEntries(entries map[string]json.RawMessage, path string, prepare func(*mcpServerEntry)) ([]ServerConfig, error) {
+	if len(entries) == 0 {
 		return []ServerConfig{}, nil
 	}
 
-	servers := make([]ServerConfig, 0, len(cfg.MCPServers))
-	for name, raw := range cfg.MCPServers {
+	servers := make([]ServerConfig, 0, len(entries))
+	for name, raw := range entries {
 		var entry mcpServerEntry
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			return nil, xerrors.Errorf("parse server %q in %q: %w", name, path, err)
+		}
+		if prepare != nil {
+			prepare(&entry)
 		}
 
 		if strings.Contains(name, ToolNameSep) || strings.HasPrefix(name, "_") || strings.HasSuffix(name, "_") {

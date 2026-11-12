@@ -24,6 +24,11 @@ type MCPServerStatus struct {
 	// as the server reported them (no server prefix), when
 	// Connected; empty otherwise.
 	Tools []MCPTool
+	// PackManifest and PackSource are set for a server a plugin pack
+	// declares: the pack's manifest and the file declaring the server
+	// (fork_pack_mcp.go).
+	PackManifest string
+	PackSource   string
 }
 
 // buildMCPServerResources turns a per-server MCP snapshot into one
@@ -65,7 +70,8 @@ func buildMCPServerResources(servers []MCPServerStatus) []Resource {
 			resources = append(resources, Resource{
 				ID:          resourceID(KindMCPServer, s.Name),
 				Kind:        KindMCPServer,
-				Source:      s.Name,
+				Source:      s.resourceSource(),
+				SourcePath:  s.PackManifest,
 				Name:        s.Name,
 				Status:      StatusUnreadable,
 				Error:       errMsg,
@@ -83,7 +89,8 @@ func buildMCPServerResources(servers []MCPServerStatus) []Resource {
 		resources = append(resources, Resource{
 			ID:          resourceID(KindMCPServer, s.Name),
 			Kind:        KindMCPServer,
-			Source:      s.Name,
+			Source:      s.resourceSource(),
+			SourcePath:  s.PackManifest,
 			Name:        s.Name,
 			Status:      StatusOK,
 			ContentHash: hashMCPServer(s.Name, serverTools),

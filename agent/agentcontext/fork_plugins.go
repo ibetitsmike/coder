@@ -82,6 +82,7 @@ type pluginManifest struct {
 	Agents         manifestPaths        `json:"agents"`
 	DefaultEnabled manifestFlag         `json:"defaultEnabled"`
 	Dependencies   manifestDependencies `json:"dependencies"`
+	MCPServers     manifestMCPServers   `json:"mcpServers"`
 }
 
 // manifestPaths is a manifest path declaration: one string or an array of
@@ -247,17 +248,20 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 
 // claudePathFieldsTyped reports whether the skills and agents fields of a
 // Claude manifest or marketplace entry are absent, null, a string, or an
-// array of strings. Claude Code fails a plugin whose field has any other
-// type, so the pack must not load with default containers in its place.
+// array of strings, and its mcpServers field is absent, null, a string, an
+// object, or an array of strings and objects. Claude Code fails a plugin
+// whose field has any other type, so the pack must not load with defaults in
+// its place.
 func claudePathFieldsTyped(data []byte) bool {
 	var fields struct {
-		Skills json.RawMessage `json:"skills"`
-		Agents json.RawMessage `json:"agents"`
+		Skills     json.RawMessage `json:"skills"`
+		Agents     json.RawMessage `json:"agents"`
+		MCPServers json.RawMessage `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return false
 	}
-	return isPathDeclaration(fields.Skills) && isPathDeclaration(fields.Agents)
+	return isPathDeclaration(fields.Skills) && isPathDeclaration(fields.Agents) && isMCPServersDeclaration(fields.MCPServers)
 }
 
 func isPathDeclaration(raw json.RawMessage) bool {
@@ -1743,6 +1747,9 @@ func newPackWatchPaths() packWatchPaths {
 
 // relevant reports whether a write to path can change the pack rows.
 func (p packWatchPaths) relevant(path string) bool {
+	if filepath.Base(path) == packCommitMarkerName {
+		return true
+	}
 	if filepath.Ext(path) == agentDefinitionExt {
 		if _, ok := p.agentDirs[filepath.Dir(path)]; ok {
 			return true
@@ -1800,7 +1807,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 			out[dir] = struct{}{}
 			watch.agentDirs[dir] = struct{}{}
 		}
-		for _, rel := range pack.declaredContainerRels() {
+		for _, rel := range append(pack.declaredContainerRels(), pack.mcpFileRels()...) {
 			if ancestor := existingAncestor(filepath.Join(pack.Dir, rel)); ancestor != "" {
 				out[ancestor] = struct{}{}
 			}

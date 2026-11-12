@@ -202,8 +202,27 @@ func (files packPathSet) defines(r database.ChatContextResource, name string) bo
 	if !files[packRelativePath(r.SourcePath, name)] {
 		return false
 	}
-	source := packRelativePath(r.Source, name)
+	source := packRelativePath(packRowSourceFile(r), name)
 	return source != "" && (files[source] || files[path.Join(source, "SKILL.md")])
+}
+
+// packMCPServerSep joins a pack MCP server's declaring file and name in its
+// row source. Keep in sync with agent/agentcontext/fork_pack_mcp.go.
+const packMCPServerSep = "#"
+
+// packRowSourceFile returns the file a pack row's source names. An MCP
+// server's source is its declaring file (a config file, or the manifest for
+// inline servers) and its name, because one file declares several servers
+// and a source is unique per agent. Splitting at the last separator fails
+// closed for a server name that holds one.
+func packRowSourceFile(r database.ChatContextResource) string {
+	if r.BodyKind != database.WorkspaceAgentContextBodyKindMcpServer {
+		return r.Source
+	}
+	if i := strings.LastIndex(r.Source, packMCPServerSep); i >= 0 {
+		return r.Source[:i]
+	}
+	return r.Source
 }
 
 // packCommitKey identifies the files of a pack at one commit.

@@ -4,21 +4,26 @@ package chatd
 // context resources.
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 func packRow(source, sourcePath string) database.ChatContextResource {
@@ -108,9 +113,9 @@ func TestFilterPackResources(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
 				PackID:        pack.ID,
-				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md", "skills/assets-only/run.sh", "agents/pack-reviewer.md"},
-				Contents:      [][]byte{[]byte("{}"), []byte("skill"), []byte("script"), []byte("agent")},
-				ContentHashes: []string{"hash", "hash", "hash", "hash"},
+				Paths:         []string{".claude-plugin/plugin.json", "skills/review-pr/SKILL.md", "skills/assets-only/run.sh", "agents/pack-reviewer.md", ".mcp.json"},
+				Contents:      [][]byte{[]byte("{}"), []byte("skill"), []byte("script"), []byte("agent"), []byte("{}")},
+				ContentHashes: []string{"hash", "hash", "hash", "hash", "hash"},
 			}))
 			return pack.ID
 		}
@@ -157,6 +162,20 @@ func TestFilterPackResources(t *testing.T) {
 		}
 		require.Equal(t, enabled, sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), stale...))),
 			"a row whose SKILL.md or manifest is not in the pack's current commit is dropped")
+		mcpRow := func(name, source string) database.ChatContextResource {
+			row := packRow("/home/u/.coder/plugins/"+name+"/"+source, "/home/u/.coder/plugins/"+name+"/.claude-plugin/plugin.json")
+			row.BodyKind = database.WorkspaceAgentContextBodyKindMcpServer
+			return row
+		}
+		mcpRows := []database.ChatContextResource{
+			mcpRow("chat-pack", ".mcp.json#deploy"),
+			mcpRow("chat-pack", ".claude-plugin/plugin.json#inline"),
+			mcpRow("chat-pack", "removed.json#gone"),
+			mcpRow("disabled-pack", ".mcp.json#deploy"),
+		}
+		require.Equal(t, append(slices.Clone(enabled), mcpRows[0].Source, mcpRows[1].Source),
+			sources(server.filterPackResources(ctx, root, append(slices.Clone(resources), mcpRows...))),
+			"an enabled pack keeps the MCP servers its commit declares, and a disabled pack's are dropped")
 		agentBody, err := protojson.Marshal(&agentproto.SubagentBody{
 			Definition: []byte(agentDefinitionMarkdown("name: pack-reviewer\ndescription: Test agent.", "Body.")),
 			Name:       "pack-reviewer",
@@ -222,4 +241,45 @@ func TestAgentRowDefinitionsGatesPackAgents(t *testing.T) {
 		"with fork-plugin-packs off the catalog omits pack agents")
 	require.ElementsMatch(t, []string{"reviewer", "comment-sicko"}, names(codersdk.Experiments{codersdk.ExperimentForkPluginPacks}),
 		"with fork-plugin-packs on the catalog lists pack agents")
+}
+
+func TestPackRowSourceFile(t *testing.T) {
+	t.Parallel()
+	mcp := func(source string) database.ChatContextResource {
+		return database.ChatContextResource{Source: source, BodyKind: database.WorkspaceAgentContextBodyKindMcpServer}
+	}
+	require.Equal(t, "/p/.mcp.json", packRowSourceFile(mcp("/p/.mcp.json#deploy")))
+	require.Equal(t, "/p/a#b.json", packRowSourceFile(mcp("/p/a#b.json#deploy")))
+	require.Equal(t, "deploy", packRowSourceFile(mcp("deploy")))
+	require.Equal(t, "/p/skills/a#b", packRowSourceFile(database.ChatContextResource{
+		Source:   "/p/skills/a#b",
+		BodyKind: database.WorkspaceAgentContextBodyKindSkill,
+	}), "only MCP server sources carry a server name")
+}
+
+func TestPinnedWorkspaceMCPToolsGatesPackServers(t *testing.T) {
+	t.Parallel()
+	server := func(t *testing.T, chatID uuid.UUID, resources ...database.ChatContextResource) *Server {
+		db := dbmock.NewMockStore(gomock.NewController(t))
+		db.EXPECT().ListChatContextResourcesByChatID(gomock.Any(), chatID).Return(resources, nil)
+		return newPinServer(t, db)
+	}
+	getConn := func(context.Context) (workspacesdk.AgentConn, error) {
+		return nil, xerrors.New("not dialed in this test")
+	}
+	packServer := mcpServerResource(t, "/home/u/.coder/plugins/chat-pack/.mcp.json#deploy", &agentproto.MCPServerBody{
+		ServerName: "deploy",
+		Tools:      []*agentproto.MCPTool{{Name: "run"}},
+	}, database.WorkspaceAgentContextResourceStatusOk)
+	packServer.SourcePath = "/home/u/.coder/plugins/chat-pack/.claude-plugin/plugin.json"
+	workspaceServer := mcpServerResource(t, "github", &agentproto.MCPServerBody{
+		ServerName: "github",
+		Tools:      []*agentproto.MCPTool{{Name: "search"}},
+	}, database.WorkspaceAgentContextResourceStatusOk)
+
+	chatID := uuid.New()
+	tools, err := server(t, chatID, packServer, workspaceServer).pinnedWorkspaceMCPTools(t.Context(), database.Chat{ID: chatID}, getConn)
+	require.NoError(t, err)
+	require.Len(t, tools, 1, "with fork-plugin-packs off a pack server's tools are dropped")
+	require.Equal(t, "github__search", tools[0].Info().Name)
 }
