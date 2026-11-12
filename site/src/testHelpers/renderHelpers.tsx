@@ -12,7 +12,10 @@ import {
 import { AppProviders } from "#/App";
 import { preferenceSettingsKey } from "#/api/queries/users";
 import type * as TypesGen from "#/api/typesGenerated";
-import { TooltipProvider } from "#/components/Tooltip/Tooltip";
+import {
+	TOOLTIP_DELAY_DURATION,
+	TooltipProvider,
+} from "#/components/Tooltip/Tooltip";
 import { RequireAuth } from "#/contexts/auth/RequireAuth";
 import type { ProxyProvider } from "#/contexts/ProxyContext";
 import { ThemeOverride } from "#/contexts/ThemeProvider";
@@ -255,7 +258,9 @@ export const renderComponent = (component: React.ReactNode) => {
 	return testingLibraryRender(component, {
 		wrapper: ({ children }) => (
 			<ThemeOverride theme={themes[DEFAULT_THEME]}>
-				<TooltipProvider delayDuration={100}>{children}</TooltipProvider>
+				<TooltipProvider delayDuration={TOOLTIP_DELAY_DURATION}>
+					{children}
+				</TooltipProvider>
 			</ThemeOverride>
 		),
 	});
