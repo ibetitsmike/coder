@@ -31,6 +31,10 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 		queryFn: () => getEnabledPluginPacks(target),
 	});
 
+/**
+ * A request to switch a plugin pack. `pack` is the snapshot used to reconcile
+ * the enabled-pack cache; `enabled` is the desired state.
+ */
 export type PluginPackToggle = {
 	pack: ForkEnabledPluginPack;
 	enabled: boolean;
