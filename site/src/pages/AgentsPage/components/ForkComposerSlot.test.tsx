@@ -6,7 +6,6 @@ import { API } from "#/api/api";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
-import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
@@ -368,9 +367,10 @@ describe("ForkComposerSlot plugin packs", () => {
 			forkPluginPackEnablementApi,
 			"getEnabledPluginPacks",
 		).mockResolvedValue([MockForkPluginPackWithoutPath]);
-		vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-			MockForkPluginPack,
-		]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		).mockResolvedValue([MockForkPluginPack]);
 		return vi
 			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
 			.mockResolvedValue();
