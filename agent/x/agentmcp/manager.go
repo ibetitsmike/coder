@@ -115,6 +115,10 @@ type Manager struct {
 	// dual-agent workspaces.
 	lastPaths []string
 
+	// packSources holds the plugin pack MCP declarations
+	// (fork_pack_servers.go), reloaded next to lastPaths.
+	packSources []PackSource
+
 	// watcher fires a debounced Reload when any watched config
 	// file is created, written, removed, or renamed. It is armed
 	// lazily on the first Reload call so tests that never call
@@ -311,7 +315,7 @@ func (m *Manager) armWatcher(paths []string) {
 	if w == nil || closed {
 		return
 	}
-	w.Sync(paths)
+	w.Sync(m.withPackFiles(paths))
 }
 
 // handleWatchedConfigChange is invoked by the watcher on a
@@ -393,6 +397,7 @@ func (m *Manager) markFirstSyncSettled() {
 // since the last reload by comparing os.Stat results against
 // the stored snapshot.
 func (m *Manager) SnapshotChanged(paths []string) bool {
+	paths = m.withPackFiles(paths)
 	seen := make(map[string]struct{}, len(paths))
 	unique := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -515,7 +520,8 @@ func (m *Manager) parseAndDedup(ctx context.Context, mcpConfigFiles []string) ([
 	// on the next check, and triggers a re-read. False positives
 	// (extra reload) are safe; false negatives (missed change)
 	// are not.
-	snap := captureSnapshot(mcpConfigFiles)
+	packs := m.currentPackSources()
+	snap := captureSnapshot(withPackFiles(mcpConfigFiles, packs))
 
 	var allConfigs []ServerConfig
 	for _, configPath := range mcpConfigFiles {
@@ -532,6 +538,7 @@ func (m *Manager) parseAndDedup(ctx context.Context, mcpConfigFiles []string) ([
 		}
 		allConfigs = append(allConfigs, configs...)
 	}
+	allConfigs = append(allConfigs, m.parsePackServers(ctx, packs)...)
 
 	// Deduplicate by server name; first occurrence wins.
 	seen := make(map[string]struct{})
@@ -808,7 +815,7 @@ func (m *Manager) refreshCatalog(ctx context.Context, wanted map[string]ServerCo
 	// connected surfaces as an unreadable entry rather than vanishing.
 	catalog := make([]ServerStatus, 0, len(wanted))
 	for name := range wanted {
-		st := ServerStatus{Name: name}
+		st := ServerStatus{Name: name, Pack: wanted[name].Pack}
 		switch res, ok := results[name]; {
 		case ok && res.err == nil:
 			st.Connected = true
@@ -1077,6 +1084,9 @@ type ServerStatus struct {
 	Connected bool
 	Err       string
 	Tools     []ToolInfo
+
+	// Pack is set for a server a plugin pack declares.
+	Pack PackOrigin
 }
 
 // ToolInfo is one tool exposed by an MCP server. InputSchema is the
