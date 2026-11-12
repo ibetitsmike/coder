@@ -26,7 +26,7 @@ type ChatWorkflowRunBase = {
 	readonly finished_at?: string;
 };
 
-export type ChatWorkflowRunStepCounts = {
+type ChatWorkflowRunStepCounts = {
 	readonly total: number;
 	readonly running: number;
 	readonly done: number;

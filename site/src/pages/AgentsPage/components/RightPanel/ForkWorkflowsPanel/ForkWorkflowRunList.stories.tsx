@@ -1,42 +1,44 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, spyOn } from "storybook/test";
+import type { ChatWorkflowRun } from "#/api/forkWorkflows";
 import {
 	MockChatWorkflowRun,
 	MockForkWorkflowNow,
 } from "#/testHelpers/forkWorkflows";
 import { ForkWorkflowRunList } from "./ForkWorkflowRunList";
 
+const mockRunningRun: ChatWorkflowRun = {
+	...MockChatWorkflowRun,
+	id: "run-running",
+	status: "running",
+	title: "",
+	result: null,
+	finished_at: undefined,
+	created_at: "2026-11-12T10:04:10Z",
+	step_counts: { total: 3, running: 2, done: 1, failed: 0 },
+};
+
+const mockFailedRun: ChatWorkflowRun = {
+	...MockChatWorkflowRun,
+	id: "run-failed",
+	status: "failed",
+	title: "Fix flaky tests",
+	step_counts: { total: 2, running: 0, done: 1, failed: 1 },
+};
+
+const mockInterruptedRun: ChatWorkflowRun = {
+	...MockChatWorkflowRun,
+	id: "run-interrupted",
+	status: "interrupted",
+	title: "Migrate the handlers",
+	finished_at: undefined,
+};
+
 const meta: Meta<typeof ForkWorkflowRunList> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunList",
 	component: ForkWorkflowRunList,
 	args: {
-		runs: [
-			{
-				...MockChatWorkflowRun,
-				id: "run-running",
-				status: "running",
-				title: "",
-				result: null,
-				finished_at: undefined,
-				created_at: "2026-11-12T10:04:10Z",
-				step_counts: { total: 3, running: 2, done: 1, failed: 0 },
-			},
-			MockChatWorkflowRun,
-			{
-				...MockChatWorkflowRun,
-				id: "run-failed",
-				status: "failed",
-				title: "Fix flaky tests",
-				step_counts: { total: 2, running: 0, done: 1, failed: 1 },
-			},
-			{
-				...MockChatWorkflowRun,
-				id: "run-interrupted",
-				status: "interrupted",
-				title: "Migrate the handlers",
-				finished_at: undefined,
-			},
-		],
+		runs: [mockRunningRun, MockChatWorkflowRun, mockFailedRun, mockInterruptedRun],
 		error: null,
 		onSelectRun: fn(),
 	},

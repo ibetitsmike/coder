@@ -8,6 +8,7 @@ import { getErrorMessage } from "#/api/errors";
 import type { ChatWorkflowRunDetail } from "#/api/forkWorkflows";
 import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
 import { Alert } from "#/components/Alert/Alert";
+import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
 import { Spinner } from "#/components/Spinner/Spinner";
 import { useTime } from "#/hooks/useTime";
@@ -41,20 +42,29 @@ export const ForkWorkflowRunDetail: React.FC<ForkWorkflowRunDetailProps> = ({
 		...runOptions,
 		refetchInterval: isVisible ? runOptions.refetchInterval : false,
 	});
+	return (
+		<ForkWorkflowRunDetailView
+			run={runQuery.data}
+			error={runQuery.error}
+			onBack={onBack}
+		/>
+	);
+};
 
+type ForkWorkflowRunDetailViewProps = {
+	run: ChatWorkflowRunDetail | undefined;
+	error: unknown;
+	onBack: () => void;
+};
+
+export const ForkWorkflowRunDetailView: React.FC<
+	ForkWorkflowRunDetailViewProps
+> = ({ run, error, onBack }) => {
 	let content: React.ReactNode;
-	if (runQuery.data) {
-		content = (
-			<ForkWorkflowRunDetailView run={runQuery.data} error={runQuery.error} />
-		);
-	} else if (runQuery.error) {
-		content = (
-			<Alert severity="error" prominent>
-				<p className="text-sm text-content-primary">
-					{getErrorMessage(runQuery.error, "Unable to load the workflow run.")}
-				</p>
-			</Alert>
-		);
+	if (run) {
+		content = <ForkWorkflowRunSummary run={run} error={error} />;
+	} else if (error) {
+		content = <ErrorAlert error={error} showDebugDetail={false} />;
 	} else {
 		content = (
 			<div className="flex items-center gap-2 text-sm text-content-secondary">
@@ -63,9 +73,8 @@ export const ForkWorkflowRunDetail: React.FC<ForkWorkflowRunDetailProps> = ({
 			</div>
 		);
 	}
-
 	return (
-		<div className="flex min-w-0 flex-col gap-2 p-4">
+		<div className="flex flex-col gap-2 p-4">
 			<Button variant="subtle" size="sm" className="w-fit px-1" onClick={onBack}>
 				<ChevronLeftIcon />
 				All runs
@@ -75,14 +84,15 @@ export const ForkWorkflowRunDetail: React.FC<ForkWorkflowRunDetailProps> = ({
 	);
 };
 
-type ForkWorkflowRunDetailViewProps = {
+type ForkWorkflowRunSummaryProps = {
 	run: ChatWorkflowRunDetail;
 	error: unknown;
 };
 
-export const ForkWorkflowRunDetailView: React.FC<
-	ForkWorkflowRunDetailViewProps
-> = ({ run, error }) => {
+const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
+	run,
+	error,
+}) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
 	const steps = run.steps
@@ -121,7 +131,7 @@ export const ForkWorkflowRunDetailView: React.FC<
 				].join(" · ")}
 			</div>
 			<div className="mt-1 font-mono text-xs text-content-secondary">
-				{`Run ${run.id}`}
+				Run {run.id}
 			</div>
 			{run.status === "interrupted" && (
 				<p className="m-0 mt-1.5 text-xs text-content-secondary">

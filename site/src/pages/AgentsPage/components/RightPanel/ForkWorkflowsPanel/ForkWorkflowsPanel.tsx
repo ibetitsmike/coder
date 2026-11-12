@@ -28,7 +28,7 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 			viewportClassName="size-full [&>div]:block!"
 			scrollBarClassName="w-1.5"
 		>
-			<div className="min-h-full w-full min-w-0 overflow-x-hidden">
+			<div className="min-h-full w-full overflow-x-hidden">
 				{selectedRunId ? (
 					<ForkWorkflowRunDetail
 						chatId={chatId}

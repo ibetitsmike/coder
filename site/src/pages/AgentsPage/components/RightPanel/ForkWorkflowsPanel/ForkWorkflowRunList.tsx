@@ -5,6 +5,7 @@ import type React from "react";
 import { getErrorMessage } from "#/api/errors";
 import type { ChatWorkflowRun } from "#/api/forkWorkflows";
 import { Alert } from "#/components/Alert/Alert";
+import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Spinner } from "#/components/Spinner/Spinner";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
@@ -34,11 +35,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	if (!runs) {
 		return error ? (
 			<div className="p-4">
-				<Alert severity="error" prominent>
-					<p className="text-sm text-content-primary">
-						{getErrorMessage(error, "Unable to load workflow runs.")}
-					</p>
-				</Alert>
+				<ErrorAlert error={error} showDebugDetail={false} />
 			</div>
 		) : (
 			<div className="flex items-center gap-2 p-4 text-sm text-content-secondary">
@@ -59,17 +56,12 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					</p>
 				</Alert>
 			)}
-			{runs.length === 0 ? (
-				<p className="m-0 text-sm text-content-secondary">
-					No workflow runs in this chat yet.
-				</p>
-			) : (
-				<ul aria-label="Workflow runs" className="m-0 flex list-none flex-col gap-1 p-0">
+			<ul aria-label="Workflow runs" className="m-0 flex list-none flex-col gap-1 p-0">
 					{runs.map((run) => (
 						<li key={run.id}>
 							<button
 								type="button"
-								className="flex w-full min-w-0 cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
+								className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
 								onClick={() => onSelectRun(run.id)}
 							>
 								<span className="flex w-full min-w-0 items-center gap-1.5">
@@ -98,7 +90,6 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 						</li>
 					))}
 				</ul>
-			)}
 		</div>
 	);
 };
