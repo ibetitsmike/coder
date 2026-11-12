@@ -147,7 +147,10 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 	const deletePack = (pack: ForkPluginPack) => {
 		deleteMutation.mutate(pack.id, {
 			onSettled: (_data, error) => {
-				if (error && !isPluginPackAbsentFromCache(queryClient, organization.id, pack.id)) {
+				if (
+					error &&
+					!isPluginPackAbsentFromCache(queryClient, organization.id, pack.id)
+				) {
 					return;
 				}
 
