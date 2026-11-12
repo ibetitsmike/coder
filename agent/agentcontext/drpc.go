@@ -2,6 +2,7 @@ package agentcontext
 
 import (
 	"context"
+	"slices"
 
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -49,6 +50,7 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		Accepted:             resp.GetAccepted(),
 		ForkPluginPacks:      resp.GetForkPluginPacks(),
 		ForkAgentDefinitions: resp.GetForkAgentDefinitions(),
+		ForkGlobRules:        resp.GetForkGlobRules(),
 	}, nil
 }
 
@@ -96,6 +98,7 @@ func setResourceBody(entry *agentproto.ContextResource, r Resource) {
 		entry.Body = &agentproto.ContextResource_InstructionFile{
 			InstructionFile: &agentproto.InstructionFileBody{
 				Content: append([]byte(nil), r.Payload...),
+				Globs:   slices.Clone(r.Globs),
 			},
 		}
 	case KindSkill:

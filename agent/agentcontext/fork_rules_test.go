@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -260,6 +261,118 @@ func TestWatcher_Rules(t *testing.T) {
 				_ = tt.change(dir)
 				return fires.Load() >= 1
 			}, testutil.WaitShort, testutil.IntervalFast, "expected fire after %s", tt.name)
+		})
+	}
+}
+
+func globRulesOn() bool { return true }
+
+func globRule(resources []agentcontext.Resource) *agentcontext.Resource {
+	for i := range resources {
+		if strings.HasSuffix(resources[i].Source, filepath.Join(".cursor", "rules", "ts.mdc")) {
+			return &resources[i]
+		}
+	}
+	return nil
+}
+
+func TestResolver_GlobRulesAdvertisedArePushed(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "rules")
+	mustWriteFile(t, filepath.Join(dir, "ts.mdc"), "---\nglobs: \"**/*.ts\"\n---\nTS rules")
+
+	snap := (&agentcontext.Resolver{GlobRulesAdvertised: globRulesOn}).Resolve([]agentcontext.ScanRoot{{Path: dir}})
+	require.Empty(t, snap.ScopedRules)
+	got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(dir, "ts.mdc"))
+	require.Equal(t, []string{"**/*.ts"}, got.Globs)
+
+	client := &fakeDRPCClient{}
+	_, err := agentcontext.NewDRPCPusher(client).PushContextState(context.Background(), &agentcontext.PushRequest{
+		Resources: snap.Resources,
+	})
+	require.NoError(t, err)
+	require.Len(t, client.lastReq.Resources, 1)
+	body := client.lastReq.Resources[0].GetInstructionFile()
+	require.Equal(t, []byte("TS rules"), body.GetContent())
+	require.Equal(t, []string{"**/*.ts"}, body.GetGlobs())
+}
+
+func TestResolver_GlobRulesShareCaps(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (string, string) {
+		project := t.TempDir()
+		rules := filepath.Join(project, ".cursor", "rules")
+		mustWriteFile(t, filepath.Join(project, "AGENTS.md"), strings.Repeat("a", 30))
+		mustWriteFile(t, filepath.Join(rules, "ts.mdc"), "---\nglobs: \"*.ts\"\n---\n"+strings.Repeat("b", 30))
+		return project, filepath.Join(rules, "ts.mdc")
+	}
+
+	t.Run("Count", func(t *testing.T) {
+		t.Parallel()
+		project, rule := setup(t)
+		r := &agentcontext.Resolver{MaxResources: 1, GlobRulesAdvertised: globRulesOn}
+		snap := r.Resolve([]agentcontext.ScanRoot{{Path: project}})
+
+		require.Equal(t, agentcontext.StatusOK, findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(project, "AGENTS.md")).Status,
+			"always-on instruction files are kept before glob rules")
+		got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, rule)
+		require.Equal(t, agentcontext.StatusExcluded, got.Status)
+		require.Contains(t, got.Error, "count cap")
+	})
+
+	t.Run("Bytes", func(t *testing.T) {
+		t.Parallel()
+		project, rule := setup(t)
+		r := &agentcontext.Resolver{MaxSnapshotBytes: 40, GlobRulesAdvertised: globRulesOn}
+		snap := r.Resolve([]agentcontext.ScanRoot{{Path: project}})
+
+		got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, rule)
+		require.Equal(t, agentcontext.StatusExcluded, got.Status)
+		require.Contains(t, got.Error, "aggregate cap")
+		require.Equal(t, []string{"*.ts"}, got.Globs, "an excluded rule keeps its globs")
+	})
+}
+
+func TestRunPush_GlobRulesFollowCapability(t *testing.T) {
+	t.Parallel()
+	for _, advertised := range []bool{true, false} {
+		t.Run(strconv.FormatBool(advertised), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			mustWriteFile(t, filepath.Join(dir, ".cursor", "rules", "ts.mdc"), "---\nglobs: \"*.ts\"\n---\nTS rules")
+			m := newTestManager(t, agentcontext.ManagerOptions{
+				WorkingDir: func() string { return dir },
+			})
+
+			p := newFakePusher()
+			p.mu.Lock()
+			p.resp = &agentcontext.PushResponse{Accepted: true, ForkGlobRules: advertised}
+			p.mu.Unlock()
+			ctx, cancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+			defer cancel()
+			pushDone := make(chan error, 1)
+			go func() {
+				pushDone <- m.RunPush(ctx, p, agentcontext.PushOptions{
+					Logger: testutil.Logger(t).Named("push"),
+				})
+			}()
+
+			settled := waitSettled(t, p, 1)
+			for _, req := range p.snapshot() {
+				if req.CapabilityGeneration != 0 {
+					require.Nil(t, globRule(req.Resources), "a probe never carries glob rules")
+				}
+			}
+			got := globRule(settled[0].Resources)
+			if advertised {
+				require.NotNil(t, got, "an advertising server receives the glob rule")
+				require.Equal(t, []string{"*.ts"}, got.Globs)
+			} else {
+				require.Nil(t, got, "a server without the capability never receives the glob rule")
+			}
+
+			cancel()
+			require.ErrorIs(t, <-pushDone, context.Canceled)
 		})
 	}
 }

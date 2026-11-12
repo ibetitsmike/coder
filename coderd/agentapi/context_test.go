@@ -280,6 +280,7 @@ func TestPushContextState(t *testing.T) {
 		require.False(t, resp.GetAccepted())
 		require.True(t, resp.GetForkPluginPacks(), "a rejected response must still advertise the pack capability")
 		require.True(t, resp.GetForkAgentDefinitions(), "a rejected response must still advertise the definitions capability")
+		require.True(t, resp.GetForkGlobRules(), "a rejected response must still advertise the glob rules capability")
 	})
 
 	t.Run("NegotiationPushSkipsChatMutation", func(t *testing.T) {

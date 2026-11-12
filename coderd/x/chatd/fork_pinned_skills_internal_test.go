@@ -143,4 +143,13 @@ func TestPinnedSkillsMessage(t *testing.T) {
 	require.NotContains(t, text, reviewBody)
 	_, ok = syncPins(t)
 	require.False(t, ok)
+
+	// Compaction drops the empty list too, and the summary may still hold
+	// the unpinned instructions, so the next step sends it again, once.
+	insert(t, string(summary.RawMessage), true)
+	text, ok = syncPins(t)
+	require.True(t, ok)
+	require.True(t, strings.HasSuffix(text, "\n"+pinnedSkillsNone))
+	_, ok = syncPins(t)
+	require.False(t, ok)
 }

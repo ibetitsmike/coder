@@ -57,6 +57,15 @@ func (api *API) putChatPinnedSkills(rw http.ResponseWriter, r *http.Request) {
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionUpdate, chat) {
 		return
 	}
+	// Pinned skills run on the owner's turns with the owner's tools and
+	// credentials, so only the owner may change them, as with sending
+	// messages.
+	if httpmw.APIKey(r).UserID != chat.OwnerID {
+		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
+			Message: "Only the chat owner may change pinned skills.",
+		})
+		return
+	}
 	var req codersdk.UpdateChatPinnedSkillsRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
