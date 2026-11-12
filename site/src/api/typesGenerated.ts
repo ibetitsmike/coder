@@ -6053,6 +6053,7 @@ export type Experiment =
 	| "fork-nested-subagents"
 	| "fork-plugin-packs"
 	| "fork-subagent-isolation"
+	| "fork-workflows"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
 	| "notifications"
@@ -6139,6 +6140,7 @@ export const Experiments: Experiment[] = [
 	"fork-nested-subagents",
 	"fork-plugin-packs",
 	"fork-subagent-isolation",
+	"fork-workflows",
 	"mcp-server-http",
 	"no_nats_pubsub",
 	"notifications",

@@ -269,6 +269,11 @@ func (*streamLoop) actionRequiredFromHistory(chat database.Chat, messages []data
 	if err != nil {
 		return nil, xerrors.Errorf("parse dynamic tools for stream: %w", err)
 	}
+	// Fork: a workflow step's workflow_report calls are server-side, so the
+	// stream state machine must not treat them as client actions.
+	if chatIsWorkflowStep(chat) {
+		delete(dynamicToolNames, workflowReportToolName)
+	}
 	_, pending, _, err := unresolvedToolCallsFromHistory(messages, dynamicToolNames)
 	if err != nil {
 		return nil, xerrors.Errorf("derive pending dynamic tool calls: %w", err)

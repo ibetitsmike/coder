@@ -2124,7 +2124,7 @@ func activeToolNamesForTurn(
 
 func exploreToolAllowed(tool fantasy.AgentTool) bool {
 	switch tool.Info().Name {
-	case "read_file", "execute", "process_output", "read_skill", "read_skill_file":
+	case "read_file", "execute", "process_output", "read_skill", "read_skill_file", workflowReportToolName:
 		return true
 	}
 	// Org tools use the spawn-time snapshot; inline tools require

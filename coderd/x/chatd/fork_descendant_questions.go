@@ -48,6 +48,7 @@ func (p *Server) descendantQuestionsEnabled(chat database.Chat) bool {
 // forkStopAfterTools returns stop plus ask_user_question when chat asks
 // descendant questions, so the call ends the turn.
 func (p *Server) forkStopAfterTools(stop map[string]struct{}, chat database.Chat) map[string]struct{} {
+	stop = forkStopAfterWorkflowReport(stop, chat)
 	if !p.descendantQuestionsEnabled(chat) {
 		return stop
 	}
