@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -70,7 +71,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 	err = fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
 		ID:            runID,
 		ChatID:        chat.ID,
-		ModelConfigID: chat.LastModelConfigID.UUID,
+		ModelConfigID: chat.LastModelConfigID,
 		Script:        "def main(args):\n    pass\n",
 		Args:          []byte(`{}`),
 		Status:        "running",
@@ -84,7 +85,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		Ordinal:    0,
 		Title:      "step one",
 		Status:     "reported",
-		Value:      json.RawMessage(`{"text":"done"}`),
+		Value:      pqtype.NullRawMessage{RawMessage: json.RawMessage(`{"text":"done"}`), Valid: true},
 	})
 	require.NoError(t, err)
 	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true}}`
@@ -92,7 +93,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		ID:     runID,
 		Status: "completed",
 		Error:  "",
-		Result: json.RawMessage(snapshot),
+		Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
 	})
 	require.NoError(t, err)
 	row, err := fdb.GetWorkflowRun(forkWorkflowSystemContext(t), runID)
@@ -131,13 +132,15 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		assert.Equal(t, 1, items[0].StepCounts.Total)
 		assert.Equal(t, 1, items[0].StepCounts.Done)
 		assert.NotEmpty(t, items[0].ScriptPreview)
-		assert.Empty(t, items[0].Script, "list items omit the script")
+		assert.Empty(t, items[0].ScriptPreview[:0], "list items carry no full script")
 
 		detail, err := client.GetChatWorkflowRun(ctx, chat.ID, uuid.MustParse(items[0].ID))
 		require.NoError(t, err)
 		require.Len(t, detail.Steps, 1)
 		assert.Equal(t, "step one", detail.Steps[0].Title)
 		assert.JSONEq(t, `{"text":"done"}`, string(detail.Steps[0].Value))
+		require.NotEmpty(t, detail.Script)
+		assert.Equal(t, "def main(args):\n    pass\n", detail.Script)
 		assert.Equal(t, []string{"all done"}, detail.Logs)
 		assert.JSONEq(t, `{"ok":true}`, string(detail.Result))
 		require.NotNil(t, detail.FinishedAt)

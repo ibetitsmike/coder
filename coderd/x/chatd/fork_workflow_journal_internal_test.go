@@ -223,7 +223,7 @@ func TestForkWorkflowStop(t *testing.T) {
 			Script: journalReviewScript,
 			Args:   map[string]any{"files": []string{"a.go", "b.go"}},
 		})
-		steps := f.steps(ctx, t, run, 2)
+		f.steps(ctx, t, run, 2)
 
 		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
 
