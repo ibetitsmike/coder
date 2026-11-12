@@ -382,7 +382,9 @@ describe("ForkComposerSlot plugin packs", () => {
 
 		renderSlot(["fork-plugin-packs"]);
 		await user.click(
-			await screen.findByRole("button", { name: "Plugin packs, 1 enabled" }),
+			await screen.findByRole("button", {
+				name: "Plugin packs, 1 enabled on this chat",
+			}),
 		);
 		await user.click(
 			await screen.findByRole("switch", {
@@ -405,10 +407,12 @@ describe("ForkComposerSlot plugin packs", () => {
 
 		renderSlot(["fork-plugin-packs"]);
 		await user.click(
-			await screen.findByRole("button", { name: "Plugin packs, 1 enabled" }),
+			await screen.findByRole("button", {
+				name: "Plugin packs, 1 enabled on this chat",
+			}),
 		);
 
-		expect(await screen.findByText(MockForkPluginPack.name)).toBeVisible();
-		expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+		await screen.findByText(MockForkPluginPack.name);
+		expect(screen.queryByRole("switch")).toBeNull();
 	});
 });
