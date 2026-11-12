@@ -545,18 +545,16 @@ func (r *workflowRun) isStopRequested() bool {
 // finish stores the result. If no await_workflow call waits, it tells the
 // parent that the run ended.
 func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
-	r.mu.Lock()
-	r.result = &res
-	close(r.done)
-	waiting := r.awaiters > 0
-	r.notified = !waiting
-	r.mu.Unlock()
 	// The journal keeps the result for the resumes and awaits of a later
 	// process, best effort like every journal update of a live run. A
 	// canceled context would fail the write, so a user stop journals on a
 	// fresh one: a stopped run must read as stopped. A shutdown keeps its
 	// canceled context, leaving the run open for the startup sweep to mark
 	// interrupted, which is what resume_run_id waits for.
+	//
+	// The write lands before done closes: stop_workflow waits on done and
+	// then reads the journal for its response, so closing done first could
+	// answer a stop from a row that still says running.
 	jctx := ctx
 	if r.isStopRequested() && ctx.Err() != nil {
 		fresh, stop := r.p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
@@ -564,6 +562,13 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 		jctx = fresh
 	}
 	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res)
+
+	r.mu.Lock()
+	r.result = &res
+	close(r.done)
+	waiting := r.awaiters > 0
+	r.notified = !waiting
+	r.mu.Unlock()
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return

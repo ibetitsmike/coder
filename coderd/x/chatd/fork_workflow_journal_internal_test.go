@@ -269,6 +269,10 @@ func TestForkWorkflowStop(t *testing.T) {
 			Script: journalReviewScript,
 			Args:   map[string]any{"files": []string{"a.go", "b.go"}},
 		})
+		// Wait for the steps to be journaled before the restart: the sweep
+		// of the new server only needs the run row, and the step rows must
+		// exist for the open-step assertions below.
+		f.steps(ctx, t, run, 2)
 		// The restart marks the run interrupted.
 		restarted := f.restartWorkflowServer(t)
 		fdb := forkWorkflowDB(t, f.db)
