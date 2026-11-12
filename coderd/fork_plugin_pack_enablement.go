@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -20,6 +21,42 @@ import (
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/codersdk"
 )
+
+// @Summary List plugin packs available to enable
+// @ID list-plugin-packs-available-to-enable
+// @Security CoderSessionToken
+// @Tags Chats
+// @Produce json
+// @Param organization path string true "Organization ID or name"
+// @Success 200 {array} codersdk.ForkEnabledPluginPack
+// @Router /api/v2/chats/fork/organizations/{organization}/available-plugin-packs [get]
+// @x-apidocgen {"skip": true}
+func (api *API) forkAvailablePluginPacks(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	organization := httpmw.OrganizationParam(r)
+	fdb, ok := forkPluginPackStore(rw, api.Database)
+	if !ok {
+		return
+	}
+	// Members enable packs but cannot read the organization skill object
+	// packs reuse, so membership gates this projection instead. A
+	// site-wide role can read every organization without being a member.
+	if !api.isOrganizationMember(r, organization.ID) {
+		httpapi.ResourceNotFound(rw)
+		return
+	}
+	//nolint:gocritic // Member-safe projection of the organization's packs.
+	rows, err := fdb.GetPluginPacksByOrganizationID(dbauthz.AsSystemRestricted(ctx), organization.ID)
+	if err != nil {
+		writeForkPluginPackError(rw, err)
+		return
+	}
+	packs := make([]codersdk.ForkEnabledPluginPack, 0, len(rows))
+	for _, row := range rows {
+		packs = append(packs, codersdk.ForkEnabledPluginPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
+	}
+	httpapi.Write(ctx, rw, http.StatusOK, packs)
+}
 
 // @Summary List plugin packs of a chat project
 // @ID list-plugin-packs-of-a-chat-project

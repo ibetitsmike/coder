@@ -10,10 +10,12 @@ import {
 	updateChatProjectInstructions,
 } from "#/api/queries/chatProjects";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
+import { enabledPluginPacks } from "#/api/queries/forkPluginPackEnablement";
 import type { ChatProject, ChatProjectRole } from "#/api/typesGenerated";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { useDashboard } from "#/modules/dashboard/useDashboard";
 import { useDialogFocusReturn } from "../useDialogFocusReturn";
+import { ForkProjectPluginPacksDialog } from "./ForkProjectPluginPacksDialog";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
 import { ProjectAgentDefinitionsDialog } from "./ProjectAgentDefinitionsDialog";
 import { ProjectDetailsPanelView } from "./ProjectDetailsPanelView";
@@ -89,6 +91,17 @@ const ProjectDetailsPanelContent: React.FC<ProjectDetailsPanelProps> = ({
 	const [isAgentDefinitionsDialogOpen, setIsAgentDefinitionsDialogOpen] =
 		useState(false);
 	const agentDefinitionsFocusReturn = useDialogFocusReturn();
+	const showPluginPacks = experiments.includes("fork-plugin-packs");
+	const pluginPacksQuery = useQuery({
+		...enabledPluginPacks({
+			kind: "project",
+			organizationId: project.organization_id,
+			projectId: project.id,
+		}),
+		enabled: showPluginPacks,
+	});
+	const [isPluginPacksDialogOpen, setIsPluginPacksDialogOpen] = useState(false);
+	const pluginPacksFocusReturn = useDialogFocusReturn();
 	// The ACL endpoints return 403 when chat sharing is disabled.
 	const isSharingDisabled = getErrorStatus(aclQuery.error) === 403;
 	const accessEntries = aclQuery.data
@@ -150,6 +163,18 @@ const ProjectDetailsPanelContent: React.FC<ProjectDetailsPanelProps> = ({
 								onOpen: (event) => {
 									agentDefinitionsFocusReturn.rememberTrigger(event);
 									setIsAgentDefinitionsDialogOpen(true);
+								},
+							}
+						: undefined
+				}
+				pluginPacks={
+					showPluginPacks
+						? {
+								count: pluginPacksQuery.data?.length,
+								error: pluginPacksQuery.error,
+								onOpen: (event) => {
+									pluginPacksFocusReturn.rememberTrigger(event);
+									setIsPluginPacksDialogOpen(true);
 								},
 							}
 						: undefined
@@ -217,6 +242,12 @@ const ProjectDetailsPanelContent: React.FC<ProjectDetailsPanelProps> = ({
 				onOpenChange={setIsAgentDefinitionsDialogOpen}
 				canEdit={project.permissions.update}
 				onCloseAutoFocus={agentDefinitionsFocusReturn.restoreFocus}
+			/>
+			<ForkProjectPluginPacksDialog
+				project={project}
+				open={isPluginPacksDialogOpen}
+				onOpenChange={setIsPluginPacksDialogOpen}
+				onCloseAutoFocus={pluginPacksFocusReturn.restoreFocus}
 			/>
 			<ProjectAccessDialog
 				open={isAccessDialogOpen}

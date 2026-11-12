@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, screen, userEvent } from "storybook/test";
 import {
 	MockOrganization,
 	MockOrganization2,
@@ -17,11 +17,16 @@ const meta = {
 	component: ForkPluginPacksTableView,
 	args: {
 		packs: [MockForkPluginPack, MockForkPluginPackWithoutPath],
+		access: { create: true, update: true, delete: true },
 		error: undefined,
 		isLoadingError: false,
 		isLoading: false,
 		isRetrying: false,
 		onRetry: fn(),
+		updatingPackIds: new Set(),
+		onInstall: fn(),
+		onUpdate: fn(),
+		onDelete: fn(),
 	},
 } satisfies Meta<typeof ForkPluginPacksTableView>;
 
@@ -34,6 +39,53 @@ export const Mobile: Story = {
 	parameters: {
 		viewport: { defaultViewport: "mobile1" },
 		pixel: { matrix: { viewports: ["phone"] } },
+	},
+};
+
+export const RowMenuOpen: Story = {
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+	},
+};
+
+export const ReadOnly: Story = {
+	args: { access: { create: false, update: false, delete: false } },
+};
+
+export const UpdateOnlyMenuOpen: Story = {
+	args: { access: { create: false, update: true, delete: false } },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+	},
+};
+
+export const DeleteOnlyMenuOpen: Story = {
+	args: { access: { create: false, update: false, delete: true } },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
+	},
+};
+
+export const UpdatingMenuOpen: Story = {
+	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
+	play: async () => {
+		await userEvent.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkPluginPack.name}`,
+			}),
+		);
 	},
 };
 
@@ -56,6 +108,17 @@ export const Empty: Story = {
 	args: { packs: [] },
 };
 
+export const EmptyReadOnly: Story = {
+	args: {
+		packs: [],
+		access: { create: false, update: false, delete: false },
+	},
+};
+
+export const Loading: Story = {
+	args: { packs: [], isLoading: true },
+};
+
 export const LoadError: Story = {
 	args: {
 		packs: [],
@@ -71,10 +134,6 @@ export const Retrying: Story = {
 		isLoadingError: true,
 		isRetrying: true,
 	},
-};
-
-export const Loading: Story = {
-	args: { packs: [], isLoading: true },
 };
 
 export const RefetchError: Story = {

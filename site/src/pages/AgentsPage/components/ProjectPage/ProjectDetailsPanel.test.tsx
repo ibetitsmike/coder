@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import { chatProjectInstructionsKey } from "#/api/queries/chatProjects";
 import type {
 	ChatProject,
@@ -26,6 +27,10 @@ import {
 	mockApiError,
 } from "#/testHelpers/entities";
 import { MockForkAgentDefinitionMetadata } from "#/testHelpers/forkAgentDefinitions";
+import {
+	MockForkPluginPack,
+	MockForkPluginPackWithoutPath,
+} from "#/testHelpers/forkPluginPacks";
 import { createTestQueryClient } from "#/testHelpers/renderHelpers";
 import { MockDisabledSkill, MockSkills } from "#/testHelpers/skills";
 import themes, { DEFAULT_THEME } from "#/theme";
@@ -636,6 +641,70 @@ describe("ProjectDetailsPanel", () => {
 
 		await waitFor(() => expect(getSkills).toHaveBeenCalled());
 		expect(getDefinitions).not.toHaveBeenCalled();
+	});
+
+	it("toggles project plugin packs from the Plugin packs row and returns focus when the dialog closes", async () => {
+		dashboard.experiments = ["fork-plugin-packs"];
+		mockInstructions(MockChatProjectInstructions);
+		vi.spyOn(API.experimental, "getChatProjectSkills").mockResolvedValue([]);
+		const projectTarget = {
+			kind: "project",
+			organizationId: MockChatProject.organization_id,
+			projectId: MockChatProject.id,
+		} as const;
+		const getEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
+			.mockResolvedValue([MockForkPluginPackWithoutPath]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		).mockResolvedValue([MockForkPluginPack, MockForkPluginPackWithoutPath]);
+		const setEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
+			.mockResolvedValue();
+		const { user } = renderPanel();
+		const packsButton = await screen.findByRole("button", {
+			name: "Plugin packs: 1 pack",
+		});
+		expect(getEnabled).toHaveBeenCalledWith(projectTarget);
+
+		await user.click(packsButton);
+		await user.click(
+			await screen.findByRole("switch", {
+				name: `Enable ${MockForkPluginPack.name}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(setEnabled).toHaveBeenCalledWith(
+				projectTarget,
+				MockForkPluginPack.id,
+				true,
+			),
+		);
+		await user.click(await screen.findByRole("button", { name: "Close" }));
+
+		await waitFor(() => expect(packsButton).toHaveFocus());
+	});
+
+	it("does not load plugin packs while the experiment is off", async () => {
+		mockInstructions(MockChatProjectInstructions);
+		const getSkills = vi
+			.spyOn(API.experimental, "getChatProjectSkills")
+			.mockResolvedValue([]);
+		const getEnabled = vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getEnabledPluginPacks",
+		);
+		const getAvailable = vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		);
+		renderPanel();
+
+		await waitFor(() => expect(getSkills).toHaveBeenCalled());
+		expect(getEnabled).not.toHaveBeenCalled();
+		expect(getAvailable).not.toHaveBeenCalled();
 	});
 
 	it("opens the project access dialog from Manage access, refetches access, and returns focus when it closes", async () => {

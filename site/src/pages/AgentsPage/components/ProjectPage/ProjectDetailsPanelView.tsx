@@ -63,6 +63,10 @@ type ProjectDetailsPanelViewProps = {
 		readonly error: unknown;
 		readonly onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 	};
+	readonly pluginPacks?: Omit<
+		CountRowProps,
+		"label" | "noun" | "disabledCount"
+	>;
 	/** `undefined` until the instructions load. */
 	readonly instructions: ChatProjectInstructions | undefined;
 	readonly error: unknown;
@@ -87,6 +91,7 @@ export const ProjectDetailsPanelView: React.FC<
 	skillsError,
 	onOpenSkills,
 	agentDefinitions,
+	pluginPacks,
 	instructions,
 	error,
 	onRetry,
@@ -168,6 +173,14 @@ export const ProjectDetailsPanelView: React.FC<
 							label="Agent definitions"
 							noun="agent"
 							{...agentDefinitions}
+						/>
+					)}
+					{pluginPacks && (
+						<CountRow
+							label="Plugin packs"
+							noun="pack"
+							disabledCount={undefined}
+							{...pluginPacks}
 						/>
 					)}
 				</dl>
@@ -457,6 +470,11 @@ const CountRow: React.FC<CountRowProps> = ({
 					: `${count} ${noun}s`;
 	if (count && disabledCount) {
 		countLabel += `, ${disabledCount} disabled`;
+	}
+	// A failed background refetch keeps the cached count, so flag it as
+	// possibly stale instead of presenting it as current.
+	if (count !== undefined && error) {
+		countLabel += " (refresh failed)";
 	}
 	return (
 		<DetailRow label={label}>

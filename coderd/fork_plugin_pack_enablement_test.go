@@ -13,6 +13,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -37,6 +38,23 @@ func TestForkPluginPackEnablement(t *testing.T) {
 	pack := insertForkPluginPack(t, db, orgID, owner.UserID, "demo")
 	foreign := insertForkPluginPack(t, db, dbgen.Organization(t, db, database.Organization{}).ID, owner.UserID, "demo")
 	want := []codersdk.ForkEnabledPluginPack{{ID: pack.ID, Name: pack.Name, CommitSHA: pack.CommitSha}}
+
+	t.Run("Available", func(t *testing.T) {
+		t.Parallel()
+		// A member lists the organization's packs without reading them.
+		packs, err := member.ForkAvailablePluginPacks(ctx, orgID)
+		require.NoError(t, err)
+		require.Equal(t, want, packs)
+
+		outsider, _ := coderdtest.CreateAnotherUser(t, client, dbgen.Organization(t, db, database.Organization{}).ID)
+		_, err = outsider.ForkAvailablePluginPacks(ctx, orgID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		// A site-wide role reads every organization but is not a member.
+		templateAdmin, _ := coderdtest.CreateAnotherUser(t, client, dbgen.Organization(t, db, database.Organization{}).ID, rbac.RoleTemplateAdmin())
+		_, err = templateAdmin.ForkAvailablePluginPacks(ctx, orgID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
 
 	t.Run("Project", func(t *testing.T) {
 		t.Parallel()

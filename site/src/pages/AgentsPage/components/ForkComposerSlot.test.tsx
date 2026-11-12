@@ -2,8 +2,10 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
+import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
@@ -18,12 +20,17 @@ import {
 	MockBuildInfo,
 	MockDefaultOrganization,
 	MockEntitlements,
+	MockUserOwner,
 } from "#/testHelpers/entities";
 import { MockChatTodoList } from "#/testHelpers/forkChatTodos";
 import {
 	MockChatWakeupCron,
 	MockChatWakeupInterval,
 } from "#/testHelpers/forkChatWakeups";
+import {
+	MockForkPluginPack,
+	MockForkPluginPackWithoutPath,
+} from "#/testHelpers/forkPluginPacks";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -34,6 +41,10 @@ import {
 } from "#/testHelpers/websockets";
 import { OneWayWebSocket } from "#/utils/OneWayWebSocket";
 import { ForkComposerSlot } from "./ForkComposerSlot";
+
+vi.mock("#/hooks/useAuthenticated", () => ({
+	useAuthenticated: () => ({ user: MockUserOwner }),
+}));
 
 const renderSlot = (
 	experiments: Experiment[],
@@ -310,5 +321,98 @@ describe("ForkComposerSlot wake-ups", () => {
 			screen.getByRole("button", { name: /^Cancel Every 5m: / }),
 		);
 		expect(updateWakeup).not.toHaveBeenCalled();
+	});
+});
+
+describe("ForkComposerSlot plugin packs", () => {
+	it("does not request the chat or its packs while fork-plugin-packs is off", () => {
+		const getChat = vi
+			.spyOn(API.experimental, "getChat")
+			.mockResolvedValue(MockChat);
+		const getEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
+			.mockResolvedValue([]);
+
+		renderSlot([]);
+
+		expect(getChat).not.toHaveBeenCalled();
+		expect(getEnabled).not.toHaveBeenCalled();
+	});
+
+	it("requests the chat's plugin packs while fork-plugin-packs is on", async () => {
+		const getChat = vi
+			.spyOn(API.experimental, "getChat")
+			.mockResolvedValue(MockChat);
+		const getEnabled = vi
+			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
+			.mockResolvedValue([]);
+
+		renderSlot(["fork-plugin-packs"]);
+
+		await waitFor(() =>
+			expect(getEnabled).toHaveBeenCalledWith({
+				kind: "chat",
+				chatId: MockChat.id,
+			}),
+		);
+		expect(getChat).toHaveBeenCalledWith(MockChat.id, expect.anything());
+	});
+
+	const mockPluginPacksOfChat = (ownerId: string) => {
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue({
+			...MockChat,
+			owner_id: ownerId,
+		});
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getEnabledPluginPacks",
+		).mockResolvedValue([MockForkPluginPackWithoutPath]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		).mockResolvedValue([MockForkPluginPack]);
+		return vi
+			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
+			.mockResolvedValue();
+	};
+
+	it("lets the chat owner enable a pack", async () => {
+		const user = userEvent.setup();
+		const setEnabled = mockPluginPacksOfChat(MockUserOwner.id);
+
+		renderSlot(["fork-plugin-packs"]);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Plugin packs, 1 enabled on this chat",
+			}),
+		);
+		await user.click(
+			await screen.findByRole("switch", {
+				name: `Enable ${MockForkPluginPack.name}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(setEnabled).toHaveBeenCalledWith(
+				{ kind: "chat", chatId: MockChat.id },
+				MockForkPluginPack.id,
+				true,
+			),
+		);
+	});
+
+	it("shows another user's chat packs read-only", async () => {
+		const user = userEvent.setup();
+		mockPluginPacksOfChat("another-user");
+
+		renderSlot(["fork-plugin-packs"]);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Plugin packs, 1 enabled on this chat",
+			}),
+		);
+
+		await screen.findByText(MockForkPluginPack.name);
+		expect(screen.queryByRole("switch")).toBeNull();
 	});
 });
