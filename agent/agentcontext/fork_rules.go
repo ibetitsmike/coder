@@ -133,17 +133,23 @@ func ruleContainersFor(rootPath string) []string {
 }
 
 // ruleDirsFor returns rootPath's rule directories and their subfolders,
-// where Cursor lets users organize rules. WalkDir does not follow
-// symlinked folders, so the walk stays inside each container.
+// where Cursor lets users organize rules. The walk starts at each
+// container's resolved target, so a symlinked container is traversed, and
+// WalkDir does not follow symlinked subfolders. Paths keep the container
+// prefix.
 func ruleDirsFor(rootPath string) []string {
 	var out []string
 	for _, container := range ruleContainersFor(rootPath) {
-		_ = filepath.WalkDir(container, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
+		resolved, err := filepath.EvalSymlinks(container)
+		if err != nil {
+			continue
+		}
+		_ = filepath.WalkDir(resolved, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || !d.IsDir() {
 				return nil
 			}
-			if d.IsDir() {
-				out = append(out, path)
+			if rel, err := filepath.Rel(resolved, path); err == nil {
+				out = append(out, filepath.Join(container, rel))
 			}
 			return nil
 		})

@@ -147,6 +147,27 @@ func TestResolver_AlwaysApplyRuleRespectsAggregateCap(t *testing.T) {
 	require.Equal(t, agentcontext.StatusExcluded, findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(dir, "b.mdc")).Status)
 }
 
+func TestResolver_RuleContainerSymlinkInsideScanRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require admin privileges on Windows runners")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared-rules")
+	mustWriteFile(t, filepath.Join(shared, "go.mdc"), "---\nalwaysApply: true\n---\nTop")
+	mustWriteFile(t, filepath.Join(shared, "frontend", "ui.mdc"), "---\nalwaysApply: true\n---\nNested")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".cursor"), 0o755))
+	require.NoError(t, os.Symlink(shared, filepath.Join(dir, ".cursor", "rules")))
+
+	r := &agentcontext.Resolver{}
+	snap := r.Resolve([]agentcontext.ScanRoot{{Path: dir}})
+
+	got := findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(dir, ".cursor", "rules", "frontend", "ui.mdc"))
+	require.Equal(t, []byte("Nested"), got.Payload, "a symlinked container inside the scan root is walked")
+	got = findResource(t, snap.Resources, agentcontext.KindInstructionFile, filepath.Join(dir, ".cursor", "rules", "go.mdc"))
+	require.Equal(t, []byte("Top"), got.Payload)
+}
+
 func TestResolver_RuleContainerSymlinkOutsideScanRootSkipped(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks require admin privileges on Windows runners")
