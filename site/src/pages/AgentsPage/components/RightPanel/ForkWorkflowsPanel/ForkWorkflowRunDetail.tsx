@@ -105,6 +105,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
 	const steps = forkWorkflowRunDetailSteps(run);
+	const headingRef = useRef<HTMLHeadingElement>(null);
 
 	return (
 		<section aria-label="Workflow run" className="flex min-w-0 flex-col">
@@ -120,10 +121,14 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			<div className="flex min-w-0 items-center gap-1.5">
 				<ForkWorkflowStatusBadge {...forkWorkflowRunStatusMeta(run.status)} />
-				<h3 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-content-primary">
+				<h3
+					ref={headingRef}
+					tabIndex={-1}
+					className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-content-primary focus:outline-none"
+				>
 					{run.title || run.script.slice(0, 200) || "Untitled run"}
 				</h3>
-				<ForkWorkflowRunStopButton run={run} />
+				<ForkWorkflowRunStopButton run={run} fallbackFocusRef={headingRef} />
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">
 				{[
@@ -166,10 +171,13 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 
 type ForkWorkflowRunStopButtonProps = {
 	run: WorkflowRunDetail;
+	/** Receives focus when the dialog closes after the Stop button unmounted. */
+	fallbackFocusRef: React.RefObject<HTMLElement | null>;
 };
 
 const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 	run,
+	fallbackFocusRef,
 }) => {
 	const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 	const stopButtonRef = useRef<HTMLButtonElement>(null);
@@ -207,13 +215,11 @@ const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 				open={isConfirmOpen}
 				onClose={() => setIsConfirmOpen(false)}
 				onConfirm={handleStop}
-				// The button unmounts once the run ends, and the dialog stays
-				// mounted so a run that ends while it is open does not drop focus.
+				// The Stop button unmounts once the run ends, including on a
+				// successful stop, so focus falls back to the run heading.
 				onCloseAutoFocus={(event) => {
-					if (stopButtonRef.current) {
-						event.preventDefault();
-						stopButtonRef.current.focus();
-					}
+					event.preventDefault();
+					(stopButtonRef.current ?? fallbackFocusRef.current)?.focus();
 				}}
 				title="Stop workflow run"
 				description="The script stops, and steps that are still running fail and stop their child chats. This cannot be undone."

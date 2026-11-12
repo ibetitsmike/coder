@@ -72,8 +72,13 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		expect(stopRun).toHaveBeenCalledWith(chatId, MockChatWorkflowRunDetail.id);
-		// The stop refreshes the run list, so its badge and counts update.
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+		expect(
+			screen.queryByRole("button", { name: "Stop" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: /review changed files/i }),
+		).toHaveFocus();
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {
