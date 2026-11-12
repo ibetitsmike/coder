@@ -5,8 +5,8 @@ import { ChevronLeftIcon } from "lucide-react";
 import type React from "react";
 import { useQuery } from "react-query";
 import { getErrorMessage } from "#/api/errors";
-import type { ChatWorkflowRunDetail } from "#/api/forkWorkflows";
 import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
@@ -52,7 +52,7 @@ export const ForkWorkflowRunDetail: React.FC<ForkWorkflowRunDetailProps> = ({
 };
 
 type ForkWorkflowRunDetailViewProps = {
-	run: ChatWorkflowRunDetail | undefined;
+	run: WorkflowRunDetail | undefined;
 	error: unknown;
 	onBack: () => void;
 };
@@ -90,7 +90,7 @@ export const ForkWorkflowRunDetailView: React.FC<
 };
 
 type ForkWorkflowRunSummaryProps = {
-	run: ChatWorkflowRunDetail;
+	run: WorkflowRunDetail;
 	error: unknown;
 };
 
@@ -147,7 +147,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				<ForkWorkflowLongText label="Error" text={run.error} isError />
 			)}
 			{steps.length > 0 && <ForkWorkflowSteps steps={steps} />}
-			{run.result !== null && (
+			{run.result !== undefined && (
 				<ForkWorkflowLongText
 					label="Result"
 					text={formatForkWorkflowValue(run.result)}

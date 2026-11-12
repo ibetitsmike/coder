@@ -3,7 +3,7 @@
 
 import type React from "react";
 import { getErrorMessage } from "#/api/errors";
-import type { ChatWorkflowRun } from "#/api/forkWorkflows";
+import type { WorkflowRun } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Spinner } from "#/components/Spinner/Spinner";
@@ -17,7 +17,7 @@ import {
 } from "../../ForkWorkflows/forkWorkflows";
 
 type ForkWorkflowRunListProps = {
-	runs: readonly ChatWorkflowRun[] | undefined;
+	runs: readonly WorkflowRun[] | undefined;
 	error: unknown;
 	onSelectRun: (runId: string) => void;
 };
@@ -72,7 +72,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 									{...forkWorkflowRunStatusMeta(run.status)}
 								/>
 								<span className="min-w-0 truncate text-sm text-content-primary">
-									{run.title || `${run.script_preview}…`}
+									{run.title || run.script_preview || "Untitled run"}
 								</span>
 							</span>
 							<span className="text-xs text-content-secondary">

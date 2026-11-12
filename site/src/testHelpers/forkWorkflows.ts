@@ -1,7 +1,4 @@
-import type {
-	ChatWorkflowRun,
-	ChatWorkflowRunDetail,
-} from "#/api/forkWorkflows";
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 
 export const MockForkWorkflowRunId = "3f6d2c1a-9b4e-4f0a-8c7d-1e2f3a4b5c6d";
 
@@ -98,7 +95,7 @@ export const MockForkWorkflowNow = Date.parse("2026-11-12T10:05:00Z");
 
 export const MockForkWorkflowChatId = "dd444444-4444-4444-8444-444444444444";
 
-export const MockChatWorkflowRunDetail: ChatWorkflowRunDetail = {
+export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
 	id: MockForkWorkflowRunId,
 	chat_id: MockForkWorkflowChatId,
 	status: "completed",
@@ -120,20 +117,18 @@ export const MockChatWorkflowRunDetail: ChatWorkflowRunDetail = {
 		ordinal,
 		started_at: "2026-11-12T10:00:05Z",
 		finished_at: "2026-11-12T10:03:00Z",
-		value: null,
 	})),
 };
 
-export const MockChatWorkflowRun: ChatWorkflowRun = {
+export const MockChatWorkflowRun: WorkflowRun = {
 	id: MockChatWorkflowRunDetail.id,
 	chat_id: MockChatWorkflowRunDetail.chat_id,
 	status: MockChatWorkflowRunDetail.status,
 	title: MockChatWorkflowRunDetail.title,
 	error: MockChatWorkflowRunDetail.error,
-	result: MockChatWorkflowRunDetail.result,
 	created_at: MockChatWorkflowRunDetail.created_at,
 	updated_at: MockChatWorkflowRunDetail.updated_at,
 	finished_at: MockChatWorkflowRunDetail.finished_at,
-	script_preview: MockForkWorkflowScript.replaceAll("\n", " ").slice(0, 200),
+	script_preview: MockForkWorkflowScript.slice(0, 200),
 	step_counts: { total: 3, running: 0, done: 3, failed: 0 },
 };

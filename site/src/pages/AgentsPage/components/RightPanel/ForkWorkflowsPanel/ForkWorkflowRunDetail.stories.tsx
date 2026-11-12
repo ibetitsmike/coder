@@ -1,17 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, spyOn } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
-import type { ChatWorkflowRunDetail } from "#/api/forkWorkflows";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowNow,
 } from "#/testHelpers/forkWorkflows";
 import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
 
-const mockRunningRunDetail: ChatWorkflowRunDetail = {
+const mockRunningRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "running",
-	result: null,
+	result: undefined,
 	logs: [],
 	finished_at: undefined,
 	steps: MockChatWorkflowRunDetail.steps.map((step, index) =>
@@ -19,10 +19,10 @@ const mockRunningRunDetail: ChatWorkflowRunDetail = {
 	),
 };
 
-const mockFailedRunDetail: ChatWorkflowRunDetail = {
+const mockFailedRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "failed",
-	result: null,
+	result: undefined,
 	error:
 		'step "coderd/users.go" failed: the step ended its turn twice without calling workflow_report',
 	steps: MockChatWorkflowRunDetail.steps.slice(0, 2).map((step, index) =>
@@ -37,10 +37,10 @@ const mockFailedRunDetail: ChatWorkflowRunDetail = {
 	),
 };
 
-const mockInterruptedRunDetail: ChatWorkflowRunDetail = {
+const mockInterruptedRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "interrupted",
-	result: null,
+	result: undefined,
 	finished_at: undefined,
 };
 
