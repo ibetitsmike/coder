@@ -64,6 +64,11 @@ type ForkPluginPacksPillViewProps = {
 	children: React.ReactNode;
 };
 
+/**
+ * The composer pill for a chat's plugin packs. The trigger counts only the
+ * packs enabled directly on the chat, the popover notes which other packs
+ * apply, and `children` holds the toggles.
+ */
 export const ForkPluginPacksPillView: React.FC<
 	ForkPluginPacksPillViewProps
 > = ({ enabledCount, isSubagent, children }) => (
@@ -90,8 +95,8 @@ export const ForkPluginPacksPillView: React.FC<
 	>
 		<p className="mb-3 mt-1 text-content-secondary">
 			{isSubagent
-				? "Packs enabled on the project or on a parent chat apply too."
-				: "Packs enabled on the project apply too."}
+				? "Packs enabled on a parent chat apply too, and so do the project's packs if the chat belongs to a project."
+				: "If this chat belongs to a project, packs enabled on the project apply too."}
 		</p>
 		{children}
 	</ComposerPillPopover>
