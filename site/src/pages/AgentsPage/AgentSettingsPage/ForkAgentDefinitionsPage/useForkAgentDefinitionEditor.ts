@@ -9,11 +9,10 @@ import {
 	agentDefinition,
 	agentDefinitions,
 	createAgentDefinition,
-	isNewer,
-	isResponseLost,
 	isSameScope,
 	updateAgentDefinition,
 } from "#/api/queries/forkAgentDefinitions";
+import { isNewer, isResponseLost } from "#/api/queries/forkListCache";
 import type {
 	ForkAgentDefinition,
 	ForkAgentDefinitionMetadata,

@@ -29,7 +29,6 @@ import {
 	updateProjectAgentDefinition,
 	updateUserAgentDefinition,
 } from "#/api/forkAgentDefinitions";
-import { compareUpdatedAtInstants } from "#/api/queries/chats";
 import type {
 	ACLAvailable,
 	CreateForkAgentDefinitionRequest,
@@ -39,6 +38,7 @@ import type {
 	UpdateOrganizationSkillACLRequest,
 	UsersRequest,
 } from "#/api/typesGenerated";
+import { invalidateList, isNewer, isResponseLost } from "./forkListCache";
 
 /**
  * Where agent definitions live: the current user's personal definitions in
@@ -154,30 +154,6 @@ export const agentDefinition = (
 		},
 	});
 
-type Timestamped = { updated_at: string };
-
-/** Whether a was updated after b, to the timestamps' full precision. */
-export const isNewer = (a: Timestamped, b: Timestamped) =>
-	compareUpdatedAtInstants(a.updated_at, b.updated_at) > 0;
-
-/** Whether a request failed with no response, so it may still have applied. */
-export const isResponseLost = (error: unknown) =>
-	isAxiosError(error) && error.response === undefined;
-
-// Callers reconcile an unknown outcome against the refetched list, so only
-// then does the mutation stay pending until the refetch settles.
-const invalidateList = (
-	queryClient: QueryClient,
-	scope: AgentDefinitionScope,
-	{ exact, awaitRefetch }: { exact: boolean; awaitRefetch: boolean },
-) => {
-	const refetch = queryClient.invalidateQueries({
-		queryKey: agentDefinitionsKey(scope),
-		exact,
-	});
-	return awaitRefetch ? refetch : undefined;
-};
-
 type CreateAgentDefinitionArgs = {
 	scope: AgentDefinitionScope;
 	req: CreateForkAgentDefinitionRequest;
@@ -217,7 +193,7 @@ export const createAgentDefinition = (queryClient: QueryClient) =>
 			);
 		},
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: true,
 				awaitRefetch: isResponseLost(error),
 			}),
@@ -262,7 +238,7 @@ export const updateAgentDefinition = (queryClient: QueryClient) =>
 		},
 		// Not exact, so a reopened editor refetches the definition it saved.
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: false,
 				awaitRefetch: isResponseLost(error),
 			}),
@@ -291,7 +267,7 @@ export const deleteAgentDefinition = (queryClient: QueryClient) =>
 			);
 		},
 		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, scope, {
+			invalidateList(queryClient, agentDefinitionsKey(scope), {
 				exact: true,
 				awaitRefetch:
 					isResponseLost(error) ||
