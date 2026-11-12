@@ -177,7 +177,8 @@ it("lists only enabled packs when the organization's packs cannot be listed", as
 	);
 });
 
-it("lists only enabled packs after the installed list becomes forbidden", async () => {
+it("keeps enabled packs toggleable after the installed list becomes forbidden", async () => {
+	const user = userEvent.setup();
 	vi.spyOn(forkPluginPacksApi, "getPluginPacks")
 		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
 		.mockRejectedValue({
@@ -200,15 +201,21 @@ it("lists only enabled packs after the installed list becomes forbidden", async 
 	});
 
 	await waitFor(() =>
-		expect(
-			screen.queryByRole("switch", {
-				name: `Enable ${MockForkPluginPack.name}`,
-			}),
-		).toBeNull(),
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
 	);
-	screen.getByRole("switch", {
-		name: `Enable ${MockForkPluginPackWithoutPath.name}`,
-	});
+	await user.click(
+		screen.getByRole("switch", {
+			name: `Enable ${MockForkPluginPackWithoutPath.name}`,
+		}),
+	);
+
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledWith(
+			target,
+			MockForkPluginPackWithoutPath.id,
+			false,
+		),
+	);
 });
 
 const toggleDeletedPack = async (
