@@ -45,7 +45,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	if err != nil {
 		return nil, err
 	}
-	tools = append(tools, p.forkWorkflowTools(chat, modelConfigID, opt.getWorkspaceConn)...)
+	tools = append(tools, p.forkWorkflowTools(ctx, chat, modelConfigID, opt.getWorkspaceConn)...)
 	nested, err := p.nestedSubagentTools(ctx, chat, modelConfigID)
 	if err != nil {
 		return nil, err
