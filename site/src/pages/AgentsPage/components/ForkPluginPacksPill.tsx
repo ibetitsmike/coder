@@ -60,7 +60,7 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 
 type ForkPluginPacksPillErrorProps = { error: unknown };
 
-/** The pill shown when the chat, and so its organization, fails to load. */
+/** The pill shown when the chat or its root chat fails to load. */
 export const ForkPluginPacksPillError: React.FC<
 	ForkPluginPacksPillErrorProps
 > = ({ error }) => (
