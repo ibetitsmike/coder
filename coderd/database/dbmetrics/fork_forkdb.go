@@ -102,6 +102,11 @@ func (f forkQueryMetricsStore) GetWorkflowRunStepCountsByChat(ctx context.Contex
 	return f.s.GetWorkflowRunStepCountsByChat(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) InsertChatFamilyMessage(ctx context.Context, arg forkdb.InsertChatFamilyMessageParams) error {
+	defer f.observe(ctx, "InsertChatFamilyMessage", time.Now())
+	return f.s.InsertChatFamilyMessage(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
 	defer f.observe(ctx, "InsertChatPinnedSkills", time.Now())
 	return f.s.InsertChatPinnedSkills(ctx, arg)
@@ -230,6 +235,11 @@ func (f forkQueryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg fo
 func (f forkQueryMetricsStore) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
 	defer f.observe(ctx, "CountActiveSubagentsForCapacity", time.Now())
 	return f.s.CountActiveSubagentsForCapacity(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) CountChatFamilyMessagesSince(ctx context.Context, arg forkdb.CountChatFamilyMessagesSinceParams) (int64, error) {
+	defer f.observe(ctx, "CountChatFamilyMessagesSince", time.Now())
+	return f.s.CountChatFamilyMessagesSince(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {

@@ -117,6 +117,21 @@ func (mr *MockStoreMockRecorder) CountActiveSubagentsForCapacity(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountActiveSubagentsForCapacity", reflect.TypeOf((*MockStore)(nil).CountActiveSubagentsForCapacity), ctx, arg)
 }
 
+// CountChatFamilyMessagesSince mocks base method.
+func (m *MockStore) CountChatFamilyMessagesSince(ctx context.Context, arg forkdb.CountChatFamilyMessagesSinceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountChatFamilyMessagesSince", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountChatFamilyMessagesSince indicates an expected call of CountChatFamilyMessagesSince.
+func (mr *MockStoreMockRecorder) CountChatFamilyMessagesSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountChatFamilyMessagesSince", reflect.TypeOf((*MockStore)(nil).CountChatFamilyMessagesSince), ctx, arg)
+}
+
 // CountChatUserNotificationsSince mocks base method.
 func (m *MockStore) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -989,6 +1004,20 @@ func (m *MockStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb
 func (mr *MockStoreMockRecorder) InsertChatExcludedPluginPack(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatExcludedPluginPack", reflect.TypeOf((*MockStore)(nil).InsertChatExcludedPluginPack), ctx, arg)
+}
+
+// InsertChatFamilyMessage mocks base method.
+func (m *MockStore) InsertChatFamilyMessage(ctx context.Context, arg forkdb.InsertChatFamilyMessageParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatFamilyMessage", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertChatFamilyMessage indicates an expected call of InsertChatFamilyMessage.
+func (mr *MockStoreMockRecorder) InsertChatFamilyMessage(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatFamilyMessage", reflect.TypeOf((*MockStore)(nil).InsertChatFamilyMessage), ctx, arg)
 }
 
 // InsertChatPinnedSkills mocks base method.

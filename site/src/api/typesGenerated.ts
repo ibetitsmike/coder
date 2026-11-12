@@ -6068,6 +6068,7 @@ export type Experiment =
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
 	| "fork-chat-wakeups"
+	| "fork-family-messages"
 	| "fork-nested-subagents"
 	| "fork-pinned-skills"
 	| "fork-plugin-packs"
@@ -6156,6 +6157,7 @@ export const Experiments: Experiment[] = [
 	"fork-agent-definitions",
 	"fork-chat-todos",
 	"fork-chat-wakeups",
+	"fork-family-messages",
 	"fork-nested-subagents",
 	"fork-pinned-skills",
 	"fork-plugin-packs",
