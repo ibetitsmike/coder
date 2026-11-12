@@ -1,0 +1,442 @@
+package chatd
+
+// This file is fork code: it ports the run engine tests of the
+// fork-workflows experiment from the upstream prototype coder/coder#31189
+// (28f93181b6). The fixture plays each step child by hand: a passive server
+// (no worker) runs the script, and the test writes the child's messages and
+// status.
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"strings"
+	"testing"
+
+	"charm.land/fantasy"
+	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/xerrors"
+
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk/agentconnmock"
+	"github.com/coder/coder/v2/testutil"
+)
+
+const reviewSchemaStarlark = `REVIEW = {"type": "object", "required": ["bugs"],
+          "properties": {"bugs": {"type": "array", "items": {"type": "string"}}}}
+`
+
+// parentStatus creates the parent chat and pins its status, the way a turn
+// in flight (running) or a finished turn (waiting) looks to the run.
+func (f *forkWorkflowFixture) parentStatus(ctx context.Context, t *testing.T, status database.ChatStatus) database.Chat {
+	t.Helper()
+	parent := f.parent(ctx, t)
+	setChatStatus(ctx, t, f.db, parent.ID, status, "")
+	parent, err := f.db.GetChatByID(ctx, parent.ID)
+	require.NoError(t, err)
+	return parent
+}
+
+func (f *forkWorkflowFixture) start(
+	ctx context.Context, t *testing.T, parent database.Chat, args runWorkflowArgs,
+) *workflowRun {
+	t.Helper()
+	run, err := f.server.startWorkflowRun(ctx, parent, f.model.ID, args, uuid.New())
+	require.NoError(t, err)
+	return run
+}
+
+// steps waits until the run has n steps.
+func (*forkWorkflowFixture) steps(ctx context.Context, t *testing.T, run *workflowRun, n int) []stepSummary {
+	t.Helper()
+	var steps []stepSummary
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		steps = run.snapshot().Steps
+		return len(steps) >= n
+	}, testutil.IntervalFast)
+	return steps
+}
+
+func (f *forkWorkflowFixture) insert(t *testing.T, chatID uuid.UUID, role database.ChatMessageRole, parts ...codersdk.ChatMessagePart) {
+	t.Helper()
+	data, err := json.Marshal(parts)
+	require.NoError(t, err)
+	_ = dbgen.ChatMessage(t, f.db, database.ChatMessage{
+		ChatID:         chatID,
+		ModelConfigID:  uuid.NullUUID{UUID: f.model.ID, Valid: true},
+		Role:           role,
+		Content:        pqtype.NullRawMessage{RawMessage: data, Valid: true},
+		ContentVersion: chatprompt.ContentVersionV1,
+	})
+}
+
+// endTurn sets the child to waiting and wakes awaitSubagentCompletion.
+func (f *forkWorkflowFixture) endTurn(ctx context.Context, t *testing.T, chatID uuid.UUID) {
+	t.Helper()
+	setChatStatus(ctx, t, f.db, chatID, database.ChatStatusWaiting, "")
+	require.NoError(t, f.ps.Publish(coderdpubsub.ChatStateUpdateChannel(chatID), []byte("{}")))
+}
+
+// report plays a child that calls workflow_report with value.
+func (f *forkWorkflowFixture) report(ctx context.Context, t *testing.T, chatID string, value string) {
+	t.Helper()
+	id := uuid.MustParse(chatID)
+	callID := "call-" + uuid.NewString()
+	f.insert(t, id, database.ChatMessageRoleAssistant,
+		codersdk.ChatMessageToolCall(callID, workflowReportToolName, json.RawMessage(value)))
+	f.insert(t, id, database.ChatMessageRoleTool,
+		codersdk.ChatMessageToolResult(callID, workflowReportToolName, json.RawMessage(`"Value accepted."`), false, false))
+	f.endTurn(ctx, t, id)
+}
+
+// stopWithoutReport plays a child that ends its turn with text only.
+func (f *forkWorkflowFixture) stopWithoutReport(ctx context.Context, t *testing.T, chatID string) {
+	t.Helper()
+	id := uuid.MustParse(chatID)
+	f.insert(t, id, database.ChatMessageRoleAssistant, codersdk.ChatMessageText("I am done."))
+	f.endTurn(ctx, t, id)
+}
+
+func (f *forkWorkflowFixture) userTexts(ctx context.Context, t *testing.T, chatID uuid.UUID) []string {
+	t.Helper()
+	msgs, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: chatID})
+	require.NoError(t, err)
+	var texts []string
+	for _, msg := range msgs {
+		if msg.Role != database.ChatMessageRoleUser {
+			continue
+		}
+		parts, err := chatprompt.ParseContent(msg)
+		require.NoError(t, err)
+		for _, part := range parts {
+			if part.Type == codersdk.ChatMessagePartTypeText {
+				texts = append(texts, part.Text)
+			}
+		}
+	}
+	return texts
+}
+
+func (f *forkWorkflowFixture) hasNotice(ctx context.Context, t *testing.T, chatID uuid.UUID) bool {
+	t.Helper()
+	for _, text := range f.userTexts(ctx, t, chatID) {
+		if strings.Contains(text, "ended with status") {
+			return true
+		}
+	}
+	return false
+}
+
+// awaitRegistered starts await in a goroutine and returns once the run
+// counts it, so finish sees a waiting call.
+func awaitRegistered(ctx context.Context, t *testing.T, run *workflowRun) <-chan runWorkflowResult {
+	t.Helper()
+	out := make(chan runWorkflowResult, 1)
+	go func() { out <- run.await(ctx, testutil.WaitLong) }()
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		run.mu.Lock()
+		defer run.mu.Unlock()
+		return run.awaiters == 1
+	}, testutil.IntervalFast)
+	return out
+}
+
+func TestForkWorkflowScriptPath(t *testing.T) {
+	t.Parallel()
+	const path = "/home/coder/workflow.star"
+	connWithFile := func(t *testing.T, content string) func(context.Context) (workspacesdk.AgentConn, error) {
+		conn := agentconnmock.NewMockAgentConn(gomock.NewController(t))
+		// The limit is one byte over the cap, so an oversized file is caught.
+		conn.EXPECT().ReadFile(gomock.Any(), path, int64(0), int64(maxScriptBytes+1)).
+			Return(io.NopCloser(strings.NewReader(content)), "", nil)
+		return func(context.Context) (workspacesdk.AgentConn, error) { return conn, nil }
+	}
+	noConn := func(context.Context) (workspacesdk.AgentConn, error) {
+		return nil, xerrors.New("the workspace must not be read")
+	}
+
+	t.Run("ReadsTheFile", func(t *testing.T) {
+		t.Parallel()
+		const src = "def main(args):\n    return 1\n"
+		got, err := workflowScript(context.Background(), runWorkflowArgs{ScriptPath: path}, connWithFile(t, src))
+		require.NoError(t, err)
+		assert.Equal(t, src, got)
+	})
+	t.Run("InlineScriptSkipsTheWorkspace", func(t *testing.T) {
+		t.Parallel()
+		got, err := workflowScript(context.Background(), runWorkflowArgs{Script: "x"}, noConn)
+		require.NoError(t, err)
+		assert.Equal(t, "x", got)
+	})
+	t.Run("RejectsBoth", func(t *testing.T) {
+		t.Parallel()
+		_, err := workflowScript(context.Background(), runWorkflowArgs{Script: "x", ScriptPath: path}, noConn)
+		require.ErrorContains(t, err, "not both")
+	})
+	t.Run("RejectsAnOversizedFile", func(t *testing.T) {
+		t.Parallel()
+		big := strings.Repeat("#", maxScriptBytes+1)
+		_, err := workflowScript(context.Background(), runWorkflowArgs{ScriptPath: path}, connWithFile(t, big))
+		require.ErrorContains(t, err, "larger than")
+	})
+}
+
+func TestForkWorkflowReplay(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+	ctx := chatdTestContext(t)
+	parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+
+	args := runWorkflowArgs{
+		Script: reviewSchemaStarlark + `
+def main(args):
+    steps = [spawn("Review %s for bugs." % name, schema = REVIEW, title = name) for name in args["files"]]
+    reviews = wait(steps)
+    bugs = [b for r in reviews if r != None for b in r["bugs"]]
+    log("%d bugs" % len(bugs))
+    return {"bugs": bugs}
+`,
+		Args: map[string]any{"files": []string{"a.go", "b.go"}},
+	}
+	run := f.start(ctx, t, parent, args)
+	assert.Equal(t, workflowStatusRunning, run.snapshot().Status, "run_workflow returns at once")
+	done := awaitRegistered(ctx, t, run)
+
+	steps := f.steps(ctx, t, run, 2)
+	f.report(ctx, t, steps[0].ChatID, `{"bugs":["nil map write"]}`)
+	f.report(ctx, t, steps[1].ChatID, `{"bugs":[]}`)
+
+	res := testutil.RequireReceive(ctx, t, done)
+	require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	assert.JSONEq(t, `{"bugs":["nil map write"]}`, string(res.Result))
+	assert.Equal(t, []string{"1 bugs"}, res.Logs)
+	assert.False(t, f.hasNotice(ctx, t, parent.ID), "the waiting call got the result, so no message")
+
+	// A restart loses the run. The model resumes it with the same script.
+	f.server.workflows.remove(run.id)
+	args.ResumeRunID = run.id.String()
+	resumed := f.start(ctx, t, parent, args)
+	res = resumed.await(ctx, testutil.WaitLong)
+	require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	assert.JSONEq(t, `{"bugs":["nil map write"]}`, string(res.Result))
+	require.Len(t, res.Steps, 2)
+	for i, step := range res.Steps {
+		assert.True(t, step.Reused, "step %d must be reused", i)
+		assert.Equal(t, steps[i].ChatID, step.ChatID)
+	}
+}
+
+func TestForkWorkflowRemind(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+
+	t.Run("ReportAfterReminder", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return agent("Say hi.", title = "hi")
+`})
+		step := f.steps(ctx, t, run, 1)[0]
+		childID := uuid.MustParse(step.ChatID)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			return strings.Contains(strings.Join(f.userTexts(ctx, t, childID), "\n"), workflowReminder)
+		}, testutil.IntervalFast)
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.JSONEq(t, `{"text":"hi"}`, string(res.Result))
+	})
+
+	t.Run("NoReportGivesNone", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return wait([spawn("Say hi.")])
+`})
+		step := f.steps(ctx, t, run, 1)[0]
+		childID := uuid.MustParse(step.ChatID)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			return strings.Contains(strings.Join(f.userTexts(ctx, t, childID), "\n"), workflowReminder)
+		}, testutil.IntervalFast)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.JSONEq(t, `[null]`, string(res.Result))
+		require.Len(t, res.Steps, 1)
+		assert.Equal(t, stepStatusFailed, res.Steps[0].Status)
+	})
+}
+
+func TestForkWorkflowNotice(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+	script := runWorkflowArgs{Script: `
+def main(args):
+    return agent("Say hi.")
+`}
+
+	t.Run("IdleParentGetsMessage", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		// The parent turn ended after run_workflow returned.
+		parent := f.parentStatus(ctx, t, database.ChatStatusWaiting)
+		run := f.start(ctx, t, parent, script)
+		f.report(ctx, t, f.steps(ctx, t, run, 1)[0].ChatID, `{"text":"hi"}`)
+
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			return f.hasNotice(ctx, t, parent.ID)
+		}, testutil.IntervalFast)
+		res := run.await(ctx, 0)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	})
+
+	t.Run("AwaitDeletesQueuedMessage", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		// The parent is busy, so the message waits in the queue.
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, script)
+		f.report(ctx, t, f.steps(ctx, t, run, 1)[0].ChatID, `{"text":"hi"}`)
+
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			n, err := f.db.CountChatQueuedMessages(ctx, parent.ID)
+			return err == nil && n == 1
+		}, testutil.IntervalFast)
+		res := run.await(ctx, 0)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		// await_workflow read the result, so the message goes. The sender can
+		// still hold the message ID, and then it deletes the message itself.
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			n, err := f.db.CountChatQueuedMessages(ctx, parent.ID)
+			return err == nil && n == 0
+		}, testutil.IntervalFast)
+	})
+}
+
+func TestForkWorkflowLimit(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+
+	t.Run("Steps", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    for i in range(51):
+        spawn("Step %d." % i)
+    return {}
+`})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "can create 50 steps at most")
+		assert.Len(t, res.Steps, maxWorkflowSteps)
+	})
+
+	t.Run("CompileErrors", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		_, err := f.server.startWorkflowRun(ctx, parent, f.model.ID, runWorkflowArgs{Script: "def main(args):\n  return ("}, uuid.New())
+		require.ErrorContains(t, err, "compile script")
+		_, err = f.server.startWorkflowRun(ctx, parent, f.model.ID, runWorkflowArgs{Script: "x = 1\n"}, uuid.New())
+		require.ErrorContains(t, err, "must define main(args)")
+		_, err = f.server.startWorkflowRun(ctx, parent, f.model.ID, runWorkflowArgs{Script: "def main(args):\n  return time.now()\n"}, uuid.New())
+		require.ErrorContains(t, err, "undefined: time")
+	})
+
+	t.Run("RuntimeErrorNamesLine", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: "def main(args):\n  fail(\"boom\")\n"})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "boom")
+		assert.Contains(t, res.Error, "workflow.star:2")
+	})
+
+	t.Run("AwaitTimeoutReturnsRunning", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: "def main(args):\n  return agent(\"Wait.\")\n"})
+		f.steps(ctx, t, run, 1)
+		res := run.await(ctx, 0)
+		assert.Equal(t, workflowStatusRunning, res.Status)
+		assert.Len(t, res.Steps, 1)
+	})
+}
+
+// TestForkWorkflowToolsGate pins the turn gate of run_workflow and
+// await_workflow: only an enabled experiment on a root chat outside plan
+// mode and explore mode gets the tools.
+func TestForkWorkflowToolsGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ExperimentOffReturnsNothing", func(t *testing.T) {
+		t.Parallel()
+		db, ps := dbtestutil.NewDB(t)
+		server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{})
+		tools := server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		assert.Empty(t, tools)
+	})
+
+	t.Run("Guards", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		getConn := func(context.Context) (workspacesdk.AgentConn, error) { return nil, nil }
+
+		child := database.Chat{ID: uuid.New(), ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+		assert.Empty(t, f.server.forkWorkflowTools(child, uuid.Nil, getConn), "a child chat never runs workflows")
+
+		explore := database.Chat{ID: uuid.New(), Mode: database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}}
+		assert.Empty(t, f.server.forkWorkflowTools(explore, uuid.Nil, getConn), "an explore chat never runs workflows")
+
+		plan := database.Chat{ID: uuid.New(), PlanMode: database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}}
+		assert.Empty(t, f.server.forkWorkflowTools(plan, uuid.Nil, getConn), "a plan-mode turn never runs workflows")
+	})
+
+	t.Run("RootTurnGetsBothTools", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		tools := f.server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		require.Len(t, tools, 2)
+		assert.Equal(t, runWorkflowToolName, tools[0].Info().Name)
+		assert.Equal(t, awaitWorkflowToolName, tools[1].Info().Name)
+		// run_workflow serializes against the other tool calls of the batch,
+		// so a script_path read sees a write from the same batch.
+		assert.True(t, tools[0].(interface{ SerialToolCalls() bool }).SerialToolCalls())
+	})
+
+	t.Run("NilConnKeepsInlineScripts", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		tools := f.server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		require.Len(t, tools, 1)
+		ctx := workspacesdk.WithToolCallID(chatdTestContext(t), uuid.New())
+		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"script_path":"/home/coder/w.star"}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "script_path needs the workspace connection")
+	})
+}
