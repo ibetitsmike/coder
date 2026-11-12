@@ -467,7 +467,7 @@ func (p *Server) startWorkflowRun(
 
 // execute runs the script and builds the final result.
 func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
-	if r.stopRequested() {
+	if r.isStopRequested() {
 		return r.stoppedResult()
 	}
 	value, err := r.program.run(ctx, r)
@@ -515,7 +515,7 @@ func (r *workflowRun) stoppedResult() runWorkflowResult {
 // stopReason is the failure reason of the open steps that the run ends: the
 // engine's own text, or the stop text when stop_workflow unwound the run.
 func (r *workflowRun) stopReason() string {
-	if r.stopRequested() {
+	if r.isStopRequested() {
 		return workflowStopError
 	}
 	return "the workflow ended before the step reported"
@@ -536,7 +536,7 @@ func (r *workflowRun) requestStop() bool {
 	return true
 }
 
-func (r *workflowRun) stopRequested() bool {
+func (r *workflowRun) isStopRequested() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.stopRequested
@@ -558,7 +558,7 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	// canceled context, leaving the run open for the startup sweep to mark
 	// interrupted, which is what resume_run_id waits for.
 	jctx := ctx
-	if r.stopRequested() && ctx.Err() != nil {
+	if r.isStopRequested() && ctx.Err() != nil {
 		fresh, stop := r.p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
 		defer stop()
 		jctx = fresh
