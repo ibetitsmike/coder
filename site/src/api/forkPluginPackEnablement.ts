@@ -16,6 +16,16 @@ const enabledPluginPacksPath = (target: PluginPackTarget) =>
 		? `/api/v2/chats/fork/organizations/${target.organizationId}/projects/${target.projectId}/plugin-packs`
 		: `/api/v2/chats/fork/${target.chatId}/plugin-packs`;
 
+/** Lists the plugin packs any organization member may enable. */
+export const getAvailablePluginPacks = async (
+	organizationId: string,
+): Promise<ForkEnabledPluginPack[]> => {
+	const response = await API.getAxiosInstance().get<ForkEnabledPluginPack[]>(
+		`/api/v2/chats/fork/organizations/${organizationId}/available-plugin-packs`,
+	);
+	return response.data;
+};
+
 /**
  * Lists the plugin packs enabled for the target itself. A chat's list leaves
  * out the packs its project enables.

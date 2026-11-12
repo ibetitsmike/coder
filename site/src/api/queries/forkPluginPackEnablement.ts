@@ -4,6 +4,7 @@
 import { mutationOptions, type QueryClient, queryOptions } from "react-query";
 import { getErrorStatus } from "#/api/errors";
 import {
+	getAvailablePluginPacks,
 	getEnabledPluginPacks,
 	type PluginPackTarget,
 	setPluginPackEnabled,
@@ -13,8 +14,17 @@ import { chatEntityKey } from "./chats";
 import { pluginPacksKey, pluginPacksRootKey } from "./forkPluginPacks";
 
 /**
+ * The query key of the plugin packs any organization member may enable. It
+ * extends pluginPacksKey, so installing, updating or deleting a pack
+ * refreshes it.
+ */
+export const availablePluginPacksKey = (organizationId: string) =>
+	[...pluginPacksKey(organizationId), "available"] as const;
+
+/**
  * The query key of the plugin packs a project or chat enables directly. A
- * project's key extends pluginPacksKey of its organization.
+ * project's key extends pluginPacksKey of its organization, but a chat's key
+ * does not.
  */
 export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 	target.kind === "project"
@@ -24,6 +34,13 @@ export const enabledPluginPacksKey = (target: PluginPackTarget) =>
 				target.projectId,
 			] as const)
 		: ([...pluginPacksRootKey, "chats", target.chatId] as const);
+
+/** Query options for the plugin packs any organization member may enable. */
+export const availablePluginPacks = (organizationId: string) =>
+	queryOptions({
+		queryKey: availablePluginPacksKey(organizationId),
+		queryFn: () => getAvailablePluginPacks(organizationId),
+	});
 
 /** Query options for the plugin packs a project or chat enables directly. */
 export const enabledPluginPacks = (target: PluginPackTarget) =>

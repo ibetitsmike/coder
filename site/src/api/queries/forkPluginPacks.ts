@@ -19,8 +19,9 @@ export const pluginPacksRootKey = ["chats", "fork-plugin-packs"] as const;
 
 /**
  * Scopes the plugin pack cache to one organization. It also prefixes the keys
- * of the organization's projects' enabled pack lists, so the pack mutations
- * invalidate those lists too, and no other organization's.
+ * of the organization's available pack list and its projects' enabled pack
+ * lists, so the pack mutations invalidate those lists too, and no other
+ * organization's.
  */
 export const pluginPacksKey = (organizationId: string) =>
 	[...pluginPacksRootKey, organizationId] as const;

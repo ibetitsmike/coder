@@ -2,14 +2,14 @@
 // pack switches.
 
 import { useMutation, useQuery, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage, getErrorStatus } from "#/api/errors";
+import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import type { PluginPackTarget } from "#/api/forkPluginPackEnablement";
 import {
+	availablePluginPacks,
 	enabledPluginPacks,
 	type PluginPackToggle,
 	setPluginPackEnabledMutation,
 } from "#/api/queries/forkPluginPackEnablement";
-import { pluginPacks } from "#/api/queries/forkPluginPacks";
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Loader } from "#/components/Loader/Loader";
@@ -19,7 +19,6 @@ import { RetryButton } from "./RetryButton";
 import { SkillEnabledStatus } from "./SkillEnabledSwitch";
 
 type ForkPluginPackTogglesViewProps = {
-	/** The organization's installed packs, or undefined when the user cannot list them. */
 	installed: readonly ForkEnabledPluginPack[] | undefined;
 	enabled: readonly ForkEnabledPluginPack[] | undefined;
 	error: unknown;
@@ -31,8 +30,9 @@ type ForkPluginPackTogglesViewProps = {
 };
 
 /**
- * Lists the installed plugin packs merged with the target's direct
- * enablements, one switch per pack, and reports toggles through `onToggle`.
+ * Lists the plugin packs in `installed`, one switch per pack, and reports
+ * toggles through `onToggle`. `enabled` only sets each switch's state, so a
+ * pack enabled for the target but missing from `installed` is not shown.
  */
 export const ForkPluginPackTogglesView: React.FC<
 	ForkPluginPackTogglesViewProps
@@ -52,34 +52,23 @@ export const ForkPluginPackTogglesView: React.FC<
 			actions={<RetryButton isRetrying={isRetrying} onRetry={onRetry} />}
 		/>
 	) : undefined;
-	if (!enabled) {
+	if (!installed || !enabled) {
 		return errorAlert ?? <Loader />;
 	}
 	const isEnabled = (packId: string) =>
 		pending?.pack.id === packId
 			? pending.enabled
 			: enabled.some((pack) => pack.id === packId);
-	// Packs enabled here stay listed even when the user cannot list the
-	// organization's packs, so they can still be disabled.
-	const packs = [
-		...(installed ?? []),
-		...enabled.filter(
-			(pack) =>
-				!installed?.some((installedPack) => installedPack.id === pack.id),
-		),
-	];
 	return (
 		<div className="flex flex-col gap-3">
 			{errorAlert}
-			{packs.length === 0 ? (
+			{installed.length === 0 ? (
 				<p className="m-0 text-sm text-content-secondary">
-					{installed
-						? "No plugin packs are installed in this organization."
-						: "No plugin packs are enabled."}
+					No plugin packs are installed in this organization.
 				</p>
 			) : (
 				<ul className="m-0 flex list-none flex-col gap-2 p-0">
-					{packs.map((pack) => (
+					{installed.map((pack) => (
 						<li key={pack.id} className="flex items-center gap-3 text-sm">
 							<span className="min-w-0 flex-1 truncate" title={pack.name}>
 								{pack.name}
@@ -101,12 +90,6 @@ export const ForkPluginPackTogglesView: React.FC<
 					))}
 				</ul>
 			)}
-			{!installed && (
-				<p className="m-0 text-xs text-content-secondary">
-					Only enabled packs are shown. Organization admins install plugin packs
-					in AI settings.
-				</p>
-			)}
 		</div>
 	);
 };
@@ -118,8 +101,9 @@ type ForkPluginPackTogglesProps = {
 };
 
 /**
- * Loads a chat or project target's plugin pack enablements and the
- * organization's installed packs, and saves each toggle for that target.
+ * Loads a chat or project target's plugin pack enablements and the packs
+ * available to the caller in the organization, and saves each toggle for
+ * that target.
  */
 export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 	target,
@@ -128,10 +112,7 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 }) => {
 	const queryClient = useQueryClient();
 	const enabledQuery = useQuery(enabledPluginPacks(target));
-	const installedQuery = useQuery({
-		...pluginPacks(organizationId),
-		retry: false,
-	});
+	const availableQuery = useQuery(availablePluginPacks(organizationId));
 	// The error toast is a mutation-level callback, so it still shows when
 	// the dialog closes while the request is in flight.
 	const toggleMutation = useMutation({
@@ -141,23 +122,15 @@ export const ForkPluginPackToggles: React.FC<ForkPluginPackTogglesProps> = ({
 				description: getErrorDetail(error),
 			}),
 	});
-	const installedStatus = getErrorStatus(installedQuery.error);
-	// Members who cannot list the organization's packs get a 403 or 404.
-	const isInstalledDenied = installedStatus === 403 || installedStatus === 404;
-	const installedError = isInstalledDenied ? undefined : installedQuery.error;
-	// Cached packs stay usable when a background refetch fails.
-	const isInstalledBlocking =
-		installedQuery.isPending ||
-		(Boolean(installedError) && !installedQuery.data);
 	return (
 		<ForkPluginPackTogglesView
-			installed={isInstalledDenied ? undefined : installedQuery.data}
-			enabled={isInstalledBlocking ? undefined : enabledQuery.data}
-			error={enabledQuery.error ?? installedError}
-			isRetrying={enabledQuery.isFetching || installedQuery.isFetching}
+			installed={availableQuery.data}
+			enabled={enabledQuery.data}
+			error={enabledQuery.error ?? availableQuery.error}
+			isRetrying={enabledQuery.isFetching || availableQuery.isFetching}
 			onRetry={() => {
 				void enabledQuery.refetch();
-				void installedQuery.refetch();
+				void availableQuery.refetch();
 			}}
 			canEdit={canEdit}
 			pending={toggleMutation.isPending ? toggleMutation.variables : undefined}

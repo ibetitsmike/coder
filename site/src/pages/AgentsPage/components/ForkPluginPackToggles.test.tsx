@@ -2,9 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as enablementApi from "#/api/forkPluginPackEnablement";
-import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import { chatEntityKey } from "#/api/queries/chats";
-import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
 import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
 import {
@@ -21,6 +19,10 @@ beforeEach(() => {
 		MockForkPluginPackWithoutPath,
 	]);
 	vi.spyOn(enablementApi, "setPluginPackEnabled").mockResolvedValue();
+	vi.spyOn(enablementApi, "getAvailablePluginPacks").mockResolvedValue([
+		MockForkPluginPack,
+		MockForkPluginPackWithoutPath,
+	]);
 });
 
 afterEach(() => {
@@ -29,10 +31,6 @@ afterEach(() => {
 
 it("enables an installed pack for the target and refetches the chat", async () => {
 	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-		MockForkPluginPackWithoutPath,
-	]);
 	const { queryClient } = render(
 		<ForkPluginPackToggles
 			target={target}
@@ -69,9 +67,6 @@ it("enables an installed pack for a project", async () => {
 		organizationId: MockForkPluginPack.organization_id,
 		projectId: "project-1",
 	} as const;
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-	]);
 	render(
 		<ForkPluginPackToggles
 			target={projectTarget}
@@ -103,9 +98,6 @@ it("refetches both lists when Retry is pressed after a failed load", async () =>
 	vi.mocked(enablementApi.getEnabledPluginPacks).mockRejectedValueOnce(
 		mockApiError({ message: "Failed to list enabled plugin packs." }),
 	);
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-	]);
 	render(
 		<ForkPluginPackToggles
 			target={target}
@@ -118,7 +110,7 @@ it("refetches both lists when Retry is pressed after a failed load", async () =>
 
 	await waitFor(() => {
 		expect(enablementApi.getEnabledPluginPacks).toHaveBeenCalledTimes(2);
-		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2);
+		expect(enablementApi.getAvailablePluginPacks).toHaveBeenCalledTimes(2);
 	});
 });
 
@@ -129,10 +121,6 @@ it("keeps the switches and offers Retry when a refetch fails", async () => {
 		.mockRejectedValueOnce(
 			mockApiError({ message: "Failed to list enabled plugin packs." }),
 		);
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-		MockForkPluginPackWithoutPath,
-	]);
 	render(
 		<ForkPluginPackToggles
 			target={target}
@@ -157,12 +145,8 @@ it("keeps the switches and offers Retry when a refetch fails", async () => {
 	);
 });
 
-it("lists only enabled packs when the organization's packs cannot be listed", async () => {
+it("disables a pack enabled for the target", async () => {
 	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockRejectedValue({
-		...mockApiError({ message: "Resource not found." }),
-		status: 404,
-	});
 	render(
 		<ForkPluginPackToggles
 			target={target}
@@ -185,92 +169,10 @@ it("lists only enabled packs when the organization's packs cannot be listed", as
 	);
 });
 
-it("keeps enabled packs toggleable after the installed list becomes forbidden", async () => {
-	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks")
-		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
-		.mockRejectedValue({
-			...mockApiError({ message: "Forbidden." }),
-			status: 403,
-		});
-	const { queryClient } = render(
-		<ForkPluginPackToggles
-			target={target}
-			organizationId={MockForkPluginPack.organization_id}
-			canEdit
-		/>,
-	);
-	await screen.findByRole("switch", {
-		name: `Enable ${MockForkPluginPack.name}`,
-	});
-
-	await queryClient.invalidateQueries({
-		queryKey: pluginPacksKey(MockForkPluginPack.organization_id),
-	});
-
-	await waitFor(() =>
-		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
-	);
-	await user.click(
-		screen.getByRole("switch", {
-			name: `Enable ${MockForkPluginPackWithoutPath.name}`,
-		}),
-	);
-
-	await waitFor(() =>
-		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledWith(
-			target,
-			MockForkPluginPackWithoutPath.id,
-			false,
-		),
-	);
-});
-
-it("keeps cached installed packs toggleable and offers Retry when the installed list refetch fails", async () => {
-	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks")
-		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
-		.mockRejectedValue(
-			mockApiError({ message: "Failed to list plugin packs." }),
-		);
-	const { queryClient } = render(
-		<ForkPluginPackToggles
-			target={target}
-			organizationId={MockForkPluginPack.organization_id}
-			canEdit
-		/>,
-	);
-	await screen.findByRole("switch", {
-		name: `Enable ${MockForkPluginPack.name}`,
-	});
-
-	await queryClient.invalidateQueries({
-		queryKey: pluginPacksKey(MockForkPluginPack.organization_id),
-	});
-	await user.click(await screen.findByRole("button", { name: "Retry" }));
-	await waitFor(() =>
-		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(3),
-	);
-	await user.click(
-		screen.getByRole("switch", { name: `Enable ${MockForkPluginPack.name}` }),
-	);
-
-	await waitFor(() =>
-		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledWith(
-			target,
-			MockForkPluginPack.id,
-			true,
-		),
-	);
-});
-
 const toggleDeletedPack = async (
 	toggleTarget: enablementApi.PluginPackTarget,
 ) => {
 	const user = userEvent.setup();
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-	]);
 	vi.mocked(enablementApi.setPluginPackEnabled).mockRejectedValueOnce({
 		...mockApiError({ message: "Resource not found." }),
 		status: 404,
@@ -290,15 +192,15 @@ const toggleDeletedPack = async (
 	);
 };
 
-it("refetches the installed packs when a chat toggle finds a deleted pack", async () => {
+it("refetches the available packs when a chat toggle finds a deleted pack", async () => {
 	await toggleDeletedPack(target);
 
 	await waitFor(() =>
-		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+		expect(enablementApi.getAvailablePluginPacks).toHaveBeenCalledTimes(2),
 	);
 });
 
-it("refetches the installed packs when a project toggle finds a deleted pack", async () => {
+it("refetches the available packs when a project toggle finds a deleted pack", async () => {
 	await toggleDeletedPack({
 		kind: "project",
 		organizationId: MockForkPluginPack.organization_id,
@@ -306,7 +208,7 @@ it("refetches the installed packs when a project toggle finds a deleted pack", a
 	});
 
 	await waitFor(() =>
-		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(2),
+		expect(enablementApi.getAvailablePluginPacks).toHaveBeenCalledTimes(2),
 	);
 });
 
@@ -319,9 +221,6 @@ it("reports a failed toggle after the switches unmount", async () => {
 			rejectToggle = reject;
 		}),
 	);
-	vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-		MockForkPluginPack,
-	]);
 	const { unmount } = render(
 		<ForkPluginPackToggles
 			target={target}

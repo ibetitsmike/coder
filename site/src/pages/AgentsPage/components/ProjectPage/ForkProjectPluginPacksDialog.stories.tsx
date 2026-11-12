@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { enabledPluginPacksKey } from "#/api/queries/forkPluginPackEnablement";
-import { pluginPacksKey } from "#/api/queries/forkPluginPacks";
+import {
+	availablePluginPacksKey,
+	enabledPluginPacksKey,
+} from "#/api/queries/forkPluginPackEnablement";
 import { MockChatProject } from "#/testHelpers/entities";
 import {
 	MockForkPluginPack,
@@ -35,7 +37,7 @@ export const Editable: Story = {
 				data: [MockForkPluginPack],
 			},
 			{
-				key: pluginPacksKey(MockChatProject.organization_id),
+				key: availablePluginPacksKey(MockChatProject.organization_id),
 				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
 			},
 		],
@@ -60,7 +62,7 @@ export const ReadOnly: Story = {
 				data: [MockForkPluginPack],
 			},
 			{
-				key: pluginPacksKey(MockChatProject.organization_id),
+				key: availablePluginPacksKey(MockChatProject.organization_id),
 				data: [MockForkPluginPack, MockForkPluginPackWithoutPath],
 			},
 		],
