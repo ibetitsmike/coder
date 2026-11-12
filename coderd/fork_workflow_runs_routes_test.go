@@ -160,7 +160,7 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		ctx := testutil.Context(t, testutil.WaitLong)
 		client, db, owner := newForkWorkflowRunsAPI(t, true)
 		memberClient, member := coderdtest.CreateAnotherUser(t, client, owner.OrganizationID)
-		otherClient, _ := coderdtest.CreateAnotherUser(t, client, owner.OrganizationID)
+		otherClient, other := coderdtest.CreateAnotherUser(t, client, owner.OrganizationID)
 		memberChat := dbgen.Chat(t, db, database.Chat{
 			OrganizationID: owner.OrganizationID,
 			OwnerID:        member.ID,
@@ -201,6 +201,17 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		err = memberClient.StopChatWorkflowRun(ctx, memberChat.ID, liveID)
 		require.NoError(t, err)
 		assert.Equal(t, "stopped", forkWorkflowRunStatus(t, fdb, liveID))
+
+		// A run of another member's chat reads as missing through the
+		// member's own chat.
+		otherChat := dbgen.Chat(t, db, database.Chat{
+			OrganizationID:    owner.OrganizationID,
+			OwnerID:           other.ID,
+			LastModelConfigID: memberChat.LastModelConfigID,
+		})
+		foreign := insertForkWorkflowRun(t, db, otherChat)
+		_, err = memberClient.GetChatWorkflowRun(ctx, memberChat.ID, foreign.ID)
+		requireForkStatus(t, err, http.StatusNotFound)
 
 		// The member cannot reach the runs of the owner's chat either.
 		ownerChat := newForkChatTodosChat(t, db, owner)

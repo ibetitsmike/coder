@@ -12,8 +12,7 @@ import { useForkExperiment } from "../../ChatElements/tools/forkToolUtils";
  * unchanged. A failed list request hides the tab.
  */
 export const useForkWorkflowsTab = (chat: Chat): boolean => {
-	const isEnabled =
-		useForkExperiment("fork-workflows") && !chat.parent_chat_id;
+	const isEnabled = useForkExperiment("fork-workflows") && !chat.parent_chat_id;
 	const runsQuery = useQuery({
 		...chatWorkflowRuns(chat.id),
 		enabled: isEnabled,

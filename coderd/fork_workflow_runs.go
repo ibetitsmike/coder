@@ -145,7 +145,9 @@ func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 
 	detail, err := api.readChatWorkflowRun(ctx, chat.ID, runID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// A run of a chat the caller cannot read fails authorization; it
+		// answers like a missing run so the two stay indistinguishable.
+		if httpapi.Is404Error(err) {
 			httpapi.Write(ctx, rw, http.StatusNotFound, codersdk.Response{
 				Message: "Workflow run not found.",
 			})
