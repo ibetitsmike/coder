@@ -304,6 +304,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			Accepted:             false,
 			ForkPluginPacks:      a.ForkPluginPacks,
 			ForkAgentDefinitions: a.ForkAgentDefinitions,
+			ForkGlobRules:        true,
 		}, nil
 	}
 
@@ -324,6 +325,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		Accepted:             true,
 		ForkPluginPacks:      a.ForkPluginPacks,
 		ForkAgentDefinitions: a.ForkAgentDefinitions,
+		ForkGlobRules:        true,
 	}, nil
 }
 

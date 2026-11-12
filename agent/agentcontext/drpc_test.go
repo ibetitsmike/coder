@@ -174,6 +174,7 @@ func TestDRPCPusher_ResponseCapabilitiesMapped(t *testing.T) {
 		Accepted:             true,
 		ForkPluginPacks:      true,
 		ForkAgentDefinitions: true,
+		ForkGlobRules:        true,
 	}}
 	pusher := agentcontext.NewDRPCPusher(client)
 
@@ -181,6 +182,7 @@ func TestDRPCPusher_ResponseCapabilitiesMapped(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.ForkPluginPacks, "the fork_plugin_packs response capability must reach the manager")
 	require.True(t, resp.ForkAgentDefinitions, "the fork_agent_definitions response capability must reach the manager")
+	require.True(t, resp.ForkGlobRules, "the fork_glob_rules response capability must reach the manager")
 }
 
 func TestDRPCPusher_UnimplementedTranslated(t *testing.T) {

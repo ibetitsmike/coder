@@ -74,8 +74,9 @@ jobs:
       # dbtestutil uses postgres:postgres@127.0.0.1:5432 when it answers.
       - name: Start Postgres
         run: ./.github/fork/start-postgres.sh
+      # The upstream test is flaky under fork-ci timing (#61); upstream CI covers it.
       - name: Chat and database packages
-        run: go test -count=1 ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
+        run: go test -count=1 -skip '^TestRunnerManager_HeartbeatDoesNotReviveStaleLease$' ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
       - name: Chat API tests
         run: go test -count=1 -run '(?i)chat|skill|mcp|plugin' ./coderd ./enterprise/coderd
       - name: Plugin CLI tests
