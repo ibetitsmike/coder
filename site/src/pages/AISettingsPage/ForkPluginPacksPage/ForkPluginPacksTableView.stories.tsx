@@ -61,10 +61,6 @@ export const UpdateOnly: Story = {
 	args: { access: { create: false, update: true, delete: false } },
 };
 
-export const Updating: Story = {
-	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
-};
-
 export const UpdatingMenuOpen: Story = {
 	args: { updatingPackIds: new Set([MockForkPluginPack.id]) },
 	play: async () => {
