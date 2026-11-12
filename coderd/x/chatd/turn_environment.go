@@ -2664,6 +2664,15 @@ func appendDynamicTools(
 	for _, t := range tools {
 		info := t.Info()
 		if dynamicToolNames[info.Name] {
+			// chatd itself injects workflow_report on workflow step chats,
+			// built from this same column, so the definition here is
+			// chatd's placeholder and the server tool owns the name by
+			// design; only a collision with a different built-in is
+			// worth a warning (fork-workflows).
+			if _, ok := t.(*workflowReportTool); ok {
+				delete(dynamicToolNames, info.Name)
+				continue
+			}
 			logger.Warn(ctx, "dynamic tool name collides with built-in tool, built-in takes precedence",
 				slog.F("tool_name", info.Name))
 			delete(dynamicToolNames, info.Name)

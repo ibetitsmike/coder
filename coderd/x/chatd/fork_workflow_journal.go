@@ -182,6 +182,35 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 	}
 }
 
+// getStep loads one journaled step. The authorizer of GetWorkflowStep reads
+// the step to find its run.
+func (j workflowJournal) getStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return forkdb.WorkflowStep{}, err
+	}
+	return fdb.GetWorkflowStep(journalCtx(ctx), id)
+}
+
+// reportStep journals a report that no live run will read from the chat
+// history: the step child of an interrupted run recovered through chat
+// recovery and reported before anyone resumed the run. Unlike updateStep it
+// is not best effort: the tool's answer tells the model whether the value
+// reached the journal, and a lost write would answer "accepted" for a value
+// that only the next report's retry can save.
+func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) error {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return err
+	}
+	return fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+		ID:     step.id,
+		Status: step.status,
+		Value:  jsonbValue(step.value),
+		Error:  step.err,
+	})
+}
+
 func (j workflowJournal) getSteps(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
 	fdb, err := j.store(ctx)
 	if err != nil {

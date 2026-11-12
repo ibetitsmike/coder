@@ -41,7 +41,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	}
 	// A workflow step child gets workflow_report before the dynamic tools,
 	// so the server tool wins the name (fork-workflows).
-	tools, err := appendWorkflowReportTool(tools, chat)
+	tools, err := p.appendWorkflowReportTool(tools, chat)
 	if err != nil {
 		return nil, err
 	}

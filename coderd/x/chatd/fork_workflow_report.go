@@ -8,12 +8,15 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"strconv"
 	"strings"
 
+	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
@@ -47,7 +50,19 @@ type workflowReportTool struct {
 	info     fantasy.ToolInfo
 	resolved *jsonschema.Resolved
 	opts     fantasy.ProviderOptions
+
+	// runID, chatID and p bind the tool to the step chat it serves, so a
+	// report from a turn whose run is no longer live can reach the journal.
+	// runID is zero for a tool built from a schema alone.
+	p      *Server
+	runID  uuid.UUID
+	chatID uuid.UUID
 }
+
+// reportAcceptedText answers a report the workflow will read: through the
+// live run's own history scan, or through the journal of an interrupted run
+// that a resume replays.
+const reportAcceptedText = "Value accepted. The workflow has your result."
 
 var _ fantasy.AgentTool = (*workflowReportTool)(nil)
 
@@ -80,7 +95,7 @@ func (t *workflowReportTool) ProviderOptions() fantasy.ProviderOptions { return 
 
 func (t *workflowReportTool) SetProviderOptions(opts fantasy.ProviderOptions) { t.opts = opts }
 
-func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func (t *workflowReportTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	var value any
 	if err := json.Unmarshal([]byte(call.Input), &value); err != nil {
 		return fantasy.NewTextErrorResponse("The input is not valid JSON: " + err.Error()), nil
@@ -97,7 +112,75 @@ func (t *workflowReportTool) Run(_ context.Context, call fantasy.ToolCall) (fant
 		return fantasy.NewTextErrorResponse("The value does not match the schema: " + err.Error() +
 			". Call workflow_report again with a corrected value."), nil
 	}
-	return fantasy.NewTextResponse("Value accepted. The workflow has your result."), nil
+	if t.runID == uuid.Nil {
+		// The tool was built from a schema alone and serves no step chat.
+		return fantasy.NewTextResponse(reportAcceptedText), nil
+	}
+	return t.accept(ctx, call.Input)
+}
+
+// accept records a valid report. A run this registry still executes
+// captures the value itself: waitStep reads the chat history after the
+// turn ends, so the journal stays the run's writer. An orphaned turn lands
+// here: the process restarted while the run was open, chat recovery
+// re-ran the step child, and the report would otherwise stay in the chat
+// history that nothing reads until a resume replays it. A run this
+// registry holds but that already ended falls through too: its journal row
+// is terminal, and the answer names that instead of accepting a value
+// nothing will read.
+func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.ToolResponse, error) {
+	if run := t.p.workflows.get(t.runID); run != nil &&
+		run.snapshot().Status == workflowStatusRunning {
+		return fantasy.NewTextResponse(reportAcceptedText), nil
+	}
+	j := t.p.workflowJournal()
+	row, found, err := j.getRun(ctx, t.runID)
+	if err != nil {
+		return fantasy.NewTextErrorResponse("the workflow run could not be loaded: " + err.Error() +
+			". Call workflow_report again."), nil
+	}
+	if !found {
+		return fantasy.NewTextErrorResponse(
+			"the workflow run of this step is not in the journal, so the report has nowhere to go. " +
+				"Stop working; resuming the run starts this step again."), nil
+	}
+	switch row.Status {
+	case workflowStatusCompleted, workflowStatusFailed, workflowStatusStopped:
+		return fantasy.NewTextErrorResponse("the workflow has already ended with status " + row.Status +
+			"; a report cannot change its result."), nil
+	case workflowStatusRunning, workflowStatusInterrupted:
+	default:
+		return fantasy.NewTextErrorResponse("the workflow run has the unknown status " + row.Status +
+			"; the report was not recorded."), nil
+	}
+	step, err := j.getStep(ctx, t.chatID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The process died between the child chat's creation and the
+		// step's journal row, so a resume starts the step from scratch.
+		return fantasy.NewTextErrorResponse(
+			"the workflow run was interrupted before this step was journaled. " +
+				"Stop working; resuming the run starts this step again."), nil
+	}
+	if err != nil {
+		return fantasy.NewTextErrorResponse("the workflow step could not be loaded: " + err.Error() +
+			". Call workflow_report again."), nil
+	}
+	if step.Status == stepStatusFailed {
+		return fantasy.NewTextErrorResponse("this step already failed (" + step.Error +
+			"); the workflow no longer waits for it. Stop working."), nil
+	}
+	// A reported row keeps receiving later calls: the history scan of a
+	// resume reads the last accepted call, so the journal must agree and
+	// record the latest value too.
+	if err := j.reportStep(ctx, &workflowStep{
+		id:     step.ID,
+		status: stepStatusReported,
+		value:  json.RawMessage(input),
+	}); err != nil {
+		return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
+			". Call workflow_report again."), nil
+	}
+	return fantasy.NewTextResponse(reportAcceptedText), nil
 }
 
 // maxExactInteger is the largest magnitude an integer report can carry.
@@ -538,7 +621,7 @@ func workflowStepDef(chat database.Chat) (codersdk.DynamicTool, bool) {
 
 // appendWorkflowReportTool adds workflow_report to the tools of a workflow
 // step child. Other chats keep their tools.
-func appendWorkflowReportTool(tools []fantasy.AgentTool, chat database.Chat) ([]fantasy.AgentTool, error) {
+func (p *Server) appendWorkflowReportTool(tools []fantasy.AgentTool, chat database.Chat) ([]fantasy.AgentTool, error) {
 	def, ok := workflowStepDef(chat)
 	if !ok {
 		return tools, nil
@@ -547,6 +630,16 @@ func appendWorkflowReportTool(tools []fantasy.AgentTool, chat database.Chat) ([]
 	if err != nil {
 		// startStep checked the schema before it created the chat.
 		return nil, xerrors.Errorf("build workflow_report for chat %s: %w", chat.ID, err)
+	}
+	// The label is chatd's own and a child chat cannot receive one any
+	// other way, so an unparseable label is a corrupt column, not a
+	// spoofing attempt. The tool still validates; it only cannot journal
+	// an orphaned report, which the warning names.
+	if id, err := uuid.Parse(chat.Labels[workflowRunLabel]); err != nil {
+		p.logger.Warn(context.Background(), "workflow step chat has an unparseable run label",
+			slog.F("chat_id", chat.ID), slog.F("label", chat.Labels[workflowRunLabel]), slog.Error(err))
+	} else {
+		tool.p, tool.runID, tool.chatID = p, id, chat.ID
 	}
 	return append(tools, tool), nil
 }
