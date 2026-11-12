@@ -146,7 +146,9 @@ func rejectOutOfRangeNumbers(input string) error {
 			// float64 decode of it says nothing about the exact value.
 			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
 		}
-		if len(mantissa) > maxNumberDigits || abs(exponent) > maxNumberExponent {
+		// Two-sided rather than abs: abs(math.MinInt) overflows back to a
+		// negative value on 64-bit hosts and would bypass the bound.
+		if len(mantissa) > maxNumberDigits || exponent > maxNumberExponent || exponent < -maxNumberExponent {
 			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
 		}
 		// Parse exactly: an integer can hide in exponent or trailing-zero
@@ -185,14 +187,6 @@ func splitNumber(text string) (mantissa string, exponent int, ok bool) {
 		return "", 0, false
 	}
 	return digits, exp, true
-}
-
-// abs returns the absolute value of n.
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 // checkStepSchema accepts a JSON Schema whose top level is an object. The
@@ -349,9 +343,12 @@ const maxInlinedNodes = 4096
 // tool contract can carry: type, the property keywords fantasy rebuilds the
 // provider schema from, documentation, the definition keywords the inliner
 // flattens, and the validation-neutral annotations (dropping them loses
-// metadata, not constraints). Anything else at the top level would be
-// enforced by Run but invisible to the child.
+// metadata, not constraints). $id and $schema only name the document and
+// bind no values, so the contract omits them while Run validates the
+// original. Anything else at the top level would be enforced by Run but
+// invisible to the child.
 var representableTopLevelKeywords = map[string]bool{
+	"$id":                  true,
 	"$schema":              true,
 	"$defs":                true,
 	"definitions":          true,

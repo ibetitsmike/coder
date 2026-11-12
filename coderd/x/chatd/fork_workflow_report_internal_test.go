@@ -182,10 +182,12 @@ func TestForkWorkflowReport(t *testing.T) {
 			`{"type":"object","properties":{"*":{"type":"string"},"other":{"type":"string"}}}`))
 		require.NoError(t, err)
 
-		// Validation-neutral annotations pass: dropping them loses metadata,
-		// not constraints.
+		// Validation-neutral metadata passes: $id names the document and the
+		// annotations bind no values, so dropping them from the contract
+		// loses metadata, not constraints.
 		_, err = newWorkflowReportTool(json.RawMessage(`{` +
 			`"type":"object",` +
+			`"$id":"https://example.com/report",` +
 			`"$comment":"why the schema looks like this",` +
 			`"default":{"a":"x"},` +
 			`"examples":[{"a":"x"}],` +
@@ -326,6 +328,14 @@ func TestForkWorkflowReport(t *testing.T) {
 		// An exponent too large for int is valid JSON with any magnitude,
 		// so it must fail closed instead of skipping the exact-number guard.
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1e-999999999999999999999999}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "too large to validate exactly")
+
+		// The minimum int exponent parses exactly, but abs of it overflows
+		// back to a negative value, so it must fail closed like any giant
+		// exponent instead of underflowing the float64 decode to zero.
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"n":1e-9223372036854775808}`})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Contains(t, resp.Content, "too large to validate exactly")
