@@ -237,6 +237,14 @@ type ChatDescendantQuestion struct {
 	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
 }
 
+// Plugin packs turned off for one chat and its subagents, even when its project or the chat enables them.
+type ChatExcludedPluginPack struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	ChatID         uuid.UUID `db:"chat_id" json:"chat_id"`
+	PackID         uuid.UUID `db:"pack_id" json:"pack_id"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+}
+
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
 	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`

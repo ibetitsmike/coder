@@ -177,6 +177,20 @@ func (mr *MockStoreMockRecorder) CountOrganizationChatWakeupRunsSince(ctx, arg a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountOrganizationChatWakeupRunsSince", reflect.TypeOf((*MockStore)(nil).CountOrganizationChatWakeupRunsSince), ctx, arg)
 }
 
+// DeleteChatExcludedPluginPack mocks base method.
+func (m *MockStore) DeleteChatExcludedPluginPack(ctx context.Context, arg forkdb.DeleteChatExcludedPluginPackParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatExcludedPluginPack", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatExcludedPluginPack indicates an expected call of DeleteChatExcludedPluginPack.
+func (mr *MockStoreMockRecorder) DeleteChatExcludedPluginPack(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatExcludedPluginPack", reflect.TypeOf((*MockStore)(nil).DeleteChatExcludedPluginPack), ctx, arg)
+}
+
 // DeleteChatPinnedSkills mocks base method.
 func (m *MockStore) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -572,6 +586,21 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByIDForUpdate(ctx, id any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByIDForUpdate", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByIDForUpdate), ctx, id)
 }
 
+// GetExcludedPluginPacksByChatID mocks base method.
+func (m *MockStore) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetExcludedPluginPacksByChatIDRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetExcludedPluginPacksByChatID", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.GetExcludedPluginPacksByChatIDRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetExcludedPluginPacksByChatID indicates an expected call of GetExcludedPluginPacksByChatID.
+func (mr *MockStoreMockRecorder) GetExcludedPluginPacksByChatID(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExcludedPluginPacksByChatID", reflect.TypeOf((*MockStore)(nil).GetExcludedPluginPacksByChatID), ctx, chatID)
+}
+
 // GetFamilySubagentsAwaitingWorker mocks base method.
 func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
 	m.ctrl.T.Helper()
@@ -855,6 +884,21 @@ func (m *MockStore) GetUserAgentDefinitionByName(ctx context.Context, arg forkdb
 func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetUserAgentDefinitionByName), ctx, arg)
+}
+
+// InsertChatExcludedPluginPack mocks base method.
+func (m *MockStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatExcludedPluginPack", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatExcludedPluginPack)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertChatExcludedPluginPack indicates an expected call of InsertChatExcludedPluginPack.
+func (mr *MockStoreMockRecorder) InsertChatExcludedPluginPack(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatExcludedPluginPack", reflect.TypeOf((*MockStore)(nil).InsertChatExcludedPluginPack), ctx, arg)
 }
 
 // InsertChatPinnedSkills mocks base method.

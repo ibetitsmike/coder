@@ -39,3 +39,24 @@ FROM chat_plugin_packs
 JOIN plugin_packs ON plugin_packs.id = chat_plugin_packs.pack_id
 WHERE chat_plugin_packs.chat_id = @chat_id
 ORDER BY plugin_packs.name;
+
+-- name: InsertChatExcludedPluginPack :one
+-- Turns off a pack of the chat's organization for the chat. It returns no
+-- row for a pack that does not exist or is in another organization.
+INSERT INTO chat_excluded_plugin_packs (organization_id, chat_id, pack_id)
+SELECT chats.organization_id, chats.id, plugin_packs.id
+FROM chats
+JOIN plugin_packs ON plugin_packs.organization_id = chats.organization_id
+WHERE chats.id = @chat_id AND plugin_packs.id = @pack_id
+ON CONFLICT (chat_id, pack_id) DO UPDATE SET created_at = chat_excluded_plugin_packs.created_at
+RETURNING *;
+
+-- name: DeleteChatExcludedPluginPack :exec
+DELETE FROM chat_excluded_plugin_packs WHERE chat_id = @chat_id AND pack_id = @pack_id;
+
+-- name: GetExcludedPluginPacksByChatID :many
+SELECT plugin_packs.id, plugin_packs.name, plugin_packs.commit_sha
+FROM chat_excluded_plugin_packs
+JOIN plugin_packs ON plugin_packs.id = chat_excluded_plugin_packs.pack_id
+WHERE chat_excluded_plugin_packs.chat_id = @chat_id
+ORDER BY plugin_packs.name;

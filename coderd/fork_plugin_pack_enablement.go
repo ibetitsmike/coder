@@ -181,6 +181,67 @@ func (api *API) deleteForkChatPluginPack(rw http.ResponseWriter, r *http.Request
 	})
 }
 
+// @Summary List plugin packs turned off for a chat
+// @ID list-plugin-packs-turned-off-for-a-chat
+// @Security CoderSessionToken
+// @Tags Chats
+// @Produce json
+// @Param chat path string true "Chat ID" format(uuid)
+// @Success 200 {array} codersdk.ForkEnabledPluginPack
+// @Router /api/v2/chats/fork/{chat}/excluded-plugin-packs [get]
+// @x-apidocgen {"skip": true}
+func (api *API) forkChatExcludedPluginPacks(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	fdb, ok := forkPluginPackStore(rw, api.Database)
+	if !ok {
+		return
+	}
+	rows, err := fdb.GetExcludedPluginPacksByChatID(ctx, httpmw.ChatParam(r).ID)
+	if err != nil {
+		writeForkPluginPackError(rw, err)
+		return
+	}
+	packs := make([]codersdk.ForkEnabledPluginPack, 0, len(rows))
+	for _, row := range rows {
+		packs = append(packs, codersdk.ForkEnabledPluginPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
+	}
+	httpapi.Write(ctx, rw, http.StatusOK, packs)
+}
+
+// @Summary Turn off a plugin pack for a chat
+// @Description The pack stays off for the chat and its subagents even when the chat's project or the chat enables it.
+// @ID turn-off-a-plugin-pack-for-a-chat
+// @Security CoderSessionToken
+// @Tags Chats
+// @Param chat path string true "Chat ID" format(uuid)
+// @Param pluginPack path string true "Plugin pack ID" format(uuid)
+// @Success 204
+// @Router /api/v2/chats/fork/{chat}/excluded-plugin-packs/{pluginPack} [put]
+// @x-apidocgen {"skip": true}
+func (api *API) putForkChatExcludedPluginPack(rw http.ResponseWriter, r *http.Request) {
+	chat := httpmw.ChatParam(r)
+	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+		_, err := fdb.InsertChatExcludedPluginPack(r.Context(), forkdb.InsertChatExcludedPluginPackParams{ChatID: chat.ID, PackID: packID})
+		return err
+	})
+}
+
+// @Summary Stop turning off a plugin pack for a chat
+// @ID stop-turning-off-a-plugin-pack-for-a-chat
+// @Security CoderSessionToken
+// @Tags Chats
+// @Param chat path string true "Chat ID" format(uuid)
+// @Param pluginPack path string true "Plugin pack ID" format(uuid)
+// @Success 204
+// @Router /api/v2/chats/fork/{chat}/excluded-plugin-packs/{pluginPack} [delete]
+// @x-apidocgen {"skip": true}
+func (api *API) deleteForkChatExcludedPluginPack(rw http.ResponseWriter, r *http.Request) {
+	chat := httpmw.ChatParam(r)
+	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+		return fdb.DeleteChatExcludedPluginPack(r.Context(), forkdb.DeleteChatExcludedPluginPackParams{ChatID: chat.ID, PackID: packID})
+	})
+}
+
 // writeForkPluginPackEnablement authorizes an update of target, then runs
 // write for the {pluginPack} parameter. A pack that does not exist or is in
 // another organization answers 404, like a pack the user cannot see.

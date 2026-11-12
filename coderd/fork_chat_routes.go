@@ -123,6 +123,9 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		chatPluginPacks.Get("/{chat}/plugin-packs", api.forkChatPluginPacks)
 		chatPluginPacks.Put("/{chat}/plugin-packs/{pluginPack}", api.putForkChatPluginPack)
 		chatPluginPacks.Delete("/{chat}/plugin-packs/{pluginPack}", api.deleteForkChatPluginPack)
+		chatPluginPacks.Get("/{chat}/excluded-plugin-packs", api.forkChatExcludedPluginPacks)
+		chatPluginPacks.Put("/{chat}/excluded-plugin-packs/{pluginPack}", api.putForkChatExcludedPluginPack)
+		chatPluginPacks.Delete("/{chat}/excluded-plugin-packs/{pluginPack}", api.deleteForkChatExcludedPluginPack)
 
 		chatPinnedSkills := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkPinnedSkills),

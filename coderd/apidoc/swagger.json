@@ -5592,6 +5592,118 @@
 				]
 			}
 		},
+		"/api/v2/chats/fork/{chat}/excluded-plugin-packs": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List plugin packs turned off for a chat",
+				"operationId": "list-plugin-packs-turned-off-for-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkEnabledPluginPack"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/{chat}/excluded-plugin-packs/{pluginPack}": {
+			"put": {
+				"description": "The pack stays off for the chat and its subagents even when the chat's project or the chat enables it.",
+				"tags": ["Chats"],
+				"summary": "Turn off a plugin pack for a chat",
+				"operationId": "turn-off-a-plugin-pack-for-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Stop turning off a plugin pack for a chat",
+				"operationId": "stop-turning-off-a-plugin-pack-for-a-chat",
+				"parameters": [
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Chat ID",
+						"name": "chat",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Plugin pack ID",
+						"name": "pluginPack",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/{chat}/family": {
 			"get": {
 				"description": "Returns the live subagent count and limit of the family under\na root chat, and the running subagents that wait for a\nconcurrency slot.",

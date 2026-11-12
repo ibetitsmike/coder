@@ -40,6 +40,7 @@ type Querier interface {
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
+	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
@@ -87,6 +88,7 @@ type Querier interface {
 	// Locks the wake-up until the transaction ends, so a worker that finishes its
 	// claim in between waits and then finds its lease gone.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
 	// worker with a fresh heartbeat owns, with the predicate of
 	// GetChatAwaitingWorker. Each row carries the counts of
@@ -114,6 +116,9 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	// Turns off a pack of the chat's organization for the chat. It returns no
+	// row for a pack that does not exist or is in another organization.
+	InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error)
 	InsertChatPinnedSkills(ctx context.Context, arg InsertChatPinnedSkillsParams) error
 	// Enables a pack of the chat's organization for the chat. It returns no row
 	// for a pack that does not exist or is in another organization.
