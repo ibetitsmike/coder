@@ -4,6 +4,7 @@ package agentcontext
 // installed plugin pack root.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,8 @@ func TestWatcherEventRelevant(t *testing.T) {
 		{"cursor manifest write re-resolves", fsnotify.Event{Name: "/p/pstack/.cursor-plugin/plugin.json", Op: fsnotify.Write}, true},
 		{"skill edit re-resolves", fsnotify.Event{Name: "/p/pstack/skills/x/SKILL.md", Op: fsnotify.Write}, true},
 		{"install record write re-resolves", fsnotify.Event{Name: "/h/.claude/plugins/installed_plugins.json", Op: fsnotify.Write}, true},
+		{"marketplace record write re-resolves", fsnotify.Event{Name: "/h/.claude/plugins/known_marketplaces.json", Op: fsnotify.Write}, true},
+		{"marketplace catalog write re-resolves", fsnotify.Event{Name: "/h/.claude/plugins/marketplaces/m/.claude-plugin/marketplace.json", Op: fsnotify.Write}, true},
 		{"ordinary write ignored", fsnotify.Event{Name: "/p/pstack/README.md", Op: fsnotify.Write}, false},
 		{"declared agent container write re-resolves", fsnotify.Event{Name: "/p/pstack/definitions/reviewer.md", Op: fsnotify.Write}, true},
 		{"non-markdown write in agent container ignored", fsnotify.Event{Name: "/p/pstack/definitions/notes.txt", Op: fsnotify.Write}, false},
@@ -66,6 +69,85 @@ func TestCollectDirsWatchesClaudeCacheLevels(t *testing.T) {
 	// re-resolves.
 	for _, dir := range []string{cache, filepath.Join(cache, "market"), plugin, live, filepath.Join(live, ".claude-plugin"), orphaned} {
 		require.Contains(t, dirs, dir)
+	}
+}
+
+func TestCollectDirsWatchesClaudeMarketplaceCatalog(t *testing.T) {
+	t.Parallel()
+	plugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+	cache := filepath.Join(plugins, "cache")
+	catalogDir := filepath.Join(plugins, "marketplaces", "market", ".claude-plugin")
+	for _, dir := range []string{filepath.Join(cache, "market", "pstack", "1.0.0"), catalogDir} {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+	}
+
+	dirs, _ := (&Watcher{}).collectDirs([]ScanRoot{{Path: cache}})
+	// An updated catalog can change the entry a cached plugin loads with.
+	require.Contains(t, dirs, catalogDir)
+}
+
+func TestCollectDirsWatchesNestedClaudeAgentDirs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, manifestDir := range []string{".claude-plugin", ".cursor-plugin"} {
+		pack := filepath.Join(root, manifestDir[1:])
+		require.NoError(t, os.MkdirAll(filepath.Join(pack, manifestDir), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pack, manifestDir, packManifestBaseName), []byte(`{"name": "pstack"}`), 0o600))
+		require.NoError(t, os.MkdirAll(filepath.Join(pack, "agents", "team", "deep"), 0o755))
+	}
+
+	dirs, agentDirs := (&Watcher{}).collectDirs([]ScanRoot{{Path: root}})
+	// A definition created in a nested folder of a Claude pack's default
+	// agents directory re-resolves; Cursor packs keep a flat directory.
+	claudeAgents := filepath.Join(root, "claude-plugin", "agents")
+	for _, dir := range []string{claudeAgents, filepath.Join(claudeAgents, "team"), filepath.Join(claudeAgents, "team", "deep")} {
+		require.Contains(t, dirs, dir)
+		require.Contains(t, agentDirs, dir)
+	}
+	cursorAgents := filepath.Join(root, "cursor-plugin", "agents")
+	require.Contains(t, agentDirs, cursorAgents)
+	require.NotContains(t, agentDirs, filepath.Join(cursorAgents, "team"))
+}
+
+func TestNestedAgentDirsBounds(t *testing.T) {
+	t.Parallel()
+	container := t.TempDir()
+	deep := container
+	for i := range maxPackAgentDepth + 2 {
+		deep = filepath.Join(deep, fmt.Sprintf("level%d", i))
+	}
+	require.NoError(t, os.MkdirAll(deep, 0o755))
+	require.Len(t, nestedAgentDirs(container), maxPackAgentDepth)
+
+	wide := t.TempDir()
+	for i := range maxPackAgentDirs + 5 {
+		require.NoError(t, os.MkdirAll(filepath.Join(wide, fmt.Sprintf("dir%d", i)), 0o755))
+	}
+	require.Len(t, nestedAgentDirs(wide), maxPackAgentDirs)
+}
+
+func TestSubstituteMarkdownBody(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		changed bool
+	}{
+		{"body only", "---\nname: x ${V}\n---\nuse ${V}/a and ${V}", "---\nname: x ${V}\n---\nuse /r/a and /r", true},
+		{"byte order mark and CRLF", "\xef\xbb\xbf---\r\nname: x\r\n---\r\n${V}\r\n", "\xef\xbb\xbf---\r\nname: x\r\n---\r\n/r\r\n", true},
+		{"no reference", "---\nname: x\n---\nbody", "---\nname: x\n---\nbody", false},
+		{"reference only in front-matter", "---\nname: ${V}\n---\nbody", "---\nname: ${V}\n---\nbody", false},
+		{"no front-matter", "${V}", "${V}", false},
+		{"unclosed front-matter", "---\nname: x\n${V}", "---\nname: x\n${V}", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, changed := substituteMarkdownBody([]byte(tc.in), "${V}", "/r")
+			require.Equal(t, tc.want, string(got))
+			require.Equal(t, tc.changed, changed)
+		})
 	}
 }
 

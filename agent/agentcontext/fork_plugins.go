@@ -24,7 +24,10 @@ package agentcontext
 // stops emission without an agent restart.
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -78,8 +81,10 @@ type pluginManifest struct {
 
 // manifestPaths is a manifest path declaration: one string or an array of
 // strings. Any other shape decodes to no declaration, so a malformed skills
-// or agents field falls back to the default container instead of rejecting
-// the whole manifest.
+// or agents field of a Cursor or root manifest falls back to the default
+// container. Claude Code fails such a plugin's validation instead, so
+// readPluginManifest rejects a Claude manifest whose field is mistyped
+// (claudePathFieldsTyped) before this lenient decoding matters.
 type manifestPaths []string
 
 func (p *manifestPaths) UnmarshalJSON(data []byte) error {
@@ -106,6 +111,16 @@ type packRoot struct {
 	// cached plugin without any manifest. Its declared skills add to the
 	// default skills directory, where Cursor's replace it.
 	Claude bool
+	// SkipDefaultSkills is set for a cached plugin whose marketplace entry
+	// takes the marketplace root as its source and lists skills: Claude
+	// Code then loads only the listed skills, not the default directory.
+	SkipDefaultSkills bool
+}
+
+// declaresAny reports whether a manifest path declaration has a non-empty
+// entry, valid or not.
+func declaresAny(declared manifestPaths) bool {
+	return slices.ContainsFunc(declared, func(d string) bool { return strings.TrimSpace(d) != "" })
 }
 
 // findPackManifest returns the first manifest candidate that exists in dir,
@@ -147,7 +162,48 @@ func readPluginManifest(packDir string) (packRoot, bool) {
 		return packRoot{}, false
 	}
 	claude := manifestPath == filepath.Join(packDir, claudePluginManifestRelPath)
+	if claude && !claudePathFieldsTyped(data) {
+		return packRoot{}, false
+	}
 	return packRoot{Dir: packDir, ManifestPath: manifestPath, Manifest: manifest, Claude: claude}, true
+}
+
+// claudePathFieldsTyped reports whether the skills and agents fields of a
+// Claude manifest or marketplace entry are absent, null, a string, or an
+// array of strings. Claude Code fails a plugin whose field has any other
+// type, so the pack must not load with default containers in its place.
+func claudePathFieldsTyped(data []byte) bool {
+	var fields struct {
+		Skills json.RawMessage `json:"skills"`
+		Agents json.RawMessage `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return false
+	}
+	return isPathDeclaration(fields.Skills) && isPathDeclaration(fields.Agents)
+}
+
+func isPathDeclaration(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case nil, string:
+		return true
+	case []any:
+		for _, item := range v {
+			if _, ok := item.(string); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // readCappedRegularFile reads a file only when it is a regular file of at
@@ -219,6 +275,13 @@ const claudeOrphanedMarker = ".orphaned_at"
 // claudeInstalledPluginsFile is Claude Code's install record, kept in the
 // plugins directory next to the cache.
 const claudeInstalledPluginsFile = "installed_plugins.json"
+
+// isClaudePluginStateFile reports whether a file name is one of the Claude
+// Code records that select which cached plugin versions load and with which
+// components, so the watcher re-resolves on writes to it.
+func isClaudePluginStateFile(name string) bool {
+	return name == claudeInstalledPluginsFile || name == claudeKnownMarketplacesFile || name == claudeMarketplaceFileName
+}
 
 // claudePluginCacheDirEnv replaces the ~/.claude/plugins directory, so the
 // cache moves to $CLAUDE_CODE_PLUGIN_CACHE_DIR/cache.
@@ -365,6 +428,7 @@ func claudeCachePackRoots(cacheDir string) []packRoot {
 	disabled := claudeDisabledPlugins(cacheDir)
 	installed := claudeInstalledPaths(cacheDir)
 	for _, marketplace := range childDirs(cacheDir) {
+		entries := claudeMarketplaceEntries(cacheDir, filepath.Base(marketplace))
 		for _, plugin := range childDirs(marketplace) {
 			id := filepath.Base(plugin) + "@" + filepath.Base(marketplace)
 			if _, off := disabled[id]; off {
@@ -374,11 +438,13 @@ func claudeCachePackRoots(cacheDir string) []packRoot {
 			if install.projectOnly {
 				continue
 			}
-			if pack, ok := installedClaudeCacheVersion(plugin, install.path); ok {
+			// The cache directory is named after the marketplace entry.
+			entry := entries[filepath.Base(plugin)]
+			if pack, ok := installedClaudeCacheVersion(plugin, install.path, entry); ok {
 				out = append(out, pack)
 				continue
 			}
-			if pack, ok := currentClaudeCacheVersion(plugin); ok {
+			if pack, ok := currentClaudeCacheVersion(plugin, entry); ok {
 				out = append(out, pack)
 			}
 		}
@@ -465,12 +531,199 @@ func claudeInstalledPaths(cacheDir string) map[string]claudeInstall {
 	return out
 }
 
+// claudeKnownMarketplacesFile is Claude Code's record of the marketplaces it
+// has fetched, kept in the plugins directory next to the cache. Each record's
+// installLocation is the marketplace's clone, or the path a marketplace added
+// from a local file or directory was given.
+const claudeKnownMarketplacesFile = "known_marketplaces.json"
+
+// claudeMarketplaceFileName is the marketplace catalog, kept at
+// claudeMarketplaceFileRel under the marketplace root.
+const claudeMarketplaceFileName = "marketplace.json"
+
+var claudeMarketplaceFileRel = filepath.Join(".claude-plugin", claudeMarketplaceFileName)
+
+// maxMarketplaceBytes bounds a marketplace catalog read. A catalog lists
+// every plugin of the marketplace with its display fields, so it outgrows a
+// settings file.
+const maxMarketplaceBytes = 4 * 1024 * 1024
+
+// claudeEntryComponentFields are the marketplace entry fields that conflict
+// with a plugin.json when the entry sets strict to false
+// (https://code.claude.com/docs/en/plugins/marketplace-reference#strict-mode).
+// themes also counts under experimental, where the manifest now keeps it.
+var claudeEntryComponentFields = []string{"commands", "agents", "skills", "hooks", "outputStyles", "themes"}
+
+// claudeMarketplaceEntry is what a marketplace's plugin entry says about the
+// components of a cached plugin. The zero value means no entry is known.
+type claudeMarketplaceEntry struct {
+	found bool
+	// strict is the entry's strict field, true unless it is false.
+	strict bool
+	// declaresComponents is set when the entry declares any of
+	// claudeEntryComponentFields.
+	declaresComponents bool
+	// rootSource is set when the entry's source is the marketplace root.
+	rootSource bool
+	skills     manifestPaths
+	agents     manifestPaths
+}
+
+// skipsDefaultSkills reports whether the entry limits the plugin to the
+// skills it lists: an entry whose source is the marketplace root and that
+// lists skills keeps Claude Code from scanning the default skills directory.
+func (e claudeMarketplaceEntry) skipsDefaultSkills() bool {
+	return e.rootSource && declaresAny(e.skills)
+}
+
+// claudeMarketplaceFiles returns the candidate catalog paths of a marketplace,
+// most authoritative first: the installLocation recorded in
+// known_marketplaces.json, then the copy Claude Code fetches into
+// marketplaces/<name>/.
+func claudeMarketplaceFiles(pluginsDir, marketplace string) []string {
+	var out []string
+	if location, rel, ok := claudeKnownMarketplaceLocation(pluginsDir, marketplace); ok {
+		if info, err := os.Stat(location); err == nil && !info.IsDir() {
+			// A marketplace added from a local file records the file.
+			out = append(out, location)
+		} else if rel != "" {
+			out = append(out, filepath.Join(location, rel))
+		}
+	}
+	return append(out, filepath.Join(pluginsDir, "marketplaces", marketplace, claudeMarketplaceFileRel))
+}
+
+// claudeKnownMarketplaceLocation returns the recorded install location of a
+// marketplace and the catalog path inside it. A git or GitHub source may name
+// a catalog path other than the default; one that escapes the clone yields
+// an empty rel. ok is false when no usable record exists.
+func claudeKnownMarketplaceLocation(pluginsDir, marketplace string) (location, rel string, ok bool) {
+	data, ok := readCappedFollowingSymlink(filepath.Join(pluginsDir, claudeKnownMarketplacesFile), maxSettingsBytes)
+	if !ok {
+		return "", "", false
+	}
+	var known map[string]json.RawMessage
+	if err := json.Unmarshal(data, &known); err != nil {
+		return "", "", false
+	}
+	var record struct {
+		Source struct {
+			Source string `json:"source"`
+			Path   string `json:"path"`
+		} `json:"source"`
+		InstallLocation string `json:"installLocation"`
+	}
+	if raw, found := known[marketplace]; !found || json.Unmarshal(raw, &record) != nil || !filepath.IsAbs(record.InstallLocation) {
+		return "", "", false
+	}
+	rel = claudeMarketplaceFileRel
+	if path := strings.TrimSpace(record.Source.Path); path != "" && (record.Source.Source == "github" || record.Source.Source == "git") {
+		rel = containerRelPath(path, "")
+	}
+	return filepath.Clean(record.InstallLocation), rel, true
+}
+
+// claudeMarketplaceEntries returns the plugin entries of a cached
+// marketplace keyed by plugin name, from the first candidate catalog that
+// reads. A missing, oversized or malformed catalog yields no entries, and the
+// plugins then load from their own files alone.
+func claudeMarketplaceEntries(cacheDir, marketplace string) map[string]claudeMarketplaceEntry {
+	pluginsDir := claudePluginsDirFor(cacheDir)
+	if pluginsDir == "" {
+		return nil
+	}
+	for _, path := range claudeMarketplaceFiles(pluginsDir, marketplace) {
+		if data, ok := readCappedFollowingSymlink(path, maxMarketplaceBytes); ok {
+			return parseClaudeMarketplaceEntries(data)
+		}
+	}
+	return nil
+}
+
+// parseClaudeMarketplaceEntries decodes the plugin entries of a catalog.
+// Claude Code validates each entry on its own, so an entry without a name or
+// with a mistyped skills or agents field is skipped without failing the rest.
+func parseClaudeMarketplaceEntries(data []byte) map[string]claudeMarketplaceEntry {
+	var catalog struct {
+		Plugins []json.RawMessage `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return nil
+	}
+	out := make(map[string]claudeMarketplaceEntry, len(catalog.Plugins))
+	for _, raw := range catalog.Plugins {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			continue
+		}
+		var name string
+		if err := json.Unmarshal(fields["name"], &name); err != nil || name == "" {
+			continue
+		}
+		if _, dup := out[name]; dup || !claudePathFieldsTyped(raw) {
+			continue
+		}
+		var paths struct {
+			Skills manifestPaths `json:"skills"`
+			Agents manifestPaths `json:"agents"`
+		}
+		if err := json.Unmarshal(raw, &paths); err != nil {
+			continue
+		}
+		entry := claudeMarketplaceEntry{
+			found:              true,
+			strict:             true,
+			declaresComponents: declaresClaudeComponents(fields),
+			rootSource:         isMarketplaceRootSource(fields["source"]),
+			skills:             paths.Skills,
+			agents:             paths.Agents,
+		}
+		var strict bool
+		if err := json.Unmarshal(fields["strict"], &strict); err == nil && !strict {
+			entry.strict = false
+		}
+		out[name] = entry
+	}
+	return out
+}
+
+func declaresClaudeComponents(fields map[string]json.RawMessage) bool {
+	for _, key := range claudeEntryComponentFields {
+		if isDeclaredJSON(fields[key]) {
+			return true
+		}
+	}
+	var experimental map[string]json.RawMessage
+	if err := json.Unmarshal(fields["experimental"], &experimental); err == nil && isDeclaredJSON(experimental["themes"]) {
+		return true
+	}
+	return false
+}
+
+// isDeclaredJSON reports whether a decoded field is present with a non-null
+// value.
+func isDeclaredJSON(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+// isMarketplaceRootSource reports whether an entry's source is the relative
+// path of the marketplace root ("." or "./").
+func isMarketplaceRootSource(raw json.RawMessage) bool {
+	var source string
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return false
+	}
+	source = strings.TrimSpace(source)
+	return source != "" && filepath.Clean(source) == "."
+}
+
 // installedClaudeCacheVersion returns the pack at the version directory an
 // install record names. The record is trusted only when that directory is a
 // direct child of pluginDir (so it lies inside the cache and belongs to this
 // plugin), is not orphaned, and loads as a pack. ok is false otherwise and
 // the caller falls back to the newest-version rule.
-func installedClaudeCacheVersion(pluginDir, installPath string) (packRoot, bool) {
+func installedClaudeCacheVersion(pluginDir, installPath string, entry claudeMarketplaceEntry) (packRoot, bool) {
 	if installPath == "" || !filepath.IsAbs(installPath) {
 		return packRoot{}, false
 	}
@@ -486,17 +739,19 @@ func installedClaudeCacheVersion(pluginDir, installPath string) (packRoot, bool)
 	if info, err := os.Stat(versionDir); err != nil || !info.IsDir() || claudeVersionOrphaned(versionDir) {
 		return packRoot{}, false
 	}
-	return readClaudeCacheVersion(versionDir)
+	return readClaudeCacheVersion(versionDir, entry)
 }
 
 // readClaudeCacheVersion reads a cached plugin version as a pack. A Claude
 // Code plugin needs no manifest: it loads the components in the standard
 // layout and takes its name from the directory, so a version directory with
-// no manifest of any kind is a Claude pack with the default component paths.
-// A manifest that exists but does not load still rejects the version.
-func readClaudeCacheVersion(versionDir string) (packRoot, bool) {
+// no manifest of any kind is a Claude pack with the default component paths,
+// and its marketplace entry, when one is known, serves as the manifest. A
+// manifest that exists but does not load still rejects the version, and so
+// does a conflict with the entry (withMarketplaceEntry).
+func readClaudeCacheVersion(versionDir string, entry claudeMarketplaceEntry) (packRoot, bool) {
 	if pack, ok := readPluginManifest(versionDir); ok {
-		return pack, true
+		return pack.withMarketplaceEntry(entry)
 	}
 	if findPackManifest(versionDir) != "" {
 		return packRoot{}, false
@@ -504,12 +759,37 @@ func readClaudeCacheVersion(versionDir string) (packRoot, bool) {
 	return packRoot{
 		Dir:          versionDir,
 		ManifestPath: filepath.Join(versionDir, claudePluginManifestRelPath),
-		Manifest:     pluginManifest{Name: filepath.Base(filepath.Dir(versionDir))},
-		Claude:       true,
+		Manifest: pluginManifest{
+			Name:   filepath.Base(filepath.Dir(versionDir)),
+			Skills: entry.skills,
+			Agents: entry.agents,
+		},
+		Claude:            true,
+		SkipDefaultSkills: entry.skipsDefaultSkills(),
 	}, true
 }
 
-func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
+// withMarketplaceEntry applies the marketplace entry of a cached Claude pack
+// that has its own plugin.json. With strict unset or true the entry's skills
+// and agents are appended to the manifest's, so entry agents replace the
+// default agents directory just as manifest agents do. With strict false an
+// entry that declares any component conflicts with plugin.json and the
+// plugin fails to load, so ok is false. Entry paths are plugin-root relative
+// and pass the same containment checks as manifest paths.
+func (p packRoot) withMarketplaceEntry(entry claudeMarketplaceEntry) (packRoot, bool) {
+	if !entry.found || !p.Claude {
+		return p, true
+	}
+	if !entry.strict && entry.declaresComponents {
+		return packRoot{}, false
+	}
+	p.Manifest.Skills = append(slices.Clone(p.Manifest.Skills), entry.skills...)
+	p.Manifest.Agents = append(slices.Clone(p.Manifest.Agents), entry.agents...)
+	p.SkipDefaultSkills = entry.skipsDefaultSkills()
+	return p, true
+}
+
+func currentClaudeCacheVersion(pluginDir string, entry claudeMarketplaceEntry) (packRoot, bool) {
 	var (
 		best     packRoot
 		bestTime time.Time
@@ -520,7 +800,7 @@ func currentClaudeCacheVersion(pluginDir string) (packRoot, bool) {
 		if err != nil {
 			continue
 		}
-		pack, ok := readClaudeCacheVersion(versionDir)
+		pack, ok := readClaudeCacheVersion(versionDir, entry)
 		if !ok {
 			continue
 		}
@@ -605,11 +885,12 @@ func declaredRels(declared manifestPaths, fallback string) []string {
 
 // skillRels returns the pack's skills paths. A Claude pack scans the default
 // skills directory and then its declared paths: Claude Code adds declared
-// paths to the default, so declaring one never hides skills/. Any other
-// manifest's declaration replaces the default.
+// paths to the default, so declaring one never hides skills/, unless a
+// marketplace entry limits the pack to its listed skills
+// (SkipDefaultSkills). Any other manifest's declaration replaces the default.
 func (p packRoot) skillRels() []string {
 	declared := declaredRels(p.Manifest.Skills, defaultPackSkillsDir)
-	if !p.Claude {
+	if !p.Claude || p.SkipDefaultSkills {
 		return declared
 	}
 	out := []string{defaultPackSkillsDir}
@@ -626,6 +907,9 @@ func (p packRoot) skillRels() []string {
 // is one skill (a manifest may declare "./review-pr"); any other directory is
 // a container whose child folders are the skills.
 func (p packRoot) skillPaths() (containers, folders []string) {
+	if p.loadsRootSkill() {
+		return nil, []string{p.Dir}
+	}
 	for _, rel := range p.skillRels() {
 		for _, dir := range inPackContainers(p, rel) {
 			if _, err := os.Lstat(filepath.Join(dir, skillMetaFileName)); err == nil {
@@ -638,12 +922,71 @@ func (p packRoot) skillPaths() (containers, folders []string) {
 	return containers, folders
 }
 
+// loadsRootSkill reports whether a Claude pack loads as one skill: Claude
+// Code takes a SKILL.md at the plugin root as the plugin's only skill when
+// the plugin has no skills directory and declares no skills.
+func (p packRoot) loadsRootSkill() bool {
+	if !p.Claude || declaresAny(p.Manifest.Skills) {
+		return false
+	}
+	if _, err := os.Lstat(filepath.Join(p.Dir, defaultPackSkillsDir)); err == nil {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(p.Dir, skillMetaFileName))
+	return err == nil
+}
+
 // agentContainers returns the existing agent-container directories of a
 // pack, honoring the manifest's declared agents entries that are directories.
+// Claude Code loads the default agents directory of a Claude pack
+// recursively, so its subfolders are containers too (nestedAgentDirs).
 func (p packRoot) agentContainers() []string {
 	var out []string
 	for _, rel := range declaredRels(p.Manifest.Agents, defaultPackAgentsDir) {
 		out = append(out, inPackContainers(p, rel)...)
+	}
+	if !p.Claude || declaresAny(p.Manifest.Agents) {
+		return out
+	}
+	var nested []string
+	for _, container := range out {
+		nested = append(nested, nestedAgentDirs(container)...)
+	}
+	return append(out, nested...)
+}
+
+// Bounds on the subfolder walk of a Claude pack's default agents directory.
+// Every folder found also becomes a watch, so a deep or wide tree must not
+// exhaust the fsnotify budget.
+const (
+	maxPackAgentDepth = 4
+	maxPackAgentDirs  = 64
+)
+
+// nestedAgentDirs returns the subfolders of container breadth-first, at most
+// maxPackAgentDepth levels down and maxPackAgentDirs in total. Symlinked
+// folders are skipped (childDirs), so the walk stays inside the pack.
+//
+// Claude Code joins the subfolder names into a scoped agent name
+// (agents/team/reviewer.md is plugin:team:reviewer). Pack agents here carry
+// no plugin namespace and coderd requires a kebab-case name, so a nested
+// agent keeps its front-matter or file name, like a top-level one, and a
+// clash is settled by the usual first-wins rule.
+func nestedAgentDirs(container string) []string {
+	var out []string
+	level := []string{container}
+	for depth := 0; depth < maxPackAgentDepth && len(level) > 0; depth++ {
+		var next []string
+		for _, dir := range level {
+			for _, child := range childDirs(dir) {
+				if len(out) >= maxPackAgentDirs {
+					return out
+				}
+				out = append(out, child)
+				next = append(next, child)
+			}
+		}
+		level = next
 	}
 	return out
 }
@@ -740,9 +1083,10 @@ func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]i
 }
 
 // emitPackSkills emits one Skill resource per skill directory in the pack's
-// skill containers, plus one per declared single skill folder. The loop
-// mirrors emitSkillsFromContainer but stamps SourcePath with the manifest
-// path so the coderd fork-plugin gate can identify pack contributions.
+// skill containers, plus one per single skill folder (declared, or a Claude
+// pack's root, see loadsRootSkill). The loop mirrors emitSkillsFromContainer
+// but stamps SourcePath with the manifest path so the coderd fork-plugin gate
+// can identify pack contributions.
 func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource, seenID map[string]int) {
 	containers, folders := pack.skillPaths()
 	for _, container := range containers {
@@ -773,10 +1117,18 @@ func (r *Resolver) emitPackSkill(pack packRoot, root ScanRoot, dir string, out *
 	if err != nil {
 		return
 	}
-	res, ok := r.readSkillMeta(pack.Dir, meta, info, root.UserSource)
+	dirName := filepath.Base(dir)
+	if dir == pack.Dir {
+		// A plugin-root skill has no skill directory to match: Claude
+		// Code names it from its front-matter, and a cached version
+		// directory is named after the version.
+		dirName = ""
+	}
+	res, ok := r.readSkillMetaNamed(pack.Dir, meta, info, root.UserSource, dirName)
 	if !ok {
 		return
 	}
+	res = r.withClaudePluginRoot(pack, res)
 	res.SourcePath = pack.ManifestPath
 	appendResource(out, seenID, res)
 }
@@ -825,6 +1177,9 @@ func (r *Resolver) emitPackAgentFile(pack packRoot, root ScanRoot, path string, 
 	// only within the pack, even when the target stays inside the
 	// enclosing scan root.
 	res, ok := r.readAgentDefinition(ScanRoot{Path: pack.Dir, UserSource: root.UserSource}, path, info)
+	if ok {
+		res = r.withClaudePluginRoot(pack, res)
+	}
 	// Agents of a managed pack are never first-wins winners: see
 	// splitManagedPackDuplicates.
 	managed := isManagedPackManifest(pack.ManifestPath)
@@ -833,6 +1188,83 @@ func (r *Resolver) emitPackAgentFile(pack packRoot, root ScanRoot, path string, 
 	}
 	res.SourcePath = pack.ManifestPath
 	appendResource(out, seenID, res)
+}
+
+// claudePluginRootVar is the path variable Claude Code substitutes with the
+// plugin root in skill, command and agent Markdown.
+const claudePluginRootVar = "${CLAUDE_PLUGIN_ROOT}"
+
+// withClaudePluginRoot substitutes claudePluginRootVar with the pack root in
+// the Markdown body of a Claude pack's skill or agent, so the served content
+// points at the plugin's files the way Claude Code's does. Front-matter is
+// left alone: a path with YAML-significant characters must not break the
+// definition coderd parses again. The payload, its size and its hash stay
+// coherent: a substitution that grows the file past the per-resource cap
+// yields an oversize row, as a file of that size would. Other packs pass
+// through unchanged.
+func (r *Resolver) withClaudePluginRoot(pack packRoot, res Resource) Resource {
+	if !pack.Claude || res.Status != StatusOK {
+		return res
+	}
+	// Claude Code substitutes forward-slash paths on Windows too.
+	payload, changed := substituteMarkdownBody(res.Payload, claudePluginRootVar, filepath.ToSlash(pack.Dir))
+	if !changed {
+		return res
+	}
+	res.ContentHash = sha256.Sum256(payload)
+	res.SizeBytes = safeUint64(int64(len(payload)))
+	if res.SizeBytes > r.MaxResourceBytes {
+		res.Status = StatusOversize
+		res.Error = fmt.Sprintf("size %d after %s substitution exceeds per-resource cap of %d bytes", res.SizeBytes, claudePluginRootVar, r.MaxResourceBytes)
+		res.Payload = nil
+		res.Name = ""
+		res.Description = ""
+		return res
+	}
+	res.Payload = payload
+	return res
+}
+
+// substituteMarkdownBody replaces old with replacement after the closing
+// front-matter delimiter of data, matching how the workspacesdk parsers
+// split front-matter. changed is false, and data is returned as is, when
+// data has no front-matter or its body holds no old.
+func substituteMarkdownBody(data []byte, old, replacement string) ([]byte, bool) {
+	start := markdownBodyOffset(data)
+	if start < 0 || !bytes.Contains(data[start:], []byte(old)) {
+		return data, false
+	}
+	body := bytes.ReplaceAll(data[start:], []byte(old), []byte(replacement))
+	out := make([]byte, 0, start+len(body))
+	out = append(out, data[:start]...)
+	return append(out, body...), true
+}
+
+// markdownBodyOffset returns the offset just past the line that closes
+// data's front-matter, or -1 when data does not open with a "---" line or
+// never closes it.
+func markdownBodyOffset(data []byte) int {
+	rest := bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	offset := len(data) - len(rest)
+	opened := false
+	for len(rest) > 0 {
+		line, next, found := bytes.Cut(rest, []byte("\n"))
+		offset += len(line)
+		if found {
+			offset++
+		}
+		delimiter := string(bytes.TrimSpace(line)) == "---"
+		switch {
+		case !opened && !delimiter:
+			return -1
+		case !opened:
+			opened = true
+		case delimiter:
+			return offset
+		}
+		rest = next
+	}
+	return -1
 }
 
 // managedPackRoot is the directory, relative to the home directory, that
@@ -937,9 +1369,10 @@ func (r *Resolver) appendManagedPackDuplicates(resources, duplicates []Resource)
 // addPackWatchDirs adds every pack root and its declared skill and agent
 // containers under rootPath to out, plus one level inside skill containers,
 // so creating a pack or editing its files re-resolves the snapshot. Agent
-// containers also go to agentDirs, so overwriting a definition in a
-// declared container with any name re-resolves. The watcher calls this
-// next to addAgentWatchDirs.
+// containers, including the nested folders of a Claude pack's default agents
+// directory, also go to agentDirs, so overwriting a definition in a
+// container with any name re-resolves. The watcher calls this next to
+// addAgentWatchDirs.
 //
 // A manifest may declare a container that does not exist yet
 // ("skills": "components/skills" while only components/ is present).
@@ -1002,7 +1435,8 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 	if isClaudePluginCache(rootPath) {
 		// The install record picks the current version, so its directory
 		// is watched too.
-		if pluginsDir := claudePluginsDirFor(rootPath); pluginsDir != "" {
+		pluginsDir := claudePluginsDirFor(rootPath)
+		if pluginsDir != "" {
 			dirs = append(dirs, pluginsDir)
 		}
 		// Watching every level down to the version directories
@@ -1013,6 +1447,10 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		// directories watched.
 		for _, marketplace := range childDirs(rootPath) {
 			out[marketplace] = struct{}{}
+			// A marketplace update can change an entry's components.
+			for _, catalog := range claudeMarketplaceFiles(pluginsDir, filepath.Base(marketplace)) {
+				dirs = append(dirs, filepath.Dir(catalog))
+			}
 			for _, plugin := range childDirs(marketplace) {
 				out[plugin] = struct{}{}
 				for _, version := range childDirs(plugin) {

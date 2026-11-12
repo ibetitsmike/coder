@@ -5,6 +5,7 @@ package agentcontext_test
 // SourcePath so coderd's fork-plugin gate can identify them.
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -705,22 +706,6 @@ func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
 			wantAgents: []string{"one"},
 		},
 		{
-			name:       "unsupported shapes fall back to defaults",
-			manifest:   `{"name": "pstack", "skills": 5, "agents": {"path": "./x"}}`,
-			skillDirs:  []string{"skills/default-skill"},
-			agentFiles: []string{"agents/default-agent.md"},
-			wantSkills: []string{"default-skill"},
-			wantAgents: []string{"default-agent"},
-		},
-		{
-			name:       "array with a non-string element falls back to defaults",
-			manifest:   `{"name": "pstack", "skills": ["./extra-skills", 3], "agents": [null]}`,
-			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
-			agentFiles: []string{"agents/default-agent.md"},
-			wantSkills: []string{"default-skill"},
-			wantAgents: []string{"default-agent"},
-		},
-		{
 			name:       "null and empty array keep defaults",
 			manifest:   `{"name": "pstack", "skills": null, "agents": []}`,
 			skillDirs:  []string{"skills/default-skill"},
@@ -1246,4 +1231,458 @@ func TestResolver_PluginPackDuplicatesUseSpareCapacity(t *testing.T) {
 			require.Equal(t, tt.wantOK, ok)
 		})
 	}
+}
+
+// resolvePackNames resolves root with pack skills and agents advertised and
+// returns the names of the skills and agents it emitted.
+func resolvePackNames(root string) (skills, agents []string) {
+	r := &agentcontext.Resolver{}
+	r.PackRowsAdvertised = func() bool { return true }
+	r.PackAgentDefinitionsAdvertised = func() bool { return true }
+	for _, res := range r.Resolve([]agentcontext.ScanRoot{{Path: root}}).Resources {
+		switch res.Kind {
+		case agentcontext.KindSkill:
+			skills = append(skills, res.Name)
+		case agentcontext.KindSubagent:
+			agents = append(agents, res.Name)
+		}
+	}
+	return skills, agents
+}
+
+func TestResolver_PluginPacksMistypedManifestPaths(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code fails a plugin whose skills or agents field has the wrong
+	// type; Cursor and root manifests keep falling back to the defaults.
+	manifests := []string{
+		`{"name": "pstack", "skills": 5}`,
+		`{"name": "pstack", "agents": {"path": "./x"}}`,
+		`{"name": "pstack", "skills": ["./extra-skills", 3]}`,
+		`{"name": "pstack", "agents": [null]}`,
+	}
+	for i, manifest := range manifests {
+		for _, manifestRel := range []string{".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "plugin.json"} {
+			t.Run(fmt.Sprintf("%d/%s", i, manifestRel), func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writePack(t, root, manifestRel, manifest, "skills", "agents")
+				skills, agents := resolvePackNames(root)
+				if manifestRel == ".claude-plugin/plugin.json" {
+					require.Empty(t, skills, "a mistyped Claude manifest rejects the pack")
+					require.Empty(t, agents, "a mistyped Claude manifest rejects the pack")
+					return
+				}
+				require.Equal(t, []string{"review-pr"}, skills)
+				require.Equal(t, []string{"comment-sicko"}, agents)
+			})
+		}
+	}
+}
+
+func TestResolver_PluginPacksClaudeMarketplaceEntry(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		// manifest is the cached version's plugin.json; empty means none.
+		manifest   string
+		entry      string
+		wantSkills []string
+		wantAgents []string
+	}{
+		{
+			name:       "no entry keeps the defaults",
+			manifest:   `{"name": "pstack"}`,
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "entry is the manifest without plugin.json",
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "skills": "./extra-skills", "agents": ["./custom/solo.md"]}`,
+			wantSkills: []string{"default-skill", "extra-skill"},
+			wantAgents: []string{"solo"},
+		},
+		{
+			name:       "strict entry appends to plugin.json",
+			manifest:   `{"name": "pstack", "agents": ["./agents/default-agent.md"]}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "skills": ["./extra-skills"], "agents": "./custom/solo.md"}`,
+			wantSkills: []string{"default-skill", "extra-skill"},
+			wantAgents: []string{"default-agent", "solo"},
+		},
+		{
+			name:       "explicit strict true appends to plugin.json",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "strict": true, "skills": "./extra-skills"}`,
+			wantSkills: []string{"default-skill", "extra-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:     "non-strict entry with skills conflicts with plugin.json",
+			manifest: `{"name": "pstack"}`,
+			entry:    `{"name": "pstack", "source": "./plugins/pstack", "strict": false, "skills": "./extra-skills"}`,
+		},
+		{
+			name:     "non-strict entry with commands conflicts with plugin.json",
+			manifest: `{"name": "pstack"}`,
+			entry:    `{"name": "pstack", "source": "./plugins/pstack", "strict": false, "commands": "./commands/"}`,
+		},
+		{
+			name:       "non-strict entry without components keeps plugin.json",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "strict": false, "description": "Deep-first workflows."}`,
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "non-strict entry is the manifest without plugin.json",
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "strict": false, "skills": "./extra-skills"}`,
+			wantSkills: []string{"default-skill", "extra-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "marketplace root source loads only the listed skills",
+			entry:      `{"name": "pstack", "source": "./", "skills": ["./extra-skills"]}`,
+			wantSkills: []string{"extra-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "escaping entry paths are ignored",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "skills": "../../../../../../outside", "agents": ["../../../../../../outside.md", "./custom/solo.md"]}`,
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"solo"},
+		},
+		{
+			name:       "mistyped entry is ignored",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "strict": false, "skills": 5}`,
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "entry of another plugin does not apply",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "other", "source": "./plugins/other", "strict": false, "skills": "./extra-skills"}`,
+			wantSkills: []string{"default-skill"},
+			wantAgents: []string{"default-agent"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			plugins := filepath.Join(home, ".claude", "plugins")
+			cache := filepath.Join(plugins, "cache")
+			version := filepath.Join(cache, "market", "pstack", "1.0.0")
+			if tc.manifest != "" {
+				mustWriteFile(t, filepath.Join(version, ".claude-plugin", "plugin.json"), tc.manifest)
+			}
+			mustWriteFile(t, filepath.Join(version, "skills", "default-skill", "SKILL.md"), skillName("default-skill"))
+			mustWriteFile(t, filepath.Join(version, "extra-skills", "extra-skill", "SKILL.md"), skillName("extra-skill"))
+			mustWriteFile(t, filepath.Join(version, "agents", "default-agent.md"), packAgent("default-agent"))
+			mustWriteFile(t, filepath.Join(version, "custom", "solo.md"), packAgent("solo"))
+			// The escaping entry paths name these, six levels above the
+			// version directory.
+			mustWriteFile(t, filepath.Join(home, "outside", "escaped", "SKILL.md"), skillName("escaped"))
+			mustWriteFile(t, filepath.Join(home, "outside.md"), packAgent("escaped-agent"))
+			if tc.entry != "" {
+				catalog := `{"name": "market", "owner": {"name": "Example"}, "plugins": [` + tc.entry + `]}`
+				mustWriteFile(t, filepath.Join(plugins, "marketplaces", "market", ".claude-plugin", "marketplace.json"), catalog)
+			}
+
+			skills, agents := resolvePackNames(cache)
+			require.ElementsMatch(t, tc.wantSkills, skills)
+			require.ElementsMatch(t, tc.wantAgents, agents)
+		})
+	}
+}
+
+func TestResolver_PluginPacksClaudeMarketplaceLocation(t *testing.T) {
+	t.Parallel()
+
+	conflict := `{"name": "market", "owner": {"name": "Example"}, "plugins": [{"name": "pstack", "source": "./", "strict": false, "skills": "./extra-skills"}]}`
+	cases := []struct {
+		name string
+		// layout writes the catalog and known_marketplaces.json under the
+		// plugins directory and returns whether the entry must apply.
+		layout func(t *testing.T, plugins string) bool
+	}{
+		{
+			name: "fetched copy under marketplaces",
+			layout: func(t *testing.T, plugins string) bool {
+				mustWriteFile(t, filepath.Join(plugins, "marketplaces", "market", ".claude-plugin", "marketplace.json"), conflict)
+				return true
+			},
+		},
+		{
+			name: "recorded directory install location",
+			layout: func(t *testing.T, plugins string) bool {
+				local := filepath.Join(t.TempDir(), "local-market")
+				mustWriteFile(t, filepath.Join(local, ".claude-plugin", "marketplace.json"), conflict)
+				mustWriteFile(t, filepath.Join(plugins, "known_marketplaces.json"),
+					fmt.Sprintf(`{"market": {"source": {"source": "directory", "path": %q}, "installLocation": %q}}`, local, local))
+				return true
+			},
+		},
+		{
+			name: "recorded file install location",
+			layout: func(t *testing.T, plugins string) bool {
+				file := filepath.Join(t.TempDir(), "local-market", ".claude-plugin", "marketplace.json")
+				mustWriteFile(t, file, conflict)
+				mustWriteFile(t, filepath.Join(plugins, "known_marketplaces.json"),
+					fmt.Sprintf(`{"market": {"source": {"source": "file", "path": %q}, "installLocation": %q}}`, file, file))
+				return true
+			},
+		},
+		{
+			name: "recorded catalog path inside a git clone",
+			layout: func(t *testing.T, plugins string) bool {
+				clone := filepath.Join(plugins, "marketplaces", "market")
+				mustWriteFile(t, filepath.Join(clone, "catalogs", "marketplace.json"), conflict)
+				mustWriteFile(t, filepath.Join(plugins, "known_marketplaces.json"),
+					fmt.Sprintf(`{"market": {"source": {"source": "github", "repo": "example/market", "path": "catalogs/marketplace.json"}, "installLocation": %q}}`, clone))
+				return true
+			},
+		},
+		{
+			name: "malformed catalog yields no entry",
+			layout: func(t *testing.T, plugins string) bool {
+				mustWriteFile(t, filepath.Join(plugins, "marketplaces", "market", ".claude-plugin", "marketplace.json"), `{"plugins": [`)
+				return false
+			},
+		},
+		{
+			name: "oversized catalog yields no entry",
+			layout: func(t *testing.T, plugins string) bool {
+				padded := `{"padding": "` + strings.Repeat("x", 5*1024*1024) + `", ` + strings.TrimPrefix(conflict, "{")
+				mustWriteFile(t, filepath.Join(plugins, "marketplaces", "market", ".claude-plugin", "marketplace.json"), padded)
+				return false
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			plugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+			cache := filepath.Join(plugins, "cache")
+			version := filepath.Join(cache, "market", "pstack", "1.0.0")
+			mustWriteFile(t, filepath.Join(version, ".claude-plugin", "plugin.json"), `{"name": "pstack"}`)
+			mustWriteFile(t, filepath.Join(version, "skills", "default-skill", "SKILL.md"), skillName("default-skill"))
+			applies := tc.layout(t, plugins)
+
+			skills, _ := resolvePackNames(cache)
+			if applies {
+				require.Empty(t, skills, "the non-strict entry conflicts with plugin.json")
+				return
+			}
+			require.Equal(t, []string{"default-skill"}, skills)
+		})
+	}
+}
+
+func TestResolver_PluginPacksClaudeRootSkill(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		manifestRel string
+		manifest    string
+		files       map[string]string
+		wantSkills  []string
+	}{
+		{
+			name:        "root SKILL.md is the only skill",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack"}`,
+			files:       map[string]string{"SKILL.md": skillName("solo")},
+			wantSkills:  []string{"solo"},
+		},
+		{
+			name:        "skills directory hides the root SKILL.md",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack"}`,
+			files:       map[string]string{"SKILL.md": skillName("solo"), "skills/review-pr/SKILL.md": skillName("review-pr")},
+			wantSkills:  []string{"review-pr"},
+		},
+		{
+			name:        "skills declaration hides the root SKILL.md",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "skills": "./extra-skills"}`,
+			files:       map[string]string{"SKILL.md": skillName("solo"), "extra-skills/extra-skill/SKILL.md": skillName("extra-skill")},
+			wantSkills:  []string{"extra-skill"},
+		},
+		{
+			name:        "Cursor pack does not load a root SKILL.md",
+			manifestRel: ".cursor-plugin/plugin.json",
+			manifest:    `{"name": "pstack"}`,
+			files:       map[string]string{"SKILL.md": skillName("solo")},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			packDir := writePack(t, root, tc.manifestRel, tc.manifest, "", "")
+			for rel, content := range tc.files {
+				mustWriteFile(t, filepath.Join(packDir, filepath.FromSlash(rel)), content)
+			}
+			skills, _ := resolvePackNames(root)
+			require.ElementsMatch(t, tc.wantSkills, skills)
+		})
+	}
+
+	t.Run("cached version without a manifest", func(t *testing.T) {
+		t.Parallel()
+
+		// The version directory never matches the skill name, so the
+		// front-matter alone names the skill.
+		cache := filepath.Join(t.TempDir(), ".claude", "plugins", "cache")
+		version := filepath.Join(cache, "market", "pstack", "1.0.0")
+		mustWriteFile(t, filepath.Join(version, "SKILL.md"), skillName("solo"))
+
+		r := &agentcontext.Resolver{}
+		r.PackRowsAdvertised = func() bool { return true }
+		snap := r.Resolve([]agentcontext.ScanRoot{{Path: cache}})
+		skill := findResource(t, snap.Resources, agentcontext.KindSkill, version)
+		require.Equal(t, agentcontext.StatusOK, skill.Status)
+		require.Equal(t, "solo", skill.Name)
+		require.Equal(t, filepath.Join(version, ".claude-plugin", "plugin.json"), skill.SourcePath)
+	})
+}
+
+func TestResolver_PluginPacksClaudePluginRoot(t *testing.T) {
+	t.Parallel()
+
+	const (
+		skillMD = "---\nname: review-pr\ndescription: Uses ${CLAUDE_PLUGIN_ROOT} in front-matter.\n---\nRun ${CLAUDE_PLUGIN_ROOT}/scripts/check.sh then ${CLAUDE_PLUGIN_ROOT}/x."
+		agentMD = "---\nname: comment-sicko\ndescription: A pack agent.\n---\nRead ${CLAUDE_PLUGIN_ROOT}/rules.md."
+	)
+	writeFiles := func(t *testing.T, root, manifestRel string) string {
+		t.Helper()
+		packDir := writePack(t, root, manifestRel, `{"name": "pstack"}`, "", "")
+		mustWriteFile(t, filepath.Join(packDir, "skills", "review-pr", "SKILL.md"), skillMD)
+		mustWriteFile(t, filepath.Join(packDir, "agents", "comment-sicko.md"), agentMD)
+		return packDir
+	}
+	resolve := func(root string, maxBytes uint64) agentcontext.Snapshot {
+		r := &agentcontext.Resolver{MaxResourceBytes: maxBytes}
+		r.PackRowsAdvertised = func() bool { return true }
+		r.PackAgentDefinitionsAdvertised = func() bool { return true }
+		return r.Resolve([]agentcontext.ScanRoot{{Path: root}})
+	}
+
+	t.Run("Claude pack substitutes the body", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		packDir := writeFiles(t, root, ".claude-plugin/plugin.json")
+		snap := resolve(root, 0)
+		rootPath := filepath.ToSlash(packDir)
+
+		skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(packDir, "skills", "review-pr"))
+		require.Equal(t, agentcontext.StatusOK, skill.Status)
+		wantSkill := "---\nname: review-pr\ndescription: Uses ${CLAUDE_PLUGIN_ROOT} in front-matter.\n---\nRun " +
+			rootPath + "/scripts/check.sh then " + rootPath + "/x."
+		require.Equal(t, wantSkill, string(skill.Payload))
+		require.Equal(t, sha256.Sum256(skill.Payload), skill.ContentHash)
+		require.Equal(t, uint64(len(skill.Payload)), skill.SizeBytes)
+
+		agent := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(packDir, "agents", "comment-sicko.md"))
+		require.Equal(t, agentcontext.StatusOK, agent.Status)
+		require.Equal(t, "comment-sicko", agent.Name)
+		require.Equal(t, strings.ReplaceAll(agentMD, "${CLAUDE_PLUGIN_ROOT}", rootPath), string(agent.Payload))
+		require.Equal(t, sha256.Sum256(agent.Payload), agent.ContentHash)
+		require.Equal(t, uint64(len(agent.Payload)), agent.SizeBytes)
+	})
+
+	t.Run("Cursor pack is unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		packDir := writeFiles(t, root, ".cursor-plugin/plugin.json")
+		snap := resolve(root, 0)
+
+		skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(packDir, "skills", "review-pr"))
+		require.Equal(t, skillMD, string(skill.Payload))
+		agent := findResource(t, snap.Resources, agentcontext.KindSubagent, filepath.Join(packDir, "agents", "comment-sicko.md"))
+		require.Equal(t, agentMD, string(agent.Payload))
+	})
+
+	t.Run("substitution past the cap is oversize", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		packDir := writeFiles(t, root, ".claude-plugin/plugin.json")
+		// The file fits the cap; with the pack path substituted three
+		// times it does not.
+		snap := resolve(root, uint64(len(skillMD)))
+
+		skill := findResource(t, snap.Resources, agentcontext.KindSkill, filepath.Join(packDir, "skills", "review-pr"))
+		require.Equal(t, agentcontext.StatusOversize, skill.Status)
+		require.Empty(t, skill.Payload)
+		require.Greater(t, skill.SizeBytes, uint64(len(skillMD)))
+	})
+}
+
+func TestResolver_PluginPacksClaudeNestedAgents(t *testing.T) {
+	t.Parallel()
+
+	files := []string{"agents/top.md", "agents/team/reviewer.md", "agents/team/deep/auditor.md"}
+	cases := []struct {
+		name        string
+		manifestRel string
+		manifest    string
+		wantAgents  []string
+	}{
+		{
+			name:        "Claude default agents directory is recursive",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack"}`,
+			wantAgents:  []string{"top", "reviewer", "auditor"},
+		},
+		{
+			name:        "declared agents are not walked",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "agents": "./agents/top.md"}`,
+			wantAgents:  []string{"top"},
+		},
+		{
+			name:        "Cursor agents directory stays flat",
+			manifestRel: ".cursor-plugin/plugin.json",
+			manifest:    `{"name": "pstack"}`,
+			wantAgents:  []string{"top"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			packDir := writePack(t, root, tc.manifestRel, tc.manifest, "", "")
+			for _, file := range files {
+				mustWriteFile(t, filepath.Join(packDir, filepath.FromSlash(file)), packAgent(strings.TrimSuffix(filepath.Base(file), ".md")))
+			}
+			_, agents := resolvePackNames(root)
+			require.ElementsMatch(t, tc.wantAgents, agents)
+		})
+	}
+
+	t.Run("symlinked subfolder is skipped", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		packDir := writePack(t, root, ".claude-plugin/plugin.json", `{"name": "pstack"}`, "", "agents")
+		inside := filepath.Join(packDir, "shared")
+		mustWriteFile(t, filepath.Join(inside, "linked.md"), packAgent("linked"))
+		if err := os.Symlink(inside, filepath.Join(packDir, "agents", "linked")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		_, agents := resolvePackNames(root)
+		require.Equal(t, []string{"comment-sicko"}, agents)
+	})
 }
