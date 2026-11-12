@@ -1932,7 +1932,11 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
-						<ForkComposerSlot chatId={chatId} isDisabled={isDisabled} />
+						<ForkComposerSlot
+							chatId={chatId}
+							isDisabled={isDisabled}
+							workspaceSkills={workspaceSkills}
+						/>
 						{contextUsage !== undefined && (
 							<div
 								className={cn(

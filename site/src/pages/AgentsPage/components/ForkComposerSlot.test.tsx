@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
+import * as forkChatPinnedSkillsApi from "#/api/forkChatPinnedSkills";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
+	ChatPinnedSkill,
 	ChatTodoList,
 	ChatWakeup,
 	Experiment,
@@ -35,6 +37,10 @@ import {
 	createTestQueryClient,
 	renderComponent,
 } from "#/testHelpers/renderHelpers";
+import {
+	MockOrganizationSkillPreferences,
+	MockSkills,
+} from "#/testHelpers/skills";
 import {
 	createMockWebSocket,
 	type MockWebSocketServer,
@@ -64,7 +70,11 @@ const renderSlot = (
 					canViewOrganizationSettings: false,
 				}}
 			>
-				<ForkComposerSlot chatId={MockChat.id} isDisabled={isDisabled} />
+				<ForkComposerSlot
+					chatId={MockChat.id}
+					isDisabled={isDisabled}
+					workspaceSkills={[]}
+				/>
 			</DashboardContext.Provider>
 		</QueryClientProvider>,
 	);
@@ -414,5 +424,113 @@ describe("ForkComposerSlot plugin packs", () => {
 
 		await screen.findByText(MockForkPluginPack.name);
 		expect(screen.queryByRole("switch")).toBeNull();
+	});
+});
+
+describe("ForkComposerSlot pinned skills", () => {
+	const mockDocsPin: ChatPinnedSkill = { source: "personal", name: "docs" };
+	const mockReviewerPin: ChatPinnedSkill = {
+		source: "personal",
+		name: "reviewer",
+	};
+	const mockDocsPins = [mockDocsPin];
+	const mockDocsAndReviewerPins = [mockDocsPin, mockReviewerPin];
+
+	const mockPinnedSkillSources = () => {
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue(MockChat);
+		vi.spyOn(API.experimental, "getUserSkills").mockResolvedValue(MockSkills);
+		vi.spyOn(API.experimental, "getOrganizationSkills").mockResolvedValue([]);
+		vi.spyOn(
+			API.experimental,
+			"getOrganizationSkillPreferences",
+		).mockResolvedValue(MockOrganizationSkillPreferences);
+	};
+
+	it("does not request pinned skills while fork-pinned-skills is off", () => {
+		const getPins = vi
+			.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills")
+			.mockResolvedValue([]);
+
+		renderSlot([]);
+
+		expect(getPins).not.toHaveBeenCalled();
+	});
+
+	it("pins a skill from the picker", async () => {
+		const user = userEvent.setup();
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockImplementation(async (_chatId, req) => [...req.skills]);
+
+		renderSlot(["fork-pinned-skills"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Pinned skills, 1 pinned" }),
+		);
+		await user.click(
+			await screen.findByRole("option", { name: "/personal/reviewer" }),
+		);
+
+		await waitFor(() => expect(updatePins).toHaveBeenCalledTimes(1));
+		expect(updatePins).toHaveBeenCalledWith(MockChat.id, {
+			skills: [mockDocsPin, mockReviewerPin],
+		});
+	});
+
+	it("unpins a skill from its chip", async () => {
+		const user = userEvent.setup();
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsAndReviewerPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockImplementation(async (_chatId, req) => [...req.skills]);
+
+		renderSlot(["fork-pinned-skills"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Pinned skills, 2 pinned" }),
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Remove skill /personal/docs",
+			}),
+		);
+
+		await waitFor(() => expect(updatePins).toHaveBeenCalledTimes(1));
+		expect(updatePins).toHaveBeenCalledWith(MockChat.id, {
+			skills: [mockReviewerPin],
+		});
+	});
+
+	it("disables chip removal while a change is saving", async () => {
+		const user = userEvent.setup();
+		mockPinnedSkillSources();
+		vi.spyOn(forkChatPinnedSkillsApi, "getChatPinnedSkills").mockResolvedValue(
+			mockDocsAndReviewerPins,
+		);
+		const updatePins = vi
+			.spyOn(forkChatPinnedSkillsApi, "updateChatPinnedSkills")
+			.mockReturnValue(new Promise(() => {}));
+
+		renderSlot(["fork-pinned-skills"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Pinned skills, 2 pinned" }),
+		);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Remove skill /personal/docs",
+			}),
+		);
+
+		const removeReviewer = screen.getByRole("button", {
+			name: "Remove skill /personal/reviewer",
+		});
+		await waitFor(() => expect(removeReviewer).toBeDisabled());
+		await user.click(removeReviewer);
+		expect(updatePins).toHaveBeenCalledTimes(1);
 	});
 });
