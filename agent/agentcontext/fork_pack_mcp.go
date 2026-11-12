@@ -181,7 +181,10 @@ func mcpFileRel(declared string) string {
 // scan-root order, which is the order a server name collision is settled in.
 // Like emitPacks it finds nothing until the server advertises pack rows, so a
 // deployment without the feature never starts pack servers, and it skips a
-// pack whose manifest path coderd cannot transport.
+// pack whose manifest path coderd cannot transport. It also skips a managed
+// pack without a commit marker: coderd writes the marker last and empties it
+// once no chat on the workspace enables the pack, so such a pack is
+// incomplete or disabled.
 func (r *Resolver) packMCPSources(roots []ScanRoot) []PackMCPSource {
 	if !r.packRowsAdvertised() {
 		return nil
@@ -197,9 +200,15 @@ func (r *Resolver) packMCPSources(roots []ScanRoot) []PackMCPSource {
 				continue
 			}
 			seen[pack.ManifestPath] = struct{}{}
-			if configs := pack.mcpConfigs(); len(configs) > 0 {
-				out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Revision: packRevision(pack.Dir), Configs: configs})
+			configs := pack.mcpConfigs()
+			if len(configs) == 0 {
+				continue
 			}
+			revision := packRevision(pack.Dir)
+			if revision == "" && isManagedPackManifest(pack.ManifestPath) {
+				continue
+			}
+			out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Revision: revision, Configs: configs})
 		}
 	}
 	return out

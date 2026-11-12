@@ -60,6 +60,9 @@ type forkPackState struct {
 	repinned sync.Map
 	// paths maps packCommitKey to packPathSet.
 	paths sync.Map
+	// swept holds the agent IDs whose managed pack directories this server
+	// has checked for packs no chat on the workspace enables.
+	swept sync.Map
 }
 
 // materializedPackKey identifies a pack written to a workspace agent. Agent
@@ -69,10 +72,12 @@ type materializedPackKey struct {
 	packID  uuid.UUID
 }
 
-// writtenPack is a pack marker an agent holds and when this server finished
-// writing it. at is zero when the marker was already on disk.
+// writtenPack is a pack marker an agent holds, the pack directory name, and
+// when this server finished writing it. at is zero when the marker was
+// already on disk.
 type writtenPack struct {
 	marker string
+	name   string
 	at     time.Time
 }
 
@@ -105,9 +110,10 @@ func packMarker(pack enabledPack) string {
 // effort: failures are logged and retried on the next turn. The agent reports
 // new files on its next context push, which only marks a pinned chat dirty,
 // so every chat with the pack enabled is re-pinned on its first dirty turn
-// after the pack reached the agent. Files of
-// disabled packs and files a pack update removed stay on disk, and
-// filterPackResources hides them.
+// after the pack reached the agent. Files a pack update removed stay on disk,
+// and filterPackResources hides them. A pack no chat on the workspace enables
+// keeps its files, which filterPackResources also hides, but its marker is
+// emptied (clearDisabledPacks), so the agent stops its MCP servers.
 //
 // It dials its own connection without the chat headers: the agent records
 // paths written by a chat for the chat's git changes, and these writes are
@@ -140,7 +146,8 @@ func (p *Server) materializePluginPacks(
 		}
 		pending = append(pending, pack)
 	}
-	if len(pending) == 0 {
+	cleanup := p.planPackCleanup(ctx, logger, chat, agentID, enabled, pending)
+	if len(pending) == 0 && len(cleanup.disabled) == 0 {
 		return
 	}
 
@@ -166,12 +173,13 @@ func (p *Server) materializePluginPacks(
 				slog.F("pack_id", pack.ID), slog.F("pack_name", pack.Name), slog.Error(err))
 			continue
 		}
-		held := writtenPack{marker: packMarker(pack)}
+		held := writtenPack{marker: packMarker(pack), name: pack.Name}
 		if wrote {
 			held.at = dbtime.Now()
 		}
 		p.forkPacks.written.Store(materializedPackKey{agentID, pack.ID}, held)
 	}
+	p.clearDisabledPacks(ctx, logger, conn, home, agentID, cleanup)
 }
 
 // repinChatAfterPackWrite re-pins a dirty chat once for each enabled pack the
