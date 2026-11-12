@@ -24,6 +24,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1cb11-79e0-7209-811f-6789c162db26_plugin_packs.up.sql"
       - "../migrations/chatdmig/nodes/01a1cb1c-5809-7422-aefd-a4ced9de57ba_plugin_pack_sources.up.sql"
       - "../migrations/chatdmig/nodes/01a1cb68-bbe7-7a46-a263-7aafc35993cc_plugin_pack_enablement.up.sql"
+      - "../migrations/chatdmig/nodes/01a1cc2d-5c38-7321-a2e0-3c283011ffa1_chat_organization_wakeup_caps.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

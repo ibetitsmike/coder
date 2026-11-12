@@ -247,6 +247,16 @@ type ChatOrganizationSubagentLimit struct {
 	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
 }
 
+// Daily wake-up caps of an organization. A NULL cap uses the built-in default.
+type ChatOrganizationWakeupCap struct {
+	OrganizationID                   uuid.UUID     `db:"organization_id" json:"organization_id"`
+	MaxChatRunsPerDay                sql.NullInt32 `db:"max_chat_runs_per_day" json:"max_chat_runs_per_day"`
+	MaxOrganizationRunsPerDay        sql.NullInt32 `db:"max_organization_runs_per_day" json:"max_organization_runs_per_day"`
+	MaxChatSpendMicrosPerDay         sql.NullInt64 `db:"max_chat_spend_micros_per_day" json:"max_chat_spend_micros_per_day"`
+	MaxOrganizationSpendMicrosPerDay sql.NullInt64 `db:"max_organization_spend_micros_per_day" json:"max_organization_spend_micros_per_day"`
+	UpdatedAt                        time.Time     `db:"updated_at" json:"updated_at"`
+}
+
 // Plugin packs enabled for one chat, in addition to the packs of its project.
 type ChatPluginPack struct {
 	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
