@@ -226,6 +226,44 @@ it("keeps enabled packs toggleable after the installed list becomes forbidden", 
 	);
 });
 
+it("keeps cached installed packs toggleable and offers Retry when the installed list refetch fails", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(forkPluginPacksApi, "getPluginPacks")
+		.mockResolvedValueOnce([MockForkPluginPack, MockForkPluginPackWithoutPath])
+		.mockRejectedValue(
+			mockApiError({ message: "Failed to list plugin packs." }),
+		);
+	const { queryClient } = render(
+		<ForkPluginPackToggles
+			target={target}
+			organizationId={MockForkPluginPack.organization_id}
+			canEdit
+		/>,
+	);
+	await screen.findByRole("switch", {
+		name: `Enable ${MockForkPluginPack.name}`,
+	});
+
+	await queryClient.invalidateQueries({
+		queryKey: pluginPacksKey(MockForkPluginPack.organization_id),
+	});
+	await user.click(await screen.findByRole("button", { name: "Retry" }));
+	await waitFor(() =>
+		expect(forkPluginPacksApi.getPluginPacks).toHaveBeenCalledTimes(3),
+	);
+	await user.click(
+		screen.getByRole("switch", { name: `Enable ${MockForkPluginPack.name}` }),
+	);
+
+	await waitFor(() =>
+		expect(enablementApi.setPluginPackEnabled).toHaveBeenCalledWith(
+			target,
+			MockForkPluginPack.id,
+			true,
+		),
+	);
+});
+
 const toggleDeletedPack = async (
 	toggleTarget: enablementApi.PluginPackTarget,
 ) => {

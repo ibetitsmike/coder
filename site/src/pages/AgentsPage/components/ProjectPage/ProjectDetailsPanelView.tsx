@@ -472,6 +472,11 @@ const CountRow: React.FC<CountRowProps> = ({
 	if (count && disabledCount) {
 		countLabel += `, ${disabledCount} disabled`;
 	}
+	// A failed background refetch keeps the cached count, so flag it as
+	// possibly stale instead of presenting it as current.
+	if (count !== undefined && error) {
+		countLabel += " (refresh failed)";
+	}
 	return (
 		<DetailRow label={label}>
 			{count === undefined && !error ? (
