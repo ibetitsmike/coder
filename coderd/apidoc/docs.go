@@ -6105,6 +6105,86 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/wakeup-caps": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get organization wake-up caps",
+                "operationId": "get-organization-wake-up-caps",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationWakeupCapsResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update organization wake-up caps",
+                "operationId": "update-organization-wake-up-caps",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationWakeupCaps"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationWakeupCapsResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            }
+        },
         "/api/v2/chats/fork/{chat}/family": {
             "get": {
                 "description": "Returns the live subagent count and limit of the family under\na root chat, and the running subagents that wait for a\nconcurrency slot.",
@@ -29762,6 +29842,60 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ForkOrganizationWakeupCaps": {
+            "type": "object",
+            "properties": {
+                "max_chat_runs_per_day": {
+                    "description": "MaxChatRunsPerDay is the maximum number of wake-up runs of one chat.",
+                    "type": "integer",
+                    "example": 288
+                },
+                "max_chat_spend_micros_per_day": {
+                    "description": "MaxChatSpendMicrosPerDay is the maximum model spend of one chat with a\nwake-up, in millionths of a dollar.",
+                    "type": "integer",
+                    "example": 20000000
+                },
+                "max_organization_runs_per_day": {
+                    "description": "MaxOrganizationRunsPerDay is the maximum number of wake-up runs of all\nchats in the organization.",
+                    "type": "integer",
+                    "example": 2880
+                },
+                "max_organization_spend_micros_per_day": {
+                    "description": "MaxOrganizationSpendMicrosPerDay is the maximum model spend of all\nchats with a wake-up in the organization, in millionths of a dollar.",
+                    "type": "integer",
+                    "example": 200000000
+                }
+            }
+        },
+        "codersdk.ForkOrganizationWakeupCapsResponse": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "description": "Default holds the built-in caps.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkWakeupCapValues"
+                        }
+                    ]
+                },
+                "effective": {
+                    "description": "Effective holds the caps in force in the organization.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkWakeupCapValues"
+                        }
+                    ]
+                },
+                "organization": {
+                    "description": "Organization holds the stored organization caps. A nil cap is unset.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationWakeupCaps"
+                        }
+                    ]
+                }
+            }
+        },
         "codersdk.ForkPluginPack": {
             "type": "object",
             "properties": {
@@ -29856,6 +29990,27 @@ const docTemplate = `{
                     "description": "MaxLivePerFamily is the maximum number of live subagent chats under one\nroot chat.",
                     "type": "integer",
                     "example": 6
+                }
+            }
+        },
+        "codersdk.ForkWakeupCapValues": {
+            "type": "object",
+            "properties": {
+                "max_chat_runs_per_day": {
+                    "type": "integer",
+                    "example": 288
+                },
+                "max_chat_spend_micros_per_day": {
+                    "type": "integer",
+                    "example": 20000000
+                },
+                "max_organization_runs_per_day": {
+                    "type": "integer",
+                    "example": 2880
+                },
+                "max_organization_spend_micros_per_day": {
+                    "type": "integer",
+                    "example": 200000000
                 }
             }
         },
