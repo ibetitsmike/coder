@@ -57,14 +57,21 @@ func (f *forkWorkflowFixture) start(
 	return run
 }
 
-// steps waits until the run has n steps.
+// steps waits until the run has n steps. A run that ends first fails the
+// test cleanly with its error: a failed run never holds an awaiter, so a
+// helper that only waits for progress would time out and hide the cause.
 func (*forkWorkflowFixture) steps(ctx context.Context, t *testing.T, run *workflowRun, n int) []stepSummary {
 	t.Helper()
 	var steps []stepSummary
 	testutil.Eventually(ctx, t, func(context.Context) bool {
 		steps = run.snapshot().Steps
-		return len(steps) >= n
+		if len(steps) >= n {
+			return true
+		}
+		return run.snapshot().Status != workflowStatusRunning
 	}, testutil.IntervalFast)
+	snap := run.snapshot()
+	require.Len(t, steps, n, "the run ended before %d steps: status %q, error %q", n, snap.Status, snap.Error)
 	return steps
 }
 
@@ -139,7 +146,9 @@ func (f *forkWorkflowFixture) hasNotice(ctx context.Context, t *testing.T, chatI
 }
 
 // awaitRegistered starts await in a goroutine and returns once the run
-// counts it, so finish sees a waiting call.
+// counts it, so finish sees a waiting call. A run that already ended never
+// holds an awaiter for long, so a finished run counts as registered too and
+// the result waits in the buffered channel.
 func awaitRegistered(ctx context.Context, t *testing.T, run *workflowRun) <-chan runWorkflowResult {
 	t.Helper()
 	out := make(chan runWorkflowResult, 1)
@@ -147,7 +156,7 @@ func awaitRegistered(ctx context.Context, t *testing.T, run *workflowRun) <-chan
 	testutil.Eventually(ctx, t, func(context.Context) bool {
 		run.mu.Lock()
 		defer run.mu.Unlock()
-		return run.awaiters == 1
+		return run.awaiters == 1 || run.result != nil
 	}, testutil.IntervalFast)
 	return out
 }

@@ -5,9 +5,9 @@ package chatd
 // run_workflow starts a Starlark program that spawns workflow step children
 // (fork_workflow_step.go) and combines their workflow_report values
 // (fork_workflow_report.go); await_workflow reads the result. The registry
-// holds the runs of one replica in memory: a restart loses a run, and the
-// model resumes it with resume_run_id. The durable run journal is a later
-// piece of the workflow work.
+// holds the runs of one replica in memory, and the journal
+// (fork_workflow_journal.go) keeps the run and step state in the database,
+// so a restart resumes a run and finished steps are never run again.
 
 import (
 	"context"
@@ -52,9 +52,11 @@ const (
 	// workflowStepTimeout bounds one step. A step that runs longer fails.
 	workflowStepTimeout = time.Hour
 
-	workflowStatusRunning   = "running"
-	workflowStatusCompleted = "completed"
-	workflowStatusFailed    = "failed"
+	workflowStatusRunning     = "running"
+	workflowStatusCompleted   = "completed"
+	workflowStatusFailed      = "failed"
+	workflowStatusInterrupted = "interrupted"
+	workflowStatusStopped     = "stopped"
 
 	stepStatusRunning  = "running"
 	stepStatusReminded = "reminded"
@@ -87,13 +89,16 @@ Rules: the script has no load(), no clock, no file access and no network. while 
 	`Limits: script 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB. ` +
 	`Each step is a child chat of this chat. chatd limits how many sub-agent chats run at the same time. Extra steps wait in a queue.
 
-Resume: a run lives in the memory of one coderd replica. If await_workflow says that the run is not found, for example after a restart, ` +
-	`call run_workflow again with the same script (or script_path), the same args and resume_run_id. Finished steps are reused and do not run again.`
+Resume: a run is journaled in the deployment database, so it survives a restart. ` +
+	`If await_workflow returns status "interrupted", call run_workflow with resume_run_id set to the run_id; ` +
+	`the script and args can be omitted, chatd replays them from the journal, and changes to the script do not apply to a resumed run. ` +
+	`Finished steps are reused and do not run again.`
 
 const awaitWorkflowDescription = `Wait for a workflow run that run_workflow started. ` +
 	`It returns when the run ends, or after wait_seconds (default 600, at most 780). ` +
 	`After a timeout the status is "running": call it again. ` +
-	`The result has status (running, completed or failed), result (what main returned), error, steps, and the last 50 log lines.`
+	`The result has status (running, completed, failed or interrupted), result (what main returned), error, steps, and the last 50 log lines. ` +
+	`On interrupted, for example after a restart, call run_workflow with resume_run_id to continue the run.`
 
 const workflowNotFoundHelp = `The run is not found on this coderd replica, for example because coderd restarted. ` +
 	`Call run_workflow again with the same script (or script_path), the same args and resume_run_id set to this run_id. Finished steps are reused.`
@@ -102,7 +107,7 @@ type runWorkflowArgs struct {
 	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this or script_path."`
 	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this or script."`
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
-	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run after a restart. Send the same script (or script_path) and args again."`
+	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 }
 
 type awaitWorkflowArgs struct {
@@ -206,10 +211,23 @@ func (p *Server) forkWorkflowTools(
 					return fantasy.NewTextErrorResponse("run_id must be a valid UUID"), nil
 				}
 				run := p.workflows.get(runID)
-				if run == nil || run.parent.ID != chat.ID {
+				if run != nil {
+					if run.parent.ID != chat.ID {
+						return fantasy.NewTextErrorResponse(workflowNotFoundHelp), nil
+					}
+					return workflowJSON(run.await(ctx, args.wait())), nil
+				}
+				// The registry lost the run, for example to a restart. The
+				// journal answers with the result of a run that ended, or
+				// the state of one that a resume continues.
+				res, found, err := p.workflowResultFromJournal(ctx, chat.ID, runID)
+				if err != nil {
+					return fantasy.NewTextErrorResponse("load the workflow run: " + err.Error()), nil
+				}
+				if !found {
 					return fantasy.NewTextErrorResponse(workflowNotFoundHelp), nil
 				}
-				return workflowJSON(run.await(ctx, args.wait())), nil
+				return workflowJSON(res), nil
 			},
 		),
 	}
@@ -301,9 +319,16 @@ func (g *workflowRegistry) remove(id uuid.UUID) {
 }
 
 type workflowStep struct {
-	chatID uuid.UUID
-	title  string
-	reused bool
+	id      uuid.UUID // the deterministic step ID, which is the child chat ID
+	chatID  uuid.UUID
+	title   string
+	reused  bool
+	specKey string
+	// occurrence is the number of earlier calls of the same spec in the
+	// script, the way the first process numbered the step. ordinal is the
+	// creation order of the step inside the run. Both journal the step.
+	occurrence int
+	ordinal    int
 	// The fields below are guarded by workflowRun.mu.
 	status string
 	value  json.RawMessage
@@ -320,21 +345,27 @@ type workflowRun struct {
 	parent        database.Chat // the parent at start
 	modelConfigID uuid.UUID     // the model of the turn that started the run
 	program       *workflowProgram
+	script        string // the script of the run, journaled at start
 	argsJSON      string
 
 	// seen is owned by the script goroutine.
 	seen map[string]int
 
-	mu           sync.Mutex
-	steps        []*workflowStep
-	logs         []string
-	logBytes     int // the bytes of the retained logs
-	result       *runWorkflowResult
-	done         chan struct{}
-	awaiters     int
-	delivered    bool  // an await_workflow call returned the end
-	notified     bool  // the parent got the end message
-	queuedNotice int64 // the queued end message, 0 if none
+	mu        sync.Mutex
+	steps     []*workflowStep
+	logs      []string
+	logBytes  int // the bytes of the retained logs
+	result    *runWorkflowResult
+	done      chan struct{}
+	awaiters  int
+	delivered bool // an await_workflow call returned the end
+	notified  bool // the parent got the end message
+	// stopRequested marks a run that stop_workflow is unwinding. finish
+	// turns its outcome into a stopped run, not a failed one. cancel is the
+	// cancel of the script context, set before the script starts.
+	stopRequested bool
+	cancel        context.CancelFunc
+	queuedNotice  int64 // the queued end message, 0 if none
 }
 
 func (p *Server) startWorkflowRun(
@@ -344,9 +375,6 @@ func (p *Server) startWorkflowRun(
 	args runWorkflowArgs,
 	callID uuid.UUID,
 ) (*workflowRun, error) {
-	if strings.TrimSpace(args.Script) == "" {
-		return nil, xerrors.New("script is required")
-	}
 	if len(args.Script) > maxScriptBytes {
 		return nil, xerrors.Errorf("the script is %d bytes; at most %d bytes are allowed", len(args.Script), maxScriptBytes)
 	}
@@ -363,6 +391,24 @@ func (p *Server) startWorkflowRun(
 			return nil, xerrors.New("the run belongs to another chat")
 		}
 		return run, nil
+	}
+	// The journal decides between a resume and a fresh start. A row exists
+	// once run_workflow journaled the run, so a retry of the same call, a
+	// second call with resume_run_id, and a resume after a restart all land
+	// here. The journal replays the script and args it holds; a submitted
+	// script only names the run.
+	row, found, err := p.workflowJournal().getRun(ctx, runID)
+	if err != nil {
+		return nil, xerrors.Errorf("load the workflow journal: %w", err)
+	}
+	if found {
+		if row.ChatID != chat.ID {
+			return nil, xerrors.New("the run belongs to another chat")
+		}
+		return p.resumeWorkflowRun(ctx, chat, row)
+	}
+	if strings.TrimSpace(args.Script) == "" {
+		return nil, xerrors.New("script is required")
 	}
 	parent, err := p.loadSubagentSpawnParentChat(ctx, func() database.Chat { return chat })
 	if err != nil {
@@ -386,6 +432,7 @@ func (p *Server) startWorkflowRun(
 		parent:        parent,
 		modelConfigID: modelConfigID,
 		program:       program,
+		script:        args.Script,
 		argsJSON:      argsJSON,
 		seen:          map[string]int{},
 		done:          make(chan struct{}),
@@ -393,11 +440,18 @@ func (p *Server) startWorkflowRun(
 	if !added {
 		return run, nil
 	}
+	if err := p.workflowJournal().insertRun(ctx, run); err != nil {
+		p.workflows.remove(runID)
+		return nil, xerrors.Errorf("journal the workflow run: %w", err)
+	}
 	// The run outlives the tool call. A fresh context drops the tool call
 	// ID: the workspace agent answers a repeated ID with a saved response.
 	// The run does the same chatd work as spawn_agent and wait_agent, which
 	// also run as the chatd subject.
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), parent) //nolint:gocritic // see above
+	run.mu.Lock()
+	run.cancel = stop
+	run.mu.Unlock()
 	err = p.goInflight(func() {
 		defer stop()
 		run.finish(runCtx, run.execute(runCtx))
@@ -405,6 +459,7 @@ func (p *Server) startWorkflowRun(
 	if err != nil {
 		stop()
 		p.workflows.remove(runID)
+		p.workflowJournal().updateRunStatus(ctx, runID, workflowStatusFailed, "start the run: "+err.Error(), nil)
 		return nil, xerrors.Errorf("start workflow run: %w", err)
 	}
 	return run, nil
@@ -412,15 +467,27 @@ func (p *Server) startWorkflowRun(
 
 // execute runs the script and builds the final result.
 func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
+	if r.isStopRequested() {
+		return r.stoppedResult()
+	}
 	value, err := r.program.run(ctx, r)
 	// Whatever the script outcome, a step that is still running has nobody
 	// waiting for its report, so the run stops it instead of leaving the
-	// child chat (and its descendants) working to a deadline.
-	r.interruptOpenSteps(ctx)
+	// child chat (and its descendants) working to a deadline. A canceled
+	// context (a stop or a shutdown) cannot run this phase, so it runs on a
+	// fresh one.
+	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
+	defer stop()
+	r.interruptOpenSteps(ictx, r.stopReason())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
 	if err != nil {
+		if r.stopRequested && ctx.Err() != nil {
+			res.Status = workflowStatusStopped
+			res.Error = workflowStopError
+			return res
+		}
 		res.Status = workflowStatusFailed
 		res.Error = err.Error()
 		return res
@@ -428,6 +495,51 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 	res.Status = workflowStatusCompleted
 	res.Result = value
 	return res
+}
+
+// stoppedResult is the snapshot of a run that stop_workflow unwound before
+// or instead of the script. It fails the open steps on a fresh context, the
+// way execute does for a script outcome.
+func (r *workflowRun) stoppedResult() runWorkflowResult {
+	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
+	defer stop()
+	r.interruptOpenSteps(ictx, workflowStopError)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	res := r.snapshotLocked()
+	res.Status = workflowStatusStopped
+	res.Error = workflowStopError
+	return res
+}
+
+// stopReason is the failure reason of the open steps that the run ends: the
+// engine's own text, or the stop text when stop_workflow unwound the run.
+func (r *workflowRun) stopReason() string {
+	if r.isStopRequested() {
+		return workflowStopError
+	}
+	return "the workflow ended before the step reported"
+}
+
+// requestStop marks the run for a stop and cancels the script context. It
+// returns false when the run already ended.
+func (r *workflowRun) requestStop() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.result != nil {
+		return false
+	}
+	r.stopRequested = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+	return true
+}
+
+func (r *workflowRun) isStopRequested() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopRequested
 }
 
 // finish stores the result. If no await_workflow call waits, it tells the
@@ -439,6 +551,19 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
+	// The journal keeps the result for the resumes and awaits of a later
+	// process, best effort like every journal update of a live run. A
+	// canceled context would fail the write, so a user stop journals on a
+	// fresh one: a stopped run must read as stopped. A shutdown keeps its
+	// canceled context, leaving the run open for the startup sweep to mark
+	// interrupted, which is what resume_run_id waits for.
+	jctx := ctx
+	if r.isStopRequested() && ctx.Err() != nil {
+		fresh, stop := r.p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
+		defer stop()
+		jctx = fresh
+	}
+	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res)
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -618,14 +743,52 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	if err != nil {
 		return nil, err
 	}
-	id := workflowStepID(r.id, key, r.seen[key])
+	occurrence := r.seen[key]
 	r.seen[key]++
+	id := workflowStepID(r.id, key, occurrence)
+
+	// A journal row with this ID belongs to a step that a previous process
+	// started. A finished step replays its journaled value; an open one
+	// re-runs in its child chat, which waitStep drives as usual.
+	r.mu.Lock()
+	var journaled *workflowStep
+	for _, s := range r.steps {
+		if s.id == id {
+			journaled = s
+			break
+		}
+	}
+	r.mu.Unlock()
+	if journaled != nil {
+		// The step came from the journal: whether it finished before the
+		// restart or is still open, the script does not run it again, so
+		// the await result reports it as reused.
+		r.mu.Lock()
+		journaled.reused = true
+		r.mu.Unlock()
+		return journaled, nil
+	}
 
 	child, reused, err := createWorkflowStepChat(ctx, r.p, r.parent, r.modelConfigID, r.id, id, spec)
 	if err != nil {
 		return nil, err
 	}
-	step := &workflowStep{chatID: child.ID, title: child.Title, reused: reused, status: stepStatusRunning}
+	step := &workflowStep{
+		id:         id,
+		chatID:     child.ID,
+		title:      child.Title,
+		reused:     reused,
+		specKey:    key,
+		occurrence: occurrence,
+		ordinal:    count,
+		status:     stepStatusRunning,
+	}
+	if err := r.p.workflowJournal().insertStep(ctx, r.id, step); err != nil {
+		// The child chat runs without a journal row. Stop it: a step that
+		// the script never reads again must not consume model capacity.
+		r.interruptStepChild(ctx, step)
+		return nil, xerrors.Errorf("journal the workflow step: %w", err)
+	}
 	r.mu.Lock()
 	r.steps = append(r.steps, step)
 	r.mu.Unlock()
@@ -644,7 +807,7 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			return nil
 		}
 		if !r.p.clock.Now().Before(deadline) {
-			r.failStep(step, "the step ran longer than "+workflowStepTimeout.String())
+			r.failStep(ctx, step, "the step ran longer than "+workflowStepTimeout.String())
 			// Nobody reads the child's value now, so stop it instead of
 			// leaving it running to its own end: interruptOpenSteps no
 			// longer sees a failed step.
@@ -659,11 +822,11 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			return ctx.Err()
 		}
 		if statusErr, ok := errors.AsType[*subagentStatusError](err); ok {
-			r.failStep(step, "the child chat failed: "+statusErr.reason)
+			r.failStep(ctx, step, "the child chat failed: "+statusErr.reason)
 			return nil
 		}
 		if err != nil {
-			r.failStep(step, err.Error())
+			r.failStep(ctx, step, err.Error())
 			return nil
 		}
 		value, reminded, err := workflowStepReport(ctx, r.p.db, step.chatID)
@@ -675,45 +838,49 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.mu.Lock()
 			step.status, step.value = stepStatusReported, value
 			r.mu.Unlock()
+			r.p.workflowJournal().updateStep(ctx, step)
 		case !reminded && !step.sentReminder:
 			if _, err := r.p.sendSubagentMessage(ctx, r.parent.ID, step.chatID,
 				workflowReminder); err != nil {
-				r.failStep(step, "send reminder: "+err.Error())
+				r.failStep(ctx, step, "send reminder: "+err.Error())
 				return nil
 			}
 			r.mu.Lock()
 			step.status, step.sentReminder = stepStatusReminded, true
 			r.mu.Unlock()
+			r.p.workflowJournal().updateStep(ctx, step)
 		default:
-			r.failStep(step, "the step stopped without a "+workflowReportToolName+" call")
+			r.failStep(ctx, step, "the step stopped without a "+workflowReportToolName+" call")
 		}
 	}
 }
 
-func (r *workflowRun) failStep(step *workflowStep, reason string) {
+func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	step.status, step.err = stepStatusFailed, reason
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
+	r.mu.Unlock()
+	r.p.workflowJournal().updateStep(ctx, step)
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left
-// unreported: a failed, timed-out, or returning script never reads their
-// value, so they must not keep consuming model capacity until their step
-// timeout. waitStep has already returned when this runs, so the step fields
-// have no other writer.
-func (r *workflowRun) interruptOpenSteps(ctx context.Context) {
+// unreported: a failed, timed-out, stopped, or returning script never reads
+// their value, so they must not keep consuming model capacity until their
+// step timeout. waitStep has already returned when this runs, so the step
+// fields have no other writer.
+func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {
 		if s.status == stepStatusRunning || s.status == stepStatusReminded {
-			s.status, s.err = stepStatusFailed, "the workflow ended before the step reported"
+			s.status, s.err = stepStatusFailed, reason
 			open = append(open, s)
 		}
 	}
 	r.mu.Unlock()
 	for _, step := range open {
 		r.interruptStepChild(ctx, step)
+		r.p.workflowJournal().updateStep(ctx, step)
 	}
 }
 

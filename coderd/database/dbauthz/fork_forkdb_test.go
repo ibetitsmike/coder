@@ -755,6 +755,98 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
 		},
+		// Workflow journal queries authorize through the chat that owns the
+		// run, fetched by ID on the fork store.
+		"GetWorkflowRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			check.Args(run.ID).Asserts(chat, policy.ActionRead).Returns(run)
+		},
+		"GetWorkflowStepsByRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			steps := []forkdb.WorkflowStep{testutil.Fake(t, faker, forkdb.WorkflowStep{RunID: run.ID})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(steps, nil).AnyTimes()
+			check.Args(run.ID).Asserts(chat, policy.ActionRead).Returns(steps)
+		},
+		"GetWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			step := testutil.Fake(t, faker, forkdb.WorkflowStep{RunID: run.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			check.Args(step.ID).Asserts(chat, policy.ActionRead).Returns(step)
+		},
+		"InsertWorkflowRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := testutil.Fake(t, faker, forkdb.InsertWorkflowRunParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().InsertWorkflowRun(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"InsertWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.InsertWorkflowStepParams{RunID: run.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().InsertWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"MarkOpenWorkflowRunsInterrupted": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			fdb.EXPECT().MarkOpenWorkflowRunsInterrupted(gomock.Any(), "the coderd process restarted before the run ended").Return(int64(2), nil).AnyTimes()
+			check.Args("the coderd process restarted before the run ended").Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(int64(2))
+		},
+		"UpdateWorkflowRunStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"UpdateWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			step := testutil.Fake(t, faker, forkdb.WorkflowStep{RunID: run.ID})
+			arg := testutil.Fake(t, faker, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.GetWorkflowRunsByChatParams{ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRunsByChat(gomock.Any(), arg).Return([]forkdb.WorkflowRun{run}, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns([]forkdb.WorkflowRun{run})
+		},
+		"GetWorkflowRunStepCountsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			counts := []forkdb.GetWorkflowRunStepCountsByChatRow{{RunID: run.ID, Status: "reported", StepCount: 1}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRunStepCountsByChat(gomock.Any(), chat.ID).Return(counts, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(counts)
+		},
+		"FailOpenWorkflowStepsOfRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := forkdb.FailOpenWorkflowStepsOfRunParams{RunID: run.ID, ErrText: "stopped by user"}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(2))
+		},
 	}
 
 	// Every fork query needs a case, like MethodTestSuite's accounting of

@@ -61,6 +61,9 @@ type Querier interface {
 	// history is delivered. Older chats start at their newest message so linking
 	// does not replay history.
 	EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error
+	// stop_workflow fails the open steps of a run that it stops. err_text, not
+	// error: it becomes a mock parameter name.
+	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
 	// Records a run of a claimed wake-up and ends the claim. Pass the
 	// lease_expires_at that ClaimDueChatWakeups returned: no row means another
 	// worker took over the expired lease.
@@ -116,6 +119,17 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error)
+	// One row per run and step status of a chat, for the step_counts of the run
+	// list. done means reported; running means running or reminded.
+	GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]GetWorkflowRunStepCountsByChatRow, error)
+	// The run list of a chat, newest first, one keyset page. after_created_at
+	// and after_id are the created_at and the ID of the last run of the page the
+	// client already has; both NULL reads the first page.
+	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error)
+	// The authorizer of UpdateWorkflowStep reads the step to find its run.
+	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
+	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
 	// Turns off a pack of the chat's organization for the chat. It returns no
 	// row for a pack that does not exist or is in another organization.
 	InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error)
@@ -141,6 +155,8 @@ type Querier interface {
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
+	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
+	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
 	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
@@ -159,6 +175,9 @@ type Querier interface {
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// chatd runs this once at startup: runs owned by a dead process stay open.
+	// The parameter is err_text, not error: it becomes a mock parameter name.
+	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
@@ -181,6 +200,17 @@ type Querier interface {
 	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	// result is the full terminal snapshot of the run, or NULL for interrupted.
+	// A terminal status stamps finished_at; interrupted keeps the run open, so
+	// a resume can end it later. The param stays uncast so sqlc ties it to the
+	// nullable column and applies the NullRawMessage override: a plain
+	// json.RawMessage would reach pq as a zero-length string, which Postgres
+	// rejects on jsonb.
+	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
+	// A reported or failed step stamps finished_at; started_at is set once, at
+	// the insert. The param stays uncast so sqlc ties it to the nullable column
+	// and applies the NullRawMessage override.
+	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatOrganizationWakeupCaps(ctx context.Context, arg UpsertChatOrganizationWakeupCapsParams) (ChatOrganizationWakeupCap, error)

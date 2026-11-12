@@ -157,5 +157,13 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		userAgentDefinitions.Get(userAgentDefinitionsPath+"/{agentDefinition}", api.forkUserAgentDefinition)
 		userAgentDefinitions.Patch(userAgentDefinitionsPath+"/{agentDefinition}", api.patchForkUserAgentDefinition)
 		userAgentDefinitions.Delete(userAgentDefinitionsPath+"/{agentDefinition}", api.deleteForkUserAgentDefinition)
+
+		chatWorkflowRuns := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkWorkflows),
+			httpmw.ExtractChatParam(api.Database),
+		)
+		chatWorkflowRuns.Get("/{chat}/workflow-runs", api.getChatWorkflowRuns)
+		chatWorkflowRuns.Get("/{chat}/workflow-runs/{workflowrun}", api.getChatWorkflowRun)
+		chatWorkflowRuns.Post("/{chat}/workflow-runs/{workflowrun}/stop", api.postStopChatWorkflowRun)
 	})
 }

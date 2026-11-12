@@ -391,6 +391,21 @@ func (mr *MockStoreMockRecorder) EnsurePluginChatBindings(ctx, pluginID any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsurePluginChatBindings", reflect.TypeOf((*MockStore)(nil).EnsurePluginChatBindings), ctx, pluginID)
 }
 
+// FailOpenWorkflowStepsOfRun mocks base method.
+func (m *MockStore) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.FailOpenWorkflowStepsOfRunParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FailOpenWorkflowStepsOfRun", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FailOpenWorkflowStepsOfRun indicates an expected call of FailOpenWorkflowStepsOfRun.
+func (mr *MockStoreMockRecorder) FailOpenWorkflowStepsOfRun(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOpenWorkflowStepsOfRun", reflect.TypeOf((*MockStore)(nil).FailOpenWorkflowStepsOfRun), ctx, arg)
+}
+
 // FinishChatWakeupClaim mocks base method.
 func (m *MockStore) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
 	m.ctrl.T.Helper()
@@ -886,6 +901,81 @@ func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetUserAgentDefinitionByName), ctx, arg)
 }
 
+// GetWorkflowRun mocks base method.
+func (m *MockStore) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowRun", ctx, id)
+	ret0, _ := ret[0].(forkdb.WorkflowRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowRun indicates an expected call of GetWorkflowRun.
+func (mr *MockStoreMockRecorder) GetWorkflowRun(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowRun", reflect.TypeOf((*MockStore)(nil).GetWorkflowRun), ctx, id)
+}
+
+// GetWorkflowRunStepCountsByChat mocks base method.
+func (m *MockStore) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetWorkflowRunStepCountsByChatRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowRunStepCountsByChat", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.GetWorkflowRunStepCountsByChatRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowRunStepCountsByChat indicates an expected call of GetWorkflowRunStepCountsByChat.
+func (mr *MockStoreMockRecorder) GetWorkflowRunStepCountsByChat(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowRunStepCountsByChat", reflect.TypeOf((*MockStore)(nil).GetWorkflowRunStepCountsByChat), ctx, chatID)
+}
+
+// GetWorkflowRunsByChat mocks base method.
+func (m *MockStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowRunsByChat", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.WorkflowRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowRunsByChat indicates an expected call of GetWorkflowRunsByChat.
+func (mr *MockStoreMockRecorder) GetWorkflowRunsByChat(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowRunsByChat", reflect.TypeOf((*MockStore)(nil).GetWorkflowRunsByChat), ctx, arg)
+}
+
+// GetWorkflowStep mocks base method.
+func (m *MockStore) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowStep", ctx, id)
+	ret0, _ := ret[0].(forkdb.WorkflowStep)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowStep indicates an expected call of GetWorkflowStep.
+func (mr *MockStoreMockRecorder) GetWorkflowStep(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowStep", reflect.TypeOf((*MockStore)(nil).GetWorkflowStep), ctx, id)
+}
+
+// GetWorkflowStepsByRun mocks base method.
+func (m *MockStore) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowStepsByRun", ctx, runID)
+	ret0, _ := ret[0].([]forkdb.WorkflowStep)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowStepsByRun indicates an expected call of GetWorkflowStepsByRun.
+func (mr *MockStoreMockRecorder) GetWorkflowStepsByRun(ctx, runID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowStepsByRun", reflect.TypeOf((*MockStore)(nil).GetWorkflowStepsByRun), ctx, runID)
+}
+
 // InsertChatExcludedPluginPack mocks base method.
 func (m *MockStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
 	m.ctrl.T.Helper()
@@ -1107,6 +1197,34 @@ func (mr *MockStoreMockRecorder) InsertUserAgentDefinition(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserAgentDefinition", reflect.TypeOf((*MockStore)(nil).InsertUserAgentDefinition), ctx, arg)
 }
 
+// InsertWorkflowRun mocks base method.
+func (m *MockStore) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWorkflowRunParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertWorkflowRun", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertWorkflowRun indicates an expected call of InsertWorkflowRun.
+func (mr *MockStoreMockRecorder) InsertWorkflowRun(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertWorkflowRun", reflect.TypeOf((*MockStore)(nil).InsertWorkflowRun), ctx, arg)
+}
+
+// InsertWorkflowStep mocks base method.
+func (m *MockStore) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertWorkflowStep", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertWorkflowStep indicates an expected call of InsertWorkflowStep.
+func (mr *MockStoreMockRecorder) InsertWorkflowStep(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertWorkflowStep", reflect.TypeOf((*MockStore)(nil).InsertWorkflowStep), ctx, arg)
+}
+
 // ListChatWakeupRunKeys mocks base method.
 func (m *MockStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	m.ctrl.T.Helper()
@@ -1225,6 +1343,21 @@ func (m *MockStore) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (u
 func (mr *MockStoreMockRecorder) LockChatForNoKeyUpdate(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockChatForNoKeyUpdate", reflect.TypeOf((*MockStore)(nil).LockChatForNoKeyUpdate), ctx, id)
+}
+
+// MarkOpenWorkflowRunsInterrupted mocks base method.
+func (m *MockStore) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkOpenWorkflowRunsInterrupted", ctx, errText)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkOpenWorkflowRunsInterrupted indicates an expected call of MarkOpenWorkflowRunsInterrupted.
+func (mr *MockStoreMockRecorder) MarkOpenWorkflowRunsInterrupted(ctx, errText any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkOpenWorkflowRunsInterrupted", reflect.TypeOf((*MockStore)(nil).MarkOpenWorkflowRunsInterrupted), ctx, errText)
 }
 
 // ReleasePluginLeases mocks base method.
@@ -1459,6 +1592,34 @@ func (m *MockStore) UpdateUserAgentDefinitionByName(ctx context.Context, arg for
 func (mr *MockStoreMockRecorder) UpdateUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).UpdateUserAgentDefinitionByName), ctx, arg)
+}
+
+// UpdateWorkflowRunStatus mocks base method.
+func (m *MockStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkflowRunStatus", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateWorkflowRunStatus indicates an expected call of UpdateWorkflowRunStatus.
+func (mr *MockStoreMockRecorder) UpdateWorkflowRunStatus(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowRunStatus", reflect.TypeOf((*MockStore)(nil).UpdateWorkflowRunStatus), ctx, arg)
+}
+
+// UpdateWorkflowStep mocks base method.
+func (m *MockStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkflowStep", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateWorkflowStep indicates an expected call of UpdateWorkflowStep.
+func (mr *MockStoreMockRecorder) UpdateWorkflowStep(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowStep", reflect.TypeOf((*MockStore)(nil).UpdateWorkflowStep), ctx, arg)
 }
 
 // UpsertChatDescendantQuestion mocks base method.
