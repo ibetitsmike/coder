@@ -50,10 +50,17 @@ func TestForkWorkflowReportCollision(t *testing.T) {
 	t.Parallel()
 
 	schema := json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`)
-	raw, err := workflowStepTools(schema)
+	stepTools, err := workflowStepTools(schema)
+	require.NoError(t, err)
+	// A caller-supplied def that collides with a different built-in.
+	otherTools, err := json.Marshal([]codersdk.DynamicTool{{
+		Name:        "other_tool",
+		Description: "a caller-supplied tool",
+		InputSchema: schema,
+	}})
 	require.NoError(t, err)
 
-	runAppend := func(t *testing.T, tools []fantasy.AgentTool) *warningSink {
+	runAppend := func(t *testing.T, tools []fantasy.AgentTool, raw json.RawMessage) *warningSink {
 		t.Helper()
 		sink := &warningSink{}
 		_, _, err := appendDynamicTools(context.Background(), slog.Make(sink), tools,
@@ -67,7 +74,7 @@ func TestForkWorkflowReportCollision(t *testing.T) {
 		t.Parallel()
 		tool, err := newWorkflowReportTool(schema)
 		require.NoError(t, err)
-		sink := runAppend(t, []fantasy.AgentTool{tool})
+		sink := runAppend(t, []fantasy.AgentTool{tool}, stepTools)
 		assert.Empty(t, sink.warns, sink.warns)
 	})
 
@@ -77,7 +84,7 @@ func TestForkWorkflowReportCollision(t *testing.T) {
 			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				return fantasy.NewTextResponse("ok"), nil
 			})
-		sink := runAppend(t, []fantasy.AgentTool{builtIn})
+		sink := runAppend(t, []fantasy.AgentTool{builtIn}, otherTools)
 		require.Len(t, sink.warns, 1)
 		assert.Contains(t, sink.warns[0], "other_tool")
 	})
