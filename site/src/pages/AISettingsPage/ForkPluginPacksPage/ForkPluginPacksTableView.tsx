@@ -53,30 +53,6 @@ type ForkPluginPacksTableViewProps = {
 	onDelete: (pack: ForkPluginPack) => void;
 };
 
-type InstallPluginPackButtonProps = {
-	ref?: React.Ref<HTMLButtonElement>;
-	focusReturn?: FocusReturn;
-	onInstall: () => void;
-};
-
-const InstallPluginPackButton: React.FC<InstallPluginPackButtonProps> = ({
-	ref,
-	focusReturn,
-	onInstall,
-}) => (
-	<Button
-		ref={ref}
-		variant="outline"
-		onClick={(event) => {
-			focusReturn?.rememberTrigger(event);
-			onInstall();
-		}}
-	>
-		<PlusIcon aria-hidden="true" />
-		Install plugin pack
-	</Button>
-);
-
 type ForkPluginPackEntryProps = {
 	pack: ForkPluginPack;
 	access: SkillAccess;
@@ -255,11 +231,17 @@ export const ForkPluginPacksTableView: React.FC<
 					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 						{action}
 						{access.create && (
-							<InstallPluginPackButton
+							<Button
 								ref={focusReturn?.setSecondaryFallback}
-								focusReturn={focusReturn}
-								onInstall={onInstall}
-							/>
+								variant="outline"
+								onClick={(event) => {
+									focusReturn?.rememberTrigger(event);
+									onInstall();
+								}}
+							>
+								<PlusIcon aria-hidden="true" />
+								Install plugin pack
+							</Button>
 						)}
 					</div>
 				}
