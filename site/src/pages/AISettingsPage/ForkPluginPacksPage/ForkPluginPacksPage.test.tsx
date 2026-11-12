@@ -14,7 +14,10 @@ import {
 	MockUserOwner,
 	mockApiError,
 } from "#/testHelpers/entities";
-import { MockForkPluginPack } from "#/testHelpers/forkPluginPacks";
+import {
+	MockForkPluginPack,
+	MockForkPluginPackWithoutPath,
+} from "#/testHelpers/forkPluginPacks";
 import { renderWithRouter } from "#/testHelpers/renderHelpers";
 import ForkPluginPacksPage from "./ForkPluginPacksPage";
 
@@ -379,6 +382,65 @@ it("keeps the row menu reachable and starts no second update while one is pendin
 	expect(update).toHaveBeenCalledTimes(1);
 
 	finishUpdate(MockForkPluginPack);
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPack.name} updated to commit 0123456789.`,
+		),
+	);
+});
+
+it("keeps one pack's update pending after another pack's update settles", async () => {
+	const user = userEvent.setup();
+	const toastSuccess = vi.spyOn(toast, "success");
+	vi.mocked(forkPluginPacksApi.getPluginPacks).mockResolvedValue([
+		MockForkPluginPack,
+		MockForkPluginPackWithoutPath,
+	]);
+	const finishUpdate = new Map<string, (pack: ForkPluginPack) => void>();
+	const update = vi
+		.spyOn(forkPluginPacksApi, "updatePluginPack")
+		.mockImplementation(
+			(_organizationId, packId) =>
+				new Promise((resolve) => {
+					finishUpdate.set(packId, resolve);
+				}),
+		);
+	renderPage();
+	const startUpdate = async (pack: ForkPluginPack) => {
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${pack.name}`,
+			}),
+		);
+		await user.click(
+			await screen.findByRole("menuitem", {
+				name: `Update to the latest commit of ${pack.ref}`,
+			}),
+		);
+	};
+
+	await startUpdate(MockForkPluginPack);
+	await startUpdate(MockForkPluginPackWithoutPath);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+
+	finishUpdate.get(MockForkPluginPackWithoutPath.id)?.(
+		MockForkPluginPackWithoutPath,
+	);
+	await waitFor(() =>
+		expect(toastSuccess).toHaveBeenCalledWith(
+			`${MockForkPluginPackWithoutPath.name} updated to commit 0123456789.`,
+		),
+	);
+
+	await user.click(
+		screen.getByRole("button", {
+			name: `More actions for ${MockForkPluginPack.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Updating…" }));
+	expect(update).toHaveBeenCalledTimes(2);
+
+	finishUpdate.get(MockForkPluginPack.id)?.(MockForkPluginPack);
 	await waitFor(() =>
 		expect(toastSuccess).toHaveBeenCalledWith(
 			`${MockForkPluginPack.name} updated to commit 0123456789.`,
