@@ -87,6 +87,12 @@ func outstandingToolCalls(ctx context.Context, store database.Store, chat databa
 		if err != nil {
 			return nil, xerrors.Errorf("parse dynamic tool names: %w", err)
 		}
+		// Fork: a workflow step's workflow_report calls are server-side
+		// (chatd.chatIsWorkflowStep). The label and the tool name are
+		// literals here because chatstate does not import the chatd runtime.
+		if chat.ParentChatID.Valid && chat.Labels["coder_workflow_run"] != "" {
+			delete(dynamicToolNames, "workflow_report")
+		}
 		if len(dynamicToolNames) == 0 {
 			return nil, nil
 		}
@@ -176,12 +182,6 @@ func parseDynamicToolNamesFromRaw(raw pqtype.NullRawMessage) (map[string]bool, e
 	}
 	out := make(map[string]bool, len(tools))
 	for _, t := range tools {
-		// Fork: chatd runs workflow_report (chatd.workflowReportToolName)
-		// itself, so the client never does. The name is a literal here
-		// because chatstate does not import the chatd runtime.
-		if t.Name == "workflow_report" {
-			continue
-		}
 		out[t.Name] = true
 	}
 	return out, nil

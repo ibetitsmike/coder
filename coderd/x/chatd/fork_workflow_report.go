@@ -53,19 +53,16 @@ func newWorkflowReportTool(raw json.RawMessage) (*workflowReportTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	var shape struct {
-		Properties map[string]any `json:"properties"`
-		Required   []string       `json:"required"`
-	}
-	if err := json.Unmarshal(raw, &shape); err != nil {
-		return nil, xerrors.Errorf("parse report schema shape: %w", err)
+	properties, required, err := stepReportParameters(raw)
+	if err != nil {
+		return nil, err
 	}
 	return &workflowReportTool{
 		info: fantasy.ToolInfo{
 			Name:        workflowReportToolName,
 			Description: workflowReportDescription,
-			Parameters:  shape.Properties,
-			Required:    shape.Required,
+			Parameters:  properties,
+			Required:    required,
 		},
 		resolved: resolved,
 	}, nil
@@ -115,6 +112,151 @@ func checkStepSchema(raw json.RawMessage) (*jsonschema.Resolved, error) {
 	return resolved, nil
 }
 
+// stepReportParameters extracts the fantasy ToolInfo parameter shape of a
+// step schema. Fantasy rebuilds a tool's provider schema as
+// {"type":"object","properties":Parameters,"required":Required}, which
+// cannot carry the document's top-level $defs, so local $refs are inlined
+// first and the properties are read from the inlined copy. Run still
+// validates against the schema checkStepSchema resolved from the original,
+// refs intact. A schema whose refs cannot inline faithfully is refused, so
+// a broken shape is never shipped to the provider.
+func stepReportParameters(raw json.RawMessage) (properties map[string]any, required []string, err error) {
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return nil, nil, xerrors.Errorf("parse report schema: %w", err)
+	}
+	inlined, err := inlineStepRefs(root, root, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	props, _ := inlined["properties"].(map[string]any)
+	if props == nil {
+		props = map[string]any{}
+	}
+	if reqs, ok := inlined["required"].([]any); ok {
+		for _, r := range reqs {
+			if name, ok := r.(string); ok {
+				required = append(required, name)
+			}
+		}
+	}
+	return props, required, nil
+}
+
+// inlineStepRefs returns a copy of node with every local $ref replaced by an
+// inlined copy of the schema it points at. seen holds the refs on the chain
+// currently being inlined, so recursive references are refused instead of
+// looping. Remote references and $ref nodes with sibling keywords cannot be
+// inlined faithfully and are refused as well.
+func inlineStepRefs(node map[string]any, root map[string]any, seen []string) (map[string]any, error) {
+	if ref, ok := node["$ref"].(string); ok {
+		if len(node) > 1 {
+			return nil, xerrors.Errorf("$ref %q cannot be combined with sibling keywords: move them into the referenced schema", ref)
+		}
+		if !strings.HasPrefix(ref, "#/") {
+			return nil, xerrors.Errorf("$ref %q is not a local reference: step schemas support only #/... references into the schema document", ref)
+		}
+		for _, s := range seen {
+			if s == ref {
+				return nil, xerrors.Errorf("$ref %q is recursive: step schemas cannot inline recursive references", ref)
+			}
+		}
+		target, err := resolveSchemaPointer(root, ref)
+		if err != nil {
+			return nil, err
+		}
+		chain := make([]string, len(seen)+1)
+		copy(chain, seen)
+		chain[len(seen)] = ref
+		return inlineStepRefs(target, root, chain)
+	}
+	out := make(map[string]any, len(node))
+	for key, value := range node {
+		inlined, err := inlineStepValue(key, value, root, seen)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = inlined
+	}
+	return out, nil
+}
+
+// schemaNameMapFields are keywords whose value maps names to schemas, so
+// their keys are property or definition names, never schema keywords.
+var schemaNameMapFields = map[string]bool{
+	"$defs":             true,
+	"definitions":       true,
+	"dependentSchemas":  true,
+	"patternProperties": true,
+	"properties":        true,
+}
+
+// inlineStepValue walks one keyword's value. Maps under schemaNameMapFields
+// are name-to-schema maps; every other map is a schema node, and array
+// elements are schemas where they are objects.
+func inlineStepValue(key string, value any, root map[string]any, seen []string) (any, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if schemaNameMapFields[key] {
+			out := make(map[string]any, len(typed))
+			for name, schema := range typed {
+				sub, ok := schema.(map[string]any)
+				if !ok {
+					out[name] = schema
+					continue
+				}
+				inlined, err := inlineStepRefs(sub, root, seen)
+				if err != nil {
+					return nil, err
+				}
+				out[name] = inlined
+			}
+			return out, nil
+		}
+		return inlineStepRefs(typed, root, seen)
+	case []any:
+		out := make([]any, len(typed))
+		for i, element := range typed {
+			sub, ok := element.(map[string]any)
+			if !ok {
+				out[i] = element
+				continue
+			}
+			inlined, err := inlineStepRefs(sub, root, seen)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = inlined
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+// resolveSchemaPointer walks ref (like "#/$defs/result") through root.
+func resolveSchemaPointer(root map[string]any, ref string) (map[string]any, error) {
+	current := any(root)
+	for _, part := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
+		part = strings.ReplaceAll(part, "~1", "/")
+		part = strings.ReplaceAll(part, "~0", "~")
+		node, ok := current.(map[string]any)
+		if !ok {
+			return nil, xerrors.Errorf("$ref %q does not resolve in the step schema", ref)
+		}
+		next, ok := node[part]
+		if !ok {
+			return nil, xerrors.Errorf("$ref %q does not resolve in the step schema", ref)
+		}
+		current = next
+	}
+	target, ok := current.(map[string]any)
+	if !ok {
+		return nil, xerrors.Errorf("$ref %q does not point at a schema object", ref)
+	}
+	return target, nil
+}
+
 // workflowStepTools returns the dynamic tools column for a step child. It
 // holds only the workflow_report definition with the step schema.
 func workflowStepTools(schema json.RawMessage) (json.RawMessage, error) {
@@ -129,57 +271,67 @@ func workflowStepTools(schema json.RawMessage) (json.RawMessage, error) {
 	return raw, nil
 }
 
-// appendWorkflowReportTool adds workflow_report to the tools of a workflow
-// step child. Other chats keep their tools.
-func appendWorkflowReportTool(tools []fantasy.AgentTool, chat database.Chat) ([]fantasy.AgentTool, error) {
-	if !chat.ParentChatID.Valid || !chat.DynamicTools.Valid {
-		return tools, nil
+// chatIsWorkflowStep reports whether chat is a child chat the fork created
+// for a workflow run: chatd sets the run label when it creates a step chat,
+// and no caller-supplied path can set a label on a child chat (the public
+// API only labels root chats, and the spawn path hardcodes empty labels).
+// Every workflow_report touchpoint (server tool injection, turn stop,
+// dynamic tool parsing) gates on this, so caller-supplied dynamic tools
+// named workflow_report keep their upstream client-side behavior on chats
+// the fork did not create.
+func chatIsWorkflowStep(chat database.Chat) bool {
+	return chat.ParentChatID.Valid && chat.Labels[workflowRunLabel] != ""
+}
+
+// workflowStepDef returns the workflow_report definition of a workflow step
+// child, or false when chat is not one.
+func workflowStepDef(chat database.Chat) (codersdk.DynamicTool, bool) {
+	if !chatIsWorkflowStep(chat) || !chat.DynamicTools.Valid {
+		return codersdk.DynamicTool{}, false
 	}
 	var defs []codersdk.DynamicTool
 	if err := json.Unmarshal(chat.DynamicTools.RawMessage, &defs); err != nil {
 		// appendDynamicTools reports a broken column. A broken column is
 		// not a workflow step.
-		return tools, nil //nolint:nilerr // see above
+		return codersdk.DynamicTool{}, false //nolint:nilerr // see above
 	}
 	for _, def := range defs {
-		if def.Name != workflowReportToolName {
-			continue
+		if def.Name == workflowReportToolName {
+			return def, true
 		}
-		tool, err := newWorkflowReportTool(def.InputSchema)
-		if err != nil {
-			// startStep checked the schema before it created the chat.
-			return nil, xerrors.Errorf("build workflow_report for chat %s: %w", chat.ID, err)
-		}
-		return append(tools, tool), nil
 	}
-	return tools, nil
+	return codersdk.DynamicTool{}, false
+}
+
+// appendWorkflowReportTool adds workflow_report to the tools of a workflow
+// step child. Other chats keep their tools.
+func appendWorkflowReportTool(tools []fantasy.AgentTool, chat database.Chat) ([]fantasy.AgentTool, error) {
+	def, ok := workflowStepDef(chat)
+	if !ok {
+		return tools, nil
+	}
+	tool, err := newWorkflowReportTool(def.InputSchema)
+	if err != nil {
+		// startStep checked the schema before it created the chat.
+		return nil, xerrors.Errorf("build workflow_report for chat %s: %w", chat.ID, err)
+	}
+	return append(tools, tool), nil
 }
 
 // forkStopAfterWorkflowReport adds workflow_report to stop when chat is a
-// workflow step child, so a valid report call ends the child's turn. It reads
-// the chat's dynamic tools column, the same place appendWorkflowReportTool
+// workflow step child, so a valid report call ends the child's turn. It
+// reads the chat's dynamic tools column, the same place appendWorkflowReportTool
 // builds the tool from, so the two agree on which chats are step children.
 func forkStopAfterWorkflowReport(stop map[string]struct{}, chat database.Chat) map[string]struct{} {
-	if !chat.ParentChatID.Valid || !chat.DynamicTools.Valid {
+	if _, ok := workflowStepDef(chat); !ok {
 		return stop
 	}
-	var defs []codersdk.DynamicTool
-	if err := json.Unmarshal(chat.DynamicTools.RawMessage, &defs); err != nil {
-		// appendWorkflowReportTool treats a broken column the same way.
-		return stop
+	out := make(map[string]struct{}, len(stop)+1)
+	for name := range stop {
+		out[name] = struct{}{}
 	}
-	for _, def := range defs {
-		if def.Name != workflowReportToolName {
-			continue
-		}
-		out := make(map[string]struct{}, len(stop)+1)
-		for name := range stop {
-			out[name] = struct{}{}
-		}
-		out[workflowReportToolName] = struct{}{}
-		return out
-	}
-	return stop
+	out[workflowReportToolName] = struct{}{}
+	return out
 }
 
 // workflowStepReport reads a step child's history. value is the input of

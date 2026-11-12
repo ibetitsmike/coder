@@ -61,17 +61,32 @@ func (s stepSpec) key() (string, error) {
 }
 
 // forkChildChatOverrides carries the fork fields that a workflow step needs
-// on a child chat: its deterministic ID, the run label, and the dynamic tools
-// column with the workflow_report definition. A nil override keeps the
-// upstream behavior exactly, so the hook is a no-op for every other spawn.
+// on a child chat: its deterministic ID (applied by forkChildChatID before
+// the prompt hooks dispatch), the run label, and the dynamic tools column
+// with the workflow_report definition. A nil override keeps the upstream
+// behavior exactly, so the hook is a no-op for every other spawn.
 type forkChildChatOverrides struct {
 	chatID       uuid.UUID
 	labels       database.StringMap
 	dynamicTools pqtype.NullRawMessage
 }
 
+// forkChildChatID returns the deterministic step chat ID for a workflow step
+// spawn, or a fresh random ID for every other child. The ID is selected
+// before the user prompt hooks dispatch: hook events carry the chat ID, and
+// consumers correlate a chat's events by it, so the admission hook must see
+// the ID the step chat is persisted with.
+func (o childSubagentChatOptions) forkChildChatID() uuid.UUID {
+	if o.fork != nil && o.fork.chatID != uuid.Nil {
+		return o.fork.chatID
+	}
+	return uuid.New()
+}
+
 // forkCreate is the one fork hook in createChildSubagentChatWithOptions.
 // Without an override it calls createSubagentChatWithID as upstream does.
+// The child's chat ID is already selected by forkChildChatID, so this hook
+// applies only the label and dynamic tools overrides.
 func (o childSubagentChatOptions) forkCreate(
 	ctx context.Context,
 	p *Server,
@@ -82,9 +97,6 @@ func (o childSubagentChatOptions) forkCreate(
 ) (chatstate.CreateChatResult, error) {
 	if o.fork == nil {
 		return p.createSubagentChatWithID(ctx, publisher, chatID, parent, o.customAgent, input)
-	}
-	if o.fork.chatID != uuid.Nil {
-		chatID = o.fork.chatID
 	}
 	if o.fork.labels != nil {
 		raw, err := json.Marshal(o.fork.labels)

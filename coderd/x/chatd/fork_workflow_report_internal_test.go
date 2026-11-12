@@ -54,6 +54,57 @@ func TestForkWorkflowReport(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("InlinesLocalRefs", func(t *testing.T) {
+		t.Parallel()
+		// Fantasy rebuilds the provider schema from the properties alone, so
+		// a $defs-based shape must be inlined or the provider sees a dangling
+		// reference.
+		withDefs := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"result":{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}},` +
+			`"required":["result"],` +
+			`"properties":{"result":{"$ref":"#/$defs/result"}}}`)
+		tool, err := newWorkflowReportTool(withDefs)
+		require.NoError(t, err)
+
+		raw, err := json.Marshal(tool.Info().Parameters)
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), "$ref", "the parameter shape must not carry references")
+		assert.NotContains(t, string(raw), "$defs")
+		assert.JSONEq(t, `{"result":{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}}`, string(raw))
+		assert.Equal(t, []string{"result"}, tool.Info().Required)
+
+		resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"result":{"score":3}}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: `{"result":{"score":"high"}}`})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+	})
+
+	t.Run("RejectsUninlinableRefs", func(t *testing.T) {
+		t.Parallel()
+		recursive := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"node":{"type":"object","properties":{"child":{"$ref":"#/$defs/node"}}}},` +
+			`"properties":{"node":{"$ref":"#/$defs/node"}}}`)
+		_, err := newWorkflowReportTool(recursive)
+		require.ErrorContains(t, err, "recursive")
+
+		siblings := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"$defs":{"tags":{"type":"array","items":{"type":"string"}}},` +
+			`"properties":{"tags":{"$ref":"#/$defs/tags","description":"duplicate"}}}`)
+		_, err = newWorkflowReportTool(siblings)
+		require.ErrorContains(t, err, "sibling")
+
+		remote := json.RawMessage(`{` +
+			`"type":"object",` +
+			`"properties":{"tags":{"$ref":"https://example.com/tags.json"}}}`)
+		_, err = newWorkflowReportTool(remote)
+		require.ErrorContains(t, err, "not a local reference")
+	})
+
 	t.Run("OnlyStepChildrenGetTool", func(t *testing.T) {
 		t.Parallel()
 		raw, err := workflowStepTools(schema)
@@ -68,6 +119,7 @@ func TestForkWorkflowReport(t *testing.T) {
 
 		child := root
 		child.ParentChatID = uuid.NullUUID{UUID: uuid.New(), Valid: true}
+		child.Labels = database.StringMap{workflowRunLabel: uuid.NewString()}
 		got, err = appendWorkflowReportTool(nil, child)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
@@ -77,11 +129,26 @@ func TestForkWorkflowReport(t *testing.T) {
 		assert.Contains(t, stop, "other")
 		assert.True(t, exploreToolAllowed(got[0]), "explore steps must keep workflow_report")
 
-		// The client never runs workflow_report.
+		// The parsers treat the step's workflow_report calls as server-side,
+		// so the client never sees them as actions.
+		assert.Empty(t, dynamicToolNamesFromChat(child))
+
+		// A child without the run label is not a step the fork created: a
+		// caller-supplied workflow_report def keeps its upstream client-side
+		// behavior.
+		noLabel := child
+		noLabel.Labels = nil
+		got, err = appendWorkflowReportTool(nil, noLabel)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+		assert.Empty(t, forkStopAfterWorkflowReport(nil, noLabel))
+		assert.Contains(t, dynamicToolNamesFromChat(noLabel), workflowReportToolName)
+
+		// The shared parser stays upstream: it has no chat, so callers with
+		// the chat apply the step filter themselves.
 		names, err := parseDynamicToolNames(tools)
 		require.NoError(t, err)
-		assert.Empty(t, names)
-		assert.Empty(t, dynamicToolNamesFromChat(child))
+		assert.Contains(t, names, workflowReportToolName)
 	})
 
 	t.Run("BrokenDynamicToolsColumnIsIgnored", func(t *testing.T) {
@@ -105,6 +172,18 @@ func TestForkWorkflowReport(t *testing.T) {
 		assert.NotEqual(t, workflowStepID(runID, "k", 0), workflowStepID(uuid.New(), "k", 0))
 		callID := uuid.New()
 		assert.Equal(t, workflowRunID(callID), workflowRunID(callID))
+	})
+
+	t.Run("ForkChildChatID", func(t *testing.T) {
+		t.Parallel()
+		opts := childSubagentChatOptions{}
+		first := opts.forkChildChatID()
+		assert.NotEqual(t, uuid.Nil, first)
+		assert.NotEqual(t, first, opts.forkChildChatID(), "each non-step spawn gets a fresh ID")
+
+		opts.fork = &forkChildChatOverrides{chatID: workflowStepID(uuid.New(), "k", 0)}
+		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID())
+		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID(), "the step ID is stable")
 	})
 }
 
