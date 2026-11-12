@@ -50,9 +50,7 @@ export const ForkPluginPacksPill: React.FC<ForkPluginPacksPillProps> = ({
 				target={target}
 				organizationId={chatQuery.data.organization_id}
 				canEdit={chatQuery.data.owner_id === user.id}
-				projectId={
-					chatQuery.data.project_id ?? rootChatQuery.data?.project_id
-				}
+				projectId={chatQuery.data.project_id ?? rootChatQuery.data?.project_id}
 			/>
 		</ForkPluginPacksPillView>
 	);
