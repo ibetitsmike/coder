@@ -26,7 +26,10 @@ func TestDefaultBuiltinRootsIncludePackRoot(t *testing.T) {
 
 func TestWatcherEventRelevant(t *testing.T) {
 	t.Parallel()
-	w := &Watcher{agentDirs: map[string]struct{}{"/p/pstack/definitions": {}}}
+	w := &Watcher{pack: packWatchPaths{
+		agentDirs:     map[string]struct{}{"/p/pstack/definitions": {}},
+		settingsFiles: map[string]struct{}{"/h/.claude/settings.json": {}},
+	}}
 	cases := []struct {
 		name  string
 		event fsnotify.Event
@@ -42,6 +45,9 @@ func TestWatcherEventRelevant(t *testing.T) {
 		{"ordinary write ignored", fsnotify.Event{Name: "/p/pstack/README.md", Op: fsnotify.Write}, false},
 		{"declared agent container write re-resolves", fsnotify.Event{Name: "/p/pstack/definitions/reviewer.md", Op: fsnotify.Write}, true},
 		{"non-markdown write in agent container ignored", fsnotify.Event{Name: "/p/pstack/definitions/notes.txt", Op: fsnotify.Write}, false},
+		{"user settings write re-resolves", fsnotify.Event{Name: "/h/.claude/settings.json", Op: fsnotify.Write}, true},
+		{"other write next to user settings ignored", fsnotify.Event{Name: "/h/.claude/history.jsonl", Op: fsnotify.Write}, false},
+		{"settings write elsewhere ignored", fsnotify.Event{Name: "/p/.claude/settings.json", Op: fsnotify.Write}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,17 +102,39 @@ func TestCollectDirsWatchesNestedClaudeAgentDirs(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(pack, "agents", "team", "deep"), 0o755))
 	}
 
-	dirs, agentDirs := (&Watcher{}).collectDirs([]ScanRoot{{Path: root}})
+	dirs, pack := (&Watcher{}).collectDirs([]ScanRoot{{Path: root}})
 	// A definition created in a nested folder of a Claude pack's default
 	// agents directory re-resolves; Cursor packs keep a flat directory.
 	claudeAgents := filepath.Join(root, "claude-plugin", "agents")
 	for _, dir := range []string{claudeAgents, filepath.Join(claudeAgents, "team"), filepath.Join(claudeAgents, "team", "deep")} {
 		require.Contains(t, dirs, dir)
-		require.Contains(t, agentDirs, dir)
+		require.Contains(t, pack.agentDirs, dir)
 	}
 	cursorAgents := filepath.Join(root, "cursor-plugin", "agents")
-	require.Contains(t, agentDirs, cursorAgents)
-	require.NotContains(t, agentDirs, filepath.Join(cursorAgents, "team"))
+	require.Contains(t, pack.agentDirs, cursorAgents)
+	require.NotContains(t, pack.agentDirs, filepath.Join(cursorAgents, "team"))
+}
+
+func TestCollectDirsWatchesClaudeUserSettings(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cache := filepath.Join(home, ".claude", "plugins", "cache")
+	require.NoError(t, os.MkdirAll(filepath.Join(cache, "market", "pstack", "1.0.0"), 0o755))
+	settings := filepath.Join(home, ".claude", "settings.json")
+
+	w := &Watcher{}
+	dirs, pack := w.collectDirs([]ScanRoot{{Path: cache}})
+	// Toggling a plugin in enabledPlugins changes which cached plugins
+	// load, so the settings directory is watched and a write to the
+	// settings file, and only that file, re-resolves.
+	require.Contains(t, dirs, filepath.Dir(settings))
+	w.pack = pack
+	require.True(t, w.eventRelevant(fsnotify.Event{Name: settings, Op: fsnotify.Write}))
+	require.False(t, w.eventRelevant(fsnotify.Event{Name: filepath.Join(home, ".claude", "history.jsonl"), Op: fsnotify.Write}))
+
+	// A scan root that is not a Claude plugin cache watches no settings.
+	_, other := w.collectDirs([]ScanRoot{{Path: t.TempDir()}})
+	require.Empty(t, other.settingsFiles)
 }
 
 func TestNestedAgentDirsBounds(t *testing.T) {

@@ -648,12 +648,11 @@ func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
 		wantAgents []string
 	}{
 		{
-			name:       "string declarations",
+			name:       "string declarations; a declared agents directory loads nothing",
 			manifest:   `{"name": "pstack", "skills": "./extra-skills", "agents": "./extra-agents"}`,
 			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
 			agentFiles: []string{"agents/default-agent.md", "extra-agents/extra-agent.md"},
 			wantSkills: []string{"default-skill", "extra-skill"},
-			wantAgents: []string{"extra-agent"},
 		},
 		{
 			name:       "declared skill folder holding SKILL.md is one skill",
@@ -674,12 +673,11 @@ func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
 			wantSkills: []string{"default-skill", "other-skill"},
 		},
 		{
-			name:       "array declarations",
+			name:       "array declarations; declared agents directories load nothing",
 			manifest:   `{"name": "pstack", "skills": ["./skills/", "./extra-skills"], "agents": ["./agents/", "./extra-agents"]}`,
 			skillDirs:  []string{"skills/default-skill", "extra-skills/extra-skill"},
 			agentFiles: []string{"agents/default-agent.md", "extra-agents/extra-agent.md"},
 			wantSkills: []string{"default-skill", "extra-skill"},
-			wantAgents: []string{"default-agent", "extra-agent"},
 		},
 		{
 			name:       "agent file entries serve only the named files",
@@ -694,10 +692,10 @@ func TestResolver_PluginPacksManifestPathShapes(t *testing.T) {
 			wantAgents: []string{"one"},
 		},
 		{
-			name:       "agent file entry mixed with a directory",
+			name:       "agent file entry mixed with a directory loads only the file",
 			manifest:   `{"name": "pstack", "agents": ["./agents/", "./single/solo.md"]}`,
 			agentFiles: []string{"agents/one.md", "single/solo.md", "single/other.md"},
-			wantAgents: []string{"one", "solo"},
+			wantAgents: []string{"solo"},
 		},
 		{
 			name:       "agent file entry escaping the pack is ignored",
@@ -1281,6 +1279,74 @@ func TestResolver_PluginPacksMistypedManifestPaths(t *testing.T) {
 	}
 }
 
+func TestResolver_PluginPacksClaudeComponentPaths(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code drops a component path that escapes the plugin, does not
+	// exist, or (for agents) is not a .md file, and loads the rest of the
+	// plugin. A Cursor manifest may still declare an agents directory.
+	cases := []struct {
+		name        string
+		manifestRel string
+		manifest    string
+		wantSkills  []string
+		wantAgents  []string
+	}{
+		{
+			name:        "escaping skills path is dropped",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "skills": ["../shared"]}`,
+			wantSkills:  []string{"review-pr"},
+			wantAgents:  []string{"comment-sicko"},
+		},
+		{
+			name:        "missing skills path is dropped",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "skills": "./missing"}`,
+			wantSkills:  []string{"review-pr"},
+			wantAgents:  []string{"comment-sicko"},
+		},
+		{
+			name:        "agents directory loads no agents",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "agents": "./agents"}`,
+			wantSkills:  []string{"review-pr"},
+		},
+		{
+			name:        "missing agent file loads no agents",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "agents": "./agents/missing.md"}`,
+			wantSkills:  []string{"review-pr"},
+		},
+		{
+			name:        "agent file next to an agents directory loads",
+			manifestRel: ".claude-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "agents": ["./agents", "./agents/comment-sicko.md"]}`,
+			wantSkills:  []string{"review-pr"},
+			wantAgents:  []string{"comment-sicko"},
+		},
+		{
+			name:        "Cursor agents directory loads",
+			manifestRel: ".cursor-plugin/plugin.json",
+			manifest:    `{"name": "pstack", "agents": "./agents"}`,
+			wantSkills:  []string{"review-pr"},
+			wantAgents:  []string{"comment-sicko"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writePack(t, root, tc.manifestRel, tc.manifest, "skills", "agents")
+			mustWriteFile(t, filepath.Join(root, "shared", "escaped", "SKILL.md"), skillName("escaped"))
+			skills, agents := resolvePackNames(root)
+			require.ElementsMatch(t, tc.wantSkills, skills)
+			require.ElementsMatch(t, tc.wantAgents, agents)
+		})
+	}
+}
+
 func TestResolver_PluginPacksClaudeMarketplaceEntry(t *testing.T) {
 	t.Parallel()
 
@@ -1346,6 +1412,12 @@ func TestResolver_PluginPacksClaudeMarketplaceEntry(t *testing.T) {
 			entry:      `{"name": "pstack", "source": "./", "skills": ["./extra-skills"]}`,
 			wantSkills: []string{"extra-skill"},
 			wantAgents: []string{"default-agent"},
+		},
+		{
+			name:       "entry agents directory loads nothing",
+			manifest:   `{"name": "pstack"}`,
+			entry:      `{"name": "pstack", "source": "./plugins/pstack", "agents": "./custom"}`,
+			wantSkills: []string{"default-skill"},
 		},
 		{
 			name:       "escaping entry paths are ignored",

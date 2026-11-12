@@ -940,12 +940,22 @@ func (p packRoot) loadsRootSkill() bool {
 // pack, honoring the manifest's declared agents entries that are directories.
 // Claude Code loads the default agents directory of a Claude pack
 // recursively, so its subfolders are containers too (nestedAgentDirs).
+//
+// A Claude pack's declared agents entries must name .md files: Claude Code
+// accepts no directory there, and a declaration replaces the default
+// directory, so a declared directory loads nothing. Like an escaping or
+// missing path, it costs only that entry, not the plugin
+// (https://code.claude.com/docs/en/errors#path-escapes-plugin-directory).
 func (p packRoot) agentContainers() []string {
+	declared := declaresAny(p.Manifest.Agents)
+	if p.Claude && declared {
+		return nil
+	}
 	var out []string
 	for _, rel := range declaredRels(p.Manifest.Agents, defaultPackAgentsDir) {
 		out = append(out, inPackContainers(p, rel)...)
 	}
-	if !p.Claude || declaresAny(p.Manifest.Agents) {
+	if !p.Claude {
 		return out
 	}
 	var nested []string
@@ -992,8 +1002,8 @@ func nestedAgentDirs(container string) []string {
 }
 
 // agentFiles returns the declared agents entries that are single definition
-// files inside the pack. Claude Code manifests may name .md files instead of
-// directories.
+// files inside the pack. Cursor and root manifests may name .md files next to
+// directories; a Claude manifest names only files.
 func (p packRoot) agentFiles() []string {
 	var out []string
 	for _, rel := range declaredRels(p.Manifest.Agents, defaultPackAgentsDir) {
@@ -1366,13 +1376,44 @@ func (r *Resolver) appendManagedPackDuplicates(resources, duplicates []Resource)
 	return resources
 }
 
+// packWatchPaths is the pack state the watcher keeps between syncs to tell
+// relevant writes from unrelated ones in the directories it watches.
+type packWatchPaths struct {
+	// agentDirs holds the pack agent containers. A manifest may name any
+	// contained directory, so a Markdown write there is relevant even when
+	// the directory is not called "agents".
+	agentDirs map[string]struct{}
+	// settingsFiles holds the Claude Code user settings files whose
+	// enabledPlugins select the cached plugins. Only these files are
+	// relevant: the directory holding one also holds Claude Code's
+	// history and session state, which change constantly.
+	settingsFiles map[string]struct{}
+}
+
+func newPackWatchPaths() packWatchPaths {
+	return packWatchPaths{agentDirs: make(map[string]struct{}), settingsFiles: make(map[string]struct{})}
+}
+
+// relevant reports whether a write to path can change the pack rows.
+func (p packWatchPaths) relevant(path string) bool {
+	if filepath.Ext(path) == agentDefinitionExt {
+		if _, ok := p.agentDirs[filepath.Dir(path)]; ok {
+			return true
+		}
+	}
+	_, ok := p.settingsFiles[path]
+	return ok
+}
+
 // addPackWatchDirs adds every pack root and its declared skill and agent
 // containers under rootPath to out, plus one level inside skill containers,
 // so creating a pack or editing its files re-resolves the snapshot. Agent
 // containers, including the nested folders of a Claude pack's default agents
-// directory, also go to agentDirs, so overwriting a definition in a
-// container with any name re-resolves. The watcher calls this next to
-// addAgentWatchDirs.
+// directory, also go to watch.agentDirs, so overwriting a definition in a
+// container with any name re-resolves. For the Claude Code plugin cache the
+// user settings file goes to watch.settingsFiles and its directory to out,
+// so toggling a plugin in enabledPlugins re-resolves. The watcher calls this
+// next to addAgentWatchDirs.
 //
 // A manifest may declare a container that does not exist yet
 // ("skills": "components/skills" while only components/ is present).
@@ -1381,7 +1422,7 @@ func (r *Resolver) appendManagedPackDuplicates(resources, duplicates []Resource)
 // an unrelated resync. Watching the deepest existing ancestor of each
 // declared path arms that event, and the watcher re-collects after every
 // re-resolve, so the watch walks down as the tree is built out.
-func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
+func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchPaths) {
 	for _, pack := range packRootsFor(rootPath) {
 		out[pack.Dir] = struct{}{}
 		// Nested manifests (.claude-plugin/plugin.json) live in their
@@ -1405,12 +1446,12 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		}
 		for _, container := range pack.agentContainers() {
 			out[container] = struct{}{}
-			agentDirs[container] = struct{}{}
+			watch.agentDirs[container] = struct{}{}
 		}
 		for _, file := range pack.agentFiles() {
 			dir := filepath.Dir(file)
 			out[dir] = struct{}{}
-			agentDirs[dir] = struct{}{}
+			watch.agentDirs[dir] = struct{}{}
 		}
 		for _, rel := range pack.declaredContainerRels() {
 			if ancestor := existingAncestor(filepath.Join(pack.Dir, rel)); ancestor != "" {
@@ -1438,6 +1479,12 @@ func addPackWatchDirs(rootPath string, out, agentDirs map[string]struct{}) {
 		pluginsDir := claudePluginsDirFor(rootPath)
 		if pluginsDir != "" {
 			dirs = append(dirs, pluginsDir)
+		}
+		// enabledPlugins in the user settings disables cached plugins
+		// (claudeDisabledPlugins).
+		if settings, ok := claudeUserSettingsPath(rootPath); ok {
+			dirs = append(dirs, filepath.Dir(settings))
+			watch.settingsFiles[settings] = struct{}{}
 		}
 		// Watching every level down to the version directories
 		// fires the events for a new install, a new version, and
