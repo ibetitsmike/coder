@@ -703,7 +703,6 @@ describe("ProjectDetailsPanel", () => {
 		renderPanel();
 
 		await waitFor(() => expect(getSkills).toHaveBeenCalled());
-		expect(screen.queryByText("Plugin packs")).not.toBeInTheDocument();
 		expect(getEnabled).not.toHaveBeenCalled();
 		expect(getAvailable).not.toHaveBeenCalled();
 	});

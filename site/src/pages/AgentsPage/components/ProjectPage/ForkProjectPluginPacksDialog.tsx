@@ -28,8 +28,7 @@ export const ForkProjectPluginPacksDialog: React.FC<
 			<DialogHeader>
 				<DialogTitle>Project plugin packs</DialogTitle>
 				<DialogDescription>
-					Every chat in this project gets the skills and agents of the packs
-					enabled here.
+					Every chat in this project uses the packs enabled here.
 				</DialogDescription>
 			</DialogHeader>
 			<ForkPluginPackToggles
