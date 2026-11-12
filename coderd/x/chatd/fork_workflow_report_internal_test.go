@@ -16,14 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
-	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/coder/coder/v2/testutil"
 )
 
 // warningSink records the messages of warn-and-worse entries.
@@ -762,11 +759,6 @@ func newForkWorkflowFixture(t *testing.T) *forkWorkflowFixture {
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
 	user, org, model := seedInternalChatDeps(t, db)
-	// The workflow tools are gated to chats owned by a deployment owner
-	// while the engine is experimental, so the fixture's chat owner is one.
-	user, err := db.UpdateUserRoles(dbauthz.AsSystemRestricted(testutil.Context(t, testutil.WaitLong)),
-		database.UpdateUserRolesParams{ID: user.ID, GrantedRoles: []string{rbac.RoleOwner().String()}})
-	require.NoError(t, err)
 	return &forkWorkflowFixture{db: db, ps: ps, server: server, user: user, org: org, model: model}
 }
 

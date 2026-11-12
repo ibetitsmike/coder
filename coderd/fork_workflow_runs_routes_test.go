@@ -19,6 +19,7 @@ import (
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
@@ -153,4 +154,65 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		err = client.StopChatWorkflowRun(ctx, chat.ID, uuid.New())
 		requireForkStatus(t, err, http.StatusNotFound)
 	})
+
+	t.Run("MemberOwnChatOnly", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, owner := newForkWorkflowRunsAPI(t, true)
+		memberClient, member := coderdtest.CreateAnotherUser(t, client, owner.OrganizationID)
+		otherClient, _ := coderdtest.CreateAnotherUser(t, client, owner.OrganizationID)
+		memberChat := dbgen.Chat(t, db, database.Chat{
+			OrganizationID: owner.OrganizationID,
+			OwnerID:        member.ID,
+			LastModelConfigID: dbgen.ChatModelConfig(t, db, database.ChatModelConfig{
+				OrganizationID: owner.OrganizationID,
+			}).ID,
+		})
+		completed := insertForkWorkflowRun(t, db, memberChat)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		liveID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            liveID,
+			ChatID:        memberChat.ID,
+			ModelConfigID: memberChat.LastModelConfigID,
+			Script:        "def main(args):\n    pass\n",
+			Args:          []byte(`{}`),
+			Status:        "running",
+		}))
+
+		// The member reads and stops the runs of their own chat.
+		items, err := memberClient.GetChatWorkflowRuns(ctx, memberChat.ID, codersdk.WorkflowRunListOptions{})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		_, err = memberClient.GetChatWorkflowRun(ctx, memberChat.ID, completed.ID)
+		require.NoError(t, err)
+
+		// Another member sees neither the chat nor its runs, and cannot stop
+		// them.
+		_, err = otherClient.GetChatWorkflowRuns(ctx, memberChat.ID, codersdk.WorkflowRunListOptions{})
+		requireForkStatus(t, err, http.StatusNotFound)
+		_, err = otherClient.GetChatWorkflowRun(ctx, memberChat.ID, completed.ID)
+		requireForkStatus(t, err, http.StatusNotFound)
+		err = otherClient.StopChatWorkflowRun(ctx, memberChat.ID, liveID)
+		requireForkStatus(t, err, http.StatusNotFound)
+		assert.Equal(t, "running", forkWorkflowRunStatus(t, fdb, liveID), "a refused stop leaves the run running")
+
+		err = memberClient.StopChatWorkflowRun(ctx, memberChat.ID, liveID)
+		require.NoError(t, err)
+		assert.Equal(t, "stopped", forkWorkflowRunStatus(t, fdb, liveID))
+
+		// The member cannot reach the runs of the owner's chat either.
+		ownerChat := newForkChatTodosChat(t, db, owner)
+		_, err = memberClient.GetChatWorkflowRuns(ctx, ownerChat.ID, codersdk.WorkflowRunListOptions{})
+		requireForkStatus(t, err, http.StatusNotFound)
+	})
+}
+
+// forkWorkflowRunStatus reads the journaled status of a run.
+func forkWorkflowRunStatus(t *testing.T, fdb forkdb.Store, runID uuid.UUID) string {
+	t.Helper()
+	row, err := fdb.GetWorkflowRun(forkWorkflowSystemContext(t), runID)
+	require.NoError(t, err)
+	return row.Status
 }

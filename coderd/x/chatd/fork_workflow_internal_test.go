@@ -543,8 +543,7 @@ def main(args):
 
 // TestForkWorkflowToolsGate pins the turn gate of run_workflow and
 // await_workflow: only an enabled experiment on a root chat outside plan
-// mode and explore mode whose owner holds the deployment owner role gets
-// the tools.
+// mode and explore mode gets the tools, whatever role the chat owner holds.
 func TestForkWorkflowToolsGate(t *testing.T) {
 	t.Parallel()
 
@@ -576,30 +575,58 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		assert.Empty(t, f.server.forkWorkflowTools(ctx, plan, uuid.Nil, getConn), "a plan-mode turn never runs workflows")
 	})
 
-	t.Run("MemberOwnerGetsNothing", func(t *testing.T) {
+	t.Run("MemberRunsAndStopsOnlyInOwnChat", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
 		ctx := chatdTestContext(t)
-		// A member without the owner role never gets the tools, and the
-		// gate fails closed for a chat whose owner row is missing.
-		member := dbgen.User(t, f.db, database.User{})
-		memberChat := dbgen.Chat(t, f.db, database.Chat{
-			OrganizationID:    f.org.ID,
-			OwnerID:           member.ID,
-			LastModelConfigID: f.model.ID,
-		})
-		assert.Empty(t, f.server.forkWorkflowTools(ctx, memberChat, uuid.Nil, nil), "a member-owned chat never runs workflows")
+		// The fixture's chat owner is a plain member: no deployment role.
+		require.Empty(t, f.user.RBACRoles)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		require.Len(t, tools, 2, "a member's own chat runs workflows")
 
-		// A chat row cannot carry a missing owner (foreign key), so the
-		// stale-owner case is an in-memory value; the gate only reads the
-		// value and looks the owner up.
-		unknown := database.Chat{
-			ID:                uuid.New(),
-			OrganizationID:    f.org.ID,
-			OwnerID:           uuid.New(),
-			LastModelConfigID: f.model.ID,
-		}
-		assert.Empty(t, f.server.forkWorkflowTools(ctx, unknown, uuid.Nil, nil), "a missing owner row fails closed")
+		input, err := json.Marshal(runWorkflowArgs{
+			Script: journalReviewScript,
+			Args:   map[string]any{"files": []string{"a.go"}},
+		})
+		require.NoError(t, err)
+		resp, err := tools[0].Run(workspacesdk.WithToolCallID(ctx, uuid.New()), fantasy.ToolCall{Input: string(input)})
+		require.NoError(t, err)
+		require.False(t, resp.IsError, resp.Content)
+		var started runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+		runID, err := uuid.Parse(started.RunID)
+		require.NoError(t, err)
+		run := f.server.workflows.get(runID)
+		require.NotNil(t, run)
+		f.steps(ctx, t, run, 1)
+
+		// Another member's chat neither sees nor stops the run.
+		other := dbgen.User(t, f.db, database.User{})
+		dbgen.OrganizationMember(t, f.db, database.OrganizationMember{UserID: other.ID, OrganizationID: f.org.ID})
+		otherChat, err := f.server.CreateChat(ctx, CreateOptions{
+			OrganizationID:     f.org.ID,
+			OwnerID:            other.ID,
+			Title:              "workflow-other-" + t.Name(),
+			ModelConfigID:      f.model.ID,
+			InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("hello")},
+		})
+		require.NoError(t, err)
+		otherTools := f.server.forkWorkflowTools(ctx, otherChat, f.model.ID, nil)
+		require.Len(t, otherTools, 2)
+		awaitInput := `{"run_id":"` + runID.String() + `","wait_seconds":0}`
+		resp, err = otherTools[1].Run(ctx, fantasy.ToolCall{Input: awaitInput})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, "another chat's await must not read the run: %s", resp.Content)
+		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, otherChat.ID, runID), ErrForkWorkflowRunNotFound)
+
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, runID))
+		resp, err = tools[1].Run(ctx, fantasy.ToolCall{Input: awaitInput})
+		require.NoError(t, err)
+		require.False(t, resp.IsError, resp.Content)
+		var stopped runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &stopped))
+		assert.Equal(t, workflowStatusStopped, stopped.Status, stopped.Error)
 	})
 
 	t.Run("RootTurnGetsBothTools", func(t *testing.T) {
