@@ -134,6 +134,29 @@ it("saves the source hosts an administrator edits", async () => {
 	);
 });
 
+it("reads the source hosts again each time the dialog opens", async () => {
+	const user = userEvent.setup();
+	const load = vi
+		.spyOn(forkPluginPacksApi, "getPluginPackSources")
+		.mockResolvedValue({ hosts: ["github.com"] });
+	renderPage();
+
+	await user.click(await screen.findByRole("button", { name: "Sources" }));
+	const first = await screen.findByRole("dialog");
+	await within(first).findByLabelText(/^Source hosts/);
+	await user.click(within(first).getByRole("button", { name: "Cancel" }));
+	await waitFor(() =>
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+	);
+
+	load.mockResolvedValue({ hosts: ["gitlab.example.com"] });
+	await user.click(screen.getByRole("button", { name: "Sources" }));
+	const second = await screen.findByRole("dialog");
+	expect(await within(second).findByLabelText(/^Source hosts/)).toHaveValue(
+		"gitlab.example.com",
+	);
+});
+
 it("does not save a source host with a scheme", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkPluginPacksApi, "getPluginPackSources").mockResolvedValue({

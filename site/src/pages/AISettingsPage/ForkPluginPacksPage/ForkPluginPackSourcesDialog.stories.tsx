@@ -45,6 +45,16 @@ export const InvalidHost: Story = {
 	},
 };
 
+export const SaveError: Story = {
+	args: {
+		saveError: mockApiError({
+			message: "Invalid plugin pack source host.",
+			detail:
+				'"git.example.com:22" must be a host name without a scheme, port or path.',
+		}),
+	},
+};
+
 export const Saving: Story = {
 	args: { isSaving: true },
 };

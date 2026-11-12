@@ -191,6 +191,12 @@ const OrganizationPluginPacks: React.FC<OrganizationPluginPacksProps> = ({
 				}}
 				onEditSources={() => {
 					sourcesMutation.reset();
+					// The form saves a full replacement list, so it starts from a
+					// fresh read rather than a cached list another admin may have
+					// changed since.
+					queryClient.removeQueries({
+						queryKey: pluginPackSources(organization.id).queryKey,
+					});
 					setIsSourcesOpen(true);
 				}}
 				onUpdate={(pack) => updateMutation.mutate(pack)}

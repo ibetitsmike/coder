@@ -25,7 +25,6 @@ const maxHosts = 50;
 const maxHostLength = 253;
 const invalidHostCharacters = /[/:@?# ]/;
 
-/** Splits the textarea into normalized, de-duplicated host names. */
 const parseHosts = (text: string) => [
 	...new Set(
 		text
