@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
-import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import { chatProjectInstructionsKey } from "#/api/queries/chatProjects";
 import type {
 	ChatProject,
@@ -656,10 +655,10 @@ describe("ProjectDetailsPanel", () => {
 		const getEnabled = vi
 			.spyOn(forkPluginPackEnablementApi, "getEnabledPluginPacks")
 			.mockResolvedValue([MockForkPluginPackWithoutPath]);
-		vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
-			MockForkPluginPack,
-			MockForkPluginPackWithoutPath,
-		]);
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		).mockResolvedValue([MockForkPluginPack, MockForkPluginPackWithoutPath]);
 		const setEnabled = vi
 			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
 			.mockResolvedValue();
@@ -697,13 +696,16 @@ describe("ProjectDetailsPanel", () => {
 			forkPluginPackEnablementApi,
 			"getEnabledPluginPacks",
 		);
-		const getInstalled = vi.spyOn(forkPluginPacksApi, "getPluginPacks");
+		const getAvailable = vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getAvailablePluginPacks",
+		);
 		renderPanel();
 
 		await waitFor(() => expect(getSkills).toHaveBeenCalled());
 		expect(screen.queryByText("Plugin packs")).not.toBeInTheDocument();
 		expect(getEnabled).not.toHaveBeenCalled();
-		expect(getInstalled).not.toHaveBeenCalled();
+		expect(getAvailable).not.toHaveBeenCalled();
 	});
 
 	it("opens the project access dialog from Manage access, refetches access, and returns focus when it closes", async () => {
