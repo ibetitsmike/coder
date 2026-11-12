@@ -83,11 +83,12 @@ const ContextResourceRow: React.FC<ContextResourceRowProps> = ({
 };
 
 /** Renders a resource row with optional description and shared typography. */
-export const ContextResourceTreeItem: React.FC<ContextResourceRowProps> = (
-	props,
-) => (
+export const ContextResourceTreeItem: React.FC<
+	ContextResourceRowProps & { children?: React.ReactNode }
+> = ({ children, ...props }) => (
 	<div className="flex min-w-0 flex-col gap-1">
 		<ContextResourceRow {...props} />
+		{children}
 	</div>
 );
 

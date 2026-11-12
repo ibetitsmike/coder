@@ -268,6 +268,17 @@ const ContextHarnessSection: React.FC<{
 	</ContextResourceAccordion>
 );
 
+// Fork hook: warning/issue count badge on an accordion trigger.
+const ContextIssueIndicator: React.FC<{ count: number }> = ({ count }) =>
+	count > 0 ? (
+		<span className="ml-1 inline-flex align-middle text-content-warning">
+			<TriangleAlertIcon aria-hidden="true" className="size-3" />
+			<span className="sr-only">
+				{count} {count === 1 ? "issue" : "issues"}
+			</span>
+		</span>
+	) : null;
+
 const ContextAgentDefinitionSection: React.FC<{
 	items: readonly ContextAgentDefinitionItem[];
 	issues: readonly ContextIssueItem[];

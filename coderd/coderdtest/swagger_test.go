@@ -169,9 +169,12 @@ func TestSwaggerEnumsNotNarrowed(t *testing.T) {
 		"codersdk.OrganizationSkillUser.role":                      true,
 		"codersdk.TemplateGroup.role":                              true,
 		"codersdk.TemplateUser.role":                               true,
-		"codersdk.UpdateUserAppearanceSettingsRequest.theme_mode":  true,
-		"codersdk.WorkspaceGroup.role":                             true,
-		"codersdk.WorkspaceUser.role":                              true,
+		// Fork hook: UpdateChatWakeupRequest.status omits the system-set
+		// "completed" on purpose; the PATCH handler 400s on any other value.
+		"codersdk.UpdateChatWakeupRequest.status":                 true,
+		"codersdk.UpdateUserAppearanceSettingsRequest.theme_mode": true,
+		"codersdk.WorkspaceGroup.role":                            true,
+		"codersdk.WorkspaceUser.role":                             true,
 	}
 
 	type schema struct {

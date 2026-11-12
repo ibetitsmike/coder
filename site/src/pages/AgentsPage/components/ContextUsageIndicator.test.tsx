@@ -7,6 +7,9 @@ import {
 	MockChatContextDirty,
 	MockChatContextResourceFailures,
 } from "#/testHelpers/chatEntities";
+// Described resource rows render tooltips, which need the ancestor
+// TooltipProvider that renderComponent supplies.
+import { renderComponent } from "#/testHelpers/renderHelpers";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 
 describe("ContextUsageIndicator", () => {
@@ -45,7 +48,7 @@ describe("ContextUsageIndicator", () => {
 
 	it("shows agent definition warnings and errors", async () => {
 		const user = userEvent.setup();
-		render(
+		renderComponent(
 			<ContextUsageIndicator
 				usage={{
 					usedTokens: 12_000,
