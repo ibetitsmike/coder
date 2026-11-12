@@ -54,6 +54,17 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 	);
 };
 
+const mockStoppedResult = {
+	...MockForkWorkflowRunningResult,
+	status: "stopped",
+	error: "stopped by user",
+	steps: MockForkWorkflowRunningResult.steps.map((step, index) =>
+		index === 0
+			? step
+			: { ...step, status: "failed", error: "stopped by user" },
+	),
+};
+
 const mockRunWorkflowArgs = {
 	script: MockForkWorkflowScript,
 	args: MockForkWorkflowArgs,
@@ -96,18 +107,7 @@ export const StillRunning: Story = {
 };
 
 export const Stopped: Story = {
-	args: {
-		result: {
-			...MockForkWorkflowRunningResult,
-			status: "stopped",
-			error: "stopped by user",
-			steps: MockForkWorkflowRunningResult.steps.map((step, index) =>
-				index === 0
-					? step
-					: { ...step, status: "failed", error: "stopped by user" },
-			),
-		},
-	},
+	args: { result: mockStoppedResult },
 	play: expand,
 };
 

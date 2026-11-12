@@ -116,7 +116,7 @@ export const forkWorkflowRunDetailSteps = (
 			error: step.error,
 		}));
 
-/** Lets the tool cards render a run detail like a tool result. */
+/** Converts a run detail to the snapshot that a tool result parses to. */
 export const forkWorkflowRunDetailSnapshot = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowRunSnapshot => ({

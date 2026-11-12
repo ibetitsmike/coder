@@ -62,8 +62,6 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	if (!props.isError && !snapshot && props.status !== "running") {
 		return <Fallback {...props} />;
 	}
-	// A run that was still running follows the run API, which shares the
-	// Workflows panel's cache.
 	if (agentId && snapshot?.status === "running") {
 		return (
 			<LiveForkWorkflowTool
@@ -90,6 +88,8 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 	resultSnapshot,
 	...props
 }) => {
+	// Shares the Workflows panel's cache. A failed request (403 or 404 for a
+	// viewer who cannot read runs) keeps the tool result, as while loading.
 	const runQuery = useQuery(chatWorkflowRun(chatId, resultSnapshot.runId));
 	return (
 		<ForkWorkflowTool

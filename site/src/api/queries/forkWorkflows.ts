@@ -31,6 +31,7 @@ export const chatWorkflowRun = (chatId: string, runId: string) =>
 			state.data?.status === "running" ? 3_000 : false,
 	});
 
+/** Stops a run, then refreshes the chat's runs and their details. */
 export const stopWorkflowRun = (
 	queryClient: QueryClient,
 	chatId: string,
