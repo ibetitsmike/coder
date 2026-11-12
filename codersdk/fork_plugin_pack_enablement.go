@@ -11,9 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// ForkEnabledPluginPack is a plugin pack enabled for a chat project or a chat.
-// It leaves out the source and the files, which only organization admins can
-// read.
+// ForkEnabledPluginPack is the member-visible view of a plugin pack. It lists
+// both the packs an organization makes available to enable and the packs
+// enabled for a chat project or a chat. It leaves out the source and the
+// files, which only organization admins can read.
 type ForkEnabledPluginPack struct {
 	ID        uuid.UUID `json:"id" format:"uuid"`
 	Name      string    `json:"name"`
