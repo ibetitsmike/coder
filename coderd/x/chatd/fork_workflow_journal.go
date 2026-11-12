@@ -17,6 +17,8 @@ import (
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
+	"github.com/sqlc-dev/pqtype"
+
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -26,7 +28,15 @@ import (
 // runs of a dead process.
 const workflowInterruptedError = "the coderd process restarted before the run ended"
 
-// workflowJournal writes the run and step state of one replica through to
+// jsonbValue wraps an optional JSON document for a nullable jsonb column.
+// A nil json.RawMessage is not a driver NULL: database/sql converts it to a
+// zero-length []byte, which Postgres rejects as invalid JSON, so it must go
+// through NullRawMessage to reach the column as NULL.
+func jsonbValue(raw json.RawMessage) pqtype.NullRawMessage {
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: len(raw) > 0}
+}
+
+// workflowJournal writes the run and step state of one replica through to// workflowJournal writes the run and step state of one replica through to
 // the journal. Every method runs as the system-restricted actor: the journal
 // is chatd-internal state of chats that chatd manages, and the turn context
 // is the chatd daemon subject, which cannot otherwise update a chat (the way
@@ -105,7 +115,7 @@ func (j workflowJournal) updateRunStatus(ctx context.Context, id uuid.UUID, stat
 		ID:     id,
 		Status: status,
 		Error:  errText,
-		Result: raw,
+		Result: jsonbValue(raw),
 	}); err != nil {
 		j.warn(ctx, "journal workflow run status", id, err)
 	}
@@ -137,7 +147,7 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 		Ordinal:    int32(step.ordinal),
 		Title:      step.title,
 		Status:     step.status,
-		Value:      step.value,
+		Value:      jsonbValue(step.value),
 	})
 }
 
@@ -151,7 +161,7 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 	if err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
 		ID:     step.id,
 		Status: step.status,
-		Value:  step.value,
+		Value:  jsonbValue(step.value),
 		Error:  step.err,
 	}); err != nil {
 		j.warn(ctx, "journal workflow step status", step.id, err)

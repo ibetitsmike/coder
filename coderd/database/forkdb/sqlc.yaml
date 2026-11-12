@@ -63,4 +63,14 @@ sql:
           - column: "agent_definitions.user_acl"
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
-              type: "ChatACL"
+              type: "ChatACL"# jsonb params: a plain json.RawMessage reaches pq as a zero-length
+          # []byte even when nil, which Postgres rejects as invalid JSON on
+          # nullable jsonb columns. NullRawMessage sends a real NULL.
+          - column: "workflow_steps.value"
+            go_type:
+              import: "github.com/sqlc-dev/pqtype"
+              type: "NullRawMessage"
+          - column: "workflow_runs.result"
+            go_type:
+              import: "github.com/sqlc-dev/pqtype"
+              type: "NullRawMessage"
