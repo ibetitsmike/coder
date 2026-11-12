@@ -79,6 +79,8 @@ export const setPluginPackEnabledMutation = (
 					}),
 				// The chat's context lists only resources from enabled packs, and
 				// waiting chats are not polled, so refetch it for the slash menu.
+				// A pack the workspace does not hold yet is written on the chat's
+				// next turn, so its resources appear only after that turn.
 				target.kind === "chat" &&
 					queryClient.invalidateQueries({
 						queryKey: chatEntityKey(target.chatId),

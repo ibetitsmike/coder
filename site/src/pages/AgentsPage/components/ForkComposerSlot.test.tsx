@@ -6,6 +6,7 @@ import { API } from "#/api/api";
 import * as forkChatTodosApi from "#/api/forkChatTodos";
 import * as forkChatWakeupsApi from "#/api/forkChatWakeups";
 import * as forkPluginPackEnablementApi from "#/api/forkPluginPackEnablement";
+import * as forkPluginPacksApi from "#/api/forkPluginPacks";
 import { chatTodosKey } from "#/api/queries/forkChatTodos";
 import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
@@ -27,6 +28,10 @@ import {
 	MockChatWakeupCron,
 	MockChatWakeupInterval,
 } from "#/testHelpers/forkChatWakeups";
+import {
+	MockForkPluginPack,
+	MockForkPluginPackWithoutPath,
+} from "#/testHelpers/forkPluginPacks";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -352,5 +357,58 @@ describe("ForkComposerSlot plugin packs", () => {
 			}),
 		);
 		expect(getChat).toHaveBeenCalledWith(MockChat.id, expect.anything());
+	});
+
+	const mockPluginPacksOfChat = (ownerId: string) => {
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue({
+			...MockChat,
+			owner_id: ownerId,
+		});
+		vi.spyOn(
+			forkPluginPackEnablementApi,
+			"getEnabledPluginPacks",
+		).mockResolvedValue([MockForkPluginPackWithoutPath]);
+		vi.spyOn(forkPluginPacksApi, "getPluginPacks").mockResolvedValue([
+			MockForkPluginPack,
+		]);
+		return vi
+			.spyOn(forkPluginPackEnablementApi, "setPluginPackEnabled")
+			.mockResolvedValue();
+	};
+
+	it("lets the chat owner enable a pack", async () => {
+		const user = userEvent.setup();
+		const setEnabled = mockPluginPacksOfChat(MockUserOwner.id);
+
+		renderSlot(["fork-plugin-packs"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Plugin packs, 1 enabled" }),
+		);
+		await user.click(
+			await screen.findByRole("switch", {
+				name: `Enable ${MockForkPluginPack.name}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(setEnabled).toHaveBeenCalledWith(
+				{ kind: "chat", chatId: MockChat.id },
+				MockForkPluginPack.id,
+				true,
+			),
+		);
+	});
+
+	it("shows another user's chat packs read-only", async () => {
+		const user = userEvent.setup();
+		mockPluginPacksOfChat("another-user");
+
+		renderSlot(["fork-plugin-packs"]);
+		await user.click(
+			await screen.findByRole("button", { name: "Plugin packs, 1 enabled" }),
+		);
+
+		expect(await screen.findByText(MockForkPluginPack.name)).toBeVisible();
+		expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 	});
 });
