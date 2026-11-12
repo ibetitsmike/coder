@@ -389,34 +389,43 @@ func TestForkWorkflowReportScan(t *testing.T) {
 		role  database.ChatMessageRole
 		parts []codersdk.ChatMessagePart
 	}
-	scan := func(t *testing.T, msgs []stepMessage) (value json.RawMessage, reminded bool) {
+	scan := func(t *testing.T, initialPrompt string, msgs []stepMessage) (value json.RawMessage, reminded bool) {
 		t.Helper()
 		f := newForkWorkflowFixture(t)
 		ctx := chatdTestContext(t)
-		parent := f.parent(ctx, t)
-		params := database.InsertChatMessagesParams{ChatID: parent.ID}
-		for _, msg := range msgs {
-			content, err := chatprompt.MarshalParts(msg.parts)
-			require.NoError(t, err)
-			params.CreatedBy = append(params.CreatedBy, uuid.Nil)
-			params.ModelConfigID = append(params.ModelConfigID, f.model.ID)
-			params.ReasoningEffort = append(params.ReasoningEffort, "")
-			params.Role = append(params.Role, msg.role)
-			params.Content = append(params.Content, string(content.RawMessage))
-			params.ContentVersion = append(params.ContentVersion, chatprompt.CurrentContentVersion)
-			params.Visibility = append(params.Visibility, database.ChatMessageVisibilityBoth)
-			params.InputTokens = append(params.InputTokens, 0)
-			params.OutputTokens = append(params.OutputTokens, 0)
-			params.TotalTokens = append(params.TotalTokens, 0)
-			params.ReasoningTokens = append(params.ReasoningTokens, 0)
-			params.CacheCreationTokens = append(params.CacheCreationTokens, 0)
-			params.CacheReadTokens = append(params.CacheReadTokens, 0)
-			params.ContextLimit = append(params.ContextLimit, 0)
-			params.Compressed = append(params.Compressed, false)
-			params.RuntimeMs = append(params.RuntimeMs, 0)
-		}
-		_, err := f.db.InsertChatMessages(ctx, params)
+		parent, err := f.server.CreateChat(ctx, CreateOptions{
+			OrganizationID:     f.org.ID,
+			OwnerID:            f.user.ID,
+			Title:              "workflow-scan-" + t.Name(),
+			ModelConfigID:      f.model.ID,
+			InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText(initialPrompt)},
+		})
 		require.NoError(t, err)
+		if len(msgs) > 0 {
+			params := database.InsertChatMessagesParams{ChatID: parent.ID}
+			for _, msg := range msgs {
+				content, err := chatprompt.MarshalParts(msg.parts)
+				require.NoError(t, err)
+				params.CreatedBy = append(params.CreatedBy, f.user.ID)
+				params.ModelConfigID = append(params.ModelConfigID, f.model.ID)
+				params.ReasoningEffort = append(params.ReasoningEffort, "")
+				params.Role = append(params.Role, msg.role)
+				params.Content = append(params.Content, string(content.RawMessage))
+				params.ContentVersion = append(params.ContentVersion, chatprompt.CurrentContentVersion)
+				params.Visibility = append(params.Visibility, database.ChatMessageVisibilityBoth)
+				params.InputTokens = append(params.InputTokens, 0)
+				params.OutputTokens = append(params.OutputTokens, 0)
+				params.TotalTokens = append(params.TotalTokens, 0)
+				params.ReasoningTokens = append(params.ReasoningTokens, 0)
+				params.CacheCreationTokens = append(params.CacheCreationTokens, 0)
+				params.CacheReadTokens = append(params.CacheReadTokens, 0)
+				params.ContextLimit = append(params.ContextLimit, 0)
+				params.Compressed = append(params.Compressed, false)
+				params.RuntimeMs = append(params.RuntimeMs, 0)
+			}
+			_, err = f.db.InsertChatMessages(ctx, params)
+			require.NoError(t, err)
+		}
 		value, reminded, err = workflowStepReport(ctx, f.db, parent.ID)
 		require.NoError(t, err)
 		return value, reminded
@@ -430,8 +439,7 @@ func TestForkWorkflowReportScan(t *testing.T) {
 
 	t.Run("AcceptedValueWins", func(t *testing.T) {
 		t.Parallel()
-		value, _ := scan(t, []stepMessage{
-			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do the thing")}},
+		value, _ := scan(t, "do the thing", []stepMessage{
 			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
 				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
 			}},
@@ -446,8 +454,7 @@ func TestForkWorkflowReportScan(t *testing.T) {
 		t.Parallel()
 		// A rejected report's arguments must not surface as the accepted
 		// value when a later, different tool call reuses the call ID.
-		value, _ := scan(t, []stepMessage{
-			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText("do the thing")}},
+		value, _ := scan(t, "do the thing", []stepMessage{
 			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
 				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
 			}},
@@ -463,14 +470,11 @@ func TestForkWorkflowReportScan(t *testing.T) {
 		t.Parallel()
 		// The step prompt itself may equal the reminder text (author-written
 		// or hook-rewritten); that must not consume the retry reminder.
-		_, reminded := scan(t, []stepMessage{
-			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText(workflowReminder)}},
-		})
+		_, reminded := scan(t, workflowReminder, nil)
 		assert.False(t, reminded)
 
 		// A reminder arriving in a later user message is the runtime's.
-		_, reminded = scan(t, []stepMessage{
-			{role: database.ChatMessageRoleUser, parts: []codersdk.ChatMessagePart{codersdk.ChatMessageText(workflowReminder)}},
+		_, reminded = scan(t, workflowReminder, []stepMessage{
 			{role: database.ChatMessageRoleAssistant, parts: []codersdk.ChatMessagePart{
 				reportCall("c1", `{"text":"bad"}`), reportResult("c1", true),
 			}},
