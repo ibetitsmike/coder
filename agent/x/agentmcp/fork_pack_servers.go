@@ -30,7 +30,11 @@ type PackSource struct {
 	// ExpandPluginRoot expands ${CLAUDE_PLUGIN_ROOT} to Dir, as Claude
 	// Code does for its plugins.
 	ExpandPluginRoot bool
-	Configs          []PackConfig
+	// Revision identifies the pack's installed files. A change restarts
+	// the pack's servers even when their declarations are unchanged,
+	// because an update can replace the program a server runs.
+	Revision string
+	Configs  []PackConfig
 }
 
 // PackConfig is one mcpServers declaration of a pack.
@@ -48,6 +52,7 @@ type PackConfig struct {
 type PackOrigin struct {
 	Manifest string
 	File     string
+	Revision string
 }
 
 // claudePluginRootVar and claudePluginRootEnv follow Claude Code: the
@@ -152,7 +157,7 @@ func parsePackSource(pack PackSource) ([]ServerConfig, []error) {
 			continue
 		}
 		for _, server := range servers {
-			server.Pack = PackOrigin{Manifest: pack.ManifestPath, File: cfg.Path}
+			server.Pack = PackOrigin{Manifest: pack.ManifestPath, File: cfg.Path, Revision: pack.Revision}
 			byName[server.Name] = server
 		}
 	}
