@@ -7,14 +7,35 @@ package forkdb
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 )
 
+const failOpenWorkflowStepsOfRun = `-- name: FailOpenWorkflowStepsOfRun :execrows
+UPDATE workflow_steps SET status = 'failed', error = $1, finished_at = now()
+WHERE run_id = $2 AND status IN ('running', 'reminded')
+`
+
+type FailOpenWorkflowStepsOfRunParams struct {
+	ErrText string    `db:"err_text" json:"err_text"`
+	RunID   uuid.UUID `db:"run_id" json:"run_id"`
+}
+
+// stop_workflow fails the open steps of a run that it stops. err_text, not
+// error: it becomes a mock parameter name.
+func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, failOpenWorkflowStepsOfRun, arg.ErrText, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -30,12 +51,112 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		&i.Error,
 		&i.Result,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }
 
+const getWorkflowRunStepCountsByChat = `-- name: GetWorkflowRunStepCountsByChat :many
+SELECT s.run_id, s.status, count(*)::int AS step_count
+FROM workflow_steps s
+JOIN workflow_runs r ON r.id = s.run_id
+WHERE r.chat_id = $1
+GROUP BY s.run_id, s.status
+`
+
+type GetWorkflowRunStepCountsByChatRow struct {
+	RunID     uuid.UUID `db:"run_id" json:"run_id"`
+	Status    string    `db:"status" json:"status"`
+	StepCount int32     `db:"step_count" json:"step_count"`
+}
+
+// One row per run and step status of a chat, for the step_counts of the run
+// list. done means reported; running means running or reminded.
+func (q *Queries) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]GetWorkflowRunStepCountsByChatRow, error) {
+	rows, err := q.db.QueryContext(ctx, getWorkflowRunStepCountsByChat, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetWorkflowRunStepCountsByChatRow
+	for rows.Next() {
+		var i GetWorkflowRunStepCountsByChatRow
+		if err := rows.Scan(&i.RunID, &i.Status, &i.StepCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkflowRunsByChat = `-- name: GetWorkflowRunsByChat :many
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at FROM workflow_runs
+WHERE chat_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (created_at, id) < ($2::timestamptz, $3::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $4::int
+`
+
+type GetWorkflowRunsByChatParams struct {
+	ChatID         uuid.UUID     `db:"chat_id" json:"chat_id"`
+	AfterCreatedAt sql.NullTime  `db:"after_created_at" json:"after_created_at"`
+	AfterID        uuid.NullUUID `db:"after_id" json:"after_id"`
+	RowLimit       int32         `db:"row_limit" json:"row_limit"`
+}
+
+// The run list of a chat, newest first, one keyset page. after_created_at
+// and after_id are the created_at and the ID of the last run of the page the
+// client already has; both NULL reads the first page.
+func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error) {
+	rows, err := q.db.QueryContext(ctx, getWorkflowRunsByChat,
+		arg.ChatID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowRun
+	for rows.Next() {
+		var i WorkflowRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatID,
+			&i.ModelConfigID,
+			&i.Script,
+			&i.Args,
+			&i.Status,
+			&i.Error,
+			&i.Result,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkflowStep = `-- name: GetWorkflowStep :one
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error FROM workflow_steps WHERE id = $1
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at FROM workflow_steps WHERE id = $1
 `
 
 // The authorizer of UpdateWorkflowStep reads the step to find its run.
@@ -52,12 +173,14 @@ func (q *Queries) GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowSt
 		&i.Status,
 		&i.Value,
 		&i.Error,
+		&i.StartedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }
 
 const getWorkflowStepsByRun = `-- name: GetWorkflowStepsByRun :many
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
 `
 
 func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error) {
@@ -79,6 +202,8 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 			&i.Status,
 			&i.Value,
 			&i.Error,
+			&i.StartedAt,
+			&i.FinishedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -150,7 +275,7 @@ func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStep
 }
 
 const markOpenWorkflowRunsInterrupted = `-- name: MarkOpenWorkflowRunsInterrupted :execrows
-UPDATE workflow_runs SET status = 'interrupted', error = $1
+UPDATE workflow_runs SET status = 'interrupted', error = $1, updated_at = now()
 WHERE status = 'running'
 `
 
@@ -166,7 +291,9 @@ func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText s
 
 const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :exec
 UPDATE workflow_runs
-SET status = $1, error = $2, result = $3
+SET status = $1, error = $2, result = $3,
+    updated_at = now(),
+    finished_at = CASE WHEN $1::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
 WHERE id = $4
 `
 
@@ -178,9 +305,11 @@ type UpdateWorkflowRunStatusParams struct {
 }
 
 // result is the full terminal snapshot of the run, or NULL for interrupted.
-// The param stays uncast so sqlc ties it to the nullable column and applies
-// the NullRawMessage override: a plain json.RawMessage would reach pq as a
-// zero-length string, which Postgres rejects on jsonb.
+// A terminal status stamps finished_at; interrupted keeps the run open, so
+// a resume can end it later. The param stays uncast so sqlc ties it to the
+// nullable column and applies the NullRawMessage override: a plain
+// json.RawMessage would reach pq as a zero-length string, which Postgres
+// rejects on jsonb.
 func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowRunStatus,
 		arg.Status,
@@ -193,7 +322,8 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
 UPDATE workflow_steps
-SET status = $1, value = $2, error = $3
+SET status = $1, value = $2, error = $3,
+    finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
 WHERE id = $4
 `
 
@@ -204,6 +334,9 @@ type UpdateWorkflowStepParams struct {
 	ID     uuid.UUID             `db:"id" json:"id"`
 }
 
+// A reported or failed step stamps finished_at; started_at is set once, at
+// the insert. The param stays uncast so sqlc ties it to the nullable column
+// and applies the NullRawMessage override.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,

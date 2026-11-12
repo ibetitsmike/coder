@@ -6879,6 +6879,203 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/{chat}/workflow-runs": {
+            "get": {
+                "description": "Lists the workflow runs of the chat, newest first, one page of\nat most 100 runs. Only deployment owners of the chat owner see\nruns, the same gate as the workflow tools. The list items\ncarry a script preview and step counts; the detail has the\nfull script, the steps and the result.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get the workflow runs of a chat",
+                "operationId": "get-the-workflow-runs-of-a-chat",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size, at most 100",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor: the created_at (RFC3339) and the ID of the last run of the previous page, as \u003cRFC3339\u003e/\u003crun ID\u003e",
+                        "name": "after",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.WorkflowRun"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/workflow-runs/{workflowrun}": {
+            "get": {
+                "description": "Returns one run with its script, its steps and, when the run\nended, its result and the log lines of the terminal snapshot.\nA live run has no logs: the journal keeps no live log lines.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a workflow run of a chat",
+                "operationId": "get-a-workflow-run-of-a-chat",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Workflow run ID",
+                        "name": "workflowrun",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.WorkflowRunDetail"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/{chat}/workflow-runs/{workflowrun}/stop": {
+            "post": {
+                "description": "Stops a running run: the script unwinds, the open steps fail\nwith \"stopped by user\", their child chats stop, and the run\nreads stopped afterwards. A run that already ended answers\n409; an interrupted run is not stoppable either, because the\nagent continues it with resume_run_id.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Stop a workflow run of a chat",
+                "operationId": "stop-a-workflow-run-of-a-chat",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Chat ID",
+                        "name": "chat",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Workflow run ID",
+                        "name": "workflowrun",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.WorkflowRunDetail"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/watch": {
             "get": {
                 "produces": [
@@ -29415,12 +29612,12 @@ const docTemplate = `{
             "enum": [
                 "fork-chat-todos",
                 "fork-nested-subagents",
-                "fork-plugin-packs",
-                "fork-pinned-skills",
                 "fork-agent-definitions",
                 "fork-subagent-isolation",
-                "fork-workflows",
                 "fork-chat-wakeups",
+                "fork-plugin-packs",
+                "fork-pinned-skills",
+                "fork-workflows",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -29488,12 +29685,12 @@ const docTemplate = `{
             "x-enum-varnames": [
                 "ExperimentForkChatTodos",
                 "ExperimentForkNestedSubagents",
-                "ExperimentForkPluginPacks",
-                "ExperimentForkPinnedSkills",
                 "ExperimentForkAgentDefinitions",
                 "ExperimentForkSubagentIsolation",
-                "ExperimentForkWorkflows",
                 "ExperimentForkChatWakeups",
+                "ExperimentForkPluginPacks",
+                "ExperimentForkPinnedSkills",
+                "ExperimentForkWorkflows",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -38068,6 +38265,161 @@ const docTemplate = `{
                 },
                 "p256dh_key": {
                     "type": "string"
+                }
+            }
+        },
+        "codersdk.WorkflowRun": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "description": "FinishedAt is the end of a terminal run. An interrupted run is open,\nso it has none until a resume ends it.",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "script_preview": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "step_counts": {
+                    "$ref": "#/definitions/codersdk.WorkflowRunStepCounts"
+                },
+                "title": {
+                    "description": "Title is a display name for the run. Runs have no title yet, so it is\nempty and the UI shows the script preview.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "codersdk.WorkflowRunDetail": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "logs": {
+                    "description": "Logs are the last log lines of a terminal run, from its snapshot.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "result": {
+                    "description": "Result is the value that main returned, for a terminal run.",
+                    "type": "object"
+                },
+                "script": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.WorkflowRunStep"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "codersdk.WorkflowRunStep": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "description": "FinishedAt is when the step reported or failed. An open step has none.",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "ordinal": {
+                    "type": "integer"
+                },
+                "reused": {
+                    "type": "boolean"
+                },
+                "run_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "started_at": {
+                    "description": "StartedAt is when the step's child chat was created (or reused).",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Value is the report the step sent, matching its schema. It is empty\nuntil the step reported.",
+                    "type": "object"
+                }
+            }
+        },
+        "codersdk.WorkflowRunStepCounts": {
+            "type": "object",
+            "properties": {
+                "done": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "running": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
