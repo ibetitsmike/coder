@@ -11,6 +11,20 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteChatExcludedPluginPack = `-- name: DeleteChatExcludedPluginPack :exec
+DELETE FROM chat_excluded_plugin_packs WHERE chat_id = $1 AND pack_id = $2
+`
+
+type DeleteChatExcludedPluginPackParams struct {
+	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
+	PackID uuid.UUID `db:"pack_id" json:"pack_id"`
+}
+
+func (q *Queries) DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error {
+	_, err := q.db.ExecContext(ctx, deleteChatExcludedPluginPack, arg.ChatID, arg.PackID)
+	return err
+}
+
 const deleteChatPluginPack = `-- name: DeleteChatPluginPack :exec
 DELETE FROM chat_plugin_packs WHERE chat_id = $1 AND pack_id = $2
 `
@@ -37,6 +51,43 @@ type DeletePluginPackProjectParams struct {
 func (q *Queries) DeletePluginPackProject(ctx context.Context, arg DeletePluginPackProjectParams) error {
 	_, err := q.db.ExecContext(ctx, deletePluginPackProject, arg.ProjectID, arg.PackID)
 	return err
+}
+
+const getExcludedPluginPacksByChatID = `-- name: GetExcludedPluginPacksByChatID :many
+SELECT plugin_packs.id, plugin_packs.name, plugin_packs.commit_sha
+FROM chat_excluded_plugin_packs
+JOIN plugin_packs ON plugin_packs.id = chat_excluded_plugin_packs.pack_id
+WHERE chat_excluded_plugin_packs.chat_id = $1
+ORDER BY plugin_packs.name
+`
+
+type GetExcludedPluginPacksByChatIDRow struct {
+	ID        uuid.UUID `db:"id" json:"id"`
+	Name      string    `db:"name" json:"name"`
+	CommitSha string    `db:"commit_sha" json:"commit_sha"`
+}
+
+func (q *Queries) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getExcludedPluginPacksByChatID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetExcludedPluginPacksByChatIDRow
+	for rows.Next() {
+		var i GetExcludedPluginPacksByChatIDRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.CommitSha); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getPluginPacksByChatID = `-- name: GetPluginPacksByChatID :many
@@ -111,6 +162,35 @@ func (q *Queries) GetPluginPacksByProjectID(ctx context.Context, projectID uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const insertChatExcludedPluginPack = `-- name: InsertChatExcludedPluginPack :one
+INSERT INTO chat_excluded_plugin_packs (organization_id, chat_id, pack_id)
+SELECT chats.organization_id, chats.id, plugin_packs.id
+FROM chats
+JOIN plugin_packs ON plugin_packs.organization_id = chats.organization_id
+WHERE chats.id = $1 AND plugin_packs.id = $2
+ON CONFLICT (chat_id, pack_id) DO UPDATE SET created_at = chat_excluded_plugin_packs.created_at
+RETURNING organization_id, chat_id, pack_id, created_at
+`
+
+type InsertChatExcludedPluginPackParams struct {
+	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
+	PackID uuid.UUID `db:"pack_id" json:"pack_id"`
+}
+
+// Turns off a pack of the chat's organization for the chat. It returns no
+// row for a pack that does not exist or is in another organization.
+func (q *Queries) InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error) {
+	row := q.db.QueryRowContext(ctx, insertChatExcludedPluginPack, arg.ChatID, arg.PackID)
+	var i ChatExcludedPluginPack
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ChatID,
+		&i.PackID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const insertChatPluginPack = `-- name: InsertChatPluginPack :one
