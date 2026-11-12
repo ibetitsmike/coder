@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -140,6 +142,7 @@ type stepSummary struct {
 // workspace connection of the live turn; a nil getConn keeps inline scripts
 // working and makes script_path fail with a clear error.
 func (p *Server) forkWorkflowTools(
+	ctx context.Context,
 	chat database.Chat,
 	modelConfigID uuid.UUID,
 	getConn func(context.Context) (workspacesdk.AgentConn, error),
@@ -148,6 +151,23 @@ func (p *Server) forkWorkflowTools(
 		chat.ParentChatID.Valid ||
 		isExploreSubagentMode(chat.Mode) ||
 		(chat.PlanMode.Valid && chat.PlanMode.ChatPlanMode == database.ChatPlanModePlan) {
+		return nil
+	}
+	// The experiment flag is deployment-wide, so while the engine is
+	// experimental the tools stay limited to chats owned by a deployment
+	// owner; widening to members is a later decision. One primary-key read
+	// per gated turn, failing closed, and a role change applies on the
+	// owner's next turn. The turn runs under the daemon subject, which has
+	// only read_personal on users, so the owner row is read as the
+	// system-restricted actor, the way UserRBACSubject reads roles.
+	//nolint:gocritic // chatd reads the owner row to gate its own tools.
+	owner, err := p.db.GetUserByID(dbauthz.AsSystemRestricted(ctx), chat.OwnerID)
+	if err != nil {
+		p.logger.Warn(ctx, "workflow owner gate: load chat owner",
+			slog.F("chat_id", chat.ID), slog.F("owner_id", chat.OwnerID), slog.Error(err))
+		return nil
+	}
+	if !slices.Contains(owner.RBACRoles, rbac.RoleOwner().String()) {
 		return nil
 	}
 	if getConn == nil {

@@ -534,7 +534,8 @@ def main(args):
 
 // TestForkWorkflowToolsGate pins the turn gate of run_workflow and
 // await_workflow: only an enabled experiment on a root chat outside plan
-// mode and explore mode gets the tools.
+// mode and explore mode whose owner holds the deployment owner role gets
+// the tools.
 func TestForkWorkflowToolsGate(t *testing.T) {
 	t.Parallel()
 
@@ -542,29 +543,60 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		t.Parallel()
 		db, ps := dbtestutil.NewDB(t)
 		server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{})
-		tools := server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		tools := server.forkWorkflowTools(chatdTestContext(t), database.Chat{ID: uuid.New()}, uuid.New(), nil)
 		assert.Empty(t, tools)
 	})
 
 	t.Run("Guards", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
 		getConn := func(context.Context) (workspacesdk.AgentConn, error) { return nil, nil }
+		parent := f.parent(ctx, t)
 
-		child := database.Chat{ID: uuid.New(), ParentChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
-		assert.Empty(t, f.server.forkWorkflowTools(child, uuid.Nil, getConn), "a child chat never runs workflows")
+		child := parent
+		child.ParentChatID = uuid.NullUUID{UUID: uuid.New(), Valid: true}
+		assert.Empty(t, f.server.forkWorkflowTools(ctx, child, uuid.Nil, getConn), "a child chat never runs workflows")
 
-		explore := database.Chat{ID: uuid.New(), Mode: database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}}
-		assert.Empty(t, f.server.forkWorkflowTools(explore, uuid.Nil, getConn), "an explore chat never runs workflows")
+		explore := parent
+		explore.Mode = database.NullChatMode{ChatMode: database.ChatModeExplore, Valid: true}
+		assert.Empty(t, f.server.forkWorkflowTools(ctx, explore, uuid.Nil, getConn), "an explore chat never runs workflows")
 
-		plan := database.Chat{ID: uuid.New(), PlanMode: database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}}
-		assert.Empty(t, f.server.forkWorkflowTools(plan, uuid.Nil, getConn), "a plan-mode turn never runs workflows")
+		plan := parent
+		plan.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
+		assert.Empty(t, f.server.forkWorkflowTools(ctx, plan, uuid.Nil, getConn), "a plan-mode turn never runs workflows")
+	})
+
+	t.Run("MemberOwnerGetsNothing", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		// A member without the owner role never gets the tools, and the
+		// gate fails closed for a chat whose owner row is missing.
+		member := dbgen.User(t, f.db, database.User{})
+		memberChat := dbgen.Chat(t, f.db, database.Chat{
+			OrganizationID:    f.org.ID,
+			OwnerID:           member.ID,
+			LastModelConfigID: f.model.ID,
+		})
+		assert.Empty(t, f.server.forkWorkflowTools(ctx, memberChat, uuid.Nil, nil), "a member-owned chat never runs workflows")
+
+		// A chat row cannot carry a missing owner (foreign key), so the
+		// stale-owner case is an in-memory value; the gate only reads the
+		// value and looks the owner up.
+		unknown := database.Chat{
+			ID:                uuid.New(),
+			OrganizationID:    f.org.ID,
+			OwnerID:           uuid.New(),
+			LastModelConfigID: f.model.ID,
+		}
+		assert.Empty(t, f.server.forkWorkflowTools(ctx, unknown, uuid.Nil, nil), "a missing owner row fails closed")
 	})
 
 	t.Run("RootTurnGetsBothTools", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
-		tools := f.server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		tools := f.server.forkWorkflowTools(chatdTestContext(t), f.parent(chatdTestContext(t), t), uuid.New(), nil)
 		require.Len(t, tools, 2)
 		assert.Equal(t, runWorkflowToolName, tools[0].Info().Name)
 		assert.Equal(t, awaitWorkflowToolName, tools[1].Info().Name)
@@ -576,9 +608,10 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 	t.Run("NilConnKeepsInlineScripts", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
-		tools := f.server.forkWorkflowTools(database.Chat{ID: uuid.New()}, uuid.New(), nil)
+		ctx := chatdTestContext(t)
+		tools := f.server.forkWorkflowTools(ctx, f.parent(ctx, t), uuid.New(), nil)
 		require.Len(t, tools, 2)
-		ctx := workspacesdk.WithToolCallID(chatdTestContext(t), uuid.New())
+		ctx = workspacesdk.WithToolCallID(ctx, uuid.New())
 		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"script_path":"/home/coder/w.star"}`})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError, resp.Content)
