@@ -142,6 +142,10 @@ type Resolver struct {
 	// resolvers, since the capability must be earned from the server like
 	// PackRowsAdvertised.
 	PackAgentDefinitionsAdvertised func() bool
+	// GlobRulesAdvertised, when non-nil and true, keeps glob-scoped rules
+	// in Resources so they are capped and pushed (fork_rules.go). The
+	// Manager wires it to the fork-glob-rules push-response capability.
+	GlobRulesAdvertised func() bool
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -177,7 +181,7 @@ func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapsho
 	if err := ctx.Err(); err != nil {
 		return Snapshot{SnapshotError: err.Error()}
 	}
-	resources, scopedRules := splitScopedRules(resources)
+	resources, scopedRules := res.splitScopedRules(resources)
 	resources = deduplicateSkills(resources)
 	resources, packDuplicates := splitManagedPackDuplicates(resources)
 	resources, totalBytes := res.applyCaps(resources)
@@ -780,6 +784,13 @@ func (r *Resolver) applyCaps(resources []Resource) ([]Resource, uint64) {
 			}
 			return -1
 		}
+		// Glob-scoped rules are cut before always-on instruction files.
+		if ag, bg := len(a.Globs) > 0, len(b.Globs) > 0; ag != bg {
+			if ag {
+				return 1
+			}
+			return -1
+		}
 		return strings.Compare(a.Source, b.Source)
 	})
 
@@ -1067,8 +1078,9 @@ type Resource struct {
 	// ACPHarness contains capabilities and options without the ACP adapter
 	// launch command.
 	ACPHarness *workspacesdk.ACPHarness
-	// Globs is set on glob-scoped rule files (fork_rules.go), which
-	// resolve into Snapshot.ScopedRules instead of Resources.
+	// Globs is set on glob-scoped rule files (fork_rules.go). They stay in
+	// Resources only while the server advertises glob rules, and resolve
+	// into Snapshot.ScopedRules otherwise.
 	Globs []string
 }
 
@@ -1117,7 +1129,8 @@ type Snapshot struct {
 	// inventory.
 	CapabilityGeneration uint64
 	// ScopedRules holds glob-scoped rule files (fork_rules.go), sorted by
-	// ID. They are not pushed or hashed.
+	// ID, while the server does not advertise glob rules. They are not
+	// pushed or hashed.
 	ScopedRules []Resource
 }
 
