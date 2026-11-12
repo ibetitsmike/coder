@@ -52,7 +52,7 @@ var pinnedSkillTagPattern = regexp.MustCompile(`(?i)<\s*/?\s*pinned-skill\b[^>]*
 // list, so the cached prompt prefix stays intact, and a compaction that drops
 // it brings it back on the next step. The fingerprint covers the loaded
 // bodies, so an edited, deleted or disabled skill changes it too.
-func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat, history []database.ChatMessage) (chatstate.Message, bool, error) {
+func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkPinnedSkills) {
 		return chatstate.Message{}, false, nil
 	}
@@ -63,13 +63,6 @@ func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat, hi
 	pins, err := fdb.GetChatPinnedSkillsByChatID(ctx, chat.ID)
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("read pinned skills: %w", err)
-	}
-	// Without pins, only a list the model may still see needs replacing, and
-	// most chats never had one, so skip the prompt read for them.
-	if len(pins) == 0 {
-		if _, found := latestPinnedSkillsFingerprint(history); !found {
-			return chatstate.Message{}, false, nil
-		}
 	}
 	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
 	if err != nil {
