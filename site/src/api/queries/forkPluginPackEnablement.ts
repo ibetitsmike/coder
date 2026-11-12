@@ -65,8 +65,7 @@ export const enabledPluginPacks = (target: PluginPackTarget) =>
 	});
 
 /**
- * Query options for the plugin packs a chat inherits from its project. It
- * does not run without a project.
+ * Query options for the plugin packs a chat inherits from its project.
  */
 export const projectPluginPacks = (
 	organizationId: string,
