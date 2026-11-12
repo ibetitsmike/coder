@@ -8,6 +8,7 @@ import {
 } from "#/testHelpers/forkPluginPacks";
 import {
 	createPluginPackMutation,
+	pluginPacks,
 	pluginPacksKey,
 	reconcileInstalledPluginPack,
 	reconcileUpdatedPluginPack,
@@ -162,6 +163,52 @@ describe("updatePluginPackMutation", () => {
 			mockNewerPack,
 			MockForkPluginPackWithoutPath,
 		]);
+	});
+	it("keeps the server's order and leaves the detail-only files out", async () => {
+		const queryClient = createQueryClient();
+		// The server's collation may order names differently from the browser.
+		queryClient.setQueryData(listKey, [
+			MockForkPluginPackWithoutPath,
+			MockForkPluginPack,
+		]);
+		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockResolvedValue({
+			...mockNewerPack,
+			files: [
+				{ path: "plugin.json", size_bytes: 2, content_hash: "sha256:00" },
+			],
+		});
+
+		await new MutationObserver(
+			queryClient,
+			updatePluginPackMutation(queryClient, organizationId),
+		).mutate(MockForkPluginPack);
+
+		expect(queryClient.getQueryData(listKey)).toEqual([
+			MockForkPluginPackWithoutPath,
+			mockNewerPack,
+		]);
+	});
+
+	it("refetches the list after a lost response even without observers", async () => {
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		const getPacks = vi
+			.spyOn(forkPluginPacksApi, "getPluginPacks")
+			.mockResolvedValue([MockForkPluginPack]);
+		await queryClient.prefetchQuery(pluginPacks(organizationId));
+		vi.spyOn(forkPluginPacksApi, "updatePluginPack").mockRejectedValue(
+			new AxiosError("Network Error"),
+		);
+
+		await new MutationObserver(
+			queryClient,
+			updatePluginPackMutation(queryClient, organizationId),
+		)
+			.mutate(MockForkPluginPack)
+			.catch(() => undefined);
+
+		expect(getPacks).toHaveBeenCalledTimes(2);
 	});
 });
 
