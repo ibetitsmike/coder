@@ -13098,6 +13098,129 @@ export interface WebsocketReport extends BaseReport {
 	readonly code: number;
 }
 
+// From codersdk/fork_workflow_runs.go
+/**
+ * WorkflowRun is one item of a chat's workflow run list. It carries a
+ * preview of the script instead of the script itself; the full script is on
+ * the detail.
+ */
+export interface WorkflowRun {
+	readonly id: string;
+	readonly chat_id: string;
+	readonly status: string;
+	readonly error: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+	/**
+	 * FinishedAt is the end of a terminal run. An interrupted run is open,
+	 * so it has none until a resume ends it.
+	 */
+	readonly finished_at?: string;
+	/**
+	 * Title is a display name for the run. Runs have no title yet, so it is
+	 * empty and the UI shows the script preview.
+	 */
+	readonly title: string;
+	readonly script_preview?: string;
+	readonly step_counts: WorkflowRunStepCounts;
+}
+
+// From codersdk/fork_workflow_runs.go
+/**
+ * WorkflowRunDetail is the full view of one run: its script, its steps, and
+ * for a terminal run the result snapshot and the log lines the script
+ * printed. A live run has empty logs: the journal keeps no live log lines,
+ * only the terminal snapshot.
+ */
+export interface WorkflowRunDetail {
+	readonly id: string;
+	readonly chat_id: string;
+	readonly status: string;
+	readonly error: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+	readonly finished_at?: string;
+	readonly title: string;
+	readonly script: string;
+	/**
+	 * Result is the value that main returned, for a terminal run.
+	 */
+	readonly result?: Record<string, string>;
+	/**
+	 * Logs are the last log lines of a terminal run, from its snapshot.
+	 */
+	readonly logs: readonly string[];
+	readonly steps: readonly WorkflowRunStep[];
+} // WorkflowRunListOptions is the pagination of a chat's workflow run list.
+
+// From codersdk/fork_workflow_runs.go
+export interface WorkflowRunListOptions {}
+
+// From codersdk/fork_workflow_runs.go
+export type WorkflowRunStatus =
+	| "completed"
+	| "failed"
+	| "interrupted"
+	| "running"
+	| "stopped";
+
+export const WorkflowRunStatuses: WorkflowRunStatus[] = [
+	"completed",
+	"failed",
+	"interrupted",
+	"running",
+	"stopped",
+];
+
+// From codersdk/fork_workflow_runs.go
+/**
+ * WorkflowRunStep is one step of a run. The step ID is the child chat ID.
+ */
+export interface WorkflowRunStep {
+	readonly id: string;
+	readonly run_id: string;
+	readonly title: string;
+	readonly status: string;
+	readonly reused: boolean;
+	readonly error: string;
+	readonly ordinal: number;
+	/**
+	 * Value is the report the step sent, matching its schema. It is empty
+	 * until the step reported.
+	 */
+	readonly value?: Record<string, string>;
+	/**
+	 * StartedAt is when the step's child chat was created (or reused).
+	 */
+	readonly started_at: string;
+	/**
+	 * FinishedAt is when the step reported or failed. An open step has none.
+	 */
+	readonly finished_at?: string;
+}
+
+// From codersdk/fork_workflow_runs.go
+/**
+ * WorkflowRunStepCounts summarizes the steps of a run for a list item.
+ * Done counts reported steps; running counts running and reminded steps.
+ */
+export interface WorkflowRunStepCounts {
+	readonly total: number;
+	readonly running: number;
+	readonly done: number;
+	readonly failed: number;
+}
+
+// From codersdk/fork_workflow_runs.go
+export type WorkflowStepStatus = "failed" | "reminded" | "reported" | "running";
+
+export const WorkflowStepStatuses: WorkflowStepStatus[] = [
+	"failed",
+	"reminded",
+	"reported",
+	"running",
+];
+
 // From codersdk/workspaces.go
 /**
  * Workspace is a deployment of a template. It references a specific

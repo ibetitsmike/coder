@@ -439,6 +439,8 @@ type WorkflowRun struct {
 	Error         string                `db:"error" json:"error"`
 	Result        pqtype.NullRawMessage `db:"result" json:"result"`
 	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time             `db:"updated_at" json:"updated_at"`
+	FinishedAt    sql.NullTime          `db:"finished_at" json:"finished_at"`
 }
 
 // Workflow steps (child chats) of a fork-workflows run. Finished steps replay from this table without running again.
@@ -452,4 +454,6 @@ type WorkflowStep struct {
 	Status     string                `db:"status" json:"status"`
 	Value      pqtype.NullRawMessage `db:"value" json:"value"`
 	Error      string                `db:"error" json:"error"`
+	StartedAt  time.Time             `db:"started_at" json:"started_at"`
+	FinishedAt sql.NullTime          `db:"finished_at" json:"finished_at"`
 }

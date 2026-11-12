@@ -351,16 +351,21 @@ type workflowRun struct {
 	// seen is owned by the script goroutine.
 	seen map[string]int
 
-	mu           sync.Mutex
-	steps        []*workflowStep
-	logs         []string
-	logBytes     int // the bytes of the retained logs
-	result       *runWorkflowResult
-	done         chan struct{}
-	awaiters     int
-	delivered    bool  // an await_workflow call returned the end
-	notified     bool  // the parent got the end message
-	queuedNotice int64 // the queued end message, 0 if none
+	mu        sync.Mutex
+	steps     []*workflowStep
+	logs      []string
+	logBytes  int // the bytes of the retained logs
+	result    *runWorkflowResult
+	done      chan struct{}
+	awaiters  int
+	delivered bool // an await_workflow call returned the end
+	notified  bool // the parent got the end message
+	// stopRequested marks a run that stop_workflow is unwinding. finish
+	// turns its outcome into a stopped run, not a failed one. cancel is the
+	// cancel of the script context, set before the script starts.
+	stopRequested bool
+	cancel        context.CancelFunc
+	queuedNotice  int64 // the queued end message, 0 if none
 }
 
 func (p *Server) startWorkflowRun(
@@ -444,6 +449,9 @@ func (p *Server) startWorkflowRun(
 	// The run does the same chatd work as spawn_agent and wait_agent, which
 	// also run as the chatd subject.
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), parent) //nolint:gocritic // see above
+	run.mu.Lock()
+	run.cancel = stop
+	run.mu.Unlock()
 	err = p.goInflight(func() {
 		defer stop()
 		run.finish(runCtx, run.execute(runCtx))
@@ -459,15 +467,27 @@ func (p *Server) startWorkflowRun(
 
 // execute runs the script and builds the final result.
 func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
+	if r.isStopRequested() {
+		return r.stoppedResult()
+	}
 	value, err := r.program.run(ctx, r)
 	// Whatever the script outcome, a step that is still running has nobody
 	// waiting for its report, so the run stops it instead of leaving the
-	// child chat (and its descendants) working to a deadline.
-	r.interruptOpenSteps(ctx)
+	// child chat (and its descendants) working to a deadline. A canceled
+	// context (a stop or a shutdown) cannot run this phase, so it runs on a
+	// fresh one.
+	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
+	defer stop()
+	r.interruptOpenSteps(ictx, r.stopReason())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
 	if err != nil {
+		if r.stopRequested && ctx.Err() != nil {
+			res.Status = workflowStatusStopped
+			res.Error = workflowStopError
+			return res
+		}
 		res.Status = workflowStatusFailed
 		res.Error = err.Error()
 		return res
@@ -477,18 +497,78 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 	return res
 }
 
+// stoppedResult is the snapshot of a run that stop_workflow unwound before
+// or instead of the script. It fails the open steps on a fresh context, the
+// way execute does for a script outcome.
+func (r *workflowRun) stoppedResult() runWorkflowResult {
+	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
+	defer stop()
+	r.interruptOpenSteps(ictx, workflowStopError)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	res := r.snapshotLocked()
+	res.Status = workflowStatusStopped
+	res.Error = workflowStopError
+	return res
+}
+
+// stopReason is the failure reason of the open steps that the run ends: the
+// engine's own text, or the stop text when stop_workflow unwound the run.
+func (r *workflowRun) stopReason() string {
+	if r.isStopRequested() {
+		return workflowStopError
+	}
+	return "the workflow ended before the step reported"
+}
+
+// requestStop marks the run for a stop and cancels the script context. It
+// returns false when the run already ended.
+func (r *workflowRun) requestStop() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.result != nil {
+		return false
+	}
+	r.stopRequested = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+	return true
+}
+
+func (r *workflowRun) isStopRequested() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopRequested
+}
+
 // finish stores the result. If no await_workflow call waits, it tells the
 // parent that the run ended.
 func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
+	// The journal keeps the result for the resumes and awaits of a later
+	// process, best effort like every journal update of a live run. A
+	// canceled context would fail the write, so a user stop journals on a
+	// fresh one: a stopped run must read as stopped. A shutdown keeps its
+	// canceled context, leaving the run open for the startup sweep to mark
+	// interrupted, which is what resume_run_id waits for.
+	//
+	// The write lands before done closes: stop_workflow waits on done and
+	// then reads the journal for its response, so closing done first could
+	// answer a stop from a row that still says running.
+	jctx := ctx
+	if r.isStopRequested() && ctx.Err() != nil {
+		fresh, stop := r.p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
+		defer stop()
+		jctx = fresh
+	}
+	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res)
+
 	r.mu.Lock()
 	r.result = &res
 	close(r.done)
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
-	// The journal keeps the result for the resumes and awaits of a later
-	// process, best effort like every journal update of a live run.
-	r.p.workflowJournal().updateRunStatus(ctx, r.id, res.Status, res.Error, &res)
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -789,22 +869,23 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left
-// unreported: a failed, timed-out, or returning script never reads their
-// value, so they must not keep consuming model capacity until their step
-// timeout. waitStep has already returned when this runs, so the step fields
-// have no other writer.
-func (r *workflowRun) interruptOpenSteps(ctx context.Context) {
+// unreported: a failed, timed-out, stopped, or returning script never reads
+// their value, so they must not keep consuming model capacity until their
+// step timeout. waitStep has already returned when this runs, so the step
+// fields have no other writer.
+func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {
 		if s.status == stepStatusRunning || s.status == stepStatusReminded {
-			s.status, s.err = stepStatusFailed, "the workflow ended before the step reported"
+			s.status, s.err = stepStatusFailed, reason
 			open = append(open, s)
 		}
 	}
 	r.mu.Unlock()
 	for _, step := range open {
 		r.interruptStepChild(ctx, step)
+		r.p.workflowJournal().updateStep(ctx, step)
 	}
 }
 

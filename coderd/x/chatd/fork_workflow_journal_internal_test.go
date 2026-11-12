@@ -210,3 +210,84 @@ func TestForkWorkflowJournal(t *testing.T) {
 		assert.JSONEq(t, `{"text":"hi"}`, string(out.Result))
 	})
 }
+
+func TestForkWorkflowStop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("StopsALiveRun", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: journalReviewScript,
+			Args:   map[string]any{"files": []string{"a.go", "b.go"}},
+		})
+		f.steps(ctx, t, run, 2)
+
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+
+		// The run reads stopped, and its snapshot carries the failed steps.
+		res := run.await(ctx, testutil.WaitShort)
+		assert.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		assert.Equal(t, workflowStopError, res.Error)
+		require.Len(t, res.Steps, 2)
+		for i, step := range res.Steps {
+			assert.Equal(t, stepStatusFailed, step.Status, "step %d", i)
+			assert.Equal(t, workflowStopError, step.Error, "step %d", i)
+		}
+
+		// The journal says stopped with the snapshot, so a resume replays it
+		// instead of re-running anything.
+		fdb := forkWorkflowDB(t, f.db)
+		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		require.True(t, row.Result.Valid, "a stopped run keeps its snapshot")
+		assert.True(t, row.FinishedAt.Valid, "a stopped run keeps its end time")
+
+		terminal, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		out := terminal.await(ctx, testutil.WaitShort)
+		assert.Equal(t, workflowStatusStopped, out.Status)
+
+		// A stopped run cannot stop again.
+		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id), ErrForkWorkflowRunTerminal)
+		// An unknown run of the chat is not found, and neither is another
+		// chat's run.
+		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, uuid.New()), ErrForkWorkflowRunNotFound)
+		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, uuid.New(), run.id), ErrForkWorkflowRunNotFound)
+	})
+
+	t.Run("InterruptedRunIsNotStoppable", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: journalReviewScript,
+			Args:   map[string]any{"files": []string{"a.go", "b.go"}},
+		})
+		// Wait for the steps to be journaled before the restart: the sweep
+		// of the new server only needs the run row, and the step rows must
+		// exist for the open-step assertions below.
+		f.steps(ctx, t, run, 2)
+		// The restart marks the run interrupted.
+		restarted := f.restartWorkflowServer(t)
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+
+		// The new server cannot stop an interrupted run: the agent resumes it.
+		assert.ErrorIs(t, restarted.server.ForkStopWorkflowRun(ctx, parent.ID, run.id), ErrForkWorkflowRunTerminal)
+		// The steps stay open for the resume.
+		stepRows, err := fdb.GetWorkflowStepsByRun(ctx, run.id)
+		require.NoError(t, err)
+		require.Len(t, stepRows, 2)
+		for _, srow := range stepRows {
+			assert.NotEqual(t, stepStatusFailed, srow.Status, "an interrupted run keeps its open steps")
+		}
+	})
+}
