@@ -112,7 +112,9 @@ func (p *Server) setStoredSubagentType(ctx context.Context, fdb forkdb.Store, en
 
 // setListedAgentTypes sets the type of each entry of a list_agents agents
 // list to its stored agent type, read for all children of the chat in one
-// query, and reports whether a type changed.
+// query, and reports whether a type changed. An entry that is not a child,
+// which a list of a descendant's children or of the subtree has, is read on
+// its own.
 func (t storedSubagentTypeTool) setListedAgentTypes(ctx context.Context, fdb forkdb.Store, result map[string]json.RawMessage) (bool, error) {
 	var agents []map[string]json.RawMessage
 	if err := json.Unmarshal(result["agents"], &agents); err != nil {
@@ -135,6 +137,7 @@ func (t storedSubagentTypeTool) setListedAgentTypes(ctx context.Context, fdb for
 		}
 		agentType, ok := stored[chatID]
 		if !ok {
+			changed = t.server.setStoredSubagentType(ctx, fdb, agent) || changed
 			continue
 		}
 		encoded, err := json.Marshal(agentType)
