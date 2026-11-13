@@ -12,10 +12,12 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/xerrors"
@@ -164,7 +166,7 @@ func TestViewImageTool(t *testing.T) {
 		t.Parallel()
 		resp := runViewImage(t, anthropic, conn, "/wide.png")
 		require.True(t, resp.IsError)
-		require.Contains(t, resp.Content, "8001x1 pixels; view_image accepts at most 8000 pixels per side")
+		require.Contains(t, resp.Content, "8001x1 pixels, and view_image accepts at most 8000 pixels per side")
 	})
 
 	t.Run("InvalidImages", func(t *testing.T) {
@@ -255,7 +257,7 @@ func TestLimitViewedImages(t *testing.T) {
 			if i < 2 {
 				require.False(t, isMedia(result), "old image %d is dropped", i)
 				text := result.Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText).Text
-				require.Contains(t, text, "call view_image again")
+				require.Contains(t, text, "Call view_image again")
 				require.Contains(t, text, "image "+string(rune('a'+i)))
 				continue
 			}
@@ -286,6 +288,21 @@ func TestLimitViewedImages(t *testing.T) {
 		messages := turn("shot", "computer", media(10, ""))
 		out := limitViewedImages(messages, nil)
 		require.Same(t, &messages[0], &out[0], "the prompt is returned as is")
+	})
+
+	t.Run("OtherMediaTakesBudget", func(t *testing.T) {
+		t.Parallel()
+		other := maxViewedImageBytesInPrompt - 15
+		for name, first := range map[string][]fantasy.Message{
+			"Screenshot": turn("shot", "computer", media(other, "")),
+			"Attachment": {{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, other), MediaType: "image/png"}}}},
+		} {
+			messages := slices.Concat(first, turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(10, "")))
+			out := limitViewedImages(messages, nil)
+			n := len(first)
+			require.False(t, isMedia(out[n+1]), "%s: the older image does not fit next to the other media", name)
+			require.True(t, isMedia(out[n+3]), "%s: the newest image stays", name)
+		}
 	})
 
 	t.Run("ReusedCallID", func(t *testing.T) {
@@ -357,10 +374,15 @@ func TestViewImageToolGate(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		experiments codersdk.Experiments
+		dynamic     bool
 		want        []string
+		bounded     bool
 	}{
-		{name: "Off", want: []string{}},
-		{name: "On", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, want: []string{viewImageToolName}},
+		{name: "Off", want: []string{}, bounded: true},
+		{name: "On", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, want: []string{viewImageToolName}, bounded: true},
+		// A caller-supplied view_image owns the name, so its results stay.
+		{name: "OffWithDynamicTool", dynamic: true, want: []string{}, bounded: false},
+		{name: "OnWithDynamicTool", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, dynamic: true, want: []string{viewImageToolName}, bounded: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -380,11 +402,14 @@ func TestViewImageToolGate(t *testing.T) {
 					fantasy.Message{Role: fantasy.MessageRoleTool, Content: []fantasy.MessagePart{fantasy.ToolResultPart{ToolCallID: id, Output: fantasy.ToolResultOutputContentMedia{Data: "AAAA", MediaType: "image/png"}}}},
 				)
 			}
+			if tt.dynamic {
+				chat.DynamicTools = pqtype.NullRawMessage{RawMessage: json.RawMessage(`[{"name":"view_image"}]`), Valid: true}
+			}
 			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, toolNames(tools))
 			_, isText := prompt[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
-			require.True(t, isText, "the prompt is bounded with the experiment %s", strings.ToLower(tt.name))
+			require.Equal(t, tt.bounded, isText, "the prompt bound in case %s", tt.name)
 		})
 	}
 }
