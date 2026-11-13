@@ -226,6 +226,65 @@ func TestForkSpawnAgentReplayTakenOver(t *testing.T) {
 	require.Equal(t, 1, children())
 }
 
+// TestForkSpawnAgentReplayRetiredWhileStarting checks the retirement of an
+// unstarted workspace child against the run that still starts it. A child
+// that a replay archived before its workspace was bound gets no prompt, and
+// its workspace is stopped. A child whose workspace was recorded is kept.
+func TestForkSpawnAgentReplayRetiredWhileStarting(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ArchivedBeforeBind", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentForkSubagentIsolation})
+		ctx := chatdTestContext(t)
+		workspaces := &fakeWorkspaces{t: t, db: f.db}
+		// The replay retires the child while the original run creates its
+		// workspace.
+		workspaces.beforeCreate = func(chatID uuid.UUID) {
+			kept, err := f.server.discardSubagentUnless(ctx, chatID, forkSubagentStarted(chatID))
+			require.NoError(t, err)
+			require.False(t, kept)
+		}
+		root, _ := f.workspaceRoot(t, workspaces)
+
+		resp := f.spawn(t, root, map[string]any{"isolation": "workspace"})
+		require.True(t, resp.IsError, resp.Content)
+		require.Contains(t, resp.Content, "archived meanwhile")
+		children := f.children(t, root)
+		require.Len(t, children, 1)
+		child, err := f.db.GetChatByID(ctx, children[0].Chat.ID)
+		require.NoError(t, err)
+		require.True(t, child.Archived)
+		queued, err := f.db.GetChatQueuedMessages(ctx, child.ID)
+		require.NoError(t, err)
+		require.Empty(t, queued, "the archived child gets no prompt")
+
+		f.server.drainInflight()
+		workspaces.mu.Lock()
+		defer workspaces.mu.Unlock()
+		require.Len(t, workspaces.created, 1)
+		require.Equal(t, []uuid.UUID{workspaces.created[0].ID}, workspaces.stops)
+	})
+
+	t.Run("KeepsStarted", func(t *testing.T) {
+		t.Parallel()
+		f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentForkSubagentIsolation})
+		ctx := chatdTestContext(t)
+		workspaces := &fakeWorkspaces{t: t, db: f.db}
+		root, _ := f.workspaceRoot(t, workspaces)
+
+		resp := f.spawn(t, root, map[string]any{"isolation": "workspace"})
+		require.False(t, resp.IsError, resp.Content)
+		childID := f.children(t, root)[0].Chat.ID
+		kept, err := f.server.discardSubagentUnless(ctx, childID, forkSubagentStarted(childID))
+		require.NoError(t, err)
+		require.True(t, kept)
+		child, err := f.db.GetChatByID(ctx, childID)
+		require.NoError(t, err)
+		require.False(t, child.Archived)
+	})
+}
+
 // TestForkSpawnAgentReplayConcurrentRun checks that a run whose spawn fails
 // because another run of the same call created the child meanwhile returns
 // that child.

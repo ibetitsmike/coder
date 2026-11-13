@@ -96,9 +96,17 @@ func (t forkReplaySafeSpawnTool) Run(ctx context.Context, call fantasy.ToolCall)
 			return fantasy.NewTextErrorResponse("spawn_agent: the child chat ID of this call is taken by another chat"), nil
 		case spawnedChildRetired:
 			if !child.Archived {
-				// The run that spawned it stopped for good, so the child
-				// would wait forever without its workspace and prompt.
-				t.server.discardSubagent(ctx, child.ID)
+				// The run that spawned it stopped, so the child would wait
+				// forever without its workspace and prompt. A run that still
+				// goes on may record the workspace meanwhile; then the
+				// child is started and the replay returns it.
+				kept, err := t.server.discardSubagentUnless(ctx, child.ID, forkSubagentStarted(child.ID))
+				if err != nil {
+					return fantasy.NewTextErrorResponse("spawn_agent: retire the unstarted child: " + err.Error()), nil
+				}
+				if kept {
+					continue
+				}
 			}
 			childID = uuid.NewSHA1(childID, []byte(spawnAgentToolName))
 			continue
@@ -161,6 +169,22 @@ func (t forkReplaySafeSpawnTool) spawnedChild(ctx context.Context, childID uuid.
 		return child, spawnedChildRetired, nil
 	}
 	return child, spawnedChildReady, nil
+}
+
+// forkSubagentStarted reports, under the lock of the child chatID, whether
+// startSubagentWorkspace recorded its workspace.
+func forkSubagentStarted(chatID uuid.UUID) func(context.Context, database.Store) (bool, error) {
+	return func(ctx context.Context, store database.Store) (bool, error) {
+		ftx, err := forkdb.From(store)
+		if err != nil {
+			return false, xerrors.Errorf("fork queries: %w", err)
+		}
+		row, err := ftx.GetChatSubagentByChatID(ctx, chatID)
+		if err != nil {
+			return false, xerrors.Errorf("get chat subagent: %w", err)
+		}
+		return row.WorkspaceID.Valid, nil
+	}
 }
 
 // forkNoteWorktreeConflict tells a replay safe spawn that the worktree of its
