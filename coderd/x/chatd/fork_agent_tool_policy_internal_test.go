@@ -79,6 +79,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		newTestAgentTool("execute"),
 		newTestAgentTool("process_output"),
 		newTestAgentTool("spawn_agent"),
+		newTestAgentTool("message_family_chat"),
 		docs,
 		other,
 		// An MCP tool whose server is unknown has no server name.
@@ -94,7 +95,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{Definition: fantasy.ProviderDefinedTool{Name: "web_search"}},
 		{Definition: fantasy.ProviderDefinedTool{Name: "code_execution"}},
 	}
-	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent"}
+	builtins := []string{"read_file", "write_file", "edit_files", "execute", "process_output", "spawn_agent", "message_family_chat"}
 	allMCP := []string{"docs__search", "other__lookup", "ghost_x__lookup", "Workspace__echo", "_Workspace__ping"}
 	allDeferred := []string{"docs__search", "other__lookup", "Workspace__echo", "_Workspace__ping"}
 	allProvider := []string{"web_search", "code_execution"}
@@ -123,7 +124,7 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "AllowlistAliases",
 			policy:       customAgentToolPolicy{Tools: []string{"Grep", "WebSearch", "Task"}, MCPMode: "inherit"},
-			want:         append([]string{"read_file", "execute", "process_output", "spawn_agent"}, allMCP...),
+			want:         append([]string{"read_file", "execute", "process_output", "spawn_agent", "message_family_chat"}, allMCP...),
 			wantDeferred: allDeferred,
 			wantProvider: []string{"web_search"},
 		},
@@ -137,9 +138,16 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		{
 			name:         "Disallowed",
 			policy:       customAgentToolPolicy{DisallowedTools: []string{"execute", "mcp__other__lookup", "mcp__ghost.x__lookup", "web_search"}, MCPMode: "inherit"},
-			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "docs__search", "Workspace__echo", "_Workspace__ping"},
+			want:         []string{"read_file", "write_file", "edit_files", "process_output", "spawn_agent", "message_family_chat", "docs__search", "Workspace__echo", "_Workspace__ping"},
 			wantDeferred: []string{"docs__search", "Workspace__echo", "_Workspace__ping"},
 			wantProvider: []string{"code_execution"},
+		},
+		{
+			name:         "DisallowedTask",
+			policy:       customAgentToolPolicy{DisallowedTools: []string{"Task"}, MCPMode: "inherit"},
+			want:         append([]string{"read_file", "write_file", "edit_files", "execute", "process_output"}, allMCP...),
+			wantDeferred: allDeferred,
+			wantProvider: allProvider,
 		},
 		{
 			name:         "DisallowedFindTools",
