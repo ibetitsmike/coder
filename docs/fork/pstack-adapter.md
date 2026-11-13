@@ -706,7 +706,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
   Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:425-442`, `:456-484`.
   Direct children only, `isSubagentTarget`, `fork_subagents.go:489-501`.
-  The `chat_id` and `recursive` options of `list_agents`, only with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:80`, `fork_list_agents.go:50-53`, `:74-84`, limited to the chat and its descendants, `:105-113`, walked through unarchived chats, `:114-118`, `:145-172`, with `parent_chat_id`, `:135-141`.
+  The `chat_id` and `recursive` options of `list_agents`, only with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:83`, `fork_list_agents.go:50-53`, `:74-84`, limited to the chat and its descendants, `:105-113`, walked through unarchived chats, `:114-118`, `:145-172`, with `parent_chat_id`, `:135-141`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
