@@ -35,6 +35,7 @@ var unbilledSubagentToolNames = map[string]bool{
 	"interrupt_agent":          true,
 	"list_agents":              true,
 	listSubagentModelsToolName: true,
+	archiveAgentToolName:       true, // fork: fork_archive_agent.go
 }
 
 type spawnAgentArgs struct {

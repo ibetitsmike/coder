@@ -57,7 +57,7 @@ var customAgentToolAliases = map[string][]string{
 	"Glob":      {"read_file", "execute", "process_output"},
 	"WebSearch": {"web_search"},
 	"Task": {
-		spawnAgentToolName, "wait_agent", "message_agent", "interrupt_agent", "list_agents",
+		spawnAgentToolName, "wait_agent", "message_agent", "interrupt_agent", archiveAgentToolName, "list_agents",
 		listSubagentModelsToolName, messageFamilyChatToolName, listFamilyChatsToolName,
 	},
 }
