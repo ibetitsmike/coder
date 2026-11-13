@@ -161,6 +161,8 @@ type Querier interface {
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
+	// Lists the unarchived chats of the family of @root_id, the root first.
+	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
 	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)

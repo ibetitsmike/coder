@@ -1283,6 +1283,21 @@ func (mr *MockStoreMockRecorder) InsertWorkflowStep(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertWorkflowStep", reflect.TypeOf((*MockStore)(nil).InsertWorkflowStep), ctx, arg)
 }
 
+// ListChatFamilyMembers mocks base method.
+func (m *MockStore) ListChatFamilyMembers(ctx context.Context, arg forkdb.ListChatFamilyMembersParams) ([]forkdb.ListChatFamilyMembersRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChatFamilyMembers", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.ListChatFamilyMembersRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChatFamilyMembers indicates an expected call of ListChatFamilyMembers.
+func (mr *MockStoreMockRecorder) ListChatFamilyMembers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatFamilyMembers", reflect.TypeOf((*MockStore)(nil).ListChatFamilyMembers), ctx, arg)
+}
+
 // ListChatWakeupRunKeys mocks base method.
 func (m *MockStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	m.ctrl.T.Helper()

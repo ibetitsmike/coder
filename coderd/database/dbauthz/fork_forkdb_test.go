@@ -419,6 +419,14 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatFamilyMessageRecipient(gomock.Any(), arg).Return(recipient, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(recipient)
 		},
+		"ListChatFamilyMembers": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.ListChatFamilyMembersParams{RootID: chat.ID, LimitCount: 101}
+			rows := []forkdb.ListChatFamilyMembersRow{{ID: chat.ID, Title: chat.Title, Status: chat.Status}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().ListChatFamilyMembers(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"InsertChatPinnedSkills": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.InsertChatPinnedSkillsParams{ChatID: chat.ID, SkillSources: []string{"personal"}, SkillNames: []string{"deploy"}}

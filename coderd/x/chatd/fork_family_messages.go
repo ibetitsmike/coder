@@ -1,7 +1,8 @@
 package chatd
 
-// This file is fork code: it holds the message_family_chat tool of the
-// fork-family-messages experiment. appendForkTools adds the tool to a turn.
+// This file is fork code: it holds the message_family_chat and
+// list_family_chats tools of the fork-family-messages experiment.
+// appendForkTools adds the tools to a turn.
 
 import (
 	"context"
@@ -49,7 +50,8 @@ type familyMessageResult struct {
 }
 
 // familyMessageTools returns the message_family_chat tool, which sends a
-// message from chat to another chat in its family.
+// message from chat to another chat in its family, and the list_family_chats
+// tool, which lists the chats of that family.
 func (p *Server) familyMessageTools(chat database.Chat) []fantasy.AgentTool {
 	return []fantasy.AgentTool{serialFamilyMessageTool{AgentTool: fantasy.NewAgentTool(
 		messageFamilyChatToolName,
@@ -61,7 +63,8 @@ func (p *Server) familyMessageTools(chat database.Chat) []fantasy.AgentTool {
 			"and that the message comes from an agent, not from the user. This "+
 			"call does not wait for a reply; the recipient replies with "+
 			messageFamilyChatToolName+". "+
-			fmt.Sprintf("At most %d messages per chat per hour.", maxFamilyMessagesPerHour),
+			fmt.Sprintf("At most %d messages per chat per hour. ", maxFamilyMessagesPerHour)+
+			"Use "+listFamilyChatsToolName+" to find chat IDs.",
 		func(ctx context.Context, args messageFamilyChatArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			target, queued, err := p.sendFamilyMessage(ctx, chat, args)
 			// A failed hook dispatch must fail closed instead of degrading
@@ -79,7 +82,7 @@ func (p *Server) familyMessageTools(chat database.Chat) []fantasy.AgentTool {
 				Title:  target.Title,
 			}), nil
 		},
-	)}}
+	)}, p.listFamilyChatsTool(chat)}
 }
 
 // serialFamilyMessageTool runs the message_family_chat calls of a step one at
@@ -246,6 +249,116 @@ func familyMessageEnvelope(senderID uuid.UUID, senderTitle, body string) string 
 		"%s\n</agent-message>",
 		senderID, strconv.Quote(escapeAgentMessageTags(senderTitle)), messageFamilyChatToolName, senderID,
 		escapeAgentMessageTags(strings.TrimSpace(body)))
+}
+
+const (
+	listFamilyChatsToolName = "list_family_chats"
+	maxFamilyChatsListed    = 100
+	// maxFamilyChatsListBytes keeps a listing below chatloop's smallest
+	// tool-result budget (16 KiB), which would cut the JSON mid-entry.
+	maxFamilyChatsListBytes = 12 << 10
+)
+
+// familyChatsResult and familyChat keep their fields in sorted JSON key
+// order, like familyMessageResult.
+type familyChatsResult struct {
+	Chats     []familyChat `json:"chats"`
+	Truncated bool         `json:"truncated,omitempty"`
+}
+
+type familyChat struct {
+	ChatID       string `json:"chat_id"`
+	ParentChatID string `json:"parent_chat_id,omitempty"`
+	Relation     string `json:"relation"`
+	Status       string `json:"status"`
+	Title        string `json:"title"`
+}
+
+// listFamilyChatsTool returns the list_family_chats tool, which lists the
+// chats of the family of chat.
+func (p *Server) listFamilyChatsTool(chat database.Chat) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
+		listFamilyChatsToolName,
+		"List the chats in your chat family, the root first, with the chat "+
+			"ID, title, status and parent of each, and its relation to you: "+
+			"self, parent, root, child, sibling or other. Archived chats are "+
+			"not listed. "+fmt.Sprintf("At most %d chats are listed; ", maxFamilyChatsListed)+
+			"truncated is true when more chats exist than the list holds.",
+		func(ctx context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			result, err := p.listFamilyChats(ctx, chat, maxFamilyChatsListed)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			return toolJSONResponse(result), nil
+		},
+	)
+}
+
+// listFamilyChats lists at most limit unarchived chats of the family of
+// caller, the root first, then by creation time, with the relation of caller
+// to each.
+func (p *Server) listFamilyChats(ctx context.Context, caller database.Chat, limit int32) (familyChatsResult, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return familyChatsResult{}, xerrors.Errorf("fork queries: %w", err)
+	}
+	rootID := subagentRootChatID(caller)
+	//nolint:gocritic // chatd reads the family of its own chat.
+	rows, err := fdb.ListChatFamilyMembers(dbauthz.AsChatd(ctx), forkdb.ListChatFamilyMembersParams{
+		RootID:     rootID,
+		LimitCount: limit + 1,
+	})
+	if err != nil {
+		return familyChatsResult{}, xerrors.Errorf("list family chats: %w", err)
+	}
+	result := familyChatsResult{Chats: []familyChat{}}
+	if len(rows) > int(limit) {
+		rows = rows[:limit]
+		result.Truncated = true
+	}
+	size := 0
+	for _, row := range rows {
+		item := familyChat{
+			ChatID:   row.ID.String(),
+			Relation: familyRelation(caller, rootID, row.ID, row.ParentChatID),
+			Status:   string(row.Status),
+			Title:    row.Title,
+		}
+		if row.ParentChatID.Valid {
+			item.ParentChatID = row.ParentChatID.UUID.String()
+		}
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return familyChatsResult{}, xerrors.Errorf("encode family chat: %w", err)
+		}
+		size += len(encoded) + 1
+		if size > maxFamilyChatsListBytes {
+			result.Truncated = true
+			break
+		}
+		result.Chats = append(result.Chats, item)
+	}
+	return result, nil
+}
+
+// familyRelation returns the relation of caller to the chat id with parent
+// parentID in the family of rootID. The first match wins: self, parent, root,
+// child, sibling, other.
+func familyRelation(caller database.Chat, rootID, id uuid.UUID, parentID uuid.NullUUID) string {
+	switch {
+	case id == caller.ID:
+		return "self"
+	case caller.ParentChatID.Valid && id == caller.ParentChatID.UUID:
+		return "parent"
+	case id == rootID:
+		return "root"
+	case parentID.Valid && parentID.UUID == caller.ID:
+		return "child"
+	case caller.ParentChatID.Valid && parentID == caller.ParentChatID:
+		return "sibling"
+	default:
+		return "other"
+	}
 }
 
 type familyMessageSenderKey struct{}
