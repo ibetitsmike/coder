@@ -4260,6 +4260,8 @@ func TestUnbilledSubagentToolNamesMatchCatalog(t *testing.T) {
 	for _, tool := range tools {
 		catalog[tool.Info().Name] = true
 	}
+	// fork: archive_agent joins these tools only with fork-nested-subagents.
+	catalog[archiveAgentToolName] = true
 	require.Equal(t, catalog, unbilledSubagentToolNames)
 }
 
