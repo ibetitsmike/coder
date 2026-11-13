@@ -188,7 +188,7 @@ The chat stores the message as `<prompt>`, and the wake-up sends `<prompt>` at e
 `/loop` also works as a chat's first message.
 An invalid `/loop` fails with status 400, `Invalid /loop command.`, and the reason in the detail, such as `usage: /loop [interval] <prompt>` for a `/loop` without a prompt.
 
-`wait_for_events` wakes the chat when its child agents are done, when a GitHub pull request has new activity, or when a background process exits, so you can end your turn instead of waiting in `wait_agent`.
+`wait_for_events` wakes the chat when its child agents are done, when a GitHub pull request has new activity, or when a background process exits, prints lines that match a pattern, or can no longer be watched, so you can end your turn instead of waiting in `wait_agent`.
 Call it, then end your turn.
 `child_chat_ids` names up to 50 direct children of the chat, and defaults to every child that is still working.
 A child is done when it's archived, or when it isn't running, interrupting, or paused, and it has no unanswered question and no `wait_for_events` wake-up of its own that still waits.
@@ -243,6 +243,7 @@ The workspace agent keeps only the first and the last 16&nbsp;KiB of a process's
 It also cuts a line longer than 2048&nbsp;bytes and ends it with `... [truncated]`, so a match in the cut part doesn't wake the chat.
 The result also holds `processes`, with the `process_id`, `command`, and `output_pattern` of each watched process.
 Coder Agents reads the processes from the workspace agent every 15&nbsp;seconds, or once a minute while the call also waits for a pull request.
+After a failed read of that pull request, the processes wait for the same retry as the pull request.
 A failed read doesn't end the watch, and when every entry that still waits is a process whose read failed, Coder Agents reads again after a minute.
 At `expires_at`, one last check reports the processes that exited by then, and no more matching lines.
 That check can also report an exit in the 15&nbsp;seconds after `expires_at`, but a check that runs later, such as after a busy turn, leaves out exits after `expires_at`.
@@ -272,7 +273,7 @@ While the experiment is on, the conversation shows each `schedule_wakeup`, `wait
 The title of a `schedule_wakeup` card names the schedule, such as **Scheduled a wake-up every 5m**, and a cron schedule shows its time zone, which is UTC by default.
 The card lists the prompt, the next run, and the run limit and expiry when the call sets them.
 The title of a `wait_for_events` card names what the call waits for, such as **Waiting for 2 child agents and a pull request** or **Waiting for 1 background process**.
-The card links each child with its title and status, and the pull request with its watched events, lists each process by its command with the pattern it matches, and shows when the wait stops.
+The card links each child with its title and status, and the pull request with its watched events, lists each process by its command, with the pattern when the call sets one, and shows when the wait stops.
 A `notify_user` card shows **Sent a notification** with the message, and the title when the call sets one.
 A failed call shows **Failed to schedule a wake-up**, **Failed to wait for events**, or **Failed to send a notification** with the tool's error.
 A result that a card can't read shows the generic tool card.
@@ -807,7 +808,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   What wakes the chat, `:169-181`, without activity after the expiry, `:134-167`, the message without bodies, `:183-223`, one per pull request, `:128-132`, `fork_wait_for_events.go:371-398`, the poll once a minute while it waits, `:401-404`, and the failed reads, `fork_pull_request_events.go:225-252`.
   The read with the chat owner's linked account and its errors, `coderd/fork_chat_pull_requests.go:24-84`, wired in `coderd/coderd.go:977`, only for GitHub, `coderd/externalauth/gitprovider/fork_github_activity.go:85`, `:101-104`, without the owner's own reviews and comments, draft reviews, or older comments, `:140-200`, and the CI state, `:202-295`.
   Background processes, `fork_wait_for_events.go:43-47`, `coderd/x/chatd/fork_process_events.go:30-54`, with the checks of the output pattern fields, `:62-98`, the read at the call and its errors, `:100-168`, the result, `:56-60`, `fork_wait_for_events.go:238-241`, and the default prompt, `:339-344`.
-  The delivery, `fork_wait_for_events.go:453-492`, the last check at the expiry, `:394-402`, `:558-564`, with the late check's process list, `fork_process_events.go:466-482`, `agent/agentproc/api.go:138-150`, the exit, lost-watch, and matching-lines messages, `fork_process_events.go:287-337`, `:387-417`, `:484-534`, the cool-down and the limit, `:347-379`, the kept output, `:419-464`, `agent/agentproc/headtail.go:12-28`, `:259-303`, and the poll and retry times, `fork_wait_for_events.go:494-499`, `fork_process_events.go:41-43`, `fork_wakeups.go:28`.
+  The delivery, `fork_wait_for_events.go:453-492`, the last check at the expiry, `:394-402`, `:558-564`, with the late check's process list, `fork_process_events.go:466-482`, `agent/agentproc/api.go:138-150`, the exit, lost-watch, and matching-lines messages, `fork_process_events.go:287-337`, `:387-417`, `:484-534`, the cool-down and the limit, `:347-379`, the kept output, `:419-464`, `agent/agentproc/headtail.go:12-28`, `:259-303`, and the poll and retry times, `fork_wait_for_events.go:494-499`, `:439-442`, `fork_process_events.go:41-43`, `fork_wakeups.go:28`.
   The wake-up routes, only with the experiment, `coderd/fork_chat_routes.go:57-62`, the list, `coderd/fork_chat_wakeups.go:23-61`, and the change, as an update of the chat, with its errors, `:71-167`, `coderd/x/chatd/fork_wakeup_controls.go:20-76`, a pause that keeps the run time and the reasons, `:24-27`, `:78-92`, and a resume, `:94-114`, with the fields, `codersdk/fork_chat_wakeups.go:38-85`.
   The composer pill, only with the experiment, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:32-34`, with the open wake-ups and their number, `ForkChatWakeupsPill.tsx:54-132`, each row and its buttons, `:135-150`, `:165-260`, read every 30&nbsp;seconds, `site/src/api/queries/forkChatWakeups.ts:13-22`.
   The tool cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:29-41`, `:70-84`, the `schedule_wakeup` card, `ForkScheduleWakeupTool.tsx:12-43`, `:53-99`, the `wait_for_events` card, `ForkWaitForEventsTool.tsx:20-64`, `:72-161`, and the `notify_user` card, `ForkNotifyUserTool.tsx:10`, `:17-62`.
