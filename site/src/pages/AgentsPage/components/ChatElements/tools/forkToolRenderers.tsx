@@ -4,6 +4,10 @@
 import type React from "react";
 import type { Experiment } from "#/api/typesGenerated";
 import { ForkChatTranscriptToolRenderer } from "./ForkChatTranscriptTool";
+import {
+	ForkListFamilyChatsToolRenderer,
+	ForkMessageFamilyChatToolRenderer,
+} from "./ForkFamilyMessageTool";
 import { ForkNotifyUserToolRenderer } from "./ForkNotifyUserTool";
 import { ForkScheduleWakeupToolRenderer } from "./ForkScheduleWakeupTool";
 import { ForkSearchChatsToolRenderer } from "./ForkSearchChatsTool";
@@ -80,5 +84,15 @@ export const createForkToolRenderers = (
 		),
 		run_workflow: workflowRenderer,
 		await_workflow: workflowRenderer,
+		message_family_chat: gate(
+			"fork-family-messages",
+			ForkMessageFamilyChatToolRenderer,
+			fallback,
+		),
+		list_family_chats: gate(
+			"fork-family-messages",
+			ForkListFamilyChatsToolRenderer,
+			fallback,
+		),
 	};
 };
