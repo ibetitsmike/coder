@@ -4,10 +4,13 @@
 # than the default 100 connections.
 set -euo pipefail
 
+# The image is pinned by digest: the chatdmig schema tests compare pg_dump
+# output, and a republished postgres:16 tag (2026-11-12) changed that output
+# (pg_attver column options) without any schema change.
 docker run -d --name fork-ci-postgres -p 5432:5432 \
 	-e POSTGRES_PASSWORD=postgres \
 	--tmpfs /var/lib/postgresql/data \
-	postgres:16 \
+	postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657 \
 	-c max_connections=1000 \
 	-c fsync=off \
 	-c synchronous_commit=off \
