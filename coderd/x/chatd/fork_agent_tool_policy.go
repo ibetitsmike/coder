@@ -58,7 +58,7 @@ var customAgentToolAliases = map[string][]string{
 	"WebSearch": {"web_search"},
 	"Task": {
 		spawnAgentToolName, "wait_agent", "message_agent", "interrupt_agent", "list_agents",
-		listSubagentModelsToolName,
+		listSubagentModelsToolName, messageFamilyChatToolName,
 	},
 }
 

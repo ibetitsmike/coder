@@ -78,6 +78,22 @@ func (f *forkQuerier) CountChatFamilyMessagesSince(ctx context.Context, arg fork
 	return f.db.CountChatFamilyMessagesSince(ctx, arg)
 }
 
+// DeleteChatFamilyMessagesBefore authorizes as an update of the sender chat.
+func (f *forkQuerier) DeleteChatFamilyMessagesBefore(ctx context.Context, arg forkdb.DeleteChatFamilyMessagesBeforeParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.SenderChatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatFamilyMessagesBefore(ctx, arg)
+}
+
+// GetChatFamilyMessageRecipient authorizes as a read of the sender chat.
+func (f *forkQuerier) GetChatFamilyMessageRecipient(ctx context.Context, arg forkdb.GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.SenderChatID); err != nil {
+		return uuid.Nil, err
+	}
+	return f.db.GetChatFamilyMessageRecipient(ctx, arg)
+}
+
 // CountChatUserNotificationsSince reads notification messages, like
 // GetNotificationMessagesByStatus.
 func (f *forkQuerier) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
@@ -486,7 +502,6 @@ func (f *forkQuerier) GetUserAgentDefinitionByName(ctx context.Context, arg fork
 	return f.db.GetUserAgentDefinitionByName(ctx, arg)
 }
 
-// InsertChatSecretAnswer authorizes as an update of the owning chat.
 // InsertChatFamilyMessage authorizes as an update of the recipient chat, which
 // the message is sent to.
 func (f *forkQuerier) InsertChatFamilyMessage(ctx context.Context, arg forkdb.InsertChatFamilyMessageParams) error {
@@ -496,6 +511,7 @@ func (f *forkQuerier) InsertChatFamilyMessage(ctx context.Context, arg forkdb.In
 	return f.db.InsertChatFamilyMessage(ctx, arg)
 }
 
+// InsertChatSecretAnswer authorizes as an update of the owning chat.
 // InsertChatPinnedSkills authorizes as an update of the owning chat.
 func (f *forkQuerier) InsertChatPinnedSkills(ctx context.Context, arg forkdb.InsertChatPinnedSkillsParams) error {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {

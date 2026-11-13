@@ -206,6 +206,20 @@ func (mr *MockStoreMockRecorder) DeleteChatExcludedPluginPack(ctx, arg any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatExcludedPluginPack", reflect.TypeOf((*MockStore)(nil).DeleteChatExcludedPluginPack), ctx, arg)
 }
 
+// DeleteChatFamilyMessagesBefore mocks base method.
+func (m *MockStore) DeleteChatFamilyMessagesBefore(ctx context.Context, arg forkdb.DeleteChatFamilyMessagesBeforeParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatFamilyMessagesBefore", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatFamilyMessagesBefore indicates an expected call of DeleteChatFamilyMessagesBefore.
+func (mr *MockStoreMockRecorder) DeleteChatFamilyMessagesBefore(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatFamilyMessagesBefore", reflect.TypeOf((*MockStore)(nil).DeleteChatFamilyMessagesBefore), ctx, arg)
+}
+
 // DeleteChatPinnedSkills mocks base method.
 func (m *MockStore) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -449,6 +463,21 @@ func (m *MockStore) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetCha
 func (mr *MockStoreMockRecorder) GetChatAwaitingWorker(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetChatAwaitingWorker), ctx, arg)
+}
+
+// GetChatFamilyMessageRecipient mocks base method.
+func (m *MockStore) GetChatFamilyMessageRecipient(ctx context.Context, arg forkdb.GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatFamilyMessageRecipient", ctx, arg)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatFamilyMessageRecipient indicates an expected call of GetChatFamilyMessageRecipient.
+func (mr *MockStoreMockRecorder) GetChatFamilyMessageRecipient(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatFamilyMessageRecipient", reflect.TypeOf((*MockStore)(nil).GetChatFamilyMessageRecipient), ctx, arg)
 }
 
 // GetChatOrganizationSubagentLimits mocks base method.

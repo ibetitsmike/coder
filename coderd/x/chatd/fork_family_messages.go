@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const (
@@ -102,6 +104,33 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	if targetID == sender.ID {
 		return database.Chat{}, false, xerrors.New("a chat cannot message itself")
 	}
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return database.Chat{}, false, xerrors.Errorf("fork queries: %w", err)
+	}
+
+	// A call replayed after a worker restart must not deliver the message
+	// again, so the recorded message takes the ID of the call occurrence.
+	// Without one the call cannot be deduplicated and gets a fresh ID.
+	messageID, ok := workspacesdk.ToolCallIDFromContext(ctx)
+	if !ok {
+		messageID = uuid.New()
+	}
+	//nolint:gocritic // chatd reads its own bookkeeping rows.
+	recipientID, err := fdb.GetChatFamilyMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatFamilyMessageRecipientParams{
+		ID:           messageID,
+		SenderChatID: sender.ID,
+	})
+	if err == nil {
+		target, err := p.db.GetChatByID(ctx, recipientID)
+		if err != nil {
+			return database.Chat{}, false, xerrors.Errorf("get target chat: %w", err)
+		}
+		return target, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return database.Chat{}, false, xerrors.Errorf("get family message: %w", err)
+	}
 
 	// A missing chat and a chat of another family get the same error, so a
 	// chat cannot probe which chat IDs exist outside its family.
@@ -125,14 +154,11 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 		return database.Chat{}, false, xerrors.Errorf("get sender chat: %w", err)
 	}
 
-	fdb, err := forkdb.From(p.db)
-	if err != nil {
-		return database.Chat{}, false, xerrors.Errorf("fork queries: %w", err)
-	}
+	since := p.clock.Now().Add(-time.Hour)
 	//nolint:gocritic // chatd counts its own bookkeeping rows.
 	sent, err := fdb.CountChatFamilyMessagesSince(dbauthz.AsChatd(ctx), forkdb.CountChatFamilyMessagesSinceParams{
 		SenderChatID: sender.ID,
-		Since:        p.clock.Now().Add(-time.Hour),
+		Since:        since,
 	})
 	if err != nil {
 		return database.Chat{}, false, xerrors.Errorf("count family messages: %w", err)
@@ -157,9 +183,19 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 			if err != nil {
 				return xerrors.Errorf("fork queries: %w", err)
 			}
+			// The rate limit reads only the last hour, so older rows of the
+			// sender are dropped here to keep its rows bounded.
+			//nolint:gocritic // chatd deletes its own bookkeeping rows.
+			err = txdb.DeleteChatFamilyMessagesBefore(dbauthz.AsChatd(ctx), forkdb.DeleteChatFamilyMessagesBeforeParams{
+				SenderChatID: sender.ID,
+				Before:       since,
+			})
+			if err != nil {
+				return xerrors.Errorf("delete old family messages: %w", err)
+			}
 			//nolint:gocritic // chatd records its own bookkeeping rows.
 			err = txdb.InsertChatFamilyMessage(dbauthz.AsChatd(ctx), forkdb.InsertChatFamilyMessageParams{
-				ID:              uuid.New(),
+				ID:              messageID,
 				SenderChatID:    sender.ID,
 				RecipientChatID: target.ID,
 				CreatedAt:       p.clock.Now(),
@@ -185,6 +221,18 @@ func familyRootID(chat database.Chat) uuid.UUID {
 	return chat.ID
 }
 
+// agentMessageTagPattern matches opening and closing <agent-message> tags,
+// including case and spacing variants.
+var agentMessageTagPattern = regexp.MustCompile(`(?i)<\s*/?\s*agent-message\b[^>]*>`)
+
+// escapeAgentMessageTags escapes the wrapper tags in text so that a sender
+// cannot end the envelope early and place text outside it.
+func escapeAgentMessageTags(text string) string {
+	return agentMessageTagPattern.ReplaceAllStringFunc(text, func(tag string) string {
+		return "&lt;" + tag[1:len(tag)-1] + "&gt;"
+	})
+}
+
 // familyMessageEnvelope returns the user message text that delivers body from
 // the sender chat. Clients parse this text to show the message as one from an
 // agent, so its format must stay stable.
@@ -193,5 +241,6 @@ func familyMessageEnvelope(senderID uuid.UUID, senderTitle, body string) string 
 		"This message comes from another agent in your chat family, not from the user. "+
 		"To reply, call %s with chat_id \"%s\".\n\n"+
 		"%s\n</agent-message>",
-		senderID, strconv.Quote(senderTitle), messageFamilyChatToolName, senderID, strings.TrimSpace(body))
+		senderID, strconv.Quote(escapeAgentMessageTags(senderTitle)), messageFamilyChatToolName, senderID,
+		escapeAgentMessageTags(strings.TrimSpace(body)))
 }

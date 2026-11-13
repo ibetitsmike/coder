@@ -29,6 +29,38 @@ func (q *Queries) CountChatFamilyMessagesSince(ctx context.Context, arg CountCha
 	return count, err
 }
 
+const deleteChatFamilyMessagesBefore = `-- name: DeleteChatFamilyMessagesBefore :exec
+DELETE FROM chat_family_messages
+WHERE sender_chat_id = $1::uuid AND created_at <= $2::timestamptz
+`
+
+type DeleteChatFamilyMessagesBeforeParams struct {
+	SenderChatID uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
+	Before       time.Time `db:"before" json:"before"`
+}
+
+func (q *Queries) DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error {
+	_, err := q.db.ExecContext(ctx, deleteChatFamilyMessagesBefore, arg.SenderChatID, arg.Before)
+	return err
+}
+
+const getChatFamilyMessageRecipient = `-- name: GetChatFamilyMessageRecipient :one
+SELECT recipient_chat_id FROM chat_family_messages
+WHERE id = $1::uuid AND sender_chat_id = $2::uuid
+`
+
+type GetChatFamilyMessageRecipientParams struct {
+	ID           uuid.UUID `db:"id" json:"id"`
+	SenderChatID uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
+}
+
+func (q *Queries) GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, getChatFamilyMessageRecipient, arg.ID, arg.SenderChatID)
+	var recipient_chat_id uuid.UUID
+	err := row.Scan(&recipient_chat_id)
+	return recipient_chat_id, err
+}
+
 const insertChatFamilyMessage = `-- name: InsertChatFamilyMessage :exec
 INSERT INTO chat_family_messages (id, sender_chat_id, recipient_chat_id, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz)

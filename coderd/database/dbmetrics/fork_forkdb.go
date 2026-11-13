@@ -242,6 +242,16 @@ func (f forkQueryMetricsStore) CountChatFamilyMessagesSince(ctx context.Context,
 	return f.s.CountChatFamilyMessagesSince(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) DeleteChatFamilyMessagesBefore(ctx context.Context, arg forkdb.DeleteChatFamilyMessagesBeforeParams) error {
+	defer f.observe(ctx, "DeleteChatFamilyMessagesBefore", time.Now())
+	return f.s.DeleteChatFamilyMessagesBefore(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatFamilyMessageRecipient(ctx context.Context, arg forkdb.GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
+	defer f.observe(ctx, "GetChatFamilyMessageRecipient", time.Now())
+	return f.s.GetChatFamilyMessageRecipient(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
 	defer f.observe(ctx, "CountChatUserNotificationsSince", time.Now())
 	return f.s.CountChatUserNotificationsSince(ctx, arg)
