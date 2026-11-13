@@ -41,8 +41,12 @@ func TestChatNotesTool(t *testing.T) {
 	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"notes"}, toolNames(tools))
-	// Plan mode, explore and read-only custom agents do not get notes.
+	// The calls of a step run in call order, so a read sees the writes
+	// before it and the note cap holds.
 	notesTool := findToolByName(tools, chatNotesToolName)
+	serial, ok := notesTool.(interface{ SerialToolCalls() bool })
+	require.True(t, ok && serial.SerialToolCalls(), "notes calls must run one at a time")
+	// Plan mode, explore and read-only custom agents do not get notes.
 	require.Empty(t, filterToolsForTurn([]fantasy.AgentTool{notesTool}, database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}, uuid.NullUUID{}, nil))
 	require.False(t, exploreToolAllowed(notesTool))
 	require.False(t, customAgentReadOnlyToolAllowed(notesTool))

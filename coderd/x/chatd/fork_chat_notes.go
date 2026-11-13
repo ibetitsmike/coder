@@ -72,7 +72,7 @@ type chatNoteDeleteResult struct {
 // chatNotesTool returns the notes tool, which reads and writes the notes of
 // chat.
 func (p *Server) chatNotesTool(chat database.Chat) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return serialChatNotesTool{AgentTool: fantasy.NewAgentTool(
 		chatNotesToolName,
 		chatNotesToolDescription,
 		func(ctx context.Context, args chatNotesArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -82,8 +82,16 @@ func (p *Server) chatNotesTool(chat database.Chat) fantasy.AgentTool {
 			}
 			return toolJSONResponse(result), nil
 		},
-	)
+	)}
 }
+
+// serialChatNotesTool runs the notes calls of a step one at a time in call
+// order, so a read sees the writes before it and the note cap holds.
+type serialChatNotesTool struct {
+	fantasy.AgentTool
+}
+
+func (serialChatNotesTool) SerialToolCalls() bool { return true }
 
 // runChatNotes runs one notes action on the notes of chatID. The returned
 // error is the text the model sees.

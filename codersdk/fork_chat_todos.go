@@ -26,7 +26,7 @@ const (
 	ChatTodoStatusPending    ChatTodoStatus = "pending"
 	ChatTodoStatusInProgress ChatTodoStatus = "in_progress"
 	ChatTodoStatusDone       ChatTodoStatus = "done"
-	ChatTodoStatusCancelled  ChatTodoStatus = "canceled"
+	ChatTodoStatusCancelled  ChatTodoStatus = "cancelled"
 )
 
 // ChatTodoStatuses lists every valid ChatTodoStatus.

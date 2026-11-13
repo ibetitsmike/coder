@@ -8,6 +8,7 @@ package chatd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -168,7 +169,7 @@ func (t secretAnswerTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	}
 	if err != nil {
 		if scrubbed := scrubSecretAnswers(err.Error(), answers); scrubbed != err.Error() {
-			err = xerrors.New(scrubbed)
+			err = errors.New(scrubbed)
 		}
 	}
 	return resp, err
