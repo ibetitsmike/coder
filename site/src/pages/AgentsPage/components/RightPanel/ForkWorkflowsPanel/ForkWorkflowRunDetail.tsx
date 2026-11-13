@@ -185,6 +185,11 @@ const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 	const stopMutation = useMutation(
 		stopWorkflowRun(queryClient, run.chat_id, run.id),
 	);
+	// Resetting the state, rather than hiding the dialog, keeps a resumed run
+	// from reopening it.
+	if (isConfirmOpen && run.status !== "running" && !stopMutation.isPending) {
+		setIsConfirmOpen(false);
+	}
 
 	const handleStop = () => {
 		stopMutation.mutate(undefined, {
@@ -213,7 +218,11 @@ const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
 			)}
 			<ConfirmDialog
 				open={isConfirmOpen}
-				onClose={() => setIsConfirmOpen(false)}
+				onClose={() => {
+					if (!stopMutation.isPending) {
+						setIsConfirmOpen(false);
+					}
+				}}
 				onConfirm={handleStop}
 				// The Stop button unmounts once the run ends, including on a
 				// successful stop, so focus falls back to the run heading.
