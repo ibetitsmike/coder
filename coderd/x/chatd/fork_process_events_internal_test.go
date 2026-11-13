@@ -92,9 +92,13 @@ func TestWaitForEventsProcesses(t *testing.T) {
 		require.Contains(t, content, tc.wantErr)
 	}
 	// An expired watch that has not had its final poll still watches.
-	mClock.Set(row.ExpiresAt.Time.Add(time.Minute))
-	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, true)
-	require.Contains(t, content, "already watched by wake-up "+watchID.String())
+	expired := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		Events:    processExitEvents(t, agent.ID, "proc-2"),
+		ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(-time.Minute), Valid: true},
+	})
+	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: []string{"proc-2"}}, true)
+	require.Contains(t, content, "already watched by wake-up "+expired.ID.String())
 	// Refused process IDs fail the call before it reads the pull request.
 	fake := &fakePullRequestActivity{activity: openPullRequest(gitprovider.CheckStatePending)}
 	server.forkPullRequestActivity = fake.fetch
@@ -105,7 +109,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 1, "refused calls create nothing")
+	require.Len(t, rows, 2, "refused calls create nothing")
 }
 
 // A watched process wakes the chat once, when it exits, with the end of its
