@@ -99,6 +99,12 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	})
 	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: []string{"proc-2"}}, true)
 	require.Contains(t, content, "already watched by wake-up "+expired.ID.String())
+	// Parallel calls in one step would all pass the guard before either
+	// creates its wake-up.
+	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+	require.NoError(t, err)
+	serial, ok := findToolByName(tools, waitForEventsToolName).(interface{ SerialToolCalls() bool })
+	require.True(t, ok && serial.SerialToolCalls(), "wait_for_events calls must run one at a time")
 	// Refused process IDs fail the call before it reads the pull request.
 	fake := &fakePullRequestActivity{activity: openPullRequest(gitprovider.CheckStatePending)}
 	server.forkPullRequestActivity = fake.fetch
@@ -179,6 +185,11 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 			wantText: "Background process proc-1 (`sleep 600`) exited without an exit code (killed by a signal).",
 		},
 		{
+			name:     "KilledBySignal",
+			output:   workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(-1)},
+			wantText: "Background process proc-1 (`sleep 600`) exited without an exit code (killed by a signal).",
+		},
+		{
 			name:     "UnknownToAgent",
 			err:      codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Process not found."}),
 			wantText: "Lost the watch on background process proc-1 (`sleep 600`): the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago).",
@@ -254,6 +265,7 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 		{name: "OnTimeReadFails", late: time.Second, outputErr: xerrors.New("connection reset")},
 		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
+		{name: "LateExitedInExpirySecond", late: time.Minute, exitedAt: new(time.Duration(0)), wantReason: "expired"},
 		{name: "LateNotListed", late: time.Minute, wantReason: "expired"},
 		{name: "LateListFails", late: time.Minute, listErr: xerrors.New("connection reset")},
 		{name: "LateUnknownToAgent", late: time.Minute, outputErr: notFound, wantReason: "expired"},

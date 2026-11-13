@@ -288,7 +288,9 @@ func processExitedBy(ctx context.Context, conn workspacesdk.AgentConn, processID
 	}
 	for _, info := range list.Processes {
 		if info.ID == processID && info.ExitedAt != nil {
-			return !time.Unix(*info.ExitedAt, 0).After(t), nil
+			// ExitedAt has whole seconds, so an exit in the second of t
+			// may be after t.
+			return !time.Unix(*info.ExitedAt+1, 0).After(t), nil
 		}
 	}
 	return false, nil
@@ -304,7 +306,8 @@ func processLostText(event wakeupEvent, reason string) string {
 // output.
 func processExitText(event wakeupEvent, output workspacesdk.ProcessOutputResponse) string {
 	exit := "exited without an exit code (killed by a signal)."
-	if output.ExitCode != nil {
+	// The agent reports -1 for a process killed by a signal.
+	if output.ExitCode != nil && *output.ExitCode >= 0 {
 		exit = fmt.Sprintf("exited with code %d.", *output.ExitCode)
 	}
 	text := fmt.Sprintf("Background process %s (`%s`) %s", event.ProcessID, event.Command, exit)

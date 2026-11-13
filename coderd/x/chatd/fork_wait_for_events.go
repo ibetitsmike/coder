@@ -84,7 +84,7 @@ type wakeupEvent struct {
 // waitForEventsTool returns the wait_for_events tool, which creates an events
 // wake-up of chat for its child agents.
 func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return serialWaitForEventsTool{fantasy.NewAgentTool(
 		waitForEventsToolName,
 		"Wait for child agents without blocking: call this, then end your "+
 			"turn. This chat then receives one user message per watched child "+
@@ -128,8 +128,15 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			}
 			return toolJSONResponse(result), nil
 		},
-	)
+	)}
 }
+
+// serialWaitForEventsTool runs the wait_for_events calls of a step one at a
+// time, so each call's duplicate guard sees the wake-ups of the calls before
+// it.
+type serialWaitForEventsTool struct{ fantasy.AgentTool }
+
+func (serialWaitForEventsTool) SerialToolCalls() bool { return true }
 
 // chatWakeupByID returns the wake-up of chat with id, or nil when chat has
 // none.
