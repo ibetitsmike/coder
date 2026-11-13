@@ -149,9 +149,9 @@ func (p *Server) chatWakeupByID(ctx context.Context, chat database.Chat, id uuid
 }
 
 // newWaitForEventsSpec resolves what a new wait_for_events call watches: its
-// pull request, its children, or both, and maps it to a wake-up spec. It
-// checks the local arguments before it reads the pull request, which can page
-// through its activity on the owner's quota.
+// pull request, its children, its processes, or several of them, and maps it
+// to a wake-up spec. It checks the other arguments before it reads the pull
+// request, which can page through its activity on the owner's quota.
 func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, args waitForEventsArgs) (wakeupSpec, error) {
 	watchesPullRequest := strings.TrimSpace(args.PullRequestURL) != ""
 	if !watchesPullRequest && len(args.PullRequestEvents) > 0 {
@@ -170,6 +170,13 @@ func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, a
 			return wakeupSpec{}, err
 		}
 	}
+	var processes []wakeupEvent
+	if len(args.ProcessIDs) > 0 {
+		processes, err = p.processWaitEvents(ctx, chat, args.ProcessIDs)
+		if err != nil {
+			return wakeupSpec{}, err
+		}
+	}
 	var pullRequest *wakeupEvent
 	if watchesPullRequest {
 		event, err := p.pullRequestWaitEvent(ctx, chat, args.PullRequestURL, args.PullRequestEvents)
@@ -177,13 +184,6 @@ func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, a
 			return wakeupSpec{}, err
 		}
 		pullRequest = &event
-	}
-	var processes []wakeupEvent
-	if len(args.ProcessIDs) > 0 {
-		processes, err = p.processWaitEvents(ctx, chat, args.ProcessIDs)
-		if err != nil {
-			return wakeupSpec{}, err
-		}
 	}
 	return waitForEventsSpec(args.Prompt, expiresInSeconds, children, processes, pullRequest)
 }
@@ -367,13 +367,14 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	processErrors := 0
 	var conns processConns
 	defer conns.release()
-	// A child's status has no time it became done, so a final poll that
-	// runs well after the expiry leaves out the children updated after the
-	// expiry: they may have finished after it. A status change updates the
-	// chat, so a child last updated by the expiry was done by then.
-	// A child whose send failed was done before the cutoff, so a retry
-	// still delivers it.
-	childrenCutOff := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
+	// A final poll that runs well after the expiry leaves out the entries
+	// that may have happened after it. A child's status has no time it
+	// became done, so it leaves out the children updated after the expiry:
+	// a status change updates the chat, so a child last updated by the
+	// expiry was done by then. It leaves out the processes that exited after
+	// the expiry. An entry whose send failed happened before the cutoff, so
+	// a retry still delivers it.
+	lateFinalPoll := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
 	for _, event := range events {
 		switch event.Type {
 		case wakeupEventChildDone:
@@ -386,7 +387,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				continue
 			}
 			child := rows[index].Chat
-			cutOff := childrenCutOff && child.UpdatedAt.After(wakeup.ExpiresAt.Time) &&
+			cutOff := lateFinalPoll && child.UpdatedAt.After(wakeup.ExpiresAt.Time) &&
 				!slices.Contains(keys, failedRunKey(childDoneRunKey(child.ID)))
 			if next == nil && !cutOff && childDone(child, waiting) {
 				next = &wakeupDelivery{
@@ -432,7 +433,11 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				if wakeup.LeaseExpiresAt.Valid && now.Add(2*processReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
 					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
 				}
-				text, err := p.processWakeupText(ctx, chat, event, &conns)
+				var exitedBy time.Time
+				if lateFinalPoll && !slices.Contains(keys, failedRunKey(processExitRunKey(event.ProcessID))) {
+					exitedBy = wakeup.ExpiresAt.Time
+				}
+				text, err := p.processWakeupText(ctx, chat, event, exitedBy, &conns)
 				if err != nil {
 					p.logger.Warn(ctx, "chat wake-up could not read its background process",
 						slog.F("wakeup_id", wakeup.ID),

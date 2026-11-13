@@ -2,6 +2,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/externalauth/gitprovider"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk/agentconnmock"
@@ -89,6 +91,12 @@ func TestWaitForEventsProcesses(t *testing.T) {
 		_, content := waitCall(tc.chat, uuid.New(), waitForEventsArgs{ProcessIDs: tc.ids}, true)
 		require.Contains(t, content, tc.wantErr)
 	}
+	// Refused process IDs fail the call before it reads the pull request.
+	fake := &fakePullRequestActivity{activity: openPullRequest(gitprovider.CheckStatePending)}
+	server.forkPullRequestActivity = fake.fetch
+	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: tooMany, PullRequestURL: testPullRequestURL}, true)
+	require.Contains(t, content, "the maximum is 10")
+	require.Empty(t, fake.calls)
 	fdb, err := forkdb.From(f.db)
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
@@ -220,6 +228,58 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 			require.Equal(t, []string{wakeup.Prompt + "\n\n" + tc.wantText}, f.wakeMessages(t, chat, wakeup.Prompt))
 			require.Equal(t, []string{processExitRunKey("proc-1")}, f.wakeupRunKeys(t, wakeup.ID))
 			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+		})
+	}
+}
+
+// A final poll well after the expiry leaves out a process that exited after
+// the expiry.
+func TestWakeupFinalPollProcesses(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		late time.Duration
+		// exitedAt is when the agent lists the process as exited, relative to
+		// the expiry.
+		exitedAt    time.Duration
+		wantMessage bool
+		wantReason  string
+	}{
+		{name: "OnTime", late: time.Second, exitedAt: time.Second, wantMessage: true, wantReason: "done"},
+		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: 30 * time.Second, wantReason: "expired"},
+		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: -30 * time.Second, wantMessage: true, wantReason: "done"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			chat := f.createWakeupChat(t)
+			_, _, agent := f.bindProcessWorkspace(t, chat)
+			// insertWakeup schedules the run at wakeupTestSlot, so this is the
+			// final poll.
+			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+				Kind:      forkdb.ChatWakeupKindEvents,
+				Events:    processExitEvents(t, agent.ID, "proc-1"),
+				ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
+			})
+			worker := f.newArchiveWorker(t, nil, nil, nil)
+			conn := processTestConn(t, worker.server, chat, agent)
+			conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).
+				Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(0)}, nil)
+			exitedAt := wakeupTestSlot.Add(tc.exitedAt).Unix()
+			conn.EXPECT().ListProcesses(gomock.Any()).
+				Return(workspacesdk.ListProcessesResponse{Processes: []workspacesdk.ProcessInfo{{ID: "proc-1", ExitedAt: &exitedAt}}}, nil).
+				AnyTimes()
+
+			worker.wakeupOnce(ctx, wakeupTestSlot.Add(tc.late))
+			if tc.wantMessage {
+				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+			} else {
+				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+			}
+			got := f.wakeup(t, wakeup.ID)
+			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+			require.Equal(t, tc.wantReason, got.StatusReason.String)
 		})
 	}
 }
