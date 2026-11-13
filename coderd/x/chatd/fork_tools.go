@@ -51,6 +51,9 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		return nil, err
 	}
 	tools = p.withForkReplaySafeSpawn(append(tools, nested...), chat)
+	if p.nestedSubagentsEnabled() {
+		tools = p.withForkArchiveAgent(tools, chat)
+	}
 	if p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		tools = append(tools, p.chatTodoTools(chat)...)
 		tools = append(tools, p.chatTranscriptTool(chat))

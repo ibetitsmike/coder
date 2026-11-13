@@ -278,7 +278,7 @@ The card links each child with its title and status, and the pull request with i
 A `notify_user` card shows **Sent a notification** with the message, and the title when the call sets one.
 A failed call shows **Failed to schedule a wake-up**, **Failed to wait for events**, or **Failed to send a notification** with the tool's error.
 A result that a card can't read shows the generic tool card.
-While the experiment is on, archiving a chat cancels the active and paused wake-ups of every chat in its family, and unarchiving doesn't resume them.
+While the experiment is on, archiving a chat cancels the active and paused wake-ups of every chat in its family, `archive_agent` cancels those of each chat it archives, and unarchiving doesn't resume them.
 A wake-up of a chat archived without the experiment stops at its next run without sending its prompt.
 
 Before a run sends its prompt, Coder Agents checks four limits over the 24&nbsp;hours before the run.
@@ -457,6 +457,16 @@ To message other chats in the family, refer to [Family messages](#family-message
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
 Archiving a root whose family is still working interrupts the family, waits up to 30&nbsp;seconds for it to stop, then archives every member.
 If a member is still working after 30&nbsp;seconds, the archive fails and archives nothing.
+With the experiment, a chat that has `interrupt_agent` also gets `archive_agent`, which archives one direct child and all of that child's descendants for good.
+It takes the child's `chat_id`, and any other chat fails with `chat_id must be a direct child of this chat`.
+It interrupts the child's subtree, waits up to 30&nbsp;seconds for it to stop, and then archives the whole subtree at once.
+If a chat of the subtree is still working, it fails with `the child agent or one of its descendants is still busy or paused` and archives nothing.
+The result lists the subtree in `archived_chat_ids`, the child last.
+The archived chats leave `list_agents`, stop counting toward the family's live limit, and refuse `message_agent`, while your own chat and the child's siblings stay open.
+So collect what you need from the child before you archive it.
+While the root chat stays unarchived, the chats that `archive_agent` archived stay archived, because only a root chat's archive state can change.
+To restore them, archive the root chat and then unarchive it, which unarchives the whole family.
+A custom type's `tools` and `disallowed_tools` treat `archive_agent` as part of `Task`.
 With the experiment, the chat list and a root chat's `GET /api/v2/chats/{chat}` include every descendant in the root's `children` list, and each entry's `parent_chat_id` names its parent.
 The Agents sidebar shows each worker under its coordinator, and selecting a descendant opens its own `/agents/:id` page.
 Without the experiment, or at the maximum depth, a child has no `spawn_agent`, and a call fails with `Tool not active in this turn: spawn_agent`.
@@ -554,13 +564,14 @@ With `fork-nested-subagents`, a `shared` child of the worktree child works in th
 `isolation: "worktree"` fails for a `computer_use` child, in a chat without a workspace, and when you omit `repo_path`, the parent works in no worktree, and the workspace agent has no directory.
 If the workspace agent is older than the server, `spawn_agent` fails with `this workspace's agent does not support worktree isolation`, so restart the workspace or spawn with `isolation: "shared"`.
 If the spawn fails after `spawn_agent` creates the worktree, Coder Agents removes the worktree and its branch.
-Otherwise Coder Agents keeps both until you archive the root chat or the deployment archives it as inactive.
-If the experiment is still on at the archive, Coder Agents then removes each child's worktree and branch in the background.
+Otherwise Coder Agents keeps both until you archive the root chat, the deployment archives it as inactive, or, with `fork-nested-subagents`, `archive_agent` archives the child or one of its ancestors.
+If the experiment is still on at the archive, Coder Agents then removes each archived child's worktree and branch, in the background after a root archive and before `archive_agent` returns.
 It keeps a worktree that has uncommitted or untracked files, is no longer on its branch, or has submodule commits that are on no remote.
 It also keeps a worktree when its branch, or the `HEAD` or branch reflog, reaches a commit that is on no other branch or remote, such as a commit that a reset moved the branch away from.
 It keeps them all when it can't reach the workspace agent or the agent is older than the server.
-Then it posts one notice in the root chat that lists the path, branch, and reason of each worktree it kept.
-So merge or push each child's branch, push its submodule commits, and put any commit that a reset dropped on another branch before you archive the root chat.
+After a root archive, it posts one notice in the root chat that lists the path, branch, and reason of each worktree it kept.
+`archive_agent` lists them in `kept_worktrees` instead, each with `path`, `branch`, and `reason`, and a later archive of the root chat tries them again.
+So merge or push each child's branch, push its submodule commits, and put any commit that a reset dropped on another branch before you archive the root chat or the child.
 To remove a kept worktree yourself, run `git worktree remove <worktree_path>` and `git branch -D <branch>` in the repository.
 Add `--force` to `git worktree remove` when the worktree still has uncommitted or untracked files.
 Without the experiment, `spawn_agent` has no `isolation`, `repo_path`, or `base_branch` field.
@@ -583,9 +594,9 @@ When the build fails, or the agent or its startup scripts don't get ready, `spaw
 It fails the same way before any build when the parent workspace's template doesn't allow Coder Agents or has an externally managed agent, so spawn the child with `isolation: "shared"` or `isolation: "worktree"` in such a workspace.
 After a failed spawn, Coder Agents archives the child and tries once to stop the workspace, if it created one, but it doesn't retry a failed archive or stop and never deletes the workspace.
 So after a failed spawn, check the **Workspaces** page and delete any workspace that the spawn created.
-When the spawn succeeds, Coder Agents doesn't stop the child's workspace until you archive the root chat or the deployment archives it as inactive.
+When the spawn succeeds, Coder Agents doesn't stop the child's workspace until you archive the root chat, the deployment archives it as inactive, or, with `fork-nested-subagents`, `archive_agent` archives the child or one of its ancestors.
 The workspace can still stop earlier on its own schedule, such as the deployment's chat workspace TTL or the template's default autostop.
-If the experiment is still on at the archive, Coder Agents then stops each child's workspace in the background, after it tries to remove the family's worktrees, but it never deletes the workspace.
+If the experiment is still on at the archive, Coder Agents then stops each archived child's workspace in the background, after it tries to remove the archived worktrees, but it never deletes the workspace.
 A worktree that it keeps doesn't prevent the stop, even when the worktree is in that workspace.
 It doesn't retry a failed stop, and it skips a child that is bound to another workspace by then.
 Delete the workspace on the **Workspaces** page or with `coder delete <workspace_name>` when you no longer need it.
@@ -695,11 +706,15 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
   Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:425-442`, `:456-484`.
   Direct children only, `isSubagentTarget`, `fork_subagents.go:489-501`.
-  The `chat_id` and `recursive` options of `list_agents`, only with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:80`, `fork_list_agents.go:50-53`, `:74-84`, limited to the chat and its descendants, `:105-113`, walked through unarchived chats, `:114-118`, `:145-172`, with `parent_chat_id`, `:135-141`.
+  The `chat_id` and `recursive` options of `list_agents`, only with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:83`, `fork_list_agents.go:50-53`, `:74-84`, limited to the chat and its descendants, `:105-113`, walked through unarchived chats, `:114-118`, `:145-172`, with `parent_chat_id`, `:135-141`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:86-89`, 30-second wait, `:26`.
+  `archive_agent`, checked against the change that adds it, only with `fork-nested-subagents` and next to `interrupt_agent`, `coderd/x/chatd/fork_tools.go:54-56`, `coderd/x/chatd/fork_archive_agent.go:58-61`, for a direct child only, `:98-100`, interrupted with a 30-second wait, `:105-115`, `fork_cascade.go:27`, `:102-151`, archived in one transaction in the family archive's lock order, skipping chats archived already, `fork_archive_agent.go:147-196`, `coderd/x/chatd/fork_family_lock.go:105-133`, or refused while busy, `fork_archive_agent.go:118-120`, with the result fields, `:34-45`, `:127-130`.
+  Archived chats leave the live count, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
+  Only a root chat's archive state changes through the API, and not to its current value, `coderd/exp_chats.go:2843-2857`, and unarchiving the root unarchives every member, `coderd/x/chatd/chatstate/family.go:110-143`.
+  Part of `Task`, `coderd/x/chatd/fork_agent_tool_policy.go:59-62`.
 - Every descendant embedded under its root, only with `fork-nested-subagents`: `coderd/fork_chat_tree.go:30-37`, `:52-71`, from `coderd/exp_chats.go:584` and `:1898`, grouped by `root_chat_id`, `coderd/database/db2sdk/db2sdk.go:2311-2318`.
   Each descendant placed in the sidebar under its own parent, `site/src/pages/AgentsPage/components/ChatsSidebar/tree/chatTree.ts:51-60`.
 - Agent definition directories: `agent/agentcontext/fork_agents.go:24-29`.
@@ -725,6 +740,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   An invalid definition refused by the API, `coderd/fork_agent_definitions.go:206`, `:229`, `:244-254`, and `invalid` in the workspace's context, `agent/agentcontext/fork_agents.go:122-130`.
   Worktree creation and its errors, `fork_isolation.go:189-237`, `:262-264`, from the worktree that the parent works in when `repo_path` is omitted, `:198-205`, removed only when the spawn fails, `:240-253`, called at spawn, `coderd/x/chatd/fork_subagents.go:294`, `:335-348`.
   Removed after a root archive with the experiment on, `coderd/x/chatd/fork_family_lock.go:28-40`, also an automatic one, `coderd/x/chatd/auto_archive.go:148-152`, `coderd/x/chatd/fork_isolation_cleanup.go:48-139`, unless the agent refuses, `agent/agentgit/fork_worktrees.go:300-353`, or is unreachable or older, `fork_isolation_cleanup.go:141-201`, with a notice in the root chat, `:203-225`.
+  Removed by `archive_agent` before it returns, with the same removal, and listed in `kept_worktrees`, checked against the change that adds `archive_agent`, `coderd/x/chatd/fork_archive_agent.go:131-138`, `fork_isolation_cleanup.go:85-137`, and already removed ones taken as gone, `:198-211`.
   The worktree fields and `diff_summary` in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:48-103`, added with the experiment, `fork_tools.go:60`, counted by the agent, `agent/agentgit/fork_worktree_summary.go:34-96`, with the fields in `codersdk/workspacesdk/fork_worktrees.go:103-117`.
   The **Branch:** and **Worktree:** lines and the diff summary on the cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:72-120`, `:151`, `:171`, `:179-202`.
   Branch name, `fork_isolation.go:275-297`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
@@ -736,6 +752,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The template checks, `coderd/x/chatd/chattool/createworkspace.go:178-190`, and the chat workspace TTL or the template default, `:192-213`.
   Archived and stopped once on failure, with each failure only logged, `fork_isolation_workspace.go:88-100`, `:170-227`, and the name, `:229-251`.
   Stopped after a root archive with the experiment on, also an automatic one, `fork_family_lock.go:28-40`, `auto_archive.go:148-152`, after the worktree cleanup, whatever it keeps, once and only logged, and skipped for a child bound to another workspace, `fork_isolation_cleanup.go:48-61`, `:90-95`, `:124-139`.
+  Stopped in the background after `archive_agent` with the same stop, checked against the change that adds `archive_agent`, `fork_archive_agent.go:137`, `:198-212`, `fork_isolation_cleanup.go:107-112`, `:139-157`.
   No delete: nothing in `coderd/x/chatd` deletes a workspace, and the workspace tools are root-only, `coderd/x/chatd/turn_environment.go:732-741`.
 - `wait_agent` returns the last assistant message: `subagent_operations.go:635-667`.
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
@@ -825,7 +842,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Wake-ups, only with `fork-chat-wakeups`: `schedule_wakeup`, `wait_for_events`, and `notify_user`, `coderd/x/chatd/fork_tools.go:36-40`, not in the plan-mode or `explore` allowlists, `turn_environment.go:2052-2068`, `:2124-2133`.
   Arguments and result, `coderd/x/chatd/fork_schedule_wakeup.go:54-70`, `:99-113`, the description, `:77-82`, one schedule, `:119-142`, and the limits, `:31-35`, `:160-202`, `:226-228`.
   `/loop`, `coderd/x/chatd/fork_loop_command.go:26-31`, `:50-70`, `:111-146`, refused with status 400 and the reason, `:33-41`, `coderd/fork_chat_loop_errors.go:15-26`, for a new chat or a message, `coderd/exp_chats.go:1807-1809`, `:3375-3377`, scheduled with the message, `coderd/x/chatd/chat_mutations.go:88`, `:222`, or with a new chat, `coderd/x/chatd/chatd.go:687`, `:810`.
-  Delivery every 15&nbsp;seconds, `coderd/x/chatd/fork_wakeups.go:28`, `:45-63`, as the chat owner, `:246-265`, after a busy chat goes idle, `:143-151`, canceled for an archived chat, `:139-140`, or at the archive, with every wake-up of the family, `coderd/x/chatd/fork_family_lock.go:44-46`, `:61-91`, `fork_wakeups.go:392-406`, and no missed runs replayed, `:334-370`.
+  Delivery every 15&nbsp;seconds, `coderd/x/chatd/fork_wakeups.go:28`, `:45-63`, as the chat owner, `:246-265`, after a busy chat goes idle, `:143-151`, canceled for an archived chat, `:139-140`, or at the archive, with every wake-up of the family, `coderd/x/chatd/fork_family_lock.go:44-46`, `:61-91`, `fork_wakeups.go:392-406`, or of each chat that `archive_agent` archives, `coderd/x/chatd/fork_archive_agent.go:187-190`, and no missed runs replayed, `fork_wakeups.go:334-370`.
   `wait_for_events` arguments, defaults, and result, `coderd/x/chatd/fork_wait_for_events.go:28-62`, the description, `:99-115`, the watched children and the errors, `:252-313`, the expiry and the prompt, which `validate` checks like a `schedule_wakeup` prompt, `:315-344`, `fork_schedule_wakeup.go:160-169`.
   One message per done child, while the chat is idle, `fork_wait_for_events.go:313-419`, `fork_wakeups.go:143-153`, and completed after the last child, `fork_wait_for_events.go:421-438`, polling every 15&nbsp;seconds, `fork_wakeups.go:354-355`.
   Done children, `fork_wait_for_events.go:487-500`, with the children that wait for their own `wait_for_events` or for an answer read in one snapshot, `:502-546`.

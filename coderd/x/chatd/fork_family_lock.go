@@ -98,20 +98,36 @@ func (p *Server) setFamilyArchivedInLockOrder(
 // lockFamilyForArchive locks the root of a family FOR NO KEY UPDATE and then
 // every member, leaves first.
 func lockFamilyForArchive(ctx context.Context, tx database.Store, ftx forkdb.Store, rootID uuid.UUID) error {
+	_, err := lockSubtreeForArchive(ctx, tx, ftx, rootID, rootID)
+	return err
+}
+
+// lockSubtreeForArchive locks the root of a family FOR NO KEY UPDATE, then
+// every descendant of topID, leaves first, and then topID. topID is the root
+// or a member of its family. It returns the chats it locked FOR UPDATE, in
+// lock order.
+func lockSubtreeForArchive(ctx context.Context, tx database.Store, ftx forkdb.Store, rootID, topID uuid.UUID) ([]uuid.UUID, error) {
 	if _, err := ftx.LockChatForNoKeyUpdate(ctx, rootID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return chatstate.ErrChatNotFound
+			return nil, chatstate.ErrChatNotFound
 		}
-		return xerrors.Errorf("lock root chat for archive: %w", err)
+		return nil, xerrors.Errorf("lock root chat for archive: %w", err)
 	}
-	rows, err := ftx.GetChatSubtreeIDs(ctx, rootID)
+	rows, err := ftx.GetChatSubtreeIDs(ctx, topID)
 	if err != nil {
-		return xerrors.Errorf("get chat subtree: %w", err)
+		return nil, xerrors.Errorf("get chat subtree: %w", err)
 	}
+	ids := make([]uuid.UUID, 0, len(rows)+1)
 	for _, row := range rows {
-		if _, err := tx.GetChatByIDForUpdate(ctx, row.ID); err != nil {
-			return xerrors.Errorf("lock family chat for archive: %w", err)
+		ids = append(ids, row.ID)
+	}
+	if topID != rootID {
+		ids = append(ids, topID)
+	}
+	for _, id := range ids {
+		if _, err := tx.GetChatByIDForUpdate(ctx, id); err != nil {
+			return nil, xerrors.Errorf("lock family chat for archive: %w", err)
 		}
 	}
-	return nil
+	return ids, nil
 }
