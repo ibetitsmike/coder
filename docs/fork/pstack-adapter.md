@@ -188,10 +188,10 @@ The OpenAI-compatible, OpenRouter, and Vercel providers report that they take an
 
 The image stays in the chat's stored history like other tool results, and later turns send it again.
 Each request carries at most the 8 newest `view_image` images, always with the newest one.
-Their size and the size of the prompt's other images, such as `computer` screenshots and attachments, add up to at most 15&nbsp;MiB.
+Their size and the size of the prompt's other images, such as `computer` screenshots and attachments, add up to at most 15&nbsp;MiB, except that the newest one stays even when it goes over.
 An older one becomes the note `[image no longer in context: only the newest viewed images are kept. Call view_image again to see it.]`, so call `view_image` again to see it.
 After a switch to a model with a lower size limit, such as from OpenAI to Anthropic, an earlier image over the new limit becomes the note `[image omitted: ... is larger than the view_image limit of ... bytes for this model. ...]` and doesn't count toward the 8 images.
-While the experiment is off, a chat whose client supplies its own `view_image` tool keeps that tool's results as they are.
+While the experiment is off, a chat whose client supplies its own `view_image` tool keeps that tool's results as they are, on turns that offer the client's tools.
 After a compaction, the images before the summary are no longer sent, like any other tool result.
 The web UI shows the call as a tool card with the image.
 Plan-mode turns and `explore` children don't get `view_image`.
@@ -769,7 +769,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The model check, `fork_view_image.go:88-94`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
   The size limit, `fork_view_image.go:100-105`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:125-128`, the structure check, `:133-139`, `:170-215`, and the pixel limit, `:33-36`, `:140-143`.
   Stored as a media tool result, `coderd/x/chatd/chatprompt/chatprompt.go:555-556`, and sent again on later turns, `:1142-1157`.
-  The bound on the prompt, `fork_view_image.go:37-42`, `:259-366`, with the other media first, `:276-303`, and the model's size limit, `:269-272`, `:316-317`, applied on every turn unless a caller-supplied tool owns the name, `fork_tools.go:60-67`, `fork_view_image.go:249-257`.
+  The bound on the prompt, `fork_view_image.go:37-42`, `:261-368`, with the other media first, `:278-305`, and the model's size limit, `:271-274`, `:318-319`, applied on every turn unless a caller-supplied tool owns the name, `fork_tools.go:60-67`, `fork_view_image.go:249-259`.
   The tool card with the image, `site/src/pages/AgentsPage/components/ChatElements/tools/Tool.tsx:964-978`.
   Kept by `Read` and `readonly: true`, `coderd/x/chatd/fork_agent_tool_policy.go:51`, `:185-189`, but not as a caller-supplied tool, `:211-215`, and bound to the worktree, `fork_isolation_binding.go:126`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.

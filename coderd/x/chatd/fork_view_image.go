@@ -246,10 +246,12 @@ func webpDimensions(data []byte) (width, height int, err error) {
 	}
 }
 
-// dynamicToolOwnsViewImage reports whether the chat's caller-supplied tools
-// hold the view_image name, which they do while fork-view-image is off.
+// dynamicToolOwnsViewImage reports whether this turn offers a caller-supplied
+// view_image, which it does while fork-view-image is off and appendDynamicTools
+// adds the chat's dynamic tools.
 func (p *Server) dynamicToolOwnsViewImage(chat database.Chat) bool {
-	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) {
+	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) || p.disableCallerSuppliedTools ||
+		isExploreSubagentMode(chat.Mode) || (chat.PlanMode.Valid && chat.PlanMode.ChatPlanMode == database.ChatPlanModePlan) {
 		return false
 	}
 	names, err := parseDynamicToolNames(chat.DynamicTools)

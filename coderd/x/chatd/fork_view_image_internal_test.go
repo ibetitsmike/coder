@@ -22,6 +22,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
@@ -375,6 +376,7 @@ func TestViewImageToolGate(t *testing.T) {
 		name        string
 		experiments codersdk.Experiments
 		dynamic     bool
+		planMode    bool
 		want        []string
 		bounded     bool
 	}{
@@ -383,6 +385,8 @@ func TestViewImageToolGate(t *testing.T) {
 		// A caller-supplied view_image owns the name, so its results stay.
 		{name: "OffWithDynamicTool", dynamic: true, want: []string{}, bounded: false},
 		{name: "OnWithDynamicTool", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, dynamic: true, want: []string{viewImageToolName}, bounded: true},
+		// Plan mode offers no dynamic tools, so the results are the built-in's.
+		{name: "OffWithDynamicToolInPlanMode", dynamic: true, planMode: true, want: []string{}, bounded: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -404,6 +408,9 @@ func TestViewImageToolGate(t *testing.T) {
 			}
 			if tt.dynamic {
 				chat.DynamicTools = pqtype.NullRawMessage{RawMessage: json.RawMessage(`[{"name":"view_image"}]`), Valid: true}
+			}
+			if tt.planMode {
+				chat.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
 			}
 			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt))
 			require.NoError(t, err)
