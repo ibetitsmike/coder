@@ -73,10 +73,15 @@ const renderWorkflowTool = (
 	return router;
 };
 
-const mockStatusError = (status: number) => ({
-	...mockApiError({ message: `Status ${status}.` }),
-	status,
-});
+const mockServerError = {
+	...mockApiError({ message: "Internal error." }),
+	status: 500,
+};
+
+const mockForbiddenError = {
+	...mockApiError({ message: "Forbidden." }),
+	status: 403,
+};
 
 describe("ForkWorkflowTool", () => {
 	afterEach(() => {
@@ -126,7 +131,7 @@ describe("ForkWorkflowTool", () => {
 		);
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValue(mockStatusError(500));
+			.mockRejectedValue(mockServerError);
 		renderWorkflowTool(
 			"run_workflow",
 			MockForkWorkflowStartedResult,
@@ -142,7 +147,7 @@ describe("ForkWorkflowTool", () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValue(mockStatusError(500));
+			.mockRejectedValue(mockServerError);
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
@@ -154,7 +159,7 @@ describe("ForkWorkflowTool", () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValue(mockStatusError(403));
+			.mockRejectedValue(mockForbiddenError);
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));

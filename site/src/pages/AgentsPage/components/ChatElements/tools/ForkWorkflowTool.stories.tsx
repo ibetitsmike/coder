@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowArgs,
@@ -144,9 +145,22 @@ export const StartedThenCompleted: Story = {
 	},
 };
 
+const mockRunningLiveDetail: WorkflowRunDetail = {
+	...MockChatWorkflowRunDetail,
+	status: "running",
+	result: undefined,
+	finished_at: undefined,
+	logs: [],
+	steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
+		...step,
+		reused: false,
+		status: index === 2 ? "running" : step.status,
+	})),
+};
+
 /**
- * A running run's detail has no logs and no reused marks yet, so the card
- * keeps those from the tool result.
+ * A running run's detail has no logs and no reused marks, so the card keeps
+ * those from the tool result.
  */
 export const StillRunningLive: Story = {
 	args: {
@@ -165,18 +179,7 @@ export const StillRunningLive: Story = {
 	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
-			data: {
-				...MockChatWorkflowRunDetail,
-				status: "running",
-				result: undefined,
-				finished_at: undefined,
-				logs: [],
-				steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
-					...step,
-					reused: false,
-					status: index === 2 ? "running" : step.status,
-				})),
-			},
+			data: mockRunningLiveDetail,
 		});
 	},
 	play: async (context) => {

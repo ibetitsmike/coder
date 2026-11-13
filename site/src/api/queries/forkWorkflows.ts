@@ -20,10 +20,11 @@ export const chatWorkflowRuns = (chatId: string) =>
 			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
 	});
 
+/** Keys one run's detail under its chat's runs. */
 export const chatWorkflowRunKey = (chatId: string, runId: string) =>
 	[...chatWorkflowRunsKey(chatId), runId] as const;
 
-/** Polls a run's detail while the run is running. */
+/** The detail query and the live tool card share this polling policy. */
 export const workflowRunRefetchInterval = (status: string | undefined) =>
 	status === "running" ? 3_000 : false;
 

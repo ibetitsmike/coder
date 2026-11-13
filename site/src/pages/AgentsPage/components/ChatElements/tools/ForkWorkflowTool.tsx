@@ -102,10 +102,9 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 		updatedAt: number,
 	) =>
 		run?.status === "interrupted" && updatedAt < mountedAt ? undefined : run;
-	// Shares the Workflows panel's cache. Until a current detail loads, the
-	// card shows the tool result and polls by its status. The app disables
-	// retries, so this rides out transient errors. A 403 or 404 means this
-	// viewer cannot read runs, so polling stops.
+	// Shares the Workflows panel's cache. The app disables retries, so polling
+	// rides out transient errors. A 403 or 404 means this viewer cannot read
+	// runs, so polling stops.
 	const runQuery = useQuery({
 		...chatWorkflowRun(chatId, resultSnapshot.runId),
 		refetchInterval: ({ state }) => {
