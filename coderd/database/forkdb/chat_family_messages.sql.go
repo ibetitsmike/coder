@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/google/uuid"
 )
 
@@ -81,4 +82,54 @@ func (q *Queries) InsertChatFamilyMessage(ctx context.Context, arg InsertChatFam
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const listChatFamilyMembers = `-- name: ListChatFamilyMembers :many
+SELECT chats.id, chats.parent_chat_id, chats.title, chats.status
+FROM chats
+WHERE (chats.id = $1::uuid OR chats.root_chat_id = $1::uuid)
+	AND chats.archived = false
+ORDER BY (chats.id = $1::uuid) DESC, chats.created_at ASC, chats.id ASC
+LIMIT $2::int
+`
+
+type ListChatFamilyMembersParams struct {
+	RootID     uuid.UUID `db:"root_id" json:"root_id"`
+	LimitCount int32     `db:"limit_count" json:"limit_count"`
+}
+
+type ListChatFamilyMembersRow struct {
+	ID           uuid.UUID           `db:"id" json:"id"`
+	ParentChatID uuid.NullUUID       `db:"parent_chat_id" json:"parent_chat_id"`
+	Title        string              `db:"title" json:"title"`
+	Status       database.ChatStatus `db:"status" json:"status"`
+}
+
+// Lists the unarchived chats of the family of @root_id, the root first.
+func (q *Queries) ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listChatFamilyMembers, arg.RootID, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChatFamilyMembersRow
+	for rows.Next() {
+		var i ListChatFamilyMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentChatID,
+			&i.Title,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

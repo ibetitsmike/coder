@@ -652,6 +652,14 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 	return f.db.InsertUserAgentDefinition(ctx, arg)
 }
 
+// ListChatFamilyMembers authorizes as a read of the root chat.
+func (f *forkQuerier) ListChatFamilyMembers(ctx context.Context, arg forkdb.ListChatFamilyMembersParams) ([]forkdb.ListChatFamilyMembersRow, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.RootID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatFamilyMembers(ctx, arg)
+}
+
 func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	if _, err := f.authorizeChatWakeup(ctx, policy.ActionRead, wakeupID); err != nil {
 		return nil, err

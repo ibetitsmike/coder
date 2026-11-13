@@ -13,3 +13,12 @@ WHERE id = @id::uuid AND sender_chat_id = @sender_chat_id::uuid;
 -- name: DeleteChatFamilyMessagesBefore :exec
 DELETE FROM chat_family_messages
 WHERE sender_chat_id = @sender_chat_id::uuid AND created_at <= @before::timestamptz;
+
+-- name: ListChatFamilyMembers :many
+-- Lists the unarchived chats of the family of @root_id, the root first.
+SELECT chats.id, chats.parent_chat_id, chats.title, chats.status
+FROM chats
+WHERE (chats.id = @root_id::uuid OR chats.root_chat_id = @root_id::uuid)
+	AND chats.archived = false
+ORDER BY (chats.id = @root_id::uuid) DESC, chats.created_at ASC, chats.id ASC
+LIMIT @limit_count::int;

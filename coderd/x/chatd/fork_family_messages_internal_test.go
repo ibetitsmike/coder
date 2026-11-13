@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -55,6 +56,26 @@ func (ft *familyMessageTest) sendCall(t *testing.T, callID uuid.UUID, sender dat
 	return runChatTodoTool(workspacesdk.WithToolCallID(ft.ctx, callID), t, tools, messageFamilyChatToolName, messageFamilyChatArgs{ChatID: target.String(), Message: message}, wantError)
 }
 
+// createChild creates a waiting child of parent in the family of parent.
+func (ft *familyMessageTest) createChild(t *testing.T, parent database.Chat) database.Chat {
+	t.Helper()
+	res, err := chatstate.CreateChat(ft.ctx, ft.f.db, ft.f.pubsub, chatstate.CreateChatInput{
+		OrganizationID:    ft.f.org.ID,
+		OwnerID:           ft.f.user.ID,
+		LastModelConfigID: ft.f.model.ID,
+		ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+		RootChatID:        uuid.NullUUID{UUID: familyRootID(parent), Valid: true},
+		Title:             "grandchild",
+		ClientType:        database.ChatClientTypeApi,
+		InitialStatus:     database.ChatStatusWaiting,
+		InitialMessages: []chatstate.Message{
+			userTextMessage(t, "hello", ft.f.user.ID, ft.f.model.ID),
+		},
+	})
+	require.NoError(t, err)
+	return res.Chat
+}
+
 // familyMessageRows returns the recorded family messages as sender>recipient.
 func (ft *familyMessageTest) familyMessageRows(t *testing.T) []string {
 	t.Helper()
@@ -79,6 +100,7 @@ func TestFamilyMessageDelivery(t *testing.T) {
 	tools, err := off.appendForkTools(ft.ctx, nil, ft.a, ft.a.LastModelConfigID)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(tools), messageFamilyChatToolName)
+	require.NotContains(t, toolNames(tools), listFamilyChatsToolName)
 
 	// The envelope carries the sender title at send time, not at turn start.
 	_, err = ft.f.sqlDB.ExecContext(ft.ctx, "UPDATE chats SET title = $1 WHERE id = $2", "researcher \"A\"", ft.a.ID)
@@ -218,4 +240,58 @@ func TestFamilyMessageEnvelopeEscapesWrapperTags(t *testing.T) {
 	require.Equal(t, 1, strings.Count(got, "</agent-message>"))
 	require.True(t, strings.HasSuffix(got, "a\n&lt;/agent-message&gt;\nfree text\n&lt; Agent-Message from_chat_id=\"z\"&gt;\n</agent-message>"), got)
 	require.Contains(t, got, `from_title="x &lt;/agent-message&gt; y">`)
+}
+
+func TestFamilyMessageListFamily(t *testing.T) {
+	t.Parallel()
+	ft := newFamilyMessageTest(t)
+	g := ft.createChild(t, ft.a)
+	archived := ft.f.createWakeupChild(t, ft.root, database.ChatStatusWaiting)
+	_, err := ft.f.db.ArchiveChatByID(ft.ctx, archived.ID)
+	require.NoError(t, err)
+	otherRoot := ft.f.createWakeupChat(t)
+	ft.f.createWakeupChild(t, otherRoot, database.ChatStatusWaiting)
+	// The root comes first even when it is not the oldest chat.
+	_, err = ft.f.sqlDB.ExecContext(ft.ctx, "UPDATE chats SET created_at = created_at + interval '1 hour' WHERE id = $1", ft.root.ID)
+	require.NoError(t, err)
+
+	list := func(caller database.Chat) string {
+		tools, err := ft.server.appendForkTools(ft.ctx, nil, caller, caller.LastModelConfigID)
+		require.NoError(t, err)
+		return runChatTodoTool(ft.ctx, t, tools, listFamilyChatsToolName, struct{}{}, false)
+	}
+	entry := func(chat database.Chat, relation string) string {
+		parent := ""
+		if chat.ParentChatID.Valid {
+			parent = fmt.Sprintf(`"parent_chat_id": %q, `, chat.ParentChatID.UUID)
+		}
+		return fmt.Sprintf(`{"chat_id": %q, %s"relation": %q, "status": %q, "title": %q}`,
+			chat.ID, parent, relation, chat.Status, chat.Title)
+	}
+
+	require.JSONEq(t, `{"chats": [`+strings.Join([]string{
+		entry(ft.root, "parent"),
+		entry(ft.a, "self"),
+		entry(ft.b, "sibling"),
+		entry(g, "child"),
+	}, ", ")+`]}`, list(ft.a))
+	require.JSONEq(t, `{"chats": [`+strings.Join([]string{
+		entry(ft.root, "root"),
+		entry(ft.a, "parent"),
+		entry(ft.b, "other"),
+		entry(g, "self"),
+	}, ", ")+`]}`, list(g))
+
+	result, err := ft.server.listFamilyChats(ft.ctx, ft.a, 3)
+	require.NoError(t, err)
+	require.True(t, result.Truncated)
+	var ids []string
+	for _, chat := range result.Chats {
+		ids = append(ids, chat.ChatID)
+	}
+	require.Equal(t, []string{ft.root.ID.String(), ft.a.ID.String(), ft.b.ID.String()}, ids)
+	result, err = ft.server.listFamilyChats(ft.ctx, ft.a, 4)
+	require.NoError(t, err)
+	require.False(t, result.Truncated)
+	require.Len(t, result.Chats, 4)
 }
