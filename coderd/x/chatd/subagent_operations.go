@@ -130,6 +130,7 @@ func (p *Server) sendSubagentMessage(
 		CreatedBy:    targetChat.OwnerID,
 		Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText(message)},
 		BusyBehavior: SendMessageBusyBehaviorSteer,
+		forkAdmit:    p.forkRecordSubagentMessage(ctx, parentChatID, targetChatID),
 	})
 	if err != nil {
 		return database.Chat{}, err
