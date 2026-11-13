@@ -72,14 +72,16 @@ describe("UserMessageContent family messages", () => {
 		expect(screen.queryByText(/comes from another agent/)).toBeNull();
 		await userEvent.click(screen.getByRole("link", { name: "Review the API" }));
 
-		expect(router.state.location.pathname).toBe(`/agents/${MockFamilyMessageSenderId}`);
+		expect(router.state.location.pathname).toBe(
+			`/agents/${MockFamilyMessageSenderId}`,
+		);
 	});
 
 	it("shows the raw envelope when fork-family-messages is off", () => {
 		renderFamilyMessage([]);
 
 		screen.getByText(/comes from another agent/);
-		screen.getByText("Should I open the PR?");
+		screen.getByText(/<\/agent-message>/);
 		expect(screen.queryByRole("link")).toBeNull();
 	});
 });

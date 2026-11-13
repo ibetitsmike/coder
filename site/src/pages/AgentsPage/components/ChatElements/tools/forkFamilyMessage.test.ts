@@ -20,8 +20,9 @@ describe("parseFamilyMessage", () => {
 
 	it("unquotes a title with quotes and unicode", () => {
 		expect(
-			parseFamilyMessage(envelope('"Fix \\"login\\" für 日本 \\u2028"', "Done."))
-				?.fromTitle,
+			parseFamilyMessage(
+				envelope('"Fix \\"login\\" für 日本 \\u2028"', "Done."),
+			)?.fromTitle,
 		).toBe('Fix "login" für 日本 \u2028');
 	});
 
