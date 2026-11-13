@@ -11,10 +11,14 @@ import {
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
 import type { UserInlineRenderBlock } from "./messageHelpers";
 
+type ForkFamilyMessageHeaderProps = {
+	message: FamilyMessage;
+};
+
 /** Names the chat that sent a family message and links to it. */
-export const ForkFamilyMessageHeader: React.FC<{ message: FamilyMessage }> = ({
-	message,
-}) => (
+export const ForkFamilyMessageHeader: React.FC<
+	ForkFamilyMessageHeaderProps
+> = ({ message }) => (
 	<div className="flex flex-wrap items-center gap-1 text-xs text-content-secondary">
 		<span>Message from agent</span>
 		<ForkChatLink chatId={message.fromChatId} className="text-xs opacity-100">
@@ -28,11 +32,7 @@ type UserInlineContent = {
 	blocks: readonly UserInlineRenderBlock[];
 };
 
-/**
- * Parses a family message from the first block when fork-family-messages is
- * on and returns its body blocks. Any other message goes to splitAsyncAnswer,
- * so a body that starts like an async answer is not labelled as one.
- */
+/** A family message body skips splitAsyncAnswer, so it is never labelled as an answer. */
 export const useForkFamilyMessage = (
 	blocks: readonly UserInlineRenderBlock[],
 	splitAsyncAnswer: (
