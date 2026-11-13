@@ -148,16 +148,19 @@ func processNotFound(err error) bool {
 }
 
 // processConns holds what the process_exit entries of one tick of an events
-// wake-up share: one read deadline, the agents of the chat's workspace and
-// one connection per agent. release closes the connections.
+// wake-up share: one read deadline, the latest build of the chat's workspace
+// and its agents, and one connection per agent. release closes the
+// connections.
 type processConns struct {
 	// ctx bounds every read of the tick, so the entries together stay
 	// within processReadTimeout.
 	ctx    context.Context
 	cancel context.CancelFunc
 	agents []uuid.UUID
-	read   bool
-	conns  map[uuid.UUID]processConn
+	// builtAt is when the latest build was created, zero without one.
+	builtAt time.Time
+	read    bool
+	conns   map[uuid.UUID]processConn
 }
 
 type processConn struct {
@@ -199,6 +202,9 @@ func (c *processConns) agentRuns(ctx context.Context, db database.Store, chat da
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, xerrors.Errorf("get latest workspace build: %w", err)
 		}
+		if err == nil {
+			c.builtAt = build.CreatedAt
+		}
 		if err == nil && build.Transition == database.WorkspaceTransitionStart {
 			agents, err := db.GetWorkspaceAgentsInLatestBuildByWorkspaceID(ctx, chat.WorkspaceID.UUID)
 			if err != nil {
@@ -229,16 +235,19 @@ func (c *processConns) conn(ctx context.Context, p *Server, chatID, agentID uuid
 
 // processWakeupText reads the process of event on the workspace agent of
 // chat and returns the message for its exit or for a lost watch, or "" while
-// it runs. With exitedBy set, it also returns "" for a process that the agent
-// lists as exited after exitedBy. An error is transient: the entry polls
-// again later.
-func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, exitedBy time.Time, conns *processConns) (string, error) {
+// it runs. With endedBy set, it also returns "" for a process that the agent
+// lists as exited after endedBy, or whose workspace stopped or was rebuilt
+// after endedBy. An error is transient: the entry polls again later.
+func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, conns *processConns) (string, error) {
 	ctx = conns.readContext(ctx)
 	runs, err := conns.agentRuns(ctx, p.db, chat, event.AgentID)
 	if err != nil {
 		return "", err
 	}
 	if !runs {
+		if !endedBy.IsZero() && conns.builtAt.After(endedBy) {
+			return "", nil
+		}
 		return processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), nil
 	}
 	conn, err := conns.conn(ctx, p, chat.ID, event.AgentID)
@@ -255,7 +264,7 @@ func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, even
 	if output.Running {
 		return "", nil
 	}
-	if !exitedBy.IsZero() && processExitedAfter(ctx, conn, event.ProcessID, exitedBy) {
+	if !endedBy.IsZero() && processExitedAfter(ctx, conn, event.ProcessID, endedBy) {
 		return "", nil
 	}
 	return processExitText(event, output), nil

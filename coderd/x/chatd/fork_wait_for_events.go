@@ -371,9 +371,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// that may have happened after it. A child's status has no time it
 	// became done, so it leaves out the children updated after the expiry:
 	// a status change updates the chat, so a child last updated by the
-	// expiry was done by then. It leaves out the processes that exited after
-	// the expiry. An entry whose send failed happened before the cutoff, so
-	// a retry still delivers it.
+	// expiry was done by then. It leaves out the processes that exited, or
+	// whose workspace stopped or was rebuilt, after the expiry. An entry
+	// whose send failed happened before the cutoff, so a retry still
+	// delivers it.
 	lateFinalPoll := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
 	for _, event := range events {
 		switch event.Type {
@@ -433,11 +434,11 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				if wakeup.LeaseExpiresAt.Valid && now.Add(2*processReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
 					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
 				}
-				var exitedBy time.Time
+				var endedBy time.Time
 				if lateFinalPoll && !slices.Contains(keys, failedRunKey(processExitRunKey(event.ProcessID))) {
-					exitedBy = wakeup.ExpiresAt.Time
+					endedBy = wakeup.ExpiresAt.Time
 				}
-				text, err := p.processWakeupText(ctx, chat, event, exitedBy, &conns)
+				text, err := p.processWakeupText(ctx, chat, event, endedBy, &conns)
 				if err != nil {
 					p.logger.Warn(ctx, "chat wake-up could not read its background process",
 						slog.F("wakeup_id", wakeup.ID),
@@ -608,10 +609,13 @@ func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]da
 	return rows, waiting, nil
 }
 
-// watchedRunKeys maps the run key of each entry that an active, unexpired
-// events wake-up of chat watches and has not delivered yet to the ID of that
-// wake-up. An expired wake-up stays active while its chat is busy, but the
-// worker then finishes it without a delivery, so it watches nothing.
+// watchedRunKeys maps the run key of each entry that an active events
+// wake-up of chat watches and has not delivered yet to the ID of that
+// wake-up. An expired wake-up stays active while its chat is busy, and its
+// final poll still delivers what happened by the expiry. A new watch leaves
+// out the children that are done, so the expired wake-up gives up its
+// children, but a new watch takes an exited process too, so the expired
+// wake-up keeps its processes.
 func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[string]uuid.UUID, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -627,9 +631,7 @@ func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[st
 		if wakeup.Kind != forkdb.ChatWakeupKindEvents || wakeup.Status != forkdb.ChatWakeupStatusActive {
 			continue
 		}
-		if wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now) {
-			continue
-		}
+		expired := wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now)
 		var events []wakeupEvent
 		if err := json.Unmarshal(wakeup.Events, &events); err != nil {
 			continue
@@ -642,6 +644,9 @@ func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[st
 			var key string
 			switch event.Type {
 			case wakeupEventChildDone:
+				if expired {
+					continue
+				}
 				key = childDoneRunKey(event.ChatID)
 			case wakeupEventProcessExit:
 				key = processExitRunKey(event.ProcessID)

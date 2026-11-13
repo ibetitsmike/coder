@@ -91,10 +91,14 @@ func TestWaitForEventsProcesses(t *testing.T) {
 		_, content := waitCall(tc.chat, uuid.New(), waitForEventsArgs{ProcessIDs: tc.ids}, true)
 		require.Contains(t, content, tc.wantErr)
 	}
+	// An expired watch that has not had its final poll still watches.
+	mClock.Set(row.ExpiresAt.Time.Add(time.Minute))
+	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, true)
+	require.Contains(t, content, "already watched by wake-up "+watchID.String())
 	// Refused process IDs fail the call before it reads the pull request.
 	fake := &fakePullRequestActivity{activity: openPullRequest(gitprovider.CheckStatePending)}
 	server.forkPullRequestActivity = fake.fetch
-	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: tooMany, PullRequestURL: testPullRequestURL}, true)
+	_, content = waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: tooMany, PullRequestURL: testPullRequestURL}, true)
 	require.Contains(t, content, "the maximum is 10")
 	require.Empty(t, fake.calls)
 	fdb, err := forkdb.From(f.db)
@@ -193,17 +197,7 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 			chat := f.createWakeupChat(t)
 			workspace, build, agent := f.bindProcessWorkspace(t, chat)
 			if tc.stopped {
-				job := dbgen.ProvisionerJob(t, f.db, nil, database.ProvisionerJob{
-					InitiatorID:    f.user.ID,
-					OrganizationID: workspace.OrganizationID,
-				})
-				dbgen.WorkspaceBuild(t, f.db, database.WorkspaceBuild{
-					WorkspaceID:       workspace.ID,
-					JobID:             job.ID,
-					TemplateVersionID: build.TemplateVersionID,
-					BuildNumber:       build.BuildNumber + 1,
-					Transition:        database.WorkspaceTransitionStop,
-				})
+				f.stopProcessWorkspace(t, workspace, build, time.Time{})
 			}
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:   forkdb.ChatWakeupKindEvents,
@@ -232,8 +226,8 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 	}
 }
 
-// A final poll well after the expiry leaves out a process that exited after
-// the expiry.
+// A final poll well after the expiry leaves out a process that exited, or
+// whose workspace stopped, after the expiry.
 func TestWakeupFinalPollProcesses(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -241,20 +235,28 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 		late time.Duration
 		// exitedAt is when the agent lists the process as exited, relative to
 		// the expiry.
-		exitedAt    time.Duration
+		exitedAt time.Duration
+		// stoppedAt, when set, is when a stop build was created, relative to
+		// the expiry.
+		stoppedAt   *time.Duration
 		wantMessage bool
 		wantReason  string
 	}{
 		{name: "OnTime", late: time.Second, exitedAt: time.Second, wantMessage: true, wantReason: "done"},
 		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: 30 * time.Second, wantReason: "expired"},
 		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: -30 * time.Second, wantMessage: true, wantReason: "done"},
+		{name: "LateStoppedAfterExpiry", late: time.Minute, stoppedAt: new(30 * time.Second), wantReason: "expired"},
+		{name: "LateStoppedBeforeExpiry", late: time.Minute, stoppedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newWorkerTestFixture(t)
 			ctx := testutil.Context(t, testutil.WaitLong)
 			chat := f.createWakeupChat(t)
-			_, _, agent := f.bindProcessWorkspace(t, chat)
+			workspace, build, agent := f.bindProcessWorkspace(t, chat)
+			if tc.stoppedAt != nil {
+				f.stopProcessWorkspace(t, workspace, build, wakeupTestSlot.Add(*tc.stoppedAt))
+			}
 			// insertWakeup schedules the run at wakeupTestSlot, so this is the
 			// final poll.
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
@@ -265,7 +267,8 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			conn := processTestConn(t, worker.server, chat, agent)
 			conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).
-				Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(0)}, nil)
+				Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(0)}, nil).
+				MaxTimes(1)
 			exitedAt := wakeupTestSlot.Add(tc.exitedAt).Unix()
 			conn.EXPECT().ListProcesses(gomock.Any()).
 				Return(workspacesdk.ListProcessesResponse{Processes: []workspacesdk.ProcessInfo{{ID: "proc-1", ExitedAt: &exitedAt}}}, nil).
@@ -328,6 +331,24 @@ func (f *workerTestFixture) bindProcessWorkspace(t *testing.T, chat database.Cha
 		"UPDATE chats SET workspace_id = $1, build_id = $2, agent_id = $3 WHERE id = $4", workspace.ID, build.ID, agent.ID, chat.ID)
 	require.NoError(t, err)
 	return workspace, build, agent
+}
+
+// stopProcessWorkspace adds a stop build of workspace after build, created at
+// createdAt, or now when zero.
+func (f *workerTestFixture) stopProcessWorkspace(t *testing.T, workspace database.WorkspaceTable, build database.WorkspaceBuild, createdAt time.Time) {
+	t.Helper()
+	job := dbgen.ProvisionerJob(t, f.db, nil, database.ProvisionerJob{
+		InitiatorID:    f.user.ID,
+		OrganizationID: workspace.OrganizationID,
+	})
+	dbgen.WorkspaceBuild(t, f.db, database.WorkspaceBuild{
+		WorkspaceID:       workspace.ID,
+		JobID:             job.ID,
+		TemplateVersionID: build.TemplateVersionID,
+		BuildNumber:       build.BuildNumber + 1,
+		Transition:        database.WorkspaceTransitionStop,
+		CreatedAt:         createdAt,
+	})
 }
 
 // processTestConn makes server dial a mock connection for agent that expects
