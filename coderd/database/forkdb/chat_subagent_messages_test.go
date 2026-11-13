@@ -40,6 +40,7 @@ func TestChatSubagentMessages(t *testing.T) {
 	for id, at := range map[uuid.UUID]time.Time{oldID: now.Add(-48 * time.Hour), newID: now} {
 		require.NoError(t, fdb.InsertChatSubagentMessage(ctx, forkdb.InsertChatSubagentMessageParams{
 			ID:              id,
+			OrganizationID:  org.ID,
 			SenderChatID:    sender.ID,
 			RecipientChatID: recipient.ID,
 			CreatedAt:       at,
@@ -47,39 +48,64 @@ func TestChatSubagentMessages(t *testing.T) {
 	}
 
 	got, err := fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           newID,
-		SenderChatID: sender.ID,
+		ID:             newID,
+		OrganizationID: org.ID,
+		SenderChatID:   sender.ID,
 	})
 	require.NoError(t, err)
 	require.Equal(t, recipient.ID, got)
 
-	// A call ID is scoped to its sender.
+	// A call ID is scoped to its sender and its organization.
 	_, err = fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           newID,
-		SenderChatID: recipient.ID,
+		ID:             newID,
+		OrganizationID: org.ID,
+		SenderChatID:   recipient.ID,
+	})
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
+		ID:             newID,
+		OrganizationID: uuid.New(),
+		SenderChatID:   sender.ID,
 	})
 	require.ErrorIs(t, err, sql.ErrNoRows)
 
 	err = fdb.InsertChatSubagentMessage(ctx, forkdb.InsertChatSubagentMessageParams{
 		ID:              newID,
+		OrganizationID:  org.ID,
 		SenderChatID:    sender.ID,
 		RecipientChatID: recipient.ID,
 		CreatedAt:       now,
 	})
 	require.True(t, database.IsUniqueViolation(err), "a call ID is recorded once: %v", err)
 
+	// A delete in another organization keeps the rows.
 	require.NoError(t, fdb.DeleteChatSubagentMessagesBefore(ctx, forkdb.DeleteChatSubagentMessagesBeforeParams{
-		SenderChatID: sender.ID,
-		Before:       now.Add(-24 * time.Hour),
+		OrganizationID: uuid.New(),
+		SenderChatID:   sender.ID,
+		Before:         now.Add(-24 * time.Hour),
 	}))
 	_, err = fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           oldID,
-		SenderChatID: sender.ID,
+		ID:             oldID,
+		OrganizationID: org.ID,
+		SenderChatID:   sender.ID,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, fdb.DeleteChatSubagentMessagesBefore(ctx, forkdb.DeleteChatSubagentMessagesBeforeParams{
+		OrganizationID: org.ID,
+		SenderChatID:   sender.ID,
+		Before:         now.Add(-24 * time.Hour),
+	}))
+	_, err = fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
+		ID:             oldID,
+		OrganizationID: org.ID,
+		SenderChatID:   sender.ID,
 	})
 	require.ErrorIs(t, err, sql.ErrNoRows)
 	_, err = fdb.GetChatSubagentMessageRecipient(ctx, forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           newID,
-		SenderChatID: sender.ID,
+		ID:             newID,
+		OrganizationID: org.ID,
+		SenderChatID:   sender.ID,
 	})
 	require.NoError(t, err)
 }

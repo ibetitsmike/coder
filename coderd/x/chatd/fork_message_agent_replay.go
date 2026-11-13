@@ -31,9 +31,16 @@ const (
 	subagentMessageRetention = 24 * time.Hour
 )
 
-// forkSubagentMessageIDKey carries the tool call ID of a message_agent call
-// into its send, so that the send records the call in its transaction.
-type forkSubagentMessageIDKey struct{}
+// forkSubagentMessageKey carries a forkSubagentMessageCall into the send of a
+// message_agent call, so that the send records the call in its transaction.
+type forkSubagentMessageKey struct{}
+
+// forkSubagentMessageCall is the tool call ID of a message_agent call and the
+// organization of the sending chat.
+type forkSubagentMessageCall struct {
+	id             uuid.UUID
+	organizationID uuid.UUID
+}
 
 // forkReplaySafeMessageAgentTool wraps message_agent so that a call with a
 // tool call ID records that ID with its message, and a replay of the call
@@ -69,8 +76,9 @@ func (t forkReplaySafeMessageAgentTool) Run(ctx context.Context, call fantasy.To
 	}
 	//nolint:gocritic // chatd reads its own bookkeeping rows.
 	recipientID, err := fdb.GetChatSubagentMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           callID,
-		SenderChatID: t.chat.ID,
+		ID:             callID,
+		OrganizationID: t.chat.OrganizationID,
+		SenderChatID:   t.chat.ID,
 	})
 	if err == nil {
 		recipient, err := t.server.db.GetChatByID(ctx, recipientID)
@@ -82,7 +90,10 @@ func (t forkReplaySafeMessageAgentTool) Run(ctx context.Context, call fantasy.To
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fantasy.NewTextErrorResponse(xerrors.Errorf("get subagent message: %w", err).Error()), nil
 	}
-	return t.AgentTool.Run(context.WithValue(ctx, forkSubagentMessageIDKey{}, callID), call)
+	return t.AgentTool.Run(context.WithValue(ctx, forkSubagentMessageKey{}, forkSubagentMessageCall{
+		id:             callID,
+		organizationID: t.chat.OrganizationID,
+	}), call)
 }
 
 // forkRecordSubagentMessage is the forkAdmit hook of sendSubagentMessage. For
@@ -90,8 +101,8 @@ func (t forkReplaySafeMessageAgentTool) Run(ctx context.Context, call fantasy.To
 // send's transaction and drops the sender's records past the retention. Any
 // other send records nothing.
 func (p *Server) forkRecordSubagentMessage(ctx context.Context, senderID, recipientID uuid.UUID) func(context.Context, database.Store, chatstate.SendMessageResult) error {
-	callID, ok := ctx.Value(forkSubagentMessageIDKey{}).(uuid.UUID)
-	if !ok || callID == uuid.Nil {
+	msgCall, ok := ctx.Value(forkSubagentMessageKey{}).(forkSubagentMessageCall)
+	if !ok || msgCall.id == uuid.Nil {
 		return nil
 	}
 	return func(ctx context.Context, store database.Store, _ chatstate.SendMessageResult) error {
@@ -102,15 +113,17 @@ func (p *Server) forkRecordSubagentMessage(ctx context.Context, senderID, recipi
 		now := p.clock.Now()
 		//nolint:gocritic // chatd deletes its own bookkeeping rows.
 		err = txdb.DeleteChatSubagentMessagesBefore(dbauthz.AsChatd(ctx), forkdb.DeleteChatSubagentMessagesBeforeParams{
-			SenderChatID: senderID,
-			Before:       now.Add(-subagentMessageRetention),
+			OrganizationID: msgCall.organizationID,
+			SenderChatID:   senderID,
+			Before:         now.Add(-subagentMessageRetention),
 		})
 		if err != nil {
 			return xerrors.Errorf("delete old subagent messages: %w", err)
 		}
 		//nolint:gocritic // chatd records its own bookkeeping rows.
 		err = txdb.InsertChatSubagentMessage(dbauthz.AsChatd(ctx), forkdb.InsertChatSubagentMessageParams{
-			ID:              callID,
+			ID:              msgCall.id,
+			OrganizationID:  msgCall.organizationID,
 			SenderChatID:    senderID,
 			RecipientChatID: recipientID,
 			CreatedAt:       now,

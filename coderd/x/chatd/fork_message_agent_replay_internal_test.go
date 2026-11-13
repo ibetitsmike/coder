@@ -82,13 +82,14 @@ func TestForkMessageAgentReplay(t *testing.T) {
 	require.Equal(t, 1, delivered("NOTE-TWO"))
 	var rows int
 	require.NoError(t, f.sqlDB.QueryRowContext(ctx,
-		`SELECT count(*) FROM chat_subagent_messages WHERE sender_chat_id = $1`, f.root.ID).Scan(&rows))
+		`SELECT count(*) FROM chat_subagent_messages WHERE sender_chat_id = $1 AND organization_id = $2`, f.root.ID, f.root.OrganizationID).Scan(&rows))
 	require.Equal(t, 2, rows)
 
 	//nolint:gocritic // The test reads chatd's bookkeeping rows.
 	_, err = f.fdb.GetChatSubagentMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatSubagentMessageRecipientParams{
-		ID:           callID,
-		SenderChatID: child.ID,
+		ID:             callID,
+		OrganizationID: child.OrganizationID,
+		SenderChatID:   child.ID,
 	})
 	require.ErrorIs(t, err, sql.ErrNoRows, "a call ID is scoped to its sender")
 }
