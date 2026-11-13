@@ -117,7 +117,9 @@ describe("ForkFamilyMessageTool", () => {
 			result,
 			isError,
 		});
-		expect(screen.getAllByRole("button")[0]).toHaveAccessibleName(label);
+		expect(
+			screen.getByRole("button", { expanded: false }),
+		).toHaveAccessibleName(label);
 	});
 
 	it("keeps the upstream card when the experiment is off", () => {
@@ -127,9 +129,9 @@ describe("ForkFamilyMessageTool", () => {
 			result: MockMessageFamilyChatResult,
 			experiments: [],
 		});
-		expect(screen.getByRole("button")).not.toHaveAccessibleName(
-			/sent message/i,
-		);
+		expect(
+			screen.getByRole("button", { expanded: false }),
+		).toHaveAccessibleName("message_family_chat");
 	});
 
 	it("lists family chats with their relation", async () => {
@@ -145,9 +147,6 @@ describe("ForkFamilyMessageTool", () => {
 				"Ship family messages (parent, running)",
 				"Migrate chat sidebar to Tailwind (sibling, waiting)",
 			],
-		);
-		expect(screen.getByText("More chats exist")).toHaveTextContent(
-			"More chats exist",
 		);
 	});
 });

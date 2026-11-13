@@ -44,7 +44,9 @@ export default meta;
 type Story = StoryObj<typeof Tool>;
 
 const expand: Story["play"] = async ({ canvasElement }) => {
-	await userEvent.click(within(canvasElement).getByRole("button"));
+	await userEvent.click(
+		within(canvasElement).getByRole("button", { expanded: false }),
+	);
 };
 
 export const Sent: Story = { play: expand };
@@ -74,5 +76,23 @@ export const ListFamilyChats: Story = {
 		args: {},
 		result: MockListFamilyChatsResult,
 	},
+	play: expand,
+};
+
+export const ListingFamilyChats: Story = {
+	args: { name: "list_family_chats", status: "running", result: undefined },
+};
+
+export const ListFamilyChatsFailed: Story = {
+	args: {
+		name: "list_family_chats",
+		result: "chat 33333333 has no chat family",
+		isError: true,
+	},
+	play: expand,
+};
+
+export const ExperimentOff: Story = {
+	parameters: { experiments: [] },
 	play: expand,
 };
