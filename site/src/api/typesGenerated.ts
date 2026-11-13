@@ -4267,8 +4267,9 @@ export interface ChatWakeup {
  */
 export interface ChatWakeupEvent {
 	/**
-	 * Type is child_done for a child chat that finishes, or pull_request for
-	 * activity on a pull request.
+	 * Type is child_done for a child chat that finishes, pull_request for
+	 * activity on a pull request, or process_exit for a background process
+	 * that exits.
 	 */
 	readonly type: string;
 	/**
@@ -4283,6 +4284,14 @@ export interface ChatWakeupEvent {
 	 * On lists the pull request activity that wakes the chat.
 	 */
 	readonly on?: readonly string[];
+	/**
+	 * ProcessID is the background process of a process_exit event.
+	 */
+	readonly process_id?: string;
+	/**
+	 * Command is the command line of that process.
+	 */
+	readonly command?: string;
 }
 
 // From codersdk/fork_chat_wakeups.go

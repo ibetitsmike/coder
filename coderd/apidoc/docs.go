@@ -27300,6 +27300,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "command": {
+                    "description": "Command is the command line of that process.",
+                    "type": "string"
+                },
                 "on": {
                     "description": "On lists the pull request activity that wakes the chat.",
                     "type": "array",
@@ -27307,8 +27311,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "process_id": {
+                    "description": "ProcessID is the background process of a process_exit event.",
+                    "type": "string"
+                },
                 "type": {
-                    "description": "Type is child_done for a child chat that finishes, or pull_request for\nactivity on a pull request.",
+                    "description": "Type is child_done for a child chat that finishes, pull_request for\nactivity on a pull request, or process_exit for a background process\nthat exits.",
                     "type": "string"
                 },
                 "url": {
