@@ -1,5 +1,6 @@
 // This file is fork code: the chat link row of the fork chat tool cards.
 
+import { cn } from "cn";
 import { ExternalLinkIcon } from "lucide-react";
 import type React from "react";
 import { Link, useLocation } from "react-router";
@@ -11,22 +12,28 @@ export const forkLinkRowClassName =
 type ForkChatLinkProps = {
 	chatId: string;
 	children: React.ReactNode;
+	className?: string;
 };
 
 /** Links to a chat, keeping the current query string, like the list_agents card. */
 export const ForkChatLink: React.FC<ForkChatLinkProps> = ({
 	chatId,
 	children,
+	className,
 }) => {
 	const location = useLocation();
 	const chatPath = safeBuildAgentChatPath({ chatId });
 	if (chatPath === null) {
-		return <div className="text-[13px] text-content-secondary">{children}</div>;
+		return (
+			<div className={cn("text-[13px] text-content-secondary", className)}>
+				{children}
+			</div>
+		);
 	}
 	return (
 		<Link
 			to={{ pathname: chatPath, search: location.search }}
-			className={forkLinkRowClassName}
+			className={cn(forkLinkRowClassName, className)}
 		>
 			{children}
 			<ExternalLinkIcon className="size-3 shrink-0" />

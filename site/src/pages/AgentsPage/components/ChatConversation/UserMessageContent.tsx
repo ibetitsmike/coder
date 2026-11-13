@@ -17,6 +17,10 @@ import {
 	AttachmentBlock,
 	type PreviewTextAttachment,
 } from "./AttachmentBlocks";
+import {
+	ForkFamilyMessageHeader,
+	useForkFamilyMessage,
+} from "./ForkFamilyMessageHeader";
 import type {
 	MessageDisplayState,
 	UserInlineRenderBlock,
@@ -130,7 +134,10 @@ export const UserMessageContent: React.FC<{
 	onTextFileClick,
 	urlTransform,
 }) => {
-	const inlineContent = splitAsyncAnswer(displayState.userInlineContent);
+	const inlineContent = useForkFamilyMessage(
+		displayState.userInlineContent,
+		splitAsyncAnswer,
+	);
 	const body = (
 		<Response
 			className="whitespace-normal"
@@ -152,6 +159,9 @@ export const UserMessageContent: React.FC<{
 				)}
 			>
 				<div className="flex flex-col gap-2">
+					{inlineContent.familyMessage && (
+						<ForkFamilyMessageHeader message={inlineContent.familyMessage} />
+					)}
 					{displayState.hasUserMessageBody &&
 						(inlineContent.isAsyncAnswer ? (
 							<div>
