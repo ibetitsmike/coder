@@ -50,7 +50,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	if err != nil {
 		return nil, err
 	}
-	tools = append(tools, nested...)
+	tools = p.withForkReplaySafeSpawn(append(tools, nested...), chat)
 	if p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		tools = append(tools, p.chatTodoTools(chat)...)
 		tools = append(tools, p.chatTranscriptTool(chat))

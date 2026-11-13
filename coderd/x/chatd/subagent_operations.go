@@ -374,7 +374,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	}
 
 	// Review before persistence so spawned chats cannot bypass prompt policy.
-	childChatID := opts.forkChildChatID()
+	childChatID := opts.forkChildChatID(ctx)
 	var promptResult *chathooks.Result
 	if p.hooks.Enabled() {
 		mintedTurnID := uuid.New()
