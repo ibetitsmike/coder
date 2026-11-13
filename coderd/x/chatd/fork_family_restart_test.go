@@ -271,6 +271,11 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 	for _, worker := range workers {
 		family = append(family, waitForChatStatus(ctx, t, db, worker.ID, database.ChatStatusWaiting))
 		familyRestartChild(ctx, t, db, worker.ID, 0)
+		// The worker stored its result once, so a duplicated final response
+		// fails here even though wait_agent reads only the newest one.
+		name := familyRestartWorkerPattern.FindString(familyRestartPrompt(ctx, t, db, worker.ID))
+		require.NotEmpty(t, name)
+		require.Equal(t, 1, familyRestartCount(t, chatMessages(ctx, t, db, worker.ID), "RESULT-"+name), name)
 	}
 	for _, chat := range family {
 		require.False(t, chat.LastError.Valid, "chat %s failed: %s", chat.Title, chat.LastError.RawMessage)
