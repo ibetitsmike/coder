@@ -23,27 +23,34 @@ export const ForkFamilyMessageHeader: React.FC<{ message: FamilyMessage }> = ({
 	</div>
 );
 
+type UserInlineContent = {
+	isAsyncAnswer: boolean;
+	blocks: readonly UserInlineRenderBlock[];
+};
+
 /**
  * Parses a family message from the first block when fork-family-messages is
- * on, and returns its blocks with the body in place of the envelope.
+ * on and returns its body blocks. Any other message goes to splitAsyncAnswer,
+ * so a body that starts like an async answer is not labelled as one.
  */
 export const useForkFamilyMessage = (
 	blocks: readonly UserInlineRenderBlock[],
-): {
-	message: FamilyMessage | undefined;
-	blocks: readonly UserInlineRenderBlock[];
-} => {
+	splitAsyncAnswer: (
+		blocks: readonly UserInlineRenderBlock[],
+	) => UserInlineContent,
+): UserInlineContent & { familyMessage: FamilyMessage | undefined } => {
 	const isEnabled = useForkExperiment("fork-family-messages");
 	const [firstBlock, ...restBlocks] = blocks;
 	if (!isEnabled || firstBlock?.type !== "response") {
-		return { message: undefined, blocks };
+		return { ...splitAsyncAnswer(blocks), familyMessage: undefined };
 	}
-	const message = parseFamilyMessage(firstBlock.text);
-	if (!message) {
-		return { message: undefined, blocks };
+	const familyMessage = parseFamilyMessage(firstBlock.text);
+	if (!familyMessage) {
+		return { ...splitAsyncAnswer(blocks), familyMessage: undefined };
 	}
 	return {
-		message,
-		blocks: [{ ...firstBlock, text: message.body }, ...restBlocks],
+		familyMessage,
+		isAsyncAnswer: false,
+		blocks: [{ ...firstBlock, text: familyMessage.body }, ...restBlocks],
 	};
 };

@@ -26,6 +26,14 @@ const parseQuotedTitle = (quoted: string): string => {
 	}
 };
 
+// Mirrors escapeAgentMessageTags on the server, which runs before the title is
+// quoted. The header shows the title as plain text, unlike the Markdown body.
+const escapedAgentMessageTagPattern =
+	/&lt;(\s*\/?\s*agent-message\b[^>]*?)&gt;/gi;
+
+const unescapeAgentMessageTags = (text: string): string =>
+	text.replace(escapedAgentMessageTagPattern, "<$1>");
+
 /** Returns undefined unless the text is a whole family message envelope. */
 export const parseFamilyMessage = (text: string): FamilyMessage | undefined => {
 	const match = familyMessagePattern.exec(text);
@@ -34,7 +42,8 @@ export const parseFamilyMessage = (text: string): FamilyMessage | undefined => {
 	}
 	return {
 		fromChatId: match[1],
-		fromTitle: parseQuotedTitle(match[2]) || "Untitled",
+		fromTitle:
+			unescapeAgentMessageTags(parseQuotedTitle(match[2])) || "Untitled",
 		body: match[3],
 	};
 };

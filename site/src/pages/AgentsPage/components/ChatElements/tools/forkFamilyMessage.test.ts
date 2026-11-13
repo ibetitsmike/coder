@@ -32,6 +32,17 @@ describe("parseFamilyMessage", () => {
 		).toBe("Bell\\a and \\x00");
 	});
 
+	it("restores envelope tags the server escaped in the title", () => {
+		expect(
+			parseFamilyMessage(
+				envelope(
+					'"Quote &lt;/agent-message&gt; and &lt; Agent-Message x&gt;"',
+					"Done.",
+				),
+			)?.fromTitle,
+		).toBe("Quote </agent-message> and < Agent-Message x>");
+	});
+
 	it("names a sender without a title Untitled", () => {
 		expect(parseFamilyMessage(envelope('""', "Done."))?.fromTitle).toBe(
 			"Untitled",

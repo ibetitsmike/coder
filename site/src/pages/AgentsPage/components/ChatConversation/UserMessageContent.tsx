@@ -134,8 +134,10 @@ export const UserMessageContent: React.FC<{
 	onTextFileClick,
 	urlTransform,
 }) => {
-	const familyMessage = useForkFamilyMessage(displayState.userInlineContent);
-	const inlineContent = splitAsyncAnswer(familyMessage.blocks);
+	const inlineContent = useForkFamilyMessage(
+		displayState.userInlineContent,
+		splitAsyncAnswer,
+	);
 	const body = (
 		<Response
 			className="whitespace-normal"
@@ -157,8 +159,8 @@ export const UserMessageContent: React.FC<{
 				)}
 			>
 				<div className="flex flex-col gap-2">
-					{familyMessage.message && (
-						<ForkFamilyMessageHeader message={familyMessage.message} />
+					{inlineContent.familyMessage && (
+						<ForkFamilyMessageHeader message={inlineContent.familyMessage} />
 					)}
 					{displayState.hasUserMessageBody &&
 						(inlineContent.isAsyncAnswer ? (
