@@ -52,7 +52,7 @@ export const ForkMessageFamilyChatToolRenderer: React.FC<
 				{!isError && recipientId !== "" && (
 					<div className="mt-1.5">
 						<ForkChatLink chatId={recipientId}>
-							{`${title} (${asString(result?.status)})`}
+							{`${title} (${asString(result?.status) || "unknown"})`}
 						</ForkChatLink>
 					</div>
 				)}
@@ -80,8 +80,8 @@ const parseFamilyChatEntry = (item: unknown): FamilyChatEntry | null => {
 	}
 	return {
 		chatId: record.chat_id,
-		relation: asString(record.relation),
-		status: asString(record.status),
+		relation: asString(record.relation) || "unknown",
+		status: asString(record.status) || "unknown",
 		title: asString(record.title),
 	};
 };

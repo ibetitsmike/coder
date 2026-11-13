@@ -5,6 +5,8 @@ import {
 	MockListFamilyChatsResult,
 	MockMessageFamilyChatArgs,
 	MockMessageFamilyChatResult,
+	MockQueuedMessageFamilyChatResult,
+	MockTruncatedListFamilyChatsResult,
 } from "#/testHelpers/forkFamilyMessages";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { Tool } from "./Tool";
@@ -52,7 +54,7 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 export const Sent: Story = { play: expand };
 
 export const Queued: Story = {
-	args: { result: { ...MockMessageFamilyChatResult, queued: true } },
+	args: { result: MockQueuedMessageFamilyChatResult },
 	play: expand,
 };
 
@@ -75,6 +77,15 @@ export const ListFamilyChats: Story = {
 		name: "list_family_chats",
 		args: {},
 		result: MockListFamilyChatsResult,
+	},
+	play: expand,
+};
+
+export const ListFamilyChatsTruncated: Story = {
+	args: {
+		name: "list_family_chats",
+		args: {},
+		result: MockTruncatedListFamilyChatsResult,
 	},
 	play: expand,
 };

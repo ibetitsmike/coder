@@ -10,6 +10,11 @@ export const MockMessageFamilyChatResult = {
 	title: "Migrate chat sidebar to Tailwind",
 };
 
+export const MockQueuedMessageFamilyChatResult = {
+	...MockMessageFamilyChatResult,
+	queued: true,
+};
+
 export const MockListFamilyChatsResult = {
 	chats: [
 		{
@@ -33,5 +38,9 @@ export const MockListFamilyChatsResult = {
 			title: "Write the tool cards",
 		},
 	],
+};
+
+export const MockTruncatedListFamilyChatsResult = {
+	...MockListFamilyChatsResult,
 	truncated: true,
 };
