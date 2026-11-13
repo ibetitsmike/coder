@@ -54,6 +54,15 @@ export const MockChatWakeupEvents: ChatWakeup = {
 			url: "https://github.com/example/repo/pull/1",
 			on: ["review", "checks"],
 		},
+		{
+			type: "process_exit",
+			process_id: "55dc01f8-7543-59a4-ae4f-eb42eeebb656",
+			command: "make test 2>&1 | tee test.log",
+		},
+		{
+			type: "process_exit",
+			process_id: "5ff79573-6d5c-58c8-945e-d48524770e4f",
+		},
 	],
 	status: "active",
 	next_run_at: "2099-01-01T09:01:00Z",
@@ -153,6 +162,23 @@ export const MockWaitForEventsResult = {
 		head_sha: "0123456789abcdef0123456789abcdef01234567",
 		checks_state: "pending",
 	},
+};
+
+export const MockWaitForEventsProcessesResult = {
+	id: MockChatWakeupEvents.id,
+	expires_at: "2099-01-02T08:00:00Z",
+	children: [],
+	processes: [
+		{
+			process_id: "55dc01f8-7543-59a4-ae4f-eb42eeebb656",
+			command: "make test 2>&1 | tee test.log",
+			output_pattern: "^(FAIL|panic:)",
+		},
+		{
+			process_id: "5ff79573-6d5c-58c8-945e-d48524770e4f",
+			command: "./scripts/deploy.sh staging",
+		},
+	],
 };
 
 export const MockNotifyUserArgs = {
