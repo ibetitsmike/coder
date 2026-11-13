@@ -6,7 +6,11 @@ import { useState } from "react";
 import { useQuery } from "react-query";
 import { useParams } from "react-router";
 import { getErrorStatus } from "#/api/errors";
-import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
+import {
+	chatWorkflowRun,
+	workflowRunRefetchInterval,
+} from "#/api/queries/forkWorkflows";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
@@ -91,27 +95,31 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 	...props
 }) => {
 	const [mountedAt] = useState(Date.now);
-	// Shares the Workflows panel's cache. A failed request (403 or 404 for a
-	// viewer who cannot read runs) keeps the tool result, as while loading.
-	// The app disables retries, so the card polls through other errors until
-	// a detail loads.
+	// A resume keeps the run ID, so a cached "interrupted" detail can predate
+	// this running result. It applies only once the card has refetched it.
+	const currentDetail = (
+		run: WorkflowRunDetail | undefined,
+		updatedAt: number,
+	) =>
+		run?.status === "interrupted" && updatedAt < mountedAt ? undefined : run;
+	// Shares the Workflows panel's cache. Until a current detail loads, the
+	// card shows the tool result and polls by its status. The app disables
+	// retries, so this rides out transient errors. A 403 or 404 means this
+	// viewer cannot read runs, so polling stops.
 	const runQuery = useQuery({
 		...chatWorkflowRun(chatId, resultSnapshot.runId),
 		refetchInterval: ({ state }) => {
-			if (state.data) {
-				return state.data.status === "running" ? 3_000 : false;
+			const detail = currentDetail(state.data, state.dataUpdatedAt);
+			if (detail) {
+				return workflowRunRefetchInterval(detail.status);
 			}
 			const errorStatus = getErrorStatus(state.error);
-			return errorStatus === 403 || errorStatus === 404 ? false : 3_000;
+			return errorStatus === 403 || errorStatus === 404
+				? false
+				: workflowRunRefetchInterval(resultSnapshot.status);
 		},
 	});
-	// A resume keeps the run ID, so a cached "interrupted" detail can predate
-	// this running result. It applies only once the card has refetched it.
-	const detail =
-		runQuery.data?.status === "interrupted" &&
-		runQuery.dataUpdatedAt < mountedAt
-			? undefined
-			: runQuery.data;
+	const detail = currentDetail(runQuery.data, runQuery.dataUpdatedAt);
 	return (
 		<ForkWorkflowTool
 			{...props}

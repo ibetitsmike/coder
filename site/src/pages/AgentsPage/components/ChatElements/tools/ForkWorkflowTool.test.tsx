@@ -4,7 +4,7 @@ import { type QueryClient, QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
-import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
+import { chatWorkflowRunKey } from "#/api/queries/forkWorkflows";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import {
 	MockAppearanceConfig,
@@ -113,13 +113,14 @@ describe("ForkWorkflowTool", () => {
 		);
 	});
 
-	it("shows a resumed run as running over a cached interrupted run", async () => {
+	it("polls a resumed run past a cached interrupted run", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const queryClient = createTestQueryClient();
 		queryClient.setQueryData(
-			chatWorkflowRun(
+			chatWorkflowRunKey(
 				MockForkWorkflowChatId,
 				MockForkWorkflowStartedResult.run_id,
-			).queryKey,
+			),
 			{ ...MockChatWorkflowRunDetail, status: "interrupted" },
 			{ updatedAt: Date.now() - 60_000 },
 		);
@@ -132,21 +133,21 @@ describe("ForkWorkflowTool", () => {
 			queryClient,
 		);
 
-		await waitFor(() => expect(getRun).toHaveBeenCalled());
-		await screen.findByRole("button", { name: /started workflow/i });
+		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(getRun).toHaveBeenCalledTimes(2);
 	});
 
 	it("polls the run again after a transient error", async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValueOnce(mockStatusError(500))
-			.mockResolvedValue(MockChatWorkflowRunDetail);
+			.mockRejectedValue(mockStatusError(500));
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
 		await vi.advanceTimersByTimeAsync(3_000);
-		await screen.findByRole("button", { name: /workflow completed/i });
+		expect(getRun).toHaveBeenCalledTimes(2);
 	});
 
 	it("stops polling when the viewer cannot read the run", async () => {

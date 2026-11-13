@@ -20,15 +20,19 @@ export const chatWorkflowRuns = (chatId: string) =>
 			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
 	});
 
-const chatWorkflowRunKey = (chatId: string, runId: string) =>
+export const chatWorkflowRunKey = (chatId: string, runId: string) =>
 	[...chatWorkflowRunsKey(chatId), runId] as const;
+
+/** Polls a run's detail while the run is running. */
+export const workflowRunRefetchInterval = (status: string | undefined) =>
+	status === "running" ? 3_000 : false;
 
 export const chatWorkflowRun = (chatId: string, runId: string) =>
 	queryOptions({
 		queryKey: chatWorkflowRunKey(chatId, runId),
 		queryFn: ({ signal }) => getChatWorkflowRun(chatId, runId, signal),
 		refetchInterval: ({ state }) =>
-			state.data?.status === "running" ? 3_000 : false,
+			workflowRunRefetchInterval(state.data?.status),
 	});
 
 /** Stops a run, then refreshes the chat's runs and their details. */

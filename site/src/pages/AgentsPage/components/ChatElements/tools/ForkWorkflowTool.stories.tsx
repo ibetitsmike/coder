@@ -144,6 +144,48 @@ export const StartedThenCompleted: Story = {
 	},
 };
 
+/**
+ * A running run's detail has no logs and no reused marks yet, so the card
+ * keeps those from the tool result.
+ */
+export const StillRunningLive: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowCompletedResult,
+			status: "running",
+			result: undefined,
+			logs: ["checked 2 files"],
+		},
+	},
+	parameters: {
+		reactRouter: reactRouterParameters({
+			location: { pathParams: { agentId: MockForkWorkflowChatId } },
+			routing: { path: "/agents/:agentId" },
+		}),
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: {
+				...MockChatWorkflowRunDetail,
+				status: "running",
+				result: undefined,
+				finished_at: undefined,
+				logs: [],
+				steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
+					...step,
+					reused: false,
+					status: index === 2 ? "running" : step.status,
+				})),
+			},
+		});
+	},
+	play: async (context) => {
+		// The live detail has one step still running.
+		await within(context.canvasElement).findByText(/2 of 3 steps reported/);
+		await expand(context);
+	},
+};
+
 export const Completed: Story = { play: expand };
 
 export const CompletedResultExpanded: Story = {

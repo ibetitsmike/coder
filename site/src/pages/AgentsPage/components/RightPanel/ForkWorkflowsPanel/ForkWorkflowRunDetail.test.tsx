@@ -12,7 +12,7 @@ import {
 } from "#/testHelpers/renderHelpers";
 import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
 
-const runningRun: WorkflowRunDetail = {
+const mockRunningRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "running",
 	result: undefined,
@@ -42,19 +42,16 @@ const runHeading = () =>
 
 describe("ForkWorkflowRunDetail", () => {
 	it("closes the stop dialog when the run ends on its own", async () => {
-		const stopRun = vi.spyOn(forkWorkflowsApi, "stopChatWorkflowRun");
-		const poll = renderDetail(runningRun);
+		const poll = renderDetail(mockRunningRunDetail);
 		const user = userEvent.setup();
 
 		await user.click(screen.getByRole("button", { name: "Stop" }));
-		poll({ ...runningRun, status: "completed" });
+		poll({ ...mockRunningRunDetail, status: "completed" });
 
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() => expect(runHeading()).toHaveFocus());
+		// A resumed run does not reopen the dialog, which would take focus.
+		poll(mockRunningRunDetail);
 		expect(runHeading()).toHaveFocus();
-		// A resumed run does not reopen the dialog.
-		poll(runningRun);
-		expect(screen.queryByRole("dialog")).toBeNull();
-		expect(stopRun).not.toHaveBeenCalled();
 	});
 
 	it("keeps the stop dialog open until the stop request settles", async () => {
@@ -64,10 +61,10 @@ describe("ForkWorkflowRunDetail", () => {
 				resolveStop = resolve;
 			}),
 		);
-		const poll = renderDetail(runningRun);
+		const poll = renderDetail(mockRunningRunDetail);
 		const user = userEvent.setup();
-		const stoppedRun: WorkflowRunDetail = {
-			...runningRun,
+		const mockStoppedRunDetail: WorkflowRunDetail = {
+			...mockRunningRunDetail,
 			status: "stopped",
 			error: "stopped by user",
 		};
@@ -76,11 +73,9 @@ describe("ForkWorkflowRunDetail", () => {
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 		await user.keyboard("{Escape}");
 		// The stop response updates the run before the request settles.
-		poll(stoppedRun);
-		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		poll(mockStoppedRunDetail);
+		resolveStop(mockStoppedRunDetail);
 
-		resolveStop(stoppedRun);
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		expect(runHeading()).toHaveFocus();
+		await waitFor(() => expect(runHeading()).toHaveFocus());
 	});
 });

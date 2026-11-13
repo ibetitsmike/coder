@@ -99,7 +99,7 @@ describe("mergeForkWorkflowRunDetail", () => {
 		if (!snapshot) {
 			throw new Error("the tool result did not parse");
 		}
-		const runningDetail = {
+		const mockRunningDetail = {
 			...MockChatWorkflowRunDetail,
 			status: "running",
 			logs: [],
@@ -109,7 +109,7 @@ describe("mergeForkWorkflowRunDetail", () => {
 			})),
 		};
 
-		const merged = mergeForkWorkflowRunDetail(snapshot, runningDetail);
+		const merged = mergeForkWorkflowRunDetail(snapshot, mockRunningDetail);
 		expect(merged.status).toBe("running");
 		expect(merged.logs).toEqual(["checked 2 files"]);
 		expect(merged.steps.map((step) => step.reused)).toEqual([
@@ -118,10 +118,10 @@ describe("mergeForkWorkflowRunDetail", () => {
 			false,
 		]);
 
-		const endedDetail = { ...runningDetail, status: "completed" };
 		expect(
 			mergeForkWorkflowRunDetail(snapshot, {
-				...endedDetail,
+				...mockRunningDetail,
+				status: "completed",
 				logs: ["2 reviews"],
 			}).logs,
 		).toEqual(["2 reviews"]);
