@@ -158,6 +158,10 @@ const formatWakeupEvent = (event: ChatWakeupEvent): string => {
 			? `${event.url} (${event.on.join(", ")})`
 			: event.url;
 	}
+	if (event.process_id) {
+		const process = `background process ${event.process_id.slice(0, 8)}`;
+		return event.command ? `${process}: ${event.command}` : process;
+	}
 	return event.type;
 };
 
