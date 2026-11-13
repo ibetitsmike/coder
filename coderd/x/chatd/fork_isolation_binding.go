@@ -123,7 +123,7 @@ func (p *Server) withForkWorktreeBinding(ctx context.Context, tools []fantasy.Ag
 	}
 	for i, tool := range tools {
 		switch tool.Info().Name {
-		case chattool.ExecuteToolName, "read_file", chattool.WriteFileToolName, chattool.EditFilesToolName, "attach_file":
+		case chattool.ExecuteToolName, "read_file", chattool.WriteFileToolName, chattool.EditFilesToolName, "attach_file", viewImageToolName:
 			tools[i] = worktreeBoundTool{AgentTool: tool, dir: worktree.path}
 		}
 	}

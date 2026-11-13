@@ -101,6 +101,7 @@ Use `.` and not `source`, because `source` fails in shells such as Dash, the `/b
 | Run another pstack skill (`/name` or "the **name** skill")              | 57 of pstack's 58 skills set `disable-model-invocation: true`, so `read_skill` and the skill index hide them from the model. You can still run one from the composer's `/` menu, but not in a chat's first message. | `read_file` `~/.coder/skills/<name>/SKILL.md`, with `~` replaced by your home directory, and follow it. Read its sibling files with `read_file` too. When you tell the user to type it, write `/workspace/<name>`, and in a new chat tell them to send a plain message first. | Stays                        |
 | `Grep`, `Glob`                                                          | `execute`, `read_file`                                                                                                                                                                                              | `execute` with `rg` or `find`.                                                                                                                                                                                                                                                | Stays                        |
 | Embed a screenshot or video inline, as `ketchup` and `ketchup-video` do | `attach_file`, for a workspace file of up to 10&nbsp;MiB. Refer to [Attachments](#attachments)                                                                                                                      | Save the file in the workspace, then call `attach_file` with its absolute path.                                                                                                                                                                                               | Stays                        |
+| Look at an image file, as `Read` does for a screenshot                  | `view_image`, only with the `fork-view-image` experiment. Refer to [Viewing images](#viewing-images)                                                                                                                | Call `view_image` with the image's absolute path. Without the tool, ask the user what the image shows.                                                                                                                                                                        | Stays                        |
 | Available-tools map, `mcps/`                                            | When MCP servers are configured, their tools sit behind `find_tools`. It is absent when there are none, or when an MCP or client tool is itself named `find_tools`                                                  | If you have `find_tools`, call it to find a tool by name or purpose. If not, look for MCP tools in your tool list.                                                                                                                                                            | Stays                        |
 
 ### Questions
@@ -166,6 +167,29 @@ Plain text, Markdown, CSV, and JSON open in a text preview.
 With the `fork-chat-todos` experiment, the web UI shows an MP4 as a player with a download link, both inline and in the turn's **Attachments** menu.
 Without the experiment, an MP4 shows as a download card, as an SVG does.
 Coder Agents doesn't send an attached file back to the model in later turns, so describe in your reply what the file shows.
+To look at an image file yourself, use [`view_image`](#viewing-images).
+
+### Viewing images
+
+`view_image` exists only when the deployment enables the `fork-view-image` experiment.
+It loads a PNG, JPEG, GIF, or WebP file from the workspace into the model's context as an image.
+It detects the type from the file's content, not its name, so a text file named `shot.png` fails with `/path/shot.png is text/plain, not a PNG, JPEG, GIF or WebP image; use read_file for text files`.
+On the Anthropic provider, and on Bedrock through the Anthropic API, a file over 3,932,160&nbsp;bytes fails, so that its base64 form fits Anthropic's 5&nbsp;MiB per-image limit.
+On other models, a file over 10&nbsp;MiB, the chat tool media limit, fails.
+The error names the limit and its reason, such as `... is larger than 3932160 bytes, the view_image limit: ...`.
+An image wider or taller than 8000&nbsp;pixels fails, because Anthropic rejects one.
+The tool doesn't resize images, so scale a large one down first.
+
+If the chat's model doesn't take images, the call fails with `model "<model>" on provider "<provider>" does not accept image input; switch to a model with image input to view images`.
+Google models don't take GIF, so a GIF fails there with `does not accept image/gif images`.
+The OpenAI-compatible, OpenRouter, and Vercel providers report that they take any image, so Coder Agents can't tell a text-only model behind them, and the provider gets the image anyway.
+
+The image stays in the chat's stored history like other tool results, and later turns send it again.
+Each request carries at most the 8 newest `view_image` images, and at most 15&nbsp;MiB of them, always with the newest one.
+An older one becomes the note `[image no longer in context: only the newest viewed images are kept; call view_image again to see it]`, so call `view_image` again to see it.
+After a compaction, the images before the summary are no longer sent, like any other tool result.
+The web UI shows the call as a tool card with the image.
+Plan-mode turns and `explore` children don't get `view_image`.
 
 ### Wake-ups
 
@@ -428,10 +452,12 @@ A change to the definition doesn't change a child that already exists.
 pstack's agents set none of these fields, so their children keep every tool of `general`.
 
 - `readonly: true` keeps only the `explore` tools without the shell tools: `read_file`, `read_skill`, `read_skill_file`, and the deployment MCP tools allowed in subagents.
+  It also keeps `view_image` when the `fork-view-image` experiment is on.
   It removes `execute` and `process_output`, because Coder Agents can't limit a shell command to reads.
   Of the provider tools, it keeps only `web_search`.
 - `tools` lists the non-MCP tools that the child keeps, and an empty list keeps none.
   Claude Code names work: `Read`, `Write`, `Edit`, `MultiEdit`, `Bash`, `Grep`, `Glob`, `WebSearch`, and `Task`, which stands for the subagent tools.
+  `Read` keeps `read_file` and `view_image`.
 - `disallowed_tools`, or `disallowedTools`, removes each tool that it names, MCP tools included.
   A Claude Code ID, `mcp__<server>__<tool>`, matches the Coder Agents tool `<server>__<tool>`.
 - `mcp: none` removes every MCP tool.
@@ -556,7 +582,7 @@ The line leaves out the uncommitted changes when `uncommitted_changes` is 0.
 The child works in its worktree.
 A system message before its prompt names the worktree and the branch, and tells the child to make and commit every change there.
 `execute` without a `workdir` runs in the worktree.
-A relative `workdir` of `execute`, and a relative path of `read_file`, `write_file`, `edit_files`, or `attach_file`, resolves against the worktree.
+A relative `workdir` of `execute`, and a relative path of `read_file`, `write_file`, `edit_files`, `attach_file`, or `view_image`, resolves against the worktree.
 An absolute path or an absolute `workdir` still reaches the rest of the workspace.
 With `fork-nested-subagents`, a `shared` child of the worktree child works in the same worktree, and its system message says so.
 
@@ -734,6 +760,13 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
+- Viewing images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:52-81`, added in `coderd/x/chatd/fork_tools.go:112-114`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
+  The model check, `fork_view_image.go:84-91`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
+  The size limit, `fork_view_image.go:96-101`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:121-128`, and the pixel limit, `:31-34`, `:129-136`.
+  Stored as a media tool result, `coderd/x/chatd/chatprompt/chatprompt.go:555-556`, and sent again on later turns, `:1142-1157`.
+  The bound on the prompt, `fork_view_image.go:35-40`, `:195-270`, applied on every turn, `fork_tools.go:60-64`.
+  The tool card with the image, `site/src/pages/AgentsPage/components/ChatElements/tools/Tool.tsx:964-978`.
+  Kept by `Read` and `readonly: true`, `coderd/x/chatd/fork_agent_tool_policy.go:51`, `:185-186`, and bound to the worktree, `fork_isolation_binding.go:126`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

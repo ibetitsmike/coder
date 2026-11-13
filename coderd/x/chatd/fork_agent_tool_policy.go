@@ -48,7 +48,7 @@ type customAgentToolPolicy struct {
 // Grep and Glob become shell searches and Task the subagent tools, as in
 // docs/fork/pstack-adapter.md.
 var customAgentToolAliases = map[string][]string{
-	"Read":      {"read_file"},
+	"Read":      {"read_file", viewImageToolName},
 	"Write":     {"write_file"},
 	"Edit":      {"edit_files"},
 	"MultiEdit": {"edit_files"},
@@ -182,6 +182,8 @@ func customAgentReadOnlyToolAllowed(tool fantasy.AgentTool) bool {
 	switch tool.Info().Name {
 	case "execute", "process_output":
 		return false
+	case viewImageToolName:
+		return true
 	}
 	return exploreToolAllowed(tool)
 }
