@@ -4,6 +4,9 @@ package chatd
 // the child it already created (fork_spawn_replay.go).
 
 import (
+	"context"
+	"database/sql"
+	"net/http"
 	"testing"
 
 	"charm.land/fantasy"
@@ -77,4 +80,131 @@ func TestForkSpawnAgentReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError, resp.Content)
 	require.Equal(t, 1, children(child))
+}
+
+// TestForkSpawnAgentReplayRetiredChild checks that a replay does not return a
+// child that an earlier run left unusable: an archived child, or a workspace
+// child whose spawn stopped before it got its workspace and prompt. The
+// replay spawns a new child at the next derived ID, and a later replay
+// returns that one.
+func TestForkSpawnAgentReplayRetiredChild(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		retire string
+	}{
+		{name: "Archived", retire: `UPDATE chats SET archived = true WHERE id = $1`},
+		// startSubagentWorkspace has not run: the child waits with no
+		// workspace and no prompt.
+		{name: "UnstartedWorkspace", retire: `WITH s AS (UPDATE chat_subagents SET isolation = 'workspace', workspace_id = NULL WHERE chat_id = $1)
+			UPDATE chats SET status = 'waiting' WHERE id = $1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+			ctx := chatdTestContext(t)
+			tools, err := f.server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
+			require.NoError(t, err)
+			tools, err = f.server.appendForkTools(ctx, tools, f.root, f.root.LastModelConfigID)
+			require.NoError(t, err)
+			callID := uuid.New()
+			spawn := func() uuid.UUID {
+				t.Helper()
+				resp, err := findToolByName(tools, spawnAgentToolName).Run(workspacesdk.WithToolCallID(ctx, callID),
+					fantasy.ToolCall{Input: `{"type":"general","prompt":"do the work"}`})
+				require.NoError(t, err)
+				id, ok := requireToolResponseMap(t, resp, false)["chat_id"].(string)
+				require.True(t, ok, resp.Content)
+				return uuid.MustParse(id)
+			}
+
+			first := spawn()
+			require.Equal(t, uuid.NewSHA1(callID, []byte(spawnAgentToolName)), first)
+			_, err = f.sqlDB.ExecContext(ctx, tc.retire, first)
+			require.NoError(t, err)
+
+			second := spawn()
+			require.Equal(t, uuid.NewSHA1(first, []byte(spawnAgentToolName)), second)
+			require.Equal(t, second, spawn(), "a later replay returns the new child")
+			old, err := f.db.GetChatByID(ctx, first)
+			require.NoError(t, err)
+			require.True(t, old.Archived, "the unusable child is archived")
+			rows, err := f.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{ParentIds: []uuid.UUID{f.root.ID}})
+			require.NoError(t, err)
+			require.Len(t, rows, 2)
+		})
+	}
+}
+
+// conflictWorktreeConn answers the worktree create of one child chat ID with
+// the conflict that an existing worktree gets.
+type conflictWorktreeConn struct {
+	*fakeWorktreeConn
+	conflictName string
+}
+
+func (c *conflictWorktreeConn) ForkCreateWorktree(ctx context.Context, req workspacesdk.ForkCreateWorktreeRequest) (workspacesdk.ForkWorktree, error) {
+	worktree, err := c.fakeWorktreeConn.ForkCreateWorktree(ctx, req)
+	if req.Name == c.conflictName {
+		return workspacesdk.ForkWorktree{}, codersdk.NewError(http.StatusConflict, codersdk.Response{Message: "worktree path already exists."})
+	}
+	return worktree, err
+}
+
+// TestForkSpawnAgentReplayWorktreeConflict checks that a replay whose child
+// worktree an earlier run created, before that run's child existed, spawns
+// the child at the next derived ID with a worktree of its own.
+func TestForkSpawnAgentReplayWorktreeConflict(t *testing.T) {
+	t.Parallel()
+
+	f := newIsolationFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentForkSubagentIsolation})
+	ctx := chatdTestContext(t)
+	callID := uuid.New()
+	first := uuid.NewSHA1(callID, []byte(spawnAgentToolName))
+	conn := &conflictWorktreeConn{
+		fakeWorktreeConn: &fakeWorktreeConn{worktree: workspacesdk.ForkWorktree{Path: "/home/coder/.coder/worktrees/child", Branch: "agent/child"}},
+		conflictName:     first.String(),
+	}
+	root := f.rootChat(t, conn)
+
+	resp, err := f.spawnTool(t, root).Run(workspacesdk.WithToolCallID(ctx, callID),
+		fantasy.ToolCall{Input: `{"type":"general","prompt":"do the work","isolation":"worktree"}`})
+	require.NoError(t, err)
+	result := requireToolResponseMap(t, resp, false)
+	second := uuid.NewSHA1(first, []byte(spawnAgentToolName))
+	require.Equal(t, second.String(), result["chat_id"], resp.Content)
+	require.Equal(t, "worktree", result["isolation"])
+
+	creates, deletes := conn.calls()
+	require.Len(t, creates, 2)
+	require.Equal(t, first.String(), creates[0].Name)
+	require.Equal(t, second.String(), creates[1].Name)
+	require.Empty(t, deletes, "the replay leaves the earlier worktree alone")
+	_, err = f.db.GetChatByID(ctx, first)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
+// TestForkSpawnAgentReplayConcurrentRun checks that a run whose spawn fails
+// because another run of the same call created the child meanwhile returns
+// that child.
+func TestForkSpawnAgentReplayConcurrentRun(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	callID := uuid.New()
+	childID := uuid.NewSHA1(callID, []byte(spawnAgentToolName))
+	// The inner spawn stands in for the losing run: the other run inserts
+	// the child first, so this run's insert fails.
+	inner := fantasy.NewAgentTool(spawnAgentToolName, "", func(ctx context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		_, err := f.server.createChildSubagentChatWithOptions(ctx, f.root, "do the work", "", childSubagentChatOptions{})
+		require.NoError(t, err)
+		return fantasy.NewTextErrorResponse("create child chat: duplicate key value violates unique constraint \"chats_pkey\""), nil
+	})
+	tool := forkReplaySafeSpawnTool{AgentTool: inner, server: f.server, chat: f.root}
+
+	resp, err := tool.Run(workspacesdk.WithToolCallID(ctx, callID), fantasy.ToolCall{Input: `{}`})
+	require.NoError(t, err)
+	require.Equal(t, childID.String(), requireToolResponseMap(t, resp, false)["chat_id"], resp.Content)
 }
