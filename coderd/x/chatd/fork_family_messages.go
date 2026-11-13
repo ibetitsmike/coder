@@ -250,6 +250,9 @@ func familyMessageEnvelope(senderID uuid.UUID, senderTitle, body string) string 
 const (
 	listFamilyChatsToolName = "list_family_chats"
 	maxFamilyChatsListed    = 100
+	// maxFamilyChatsListBytes keeps a listing below chatloop's smallest
+	// tool-result budget (16 KiB), which would cut the JSON mid-entry.
+	maxFamilyChatsListBytes = 12 << 10
 )
 
 // familyChatsResult and familyChat keep their fields in sorted JSON key
@@ -276,7 +279,7 @@ func (p *Server) listFamilyChatsTool(chat database.Chat) fantasy.AgentTool {
 			"ID, title, status and parent of each, and its relation to you: "+
 			"self, parent, root, child, sibling or other. Archived chats are "+
 			"not listed. "+fmt.Sprintf("At most %d chats are listed; ", maxFamilyChatsListed)+
-			"truncated is true when the family has more.",
+			"truncated is true when more chats exist than the list holds.",
 		func(ctx context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			result, err := p.listFamilyChats(ctx, chat, maxFamilyChatsListed)
 			if err != nil {
@@ -309,6 +312,7 @@ func (p *Server) listFamilyChats(ctx context.Context, caller database.Chat, limi
 		rows = rows[:limit]
 		result.Truncated = true
 	}
+	size := 0
 	for _, row := range rows {
 		item := familyChat{
 			ChatID:   row.ID.String(),
@@ -318,6 +322,15 @@ func (p *Server) listFamilyChats(ctx context.Context, caller database.Chat, limi
 		}
 		if row.ParentChatID.Valid {
 			item.ParentChatID = row.ParentChatID.UUID.String()
+		}
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return familyChatsResult{}, xerrors.Errorf("encode family chat: %w", err)
+		}
+		size += len(encoded) + 1
+		if size > maxFamilyChatsListBytes {
+			result.Truncated = true
+			break
 		}
 		result.Chats = append(result.Chats, item)
 	}

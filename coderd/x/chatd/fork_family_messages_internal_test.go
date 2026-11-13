@@ -311,6 +311,24 @@ func TestFamilyMessageListFamily(t *testing.T) {
 	require.Len(t, result.Chats, 4)
 }
 
+func TestFamilyMessageListFamilyByteBudget(t *testing.T) {
+	t.Parallel()
+	ft := newFamilyMessageTest(t)
+	for range 20 {
+		ft.createChild(t, ft.root)
+	}
+	_, err := ft.f.sqlDB.ExecContext(ft.ctx, "UPDATE chats SET title = repeat($1, $2) WHERE root_chat_id = $3", "\U0001F600", codersdk.MaxChatTitleRunes, ft.root.ID)
+	require.NoError(t, err)
+
+	result, err := ft.server.listFamilyChats(ft.ctx, ft.a, maxFamilyChatsListed)
+	require.NoError(t, err)
+	require.True(t, result.Truncated)
+	require.Less(t, len(result.Chats), 23, "the family has 23 chats")
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(encoded), maxFamilyChatsListBytes+64)
+}
+
 func TestFamilyMessageChildWithoutRootID(t *testing.T) {
 	t.Parallel()
 	ft := newFamilyMessageTest(t)
