@@ -7,6 +7,7 @@ package chatd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -21,6 +22,8 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/agenthooks/dispatch"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -64,6 +67,11 @@ func (p *Server) familyMessageTools(chat database.Chat) []fantasy.AgentTool {
 			"Use "+listFamilyChatsToolName+" to find chat IDs.",
 		func(ctx context.Context, args messageFamilyChatArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			target, queued, err := p.sendFamilyMessage(ctx, chat, args)
+			// A failed hook dispatch must fail closed instead of degrading
+			// into a tool error the model can ignore, as in spawn_agent.
+			if errors.As(err, new(*dispatch.Error)) {
+				return fantasy.ToolResponse{}, err
+			}
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
@@ -114,10 +122,9 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 
 	// A call replayed after a worker restart must not deliver the message
 	// again, so the recorded message takes the ID of the call occurrence.
-	// Without one the call cannot be deduplicated and gets a fresh ID.
 	messageID, ok := workspacesdk.ToolCallIDFromContext(ctx)
 	if !ok {
-		messageID = uuid.New()
+		return database.Chat{}, false, xerrors.Errorf("%s requires a deterministic tool-call ID", messageFamilyChatToolName)
 	}
 	//nolint:gocritic // chatd reads its own bookkeeping rows.
 	recipientID, err := fdb.GetChatFamilyMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatFamilyMessageRecipientParams{
@@ -145,7 +152,7 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	if err != nil {
 		return database.Chat{}, false, xerrors.Errorf("get target chat: %w", err)
 	}
-	if familyRootID(target) != familyRootID(sender) {
+	if subagentRootChatID(target) != subagentRootChatID(sender) {
 		return database.Chat{}, false, notInFamily
 	}
 	if target.Archived {
@@ -176,6 +183,7 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	if err := p.forkValidateSubagentResume(ctx, p.db, target, false); err != nil {
 		return database.Chat{}, false, err
 	}
+	ctx = context.WithValue(ctx, familyMessageSenderKey{}, familyMessageSender{id: sender.ID, title: sender.Title})
 	result, err := p.SendMessage(ctx, SendMessageOptions{
 		ChatID:       target.ID,
 		CreatedBy:    target.OwnerID,
@@ -215,15 +223,6 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	return result.Chat, result.Queued, nil
 }
 
-// familyRootID returns the root of the family of chat: its root chat, or the
-// chat itself when it is a root.
-func familyRootID(chat database.Chat) uuid.UUID {
-	if chat.RootChatID.Valid {
-		return chat.RootChatID.UUID
-	}
-	return chat.ID
-}
-
 // agentMessageTagPattern matches opening and closing <agent-message> tags,
 // including case and spacing variants.
 var agentMessageTagPattern = regexp.MustCompile(`(?i)<\s*/?\s*agent-message\b[^>]*>`)
@@ -242,7 +241,7 @@ func escapeAgentMessageTags(text string) string {
 func familyMessageEnvelope(senderID uuid.UUID, senderTitle, body string) string {
 	return fmt.Sprintf("<agent-message from_chat_id=\"%s\" from_title=%s>\n"+
 		"This message comes from another agent in your chat family, not from the user. "+
-		"To reply, call %s with chat_id \"%s\".\n\n"+
+		"If you have the %s tool, you can reply with it and chat_id \"%s\".\n\n"+
 		"%s\n</agent-message>",
 		senderID, strconv.Quote(escapeAgentMessageTags(senderTitle)), messageFamilyChatToolName, senderID,
 		escapeAgentMessageTags(strings.TrimSpace(body)))
@@ -296,7 +295,7 @@ func (p *Server) listFamilyChats(ctx context.Context, caller database.Chat, limi
 	if err != nil {
 		return familyChatsResult{}, xerrors.Errorf("fork queries: %w", err)
 	}
-	rootID := familyRootID(caller)
+	rootID := subagentRootChatID(caller)
 	//nolint:gocritic // chatd reads the family of its own chat.
 	rows, err := fdb.ListChatFamilyMembers(dbauthz.AsChatd(ctx), forkdb.ListChatFamilyMembersParams{
 		RootID:     rootID,
@@ -343,4 +342,36 @@ func familyRelation(caller database.Chat, rootID, id uuid.UUID, parentID uuid.Nu
 	default:
 		return "other"
 	}
+}
+
+type familyMessageSenderKey struct{}
+
+// familyMessageSender is the sender of the family message that a SendMessage
+// call delivers.
+type familyMessageSender struct {
+	id    uuid.UUID
+	title string
+}
+
+// forkWrapFamilyMessagePrompt wraps the prompt override of a
+// user_prompt_submit hook in the agent-message envelope when the send
+// delivers a family message, so the recipient still sees that the prompt
+// comes from an agent and not from the user. An override that does not decode
+// stays as is, and composing the prompt reports its error.
+func forkWrapFamilyMessagePrompt(ctx context.Context, result *chathooks.Result) *chathooks.Result {
+	sender, ok := ctx.Value(familyMessageSenderKey{}).(familyMessageSender)
+	if !ok {
+		return result
+	}
+	prompt, overridden, err := chathooks.UserPromptOverride(result)
+	if err != nil || !overridden {
+		return result
+	}
+	override, err := json.Marshal(map[string]string{"prompt": familyMessageEnvelope(sender.id, sender.title, prompt)})
+	if err != nil {
+		return result
+	}
+	wrapped := *result
+	wrapped.InputOverride = override
+	return &wrapped
 }

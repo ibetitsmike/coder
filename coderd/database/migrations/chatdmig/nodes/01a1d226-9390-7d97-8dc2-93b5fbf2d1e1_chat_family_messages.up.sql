@@ -8,5 +8,6 @@ CREATE TABLE chat_family_messages (
 );
 
 CREATE INDEX chat_family_messages_sender_created_at_idx ON chat_family_messages (sender_chat_id, created_at);
+CREATE INDEX chat_family_messages_recipient_chat_id_idx ON chat_family_messages (recipient_chat_id);
 
 COMMENT ON TABLE chat_family_messages IS 'Messages that a chat sent to another chat in its family with message_family_chat. The per-chat rate limit counts them.';
