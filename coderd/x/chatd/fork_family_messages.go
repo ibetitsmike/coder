@@ -125,8 +125,9 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	}
 	//nolint:gocritic // chatd reads its own bookkeeping rows.
 	recipientID, err := fdb.GetChatFamilyMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatFamilyMessageRecipientParams{
-		ID:           messageID,
-		SenderChatID: sender.ID,
+		ID:             messageID,
+		OrganizationID: sender.OrganizationID,
+		SenderChatID:   sender.ID,
 	})
 	if err == nil {
 		target, err := p.db.GetChatByID(ctx, recipientID)
@@ -164,8 +165,9 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 	since := p.clock.Now().Add(-time.Hour)
 	//nolint:gocritic // chatd counts its own bookkeeping rows.
 	sent, err := fdb.CountChatFamilyMessagesSince(dbauthz.AsChatd(ctx), forkdb.CountChatFamilyMessagesSinceParams{
-		SenderChatID: sender.ID,
-		Since:        since,
+		OrganizationID: sender.OrganizationID,
+		SenderChatID:   sender.ID,
+		Since:          since,
 	})
 	if err != nil {
 		return database.Chat{}, false, xerrors.Errorf("count family messages: %w", err)
@@ -195,8 +197,9 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 			// sender are dropped here to keep its rows bounded.
 			//nolint:gocritic // chatd deletes its own bookkeeping rows.
 			err = txdb.DeleteChatFamilyMessagesBefore(dbauthz.AsChatd(ctx), forkdb.DeleteChatFamilyMessagesBeforeParams{
-				SenderChatID: sender.ID,
-				Before:       since,
+				OrganizationID: sender.OrganizationID,
+				SenderChatID:   sender.ID,
+				Before:         since,
 			})
 			if err != nil {
 				return xerrors.Errorf("delete old family messages: %w", err)
@@ -204,6 +207,7 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 			//nolint:gocritic // chatd records its own bookkeeping rows.
 			err = txdb.InsertChatFamilyMessage(dbauthz.AsChatd(ctx), forkdb.InsertChatFamilyMessageParams{
 				ID:              messageID,
+				OrganizationID:  sender.OrganizationID,
 				SenderChatID:    sender.ID,
 				RecipientChatID: target.ID,
 				CreatedAt:       p.clock.Now(),
