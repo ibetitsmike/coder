@@ -27300,6 +27300,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "command": {
+                    "description": "Command is the command line of that process.",
+                    "type": "string"
+                },
                 "on": {
                     "description": "On lists the pull request activity that wakes the chat.",
                     "type": "array",
@@ -27307,8 +27311,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "process_id": {
+                    "description": "ProcessID is the background process of a process_exit event.",
+                    "type": "string"
+                },
                 "type": {
-                    "description": "Type is child_done for a child chat that finishes, or pull_request for\nactivity on a pull request.",
+                    "description": "Type is child_done for a child chat that finishes, pull_request for\nactivity on a pull request, or process_exit for a background process\nthat exits.",
                     "type": "string"
                 },
                 "url": {
@@ -29635,13 +29643,15 @@ const docTemplate = `{
                 "chat-inline-mcp-servers",
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
-                "chat-acp-subagents"
+                "chat-acp-subagents",
+                "chat-automations"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
                 "ExperimentAIGatewaySeatExclusion": "Excludes AI Gateway (AI Bridge) usage from AI Governance seat consumption.",
                 "ExperimentAgentLifecycleHooks": "Enables chat lifecycle hook webhooks for agent chats.",
                 "ExperimentChatACPSubagents": "Enables workspace-local ACP subagent tools in root chats.",
+                "ExperimentChatAutomations": "Enables webhook and scheduled automations that deliver prompts to agent chats.",
                 "ExperimentChatInlineMCPServers": "Enables inline MCP servers declared on POST /chats.",
                 "ExperimentChatProjectSharing": "Enables sharing agent chat projects with other users and groups.",
                 "ExperimentChatStageMetrics": "Exposes chat lifecycle stage durations as Prometheus metrics.",
@@ -29682,7 +29692,8 @@ const docTemplate = `{
                 "Enables inline MCP servers declared on POST /chats.",
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
-                "Enables workspace-local ACP subagent tools in root chats."
+                "Enables workspace-local ACP subagent tools in root chats.",
+                "Enables webhook and scheduled automations that deliver prompts to agent chats."
             ],
             "x-enum-varnames": [
                 "ExperimentForkChatTodos",
@@ -29710,7 +29721,8 @@ const docTemplate = `{
                 "ExperimentChatInlineMCPServers",
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
-                "ExperimentChatACPSubagents"
+                "ExperimentChatACPSubagents",
+                "ExperimentChatAutomations"
             ]
         },
         "codersdk.ExperimentRule": {
@@ -33891,6 +33903,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "collect_db_metrics": {
+                    "type": "boolean"
+                },
+                "collect_workspace_stats": {
                     "type": "boolean"
                 },
                 "enable": {

@@ -4267,8 +4267,9 @@ export interface ChatWakeup {
  */
 export interface ChatWakeupEvent {
 	/**
-	 * Type is child_done for a child chat that finishes, or pull_request for
-	 * activity on a pull request.
+	 * Type is child_done for a child chat that finishes, pull_request for
+	 * activity on a pull request, or process_exit for a background process
+	 * that exits.
 	 */
 	readonly type: string;
 	/**
@@ -4283,6 +4284,14 @@ export interface ChatWakeupEvent {
 	 * On lists the pull request activity that wakes the chat.
 	 */
 	readonly on?: readonly string[];
+	/**
+	 * ProcessID is the background process of a process_exit event.
+	 */
+	readonly process_id?: string;
+	/**
+	 * Command is the command line of that process.
+	 */
+	readonly command?: string;
 }
 
 // From codersdk/fork_chat_wakeups.go
@@ -6059,6 +6068,7 @@ export type Experiment =
 	| "ai-gateway-seat-exclusion"
 	| "agent-lifecycle-hooks"
 	| "chat-acp-subagents"
+	| "chat-automations"
 	| "chat-inline-mcp-servers"
 	| "chat-project-sharing"
 	| "chat-stage-metrics"
@@ -6148,6 +6158,7 @@ export const Experiments: Experiment[] = [
 	"ai-gateway-seat-exclusion",
 	"agent-lifecycle-hooks",
 	"chat-acp-subagents",
+	"chat-automations",
 	"chat-inline-mcp-servers",
 	"chat-project-sharing",
 	"chat-stage-metrics",
@@ -9544,6 +9555,7 @@ export interface PrometheusConfig {
 	readonly collect_agent_stats: boolean;
 	readonly collect_db_metrics: boolean;
 	readonly aggregate_agent_stats_by: string;
+	readonly collect_workspace_stats: boolean;
 }
 
 // From codersdk/chats.go

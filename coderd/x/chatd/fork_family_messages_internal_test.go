@@ -86,16 +86,18 @@ func (ft *familyMessageTest) createChild(t *testing.T, parent database.Chat) dat
 	return res.Chat
 }
 
-// familyMessageRows returns the recorded family messages as sender>recipient.
+// familyMessageRows returns the recorded family messages as sender>recipient
+// and requires each to carry the organization of its sender.
 func (ft *familyMessageTest) familyMessageRows(t *testing.T) []string {
 	t.Helper()
-	rows, err := ft.f.sqlDB.QueryContext(ft.ctx, "SELECT sender_chat_id, recipient_chat_id FROM chat_family_messages")
+	rows, err := ft.f.sqlDB.QueryContext(ft.ctx, "SELECT m.sender_chat_id, m.recipient_chat_id, m.organization_id, c.organization_id FROM chat_family_messages m JOIN chats c ON c.id = m.sender_chat_id")
 	require.NoError(t, err)
 	defer rows.Close()
 	var got []string
 	for rows.Next() {
-		var sender, recipient uuid.UUID
-		require.NoError(t, rows.Scan(&sender, &recipient))
+		var sender, recipient, org, senderOrg uuid.UUID
+		require.NoError(t, rows.Scan(&sender, &recipient, &org, &senderOrg))
+		require.Equal(t, senderOrg, org)
 		got = append(got, sender.String()+">"+recipient.String())
 	}
 	require.NoError(t, rows.Err())

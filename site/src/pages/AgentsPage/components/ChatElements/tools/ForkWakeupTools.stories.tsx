@@ -5,6 +5,7 @@ import {
 	MockNotifyUserArgs,
 	MockScheduleWakeupArgs,
 	MockScheduleWakeupResult,
+	MockWaitForEventsProcessesResult,
 	MockWaitForEventsResult,
 } from "#/testHelpers/forkChatWakeups";
 import { withDashboardProvider } from "#/testHelpers/storybook";
@@ -99,6 +100,32 @@ export const WaitForEventsPullRequestOnly: Story = {
 		name: "wait_for_events",
 		args: { pull_request_url: MockWaitForEventsResult.pull_request.url },
 		result: { ...MockWaitForEventsResult, children: [] },
+	},
+	play: expand,
+};
+
+export const WaitForEventsProcesses: Story = {
+	args: {
+		name: "wait_for_events",
+		args: {
+			process_ids: MockWaitForEventsProcessesResult.processes.map(
+				(process) => process.process_id,
+			),
+			process_output_pattern: "^(FAIL|panic:)",
+		},
+		result: MockWaitForEventsProcessesResult,
+	},
+	play: expand,
+};
+
+export const WaitForEventsProcessesAndPullRequest: Story = {
+	args: {
+		name: "wait_for_events",
+		args: { pull_request_url: MockWaitForEventsResult.pull_request.url },
+		result: {
+			...MockWaitForEventsResult,
+			processes: MockWaitForEventsProcessesResult.processes,
+		},
 	},
 	play: expand,
 };

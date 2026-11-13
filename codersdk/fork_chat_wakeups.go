@@ -37,8 +37,9 @@ const (
 
 // ChatWakeupEvent is one event that an events wake-up waits for.
 type ChatWakeupEvent struct {
-	// Type is child_done for a child chat that finishes, or pull_request for
-	// activity on a pull request.
+	// Type is child_done for a child chat that finishes, pull_request for
+	// activity on a pull request, or process_exit for a background process
+	// that exits.
 	Type string `json:"type"`
 	// ChatID is the child chat of a child_done event.
 	ChatID *uuid.UUID `json:"chat_id,omitempty" format:"uuid"`
@@ -46,6 +47,10 @@ type ChatWakeupEvent struct {
 	URL string `json:"url,omitempty"`
 	// On lists the pull request activity that wakes the chat.
 	On []string `json:"on,omitempty"`
+	// ProcessID is the background process of a process_exit event.
+	ProcessID string `json:"process_id,omitempty"`
+	// Command is the command line of that process.
+	Command string `json:"command,omitempty"`
 }
 
 // ChatWakeup is a scheduled message that a chat sends itself, created by the

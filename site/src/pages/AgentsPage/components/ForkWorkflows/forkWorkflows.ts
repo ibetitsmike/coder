@@ -117,7 +117,7 @@ export const forkWorkflowRunDetailSteps = (
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */
-export const forkWorkflowRunDetailSnapshot = (
+const forkWorkflowRunDetailSnapshot = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowRunSnapshot => ({
 	runId: run.id,
@@ -127,6 +127,27 @@ export const forkWorkflowRunDetailSnapshot = (
 	steps: forkWorkflowRunDetailSteps(run),
 	logs: run.logs,
 });
+
+/**
+ * Applies a run detail to a running tool result. The detail has no logs until
+ * the run ends and does not mark reused steps, so those come from the result.
+ */
+export const mergeForkWorkflowRunDetail = (
+	snapshot: ForkWorkflowRunSnapshot,
+	run: WorkflowRunDetail,
+): ForkWorkflowRunSnapshot => {
+	const detail = forkWorkflowRunDetailSnapshot(run);
+	const reusedChatIds = new Set(
+		snapshot.steps.filter((step) => step.reused).map((step) => step.chatId),
+	);
+	return {
+		...detail,
+		steps: detail.steps.map((step) =>
+			reusedChatIds.has(step.chatId) ? { ...step, reused: true } : step,
+		),
+		logs: detail.logs.length > 0 ? detail.logs : snapshot.logs,
+	};
+};
 
 /** Summarizes step progress, for example "2 of 3 steps reported". */
 export const forkWorkflowStepCountProgress = (

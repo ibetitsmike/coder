@@ -6148,9 +6148,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "events": [
     {
       "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+      "command": "string",
       "on": [
         "string"
       ],
+      "process_id": "string",
       "type": "string",
       "url": "string"
     }
@@ -6203,9 +6205,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "command": "string",
   "on": [
     "string"
   ],
+  "process_id": "string",
   "type": "string",
   "url": "string"
 }
@@ -6213,12 +6217,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name      | Type            | Required | Restrictions | Description                                                                                        |
-|-----------|-----------------|----------|--------------|----------------------------------------------------------------------------------------------------|
-| `chat_id` | string          | false    |              | Chat ID is the child chat of a child_done event.                                                   |
-| `on`      | array of string | false    |              | On lists the pull request activity that wakes the chat.                                            |
-| `type`    | string          | false    |              | Type is child_done for a child chat that finishes, or pull_request for activity on a pull request. |
-| `url`     | string          | false    |              | URL is the pull request of a pull_request event.                                                   |
+| Name         | Type            | Required | Restrictions | Description                                                                                                                                          |
+|--------------|-----------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `chat_id`    | string          | false    |              | Chat ID is the child chat of a child_done event.                                                                                                     |
+| `command`    | string          | false    |              | Command is the command line of that process.                                                                                                         |
+| `on`         | array of string | false    |              | On lists the pull request activity that wakes the chat.                                                                                              |
+| `process_id` | string          | false    |              | Process ID is the background process of a process_exit event.                                                                                        |
+| `type`       | string          | false    |              | Type is child_done for a child chat that finishes, pull_request for activity on a pull request, or process_exit for a background process that exits. |
+| `url`        | string          | false    |              | URL is the pull request of a pull_request event.                                                                                                     |
 
 ## codersdk.ChatWakeupKind
 
@@ -8964,6 +8970,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       ],
       "collect_agent_stats": true,
       "collect_db_metrics": true,
+      "collect_workspace_stats": true,
       "enable": true
     },
     "provisioner": {
@@ -9609,6 +9616,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
     ],
     "collect_agent_stats": true,
     "collect_db_metrics": true,
+    "collect_workspace_stats": true,
     "enable": true
   },
   "provisioner": {
@@ -10341,9 +10349,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-family-messages`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-family-messages`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -14785,6 +14793,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   ],
   "collect_agent_stats": true,
   "collect_db_metrics": true,
+  "collect_workspace_stats": true,
   "enable": true
 }
 ```
@@ -14797,6 +14806,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `aggregate_agent_stats_by` | array of string                      | false    |              |             |
 | `collect_agent_stats`      | boolean                              | false    |              |             |
 | `collect_db_metrics`       | boolean                              | false    |              |             |
+| `collect_workspace_stats`  | boolean                              | false    |              |             |
 | `enable`                   | boolean                              | false    |              |             |
 
 ## codersdk.ProposeChatTitleResponse
