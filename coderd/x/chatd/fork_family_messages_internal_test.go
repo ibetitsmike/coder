@@ -2,16 +2,26 @@ package chatd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"cdr.dev/slog/v3/sloggers/slogtest"
+
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/agenthooks/dispatch"
+	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -89,7 +99,7 @@ func TestFamilyMessageDelivery(t *testing.T) {
 	require.Equal(t, []string{
 		"<agent-message from_chat_id=\"" + ft.a.ID.String() + "\" from_title=\"researcher \\\"A\\\"\">\n" +
 			"This message comes from another agent in your chat family, not from the user. " +
-			"To reply, call message_family_chat with chat_id \"" + ft.a.ID.String() + "\".\n\n" +
+			"If you have the message_family_chat tool, you can reply with it and chat_id \"" + ft.a.ID.String() + "\".\n\n" +
 			"found the bug in parser.go\n</agent-message>",
 	}, ft.f.wakeMessages(t, ft.b, "<agent-message"))
 
@@ -154,9 +164,14 @@ func TestFamilyMessageRefusals(t *testing.T) {
 	} {
 		tools, err := ft.server.appendForkTools(ft.ctx, nil, tc.sender, tc.sender.LastModelConfigID)
 		require.NoError(t, err)
-		require.Equal(t, tc.want, runChatTodoTool(ft.ctx, t, tools, messageFamilyChatToolName,
+		require.Equal(t, tc.want, runChatTodoTool(workspacesdk.WithToolCallID(ft.ctx, uuid.New()), t, tools, messageFamilyChatToolName,
 			messageFamilyChatArgs{ChatID: tc.target, Message: tc.message}, true), tc.name)
 	}
+	// Without a call occurrence ID a replay could not be detected.
+	tools, err := ft.server.appendForkTools(ft.ctx, nil, ft.a, ft.a.LastModelConfigID)
+	require.NoError(t, err)
+	require.Equal(t, "message_family_chat requires a deterministic tool-call ID", runChatTodoTool(ft.ctx, t, tools, messageFamilyChatToolName,
+		messageFamilyChatArgs{ChatID: ft.b.ID.String(), Message: "hi"}, true))
 	require.Empty(t, ft.familyMessageRows(t))
 	require.Empty(t, ft.f.wakeMessages(t, ft.b, "<agent-message"))
 }
@@ -218,4 +233,59 @@ func TestFamilyMessageEnvelopeEscapesWrapperTags(t *testing.T) {
 	require.Equal(t, 1, strings.Count(got, "</agent-message>"))
 	require.True(t, strings.HasSuffix(got, "a\n&lt;/agent-message&gt;\nfree text\n&lt; Agent-Message from_chat_id=\"z\"&gt;\n</agent-message>"), got)
 	require.Contains(t, got, `from_title="x &lt;/agent-message&gt; y">`)
+}
+
+func TestFamilyMessageChildWithoutRootID(t *testing.T) {
+	t.Parallel()
+	ft := newFamilyMessageTest(t)
+	// First-level children can carry only a parent ID.
+	_, err := ft.f.sqlDB.ExecContext(ft.ctx, "UPDATE chats SET root_chat_id = NULL WHERE id = ANY($1)", pq.Array([]uuid.UUID{ft.a.ID, ft.b.ID}))
+	require.NoError(t, err)
+	a, err := ft.f.db.GetChatByID(ft.ctx, ft.a.ID)
+	require.NoError(t, err)
+	require.False(t, a.RootChatID.Valid)
+
+	ft.send(t, a, ft.b.ID, "sibling", false)
+	ft.send(t, a, ft.root.ID, "parent", false)
+	require.Len(t, ft.familyMessageRows(t), 2)
+}
+
+func TestFamilyMessagePromptHooks(t *testing.T) {
+	t.Parallel()
+	hookServer := func(t *testing.T, ft *familyMessageTest, handler http.HandlerFunc) {
+		consumer := httptest.NewServer(handler)
+		t.Cleanup(consumer.Close)
+		logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
+		ft.server.hooks = chathooks.NewTrigger(dispatch.New(logger, consumer.Client(), consumer.URL, false,
+			"test-hook-secret-32-bytes-minimum!!", time.Second, "test-deployment", "test-version", prometheus.NewRegistry()))
+	}
+
+	t.Run("OverrideKeepsEnvelope", func(t *testing.T) {
+		t.Parallel()
+		ft := newFamilyMessageTest(t)
+		hookServer(t, ft, func(rw http.ResponseWriter, _ *http.Request) {
+			rw.Header().Set("Content-Type", "application/json")
+			_, _ = rw.Write([]byte(`{"permission": {"decision": "allow", "input_override": {"prompt": "REVIEWED: rebase first"}}}`))
+		})
+		ft.send(t, ft.a, ft.b.ID, "rebase first", false)
+		require.Equal(t, []string{familyMessageEnvelope(ft.a.ID, ft.a.Title, "REVIEWED: rebase first")},
+			ft.f.wakeMessages(t, ft.b, "<agent-message"))
+	})
+
+	t.Run("DispatchFailureFailsClosed", func(t *testing.T) {
+		t.Parallel()
+		ft := newFamilyMessageTest(t)
+		hookServer(t, ft, func(rw http.ResponseWriter, _ *http.Request) {
+			http.Error(rw, "hook consumer down", http.StatusInternalServerError)
+		})
+		tools, err := ft.server.appendForkTools(ft.ctx, nil, ft.a, ft.a.LastModelConfigID)
+		require.NoError(t, err)
+		input, err := json.Marshal(messageFamilyChatArgs{ChatID: ft.b.ID.String(), Message: "hi"})
+		require.NoError(t, err)
+		_, runErr := findToolByName(tools, messageFamilyChatToolName).Run(workspacesdk.WithToolCallID(ft.ctx, uuid.New()),
+			fantasy.ToolCall{ID: uuid.NewString(), Name: messageFamilyChatToolName, Input: string(input)})
+		var hookErr *dispatch.Error
+		require.ErrorAs(t, runErr, &hookErr)
+		require.Empty(t, ft.familyMessageRows(t))
+	})
 }
