@@ -56,6 +56,7 @@ This page is fork-only: it isn't in `docs/manifest.json`.
     - A transcript of your own chat, a child, or a chat ID you were given: read_chat_transcript, if you have it.
     - Recent chats, or a top-level chat ID you don't have: search_chats, if you have it.
     - A child's chat ID you don't have: list_agents in its parent.
+    - A deeper descendant's chat ID you don't have: list_agents with recursive true, if it takes recursive.
     - /loop <interval> or a watcher: if you have schedule_wakeup, run the step once now, then call schedule_wakeup with interval_seconds.
       Set max_runs or expires_in_seconds, because no tool cancels a wake-up.
     - Background subagents you wait for across turns: if you have wait_for_events, call it and end the turn, then call wait_agent on the child that each wake-up message names.
@@ -448,6 +449,10 @@ The default depth of 2 allows a root, a coordinator, and its workers.
 An organization's `max_depth` subagent limit can lower that depth, but not raise it.
 An `explore` or `computer_use` child never gets them.
 With the experiment, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` reach only a chat's direct children, so the root waits on the coordinator, not on its workers.
+With the experiment, `list_agents` also takes a `chat_id` to list the children of that chat instead, and `recursive: true` to list every descendant instead of only the children.
+The `chat_id` must be your own chat or one of your descendants, so `list_agents` never lists chats outside your subtree.
+With either option, each entry also has `parent_chat_id`.
+With the `fork-chat-todos` experiment, you can pass any listed ID to `read_chat_transcript`.
 To message other chats in the family, refer to [Family messages](#family-messages).
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
 Archiving a root whose family is still working interrupts the family, waits up to 30&nbsp;seconds for it to stop, then archives every member.
@@ -493,7 +498,7 @@ If no child is live, retry one time without waiting.
 If a child is `running`, `interrupting`, or `paused`, call `wait_agent` on it, and retry when it finishes.
 A `paused` child waits for its owner to finish editing a queued message, so keep waiting on it unless the user says otherwise.
 Otherwise, or if that retry fails, `requires_action` children or your children's own workers hold the limit.
-`wait_agent` returns at once for a `requires_action` child, and `list_agents` doesn't show your children's workers.
+`wait_agent` returns at once for a `requires_action` child, and `list_agents` shows your children's workers only with `recursive: true`.
 In that case, call `interrupt_agent` on each child whose remaining work you don't need.
 Whatever the child's status, `interrupt_agent` interrupts its `running`, `interrupting`, and `requires_action` descendants, and the child itself when it has a turn.
 An interrupted `requires_action` child runs again before it stops, so call `wait_agent` on it before you retry.
@@ -640,6 +645,7 @@ Pass a child's `chat_id` from `spawn_agent` or `list_agents` to read that child,
 With the same experiment, `search_chats` finds top-level chats with the chat list search syntax, such as `search:"<phrase>"` or `pr:<number>`, and an empty query lists the recent ones.
 By default it searches only the chats your user created, so add `source:created_by_me,shared_with_me` to include chats shared with your user.
 It returns no subagent chats, so get a child's ID from `list_agents` in its parent.
+With the `fork-nested-subagents` experiment, `list_agents` with `recursive: true` also lists your children's workers and their own children.
 In the conversation, the web UI shows each `search_chats` call as a card, such as **Found 3 chats**, that expands to the query and a link to each chat with its status.
 It shows each `read_chat_transcript` call as a card, such as **Read 4 messages from** and the chat's title, that expands to a link to the chat and one line per message with its role and a preview.
 A card says **More chats available** or **More messages available** when the tool has another page, and the card of a failed call expands to its error.
@@ -693,12 +699,14 @@ If the user wants `poteto-mode` to stay on, tell them that with the experiment t
 Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`, which is checked against #202, and `fork_tools.go`, which is checked against the change that gives API root chats `ask_user_question`.
 The family messages entry is checked against fork `main` at `2bf9127b59`.
 The pinned skills entry is checked against fork `main` at `9dbe879138`.
+The `list_agents` lines on `chat_id`, `recursive`, `waiting_for_capacity`, and the children's lists are checked against the change that adds `chat_id` and `recursive` to `list_agents`.
 The skill roots, instruction files, and rules entries, and the wake-ups entry's lines on the `wait_for_events` arguments, the pull request arguments, background processes, and the tool cards are checked against fork `main` at `525bb3d68b`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
   Subagent tools for a `general` child only with `fork-nested-subagents` and below the depth limit, `coderd/x/chatd/fork_subagents.go:425-442`, `:456-484`.
   Direct children only, `isSubagentTarget`, `fork_subagents.go:489-501`.
+  The `chat_id` and `recursive` options of `list_agents`, only with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:80`, `fork_list_agents.go:50-53`, `:74-84`, limited to the chat and its descendants, `:105-113`, walked through unarchived chats, `:114-118`, `:145-172`, with `parent_chat_id`, `:135-141`.
   Depth flag, `codersdk/fork_chat_config.go:45-52`, lowered by the organization's `max_depth`, `coderd/x/chatd/fork_limits.go:56-58`.
   Inactive tool error, `coderd/x/chatd/chatloop/chatloop.go:1460`.
   Upstream server check, `validateSubagentSpawnParent`, `subagent_catalog.go:254-262`.
@@ -750,7 +758,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Concurrency default and queued refusals: `coderd/x/chatd/agentadmission.go:13`, no cap when an entitlement unlocks it, `:60-65`, `enterprise/coderd/x/chatd/agentadmission.go:18-28`, `coderd/x/chatd/worker.go:275-283`.
   Subagent limits, only with `fork-nested-subagents`: flags, `codersdk/fork_chat_config.go:54-83`, the lower of the deployment and organization values, `fork_capacity.go:32-45`, `fork_limits.go:49-60`, `:64-72`, returned by the organization limits API, `coderd/fork_subagent_limits.go:30-51`, `:133-140`, without the default cap, `fork_capacity.go:119-130`.
   The organization settings section, only with `fork-nested-subagents` and for a user who can read the organization's chat model configs, `site/src/pages/AISettingsPage/CoderAgentsPage/ForkSubagentLimits.tsx:31-55`, read-only without edit permission, `components/ForkSubagentLimitsSettings.tsx:179-189`.
-  Concurrency limits without the ancestors, `fork_capacity.go:75-117`, and `waiting_for_capacity` in `list_agents`, `coderd/x/chatd/fork_list_agents.go:34-40`, `:81-88`, from `fork_capacity.go:146-192`.
+  Concurrency limits without the ancestors, `fork_capacity.go:75-117`, and `waiting_for_capacity` in `list_agents`, `coderd/x/chatd/fork_list_agents.go:176-182`, `:223-230`, from `fork_capacity.go:146-192`.
   The `list_agents` card's **waiting for capacity**, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:16-27`, in each row, `ListAgentsTool.tsx:58`.
   The family API, only with the experiment, `coderd/fork_chat_routes.go:45-48`, status 400 for a child chat, `coderd/fork_chat_family.go:29-34`, and its fields, `codersdk/fork_chat_family.go:16-28`, from `coderd/x/chatd/fork_family.go:22-67`.
   The sidebar hourglass and subtitle for a waiting child, and the chip at the live limit for an expanded root chat with a live subagent, only with the experiment and for the chat owner, `site/src/pages/AgentsPage/components/ChatsSidebar/tree/ForkFamilyCapacity.tsx:30-34`, `:48-91`, `:98-115`, polled every 5&nbsp;seconds, `site/src/api/queries/forkChatFamily.ts:12-19`, in each row, `ChatTreeNode.tsx:142-159`, `:347-349`.
@@ -784,7 +792,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The **Available agents** page, only with `fork-agent-definitions`, the route, `site/src/forkRoutes.tsx:32`, the nav item, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-20`, `:30-36`, and the page, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAvailableAgentsPage/ForkAvailableAgentsPage.tsx:103`, `:138-140`, with your organizations, `:96-98`, `:104-108`, `:201-213`, the menus of its projects and your workspaces, `:53-55`, `:70`, `:84`, `:110-114`, `:122-136`, `:207-229`, the columns, `:176-190`, `:234-243`, the source labels, `site/src/pages/AgentsPage/components/ChatElements/ForkCompactAgentTypeSelector.tsx:31-37`, and the recent chats from the sidebar's default list, matched by the name without its prefix, `ForkAvailableAgentsPage.tsx:46-51`, `:115-121`, `:143-174`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:107-160`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
   The `@` menu in the composer, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatMessageInput/ForkAgentMentionPlugin.tsx:146`, `:234-236`, opened at the start of a line or after a space, `:46-58`, with the built-in types and each source's agents under the names that `spawn_agent` accepts, `:60-95`, `:97-116`, `:170-198`, and inserting the delegation, `:118-130`, in a child chat only for a `general` child with `fork-nested-subagents`, `:156-161`, with its root chat's project, `:162-169`, holding Enter while agents load, `:215-232`, and rendered in Lexical's listbox, `:238-268`, registered in `ChatMessageInput.tsx:1405-1409`.
-- Family messages, only with `fork-family-messages`: `codersdk/fork_experiments.go:58-60`, `coderd/x/chatd/fork_tools.go:82-84`, without the plan-mode, `explore`, and `readonly` tools, `coderd/x/chatd/turn_environment.go:743`, `:880`, `:2048-2064`, `:883-887`, `:2120-2130`, `coderd/x/chatd/fork_agent_tool_policy.go:181-187`, `:203`, and part of `Task`, `:59-62`.
+- Family messages, only with `fork-family-messages`: `codersdk/fork_experiments.go:58-60`, `coderd/x/chatd/fork_tools.go:83-85`, without the plan-mode, `explore`, and `readonly` tools, `coderd/x/chatd/turn_environment.go:743`, `:880`, `:2048-2064`, `:883-887`, `:2120-2130`, `coderd/x/chatd/fork_agent_tool_policy.go:181-187`, `:203`, and part of `Task`, `:59-62`.
   `list_family_chats`, `coderd/x/chatd/fork_family_messages.go:254-342`, with `parent_chat_id` only for a chat with a parent, `:269-275`, `:327-329`, with each relation, `:344-362`, from the unarchived family, `coderd/database/forkdb/queries/chat_family_messages.sql:17-28`.
   `message_family_chat`, `fork_family_messages.go:32-41`, `:55-86`, with the refused sends, `:104-117`, `:146-161`, the hourly limit, `:168-180`, `chat_family_messages.sql:5-7`, the live limit and the secret question with `fork-nested-subagents`, `fork_family_messages.go:182-187`, `coderd/x/chatd/fork_subagents.go:161-164`, `:216-251`, the delivery that steers a busy recipient, `fork_family_messages.go:188-227`, `coderd/x/chatd/chatd.go:462-464`, and the envelope, `fork_family_messages.go:230-252`, also around a hook's prompt, `:373-394`, `coderd/x/chatd/chat_mutations.go:129`.
   The cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:87-96`, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkFamilyMessageTool.tsx:15-67`, `:89-153`, and the recipient's message, `site/src/pages/AgentsPage/components/ChatConversation/ForkFamilyMessageHeader.tsx:19-56`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkFamilyMessage.ts:14-15`, `:38-49`, `site/src/pages/AgentsPage/components/ChatConversation/UserMessageContent.tsx:137-140`, `:162-164`.
@@ -818,7 +826,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Snapshot after a compaction, `todoSnapshotMessage`, `coderd/x/chatd/fork_context.go:105-108`.
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:19-31`, `ChatTodoPill.tsx:94-108`.
   Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:43-49`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
-  The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:28`, `:50`, `:70-74`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
+  The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:42`, `:192`, `:212-216`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:34`.
