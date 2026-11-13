@@ -296,6 +296,7 @@ The result is also `{"sent":true}` when Coder drops the notification, because th
 | `cloud_base_branch: <b>`                      | `base_branch` only with `isolation: "worktree"` and the `fork-subagent-isolation` experiment                                                                                                                                                                                                                              | With the experiment, pass `base_branch: "<b>"` with `isolation: "worktree"`. Otherwise tell the worker to create its worktree from `<b>`.                                                                                                                                                                                                     | W3         |
 | `run_in_background: true`                     | `spawn_agent` never blocks. With the `fork-chat-wakeups` experiment, `wait_for_events` wakes the parent when a child is done                                                                                                                                                                                              | Omit. Call `wait_agent` when you need the result. To end the turn while children work, call `wait_for_events` if you have it, then end the turn, and call `wait_agent` on the child that each wake-up message names.                                                                                                                          | Stays      |
 | `resume`                                      | `message_agent` wakes an idle child with a follow-up                                                                                                                                                                                                                                                                      | `message_agent`, then `wait_agent`.                                                                                                                                                                                                                                                                                                           | Stays      |
+| A worker that messages its parent or sibling  | Only with the `fork-family-messages` experiment, `message_family_chat` sends to any chat in the family, and `list_family_chats` lists their IDs. Refer to [Family messages](#family-messages)                                                                                                                             | Put the worker's results in its final reply, as pstack expects. If the worker has `message_family_chat`, it can also send its parent a status, a blocker, or a question and keep working, or send a sibling what it needs.                                                                                                                    | W14        |
 | `file_attachments`                            | No field                                                                                                                                                                                                                                                                                                                  | List the paths in the prompt.                                                                                                                                                                                                                                                                                                                 | Stays      |
 
 ### Custom agent types
@@ -421,7 +422,8 @@ When the deployment enables the `fork-nested-subagents` experiment, a `general` 
 The default depth of 2 allows a root, a coordinator, and its workers.
 An organization's `max_depth` subagent limit can lower that depth, but not raise it.
 An `explore` or `computer_use` child never gets them.
-With the experiment, each chat can wait on, message, interrupt, and list only its direct children, so the root waits on the coordinator, not on its workers.
+With the experiment, `wait_agent`, `message_agent`, `interrupt_agent`, and `list_agents` reach only a chat's direct children, so the root waits on the coordinator, not on its workers.
+To message other chats in the family, refer to [Family messages](#family-messages).
 The experiment also makes **Stop** and `interrupt_agent` interrupt a chat's active descendants first.
 Archiving a root whose family is still working interrupts the family, waits up to 30&nbsp;seconds for it to stop, then archives every member.
 If a member is still working after 30&nbsp;seconds, the archive fails and archives nothing.
@@ -468,6 +470,24 @@ An organization's `max_concurrent`, `max_concurrent_per_family`, and `max_live_p
 An organization admin or auditor can read the flag values and the lower values in the `deployment` and `effective` fields of `GET /api/v2/chats/fork/organizations/{organization}/subagent-limits`.
 Neither field includes the default cap of 10 subagent turns.
 An organization admin can also change the organization values in the **Subagent limits** section of **AI Settings** > **Coder Agents**, and an auditor can view them there.
+
+### Family messages
+
+When the deployment enables the `fork-family-messages` experiment, each chat gets `message_family_chat` and `list_family_chats`, except an `explore` chat and a chat of a custom type with `readonly: true`.
+A custom type's `tools` and `disallowed_tools` treat both tools as part of `Task`.
+`list_family_chats` lists up to 100 unarchived chats of the caller's family, the root first, with each chat's `chat_id`, `title`, `status`, and `parent_chat_id`.
+Each entry's `relation` is `self`, `parent`, `root`, `child`, `sibling`, or `other`, and `truncated` is `true` when the list leaves chats out.
+`message_family_chat` takes a `chat_id` from that list and a `message` of up to 16384 bytes, and it sends the message to the parent, a sibling, or any other chat under the same root.
+It doesn't wait for a reply.
+An idle recipient starts a new turn with the message, and a busy one gets it before its next model call without an interrupt, as with `message_agent`.
+The result names the recipient's `chat_id`, `title`, and `status`, and `queued` is `true` when the recipient was busy.
+The recipient gets the message inside `<agent-message from_chat_id="<id>" from_title="<title>">` with a note that another agent in the family sent it, not the user, and how to reply.
+A chat outside the family, an ID that doesn't exist, and the chat itself are refused, and so is an archived chat.
+Each chat can send at most 60 messages in any hour.
+With `fork-nested-subagents`, a message that wakes a finished child counts toward the family's live limit, as [Subagent limits](#subagent-limits) describes, and a child that waits for a secret answer refuses messages.
+With the experiment, the sender's conversation shows **Sent message to** or **Queued message for** and the recipient's title, with a link to the recipient and the message text.
+A `list_family_chats` call shows **Found** and the number of family chats, with a link to each chat other than the caller.
+The recipient's chat shows the message with **Message from agent** and a link to the sender.
 
 ### Worktree isolation
 
@@ -617,7 +637,8 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`, which is checked against #202, and `fork_tools.go`, which is checked against the change that gives API root chats `ask_user_question`:
+Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`, which is checked against #202, and `fork_tools.go`, which is checked against the change that gives API root chats `ask_user_question`.
+The family messages entry is checked against fork `main` at `2bf9127b59`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -702,6 +723,10 @@ Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`,
   The **Available agents** page, only with `fork-agent-definitions`, the route, `site/src/forkRoutes.tsx:32`, the nav item, `site/src/pages/AgentsPage/components/ChatsSidebar/settings/ForkSettingsNavItems.tsx:18-20`, `:30-36`, and the page, `site/src/pages/AgentsPage/AgentSettingsPage/ForkAvailableAgentsPage/ForkAvailableAgentsPage.tsx:103`, `:138-140`, with your organizations, `:96-98`, `:104-108`, `:201-213`, the menus of its projects and your workspaces, `:53-55`, `:70`, `:84`, `:110-114`, `:122-136`, `:207-229`, the columns, `:176-190`, `:234-243`, the source labels, `site/src/pages/AgentsPage/components/ChatElements/ForkCompactAgentTypeSelector.tsx:31-37`, and the recent chats from the sidebar's default list, matched by the name without its prefix, `ForkAvailableAgentsPage.tsx:46-51`, `:115-121`, `:143-174`.
   Bare names for one source and qualified names for several, `fork_agent_definitions.go:107-160`, `coderd/x/skills/skills.go:153-229`, and the error for an unknown or ambiguous type, `subagent_catalog.go:233-242`.
   The `@` menu in the composer, only with `fork-agent-definitions`, `site/src/pages/AgentsPage/components/ChatMessageInput/ForkAgentMentionPlugin.tsx:146`, `:234-236`, opened at the start of a line or after a space, `:46-58`, with the built-in types and each source's agents under the names that `spawn_agent` accepts, `:60-95`, `:97-116`, `:170-198`, and inserting the delegation, `:118-130`, in a child chat only for a `general` child with `fork-nested-subagents`, `:156-161`, with its root chat's project, `:162-169`, holding Enter while agents load, `:215-232`, and rendered in Lexical's listbox, `:238-268`, registered in `ChatMessageInput.tsx:1405-1409`.
+- Family messages, only with `fork-family-messages`: `codersdk/fork_experiments.go:58-60`, `coderd/x/chatd/fork_tools.go:82-84`, without the `explore` and `readonly` tools, `coderd/x/chatd/turn_environment.go:743`, `:883-887`, `:2120-2130`, `coderd/x/chatd/fork_agent_tool_policy.go:181-187`, `:203`, and part of `Task`, `:59-62`.
+  `list_family_chats`, `coderd/x/chatd/fork_family_messages.go:254-342`, with each relation, `:344-362`, from the unarchived family, `coderd/database/forkdb/queries/chat_family_messages.sql:17-28`.
+  `message_family_chat`, `fork_family_messages.go:32-41`, `:55-86`, with the refused sends, `:104-117`, `:146-161`, the hourly limit, `:168-180`, `chat_family_messages.sql:5-7`, the live limit and the secret question with `fork-nested-subagents`, `fork_family_messages.go:182-187`, `coderd/x/chatd/fork_subagents.go:161-164`, `:216-251`, the delivery that steers a busy recipient, `fork_family_messages.go:188-227`, `coderd/x/chatd/chatd.go:462-464`, and the envelope, `fork_family_messages.go:230-252`, also around a hook's prompt, `:373-394`, `coderd/x/chatd/chat_mutations.go:129`.
+  The cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:87-96`, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkFamilyMessageTool.tsx:15-67`, `:89-153`, and the recipient's message, `site/src/pages/AgentsPage/components/ChatConversation/ForkFamilyMessageHeader.tsx:19-56`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkFamilyMessage.ts:14-15`, `:38-49`, `site/src/pages/AgentsPage/components/ChatConversation/UserMessageContent.tsx:137-140`, `:162-164`.
 - `ask_user_question` in plan-mode root turns, and outside plan mode in web UI root chats: `coderd/x/chatd/turn_environment.go:725-731`, async description, `coderd/x/chatd/chattool/askuserquestion.go:17-24`, and in API root chats with `fork-nested-subagents`, `coderd/x/chatd/fork_tools.go:46-53`.
   For a child that isn't an `explore` child, only with `fork-nested-subagents`, `coderd/x/chatd/fork_descendant_questions.go:44-46`, `fork_tools.go:41-45`, ending the turn, `fork_descendant_questions.go:50-60`, `coderd/x/chatd/turn_environment.go:1095`, and not in plan-mode child turns, `:2052-2061`.
   Unanswered until the child gets a user message after the question, and a secret question until the message of its answer or decline, `coderd/database/forkdb/queries/chat_descendant_questions.sql:10-44`.
