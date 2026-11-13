@@ -6068,6 +6068,7 @@ export type Experiment =
 	| "ai-gateway-seat-exclusion"
 	| "agent-lifecycle-hooks"
 	| "chat-acp-subagents"
+	| "chat-automations"
 	| "chat-inline-mcp-servers"
 	| "chat-project-sharing"
 	| "chat-stage-metrics"
@@ -6157,6 +6158,7 @@ export const Experiments: Experiment[] = [
 	"ai-gateway-seat-exclusion",
 	"agent-lifecycle-hooks",
 	"chat-acp-subagents",
+	"chat-automations",
 	"chat-inline-mcp-servers",
 	"chat-project-sharing",
 	"chat-stage-metrics",
@@ -9553,6 +9555,7 @@ export interface PrometheusConfig {
 	readonly collect_agent_stats: boolean;
 	readonly collect_db_metrics: boolean;
 	readonly aggregate_agent_stats_by: string;
+	readonly collect_workspace_stats: boolean;
 }
 
 // From codersdk/chats.go

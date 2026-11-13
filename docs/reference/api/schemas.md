@@ -8970,6 +8970,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       ],
       "collect_agent_stats": true,
       "collect_db_metrics": true,
+      "collect_workspace_stats": true,
       "enable": true
     },
     "provisioner": {
@@ -9615,6 +9616,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
     ],
     "collect_agent_stats": true,
     "collect_db_metrics": true,
+    "collect_workspace_stats": true,
     "enable": true
   },
   "provisioner": {
@@ -10347,9 +10349,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-family-messages`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-family-messages`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -14791,6 +14793,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   ],
   "collect_agent_stats": true,
   "collect_db_metrics": true,
+  "collect_workspace_stats": true,
   "enable": true
 }
 ```
@@ -14803,6 +14806,7 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `aggregate_agent_stats_by` | array of string                      | false    |              |             |
 | `collect_agent_stats`      | boolean                              | false    |              |             |
 | `collect_db_metrics`       | boolean                              | false    |              |             |
+| `collect_workspace_stats`  | boolean                              | false    |              |             |
 | `enable`                   | boolean                              | false    |              |             |
 
 ## codersdk.ProposeChatTitleResponse
