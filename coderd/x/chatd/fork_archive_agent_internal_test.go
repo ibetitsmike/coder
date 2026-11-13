@@ -202,6 +202,15 @@ func TestForkArchiveAgent(t *testing.T) {
 		require.Equal(t, []string{grandchild.ID.String(), child.ID.String()}, result.ArchivedChatIDs)
 		requireChatsArchived(t, f.db, true, child, grandchild)
 		requireChatsArchived(t, f.db, false, root, sibling)
+
+		// Archiving and then unarchiving the root restores the whole family.
+		ctx := chatdTestContext(t)
+		require.NoError(t, f.server.ArchiveChat(ctx, root))
+		requireChatsArchived(t, f.db, true, root, child, grandchild, sibling)
+		archivedRoot, err := f.db.GetChatByID(ctx, root.ID)
+		require.NoError(t, err)
+		require.NoError(t, f.server.UnarchiveChat(ctx, archivedRoot))
+		requireChatsArchived(t, f.db, false, root, child, grandchild, sibling)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {

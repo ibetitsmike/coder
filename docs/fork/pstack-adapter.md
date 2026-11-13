@@ -459,7 +459,8 @@ If a chat of the subtree is still working, it fails with `the child agent or one
 The result lists the subtree in `archived_chat_ids`, the child last.
 The archived chats leave `list_agents`, stop counting toward the family's live limit, and refuse `message_agent`, while your own chat and the child's siblings stay open.
 So collect what you need from the child before you archive it.
-Unarchiving the root chat unarchives the archived children too.
+While the root chat stays unarchived, the chats that `archive_agent` archived stay archived, because only a root chat's archive state can change.
+To restore them, archive the root chat and then unarchive it, which unarchives the whole family.
 A custom type's `tools` and `disallowed_tools` treat `archive_agent` as part of `Task`.
 With the experiment, the chat list and a root chat's `GET /api/v2/chats/{chat}` include every descendant in the root's `children` list, and each entry's `parent_chat_id` names its parent.
 The Agents sidebar shows each worker under its coordinator, and selecting a descendant opens its own `/agents/:id` page.
@@ -704,7 +705,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Interrupt cascade and archive of an active family, only with `fork-nested-subagents`: `coderd/x/chatd/fork_cascade.go:43-46`, `:86-89`, 30-second wait, `:26`.
   `archive_agent`, checked against the change that adds it, only with `fork-nested-subagents` and next to `interrupt_agent`, `coderd/x/chatd/fork_tools.go:54-56`, `coderd/x/chatd/fork_archive_agent.go:58-61`, for a direct child only, `:98-100`, interrupted with a 30-second wait, `:105-115`, `fork_cascade.go:27`, `:102-151`, archived in one transaction in the family archive's lock order, skipping chats archived already, `fork_archive_agent.go:147-196`, `coderd/x/chatd/fork_family_lock.go:105-133`, or refused while busy, `fork_archive_agent.go:118-120`, with the result fields, `:34-45`, `:127-130`.
   Archived chats leave the live count, `coderd/database/forkdb/queries/chat_capacity.sql:30-37`.
-  Unarchiving the root unarchives every member, `coderd/x/chatd/chatstate/family.go:110-143`.
+  Only a root chat's archive state changes through the API, and not to its current value, `coderd/exp_chats.go:2843-2857`, and unarchiving the root unarchives every member, `coderd/x/chatd/chatstate/family.go:110-143`.
   Part of `Task`, `coderd/x/chatd/fork_agent_tool_policy.go:59-62`.
 - Every descendant embedded under its root, only with `fork-nested-subagents`: `coderd/fork_chat_tree.go:30-37`, `:52-71`, from `coderd/exp_chats.go:584` and `:1898`, grouped by `root_chat_id`, `coderd/database/db2sdk/db2sdk.go:2311-2318`.
   Each descendant placed in the sidebar under its own parent, `site/src/pages/AgentsPage/components/ChatsSidebar/tree/chatTree.ts:51-60`.

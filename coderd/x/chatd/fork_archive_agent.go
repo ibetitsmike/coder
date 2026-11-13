@@ -64,7 +64,7 @@ func (p *Server) withForkArchiveAgent(tools []fantasy.AgentTool, chat database.C
 		"them, so they leave list_agents, no longer count toward the live " +
 		"subagent limit of the family, and cannot be messaged or resumed. " +
 		"Collect what you need from the child before you archive it. " +
-		"Unarchiving the root chat restores them."
+		"Only archiving and then unarchiving the root chat restores them."
 	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		description += " It also removes the git worktree and branch of each " +
 			"archived worktree agent when the worktree is clean, lists in " +
