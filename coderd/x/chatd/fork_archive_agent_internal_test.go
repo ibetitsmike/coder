@@ -137,6 +137,13 @@ func TestForkArchiveAgent(t *testing.T) {
 		requireChatsArchived(t, f.db, true, dirty)
 		requireChatsArchived(t, f.db, false, root)
 		require.Empty(t, f.systemNotices(t, root))
+
+		// A later archive of the root tries the kept worktree again and lists
+		// it in the root's notice.
+		notices := f.archiveAndAwaitNotices(t, root, conn, 2)
+		require.Len(t, notices, 1)
+		require.Contains(t, notices[0], row.WorktreePath)
+		requireChatsArchived(t, f.db, true, root, dirty)
 	})
 
 	t.Run("StopsChildWorkspace", func(t *testing.T) {
