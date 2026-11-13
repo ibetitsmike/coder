@@ -17,10 +17,12 @@ const familyMessagePattern =
 // The server quotes the title with Go's strconv.Quote, which can emit escapes
 // such as \x00 and \a that JSON rejects.
 const parseQuotedTitle = (quoted: string): string => {
+	const unquoted = quoted.slice(1, -1);
 	try {
-		return String(JSON.parse(quoted));
+		const title: unknown = JSON.parse(quoted);
+		return typeof title === "string" ? title : unquoted;
 	} catch {
-		return quoted.slice(1, -1);
+		return unquoted;
 	}
 };
 
