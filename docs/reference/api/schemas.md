@@ -6148,9 +6148,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "events": [
     {
       "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+      "command": "string",
       "on": [
         "string"
       ],
+      "process_id": "string",
       "type": "string",
       "url": "string"
     }
@@ -6203,9 +6205,11 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "command": "string",
   "on": [
     "string"
   ],
+  "process_id": "string",
   "type": "string",
   "url": "string"
 }
@@ -6213,12 +6217,14 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 ### Properties
 
-| Name      | Type            | Required | Restrictions | Description                                                                                        |
-|-----------|-----------------|----------|--------------|----------------------------------------------------------------------------------------------------|
-| `chat_id` | string          | false    |              | Chat ID is the child chat of a child_done event.                                                   |
-| `on`      | array of string | false    |              | On lists the pull request activity that wakes the chat.                                            |
-| `type`    | string          | false    |              | Type is child_done for a child chat that finishes, or pull_request for activity on a pull request. |
-| `url`     | string          | false    |              | URL is the pull request of a pull_request event.                                                   |
+| Name         | Type            | Required | Restrictions | Description                                                                                                                                          |
+|--------------|-----------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `chat_id`    | string          | false    |              | Chat ID is the child chat of a child_done event.                                                                                                     |
+| `command`    | string          | false    |              | Command is the command line of that process.                                                                                                         |
+| `on`         | array of string | false    |              | On lists the pull request activity that wakes the chat.                                                                                              |
+| `process_id` | string          | false    |              | Process ID is the background process of a process_exit event.                                                                                        |
+| `type`       | string          | false    |              | Type is child_done for a child chat that finishes, pull_request for activity on a pull request, or process_exit for a background process that exits. |
+| `url`        | string          | false    |              | URL is the pull request of a pull_request event.                                                                                                     |
 
 ## codersdk.ChatWakeupKind
 

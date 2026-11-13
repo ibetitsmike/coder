@@ -19,11 +19,40 @@ import {
 
 const failedLabel = "Failed to wait for events";
 
-const formatWaitTargets = (childCount: number, hasPullRequest: boolean) => {
+type WaitProcess = {
+	processId: string;
+	command: string;
+	outputPattern: string;
+};
+
+const parseWaitProcess = (item: unknown): WaitProcess | null => {
+	const record = asRecord(item);
+	if (!record || typeof record.process_id !== "string") {
+		return null;
+	}
+	return {
+		processId: record.process_id,
+		command: asString(record.command),
+		outputPattern: asString(record.output_pattern),
+	};
+};
+
+const formatWaitTargets = (
+	childCount: number,
+	processCount: number,
+	hasPullRequest: boolean,
+) => {
 	const targets: string[] = [];
 	if (childCount > 0) {
 		targets.push(
 			childCount === 1 ? "1 child agent" : `${childCount} child agents`,
+		);
+	}
+	if (processCount > 0) {
+		targets.push(
+			processCount === 1
+				? "1 background process"
+				: `${processCount} background processes`,
 		);
 	}
 	if (hasPullRequest) {
@@ -31,10 +60,10 @@ const formatWaitTargets = (childCount: number, hasPullRequest: boolean) => {
 	}
 	return targets.length === 0
 		? "Waiting for events"
-		: `Waiting for ${targets.join(" and ")}`;
+		: `Waiting for ${new Intl.ListFormat("en-US").format(targets)}`;
 };
 
-/** The children and the pull request come from the result. */
+/** The children, processes and pull request come from the result. */
 export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 	fallback: Fallback,
 	...props
@@ -42,7 +71,12 @@ export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 	const { status, isError } = props;
 	const result = isError ? null : parseArgs(props.result);
 	const children = parseArray(result?.children, parseSearchChatsEntry);
-	if (!isError && !children && status !== "running") {
+	// The server omits processes when the call watches none.
+	const processes =
+		result?.processes === undefined
+			? []
+			: parseArray(result.processes, parseWaitProcess);
+	if (!isError && (!children || !processes) && status !== "running") {
 		return <Fallback {...props} />;
 	}
 	const pullRequest = asRecord(result?.pull_request);
@@ -51,7 +85,11 @@ export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 	const expiresAt = asString(result?.expires_at);
 	const errorMessage = isError ? forkToolErrorMessage(props.result) : "";
 	const errorDetail = errorMessage.trim();
-	let label = formatWaitTargets(children?.length ?? 0, pullRequestURL !== "");
+	let label = formatWaitTargets(
+		children?.length ?? 0,
+		processes?.length ?? 0,
+		pullRequestURL !== "",
+	);
 	if (status === "running") {
 		label = "Starting to wait for events…";
 	} else if (isError) {
@@ -77,6 +115,26 @@ export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 							<ForkChatLink key={child.chatId} chatId={child.chatId}>
 								{`${child.title || "Untitled"} (${child.status})`}
 							</ForkChatLink>
+						))}
+						{processes?.map((process) => (
+							<div
+								key={process.processId}
+								title={process.processId}
+								className="text-[13px] text-content-secondary wrap-anywhere"
+							>
+								<span className="font-mono text-xs">
+									{process.command || process.processId}
+								</span>
+								{process.outputPattern !== "" && (
+									<>
+										{" (lines matching "}
+										<span className="font-mono text-xs">
+											{process.outputPattern}
+										</span>
+										{")"}
+									</>
+								)}
+							</div>
 						))}
 						{pullRequestURL !== "" && (
 							<a

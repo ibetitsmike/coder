@@ -2,18 +2,24 @@
 // tools of the fork-workflows experiment.
 
 import type React from "react";
+import { useState } from "react";
 import { useQuery } from "react-query";
 import { useParams } from "react-router";
-import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
+import { getErrorStatus } from "#/api/errors";
+import {
+	chatWorkflowRun,
+	workflowRunRefetchInterval,
+} from "#/api/queries/forkWorkflows";
+import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
 	type ForkWorkflowRunSnapshot,
-	forkWorkflowRunDetailSnapshot,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepProgress,
 	formatForkWorkflowValue,
+	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "../../ForkWorkflows/forkWorkflows";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
@@ -88,15 +94,37 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 	resultSnapshot,
 	...props
 }) => {
-	// Shares the Workflows panel's cache. A failed request (403 or 404 for a
-	// viewer who cannot read runs) keeps the tool result, as while loading.
-	const runQuery = useQuery(chatWorkflowRun(chatId, resultSnapshot.runId));
+	const [mountedAt] = useState(Date.now);
+	// A resume keeps the run ID, so a cached "interrupted" detail can predate
+	// this running result. It applies only once the card has refetched it.
+	const currentDetail = (
+		run: WorkflowRunDetail | undefined,
+		updatedAt: number,
+	) =>
+		run?.status === "interrupted" && updatedAt < mountedAt ? undefined : run;
+	// Shares the Workflows panel's cache. The app disables retries, so polling
+	// rides out transient errors. A 403 or 404 means this viewer cannot read
+	// runs, so polling stops.
+	const runQuery = useQuery({
+		...chatWorkflowRun(chatId, resultSnapshot.runId),
+		refetchInterval: ({ state }) => {
+			const detail = currentDetail(state.data, state.dataUpdatedAt);
+			if (detail) {
+				return workflowRunRefetchInterval(detail.status);
+			}
+			const errorStatus = getErrorStatus(state.error);
+			return errorStatus === 403 || errorStatus === 404
+				? false
+				: workflowRunRefetchInterval(resultSnapshot.status);
+		},
+	});
+	const detail = currentDetail(runQuery.data, runQuery.dataUpdatedAt);
 	return (
 		<ForkWorkflowTool
 			{...props}
 			snapshot={
-				runQuery.data
-					? forkWorkflowRunDetailSnapshot(runQuery.data)
+				detail
+					? mergeForkWorkflowRunDetail(resultSnapshot, detail)
 					: resultSnapshot
 			}
 		/>
