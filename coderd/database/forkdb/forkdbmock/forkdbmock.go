@@ -220,6 +220,21 @@ func (mr *MockStoreMockRecorder) DeleteChatFamilyMessagesBefore(ctx, arg any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatFamilyMessagesBefore", reflect.TypeOf((*MockStore)(nil).DeleteChatFamilyMessagesBefore), ctx, arg)
 }
 
+// DeleteChatNote mocks base method.
+func (m *MockStore) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatNoteParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatNote", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteChatNote indicates an expected call of DeleteChatNote.
+func (mr *MockStoreMockRecorder) DeleteChatNote(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatNote", reflect.TypeOf((*MockStore)(nil).DeleteChatNote), ctx, arg)
+}
+
 // DeleteChatPinnedSkills mocks base method.
 func (m *MockStore) DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -478,6 +493,21 @@ func (m *MockStore) GetChatFamilyMessageRecipient(ctx context.Context, arg forkd
 func (mr *MockStoreMockRecorder) GetChatFamilyMessageRecipient(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatFamilyMessageRecipient", reflect.TypeOf((*MockStore)(nil).GetChatFamilyMessageRecipient), ctx, arg)
+}
+
+// GetChatNote mocks base method.
+func (m *MockStore) GetChatNote(ctx context.Context, arg forkdb.GetChatNoteParams) (forkdb.ChatNote, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatNote", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatNote)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatNote indicates an expected call of GetChatNote.
+func (mr *MockStoreMockRecorder) GetChatNote(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatNote", reflect.TypeOf((*MockStore)(nil).GetChatNote), ctx, arg)
 }
 
 // GetChatOrganizationSubagentLimits mocks base method.
@@ -1298,6 +1328,21 @@ func (mr *MockStoreMockRecorder) ListChatFamilyMembers(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatFamilyMembers", reflect.TypeOf((*MockStore)(nil).ListChatFamilyMembers), ctx, arg)
 }
 
+// ListChatNotes mocks base method.
+func (m *MockStore) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChatNotes", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.ListChatNotesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChatNotes indicates an expected call of ListChatNotes.
+func (mr *MockStoreMockRecorder) ListChatNotes(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatNotes", reflect.TypeOf((*MockStore)(nil).ListChatNotes), ctx, chatID)
+}
+
 // ListChatWakeupRunKeys mocks base method.
 func (m *MockStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	m.ctrl.T.Helper()
@@ -1783,4 +1828,19 @@ func (m *MockStore) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertP
 func (mr *MockStoreMockRecorder) UpsertPluginUserLink(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertPluginUserLink", reflect.TypeOf((*MockStore)(nil).UpsertPluginUserLink), ctx, arg)
+}
+
+// WriteChatNote mocks base method.
+func (m *MockStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.ChatNote, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteChatNote", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatNote)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// WriteChatNote indicates an expected call of WriteChatNote.
+func (mr *MockStoreMockRecorder) WriteChatNote(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteChatNote", reflect.TypeOf((*MockStore)(nil).WriteChatNote), ctx, arg)
 }

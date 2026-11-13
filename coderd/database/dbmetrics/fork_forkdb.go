@@ -357,6 +357,26 @@ func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uui
 	return f.s.GetChatSubtreeIDs(ctx, rootID)
 }
 
+func (f forkQueryMetricsStore) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatNoteParams) (int64, error) {
+	defer f.observe(ctx, "DeleteChatNote", time.Now())
+	return f.s.DeleteChatNote(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatNote(ctx context.Context, arg forkdb.GetChatNoteParams) (forkdb.ChatNote, error) {
+	defer f.observe(ctx, "GetChatNote", time.Now())
+	return f.s.GetChatNote(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
+	defer f.observe(ctx, "ListChatNotes", time.Now())
+	return f.s.ListChatNotes(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.ChatNote, error) {
+	defer f.observe(ctx, "WriteChatNote", time.Now())
+	return f.s.WriteChatNote(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
 	defer f.observe(ctx, "GetChatTodosByChatID", time.Now())
 	return f.s.GetChatTodosByChatID(ctx, chatID)

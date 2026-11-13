@@ -43,6 +43,7 @@ type Querier interface {
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
+	DeleteChatNote(ctx context.Context, arg DeleteChatNoteParams) (int64, error)
 	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
@@ -74,6 +75,7 @@ type Querier interface {
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
+	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
@@ -163,6 +165,7 @@ type Querier interface {
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
+	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
 	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
@@ -225,6 +228,11 @@ type Querier interface {
 	// Relinking an external identity to another user clears the active chat so
 	// replies never reach a chat the new user does not own.
 	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)
+	// WriteChatNote replaces a note, or with append set adds content as a new
+	// line at its end. It creates a missing note only while the chat has fewer
+	// than max_notes notes, and returns no row when the chat is at the limit. The
+	// table check keeps the size cap.
+	WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (ChatNote, error)
 }
 
 var _ Querier = (*Queries)(nil)
