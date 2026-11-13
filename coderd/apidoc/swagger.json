@@ -6182,7 +6182,7 @@
 		},
 		"/api/v2/chats/fork/{chat}/workflow-runs": {
 			"get": {
-				"description": "Lists the workflow runs of the chat, newest first, one page of\nat most 100 runs. Only deployment owners of the chat owner see\nruns, the same gate as the workflow tools. The list items\ncarry a script preview and step counts; the detail has the\nfull script, the steps and the result.",
+				"description": "Lists the workflow runs of the chat, newest first, one page of\nat most 100 runs. Whoever can read the chat can read its\nruns. The list items carry a script preview and step counts;\nthe detail has the full script, the steps and the result.",
 				"produces": ["application/json"],
 				"tags": ["Chats"],
 				"summary": "Get the workflow runs of a chat",

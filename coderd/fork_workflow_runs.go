@@ -11,19 +11,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 
-	"cdr.dev/slog/v3"
-	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
-	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -51,16 +47,12 @@ const (
 // @Router /api/v2/chats/fork/{chat}/workflow-runs [get]
 // @x-apidocgen {"skip": true}
 // @Description Lists the workflow runs of the chat, newest first, one page of
-// @Description at most 100 runs. Only deployment owners of the chat owner see
-// @Description runs, the same gate as the workflow tools. The list items
-// @Description carry a script preview and step counts; the detail has the
-// @Description full script, the steps and the result.
+// @Description at most 100 runs. Whoever can read the chat can read its
+// @Description runs. The list items carry a script preview and step counts;
+// @Description the detail has the full script, the steps and the result.
 func (api *API) getChatWorkflowRuns(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
-	if !api.checkForkWorkflowOwner(rw, r, chat) {
-		return
-	}
 
 	parser := httpapi.NewQueryParamParser()
 	limit := int(parser.PositiveInt64(r.URL.Query(), workflowRunsDefaultLimit, "limit"))
@@ -146,9 +138,6 @@ func (api *API) getChatWorkflowRuns(rw http.ResponseWriter, r *http.Request) {
 func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
-	if !api.checkForkWorkflowOwner(rw, r, chat) {
-		return
-	}
 	runID, ok := httpmw.ParseUUIDParam(rw, r, "workflowrun")
 	if !ok {
 		return
@@ -156,7 +145,9 @@ func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 
 	detail, err := api.readChatWorkflowRun(ctx, chat.ID, runID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// A run of a chat the caller cannot read fails authorization; it
+		// answers like a missing run so the two stay indistinguishable.
+		if httpapi.Is404Error(err) {
 			httpapi.Write(ctx, rw, http.StatusNotFound, codersdk.Response{
 				Message: "Workflow run not found.",
 			})
@@ -192,9 +183,6 @@ func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 func (api *API) postStopChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
-	if !api.checkForkWorkflowOwner(rw, r, chat) {
-		return
-	}
 	runID, ok := httpmw.ParseUUIDParam(rw, r, "workflowrun")
 	if !ok {
 		return
@@ -236,29 +224,6 @@ func (api *API) postStopChatWorkflowRun(rw http.ResponseWriter, r *http.Request)
 		return
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, detail)
-}
-
-// checkForkWorkflowOwner is the API form of the workflow tool gate: only a
-// deployment owner may read or stop the workflow runs of a chat, the same
-// gate that lets the owner's turns run workflows. It fails closed.
-func (api *API) checkForkWorkflowOwner(rw http.ResponseWriter, r *http.Request, chat database.Chat) bool {
-	ctx := r.Context()
-	owner, err := api.Database.GetUserByID(ctx, chat.OwnerID)
-	if err != nil {
-		api.Logger.Warn(ctx, "read the chat owner for the workflow run gate",
-			slog.F("chat_id", chat.ID), slog.Error(err))
-		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
-			Message: "Workflow runs are only available to deployment owners.",
-		})
-		return false
-	}
-	if !slices.Contains(owner.RBACRoles, rbac.RoleOwner().String()) {
-		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
-			Message: "Workflow runs are only available to deployment owners.",
-		})
-		return false
-	}
-	return true
 }
 
 // readChatWorkflowRuns reads one page of a chat's run journal with the step
