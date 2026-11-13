@@ -201,7 +201,6 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 	}
 	configure(&cfg)
 	first := newChatdServer(t, ps, cfg)
-	first.Start()
 	var firstClosed bool
 	t.Cleanup(func() {
 		if !firstClosed {
@@ -217,7 +216,9 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("run the family")},
 	})
 	require.NoError(t, err)
+	// The model mock reads rootID, so the worker starts only after it is set.
 	rootID.Store(&root.ID)
+	first.Start()
 
 	// Stop the server only once every part of the family is in its state.
 	var blockedWorkers []string
@@ -246,8 +247,9 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 			continue
 		}
 		startedMu.Lock()
-		require.False(t, started[name], "%s must wait for capacity", name)
+		workerStarted := started[name]
 		startedMu.Unlock()
+		require.False(t, workerStarted, "%s must wait for capacity", name)
 		require.Equal(t, database.ChatStatusRunning, worker.Status, "%s must wait for capacity", name)
 		require.False(t, worker.WorkerID.Valid, "%s must wait for capacity", name)
 	}
