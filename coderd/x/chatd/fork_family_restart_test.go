@@ -22,6 +22,8 @@ import (
 	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	dbpubsub "github.com/coder/coder/v2/coderd/database/pubsub"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
@@ -59,6 +61,10 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		blocked   = make(chan string, 8)
 		startedMu sync.Mutex
 		started   = map[string]bool{}
+		// waitsCommitted holds each worker's family message until the
+		// coordinator committed its wait_agent batch, so the messages stay
+		// queued instead of joining the coordinator's next model call.
+		waitsCommitted = make(chan struct{})
 	)
 	coordinatorID := func(ctx context.Context) (uuid.UUID, error) {
 		id := rootID.Load()
@@ -99,6 +105,11 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 				startedMu.Lock()
 				started[name] = true
 				startedMu.Unlock()
+				select {
+				case <-waitsCommitted:
+				case <-req.Context().Done():
+					return chattest.OpenAIStreamingResponse()
+				}
 				parent, err := coordinatorID(req.Context())
 				if err != nil {
 					return text(err.Error())
@@ -200,7 +211,8 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		MCPHTTPClient:              testMCPHTTPClient(),
 	}
 	configure(&cfg)
-	first := newChatdServer(t, ps, cfg)
+	subscriptions := &familyRestartPubsub{Pubsub: ps, active: map[string]int{}}
+	first := newChatdServer(t, subscriptions, cfg)
 	var firstClosed bool
 	t.Cleanup(func() {
 		if !firstClosed {
@@ -221,6 +233,22 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 	first.Start()
 
 	// Stop the server only once every part of the family is in its state.
+	waitForChatStatus(ctx, t, db, root.ID, database.ChatStatusWaiting)
+	var coordinator database.Chat
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		rows, err := db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{ParentIds: []uuid.UUID{root.ID}})
+		if err != nil || len(rows) != 1 {
+			return false
+		}
+		coordinator = rows[0].Chat
+		return true
+	}, testutil.IntervalFast)
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		calls := familyRestartParts(t, chatMessages(ctx, t, db, coordinator.ID), codersdk.ChatMessagePartTypeToolCall, "wait_agent")
+		rows, err := db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{ParentIds: []uuid.UUID{coordinator.ID}})
+		return err == nil && len(calls) == 3 && len(rows) == 3
+	}, testutil.IntervalFast)
+	close(waitsCommitted)
 	var blockedWorkers []string
 	for len(blockedWorkers) < 2 {
 		select {
@@ -230,17 +258,10 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 			t.Fatalf("workers did not block: %v", ctx.Err())
 		}
 	}
-	waitForChatStatus(ctx, t, db, root.ID, database.ChatStatusWaiting)
-	coordinator := familyRestartChild(ctx, t, db, root.ID, 1)[0]
-	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
-		calls := familyRestartParts(t, chatMessages(ctx, t, db, coordinator.ID), codersdk.ChatMessagePartTypeToolCall, "wait_agent")
-		rows, err := db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{ParentIds: []uuid.UUID{coordinator.ID}})
-		return err == nil && len(calls) == 3 && len(rows) == 3
-	}, testutil.IntervalFast)
-	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
-		queued, err := db.GetChatQueuedMessages(ctx, coordinator.ID)
-		return err == nil && len(queued)+familyRestartCount(t, chatMessages(ctx, t, db, coordinator.ID), "HELLO-") == 2
-	}, testutil.IntervalFast)
+	require.Zero(t, familyRestartCount(t, chatMessages(ctx, t, db, coordinator.ID), "HELLO-"), "family messages must stay queued")
+	queued, err := db.GetChatQueuedMessages(ctx, coordinator.ID)
+	require.NoError(t, err)
+	require.Len(t, queued, 2, "each running worker's family message is queued")
 	for _, worker := range familyRestartChild(ctx, t, db, coordinator.ID, 3) {
 		name := familyRestartWorkerPattern.FindString(familyRestartPrompt(ctx, t, db, worker.ID))
 		if name == "" || slices.Contains(blockedWorkers, name) {
@@ -253,6 +274,20 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		require.Equal(t, database.ChatStatusRunning, worker.Status, "%s must wait for capacity", name)
 		require.False(t, worker.WorkerID.Valid, "%s must wait for capacity", name)
 	}
+	// Each wait_agent call subscribes to the state of its worker while it
+	// waits. A running worker's own runner holds one more subscription.
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		for _, worker := range familyRestartChild(ctx, t, db, coordinator.ID, 3) {
+			want := 1
+			if worker.WorkerID.Valid {
+				want = 2
+			}
+			if subscriptions.count(coderdpubsub.ChatStateUpdateChannel(worker.ID)) < want {
+				return false
+			}
+		}
+		return true
+	}, testutil.IntervalFast)
 
 	require.NoError(t, first.Close())
 	firstClosed = true
@@ -303,6 +338,46 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		require.Equal(t, 1, strings.Count(strings.Join(waits, "\n"), "RESULT-"+name), name)
 	}
 	require.Len(t, familyRestartParts(t, coordinatorMessages, codersdk.ChatMessagePartTypeToolResult, "spawn_agent"), 3)
+}
+
+// familyRestartPubsub counts the active subscriptions of each channel.
+type familyRestartPubsub struct {
+	dbpubsub.Pubsub
+	mu     sync.Mutex
+	active map[string]int
+}
+
+func (p *familyRestartPubsub) Subscribe(event string, listener dbpubsub.Listener) (func(), error) {
+	return p.track(event, func() (func(), error) { return p.Pubsub.Subscribe(event, listener) })
+}
+
+func (p *familyRestartPubsub) SubscribeWithErr(event string, listener dbpubsub.ListenerWithErr) (func(), error) {
+	return p.track(event, func() (func(), error) { return p.Pubsub.SubscribeWithErr(event, listener) })
+}
+
+func (p *familyRestartPubsub) track(event string, subscribe func() (func(), error)) (func(), error) {
+	cancel, err := subscribe()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	p.active[event]++
+	p.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.active[event]--
+			p.mu.Unlock()
+		})
+		cancel()
+	}, nil
+}
+
+func (p *familyRestartPubsub) count(event string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.active[event]
 }
 
 // familyRestartToolCalls returns one streaming chunk that calls each
