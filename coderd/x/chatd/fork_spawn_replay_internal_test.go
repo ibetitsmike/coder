@@ -185,6 +185,47 @@ func TestForkSpawnAgentReplayWorktreeConflict(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
+// TestForkSpawnAgentReplayTakenOver checks that a turn whose chat another
+// run took over creates no child: the run that took over replays the call
+// and creates the child itself.
+func TestForkSpawnAgentReplayTakenOver(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	workerID, runnerID := uuid.New(), uuid.New()
+	_, err := f.sqlDB.ExecContext(ctx, `UPDATE chats SET worker_id = $2, runner_id = $3 WHERE id = $1`, f.root.ID, workerID, runnerID)
+	require.NoError(t, err)
+	children := func() int {
+		t.Helper()
+		rows, err := f.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{ParentIds: []uuid.UUID{f.root.ID}})
+		require.NoError(t, err)
+		return len(rows)
+	}
+	spawn := func(runner uuid.UUID) fantasy.ToolResponse {
+		t.Helper()
+		chat := f.root
+		chat.WorkerID = uuid.NullUUID{UUID: workerID, Valid: true}
+		chat.RunnerID = uuid.NullUUID{UUID: runner, Valid: true}
+		tools, err := f.server.subagentTools(ctx, func() database.Chat { return chat }, chat.LastModelConfigID)
+		require.NoError(t, err)
+		tools, err = f.server.appendForkTools(ctx, tools, chat, chat.LastModelConfigID)
+		require.NoError(t, err)
+		resp, err := findToolByName(tools, spawnAgentToolName).Run(workspacesdk.WithToolCallID(ctx, uuid.New()),
+			fantasy.ToolCall{Input: `{"type":"general","prompt":"do the work"}`})
+		require.NoError(t, err)
+		return resp
+	}
+
+	resp := spawn(uuid.New())
+	require.True(t, resp.IsError, "a turn of an earlier runner creates no child: %s", resp.Content)
+	require.Equal(t, 0, children())
+
+	resp = spawn(runnerID)
+	require.False(t, resp.IsError, resp.Content)
+	require.Equal(t, 1, children())
+}
+
 // TestForkSpawnAgentReplayConcurrentRun checks that a run whose spawn fails
 // because another run of the same call created the child meanwhile returns
 // that child.

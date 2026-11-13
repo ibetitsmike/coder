@@ -35,6 +35,10 @@ type forkSpawnChildIDKey struct{}
 // sets when the worktree of the derived child chat ID already exists.
 type forkSpawnWorktreeConflictKey struct{}
 
+// forkSpawnOwnerKey carries the calling chat as its turn loaded it, owned by
+// the worker and runner of that turn.
+type forkSpawnOwnerKey struct{}
+
 // forkReplaySafeSpawnTool wraps spawn_agent so that a call with a tool call
 // ID creates its child with an ID derived from that tool call ID, and a
 // replay of the call returns that child instead of creating another one.
@@ -101,7 +105,9 @@ func (t forkReplaySafeSpawnTool) Run(ctx context.Context, call fantasy.ToolCall)
 		}
 
 		conflict := new(bool)
-		spawnCtx := context.WithValue(context.WithValue(ctx, forkSpawnChildIDKey{}, childID), forkSpawnWorktreeConflictKey{}, conflict)
+		spawnCtx := context.WithValue(ctx, forkSpawnChildIDKey{}, childID)
+		spawnCtx = context.WithValue(spawnCtx, forkSpawnWorktreeConflictKey{}, conflict)
+		spawnCtx = context.WithValue(spawnCtx, forkSpawnOwnerKey{}, t.chat)
 		resp, err := t.AgentTool.Run(spawnCtx, call)
 		if err != nil || !resp.IsError {
 			return resp, err
@@ -114,8 +120,10 @@ func (t forkReplaySafeSpawnTool) Run(ctx context.Context, call fantasy.ToolCall)
 		if !*conflict {
 			return resp, nil
 		}
-		// An earlier run created the worktree of this ID and stopped before
-		// its child existed. The next ID gets a worktree of its own.
+		// An earlier run created the worktree of this ID and has no child.
+		// If that run still goes on, forkCheckSpawnOwner refuses its child,
+		// because this turn owns the chat now. The next ID gets a worktree of
+		// its own.
 		childID = uuid.NewSHA1(childID, []byte(spawnAgentToolName))
 	}
 	return fantasy.NewTextErrorResponse("spawn_agent: earlier runs of this call left no usable child; call spawn_agent again"), nil
@@ -163,4 +171,32 @@ func forkNoteWorktreeConflict(ctx context.Context, err error) {
 	if ok && errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusConflict {
 		*conflict = true
 	}
+}
+
+// forkCheckSpawnOwner runs in the transaction that inserts the child of a
+// replay safe spawn. It refuses the child when the turn that made the call
+// no longer owns the parent chat: a takeover replays the call, and the new
+// turn creates the child instead. The share lock on the parent makes an
+// acquire of the parent wait until the child commits, so the replay sees it.
+func forkCheckSpawnOwner(ctx context.Context, tx database.Store, parent database.Chat) error {
+	owner, ok := ctx.Value(forkSpawnOwnerKey{}).(database.Chat)
+	if !ok || owner.ID != parent.ID || !owner.WorkerID.Valid || !owner.RunnerID.Valid {
+		return nil
+	}
+	// Family operations lock the root first. This runs before any other lock
+	// of the spawn, so a send that holds the parent and waits for the family
+	// admission lock never waits for this transaction.
+	if rootID := subagentRootChatID(parent); rootID != parent.ID {
+		if _, err := tx.GetChatByIDForShare(ctx, rootID); err != nil {
+			return xerrors.Errorf("lock root chat: %w", err)
+		}
+	}
+	current, err := tx.GetChatByIDForShare(ctx, parent.ID)
+	if err != nil {
+		return xerrors.Errorf("lock parent chat: %w", err)
+	}
+	if current.WorkerID != owner.WorkerID || current.RunnerID != owner.RunnerID {
+		return xerrors.New("spawn_agent: another run took over this chat, so this run creates no child")
+	}
+	return nil
 }

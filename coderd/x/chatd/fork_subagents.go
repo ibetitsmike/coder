@@ -353,6 +353,9 @@ func (p *Server) createSubagentChatWithID(
 	defer buffer.Discard()
 	var result chatstate.CreateChatResult
 	err = forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+		if err := forkCheckSpawnOwner(ctx, tx, parent); err != nil {
+			return err
+		}
 		// Without nested subagents the parent is a root chat that was
 		// already validated, so only its depth is needed.
 		var depth int32
