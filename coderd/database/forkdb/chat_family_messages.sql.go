@@ -87,7 +87,11 @@ func (q *Queries) InsertChatFamilyMessage(ctx context.Context, arg InsertChatFam
 const listChatFamilyMembers = `-- name: ListChatFamilyMembers :many
 SELECT chats.id, chats.parent_chat_id, chats.title, chats.status
 FROM chats
-WHERE (chats.id = $1::uuid OR COALESCE(chats.root_chat_id, chats.parent_chat_id) = $1::uuid)
+WHERE (
+	chats.id = $1::uuid
+	OR chats.root_chat_id = $1::uuid
+	OR (chats.root_chat_id IS NULL AND chats.parent_chat_id = $1::uuid)
+)
 	AND chats.archived = false
 ORDER BY (chats.id = $1::uuid) DESC, chats.created_at ASC, chats.id ASC
 LIMIT $2::int
