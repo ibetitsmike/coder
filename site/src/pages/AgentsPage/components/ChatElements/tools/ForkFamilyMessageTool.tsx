@@ -86,6 +86,7 @@ const parseFamilyChatEntry = (item: unknown): FamilyChatEntry | null => {
 	};
 };
 
+/** Lists the caller's chat family; the caller's own row has no link. */
 export const ForkListFamilyChatsToolRenderer: React.FC<
 	ForkToolRendererProps
 > = ({ fallback: Fallback, ...props }) => {
