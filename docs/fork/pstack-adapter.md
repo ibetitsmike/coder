@@ -100,6 +100,7 @@ Use `.` and not `source`, because `source` fails in shells such as Dash, the `/b
 | Open a todolist                                                         | `todo_write` and `todo_read`, only with the `fork-chat-todos` experiment. Refer to [Todo list](#todo-list)                                                                                                          | Send the whole list with `todo_write` and update it at each phase. Without the tools, keep the list in your reply and restate it after a compaction.                                                                                                                          | W4                           |
 | Keep notes across a long task                                           | `notes`, only with the `fork-token-budget` experiment. Refer to [Notes](#notes)                                                                                                                                     | Keep a checkpoint in `checkpoint.md` with the goal, the decisions, the progress and the next steps, and update it as you work. Without the tool, restate the checkpoint in your reply after a compaction.                                                                     | Stays                        |
 | Find what scrolled out of context                                       | `chat_history`, only with the `fork-token-budget` experiment. Refer to [Chat history](#chat-history)                                                                                                                | Call `list_windows`, then `search` or `list_items`, then `read_item`. Without the tool, use `read_chat_transcript` if you have it.                                                                                                                                            | Stays                        |
+| Start over in a fresh context                                           | `new_context`, only with the `fork-token-budget` experiment. Refer to [Context windows](#context-windows)                                                                                                           | When a `context_budget` request arrives, save `checkpoint.md` with `notes`, finish the step, and call `new_context`. Without the tool, the chat summarizes when it fills up.                                                                                                  | Stays                        |
 | Run another pstack skill (`/name` or "the **name** skill")              | 57 of pstack's 58 skills set `disable-model-invocation: true`, so `read_skill` and the skill index hide them from the model. You can still run one from the composer's `/` menu, but not in a chat's first message. | `read_file` `~/.coder/skills/<name>/SKILL.md`, with `~` replaced by your home directory, and follow it. Read its sibling files with `read_file` too. When you tell the user to type it, write `/workspace/<name>`, and in a new chat tell them to send a plain message first. | Stays                        |
 | `Grep`, `Glob`                                                          | `execute`, `read_file`                                                                                                                                                                                              | `execute` with `rg` or `find`.                                                                                                                                                                                                                                                | Stays                        |
 | Embed a screenshot or video inline, as `ketchup` and `ketchup-video` do | `attach_file`, for a workspace file of up to 10&nbsp;MiB. Refer to [Attachments](#attachments)                                                                                                                      | Save the file in the workspace, then call `attach_file` with its absolute path.                                                                                                                                                                                               | Stays                        |
@@ -188,6 +189,38 @@ The actions are:
 
 Each result holds 16&nbsp;KiB at most.
 It skips its own calls and those of `read_chat_transcript`, and messages that only the model or only the user sees.
+A window that a [rollover](#context-windows) started shows `chat_summarized`, as one a summary started does.
+
+### Context windows
+
+With the `fork-token-budget` experiment, a chat that has `notes` and `new_context` works in context windows instead of summaries.
+Plan-mode turns, `explore` children, read-only custom agent types and custom agent types whose tool policy drops `notes` or `new_context` keep the summary.
+Each chat has its own windows and its own notes, a child included, and a child's window doesn't change its parent's.
+
+The points of a window come from the model's context limit and the chat's compression threshold, which is the model's threshold or the user's override of it:
+
+- The usable limit is the context limit minus 8192 tokens, or minus a quarter of the limit when that is less.
+- The final point is 10192 tokens below the usable limit, or half of it when that is more.
+- The handoff point is the threshold, or the final point when that is lower. A threshold below 10% counts as 10%.
+
+When the last prompt of the window reaches the handoff point, the chat gets a model-only message that starts with `<context_budget request="handoff">`.
+At the final point it gets one that starts with `<context_budget request="final">`.
+Each goes out once per window.
+A window whose first prompt is already past the handoff point gets neither.
+Save the goal, the decisions, the progress and the next steps in `checkpoint.md`, then call `new_context`.
+`new_context` takes no arguments and fails until a note was written or appended in this window.
+After the other calls of the step finish, the next window starts.
+
+If the chat doesn't call it, the window rolls over by itself when a prompt reaches the usable limit.
+A rollover waits for the results of the step's tool calls, so a call and its result stay in the same window.
+The next window starts with a model-only message that starts with `<context_window id="w:2">`, with the window's ID.
+It lists the notes and says to read `checkpoint.md` first, and holds nothing of the earlier conversation.
+A rollover makes no model call, and the conversation shows `Context window w:2 started from the notes of this chat. No summary was made.`
+Use `chat_history` to find a message of an earlier window.
+
+A threshold of 100% turns off the requests and the rollover, and `new_context` still works.
+A compaction model override doesn't apply to a rollover, since it makes no summary.
+A manual compaction from the composer still makes a summary.
 
 ### Attachments
 
@@ -910,6 +943,10 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:88-94`.
 - Chat history tool: `coderd/x/chatd/fork_chat_history.go:141-158`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:119-121`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
   The windows and the clear floor, `fork_chat_history.go:189-227`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:394-470` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:532-589`. The 16&nbsp;KiB cap, `fork_chat_history.go:26-45`, and the fit of a whole message, `fork_chat_history.go:591-634`.
+- Context windows: `new_context`, `coderd/x/chatd/fork_token_budget.go:259-320`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:120`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists. Eligible turns keep both `notes` and `new_context`, `fork_token_budget.go:98-112`.
+  The points of a window, `newTokenBudget`, `fork_token_budget.go:76-89`. The requests, `tokenBudgetMessage` and `tokenBudgetRequestDue`, `fork_token_budget.go:322-437`, sent before each step, `coderd/x/chatd/fork_context.go:64-72`.
+  The rollover trigger, `tokenBudgetTriggers`, `fork_token_budget.go:114-141`, called from `coderd/x/chatd/turn_environment.go:1042`. The lead-in without a model call, `fork_token_budget.go:164-257`, called from `coderd/x/chatd/generation.go:1360` for automatic compactions only. Unanswered tool calls run before a compaction, `decideGenerationAction`, `generation.go:198`.
+  Tests: `TestTokenBudgetWindows` in `coderd/x/chatd/fork_token_budget_test.go` and the unit tests in `fork_token_budget_internal_test.go`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:34`.
