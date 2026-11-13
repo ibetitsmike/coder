@@ -4,6 +4,7 @@ package chatd
 // fork-nested-subagents adds to list_agents.
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -21,7 +22,6 @@ func TestForkListAgentsDescendants(t *testing.T) {
 	f := newNestedSubagentsFixture(t, codersdk.Experiments{
 		codersdk.ExperimentForkNestedSubagents, codersdk.ExperimentForkChatTodos,
 	}, Limits{})
-	ctx := chatdTestContext(t)
 	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
 	require.NoError(t, err)
 	sibling, err := f.spawn(t, f.root, childSubagentChatOptions{})
@@ -32,7 +32,9 @@ func TestForkListAgentsDescendants(t *testing.T) {
 	// tools builds a turn's tool list the way turn_environment.go does: a
 	// root gets the subagent tools from appendRootChatTools, a child from
 	// appendForkTools.
-	tools := func(t *testing.T, chat database.Chat) []fantasy.AgentTool {
+	// Each subtest makes its own context: parallel subtests can wait for a
+	// slot long after the parent returns.
+	tools := func(ctx context.Context, t *testing.T, chat database.Chat) []fantasy.AgentTool {
 		t.Helper()
 		var base []fantasy.AgentTool
 		if !chat.ParentChatID.Valid {
@@ -44,9 +46,9 @@ func TestForkListAgentsDescendants(t *testing.T) {
 		require.NoError(t, err)
 		return all
 	}
-	list := func(t *testing.T, chat database.Chat, args map[string]any, wantError bool) (forkListAgentsResult, string) {
+	list := func(ctx context.Context, t *testing.T, chat database.Chat, args map[string]any, wantError bool) (forkListAgentsResult, string) {
 		t.Helper()
-		content := runChatTodoTool(ctx, t, tools(t, chat), "list_agents", args, wantError)
+		content := runChatTodoTool(ctx, t, tools(ctx, t, chat), "list_agents", args, wantError)
 		var result forkListAgentsResult
 		if !wantError {
 			require.NoError(t, json.Unmarshal([]byte(content), &result))
@@ -63,7 +65,8 @@ func TestForkListAgentsDescendants(t *testing.T) {
 
 	t.Run("RootListsSubtreeAndReadsGrandchild", func(t *testing.T) {
 		t.Parallel()
-		result, _ := list(t, f.root, map[string]any{"recursive": true}, false)
+		ctx := chatdTestContext(t)
+		result, _ := list(ctx, t, f.root, map[string]any{"recursive": true}, false)
 		require.Equal(t, map[string]string{
 			child.ID.String():      f.root.ID.String(),
 			sibling.ID.String():    f.root.ID.String(),
@@ -71,10 +74,10 @@ func TestForkListAgentsDescendants(t *testing.T) {
 		}, parentsByID(result))
 		require.Equal(t, 3, result.Total)
 
-		result, _ = list(t, f.root, map[string]any{"chat_id": child.ID.String()}, false)
+		result, _ = list(ctx, t, f.root, map[string]any{"chat_id": child.ID.String()}, false)
 		require.Equal(t, map[string]string{grandchild.ID.String(): child.ID.String()}, parentsByID(result))
 
-		content := runChatTodoTool(ctx, t, tools(t, f.root), readChatTranscriptToolName,
+		content := runChatTodoTool(ctx, t, tools(ctx, t, f.root), readChatTranscriptToolName,
 			readChatTranscriptArgs{ChatID: grandchild.ID.String()}, false)
 		var page chatTranscriptResult
 		require.NoError(t, json.Unmarshal([]byte(content), &page))
@@ -84,7 +87,8 @@ func TestForkListAgentsDescendants(t *testing.T) {
 
 	t.Run("PagesTheSubtree", func(t *testing.T) {
 		t.Parallel()
-		result, _ := list(t, f.root, map[string]any{"recursive": true, "limit": 2, "offset": 1}, false)
+		ctx := chatdTestContext(t)
+		result, _ := list(ctx, t, f.root, map[string]any{"recursive": true, "limit": 2, "offset": 1}, false)
 		require.Len(t, result.Agents, 2)
 		require.Equal(t, 3, result.Total)
 		require.Equal(t, 1, result.Offset)
@@ -93,23 +97,26 @@ func TestForkListAgentsDescendants(t *testing.T) {
 
 	t.Run("WithoutOptionsListsChildrenAsUpstream", func(t *testing.T) {
 		t.Parallel()
-		_, content := list(t, f.root, map[string]any{}, false)
+		ctx := chatdTestContext(t)
+		_, content := list(ctx, t, f.root, map[string]any{}, false)
 		require.NotContains(t, content, "parent_chat_id")
 		require.NotContains(t, content, grandchild.ID.String())
 	})
 
 	t.Run("ChildListsOnlyItsSubtree", func(t *testing.T) {
 		t.Parallel()
-		result, _ := list(t, child, map[string]any{"recursive": true}, false)
+		ctx := chatdTestContext(t)
+		result, _ := list(ctx, t, child, map[string]any{"recursive": true}, false)
 		require.Equal(t, map[string]string{grandchild.ID.String(): child.ID.String()}, parentsByID(result))
 		for _, outside := range []uuid.UUID{f.root.ID, sibling.ID, uuid.New()} {
-			_, content := list(t, child, map[string]any{"chat_id": outside.String()}, true)
+			_, content := list(ctx, t, child, map[string]any{"chat_id": outside.String()}, true)
 			require.Contains(t, content, "chat_id must be this chat or one of its descendants")
 		}
 	})
 
 	t.Run("ExperimentOffKeepsUpstreamSchema", func(t *testing.T) {
 		t.Parallel()
+		ctx := chatdTestContext(t)
 		off := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkChatTodos}, Limits{})
 		base, err := off.server.subagentTools(ctx, func() database.Chat { return off.root }, off.root.LastModelConfigID)
 		require.NoError(t, err)
