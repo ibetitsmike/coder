@@ -46,6 +46,8 @@ func TestWaitForEventsProcesses(t *testing.T) {
 		Return(workspacesdk.ProcessOutputResponse{Running: true, Command: "sleep 60"}, nil)
 	conn.EXPECT().ProcessOutput(gomock.Any(), "unknown", nil).
 		Return(workspacesdk.ProcessOutputResponse{}, codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Process not found."}))
+	conn.EXPECT().ProcessOutput(gomock.Any(), "proc-3", nil).
+		Return(workspacesdk.ProcessOutputResponse{Running: true, Command: "tail -f log"}, nil)
 	waitCall := func(chat database.Chat, callID uuid.UUID, args waitForEventsArgs, wantError bool) (waitForEventsResult, string) {
 		t.Helper()
 		tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
@@ -72,23 +74,34 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	replayed, _ := waitCall(chat, watchID, waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, false)
 	require.Equal(t, want, replayed.Processes)
 
+	// An output pattern is stored with the defaults it resolved.
+	patternID := uuid.New()
+	patterned, _ := waitCall(chat, patternID, waitForEventsArgs{ProcessIDs: []string{"proc-3"}, ProcessOutputPattern: "ERROR"}, false)
+	require.Equal(t, []waitForEventsProcess{{ProcessID: "proc-3", Command: "tail -f log", OutputPattern: "ERROR"}}, patterned.Processes)
+	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-3","command":"tail -f log","agent_id":%q,"output_pattern":"ERROR","output_cooldown_seconds":60,"output_max_events":10}]`, agent.ID), string(f.wakeup(t, patternID).Events))
+
 	tooMany := make([]string, 0, maxWaitForEventsProcesses+1)
 	for i := range maxWaitForEventsProcesses + 1 {
 		tooMany = append(tooMany, fmt.Sprintf("proc-%d", i+10))
 	}
+	fresh := []string{"proc-4"}
 	for name, tc := range map[string]struct {
 		chat    database.Chat
-		ids     []string
+		args    waitForEventsArgs
 		wantErr string
 	}{
-		"AlreadyWatched": {chat, []string{"proc-1"}, "already watched by wake-up " + watchID.String()},
-		"NotAProcess":    {chat, []string{"unknown"}, `process "unknown" is not a process of this chat`},
-		"NoAgent":        {unbound, []string{"proc-1"}, "this chat has no workspace agent"},
-		"TooMany":        {chat, tooMany, "the maximum is 10"},
-		"EmptyID":        {chat, []string{" "}, "must not contain an empty ID"},
+		"AlreadyWatched":         {chat, waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, "already watched by wake-up " + watchID.String()},
+		"NotAProcess":            {chat, waitForEventsArgs{ProcessIDs: []string{"unknown"}}, `process "unknown" is not a process of this chat`},
+		"NoAgent":                {unbound, waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, "this chat has no workspace agent"},
+		"TooMany":                {chat, waitForEventsArgs{ProcessIDs: tooMany}, "the maximum is 10"},
+		"EmptyID":                {chat, waitForEventsArgs{ProcessIDs: []string{" "}}, "must not contain an empty ID"},
+		"PatternWithoutProcess":  {chat, waitForEventsArgs{ProcessOutputPattern: "ERROR"}, "process_output_pattern requires process_ids"},
+		"CooldownWithoutPattern": {chat, waitForEventsArgs{ProcessIDs: fresh, ProcessOutputCooldownSeconds: new(10)}, "require process_output_pattern"},
+		"InvalidPattern":         {chat, waitForEventsArgs{ProcessIDs: fresh, ProcessOutputPattern: "("}, "invalid process_output_pattern"},
+		"MaxEventsOutOfRange":    {chat, waitForEventsArgs{ProcessIDs: fresh, ProcessOutputPattern: "ERROR", ProcessOutputMaxEvents: new(0)}, "process_output_max_events must be between 1 and 100"},
 	} {
 		t.Logf("case %s", name)
-		_, content := waitCall(tc.chat, uuid.New(), waitForEventsArgs{ProcessIDs: tc.ids}, true)
+		_, content := waitCall(tc.chat, uuid.New(), tc.args, true)
 		require.Contains(t, content, tc.wantErr)
 	}
 	// An expired watch that has not had its final poll still watches.
@@ -115,7 +128,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	require.NoError(t, err)
 	rows, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 2, "refused calls create nothing")
+	require.Len(t, rows, 3, "refused calls create nothing")
 }
 
 // A watched process wakes the chat once, when it exits, with the end of its
@@ -163,6 +176,122 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
 	tick()
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+}
+
+// A watch with an output pattern wakes the chat for new matching lines of a
+// running process, collects the lines of its cool-down, stops after its
+// maximum and still reports the exit.
+func TestWakeupEventsProcessOutput(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	_, _, agent := f.bindProcessWorkspace(t, chat)
+	events, err := json.Marshal([]wakeupEvent{{
+		Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "sleep 600", AgentID: agent.ID,
+		OutputPattern: "ERROR", OutputCooldownSeconds: 60, OutputMaxEvents: 2,
+	}})
+	require.NoError(t, err)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindEvents, Events: events})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	conn := processTestConn(t, worker.server, chat, agent)
+	first := "ok\nERROR one\n"
+	second := first + "partial ERROR two\nERROR three\n"
+	running := func(output string) workspacesdk.ProcessOutputResponse {
+		return workspacesdk.ProcessOutputResponse{Running: true, Command: "sleep 600", Output: output}
+	}
+	gomock.InOrder(
+		// The last line may still be written.
+		conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).Return(running(first+"partial"), nil),
+		conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).Return(running(second), nil),
+		conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).Return(running(second), nil),
+		conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).Return(running(second+"ERROR four\n"), nil),
+		conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).
+			Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", Output: second + "ERROR four\n", ExitCode: new(1)}, nil),
+	)
+	now := wakeupTestSlot
+	tick := func(step time.Duration) {
+		t.Helper()
+		forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+		now = now.Add(step)
+		worker.wakeupOnce(ctx, now)
+	}
+	prefix := wakeup.Prompt + "\n\nBackground process proc-1 (`sleep 600`) "
+	firstMessage := prefix + "is still running and printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR one\n```"
+	secondMessage := prefix + "is still running and printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\npartial ERROR two\nERROR three\n```" +
+		"\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
+
+	tick(time.Second)
+	require.Equal(t, []string{firstMessage}, f.wakeMessages(t, chat, wakeup.Prompt))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status, "the process still runs")
+
+	tick(wakeupPollInterval + time.Second)
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "in the cool-down")
+
+	tick(time.Minute)
+	require.Equal(t, []string{firstMessage, secondMessage}, f.wakeMessages(t, chat, wakeup.Prompt))
+
+	tick(2 * time.Minute)
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 2, "no line messages after the maximum")
+
+	tick(wakeupPollInterval + time.Second)
+	messages := f.wakeMessages(t, chat, wakeup.Prompt)
+	require.Len(t, messages, 3)
+	require.True(t, strings.HasPrefix(messages[2], prefix+"exited with code 1."), messages[2])
+	require.Equal(t, []string{
+		processOutputRunKey("proc-1", len(first)),
+		processOutputRunKey("proc-1", len(second)),
+		processExitRunKey("proc-1"),
+	}, f.wakeupRunKeys(t, wakeup.ID))
+	got = f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+}
+
+func TestProcessNewLines(t *testing.T) {
+	t.Parallel()
+	head := "h1 ERROR\nh2\n"
+	tail := "rt line\nERROR t1\nt2\npart"
+	marker := "\n\n... [omitted 100 bytes] ...\n\n"
+	truncated := workspacesdk.ProcessOutputResponse{
+		Output:    head + marker + tail,
+		Truncated: &workspacesdk.ProcessTruncation{OriginalBytes: 1000, OmittedBytes: 100},
+	}
+	// The output of truncated ends at position 1000.
+	tailEnd := func(prefix string) int { return 1000 - len(tail) + len(prefix) }
+	for _, tc := range []struct {
+		name      string
+		output    workspacesdk.ProcessOutputResponse
+		cursor    int
+		wantLines []string
+		wantEnd   int
+	}{
+		{name: "Whole", output: workspacesdk.ProcessOutputResponse{Output: "a\nb\nc"}, wantLines: []string{"a", "b"}, wantEnd: 4},
+		{name: "AfterCursor", output: workspacesdk.ProcessOutputResponse{Output: "a\nb\nc\n"}, cursor: 2, wantLines: []string{"b", "c"}, wantEnd: 6},
+		{name: "NothingNew", output: workspacesdk.ProcessOutputResponse{Output: "a\nb\n"}, cursor: 4, wantEnd: 4},
+		{
+			// The head is old, and the first tail line lost its start.
+			name: "Truncated", output: truncated, cursor: 20,
+			wantLines: []string{"ERROR t1", "t2"}, wantEnd: tailEnd("rt line\nERROR t1\nt2\n"),
+		},
+		{name: "TruncatedAfterCursor", output: truncated, cursor: tailEnd("rt line\nERROR t1\n"), wantLines: []string{"t2"}, wantEnd: tailEnd("rt line\nERROR t1\nt2\n")},
+		{
+			name: "UnknownMarker",
+			output: workspacesdk.ProcessOutputResponse{
+				Output:    "a\nb\n",
+				Truncated: &workspacesdk.ProcessTruncation{OriginalBytes: 1000, OmittedBytes: 100},
+			},
+			cursor: 7, wantEnd: 7,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			lines, end := processNewLines(tc.output, tc.cursor)
+			require.Equal(t, tc.wantLines, lines)
+			require.Equal(t, tc.wantEnd, end)
+		})
+	}
 }
 
 // The first poll reports a process that is gone or already exited, and a

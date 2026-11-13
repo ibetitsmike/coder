@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,12 +22,16 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const (
 	wakeupEventProcessExit = "process_exit"
+	// processOutputRunKeyPrefix starts the run keys of the messages for
+	// matching output lines.
+	processOutputRunKeyPrefix = "process_output"
 
 	maxWaitForEventsProcesses = 10
 	// processReadTimeout bounds the agent reads of one tick, dial included,
@@ -39,18 +45,63 @@ const (
 	// exit message quotes.
 	maxProcessTailLines = 40
 	maxProcessTailBytes = 4096
+
+	maxProcessOutputPatternBytes   = 1024
+	defaultProcessOutputCooldown   = 60
+	maxProcessOutputCooldown       = 86400
+	defaultProcessOutputMaxEvents  = 10
+	maxProcessOutputMaxEventsLimit = 100
 )
 
 type waitForEventsProcess struct {
-	ProcessID string `json:"process_id"`
-	Command   string `json:"command"`
+	ProcessID     string `json:"process_id"`
+	Command       string `json:"command"`
+	OutputPattern string `json:"output_pattern,omitempty"`
+}
+
+// processOutputArgs checks the output pattern arguments of args and returns
+// the event fields they set, all zero without a pattern.
+func processOutputArgs(args waitForEventsArgs) (wakeupEvent, error) {
+	if args.ProcessOutputPattern == "" {
+		if args.ProcessOutputCooldownSeconds != nil || args.ProcessOutputMaxEvents != nil {
+			return wakeupEvent{}, xerrors.New("process_output_cooldown_seconds and process_output_max_events require process_output_pattern")
+		}
+		return wakeupEvent{}, nil
+	}
+	if len(args.ProcessIDs) == 0 {
+		return wakeupEvent{}, xerrors.New("process_output_pattern requires process_ids")
+	}
+	if len(args.ProcessOutputPattern) > maxProcessOutputPatternBytes {
+		return wakeupEvent{}, xerrors.Errorf("process_output_pattern must be at most %d bytes", maxProcessOutputPatternBytes)
+	}
+	if _, err := regexp.Compile(args.ProcessOutputPattern); err != nil {
+		return wakeupEvent{}, xerrors.Errorf("invalid process_output_pattern: %w", err)
+	}
+	event := wakeupEvent{
+		OutputPattern:         args.ProcessOutputPattern,
+		OutputCooldownSeconds: defaultProcessOutputCooldown,
+		OutputMaxEvents:       defaultProcessOutputMaxEvents,
+	}
+	if seconds := args.ProcessOutputCooldownSeconds; seconds != nil {
+		if *seconds < 0 || *seconds > maxProcessOutputCooldown {
+			return wakeupEvent{}, xerrors.Errorf("process_output_cooldown_seconds must be between 0 and %d, got %d", maxProcessOutputCooldown, *seconds)
+		}
+		event.OutputCooldownSeconds = *seconds
+	}
+	if count := args.ProcessOutputMaxEvents; count != nil {
+		if *count < 1 || *count > maxProcessOutputMaxEventsLimit {
+			return wakeupEvent{}, xerrors.Errorf("process_output_max_events must be between 1 and %d, got %d", maxProcessOutputMaxEventsLimit, *count)
+		}
+		event.OutputMaxEvents = *count
+	}
+	return event, nil
 }
 
 // processWaitEvents checks that the workspace agent of chat runs the
 // background processes ids for chat, and returns the process_exit events
-// that watch them. A process that already exited is still watched, so the
-// first poll reports it.
-func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids []string) ([]wakeupEvent, error) {
+// that watch them, with the output pattern fields of output. A process that
+// already exited is still watched, so the first poll reports it.
+func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids []string, output wakeupEvent) ([]wakeupEvent, error) {
 	var requested []string
 	for _, raw := range ids {
 		id := strings.TrimSpace(raw)
@@ -99,19 +150,19 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 	defer release()
 	events := make([]wakeupEvent, 0, len(requested))
 	for _, id := range requested {
-		output, err := conn.ProcessOutput(ctx, id, nil)
+		process, err := conn.ProcessOutput(ctx, id, nil)
 		if processNotFound(err) {
 			return nil, xerrors.Errorf("process %q is not a process of this chat: pass the background_process_id that execute returned", id)
 		}
 		if err != nil {
 			return nil, xerrors.Errorf("read process %q: %w", id, err)
 		}
-		events = append(events, wakeupEvent{
-			Type:      wakeupEventProcessExit,
-			ProcessID: id,
-			Command:   output.Command,
-			AgentID:   chat.AgentID.UUID,
-		})
+		event := output
+		event.Type = wakeupEventProcessExit
+		event.ProcessID = id
+		event.Command = process.Command
+		event.AgentID = chat.AgentID.UUID
+		events = append(events, event)
 	}
 	return events, nil
 }
@@ -234,48 +285,182 @@ func (c *processConns) conn(ctx context.Context, p *Server, chatID, agentID uuid
 }
 
 // processWakeupText reads the process of event on the workspace agent of
-// chat and returns the message for its exit or for a lost watch, or "" while
-// it runs. With endedBy set, it also returns "" unless the process provably
-// ended by endedBy: the agent lists it as exited by then, or its workspace
-// stopped or was rebuilt by then. An error is transient: the entry polls
-// again later.
-func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, conns *processConns) (string, error) {
+// chat and returns the message for its exit or for a lost watch, with
+// processExitRunKey, or "" while it runs. With lines set, a running process
+// that printed matching lines returns the message for them and its
+// processOutputRunKey instead. With endedBy set, it also returns "" unless
+// the process provably ended by endedBy: the agent lists it as exited by
+// then, or its workspace stopped or was rebuilt by then. An error is
+// transient: the entry polls again later.
+func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, lines *processLines, conns *processConns) (string, string, error) {
+	exitKey := processExitRunKey(event.ProcessID)
 	ctx = conns.readContext(ctx)
 	runs, err := conns.agentRuns(ctx, p.db, chat, event.AgentID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !runs {
 		if !endedBy.IsZero() && conns.builtAt.After(endedBy) {
-			return "", nil
+			return "", "", nil
 		}
-		return processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), nil
+		return processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), exitKey, nil
 	}
 	conn, err := conns.conn(ctx, p, chat.ID, event.AgentID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	output, err := conn.ProcessOutput(ctx, event.ProcessID, nil)
 	if processNotFound(err) {
 		// The agent does not tell when it forgot the process.
 		if !endedBy.IsZero() {
-			return "", nil
+			return "", "", nil
 		}
-		return processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), nil
+		return processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), exitKey, nil
 	}
 	if err != nil {
-		return "", xerrors.Errorf("read process %q: %w", event.ProcessID, err)
+		return "", "", xerrors.Errorf("read process %q: %w", event.ProcessID, err)
 	}
 	if output.Running {
-		return "", nil
+		if lines == nil {
+			return "", "", nil
+		}
+		text, runKey := processLinesText(event, output, *lines)
+		return text, runKey, nil
 	}
 	if !endedBy.IsZero() {
 		exited, err := processExitedBy(ctx, conn, event.ProcessID, endedBy)
 		if err != nil || !exited {
-			return "", err
+			return "", "", err
 		}
 	}
-	return processExitText(event, output), nil
+	return processExitText(event, output), exitKey, nil
+}
+
+// processLines is where the output pattern of a process watch continues:
+// cursor is the output position after the lines that earlier messages
+// covered, and sent counts those messages.
+type processLines struct {
+	cursor int
+	sent   int
+}
+
+// processLinesDue returns where the output pattern of event continues, or
+// false when this poll of wakeup at now reports no lines: event has no
+// pattern, its line messages are used up, the wake-up is in its cool-down
+// after its last message, or this is the final poll, which reports exits
+// only.
+func processLinesDue(event wakeupEvent, keys []string, wakeup forkdb.ChatWakeup, now time.Time) (processLines, bool) {
+	if event.OutputPattern == "" || eventsFinalPoll(wakeup, now) {
+		return processLines{}, false
+	}
+	var lines processLines
+	prefix := processOutputRunKeyPrefix + ":" + event.ProcessID + ":"
+	for _, key := range keys {
+		rest, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+		// The keys of failed sends end in ":failed" and do not count.
+		cursor, err := strconv.Atoi(rest)
+		if err != nil {
+			continue
+		}
+		lines.sent++
+		lines.cursor = max(lines.cursor, cursor)
+	}
+	if lines.sent >= event.OutputMaxEvents {
+		return processLines{}, false
+	}
+	cooldown := time.Duration(event.OutputCooldownSeconds) * time.Second
+	if wakeup.LastRunAt.Valid && now.Before(wakeup.LastRunAt.Time.Add(cooldown)) {
+		return processLines{}, false
+	}
+	return lines, true
+}
+
+// processOutputRunKey names the run of the message for the output lines of
+// processID up to position end.
+func processOutputRunKey(processID string, end int) string {
+	return processOutputRunKeyPrefix + ":" + processID + ":" + strconv.Itoa(end)
+}
+
+// processLinesText returns the message for the lines of output after
+// lines.cursor that match the pattern of event, with its run key, or "" when
+// none match.
+func processLinesText(event wakeupEvent, output workspacesdk.ProcessOutputResponse, lines processLines) (string, string) {
+	pattern, err := regexp.Compile(event.OutputPattern)
+	if err != nil {
+		// processOutputArgs checked the pattern.
+		return "", ""
+	}
+	newLines, end := processNewLines(output, lines.cursor)
+	matched := slices.DeleteFunc(newLines, func(line string) bool { return !pattern.MatchString(line) })
+	if len(matched) == 0 {
+		return "", ""
+	}
+	noun := "lines"
+	if len(matched) == 1 {
+		noun = "line"
+	}
+	text := fmt.Sprintf("Background process %s (`%s`) is still running and printed %d new %s matching `%s`.", event.ProcessID, event.Command, len(matched), noun, event.OutputPattern)
+	if tail, shown := processOutputTail(strings.Join(matched, "\n")); shown > 0 {
+		label := "Matching lines"
+		if shown < len(matched) {
+			label = fmt.Sprintf("Last %d matching lines", shown)
+		}
+		text += fmt.Sprintf("\n\n%s:\n```\n%s\n```", label, tail)
+	}
+	if lines.sent+1 >= event.OutputMaxEvents {
+		text += "\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
+	}
+	return text, processOutputRunKey(event.ProcessID, end)
+}
+
+// processNewLines returns the complete lines of output that end after
+// position cursor, and the position after the last of them, or cursor when
+// there are none. A position counts the bytes of the whole output of the
+// process. The agent keeps the first and the last 16 KiB of it and joins
+// them with an omission marker (agentproc.HeadTailBuffer), so once bytes are
+// omitted only the lines after the marker can be new, the first of which may
+// have lost its start. Lines that the agent no longer keeps are missed.
+func processNewLines(output workspacesdk.ProcessOutputResponse, cursor int) ([]string, int) {
+	text := output.Output
+	total := len(text)
+	start := 0
+	if truncated := output.Truncated; truncated != nil {
+		total = truncated.OriginalBytes
+		if truncated.OmittedBytes > 0 {
+			marker := fmt.Sprintf("\n\n... [omitted %d bytes] ...\n\n", truncated.OmittedBytes)
+			index := strings.Index(text, marker)
+			if index < 0 {
+				return nil, cursor
+			}
+			start = index + len(marker)
+			newline := strings.IndexByte(text[start:], '\n')
+			if newline < 0 {
+				return nil, cursor
+			}
+			start += newline + 1
+		}
+	}
+	// text ends at position total.
+	offset := total - len(text)
+	var lines []string
+	end := cursor
+	for start < len(text) {
+		newline := strings.IndexByte(text[start:], '\n')
+		if newline < 0 {
+			// The process may still be writing this line.
+			break
+		}
+		lineEnd := start + newline + 1
+		if offset+lineEnd > cursor {
+			lines = append(lines, text[start:lineEnd-1])
+			end = offset + lineEnd
+		}
+		start = lineEnd
+	}
+	return lines, end
 }
 
 // processExitedBy reports whether the agent lists processID as exited by t.

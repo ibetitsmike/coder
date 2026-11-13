@@ -41,6 +41,10 @@ type waitForEventsArgs struct {
 	PullRequestURL    string   `json:"pull_request_url,omitempty" description:"A GitHub pull request URL, e.g. https://github.com/org/repo/pull/7, to watch. The chat gets one message when it has new activity by someone other than the chat owner. Without child_chat_ids, only the pull request is watched."`
 	PullRequestEvents []string `json:"pull_request_events,omitempty" description:"Which pull request activity wakes the chat: any of review, comment, checks (CI settled on a new result) and closed (closed or merged). Defaults to all four. Requires pull_request_url."`
 	ProcessIDs        []string `json:"process_ids,omitempty" description:"IDs of background processes of this chat to watch, the background_process_id that execute returns. The chat gets one message when each one exits, with its exit code and the end of its output. At most 10. Without child_chat_ids, only the processes (and the pull request) are watched."`
+	// The output pattern fields apply to every process of the call.
+	ProcessOutputPattern         string `json:"process_output_pattern,omitempty" description:"A regular expression (RE2 syntax) for output lines of the processes. While a process runs, the chat also gets a message when it printed new lines that match, with those lines. Requires process_ids."`
+	ProcessOutputCooldownSeconds *int   `json:"process_output_cooldown_seconds,omitempty" description:"Wait at least this many seconds after the last message of this wake-up before a message for matching lines, which collects the lines printed meanwhile. 0 to 86400. Defaults to 60. Requires process_output_pattern."`
+	ProcessOutputMaxEvents       *int   `json:"process_output_max_events,omitempty" description:"Send at most this many messages for matching lines per process. 1 to 100. Defaults to 10. The exit message comes either way. Requires process_output_pattern."`
 }
 
 type waitForEventsChild struct {
@@ -60,7 +64,8 @@ type waitForEventsResult struct {
 // wakeupEvent is one entry of the events of an events wake-up. Type names
 // what the worker waits for; entries of other types are ignored. A child_done
 // entry sets ChatID, and a process_exit entry sets ProcessID, Command and
-// AgentID, the workspace agent that runs the process. A pull_request entry
+// AgentID, the workspace agent that runs the process, and with an output
+// pattern also the Output fields. A pull_request entry
 // sets the other fields: Since is when the watch started, and HeadSHA and
 // ChecksState are the baseline at that time.
 type wakeupEvent struct {
@@ -79,6 +84,11 @@ type wakeupEvent struct {
 	ProcessID string    `json:"process_id,omitempty"`
 	Command   string    `json:"command,omitempty"`
 	AgentID   uuid.UUID `json:"agent_id,omitzero"`
+	// OutputPattern, OutputCooldownSeconds and OutputMaxEvents are the
+	// process_output_* arguments that the call resolved.
+	OutputPattern         string `json:"output_pattern,omitempty"`
+	OutputCooldownSeconds int    `json:"output_cooldown_seconds,omitempty"`
+	OutputMaxEvents       int    `json:"output_max_events,omitempty"`
 }
 
 // waitForEventsTool returns the wait_for_events tool, which creates an events
@@ -99,7 +109,10 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 			"settles, or it closes. With process_ids, it watches background "+
 			"processes from execute and sends one message per process when it "+
 			"exits, with its exit code and the end of its output; a process "+
-			"that already exited wakes the chat right after this turn.",
+			"that already exited wakes the chat right after this turn. With "+
+			"process_output_pattern, it also sends a message while a process "+
+			"runs when it printed new lines that match, at most once per "+
+			"cool-down and up to process_output_max_events times per process.",
 		func(ctx context.Context, args waitForEventsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			id, ok := workspacesdk.ToolCallIDFromContext(ctx)
 			if !ok {
@@ -168,6 +181,10 @@ func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, a
 	if err != nil {
 		return wakeupSpec{}, err
 	}
+	output, err := processOutputArgs(args)
+	if err != nil {
+		return wakeupSpec{}, err
+	}
 	var children []database.Chat
 	// A call that names only a pull request or processes waits for no
 	// children.
@@ -179,7 +196,7 @@ func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, a
 	}
 	var processes []wakeupEvent
 	if len(args.ProcessIDs) > 0 {
-		processes, err = p.processWaitEvents(ctx, chat, args.ProcessIDs)
+		processes, err = p.processWaitEvents(ctx, chat, args.ProcessIDs, output)
 		if err != nil {
 			return wakeupSpec{}, err
 		}
@@ -219,7 +236,7 @@ func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, 
 			continue
 		}
 		if event.Type == wakeupEventProcessExit {
-			result.Processes = append(result.Processes, waitForEventsProcess{ProcessID: event.ProcessID, Command: event.Command})
+			result.Processes = append(result.Processes, waitForEventsProcess{ProcessID: event.ProcessID, Command: event.Command, OutputPattern: event.OutputPattern})
 			continue
 		}
 		index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
@@ -445,7 +462,11 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				if lateFinalPoll && !slices.Contains(keys, failedRunKey(processExitRunKey(event.ProcessID))) {
 					endedBy = wakeup.ExpiresAt.Time
 				}
-				text, err := p.processWakeupText(ctx, chat, event, endedBy, &conns)
+				var lines *processLines
+				if due, ok := processLinesDue(event, keys, wakeup, now); ok {
+					lines = &due
+				}
+				text, runKey, err := p.processWakeupText(ctx, chat, event, endedBy, lines, &conns)
 				if err != nil {
 					p.logger.Warn(ctx, "chat wake-up could not read its background process",
 						slog.F("wakeup_id", wakeup.ID),
@@ -458,9 +479,13 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				if text != "" {
 					next = &wakeupDelivery{
 						text:   wakeup.Prompt + "\n\n" + text,
-						runKey: processExitRunKey(event.ProcessID),
+						runKey: runKey,
 					}
-					continue
+					// A process that printed matching lines still runs, so
+					// it stays pending.
+					if runKey == processExitRunKey(event.ProcessID) {
+						continue
+					}
 				}
 			}
 			pending++
