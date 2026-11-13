@@ -235,9 +235,10 @@ func (c *processConns) conn(ctx context.Context, p *Server, chatID, agentID uuid
 
 // processWakeupText reads the process of event on the workspace agent of
 // chat and returns the message for its exit or for a lost watch, or "" while
-// it runs. With endedBy set, it also returns "" for a process that the agent
-// lists as exited after endedBy, or whose workspace stopped or was rebuilt
-// after endedBy. An error is transient: the entry polls again later.
+// it runs. With endedBy set, it also returns "" unless the process provably
+// ended by endedBy: the agent lists it as exited by then, or its workspace
+// stopped or was rebuilt by then. An error is transient: the entry polls
+// again later.
 func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, conns *processConns) (string, error) {
 	ctx = conns.readContext(ctx)
 	runs, err := conns.agentRuns(ctx, p.db, chat, event.AgentID)
@@ -256,6 +257,10 @@ func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, even
 	}
 	output, err := conn.ProcessOutput(ctx, event.ProcessID, nil)
 	if processNotFound(err) {
+		// The agent does not tell when it forgot the process.
+		if !endedBy.IsZero() {
+			return "", nil
+		}
 		return processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), nil
 	}
 	if err != nil {
@@ -264,26 +269,29 @@ func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, even
 	if output.Running {
 		return "", nil
 	}
-	if !endedBy.IsZero() && processExitedAfter(ctx, conn, event.ProcessID, endedBy) {
-		return "", nil
+	if !endedBy.IsZero() {
+		exited, err := processExitedBy(ctx, conn, event.ProcessID, endedBy)
+		if err != nil || !exited {
+			return "", err
+		}
 	}
 	return processExitText(event, output), nil
 }
 
-// processExitedAfter reports whether the agent lists processID as exited
-// after t. A process that the list leaves out, or a failed list, counts as
-// exited by t, so its exit is still reported.
-func processExitedAfter(ctx context.Context, conn workspacesdk.AgentConn, processID string, t time.Time) bool {
+// processExitedBy reports whether the agent lists processID as exited by t.
+// The list holds at most ten processes, running ones first, so it can leave
+// out an exited process, which then does not count as exited by t.
+func processExitedBy(ctx context.Context, conn workspacesdk.AgentConn, processID string, t time.Time) (bool, error) {
 	list, err := conn.ListProcesses(ctx)
 	if err != nil {
-		return false
+		return false, xerrors.Errorf("list processes: %w", err)
 	}
 	for _, info := range list.Processes {
 		if info.ID == processID && info.ExitedAt != nil {
-			return time.Unix(*info.ExitedAt, 0).After(t)
+			return !time.Unix(*info.ExitedAt, 0).After(t), nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // processLostText tells that the watch of event ended for reason, without the

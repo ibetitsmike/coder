@@ -467,6 +467,12 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		interval = processErrorRetry
 	}
 	if next == nil {
+		// A failed read on the final poll could miss an exit by the expiry.
+		if processErrors > 0 {
+			if retry, ok := eventsFinalRetry(wakeup, now, now.Add(processErrorRetry)); ok {
+				return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, retry)
+			}
+		}
 		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, interval))
 	}
 	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {

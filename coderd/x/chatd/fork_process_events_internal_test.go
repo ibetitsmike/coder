@@ -226,25 +226,33 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 	}
 }
 
-// A final poll well after the expiry leaves out a process that exited, or
-// whose workspace stopped, after the expiry.
+// A final poll well after the expiry delivers only a process that provably
+// ended by the expiry, and a failed read on the final poll retries.
 func TestWakeupFinalPollProcesses(t *testing.T) {
 	t.Parallel()
+	notFound := codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Process not found."})
 	for _, tc := range []struct {
 		name string
 		late time.Duration
-		// exitedAt is when the agent lists the process as exited, relative to
-		// the expiry.
-		exitedAt time.Duration
+		// exitedAt, when set, is when the agent lists the process as exited,
+		// relative to the expiry.
+		exitedAt  *time.Duration
+		listErr   error
+		outputErr error
 		// stoppedAt, when set, is when a stop build was created, relative to
 		// the expiry.
 		stoppedAt   *time.Duration
 		wantMessage bool
-		wantReason  string
+		// wantReason is the completion reason, or "" for a retry.
+		wantReason string
 	}{
-		{name: "OnTime", late: time.Second, exitedAt: time.Second, wantMessage: true, wantReason: "done"},
-		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: 30 * time.Second, wantReason: "expired"},
-		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: -30 * time.Second, wantMessage: true, wantReason: "done"},
+		{name: "OnTime", late: time.Second, exitedAt: new(time.Second), wantMessage: true, wantReason: "done"},
+		{name: "OnTimeReadFails", late: time.Second, outputErr: xerrors.New("connection reset")},
+		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: new(30 * time.Second), wantReason: "expired"},
+		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
+		{name: "LateNotListed", late: time.Minute, wantReason: "expired"},
+		{name: "LateListFails", late: time.Minute, listErr: xerrors.New("connection reset")},
+		{name: "LateUnknownToAgent", late: time.Minute, outputErr: notFound, wantReason: "expired"},
 		{name: "LateStoppedAfterExpiry", late: time.Minute, stoppedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateStoppedBeforeExpiry", late: time.Minute, stoppedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 	} {
@@ -267,20 +275,28 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			conn := processTestConn(t, worker.server, chat, agent)
 			conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).
-				Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(0)}, nil).
+				Return(workspacesdk.ProcessOutputResponse{Command: "sleep 600", ExitCode: new(0)}, tc.outputErr).
 				MaxTimes(1)
-			exitedAt := wakeupTestSlot.Add(tc.exitedAt).Unix()
-			conn.EXPECT().ListProcesses(gomock.Any()).
-				Return(workspacesdk.ListProcessesResponse{Processes: []workspacesdk.ProcessInfo{{ID: "proc-1", ExitedAt: &exitedAt}}}, nil).
-				AnyTimes()
+			var list workspacesdk.ListProcessesResponse
+			if tc.exitedAt != nil {
+				exitedAt := wakeupTestSlot.Add(*tc.exitedAt).Unix()
+				list.Processes = []workspacesdk.ProcessInfo{{ID: "proc-1", ExitedAt: &exitedAt}}
+			}
+			conn.EXPECT().ListProcesses(gomock.Any()).Return(list, tc.listErr).AnyTimes()
 
-			worker.wakeupOnce(ctx, wakeupTestSlot.Add(tc.late))
+			now := wakeupTestSlot.Add(tc.late)
+			worker.wakeupOnce(ctx, now)
 			if tc.wantMessage {
 				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
 			} else {
 				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
 			}
 			got := f.wakeup(t, wakeup.ID)
+			if tc.wantReason == "" {
+				require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+				require.WithinDuration(t, now.Add(processErrorRetry), got.NextRunAt.Time, time.Second)
+				return
+			}
 			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 			require.Equal(t, tc.wantReason, got.StatusReason.String)
 		})
