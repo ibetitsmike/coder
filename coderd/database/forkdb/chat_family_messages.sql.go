@@ -14,16 +14,17 @@ import (
 
 const countChatFamilyMessagesSince = `-- name: CountChatFamilyMessagesSince :one
 SELECT count(*) FROM chat_family_messages
-WHERE sender_chat_id = $1::uuid AND created_at > $2::timestamptz
+WHERE organization_id = $1::uuid AND sender_chat_id = $2::uuid AND created_at > $3::timestamptz
 `
 
 type CountChatFamilyMessagesSinceParams struct {
-	SenderChatID uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
-	Since        time.Time `db:"since" json:"since"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	SenderChatID   uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
+	Since          time.Time `db:"since" json:"since"`
 }
 
 func (q *Queries) CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countChatFamilyMessagesSince, arg.SenderChatID, arg.Since)
+	row := q.db.QueryRowContext(ctx, countChatFamilyMessagesSince, arg.OrganizationID, arg.SenderChatID, arg.Since)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -31,43 +32,46 @@ func (q *Queries) CountChatFamilyMessagesSince(ctx context.Context, arg CountCha
 
 const deleteChatFamilyMessagesBefore = `-- name: DeleteChatFamilyMessagesBefore :exec
 DELETE FROM chat_family_messages
-WHERE sender_chat_id = $1::uuid AND created_at <= $2::timestamptz
+WHERE organization_id = $1::uuid AND sender_chat_id = $2::uuid AND created_at <= $3::timestamptz
 `
 
 type DeleteChatFamilyMessagesBeforeParams struct {
-	SenderChatID uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
-	Before       time.Time `db:"before" json:"before"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	SenderChatID   uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
+	Before         time.Time `db:"before" json:"before"`
 }
 
 func (q *Queries) DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error {
-	_, err := q.db.ExecContext(ctx, deleteChatFamilyMessagesBefore, arg.SenderChatID, arg.Before)
+	_, err := q.db.ExecContext(ctx, deleteChatFamilyMessagesBefore, arg.OrganizationID, arg.SenderChatID, arg.Before)
 	return err
 }
 
 const getChatFamilyMessageRecipient = `-- name: GetChatFamilyMessageRecipient :one
 SELECT recipient_chat_id FROM chat_family_messages
-WHERE id = $1::uuid AND sender_chat_id = $2::uuid
+WHERE id = $1::uuid AND organization_id = $2::uuid AND sender_chat_id = $3::uuid
 `
 
 type GetChatFamilyMessageRecipientParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	SenderChatID uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	SenderChatID   uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
 }
 
 func (q *Queries) GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
-	row := q.db.QueryRowContext(ctx, getChatFamilyMessageRecipient, arg.ID, arg.SenderChatID)
+	row := q.db.QueryRowContext(ctx, getChatFamilyMessageRecipient, arg.ID, arg.OrganizationID, arg.SenderChatID)
 	var recipient_chat_id uuid.UUID
 	err := row.Scan(&recipient_chat_id)
 	return recipient_chat_id, err
 }
 
 const insertChatFamilyMessage = `-- name: InsertChatFamilyMessage :exec
-INSERT INTO chat_family_messages (id, sender_chat_id, recipient_chat_id, created_at)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz)
+INSERT INTO chat_family_messages (id, organization_id, sender_chat_id, recipient_chat_id, created_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::timestamptz)
 `
 
 type InsertChatFamilyMessageParams struct {
 	ID              uuid.UUID `db:"id" json:"id"`
+	OrganizationID  uuid.UUID `db:"organization_id" json:"organization_id"`
 	SenderChatID    uuid.UUID `db:"sender_chat_id" json:"sender_chat_id"`
 	RecipientChatID uuid.UUID `db:"recipient_chat_id" json:"recipient_chat_id"`
 	CreatedAt       time.Time `db:"created_at" json:"created_at"`
@@ -76,6 +80,7 @@ type InsertChatFamilyMessageParams struct {
 func (q *Queries) InsertChatFamilyMessage(ctx context.Context, arg InsertChatFamilyMessageParams) error {
 	_, err := q.db.ExecContext(ctx, insertChatFamilyMessage,
 		arg.ID,
+		arg.OrganizationID,
 		arg.SenderChatID,
 		arg.RecipientChatID,
 		arg.CreatedAt,
