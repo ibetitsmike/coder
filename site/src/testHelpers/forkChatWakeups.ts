@@ -59,6 +59,10 @@ export const MockChatWakeupEvents: ChatWakeup = {
 			process_id: "55dc01f8-7543-59a4-ae4f-eb42eeebb656",
 			command: "make test 2>&1 | tee test.log",
 		},
+		{
+			type: "process_exit",
+			process_id: "5ff79573-6d5c-58c8-945e-d48524770e4f",
+		},
 	],
 	status: "active",
 	next_run_at: "2099-01-01T09:01:00Z",
