@@ -1371,6 +1371,21 @@ func (mr *MockStoreMockRecorder) ListChatFamilyMembers(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatFamilyMembers", reflect.TypeOf((*MockStore)(nil).ListChatFamilyMembers), ctx, arg)
 }
 
+// ListChatHistoryRows mocks base method.
+func (m *MockStore) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChatHistoryRows", ctx, chatID)
+	ret0, _ := ret[0].([]forkdb.ListChatHistoryRowsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChatHistoryRows indicates an expected call of ListChatHistoryRows.
+func (mr *MockStoreMockRecorder) ListChatHistoryRows(ctx, chatID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatHistoryRows", reflect.TypeOf((*MockStore)(nil).ListChatHistoryRows), ctx, chatID)
+}
+
 // ListChatNotes mocks base method.
 func (m *MockStore) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
 	m.ctrl.T.Helper()
@@ -1533,6 +1548,21 @@ func (m *MockStore) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID)
 func (mr *MockStoreMockRecorder) ReleasePluginLeases(ctx, runnerID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleasePluginLeases", reflect.TypeOf((*MockStore)(nil).ReleasePluginLeases), ctx, runnerID)
+}
+
+// SearchChatHistory mocks base method.
+func (m *MockStore) SearchChatHistory(ctx context.Context, arg forkdb.SearchChatHistoryParams) ([]forkdb.SearchChatHistoryRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SearchChatHistory", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.SearchChatHistoryRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SearchChatHistory indicates an expected call of SearchChatHistory.
+func (mr *MockStoreMockRecorder) SearchChatHistory(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchChatHistory", reflect.TypeOf((*MockStore)(nil).SearchChatHistory), ctx, arg)
 }
 
 // SetPluginUserLinkActiveChat mocks base method.

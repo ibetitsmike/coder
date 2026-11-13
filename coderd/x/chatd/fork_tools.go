@@ -88,7 +88,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = append(tools, p.familyMessageTools(chat)...)
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) {
-		tools = append(tools, p.chatNotesTool(chat))
+		tools = append(tools, p.chatNotesTool(chat), p.chatHistoryTool(chat))
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		tools = p.withForkSpawnIsolation(tools, chat)

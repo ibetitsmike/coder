@@ -221,9 +221,9 @@ func transcriptFilters(args readChatTranscriptArgs) (roles []codersdk.ChatMessag
 // such as a tool result whose user view holds a subagent's private
 // reasoning while the model gets a separate model-only row. Hook notices
 // and sources are skipped because they never reach the model. Rows with a
-// call or result of this tool are skipped too, so paging through the
-// calling chat does not return earlier pages again or grow the tail faster
-// than the cursor.
+// call or result of this tool or of chat_history are skipped too, so
+// paging through the calling chat does not return earlier pages again or
+// grow the tail faster than the cursor.
 func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int) (chatTranscriptMessage, bool) {
 	if row.Visibility != database.ChatMessageVisibilityBoth {
 		return chatTranscriptMessage{}, false
@@ -233,7 +233,7 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 		return chatTranscriptMessage{}, false
 	}
 	if slices.ContainsFunc(message.Content, func(part codersdk.ChatMessagePart) bool {
-		return part.ToolName == readChatTranscriptToolName
+		return part.ToolName == readChatTranscriptToolName || part.ToolName == chatHistoryToolName
 	}) {
 		return chatTranscriptMessage{}, false
 	}

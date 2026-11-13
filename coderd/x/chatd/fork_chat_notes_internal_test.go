@@ -40,7 +40,7 @@ func TestChatNotesTool(t *testing.T) {
 
 	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)
-	require.Equal(t, []string{"notes"}, toolNames(tools))
+	require.Equal(t, []string{"notes", "chat_history"}, toolNames(tools))
 	// The calls of a step run in call order, so a read sees the writes
 	// before it and the note cap holds.
 	notesTool := findToolByName(tools, chatNotesToolName)
