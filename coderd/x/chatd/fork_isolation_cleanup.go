@@ -4,6 +4,7 @@ package chatd
 // worktrees of the family's worktree subagents and stops the workspaces of
 // its workspace subagents behind the fork-subagent-isolation experiment, and
 // posts a notice on the root chat that lists each worktree it kept.
+// archive_agent runs the same removal and stops for the subtree it archives.
 
 import (
 	"context"
@@ -62,23 +63,39 @@ func (p *Server) scheduleArchivedSubagentCleanup(ctx context.Context, rootID uui
 
 func (p *Server) cleanupArchivedSubagents(ctx context.Context, rootID uuid.UUID, familyChats []database.Chat) {
 	logger := p.logger.With(slog.F("chat_id", rootID))
+	kept, workspaces := p.removeArchivedSubagentWorktrees(ctx, logger, familyChats)
+	var root database.Chat
+	for _, chat := range familyChats {
+		if chat.ID == rootID {
+			root = chat
+		}
+	}
+	if len(kept) > 0 && root.ID != uuid.Nil {
+		if err := p.postKeptWorktreesNotice(ctx, root, kept); err != nil {
+			logger.Error(ctx, "post kept subagent worktrees notice", slog.Error(err))
+		}
+	}
+	p.stopArchivedSubagentWorkspaces(ctx, logger, workspaces)
+}
+
+// removeArchivedSubagentWorktrees removes the worktrees of the worktree
+// subagents in chats, which are archived. It returns the worktrees it kept,
+// and the workspaces of the workspace subagents in chats for
+// stopArchivedSubagentWorkspaces.
+func (p *Server) removeArchivedSubagentWorktrees(ctx context.Context, logger slog.Logger, chats []database.Chat) ([]keptWorktree, []archivedSubagentWorkspace) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		logger.Error(ctx, "subagent worktree cleanup: fork queries", slog.Error(err))
-		return
+		return nil, nil
 	}
 
 	var (
-		root       database.Chat
 		kept       []keptWorktree
 		agentIDs   []uuid.UUID
 		byAgent    = map[uuid.UUID][]forkdb.ChatSubagent{}
 		workspaces []archivedSubagentWorkspace
 	)
-	for _, chat := range familyChats {
-		if chat.ID == rootID {
-			root = chat
-		}
+	for _, chat := range chats {
 		row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -105,8 +122,8 @@ func (p *Server) cleanupArchivedSubagents(ctx context.Context, rootID uuid.UUID,
 		}
 		byAgent[chat.AgentID.UUID] = append(byAgent[chat.AgentID.UUID], row)
 	}
-	// The notice is posted with ctx, so an agent that uses up this deadline
-	// still gets its worktrees listed.
+	// The caller reports the kept worktrees with ctx, so an agent that uses
+	// up this deadline still gets its worktrees listed.
 	agentCtx, cancel := context.WithTimeout(ctx, worktreeCleanupTimeout)
 	defer cancel()
 	for _, agentID := range agentIDs {
@@ -116,11 +133,12 @@ func (p *Server) cleanupArchivedSubagents(ctx context.Context, rootID uuid.UUID,
 		logger.Warn(ctx, "kept subagent worktree after archive",
 			slog.F("path", wt.path), slog.F("branch", wt.branch), slog.F("reason", wt.reason))
 	}
-	if len(kept) > 0 && root.ID != uuid.Nil {
-		if err := p.postKeptWorktreesNotice(ctx, root, kept); err != nil {
-			logger.Error(ctx, "post kept subagent worktrees notice", slog.Error(err))
-		}
-	}
+	return kept, workspaces
+}
+
+// stopArchivedSubagentWorkspaces stops the workspaces that
+// removeArchivedSubagentWorktrees returned.
+func (p *Server) stopArchivedSubagentWorkspaces(ctx context.Context, logger slog.Logger, workspaces []archivedSubagentWorkspace) {
 	// A worktree descendant of a workspace subagent lives in that subagent's
 	// workspace, so the workspaces stop only after the worktrees are removed.
 	for _, ws := range workspaces {
