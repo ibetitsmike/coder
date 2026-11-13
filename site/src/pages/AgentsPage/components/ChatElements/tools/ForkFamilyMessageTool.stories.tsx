@@ -69,6 +69,10 @@ export const Failed: Story = {
 };
 
 export const ListFamilyChats: Story = {
-	args: { name: "list_family_chats", args: {}, result: MockListFamilyChatsResult },
+	args: {
+		name: "list_family_chats",
+		args: {},
+		result: MockListFamilyChatsResult,
+	},
 	play: expand,
 };

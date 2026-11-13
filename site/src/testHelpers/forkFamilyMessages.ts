@@ -1,6 +1,7 @@
 export const MockMessageFamilyChatArgs = {
 	chat_id: "22222222-2222-4222-8222-222222222222",
-	message: "The migration landed on main.\nRebase your branch before the next push.",
+	message:
+		"The migration landed on main.\nRebase your branch before the next push.",
 };
 
 export const MockMessageFamilyChatResult = {

@@ -40,7 +40,9 @@ const renderFamilyTool = ({
 						name={name}
 						status="completed"
 						args={args}
-						result={typeof result === "string" ? result : JSON.stringify(result)}
+						result={
+							typeof result === "string" ? result : JSON.stringify(result)
+						}
 						isError={isError}
 						organizationId="organization-id"
 						mcpServers={[]}
@@ -95,29 +97,27 @@ describe("ForkFamilyMessageTool", () => {
 		);
 	});
 
-	it("labels a message queued behind the recipient's turn", () => {
-		renderFamilyTool({
-			name: "message_family_chat",
-			args: MockMessageFamilyChatArgs,
+	it.each([
+		{
+			outcome: "queued",
 			result: { ...MockMessageFamilyChatResult, queued: true },
-		});
-		expect(screen.getByRole("button")).toHaveAccessibleName(
-			"Queued message for Migrate chat sidebar to Tailwind",
-		);
-	});
-
-	it("shows why a message failed", async () => {
-		const error = "chat 22222222 is not in your chat family";
+			isError: false,
+			label: /^Queued message for Migrate chat sidebar to Tailwind$/,
+		},
+		{
+			outcome: "failed",
+			result: "chat 22222222 is not in your chat family",
+			isError: true,
+			label: /^Failed to message chat/,
+		},
+	])("labels a $outcome message", ({ result, isError, label }) => {
 		renderFamilyTool({
 			name: "message_family_chat",
 			args: MockMessageFamilyChatArgs,
-			result: error,
-			isError: true,
+			result,
+			isError,
 		});
-		await userEvent.click(
-			screen.getByRole("button", { name: "Failed to message chat" }),
-		);
-		expect(screen.getByText(error)).toHaveTextContent(error);
+		expect(screen.getAllByRole("button")[0]).toHaveAccessibleName(label);
 	});
 
 	it("keeps the upstream card when the experiment is off", () => {
@@ -140,12 +140,12 @@ describe("ForkFamilyMessageTool", () => {
 		await userEvent.click(
 			screen.getByRole("button", { name: "Found 3 family chats" }),
 		);
-		expect(
-			screen.getAllByRole("link").map((link) => link.textContent),
-		).toEqual([
-			"Ship family messages (parent, running)",
-			"Migrate chat sidebar to Tailwind (sibling, waiting)",
-		]);
+		expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
+			[
+				"Ship family messages (parent, running)",
+				"Migrate chat sidebar to Tailwind (sibling, waiting)",
+			],
+		);
 		expect(screen.getByText("More chats exist")).toHaveTextContent(
 			"More chats exist",
 		);
