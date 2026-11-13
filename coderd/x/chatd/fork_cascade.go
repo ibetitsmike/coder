@@ -21,8 +21,9 @@ import (
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 )
 
-// familyArchiveSettleTimeout bounds how long archiving a root waits for its
-// active family to stop after interrupting it.
+// familyArchiveSettleTimeout bounds how long archiving a root, or a child
+// with archive_agent, waits for its active members to stop after
+// interrupting them.
 const familyArchiveSettleTimeout = 30 * time.Second
 
 // interruptCascadeKey marks the context of the InterruptChat calls that a
@@ -91,6 +92,14 @@ func (p *Server) forkArchiveActiveFamily(ctx context.Context, root database.Chat
 	if err != nil {
 		return xerrors.Errorf("get chat family: %w", err)
 	}
+	return p.settleChatsForArchive(ctx, root, ids)
+}
+
+// settleChatsForArchive interrupts top, which cascades to its descendants,
+// until no chat in ids is active, and waits up to familyArchiveSettleTimeout
+// for that. ids holds top and its descendants. It returns nil on timeout, so
+// that the archive transition refuses the members that are still active.
+func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, ids []uuid.UUID) error {
 	active, err := p.activeChatIDs(ctx, ids)
 	if err != nil || len(active) == 0 {
 		return err
@@ -122,8 +131,8 @@ func (p *Server) forkArchiveActiveFamily(ctx context.Context, root database.Chat
 
 	for {
 		// A requires_action member returns to running when interrupted,
-		// so each wake interrupts the family again.
-		if _, _, err := p.InterruptChat(ctx, root); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
+		// so each wake interrupts the members again.
+		if _, _, err := p.InterruptChat(ctx, top); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
 			return xerrors.Errorf("interrupt chat family: %w", err)
 		}
 		active, err = p.activeChatIDs(ctx, ids)
