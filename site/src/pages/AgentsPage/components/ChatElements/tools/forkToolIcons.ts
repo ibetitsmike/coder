@@ -9,6 +9,8 @@ import {
 	type LucideIcon,
 	MessagesSquareIcon,
 	SearchIcon,
+	SendIcon,
+	UsersIcon,
 	WorkflowIcon,
 } from "lucide-react";
 
@@ -21,4 +23,6 @@ export const forkToolIcons: Record<string, LucideIcon> = {
 	fork_wait_for_events: HourglassIcon,
 	fork_notify_user: BellIcon,
 	fork_workflow: WorkflowIcon,
+	fork_family_message: SendIcon,
+	fork_family_chats: UsersIcon,
 };
