@@ -34,3 +34,7 @@ export default meta;
 type Story = StoryObj<typeof UserMessageContent>;
 
 export const FamilyMessage: Story = {};
+
+export const ExperimentOff: Story = {
+	parameters: { experiments: [] },
+};

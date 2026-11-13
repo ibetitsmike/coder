@@ -17,7 +17,10 @@ import {
 	AttachmentBlock,
 	type PreviewTextAttachment,
 } from "./AttachmentBlocks";
-import { useForkFamilyMessage } from "./ForkFamilyMessageHeader";
+import {
+	ForkFamilyMessageHeader,
+	useForkFamilyMessage,
+} from "./ForkFamilyMessageHeader";
 import type {
 	MessageDisplayState,
 	UserInlineRenderBlock,
@@ -154,7 +157,9 @@ export const UserMessageContent: React.FC<{
 				)}
 			>
 				<div className="flex flex-col gap-2">
-					{familyMessage.header}
+					{familyMessage.message && (
+						<ForkFamilyMessageHeader message={familyMessage.message} />
+					)}
 					{displayState.hasUserMessageBody &&
 						(inlineContent.isAsyncAnswer ? (
 							<div>

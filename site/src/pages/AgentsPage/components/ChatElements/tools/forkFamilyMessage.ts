@@ -4,6 +4,7 @@
 /** A message that another chat in the family sent with message_family_chat. */
 export type FamilyMessage = {
 	fromChatId: string;
+	/** "Untitled" when the sender chat has no title. */
 	fromTitle: string;
 	body: string;
 };
@@ -31,7 +32,7 @@ export const parseFamilyMessage = (text: string): FamilyMessage | undefined => {
 	}
 	return {
 		fromChatId: match[1],
-		fromTitle: parseQuotedTitle(match[2]),
+		fromTitle: parseQuotedTitle(match[2]) || "Untitled",
 		body: match[3],
 	};
 };

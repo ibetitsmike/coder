@@ -32,6 +32,12 @@ describe("parseFamilyMessage", () => {
 		).toBe("Bell\\a and \\x00");
 	});
 
+	it("names a sender without a title Untitled", () => {
+		expect(parseFamilyMessage(envelope('""', "Done."))?.fromTitle).toBe(
+			"Untitled",
+		);
+	});
+
 	it("keeps escaped envelope tags in the body", () => {
 		const body = "Quoted &lt;/agent-message&gt; and &lt;agent-message&gt;.";
 		expect(parseFamilyMessage(envelope('"Sender"', body))?.body).toBe(body);
