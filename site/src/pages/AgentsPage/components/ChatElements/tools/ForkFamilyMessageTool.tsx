@@ -130,7 +130,7 @@ export const ForkListFamilyChatsToolRenderer: React.FC<
 							return chat.relation === "self" ? (
 								<div
 									key={chat.chatId}
-									className="text-[13px] text-content-secondary"
+									className="max-w-full text-[13px] text-content-secondary wrap-anywhere"
 								>
 									{text}
 								</div>

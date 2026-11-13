@@ -75,8 +75,18 @@ describe("ForkFamilyMessageTool", () => {
 			result: MockMessageFamilyChatResult,
 		});
 		const user = userEvent.setup();
-		await user.click(screen.getByRole("button", { expanded: false }));
-		await user.click(screen.getByRole("link"));
+		await user.click(
+			screen.getByRole("button", {
+				name: new RegExp(
+					`Sent message to ${MockMessageFamilyChatResult.title}`,
+				),
+			}),
+		);
+		await user.click(
+			screen.getByRole("link", {
+				name: new RegExp(MockMessageFamilyChatResult.title),
+			}),
+		);
 		expect(router.state.location.pathname).toBe(
 			`/agents/${MockMessageFamilyChatResult.chat_id}`,
 		);
@@ -89,7 +99,9 @@ describe("ForkFamilyMessageTool", () => {
 		});
 		const sibling = MockListFamilyChatsResult.chats[1];
 		const user = userEvent.setup();
-		await user.click(screen.getByRole("button", { expanded: false }));
+		await user.click(
+			screen.getByRole("button", { name: /Found 3 family chats/ }),
+		);
 		await user.click(
 			screen.getByRole("link", { name: new RegExp(sibling.title) }),
 		);
