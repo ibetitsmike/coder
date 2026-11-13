@@ -183,7 +183,10 @@ func customAgentReadOnlyToolAllowed(tool fantasy.AgentTool) bool {
 	case "execute", "process_output":
 		return false
 	case viewImageToolName:
-		return true
+		// Only the built-in tool, not a caller-supplied tool that takes
+		// its name while fork-view-image is off.
+		_, dynamic := tool.(*dynamicTool)
+		return !dynamic
 	}
 	return exploreToolAllowed(tool)
 }
@@ -204,6 +207,11 @@ func (policy customAgentToolPolicy) filter(
 		name := tool.Info().Name
 		if disallowed[name] || (policy.ReadOnly && !customAgentReadOnlyToolAllowed(tool)) {
 			return false
+		}
+		// The Read alias covers the built-in view_image only. A
+		// caller-supplied tool of that name needs its own entry.
+		if _, dynamic := tool.(*dynamicTool); dynamic && name == viewImageToolName && policy.Tools != nil {
+			return slices.Contains(policy.Tools, name)
 		}
 		if server, isMCP := customAgentMCPServer(tool, mcpServerSlugs); isMCP {
 			return policy.allowsMCPServer(server)

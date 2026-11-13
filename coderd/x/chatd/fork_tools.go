@@ -60,7 +60,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	// The bound applies with the experiment off too, so a chat that viewed
 	// images before the experiment was turned off stays bounded.
 	if opt.prompt != nil {
-		*opt.prompt = limitViewedImages(*opt.prompt)
+		*opt.prompt = limitViewedImages(*opt.prompt, opt.model)
 	}
 	// A workflow step child gets workflow_report before the dynamic tools,
 	// so the server tool wins the name (fork-workflows).

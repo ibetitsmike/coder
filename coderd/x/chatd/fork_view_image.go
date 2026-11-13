@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -56,8 +57,10 @@ func viewImageTool(model chatprovider.Model, getConn func(context.Context) (work
 			"The image is added to your context so you can see it. "+
 			"Use read_file for text files. Only the newest viewed images stay in context; call view_image again to see an older one.",
 		func(ctx context.Context, args viewImageArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			path := strings.TrimSpace(args.Path)
-			if path == "" {
+			// read_file passes the path as given, and so does view_image: a
+			// file name may start or end with whitespace.
+			path := args.Path
+			if strings.TrimSpace(path) == "" {
 				return fantasy.NewTextErrorResponse("path is required (use an absolute path, e.g. /home/coder/screenshot.png)"), nil
 			}
 			if err := viewImageModelSupported(model); err != nil {
@@ -127,6 +130,9 @@ func viewImage(ctx context.Context, conn workspacesdk.AgentConn, model chatprovi
 			model.ModelID(), model.RouteProvider(), mediaType)
 	}
 	width, height, err := imageDimensions(data, mediaType)
+	if err == nil {
+		err = imageComplete(data, mediaType)
+	}
 	if err != nil {
 		return fantasy.ToolResponse{}, xerrors.Errorf("%s is not a valid %s image: %w", path, mediaType, err)
 	}
@@ -158,6 +164,53 @@ func imageDimensions(data []byte, mediaType string) (width, height int, err erro
 		return 0, 0, err
 	}
 	return config.Width, config.Height, nil
+}
+
+// imageComplete checks the structure of the whole file without decoding the
+// pixels, so that a truncated or damaged file, such as a screenshot still
+// being written, fails here. A stored image the provider rejects would fail
+// every later request, because the newest viewed image always stays in the
+// prompt.
+func imageComplete(data []byte, mediaType string) error {
+	switch mediaType {
+	case "image/png":
+		// The signature, then chunks of length, type, data and CRC, up to
+		// IEND. Bytes after IEND are ignored, as decoders do.
+		for offset := 8; ; {
+			if len(data)-offset < 12 {
+				return xerrors.New("truncated before the IEND chunk")
+			}
+			length := int64(binary.BigEndian.Uint32(data[offset:]))
+			if length > int64(len(data)-offset-12) {
+				return xerrors.New("truncated chunk")
+			}
+			end := offset + 8 + int(length)
+			if crc32.ChecksumIEEE(data[offset+4:end]) != binary.BigEndian.Uint32(data[end:]) {
+				return xerrors.Errorf("bad CRC in chunk %q", data[offset+4:offset+8])
+			}
+			if string(data[offset+4:offset+8]) == "IEND" {
+				return nil
+			}
+			offset = end + 4
+		}
+	case "image/jpeg":
+		// Entropy-coded data escapes 0xFF, so a marker pair only appears as a
+		// marker. An embedded thumbnail ends before the image's last start of
+		// scan, so the end of image must follow that.
+		sos := bytes.LastIndex(data, []byte{0xff, 0xda})
+		if sos < 0 || bytes.LastIndex(data, []byte{0xff, 0xd9}) < sos {
+			return xerrors.New("truncated before the end of image marker")
+		}
+	case "image/gif":
+		if !bytes.HasSuffix(bytes.TrimRight(data, "\x00"), []byte{0x3b}) {
+			return xerrors.New("truncated before the GIF trailer")
+		}
+	case "image/webp":
+		if int64(binary.LittleEndian.Uint32(data[4:8]))+8 > int64(len(data)) {
+			return xerrors.New("shorter than its RIFF size")
+		}
+	}
+	return nil
 }
 
 // webpDimensions reads the canvas size of a WebP file from its first chunk,
@@ -196,75 +249,93 @@ func webpDimensions(data []byte) (width, height int, err error) {
 // at most maxViewedImagesInPrompt of them and maxViewedImageBytesInPrompt
 // decoded bytes, and always the newest one. It replaces older ones with a text
 // note. The stored conversation keeps every image; only the prompt drops them,
-// so each turn sends a bounded amount of image data. It copies the messages it
-// changes and leaves messages itself unchanged.
-func limitViewedImages(messages []fantasy.Message) []fantasy.Message {
-	viewCalls := map[string]bool{}
-	for _, msg := range messages {
-		for _, part := range msg.Content {
-			switch call := part.(type) {
-			case fantasy.ToolCallPart:
-				if call.ToolName == viewImageToolName {
-					viewCalls[call.ToolCallID] = true
-				}
-			case *fantasy.ToolCallPart:
-				if call != nil && call.ToolName == viewImageToolName {
-					viewCalls[call.ToolCallID] = true
-				}
+// so each turn sends a bounded amount of image data. With a model, it also
+// replaces an image over view_image's size limit for that model, which a chat
+// can hold after it switched from a model with a higher limit. It copies the
+// messages it changes and leaves messages itself unchanged.
+func limitViewedImages(messages []fantasy.Message, model *chatprovider.Model) []fantasy.Message {
+	sizeLimit := -1
+	if model != nil {
+		sizeLimit, _ = viewImageSizeLimit(*model)
+	}
+	// A result belongs to the newest earlier call with its ID, so a reused
+	// ID does not make another tool's result count as a viewed image.
+	type position struct{ i, j int }
+	var results []position
+	callTools := map[string]string{}
+	for i, msg := range messages {
+		for j, part := range msg.Content {
+			if call, ok := toolCallPartOf(part); ok {
+				callTools[call.ToolCallID] = call.ToolName
+				continue
+			}
+			if result, ok := toolResultPartOf(part); ok && callTools[result.ToolCallID] == viewImageToolName {
+				results = append(results, position{i, j})
 			}
 		}
-	}
-	if len(viewCalls) == 0 {
-		return messages
 	}
 
 	var out []fantasy.Message
 	cloned := map[int]bool{}
 	kept, keptBytes := 0, 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		for j := len(messages[i].Content) - 1; j >= 0; j-- {
-			var result fantasy.ToolResultPart
-			switch part := messages[i].Content[j].(type) {
-			case fantasy.ToolResultPart:
-				result = part
-			case *fantasy.ToolResultPart:
-				if part == nil {
-					continue
-				}
-				result = *part
-			default:
-				continue
-			}
-			if !viewCalls[result.ToolCallID] {
-				continue
-			}
-			media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output)
-			if !ok {
-				continue
-			}
-			size := base64DecodedLen(media.Data)
-			if kept == 0 || (kept < maxViewedImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt) {
-				kept++
-				keptBytes += size
-				continue
-			}
-			note := "[image no longer in context: only the newest viewed images are kept; call view_image again to see it]"
-			if media.Text != "" {
-				note += "\n\n" + media.Text
-			}
-			result.Output = fantasy.ToolResultOutputContentText{Text: note}
-			if out == nil {
-				out = slices.Clone(messages)
-			}
-			if !cloned[i] {
-				out[i].Content = slices.Clone(messages[i].Content)
-				cloned[i] = true
-			}
-			out[i].Content[j] = result
+	for k := len(results) - 1; k >= 0; k-- {
+		i, j := results[k].i, results[k].j
+		result, _ := toolResultPartOf(messages[i].Content[j])
+		media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output)
+		if !ok {
+			continue
 		}
+		size := base64DecodedLen(media.Data)
+		var note string
+		switch {
+		case sizeLimit >= 0 && size > sizeLimit:
+			note = fmt.Sprintf("[image omitted: %d bytes is larger than the view_image limit of %d bytes for this model; scale the image down and call view_image again]", size, sizeLimit)
+		case kept == 0 || (kept < maxViewedImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt):
+			kept++
+			keptBytes += size
+			continue
+		default:
+			note = "[image no longer in context: only the newest viewed images are kept; call view_image again to see it]"
+		}
+		if media.Text != "" {
+			note += "\n\n" + media.Text
+		}
+		result.Output = fantasy.ToolResultOutputContentText{Text: note}
+		if out == nil {
+			out = slices.Clone(messages)
+		}
+		if !cloned[i] {
+			out[i].Content = slices.Clone(messages[i].Content)
+			cloned[i] = true
+		}
+		out[i].Content[j] = result
 	}
 	if out == nil {
 		return messages
 	}
 	return out
+}
+
+func toolCallPartOf(part fantasy.MessagePart) (fantasy.ToolCallPart, bool) {
+	switch call := part.(type) {
+	case fantasy.ToolCallPart:
+		return call, true
+	case *fantasy.ToolCallPart:
+		if call != nil {
+			return *call, true
+		}
+	}
+	return fantasy.ToolCallPart{}, false
+}
+
+func toolResultPartOf(part fantasy.MessagePart) (fantasy.ToolResultPart, bool) {
+	switch result := part.(type) {
+	case fantasy.ToolResultPart:
+		return result, true
+	case *fantasy.ToolResultPart:
+		if result != nil {
+			return *result, true
+		}
+	}
+	return fantasy.ToolResultPart{}, false
 }

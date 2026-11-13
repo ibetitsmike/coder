@@ -92,16 +92,25 @@ func TestViewImageTool(t *testing.T) {
 	anthropicLimit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
 	// A valid PNG header padded past the limit.
 	bigPNG := append(testPNG(t, 2, 2), make([]byte, anthropicLimit)...)
+	badCRC := bytes.Clone(pngData)
+	badCRC[len(badCRC)-13] ^= 0xff // The last byte of the IDAT chunk's CRC.
 	conn := viewImageConn(t, map[string][]byte{
-		"/shot.txt":  pngData,
-		"/photo.jpg": jpegBuf.Bytes(),
-		"/anim.gif":  gifBuf.Bytes(),
-		"/pic.webp":  testWebP(9, 10),
-		"/notes.md":  []byte("# notes\nnot an image\n"),
-		"/big.png":   bigPNG,
-		"/wide.png":  testPNG(t, viewImageMaxDimension+1, 1),
-		"/empty.png": {},
-		"/bad.png":   append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 40)...),
+		"/shot.txt":     pngData,
+		"/photo.jpg":    jpegBuf.Bytes(),
+		"/anim.gif":     gifBuf.Bytes(),
+		"/pic.webp":     testWebP(9, 10),
+		"/notes.md":     []byte("# notes\nnot an image\n"),
+		"/big.png":      bigPNG,
+		"/wide.png":     testPNG(t, viewImageMaxDimension+1, 1),
+		"/empty.png":    {},
+		"/bad.png":      append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 40)...),
+		"/ spaced.png ": pngData, //nolint:gocritic // The test needs a path with outer spaces.
+		// Each header decodes, but the rest of the file is missing or damaged.
+		"/cut.png":  pngData[:len(pngData)-4],
+		"/crc.png":  badCRC,
+		"/cut.jpg":  jpegBuf.Bytes()[:jpegBuf.Len()-2],
+		"/cut.gif":  gifBuf.Bytes()[:gifBuf.Len()-1],
+		"/cut.webp": testWebP(9, 10)[:37],
 	})
 
 	t.Run("DetectsTypeByContent", func(t *testing.T) {
@@ -164,6 +173,25 @@ func TestViewImageTool(t *testing.T) {
 		require.Contains(t, runViewImage(t, anthropic, conn, "/bad.png").Content, "is not a valid image/png image")
 		require.Contains(t, runViewImage(t, anthropic, conn, "/missing.png").Content, "file not found")
 		require.Contains(t, runViewImage(t, anthropic, conn, " ").Content, "path is required")
+		for path, want := range map[string]string{
+			"/cut.png":  "truncated",
+			"/crc.png":  `bad CRC in chunk "IDAT"`,
+			"/cut.jpg":  "truncated before the end of image marker",
+			"/cut.gif":  "truncated before the GIF trailer",
+			"/cut.webp": "shorter than its RIFF size",
+		} {
+			resp := runViewImage(t, openai, conn, path)
+			require.True(t, resp.IsError, path)
+			require.Contains(t, resp.Content, "is not a valid image/", path)
+			require.Contains(t, resp.Content, want, path)
+		}
+	})
+
+	t.Run("KeepsPathWhitespace", func(t *testing.T) {
+		t.Parallel()
+		resp := runViewImage(t, anthropic, conn, "/ spaced.png ")
+		require.False(t, resp.IsError, resp.Content)
+		require.Equal(t, pngData, resp.Data)
 	})
 
 	t.Run("ModelWithoutImageInput", func(t *testing.T) {
@@ -220,7 +248,7 @@ func TestLimitViewedImages(t *testing.T) {
 		before, err := json.Marshal(messages)
 		require.NoError(t, err)
 
-		out := limitViewedImages(messages)
+		out := limitViewedImages(messages, nil)
 		require.True(t, isMedia(out[1]), "other tools keep their media")
 		for i := range maxViewedImagesInPrompt + 2 {
 			result := out[3+2*i]
@@ -243,22 +271,83 @@ func TestLimitViewedImages(t *testing.T) {
 		big := maxViewedImageBytesInPrompt/2 + 1
 		messages := append(turn("a", viewImageToolName, media(big, "")), turn("b", viewImageToolName, media(big, ""))...)
 		messages = append(messages, turn("c", viewImageToolName, media(big, ""))...)
-		out := limitViewedImages(messages)
+		out := limitViewedImages(messages, nil)
 		require.False(t, isMedia(out[1]))
 		require.False(t, isMedia(out[3]), "two halves exceed the byte bound")
 		require.True(t, isMedia(out[5]))
 
 		// The newest image always stays, even over the bound.
 		huge := turn("d", viewImageToolName, media(maxViewedImageBytesInPrompt+1, ""))
-		require.True(t, isMedia(limitViewedImages(huge)[1]))
+		require.True(t, isMedia(limitViewedImages(huge, nil)[1]))
 	})
 
 	t.Run("NoViewImage", func(t *testing.T) {
 		t.Parallel()
 		messages := turn("shot", "computer", media(10, ""))
-		out := limitViewedImages(messages)
+		out := limitViewedImages(messages, nil)
 		require.Same(t, &messages[0], &out[0], "the prompt is returned as is")
 	})
+
+	t.Run("ReusedCallID", func(t *testing.T) {
+		t.Parallel()
+		// A later computer call reuses a view_image call's ID. Its
+		// screenshot is not a viewed image and stays.
+		messages := append(turn("x", viewImageToolName, media(10, "")), turn("x", "computer", media(10, ""))...)
+		for i := range maxViewedImagesInPrompt {
+			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, ""))...)
+		}
+		out := limitViewedImages(messages, nil)
+		require.False(t, isMedia(out[1]), "the oldest viewed image is dropped")
+		require.True(t, isMedia(out[3]), "the computer screenshot stays")
+	})
+
+	t.Run("ModelSizeLimit", func(t *testing.T) {
+		t.Parallel()
+		// Viewed on a model without an inline cap, then the chat switched to
+		// Anthropic, whose limit applies to the base64 form.
+		limit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
+		messages := append(turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(limit+1, "too big"))...)
+		anthropic := routedModel("anthropic", "anthropic")
+		out := limitViewedImages(messages, &anthropic)
+		require.True(t, isMedia(out[1]), "the older image fits and stays")
+		require.False(t, isMedia(out[3]))
+		text := out[3].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText).Text
+		require.Contains(t, text, "larger than the view_image limit of 3932160 bytes for this model")
+		require.Contains(t, text, "too big")
+
+		openai := routedModel("openai", "openai")
+		out = limitViewedImages(messages, &openai)
+		require.True(t, isMedia(out[1]))
+		require.True(t, isMedia(out[3]))
+	})
+}
+
+func TestViewImageCustomAgentPolicy(t *testing.T) {
+	t.Parallel()
+
+	builtin := newTestAgentTool(viewImageToolName)
+	// A caller-supplied tool that takes the name while fork-view-image is off.
+	dynamic := &dynamicTool{name: viewImageToolName}
+	for _, tt := range []struct {
+		name   string
+		policy customAgentToolPolicy
+		want   []string
+	}{
+		{name: "ReadOnly", policy: customAgentToolPolicy{ReadOnly: true}, want: []string{"builtin"}},
+		{name: "ReadAlias", policy: customAgentToolPolicy{Tools: []string{"Read"}}, want: []string{"builtin"}},
+		{name: "Named", policy: customAgentToolPolicy{Tools: []string{viewImageToolName}}, want: []string{"builtin", "dynamic"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for kind, tool := range map[string]fantasy.AgentTool{"builtin": builtin, "dynamic": dynamic} {
+				if kept, _, _ := tt.policy.filter([]fantasy.AgentTool{tool}, nil, nil, nil); len(kept) == 1 {
+					got = append(got, kind)
+				}
+			}
+			require.ElementsMatch(t, tt.want, got)
+		})
+	}
 }
 
 func TestViewImageToolGate(t *testing.T) {
