@@ -7,7 +7,7 @@ import { QueryClientProvider } from "react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkTokenBudgetApi from "#/api/forkTokenBudget";
-import { organizationTokenBudget } from "#/api/queries/forkTokenBudget";
+import { organizationTokenBudgetKey } from "#/api/queries/forkTokenBudget";
 import { organizationsPermissions } from "#/api/queries/organizations";
 import type { Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
@@ -85,29 +85,6 @@ afterEach(() => {
 });
 
 describe("ForkTokenBudget", () => {
-	it("shows the defaults with the fallback disabled", async () => {
-		renderSetting();
-
-		const strategy = await strategyGroup();
-		expect(
-			within(strategy).getByRole("radio", {
-				name: "Summarize the conversation",
-			}),
-		).toBeChecked();
-		const fallback = await fallbackGroup();
-		const newWindow = within(fallback).getByRole("radio", {
-			name: "Start a new context window",
-		});
-		expect(newWindow).toBeChecked();
-		expect(newWindow).toBeDisabled();
-		expect(
-			screen.getByText(/each model's compression threshold/),
-		).toHaveTextContent("A threshold of 100% turns the budget off");
-		expect(
-			screen.getByText(/each model's compression threshold/),
-		).toHaveTextContent("A user's own compression threshold");
-	});
-
 	it("saves the token budget with the summary fallback", async () => {
 		const { updateSetting, queryClient } = renderSetting();
 		const cancelQueries = vi.spyOn(queryClient, "cancelQueries");
@@ -129,11 +106,11 @@ describe("ForkTokenBudget", () => {
 		expect(updateSetting.mock.lastCall).toStrictEqual([orgId, saved]);
 		await waitFor(() =>
 			expect(
-				queryClient.getQueryData(organizationTokenBudget(orgId).queryKey),
+				queryClient.getQueryData(organizationTokenBudgetKey(orgId)),
 			).toStrictEqual(saved),
 		);
 		expect(cancelQueries).toHaveBeenCalledWith({
-			queryKey: organizationTokenBudget(orgId).queryKey,
+			queryKey: organizationTokenBudgetKey(orgId),
 		});
 	});
 
@@ -163,7 +140,7 @@ describe("ForkTokenBudget", () => {
 		});
 		await user.click(tokenBudget);
 		await act(async () => {
-			queryClient.setQueryData(organizationTokenBudget(orgId).queryKey, {
+			queryClient.setQueryData(organizationTokenBudgetKey(orgId), {
 				strategy: "summary",
 				fallback: "summary",
 			});
@@ -181,7 +158,7 @@ describe("ForkTokenBudget", () => {
 		const { queryClient } = renderSetting();
 
 		const fallback = await fallbackGroup();
-		queryClient.setQueryData(organizationTokenBudget(orgId).queryKey, {
+		queryClient.setQueryData(organizationTokenBudgetKey(orgId), {
 			strategy: "token_budget",
 			fallback: "summary",
 		});

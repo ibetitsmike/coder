@@ -8,17 +8,19 @@ import {
 } from "#/api/forkTokenBudget";
 import type { ForkOrganizationTokenBudget } from "#/api/typesGenerated";
 
-const organizationTokenBudgetKey = (organizationId: string) =>
+export const organizationTokenBudgetKey = (organizationId: string) =>
 	["chats", "fork-token-budget", organizationId] as const;
 
-/** Query options for an organization's token budget setting. */
 export const organizationTokenBudget = (organizationId: string) =>
 	queryOptions({
 		queryKey: organizationTokenBudgetKey(organizationId),
 		queryFn: ({ signal }) => getOrganizationTokenBudget(organizationId, signal),
 	});
 
-/** Mutation options that replace an organization's token budget setting. */
+/**
+ * A save writes the response into the cache instead of refetching, and
+ * cancels any refetch in flight first so it cannot overwrite the save.
+ */
 export const updateOrganizationTokenBudget = (
 	queryClient: QueryClient,
 	organizationId: string,

@@ -11,7 +11,10 @@ type ForkOrganizationAgentSettingsProps = {
 	canEdit: boolean;
 };
 
-/** Renders each fork section of an organization's agent settings. */
+/**
+ * Add a fork section here, not in OrganizationAgentSettings.tsx, so the
+ * upstream file keeps its single hook line through syncs.
+ */
 export const ForkOrganizationAgentSettings: React.FC<
 	ForkOrganizationAgentSettingsProps
 > = ({ organization, canEdit }) => (

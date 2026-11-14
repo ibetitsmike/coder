@@ -4,7 +4,7 @@
 import { API } from "./api";
 import type { ForkOrganizationTokenBudget } from "./typesGenerated";
 
-/** Fetches the organization's token budget setting. */
+/** The signal lets react-query cancel a fetch that a save superseded. */
 export const getOrganizationTokenBudget = async (
 	organizationId: string,
 	signal?: AbortSignal,
@@ -17,7 +17,6 @@ export const getOrganizationTokenBudget = async (
 	return response.data;
 };
 
-/** Replaces the organization's token budget setting. */
 export const updateOrganizationTokenBudget = async (
 	organizationId: string,
 	req: ForkOrganizationTokenBudget,

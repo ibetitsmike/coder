@@ -3,7 +3,7 @@
 
 import { useFormik } from "formik";
 import isEqual from "lodash/isEqual";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { getErrorMessage } from "#/api/errors";
 import type {
 	ForkOrganizationTokenBudget,
@@ -35,7 +35,7 @@ const strategyOptions: readonly Option<ForkTokenBudgetStrategy>[] = [
 		value: "token_budget",
 		label: "Token budget",
 		description:
-			"Chats save notes and start a new context window with new_context when they reach the handoff point.",
+			"At the handoff point, chats are asked to save notes and call new_context to start a new context window.",
 	},
 ];
 
@@ -202,7 +202,7 @@ const OptionGroup = <T extends string>({
 	onChange,
 	disabled,
 }: OptionGroupProps<T>) => {
-	const legendId = `fork-token-budget-${name}`;
+	const legendId = `${useId()}-${name}`;
 	const hintId = `${legendId}-hint`;
 	return (
 		<div className="flex flex-col gap-3">

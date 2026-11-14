@@ -3,6 +3,7 @@
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
+import type { ForkOrganizationTokenBudget } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkOrganizationTokenBudget } from "#/testHelpers/forkTokenBudget";
 import { ForkTokenBudgetSettings } from "./ForkTokenBudgetSettings";
@@ -22,6 +23,18 @@ const meta = {
 	},
 } satisfies Meta<typeof ForkTokenBudgetSettings>;
 
+const MockTokenBudgetWithSummaryFallback = {
+	...MockForkOrganizationTokenBudget,
+	strategy: "token_budget",
+	fallback: "summary",
+} satisfies ForkOrganizationTokenBudget;
+
+const MockTokenBudgetWithNewWindowFallback = {
+	...MockForkOrganizationTokenBudget,
+	strategy: "token_budget",
+	fallback: "new_window",
+} satisfies ForkOrganizationTokenBudget;
+
 export default meta;
 type Story = StoryObj<typeof ForkTokenBudgetSettings>;
 
@@ -29,7 +42,7 @@ export const Default: Story = {};
 
 export const TokenBudget: Story = {
 	args: {
-		setting: { strategy: "token_budget", fallback: "summary" },
+		setting: MockTokenBudgetWithSummaryFallback,
 	},
 };
 
@@ -45,7 +58,7 @@ export const Edited: Story = {
 
 export const Saving: Story = {
 	args: {
-		setting: { strategy: "token_budget", fallback: "new_window" },
+		setting: MockTokenBudgetWithNewWindowFallback,
 		isSaving: true,
 	},
 };
