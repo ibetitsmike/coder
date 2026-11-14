@@ -19,6 +19,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
+	ExperimentForkHTMLAttachments,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -58,6 +59,23 @@ const ExperimentForkWorkflows Experiment = "fork-workflows"
 // ExperimentForkFamilyMessages lets a chat message its parent, siblings and
 // other chats in its family with the message_family_chat tool.
 const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
+
+// ExperimentForkHTMLAttachments renders an HTML file that a chat attaches in
+// a sandboxed viewer, from which a click can send a message to the chat.
+const ExperimentForkHTMLAttachments Experiment = "fork-html-attachments"
+
+// forkExperimentDisplayNames names the fork experiments whose title-cased
+// names read wrong, such as "Html".
+var forkExperimentDisplayNames = map[Experiment]string{
+	ExperimentForkHTMLAttachments: "Fork HTML Attachments",
+}
+
+// forkExperimentDisplayName returns the display name of a fork experiment
+// that has one. Experiment.DisplayName calls it first.
+func forkExperimentDisplayName(e Experiment) (string, bool) {
+	name, ok := forkExperimentDisplayNames[e]
+	return name, ok
+}
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

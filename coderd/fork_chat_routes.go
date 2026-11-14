@@ -31,6 +31,16 @@ import (
 // subrouter: a Use applies to the reserved 404 too, so a fork path that no
 // route matches would answer the middleware's 403 or 400.
 func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.Handler) http.Handler) {
+	// The HTML attachment route sits outside the mount so that its sandbox
+	// headers come before authentication and cover every response, errors
+	// included. A direct open of the URL then never runs a script on the
+	// Coder origin.
+	r.With(
+		forkHTMLAttachmentHeaders,
+		apiKeyMiddleware,
+		httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkHTMLAttachments),
+	).Get("/chats/fork/files/{file}/html", api.getForkChatHTMLAttachment)
+
 	r.With(apiKeyMiddleware).Route("/chats/fork", func(r chi.Router) {
 		// The fork routes take their middleware inline rather than from a
 		// {chat} subrouter: a subrouter is mounted as a prefix, so it would

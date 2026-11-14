@@ -4615,6 +4615,39 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/files/{file}/html": {
+            "get": {
+                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks network\naccess.",
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a chat HTML attachment for the sandboxed viewer",
+                "operationId": "get-a-chat-html-attachment-for-the-sandboxed-viewer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "File ID",
+                        "name": "file",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/agent-definitions": {
             "get": {
                 "produces": [
@@ -25077,20 +25110,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -29627,6 +29660,7 @@ const docTemplate = `{
                 "fork-pinned-skills",
                 "fork-workflows",
                 "fork-family-messages",
+                "fork-html-attachments",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -29676,6 +29710,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29705,6 +29740,7 @@ const docTemplate = `{
                 "ExperimentForkPinnedSkills",
                 "ExperimentForkWorkflows",
                 "ExperimentForkFamilyMessages",
+                "ExperimentForkHTMLAttachments",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",

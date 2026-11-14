@@ -29,3 +29,11 @@ func TestForkExperiments(t *testing.T) {
 	// which is what happens if it runs before ExperimentsKnown initializes.
 	require.Contains(t, codersdk.ExperimentsKnown, codersdk.ExperimentExample)
 }
+
+func TestForkExperimentDisplayNames(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Fork HTML Attachments", codersdk.ExperimentForkHTMLAttachments.DisplayName())
+	// A fork experiment without its own name keeps the title-cased default.
+	require.Equal(t, "Fork Chat Todos", codersdk.ExperimentForkChatTodos.DisplayName())
+}
