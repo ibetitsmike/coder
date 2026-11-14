@@ -31,6 +31,8 @@ sql:
       - "../migrations/chatdmig/nodes/01a1d05b-a4aa-7050-ac85-2f3c1e806fe9_workflow_run_timestamps.up.sql"
       - "../migrations/chatdmig/nodes/01a1d226-9390-7d97-8dc2-93b5fbf2d1e1_chat_family_messages.up.sql"
       - "../migrations/chatdmig/nodes/01a1d6ec-bf25-76dd-8035-184db759fb30_chat_subagent_messages.up.sql"
+      - "../migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql"
+      - "../migrations/chatdmig/nodes/01a1d903-ff52-75e8-91c2-e50d900ac0b7_chat_note_calls.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

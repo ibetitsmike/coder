@@ -20,6 +20,8 @@ var ForkExperiments = Experiments{
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
 	ExperimentForkHTMLAttachments,
+	ExperimentForkTokenBudget,
+	ExperimentForkViewImage,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -63,6 +65,15 @@ const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
 // ExperimentForkHTMLAttachments renders an HTML file that a chat attaches in
 // a sandboxed viewer, from which a click can send a message to the chat.
 const ExperimentForkHTMLAttachments Experiment = "fork-html-attachments"
+
+// ExperimentForkTokenBudget gives chats token-budget context windows: the
+// notes tool keeps a checkpoint, and a chat starts a new context window from
+// it instead of summarizing its history.
+const ExperimentForkTokenBudget Experiment = "fork-token-budget"
+
+// ExperimentForkViewImage enables the view_image chat tool, which loads a PNG,
+// JPEG, GIF or WebP file from the workspace into the model's context.
+const ExperimentForkViewImage Experiment = "fork-view-image"
 
 // forkExperimentDisplayNames names the fork experiments whose title-cased
 // names read wrong, such as "Html".

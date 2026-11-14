@@ -137,7 +137,7 @@ func (p *Server) readChatTranscript(ctx context.Context, chat database.Chat, arg
 		}
 		for i, row := range rows {
 			scanned++
-			message, ok := transcriptMessage(row, roles, partTypes, min(maxTranscriptPartBytes, maxBytes))
+			message, ok := transcriptMessage(row, roles, partTypes, min(maxTranscriptPartBytes, maxBytes), p.experiments.Enabled(codersdk.ExperimentForkTokenBudget))
 			if ok {
 				var size int
 				if len(result.Messages) == 0 {
@@ -223,8 +223,10 @@ func transcriptFilters(args readChatTranscriptArgs) (roles []codersdk.ChatMessag
 // and sources are skipped because they never reach the model. Rows with a
 // call or result of this tool are skipped too, so paging through the
 // calling chat does not return earlier pages again or grow the tail faster
-// than the cursor.
-func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int) (chatTranscriptMessage, bool) {
+// than the cursor. skipHistory skips the rows of chat_history as well; it
+// is set only while that built-in tool exists, so a dynamic or MCP tool of
+// the same name stays readable.
+func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRole, partTypes []codersdk.ChatMessagePartType, maxPartBytes int, skipHistory bool) (chatTranscriptMessage, bool) {
 	if row.Visibility != database.ChatMessageVisibilityBoth {
 		return chatTranscriptMessage{}, false
 	}
@@ -233,7 +235,7 @@ func transcriptMessage(row database.ChatMessage, roles []codersdk.ChatMessageRol
 		return chatTranscriptMessage{}, false
 	}
 	if slices.ContainsFunc(message.Content, func(part codersdk.ChatMessagePart) bool {
-		return part.ToolName == readChatTranscriptToolName
+		return part.ToolName == readChatTranscriptToolName || (skipHistory && part.ToolName == chatHistoryToolName)
 	}) {
 		return chatTranscriptMessage{}, false
 	}

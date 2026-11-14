@@ -1336,6 +1336,7 @@ func (s *taskStarter) generateCompaction(
 			overrideModel.dbConfig,
 			prepared.ReasoningProvenance.Model,
 		)
+		compactionOpts.Messages = s.server.limitViewedImagesForModel(prepared.Chat, compactionOpts.Messages, overrideModel.model)
 	}
 	preResult, err := s.server.hooks.Trigger(ctx, chathooks.ChatFor(prepared.Chat, input.hookTurnID()), chathooks.Message{}, agenthooks.EventPreCompact, dispatch.CapacityClassGeneration)
 	if err != nil {
@@ -1356,7 +1357,7 @@ func (s *taskStarter) generateCompaction(
 		attribute.String(chatloop.AttrCompactionSource, string(source)),
 	)
 	compactionSpan.SetModel(compactionModel)
-	outcome, err := chatloop.GenerateCompaction(compactionCtx, compactionOpts)
+	outcome, err := s.server.forkGenerateCompaction(compactionCtx, prepared, compactionOpts)
 	compactionSpan.End(err)
 	if err != nil {
 		s.server.metrics.RecordCompaction(metricProvider, metricModel, false, err)

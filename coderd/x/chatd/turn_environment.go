@@ -740,7 +740,7 @@ func (p *Server) buildTurnEnvironment(
 		}
 	}
 
-	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn)); err != nil {
+	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn), forkToolsWithModel(model, &prompt, pendingPrompt)); err != nil {
 		return turnEnvironment{}, err
 	}
 	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
@@ -1039,6 +1039,7 @@ func (p *Server) buildTurnEnvironment(
 	}
 	compactionStepUsage := latestPromptUsage(promptRows)
 	compactionNeeded := shouldCompactPromptUsage(compactionStepUsage, binding.contextLimit, binding.thresholdPercent)
+	binding, bindingSource, otherTrigger, compactionNeeded = p.tokenBudgetTriggers(tools, promptRows, chatTrigger, binding, bindingSource, otherTrigger, compactionNeeded)
 	// The options carry the chat model; generateCompaction swaps in the
 	// override client when one is configured.
 	compactionOptions := chatloop.GenerateCompactionOptions{

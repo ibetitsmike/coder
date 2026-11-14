@@ -4617,7 +4617,10 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/files/{file}/html": {
             "get": {
-                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks network\naccess.",
+                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks fetches\nand subresource loads. It does not stop WebRTC in browsers\nthat ignore webrtc 'block', such as Chromium, and it does not\nstop the page from navigating itself.",
+                "produces": [
+                    "text/html"
+                ],
                 "tags": [
                     "Chats"
                 ],
@@ -25110,20 +25113,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -29661,6 +29664,8 @@ const docTemplate = `{
                 "fork-workflows",
                 "fork-family-messages",
                 "fork-html-attachments",
+                "fork-token-budget",
+                "fork-view-image",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -29711,6 +29716,8 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29741,6 +29748,8 @@ const docTemplate = `{
                 "ExperimentForkWorkflows",
                 "ExperimentForkFamilyMessages",
                 "ExperimentForkHTMLAttachments",
+                "ExperimentForkTokenBudget",
+                "ExperimentForkViewImage",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
