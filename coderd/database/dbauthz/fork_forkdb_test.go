@@ -66,7 +66,7 @@ func TestForkQuerier(t *testing.T) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(3))
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
 		},
 		"GetFamilySubagentsAwaitingWorker": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -74,7 +74,7 @@ func TestForkQuerier(t *testing.T) {
 			rows := []forkdb.GetFamilySubagentsAwaitingWorkerRow{{ChatID: uuid.New(), ActiveFamilyCount: 1}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetFamilySubagentsAwaitingWorker(gomock.Any(), arg).Return(rows, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"GetChatAwaitingWorker": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.GetChatAwaitingWorkerParams{})
@@ -116,7 +116,7 @@ func TestForkQuerier(t *testing.T) {
 			sub := testutil.Fake(t, faker, forkdb.ChatSubagent{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(sub, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(sub)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(sub)
 		},
 		"GetChatSubagentTypesByChatIDs": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			rows := []forkdb.GetChatSubagentTypesByChatIDsRow{testutil.Fake(t, faker, forkdb.GetChatSubagentTypesByChatIDsRow{})}
@@ -129,28 +129,28 @@ func TestForkQuerier(t *testing.T) {
 			subs := []forkdb.ChatSubagent{testutil.Fake(t, faker, forkdb.ChatSubagent{})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSubagentsByParentChatID(gomock.Any(), chat.ID).Return(subs, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(subs)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(subs)
 		},
 		"GetChatSubtreeIDs": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.GetChatSubtreeIDsRow{testutil.Fake(t, faker, forkdb.GetChatSubtreeIDsRow{})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSubtreeIDs(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"GetChatTodosByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			todos := testutil.Fake(t, faker, forkdb.ChatTodo{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatTodosByChatID(gomock.Any(), chat.ID).Return(todos, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(todos)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(todos)
 		},
 		"DeleteChatNote": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatNoteParams{ChatID: chat.ID, Path: "checkpoint.md", CallID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatNote(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(int64(1))
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
 		},
 		"GetChatNote": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -158,7 +158,7 @@ func TestForkQuerier(t *testing.T) {
 			note := testutil.Fake(t, faker, forkdb.ChatNote{ChatID: chat.ID, Path: arg.Path})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatNote(gomock.Any(), arg).Return(note, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(note)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(note)
 		},
 		"GetChatNoteCall": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -166,14 +166,14 @@ func TestForkQuerier(t *testing.T) {
 			call := testutil.Fake(t, faker, forkdb.ChatNoteCall{ID: arg.ID, ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatNoteCall(gomock.Any(), arg).Return(call, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(call)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(call)
 		},
 		"ListChatHistoryRows": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.ListChatHistoryRowsRow{{ID: 1, Role: "user", Visibility: "both", CreatedAt: dbtime.Now()}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().ListChatHistoryRows(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"SearchChatHistory": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -181,14 +181,14 @@ func TestForkQuerier(t *testing.T) {
 			rows := []forkdb.SearchChatHistoryRow{{ID: 1, Role: "user", CreatedAt: dbtime.Now()}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().SearchChatHistory(gomock.Any(), arg).Return(rows, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"ListChatNotes": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.ListChatNotesRow{{Path: "checkpoint.md", Bytes: 4, UpdatedAt: dbtime.Now()}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().ListChatNotes(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"WriteChatNote": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -196,21 +196,21 @@ func TestForkQuerier(t *testing.T) {
 			note := testutil.Fake(t, faker, forkdb.WriteChatNoteRow{ChatID: chat.ID, Path: arg.Path})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().WriteChatNote(gomock.Any(), arg).Return(note, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(note)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(note)
 		},
 		"GetPendingChatDescendantQuestion": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			question := testutil.Fake(t, faker, forkdb.ChatDescendantQuestion{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetPendingChatDescendantQuestion(gomock.Any(), chat.ID).Return(question, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(question)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(question)
 		},
 		"ListPendingChatDescendantQuestionsByRoot": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			root := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.ListPendingChatDescendantQuestionsByRootRow{testutil.Fake(t, faker, forkdb.ListPendingChatDescendantQuestionsByRootRow{})}
 			db.EXPECT().GetChatByID(gomock.Any(), root.ID).Return(root, nil).AnyTimes()
 			fdb.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), root.ID).Return(rows, nil).AnyTimes()
-			check.Args(root.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(root.ID).Asserts(root, policy.ActionRead).Returns(rows)
 		},
 		"UpsertChatDescendantQuestion": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -218,28 +218,28 @@ func TestForkQuerier(t *testing.T) {
 			question := testutil.Fake(t, faker, forkdb.ChatDescendantQuestion{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().UpsertChatDescendantQuestion(gomock.Any(), arg).Return(question, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(question)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(question)
 		},
 		"InsertChatSecretAnswer": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.InsertChatSecretAnswerParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetChatSecretAnswersByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			answers := []forkdb.ChatSecretAnswer{testutil.Fake(t, faker, forkdb.ChatSecretAnswer{ChatID: chat.ID})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSecretAnswersByChatID(gomock.Any(), chat.ID).Return(answers, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(answers)
+			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns(answers)
 		},
 		"DeleteChatSecretAnswer": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatSecretAnswerParams{ChatID: chat.ID, ToolCallID: "call_1"}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatSecretAnswer(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"DeleteOldChatSecretAnswers": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), int32(1000)).Return(int64(1), nil).AnyTimes()
@@ -249,7 +249,7 @@ func TestForkQuerier(t *testing.T) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().LockChatForNoKeyUpdate(gomock.Any(), chat.ID).Return(chat.ID, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chat.ID)
+			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns(chat.ID)
 		},
 		"InsertChatSubagent": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -257,14 +257,14 @@ func TestForkQuerier(t *testing.T) {
 			sub := testutil.Fake(t, faker, forkdb.ChatSubagent{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatSubagent(gomock.Any(), arg).Return(sub, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(sub)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(sub)
 		},
 		"UpdateChatSubagentWorkspaceID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.UpdateChatSubagentWorkspaceIDParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().UpdateChatSubagentWorkspaceID(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"UpsertChatTodos": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -272,7 +272,7 @@ func TestForkQuerier(t *testing.T) {
 			todos := testutil.Fake(t, faker, forkdb.ChatTodo{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().UpsertChatTodos(gomock.Any(), arg).Return(todos, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(todos)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(todos)
 		},
 		"InsertChatWakeup": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -280,14 +280,14 @@ func TestForkQuerier(t *testing.T) {
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatWakeup(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeup)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
 		"GetChatWakeupByID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(wakeup)
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(wakeup)
 		},
 		"GetChatWakeupByIDForUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -295,21 +295,21 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByIDForUpdate(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeup)
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
 		"ListChatWakeupsByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeups := []forkdb.ChatWakeup{testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().ListChatWakeupsByChatID(gomock.Any(), chat.ID).Return(wakeups, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(wakeups)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(wakeups)
 		},
 		"ListChildChatIDsWithActiveEventsWakeups": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			parent := testutil.Fake(t, faker, database.Chat{})
 			ids := []uuid.UUID{uuid.New()}
 			db.EXPECT().GetChatByID(gomock.Any(), parent.ID).Return(parent, nil).AnyTimes()
 			fdb.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), parent.ID).Return(ids, nil).AnyTimes()
-			check.Args(parent.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(ids)
+			check.Args(parent.ID).Asserts(parent, policy.ActionRead).Returns(ids)
 		},
 		"UpdateChatWakeupStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -318,7 +318,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().UpdateChatWakeupStatus(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeup)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
 		"CancelChatWakeupsByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -326,7 +326,7 @@ func TestForkQuerier(t *testing.T) {
 			wakeups := []forkdb.ChatWakeup{testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().CancelChatWakeupsByChatID(gomock.Any(), arg).Return(wakeups, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeups)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeups)
 		},
 		"ClaimDueChatWakeups": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.ClaimDueChatWakeupsParams{})
@@ -341,7 +341,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().FinishChatWakeupClaim(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeup)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
 		"InsertChatWakeupRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -351,7 +351,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(run)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
 		},
 		"ListChatWakeupRunKeys": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -360,14 +360,14 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(keys, nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(keys)
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(keys)
 		},
 		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().CountChatWakeupRunsSince(gomock.Any(), arg).Return(int64(4), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(4))
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(4))
 		},
 		"CountOrganizationChatWakeupRunsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.CountOrganizationChatWakeupRunsSinceParams{})
@@ -379,7 +379,7 @@ func TestForkQuerier(t *testing.T) {
 			arg := testutil.Fake(t, faker, forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().SumChatCostMicrosSince(gomock.Any(), arg).Return(int64(1500), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(1500))
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(1500))
 		},
 		"SumOrganizationWakeupChatCostMicrosSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{})
@@ -436,34 +436,34 @@ func TestForkQuerier(t *testing.T) {
 			rows := []forkdb.ChatPinnedSkill{{ChatID: chat.ID, SkillSource: "personal", SkillName: "deploy"}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatPinnedSkillsByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"DeleteChatPinnedSkills": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatPinnedSkills(gomock.Any(), chat.ID).Return(nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(chat.ID).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"InsertChatFamilyMessage": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.InsertChatFamilyMessageParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: uuid.New(), RecipientChatID: chat.ID, CreatedAt: dbtime.Now()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatFamilyMessage(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"CountChatFamilyMessagesSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.CountChatFamilyMessagesSinceParams{OrganizationID: chat.OrganizationID, SenderChatID: chat.ID, Since: dbtime.Now()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().CountChatFamilyMessagesSince(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(2))
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(2))
 		},
 		"DeleteChatFamilyMessagesBefore": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatFamilyMessagesBeforeParams{OrganizationID: chat.OrganizationID, SenderChatID: chat.ID, Before: dbtime.Now()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatFamilyMessagesBefore(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetChatFamilyMessageRecipient": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -471,21 +471,21 @@ func TestForkQuerier(t *testing.T) {
 			arg := forkdb.GetChatFamilyMessageRecipientParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: chat.ID}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatFamilyMessageRecipient(gomock.Any(), arg).Return(recipient, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(recipient)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(recipient)
 		},
 		"InsertChatSubagentMessage": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.InsertChatSubagentMessageParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: uuid.New(), RecipientChatID: chat.ID, CreatedAt: dbtime.Now()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatSubagentMessage(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"DeleteChatSubagentMessagesBefore": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatSubagentMessagesBeforeParams{OrganizationID: chat.OrganizationID, SenderChatID: chat.ID, Before: dbtime.Now()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatSubagentMessagesBefore(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetChatSubagentMessageRecipient": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -493,7 +493,7 @@ func TestForkQuerier(t *testing.T) {
 			arg := forkdb.GetChatSubagentMessageRecipientParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: chat.ID}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatSubagentMessageRecipient(gomock.Any(), arg).Return(recipient, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(recipient)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(recipient)
 		},
 		"ListChatFamilyMembers": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -501,14 +501,14 @@ func TestForkQuerier(t *testing.T) {
 			rows := []forkdb.ListChatFamilyMembersRow{{ID: chat.ID, Title: chat.Title, Status: chat.Status}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().ListChatFamilyMembers(gomock.Any(), arg).Return(rows, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"InsertChatPinnedSkills": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.InsertChatPinnedSkillsParams{ChatID: chat.ID, SkillSources: []string{"personal"}, SkillNames: []string{"deploy"}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatPinnedSkills(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"InsertChatExcludedPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -516,21 +516,21 @@ func TestForkQuerier(t *testing.T) {
 			row := forkdb.ChatExcludedPluginPack{ChatID: chat.ID, PackID: arg.PackID}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatExcludedPluginPack(gomock.Any(), arg).Return(row, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(row)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(row)
 		},
 		"DeleteChatExcludedPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatExcludedPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatExcludedPluginPack(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetExcludedPluginPacksByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.GetExcludedPluginPacksByChatIDRow{testutil.Fake(t, faker, forkdb.GetExcludedPluginPacksByChatIDRow{})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetExcludedPluginPacksByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"InsertChatPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -538,21 +538,21 @@ func TestForkQuerier(t *testing.T) {
 			row := forkdb.ChatPluginPack{ChatID: chat.ID, PackID: arg.PackID}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertChatPluginPack(gomock.Any(), arg).Return(row, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(row)
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(row)
 		},
 		"DeleteChatPluginPack": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatPluginPackParams{ChatID: chat.ID, PackID: uuid.New()}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatPluginPack(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetPluginPacksByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.GetPluginPacksByChatIDRow{testutil.Fake(t, faker, forkdb.GetPluginPacksByChatIDRow{})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetPluginPacksByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
 		"UpdatePluginPackCommit": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
@@ -875,7 +875,7 @@ func TestForkQuerier(t *testing.T) {
 			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			check.Args(run.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(run)
+			check.Args(run.ID).Asserts(chat, policy.ActionRead).Returns(run)
 		},
 		"GetWorkflowStepsByRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -884,7 +884,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(steps, nil).AnyTimes()
-			check.Args(run.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(steps)
+			check.Args(run.ID).Asserts(chat, policy.ActionRead).Returns(steps)
 		},
 		"GetWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -893,14 +893,14 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			check.Args(step.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(step)
+			check.Args(step.ID).Asserts(chat, policy.ActionRead).Returns(step)
 		},
 		"InsertWorkflowRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := testutil.Fake(t, faker, forkdb.InsertWorkflowRunParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().InsertWorkflowRun(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"InsertWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -909,7 +909,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
 			fdb.EXPECT().InsertWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"MarkOpenWorkflowRunsInterrupted": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			fdb.EXPECT().MarkOpenWorkflowRunsInterrupted(gomock.Any(), "the coderd process restarted before the run ended").Return(int64(2), nil).AnyTimes()
@@ -922,7 +922,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
 			fdb.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"UpdateWorkflowStep": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -933,7 +933,7 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
 			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -941,7 +941,7 @@ func TestForkQuerier(t *testing.T) {
 			arg := testutil.Fake(t, faker, forkdb.GetWorkflowRunsByChatParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRunsByChat(gomock.Any(), arg).Return([]forkdb.WorkflowRun{run}, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns([]forkdb.WorkflowRun{run})
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns([]forkdb.WorkflowRun{run})
 		},
 		"GetWorkflowRunStepCountsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -949,7 +949,7 @@ func TestForkQuerier(t *testing.T) {
 			counts := []forkdb.GetWorkflowRunStepCountsByChatRow{{RunID: run.ID, Status: "reported", StepCount: 1}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRunStepCountsByChat(gomock.Any(), chat.ID).Return(counts, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(counts)
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(counts)
 		},
 		"FailOpenWorkflowStepsOfRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -958,7 +958,7 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
 			fdb.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(int64(2))
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(2))
 		},
 	}
 

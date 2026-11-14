@@ -389,7 +389,7 @@ func (f *forkQuerier) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.
 	if err != nil {
 		return forkdb.WorkflowRun{}, err
 	}
-	if !f.actsOnAllChats(ctx, policy.ActionRead) {
+	if !f.actsOnAllChats(ctx) {
 		if err := f.authorizeChat(ctx, policy.ActionRead, run.ChatID); err != nil {
 			return forkdb.WorkflowRun{}, err
 		}
@@ -401,7 +401,7 @@ func (f *forkQuerier) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.
 // site-wide chat permission skips the reads, which no longer contribute to
 // the decision (fork issue #292).
 func (f *forkQuerier) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
-	if f.actsOnAllChats(ctx, policy.ActionRead) {
+	if f.actsOnAllChats(ctx) {
 		return f.db.GetWorkflowStepsByRun(ctx, runID)
 	}
 	run, err := f.db.GetWorkflowRun(ctx, runID)
@@ -422,7 +422,7 @@ func (f *forkQuerier) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb
 	if err != nil {
 		return forkdb.WorkflowStep{}, err
 	}
-	if !f.actsOnAllChats(ctx, policy.ActionRead) {
+	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
 		if err != nil {
 			return forkdb.WorkflowStep{}, err
@@ -644,7 +644,7 @@ func (f *forkQuerier) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWo
 // with site-wide chat permission skips the read of the run, which no longer
 // contributes to the decision (fork issue #292).
 func (f *forkQuerier) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
-	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
 		if err != nil {
 			return err
@@ -929,7 +929,7 @@ func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg f
 // with site-wide chat permission skips the read, which no longer contributes
 // to the decision (fork issue #292).
 func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
-	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
 		if err != nil {
 			return err
@@ -945,7 +945,7 @@ func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.Up
 // with site-wide chat permission skips the reads, which no longer contribute
 // to the decision (fork issue #292).
 func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
-	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+	if !f.actsOnAllChats(ctx) {
 		step, err := f.db.GetWorkflowStep(ctx, arg.ID)
 		if err != nil {
 			return err
@@ -982,7 +982,7 @@ func (f *forkQuerier) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID
 // caller with site-wide chat permission skips the read, which no longer
 // contributes to the decision (fork issue #292).
 func (f *forkQuerier) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.FailOpenWorkflowStepsOfRunParams) (int64, error) {
-	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
 		if err != nil {
 			return 0, err
@@ -1057,25 +1057,33 @@ func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.Upser
 	return f.db.UpsertPluginUserLink(ctx, arg)
 }
 
-// actsOnAllChats reports whether the caller holds action on the chat type
-// itself, like chatd does. The rego policy votes site-level grants on the
-// object type alone and ID-restricted scopes fail this check, so a pass
-// proves that reading one chat to authorize it cannot change the outcome.
-// The check stays quiet on a failure: the caller falls back to the
-// object-level path, which reports any denial itself.
-func (f *forkQuerier) actsOnAllChats(ctx context.Context, action policy.Action) bool {
+// actsOnAllChats reports whether the caller is a subject type that holds
+// site-wide chat permission by role, like chatd does. Only the chatd and
+// system-restricted subject types qualify. Checking the subject type
+// directly, like authorizeProvisionerJob does, avoids a quiet rego probe
+// that would record an authorization-denial metric for every non-site-wide
+// caller (fork issue #292). Both subjects carry site-level chat grants for
+// every action, role grants vote on the object type alone and ACLs only
+// ever add grants, so the object-level check they fall back from can never
+// change their outcome.
+func (*forkQuerier) actsOnAllChats(ctx context.Context) bool {
 	act, ok := ActorFromContext(ctx)
 	if !ok {
 		return false
 	}
-	return f.q.auth.Authorize(ctx, act, action, rbac.ResourceChat) == nil
+	switch act.Type {
+	case rbac.SubjectTypeChatd, rbac.SubjectTypeSystemRestricted:
+		return true
+	default:
+		return false
+	}
 }
 
 // authorizeChat authorizes action on the chat that owns a fork row, like
 // UpsertChatTodos. A caller with site-wide chat permission skips the read,
 // which no longer contributes to the decision (fork issue #292).
 func (f *forkQuerier) authorizeChat(ctx context.Context, action policy.Action, chatID uuid.UUID) error {
-	if f.actsOnAllChats(ctx, action) {
+	if f.actsOnAllChats(ctx) {
 		return nil
 	}
 	chat, err := f.q.db.GetChatByID(ctx, chatID)
@@ -1089,7 +1097,7 @@ func (f *forkQuerier) authorizeChat(ctx context.Context, action policy.Action, c
 // for callers that discard the wake-up row. A caller with site-wide chat
 // permission issues no read at all (fork issue #292).
 func (f *forkQuerier) authorizeChatWakeupID(ctx context.Context, action policy.Action, id uuid.UUID) error {
-	if f.actsOnAllChats(ctx, action) {
+	if f.actsOnAllChats(ctx) {
 		return nil
 	}
 	wakeup, err := f.db.GetChatWakeupByID(ctx, id)
@@ -1107,7 +1115,7 @@ func (f *forkQuerier) authorizeChatWakeup(ctx context.Context, action policy.Act
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
-	if !f.actsOnAllChats(ctx, action) {
+	if !f.actsOnAllChats(ctx) {
 		if err := f.authorizeChat(ctx, action, wakeup.ChatID); err != nil {
 			return forkdb.ChatWakeup{}, err
 		}
