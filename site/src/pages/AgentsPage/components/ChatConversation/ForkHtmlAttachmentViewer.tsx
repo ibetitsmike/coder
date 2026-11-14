@@ -28,7 +28,7 @@ import {
 	latestForkHtmlAttachmentIds,
 	parseForkHtmlMessage,
 } from "./forkHtmlAttachments";
-import type { ParsedMessageEntry } from "./types";
+import type { ParsedMessageEntry, RenderBlock } from "./types";
 
 type HtmlFilePart = TypesGen.ChatFilePart & { file_id: string; name: string };
 
@@ -38,17 +38,19 @@ const LatestHtmlAttachmentsContext = createContext<
 
 /**
  * Wraps the upstream FileProbeProvider so the timeline needs one hook line,
- * and tells each HTML attachment whether a newer one with its name exists.
+ * and tells each HTML attachment whether it is the newest agent page of its
+ * name.
  */
 export const ForkFileProbeProvider: React.FC<
 	React.PropsWithChildren<{
 		evictedFileIds: ReadonlySet<string>;
 		entries: readonly Pick<ParsedMessageEntry, "message">[];
+		liveBlocks?: readonly RenderBlock[];
 	}>
-> = ({ evictedFileIds, entries, children }) => (
+> = ({ evictedFileIds, entries, liveBlocks, children }) => (
 	<FileProbeProvider evictedFileIds={evictedFileIds}>
 		<LatestHtmlAttachmentsContext.Provider
-			value={latestForkHtmlAttachmentIds(entries)}
+			value={latestForkHtmlAttachmentIds(entries, liveBlocks)}
 		>
 			{children}
 		</LatestHtmlAttachmentsContext.Provider>
@@ -57,18 +59,21 @@ export const ForkFileProbeProvider: React.FC<
 
 type ForkHtmlAttachmentPreviewProps = {
 	block: HtmlFilePart;
-	/** The upstream card, shown for a page that a newer one replaced. */
+	/**
+	 * The upstream card, shown for a page that a newer one replaced and for
+	 * an upload by the user.
+	 */
 	children: React.ReactNode;
 };
 
-/** Only the newest attachment of a name renders as a live page. */
+/** Only the newest agent attachment of a name renders as a live page. */
 export const ForkHtmlAttachmentPreview: React.FC<
 	ForkHtmlAttachmentPreviewProps
 > = ({ block, children }) => {
 	const latestFileId = useContext(LatestHtmlAttachmentsContext)?.get(
 		block.name,
 	);
-	if (latestFileId !== undefined && latestFileId !== block.file_id) {
+	if (latestFileId !== block.file_id) {
 		return children;
 	}
 	return <ForkHtmlAttachmentViewer block={block} />;
@@ -82,9 +87,10 @@ export const ForkHtmlAttachmentPreview: React.FC<
  *
  * A page proposes text for the chat with
  * `parent.postMessage({ type: "coder:chat-message", text }, "*")`. The viewer
- * takes only proposals from its own frame, right after a click, and at most
- * one per forkHtmlMessageIntervalMs. It shows the exact message and sends it
- * only when the user confirms outside the frame.
+ * takes only proposals from its own frame, right after a click in that frame
+ * and no input in the dashboard, and at most one per
+ * forkHtmlMessageIntervalMs. It shows the exact message and sends it only
+ * when the user confirms outside the frame.
  */
 const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	block,
@@ -92,8 +98,10 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const { agentId } = useParams();
 	const queryClient = useQueryClient();
 	const sendMessage = useMutation(createChatMessageByChatId(queryClient));
+	const { reset: resetSend } = sendMessage;
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
+	const lastDashboardInputAt = useRef(Number.NEGATIVE_INFINITY);
 	const [proposal, setProposal] = useState<string | null>(null);
 	const headerId = useId();
 	const proposalId = useId();
@@ -119,6 +127,27 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		setNavigatedAway(false);
 	};
 
+	// Input inside a frame never reaches the dashboard, so recent dashboard
+	// input means the activation came from the dashboard, not the page. Tab
+	// only moves focus, often into the frame, so it does not count.
+	useEffect(() => {
+		const onInput = (event: Event) => {
+			if (
+				event instanceof KeyboardEvent &&
+				(event.key === "Tab" || event.key === "Shift")
+			) {
+				return;
+			}
+			lastDashboardInputAt.current = Date.now();
+		};
+		window.addEventListener("pointerdown", onInput, true);
+		window.addEventListener("keydown", onInput, true);
+		return () => {
+			window.removeEventListener("pointerdown", onInput, true);
+			window.removeEventListener("keydown", onInput, true);
+		};
+	}, []);
+
 	useEffect(() => {
 		// An open proposal stays as shown: the page cannot swap its text
 		// while the user reads it.
@@ -131,31 +160,43 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 				return;
 			}
 			const text = parseForkHtmlMessage(event.data);
-			// A click in the frame also activates this page. Without one,
-			// a script in the page could propose messages on its own.
-			if (text === null || !navigator.userActivation?.isActive) {
+			// A click in the frame activates this page and focuses the frame,
+			// and the dashboard does not see it. Without all three, a script
+			// in the page could propose messages on its own, or ride a click
+			// in the dashboard.
+			const now = Date.now();
+			if (
+				text === null ||
+				!navigator.userActivation?.isActive ||
+				document.activeElement !== frameRef.current ||
+				now - lastDashboardInputAt.current < forkHtmlMessageIntervalMs
+			) {
 				return;
 			}
-			const now = Date.now();
 			if (now - lastProposedAt.current < forkHtmlMessageIntervalMs) {
 				return;
 			}
 			lastProposedAt.current = now;
+			resetSend();
 			setProposal(formatForkHtmlMessage(block.name, text));
 		};
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
-	}, [agentId, block.name, proposal]);
+	}, [agentId, block.name, proposal, resetSend]);
 
+	// The proposal stays open until the send succeeds, so a failed send can
+	// be retried.
 	const send = () => {
 		if (!agentId || proposal === null) {
 			return;
 		}
-		sendMessage.mutate({
-			chatId: agentId,
-			req: { content: [{ type: "text", text: proposal }] },
-		});
-		setProposal(null);
+		sendMessage.mutate(
+			{
+				chatId: agentId,
+				req: { content: [{ type: "text", text: proposal }] },
+			},
+			{ onSuccess: () => setProposal(null) },
+		);
 	};
 
 	let status = "";
@@ -172,7 +213,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			{/* The header sits outside the frame, so the page cannot hide or
 			    restyle it. */}
 			<figcaption className="flex min-w-0 items-center gap-1 text-xs text-content-secondary">
-				<span id={headerId} className="min-w-0">
+				<span id={headerId} className="min-w-0 break-words">
 					Page attached by the agent: {download.displayName}. It cannot see your
 					session. Do not type passwords or secrets.
 				</span>
@@ -220,11 +261,12 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 						<Button
 							size="sm"
 							variant="outline"
+							disabled={sendMessage.isPending}
 							onClick={() => setProposal(null)}
 						>
 							Cancel
 						</Button>
-						<Button size="sm" onClick={send}>
+						<Button size="sm" disabled={sendMessage.isPending} onClick={send}>
 							Send
 						</Button>
 					</div>

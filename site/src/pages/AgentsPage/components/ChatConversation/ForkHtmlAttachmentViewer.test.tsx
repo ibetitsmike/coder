@@ -80,9 +80,18 @@ const setUserActivation = (isActive: boolean) => {
 	});
 };
 
-const postFromFrame = (data: unknown, source?: Window | null) => {
+// A click in the page focuses its frame, so the frame is focused unless a
+// test clicks elsewhere first.
+const postFromFrame = (
+	data: unknown,
+	source?: Window | null,
+	clickInFrame = true,
+) => {
 	const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
 	act(() => {
+		if (clickInFrame) {
+			frame.focus();
+		}
 		window.dispatchEvent(
 			new MessageEvent("message", {
 				data,
@@ -164,6 +173,12 @@ describe("parseForkHtmlMessage", () => {
 		const text = "x".repeat(forkHtmlMessageMaxLength);
 		expect(parseForkHtmlMessage(pageMessage(text))).toBe(text);
 	});
+
+	it("counts characters, not UTF-16 code units", () => {
+		const text = "😀".repeat(forkHtmlMessageMaxLength);
+		expect(parseForkHtmlMessage(pageMessage(text))).toBe(text);
+		expect(parseForkHtmlMessage(pageMessage(`${text}😀`))).toBeNull();
+	});
 });
 
 describe("latestForkHtmlAttachmentIds", () => {
@@ -171,6 +186,36 @@ describe("latestForkHtmlAttachmentIds", () => {
 		expect(latestForkHtmlAttachmentIds(MockChatHtmlMessages)).toEqual(
 			new Map([[MockChatHtmlFilePart.name, MockChatHtmlFilePart.file_id]]),
 		);
+	});
+
+	it("skips pages that the user uploaded", () => {
+		const upload = { ...MockChatHtmlFilePart, file_id: "chat-file-html-user" };
+		const entries = [
+			...MockChatHtmlMessages,
+			{
+				message: {
+					...MockChatHtmlMessages[1].message,
+					id: 3,
+					role: "user" as const,
+					content: [upload],
+				},
+			},
+		];
+
+		expect(latestForkHtmlAttachmentIds(entries)).toEqual(
+			new Map([[MockChatHtmlFilePart.name, MockChatHtmlFilePart.file_id]]),
+		);
+	});
+
+	it("prefers a page from the streaming turn", () => {
+		const streamed = {
+			...MockChatHtmlFilePart,
+			file_id: "chat-file-html-streamed",
+		};
+
+		expect(
+			latestForkHtmlAttachmentIds(MockChatHtmlMessages, [streamed]),
+		).toEqual(new Map([[streamed.name, streamed.file_id]]));
 	});
 });
 
@@ -205,16 +250,35 @@ describe("ForkHtmlAttachmentViewer", () => {
 		);
 	});
 
-	it("shows the error when the message fails to send", async () => {
-		vi.spyOn(API.experimental, "createChatMessage").mockRejectedValue(
-			new Error("The chat is archived."),
+	it("keeps the proposal for a retry when the message fails to send", async () => {
+		const createChatMessage = mockCreateChatMessage().mockRejectedValueOnce(
+			new Error("The message queue is full."),
 		);
 		renderPreview(["fork-html-attachments"]);
 
 		postFromFrame(pageMessage("Option B"));
 		await confirmProposal("Option B");
+		await screen.findByText("The message queue is full.");
 
-		await screen.findByText("The chat is archived.");
+		await confirmProposal("Option B");
+		await screen.findByText("Sent to the chat");
+		expect(createChatMessage).toHaveBeenCalledTimes(2);
+		expect(queryProposal()).toBeNull();
+	});
+
+	it("clears the last send status for a new proposal", async () => {
+		mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option A"));
+		await confirmProposal("Option A");
+		await screen.findByText("Sent to the chat");
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		postFromFrame(pageMessage("Option B"));
+		await screen.findByRole("region", { name: proposalName });
+		expect(screen.getByRole("status").textContent).toBe("");
 	});
 
 	it("ignores messages from other windows", async () => {
@@ -234,6 +298,29 @@ describe("ForkHtmlAttachmentViewer", () => {
 		postFromFrame({ type: "coder:api", path: "/api/v2/users/me" });
 		postFromFrame(pageMessage("x".repeat(forkHtmlMessageMaxLength + 1)));
 
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("ignores messages while the user works outside the frame", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("After a click elsewhere"), undefined, false);
+
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("ignores messages right after input in the dashboard", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		await userEvent.click(screen.getByRole("figure"));
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		postFromFrame(pageMessage("After a click in the dashboard"));
+		expect(queryProposal()).toBeNull();
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
@@ -311,15 +398,8 @@ describe("ForkHtmlAttachmentViewer", () => {
 		renderPreview(["fork-html-attachments"]);
 
 		fireEvent.load(screen.getByTitle("choices.html"));
-		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
-
 		fireEvent.load(screen.getByTitle("choices.html"));
 		expect(screen.queryByTitle("choices.html")).toBeNull();
-		expect(
-			screen.getByText(
-				"The page tried to load another address, so the viewer closed it.",
-			),
-		).toBeInTheDocument();
 
 		await userEvent.click(
 			screen.getByRole("button", { name: "Show the page again" }),
@@ -329,7 +409,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 			`/api/v2/chats/fork/files/${MockChatHtmlFilePart.file_id}/html`,
 		);
 		fireEvent.load(frame);
-		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
+		expect(screen.queryByTitle("choices.html")).toBe(frame);
 	});
 
 	it("drops an open proposal when the page navigates away", async () => {
@@ -353,6 +433,22 @@ describe("ForkHtmlAttachmentViewer", () => {
 				.getByRole("link", { name: "Download choices.html" })
 				.getAttribute("href"),
 		).toBe(`/api/v2/chats/files/${MockChatReplacedHtmlFilePart.file_id}`);
+	});
+
+	it("shows the upstream card for a page that the user uploaded", () => {
+		const upload = {
+			...MockChatHtmlFilePart,
+			file_id: "chat-file-html-user",
+			name: "mine.html",
+		};
+		renderPreview(["fork-html-attachments"], upload);
+
+		expect(screen.queryByTitle("mine.html")).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Download mine.html" })
+				.getAttribute("href"),
+		).toBe(`/api/v2/chats/files/${upload.file_id}`);
 	});
 
 	it("shows the upstream card when fork-html-attachments is off", () => {

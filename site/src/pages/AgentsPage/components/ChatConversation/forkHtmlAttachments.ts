@@ -1,12 +1,12 @@
 // This file is fork code: the helpers of the fork-html-attachments viewer.
 
 import type * as TypesGen from "#/api/typesGenerated";
-import type { ParsedMessageEntry } from "./types";
+import type { ParsedMessageEntry, RenderBlock } from "./types";
 
 /** The `type` of the message a page posts to send text to the chat. */
 export const forkHtmlMessageType = "coder:chat-message";
 
-/** The longest text, in UTF-16 code units, that a page may send. */
+/** The longest text, in Unicode code points, that a page may send. */
 export const forkHtmlMessageMaxLength = 4000;
 
 /**
@@ -51,7 +51,8 @@ export const parseForkHtmlMessage = (data: unknown): string | null => {
 		return null;
 	}
 	const text = data.text.trim();
-	if (text.length === 0 || text.length > forkHtmlMessageMaxLength) {
+	const length = [...text].length;
+	if (length === 0 || length > forkHtmlMessageMaxLength) {
 		return null;
 	}
 	return text;
@@ -62,19 +63,30 @@ export const formatForkHtmlMessage = (name: string, text: string) =>
 	`Message from the attached page "${name}":\n\n${text}`;
 
 /**
- * Maps each HTML attachment name to the file ID of its newest attachment in
- * the conversation, so an earlier page with the same name gives way to it.
+ * Maps each HTML attachment name to the file ID of its newest attachment by
+ * the agent, so an earlier page with the same name gives way to it. Pages in
+ * user messages are uploads, not agent pages, and stay out. The live blocks
+ * of the streaming turn come last, because they are the newest.
  */
 export const latestForkHtmlAttachmentIds = (
 	entries: readonly Pick<ParsedMessageEntry, "message">[],
+	liveBlocks: readonly RenderBlock[] = [],
 ): ReadonlyMap<string, string> => {
 	const latest = new Map<string, string>();
+	const add = (part: RenderBlock | TypesGen.ChatMessagePart) => {
+		if (part.type === "file" && isForkHtmlAttachment(part)) {
+			latest.set(part.name, part.file_id);
+		}
+	};
 	for (const { message } of entries) {
-		for (const part of message.content ?? []) {
-			if (part.type === "file" && isForkHtmlAttachment(part)) {
-				latest.set(part.name, part.file_id);
+		if (message.role === "assistant") {
+			for (const part of message.content ?? []) {
+				add(part);
 			}
 		}
+	}
+	for (const block of liveBlocks) {
+		add(block);
 	}
 	return latest;
 };
