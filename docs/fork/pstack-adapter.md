@@ -170,23 +170,27 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 #### HTML pages
 
 With the `fork-html-attachments` experiment, the web UI shows an attached `.html` or `.htm` file as a live page, inline and in the turn's **Attachments** menu.
-Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets." A download link sits next to it.
+Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets."
+A download link sits next to it.
 Without the experiment, the page shows as a download card.
 When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
-Only pages that the agent attaches run. An `.html` file that you upload yourself shows as a download card.
+Only pages that the agent attaches run.
+An `.html` file that you upload yourself shows as a download card.
 
 The page runs in a sandbox:
 
 - Scripts run, but the page has its own opaque origin, so it can't read the user's Coder session, cookies, or storage, or reach the dashboard.
 - The page can't fetch or load anything over the network, so it can't call the Coder API or load anything from elsewhere.
   Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
-- Forms don't submit. Handle a choice in a button's click handler instead.
+- Forms don't submit.
+  Handle a choice in a button's click handler instead.
 - The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
 
 Two gaps stay open, so treat what the user does in a page as visible to whoever wrote it.
 The fixed line above the page tells the user not to type secrets.
 
-- WebRTC: the content security policy doesn't cover it. The policy sets `webrtc 'block'`, but Chromium ignores that directive, so a page can still send data out over WebRTC.
+- WebRTC: the content security policy doesn't cover it.
+  The policy sets `webrtc 'block'`, but Chromium ignores that directive, so a page can still send data out over WebRTC.
 - Navigation: the sandbox lets the page navigate its own frame, and that navigation can carry what the user typed in its URL.
   The dashboard's own policy (`frame-src`) blocks frames from other sites, so the browser refuses such a navigation before any request.
   It still lets the frame load the Coder origin, the deployment's workspace app hosts, and any frame hosts the deployment adds to its policy.
