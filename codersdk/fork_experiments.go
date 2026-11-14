@@ -19,6 +19,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
+	ExperimentForkTokenBudget,
 	ExperimentForkViewImage,
 }
 
@@ -59,6 +60,11 @@ const ExperimentForkWorkflows Experiment = "fork-workflows"
 // ExperimentForkFamilyMessages lets a chat message its parent, siblings and
 // other chats in its family with the message_family_chat tool.
 const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
+
+// ExperimentForkTokenBudget gives chats token-budget context windows: the
+// notes tool keeps a checkpoint, and a chat starts a new context window from
+// it instead of summarizing its history.
+const ExperimentForkTokenBudget Experiment = "fork-token-budget"
 
 // ExperimentForkViewImage enables the view_image chat tool, which loads a PNG,
 // JPEG, GIF or WebP file from the workspace into the model's context.
