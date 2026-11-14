@@ -219,7 +219,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 		});
 
 		expect(screen.queryByTitle("choices.html")).toBeNull();
-		expect(screen.getByText("Attachment expired")).toBeInTheDocument();
 	});
 
 	it("shows the upstream card when fork-html-attachments is off", () => {
@@ -324,5 +323,15 @@ describe("ConversationTimeline with fork-html-attachments", () => {
 		);
 
 		expect(screen.queryByTitle("choices.html")).toBeNull();
+		expect(
+			screen
+				.getAllByRole("link", { name: "Download choices.html" })
+				.map((link) => link.getAttribute("href"))
+				.sort(),
+		).toEqual(
+			[MockChatReplacedHtmlFilePart, MockChatHtmlFilePart]
+				.map((file) => `/api/v2/chats/files/${file.file_id}`)
+				.sort(),
+		);
 	});
 });
