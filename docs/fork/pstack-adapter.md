@@ -99,6 +99,7 @@ Use `.` and not `source`, because `source` fails in shells such as Dash, the `/b
 | `AskQuestion`                                                           | `ask_user_question` in some root chats, and in children with `fork-nested-subagents`. Refer to [Questions](#questions)                                                                                              | If you have `ask_user_question`, use it. Otherwise ask in plain text and end the turn.                                                                                                                                                                                        | W2 (questions from children) |
 | Open a todolist                                                         | `todo_write` and `todo_read`, only with the `fork-chat-todos` experiment. Refer to [Todo list](#todo-list)                                                                                                          | Send the whole list with `todo_write` and update it at each phase. Without the tools, keep the list in your reply and restate it after a compaction.                                                                                                                          | W4                           |
 | Keep notes across a long task                                           | `notes`, only with the `fork-token-budget` experiment. Refer to [Notes](#notes)                                                                                                                                     | Keep a checkpoint in `checkpoint.md` with the goal, the decisions, the progress and the next steps, and update it as you work. Without the tool, restate the checkpoint in your reply after a compaction.                                                                     | Stays                        |
+| Find what scrolled out of context                                       | `chat_history`, only with the `fork-token-budget` experiment. Refer to [Chat history](#chat-history)                                                                                                                | Call `list_windows`, then `search` or `list_items`, then `read_item`. Without the tool, use `read_chat_transcript` if you have it.                                                                                                                                            | Stays                        |
 | Run another pstack skill (`/name` or "the **name** skill")              | 57 of pstack's 58 skills set `disable-model-invocation: true`, so `read_skill` and the skill index hide them from the model. You can still run one from the composer's `/` menu, but not in a chat's first message. | `read_file` `~/.coder/skills/<name>/SKILL.md`, with `~` replaced by your home directory, and follow it. Read its sibling files with `read_file` too. When you tell the user to type it, write `/workspace/<name>`, and in a new chat tell them to send a plain message first. | Stays                        |
 | `Grep`, `Glob`                                                          | `execute`, `read_file`                                                                                                                                                                                              | `execute` with `rg` or `find`.                                                                                                                                                                                                                                                | Stays                        |
 | Embed a screenshot or video inline, as `ketchup` and `ketchup-video` do | `attach_file`, for a workspace file of up to 10&nbsp;MiB. Refer to [Attachments](#attachments)                                                                                                                      | Save the file in the workspace, then call `attach_file` with its absolute path.                                                                                                                                                                                               | Stays                        |
@@ -169,6 +170,24 @@ A path has 1 to 128 characters from `a-z`, `0-9`, `.`, `_`, `/` and `-`, and sta
 A note holds 16384 bytes at most, and a chat keeps 20 notes at most.
 A write or an append that breaks a limit fails and stores nothing.
 The notes survive a compaction, so keep the goal, the decisions, the progress and the next steps in `checkpoint.md`.
+
+### Chat history
+
+`chat_history` exists only when the deployment enables the `fork-token-budget` experiment.
+Plan-mode turns, `explore` children and read-only custom agent types don't get it.
+It reads only its own chat.
+The chat's history is a list of context windows, `w:1`, `w:2` and on.
+A compaction starts the next window, and the last window is the current one.
+The history never reaches past a clear of the chat, so after a clear the windows start again at `w:1`.
+The actions are:
+
+- `list_windows` lists the windows, with what started each one, `chat_start`, `chat_summarized` or `chat_cleared`, and their first and last message IDs.
+- `list_items` with a `window` lists its messages with a short preview, 20 at a time and 50 at most with `limit`. Pass `next_after_id` as `after_id` for the next page.
+- `search` with a `query` of 2 to 200 bytes finds the newest messages whose text, tool calls or tool results contain it, in any case. Pass `window` to look in one window, and `next_before_id` as `before_id` for older matches.
+- `read_item` with an `id` reads one message, with long parts cut. `part_bytes` gives the full size of each part it returns, and `omitted_parts` counts the trailing parts that did not fit. Add `part`, starting at 1, to read that part in full, a slice at a time, and pass `next_offset` as `offset` until `has_more` is false.
+
+Each result holds 16&nbsp;KiB at most.
+It skips its own calls and those of `read_chat_transcript`, and messages that only the model or only the user sees.
 
 ### Attachments
 
@@ -885,10 +904,12 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:19-31`, `ChatTodoPill.tsx:94-108`.
   Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:43-49`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
   The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:42`, `:192`, `:212-216`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
-- Notes tool: `coderd/x/chatd/fork_chat_notes.go:74-94`, added only with `fork-token-budget`, `codersdk/fork_experiments.go:63-66`, `coderd/x/chatd/fork_tools.go:89-91`. The plan-mode, `explore` and read-only custom agent allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go` and `customAgentReadOnlyToolAllowed` in `fork_agent_tool_policy.go`, don't list it.
+- Notes tool: `coderd/x/chatd/fork_chat_notes.go:74-94`, added only with `fork-token-budget`, `codersdk/fork_experiments.go:63-66`, `coderd/x/chatd/fork_tools.go:119-121`. The plan-mode, `explore` and read-only custom agent allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go` and `customAgentReadOnlyToolAllowed` in `fork_agent_tool_policy.go`, don't list it.
   The actions and their errors, `fork_chat_notes.go:96-158`, the path rule and the limits, `:21-34`, also checked by the table, `coderd/database/migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql`, and the note cap, `coderd/database/forkdb/queries/chat_notes.sql:13-29`.
   Each chat reads only its own notes, `chatNotesTool` binds the chat, `fork_chat_notes.go:74-80`.
   The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:88-94`.
+- Chat history tool: `coderd/x/chatd/fork_chat_history.go:141-158`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:119-121`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
+  The windows and the clear floor, `fork_chat_history.go:189-227`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:394-470` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:532-589`. The 16&nbsp;KiB cap, `fork_chat_history.go:26-45`, and the fit of a whole message, `fork_chat_history.go:591-634`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:34`.

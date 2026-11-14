@@ -159,6 +159,21 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatNote(gomock.Any(), arg).Return(note, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(note)
 		},
+		"ListChatHistoryRows": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.ListChatHistoryRowsRow{{ID: 1, Role: "user", Visibility: "both", CreatedAt: dbtime.Now()}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().ListChatHistoryRows(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
+		"SearchChatHistory": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.SearchChatHistoryParams{ChatID: chat.ID, Needle: "needle", LimitCount: 20}
+			rows := []forkdb.SearchChatHistoryRow{{ID: 1, Role: "user", CreatedAt: dbtime.Now()}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().SearchChatHistory(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"ListChatNotes": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			rows := []forkdb.ListChatNotesRow{{Path: "checkpoint.md", Bytes: 4, UpdatedAt: dbtime.Now()}}

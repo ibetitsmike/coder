@@ -168,6 +168,12 @@ type Querier interface {
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
+	// ListChatHistoryRows lists the rows that shape the context windows of a
+	// chat: the compressed boundary rows, with their content, and the messages
+	// that both the user and the model see, with an empty boundary_content.
+	// Calls and results of the chat_history and read_chat_transcript tools are
+	// left out, because the history tool skips them.
+	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
@@ -191,6 +197,11 @@ type Querier interface {
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// SearchChatHistory returns the newest messages between after_id and
+	// before_id, with before_id 0 for no upper bound, whose content holds
+	// needle. The caller lowercases needle and escapes it as JSON string text,
+	// since the match runs on the stored JSON.
+	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
