@@ -115,7 +115,7 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 		// The policy is what keeps the page away from the session and the
 		// API, so pin it exactly.
 		require.Equal(t,
-			"sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "+
+			"sandbox allow-scripts; default-src 'none'; webrtc 'block'; script-src 'unsafe-inline'; "+
 				"style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "+
 				"media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
 			res.header.Get("Content-Security-Policy"),

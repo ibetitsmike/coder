@@ -22,11 +22,14 @@ import (
 // forkHTMLAttachmentCSP confines an HTML attachment. The sandbox directive
 // gives the document an opaque origin even when it is opened outside the
 // viewer's sandboxed iframe, so its scripts cannot read the Coder session.
-// default-src 'none' blocks every network request, so they cannot call the
-// Coder API or send data elsewhere. Inline scripts and styles run, because a
-// page the agent writes keeps them in one file.
+// default-src 'none' blocks every fetch and load, so they cannot call the
+// Coder API. CSP does not cover WebRTC: webrtc 'block' stops it only in
+// browsers that implement that directive, and Chromium does not, so a page
+// can still send what the user does in it out over WebRTC. Inline scripts
+// and styles run, because a page the agent writes keeps them in one file.
 const forkHTMLAttachmentCSP = "sandbox allow-scripts; " +
 	"default-src 'none'; " +
+	"webrtc 'block'; " +
 	"script-src 'unsafe-inline'; " +
 	"style-src 'unsafe-inline'; " +
 	"img-src data: blob:; " +
