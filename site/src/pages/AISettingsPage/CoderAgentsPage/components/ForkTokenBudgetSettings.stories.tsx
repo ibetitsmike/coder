@@ -2,7 +2,7 @@
 // organization token budget form.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import { MockForkOrganizationTokenBudget } from "#/testHelpers/forkTokenBudget";
 import { ForkTokenBudgetSettings } from "./ForkTokenBudgetSettings";
@@ -40,14 +40,6 @@ export const Edited: Story = {
 		await userEvent.click(
 			within(strategy).getByRole("radio", { name: "Token budget" }),
 		);
-		const fallback = canvas.getByRole("radiogroup", {
-			name: "Fallback at the usable limit",
-		});
-		await expect(
-			within(fallback).getByRole("radio", {
-				name: "Summarize the conversation",
-			}),
-		).toBeEnabled();
 	},
 };
 

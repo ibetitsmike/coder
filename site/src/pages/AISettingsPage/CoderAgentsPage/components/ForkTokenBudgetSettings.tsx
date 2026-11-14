@@ -137,7 +137,8 @@ const TokenBudgetForm: React.FC<TokenBudgetFormProps> = ({
 				<>
 					The token budget hands off at each model's compression threshold,
 					which you set on the model config. A threshold of 100% turns the
-					budget off for that model.{" "}
+					budget off for that model. A user's own compression threshold for the
+					model replaces it in that user's chats.{" "}
 					{canEdit
 						? "A change applies from the next step of each chat."
 						: "You can view this setting but not change it."}
@@ -150,7 +151,7 @@ const TokenBudgetForm: React.FC<TokenBudgetFormProps> = ({
 			onSubmit={form.handleSubmit}
 			error={
 				saveError ? (
-					<p className="m-0">
+					<p className="m-0" role="alert">
 						{getErrorMessage(
 							saveError,
 							"Failed to save the token budget setting.",

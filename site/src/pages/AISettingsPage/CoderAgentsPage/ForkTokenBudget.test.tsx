@@ -103,6 +103,9 @@ describe("ForkTokenBudget", () => {
 		expect(
 			screen.getByText(/each model's compression threshold/),
 		).toHaveTextContent("A threshold of 100% turns the budget off");
+		expect(
+			screen.getByText(/each model's compression threshold/),
+		).toHaveTextContent("A user's own compression threshold");
 	});
 
 	it("saves the token budget with the summary fallback", async () => {
@@ -127,6 +130,23 @@ describe("ForkTokenBudget", () => {
 			expect(
 				queryClient.getQueryData(organizationTokenBudget(orgId).queryKey),
 			).toStrictEqual(saved),
+		);
+	});
+
+	it("announces a failed save", async () => {
+		const { updateSetting } = renderSetting();
+		updateSetting.mockRejectedValue(new Error("Invalid token budget setting."));
+		const user = userEvent.setup();
+
+		await user.click(
+			within(await strategyGroup()).getByRole("radio", {
+				name: "Token budget",
+			}),
+		);
+		await user.click(screen.getByRole("button", { name: "Save" }));
+
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"Invalid token budget setting.",
 		);
 	});
 
