@@ -90,7 +90,12 @@ Rules: the script has no load(), no clock, no file access and no network. while 
 Resume: a run is journaled in the deployment database, so it survives a restart. ` +
 	`If await_workflow returns status "interrupted", call run_workflow with resume_run_id set to the run_id; ` +
 	`the script and args can be omitted, chatd replays them from the journal, and changes to the script do not apply to a resumed run. ` +
-	`Finished steps are reused and do not run again.`
+	`Finished steps are reused and do not run again.
+
+Saved workflows: users save workflows in Coder. To run one, send its name in "name" instead of script or script_path, with its args. ` +
+	`Call list_workflows to see the saved workflows you can run, with their descriptions and args schemas. ` +
+	`A personal workflow hides an organization workflow with the same name. ` +
+	`If the workflow has an args schema, args must match it or the run does not start.`
 
 const awaitWorkflowDescription = `Wait for a workflow run that run_workflow started. ` +
 	`It returns when the run ends, or after wait_seconds (default 600, at most 780). ` +
@@ -99,13 +104,14 @@ const awaitWorkflowDescription = `Wait for a workflow run that run_workflow star
 	`On interrupted, for example after a restart, call run_workflow with resume_run_id to continue the run.`
 
 const workflowNotFoundHelp = `The run is not found on this coderd replica, for example because coderd restarted. ` +
-	`Call run_workflow again with the same script (or script_path), the same args and resume_run_id set to this run_id. Finished steps are reused.`
+	`Call run_workflow again with the same script (or script_path or name), the same args and resume_run_id set to this run_id. Finished steps are reused.`
 
 type runWorkflowArgs struct {
 	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this or script_path."`
 	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this or script."`
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
+	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
 }
 
 type awaitWorkflowArgs struct {
@@ -139,9 +145,10 @@ type stepSummary struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// forkWorkflowTools returns run_workflow and await_workflow for a root chat
-// turn that is not in plan mode. Every chat owner gets them: a run belongs to
-// its chat, so the chat's own access rules cover the run. The gate runs on
+// forkWorkflowTools returns run_workflow, await_workflow and list_workflows
+// for a root chat turn that is not in plan mode. Every chat owner gets them:
+// a run belongs to its chat, so the chat's own access rules cover the run.
+// The gate runs on
 // every turn, so an admin can turn the experiment on at runtime without a
 // restart. getConn is the workspace connection of the live turn; a nil
 // getConn keeps inline scripts working and makes script_path fail with a
@@ -172,6 +179,9 @@ func (p *Server) forkWorkflowTools(
 				callID, ok := workspacesdk.ToolCallIDFromContext(ctx)
 				if !ok {
 					return fantasy.NewTextErrorResponse("run_workflow needs a tool call ID"), nil
+				}
+				if strings.TrimSpace(args.Name) != "" && (args.Script != "" || strings.TrimSpace(args.ScriptPath) != "") {
+					return fantasy.NewTextErrorResponse("send name, script or script_path, not more than one"), nil
 				}
 				script, err := workflowScript(ctx, args, getConn)
 				if err != nil {
@@ -213,6 +223,7 @@ func (p *Server) forkWorkflowTools(
 				return workflowJSON(res), nil
 			},
 		),
+		p.listWorkflowsTool(chat),
 	}
 }
 
@@ -389,6 +400,19 @@ func (p *Server) startWorkflowRun(
 			return nil, xerrors.New("the run belongs to another chat")
 		}
 		return p.resumeWorkflowRun(ctx, chat, row)
+	}
+	if name := strings.TrimSpace(args.Name); name != "" {
+		if args.Script != "" {
+			return nil, xerrors.New("send name or script, not both")
+		}
+		saved, script, err := p.loadSavedWorkflow(ctx, chat, name)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateSavedWorkflowArgs(saved, args.Args); err != nil {
+			return nil, err
+		}
+		args.Script = script
 	}
 	if strings.TrimSpace(args.Script) == "" {
 		return nil, xerrors.New("script is required")
