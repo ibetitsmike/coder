@@ -4615,6 +4615,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/files/{file}/html": {
+            "get": {
+                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks fetches\nand subresource loads. It does not stop WebRTC in browsers\nthat ignore webrtc 'block', such as Chromium, and it does not\nstop the page from navigating itself.",
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a chat HTML attachment for the sandboxed viewer",
+                "operationId": "get-a-chat-html-attachment-for-the-sandboxed-viewer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "File ID",
+                        "name": "file",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/agent-definitions": {
             "get": {
                 "produces": [
@@ -29627,6 +29663,7 @@ const docTemplate = `{
                 "fork-pinned-skills",
                 "fork-workflows",
                 "fork-family-messages",
+                "fork-html-attachments",
                 "fork-token-budget",
                 "fork-view-image",
                 "example",
@@ -29680,6 +29717,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29709,6 +29747,7 @@ const docTemplate = `{
                 "ExperimentForkPinnedSkills",
                 "ExperimentForkWorkflows",
                 "ExperimentForkFamilyMessages",
+                "ExperimentForkHTMLAttachments",
                 "ExperimentForkTokenBudget",
                 "ExperimentForkViewImage",
                 "ExperimentExample",

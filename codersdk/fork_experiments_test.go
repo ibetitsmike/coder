@@ -32,3 +32,11 @@ func TestForkExperiments(t *testing.T) {
 	// Fork experiments use the title-cased fallback display name.
 	require.Equal(t, "Fork Token Budget", codersdk.ExperimentForkTokenBudget.DisplayName())
 }
+
+func TestForkExperimentDisplayNames(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Fork HTML Attachments", codersdk.ExperimentForkHTMLAttachments.DisplayName())
+	// A fork experiment without its own name keeps the title-cased default.
+	require.Equal(t, "Fork Chat Todos", codersdk.ExperimentForkChatTodos.DisplayName())
+}
