@@ -70,9 +70,31 @@ func (t forkReplaySafeMessageAgentTool) Run(ctx context.Context, call fantasy.To
 	if !ok {
 		return t.AgentTool.Run(ctx, call)
 	}
+	if resp, found := t.recorded(ctx, callID); found {
+		return resp, nil
+	}
+	resp, err := t.AgentTool.Run(context.WithValue(ctx, forkSubagentMessageKey{}, forkSubagentMessageCall{
+		id:             callID,
+		organizationID: t.chat.OrganizationID,
+	}), call)
+	if err != nil || !resp.IsError {
+		return resp, err
+	}
+	// A run of the same call that a takeover left running can record the
+	// call after the lookup above. This send then fails on the record's
+	// primary key and rolls back, and the message went out once.
+	if recordedResp, found := t.recorded(ctx, callID); found {
+		return recordedResp, nil
+	}
+	return resp, nil
+}
+
+// recorded looks up the record of the call. found is true when the record
+// exists or the lookup failed, and resp is then the tool response.
+func (t forkReplaySafeMessageAgentTool) recorded(ctx context.Context, callID uuid.UUID) (resp fantasy.ToolResponse, found bool) {
 	fdb, err := forkdb.From(t.server.db)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(xerrors.Errorf("fork queries: %w", err).Error()), nil
+		return fantasy.NewTextErrorResponse(xerrors.Errorf("fork queries: %w", err).Error()), true
 	}
 	//nolint:gocritic // chatd reads its own bookkeeping rows.
 	recipientID, err := fdb.GetChatSubagentMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatSubagentMessageRecipientParams{
@@ -80,20 +102,17 @@ func (t forkReplaySafeMessageAgentTool) Run(ctx context.Context, call fantasy.To
 		OrganizationID: t.chat.OrganizationID,
 		SenderChatID:   t.chat.ID,
 	})
-	if err == nil {
-		recipient, err := t.server.db.GetChatByID(ctx, recipientID)
-		if err != nil {
-			return fantasy.NewTextErrorResponse(xerrors.Errorf("get target chat: %w", err).Error()), nil
-		}
-		return toolJSONResponse(subagentChatResult(recipient)), nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return fantasy.ToolResponse{}, false
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return fantasy.NewTextErrorResponse(xerrors.Errorf("get subagent message: %w", err).Error()), nil
+	if err != nil {
+		return fantasy.NewTextErrorResponse(xerrors.Errorf("get subagent message: %w", err).Error()), true
 	}
-	return t.AgentTool.Run(context.WithValue(ctx, forkSubagentMessageKey{}, forkSubagentMessageCall{
-		id:             callID,
-		organizationID: t.chat.OrganizationID,
-	}), call)
+	recipient, err := t.server.db.GetChatByID(ctx, recipientID)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(xerrors.Errorf("get target chat: %w", err).Error()), true
+	}
+	return toolJSONResponse(subagentChatResult(recipient)), true
 }
 
 // forkRecordSubagentMessage is the forkAdmit hook of sendSubagentMessage. For

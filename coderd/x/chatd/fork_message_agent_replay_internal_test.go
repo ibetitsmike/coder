@@ -4,6 +4,7 @@ package chatd
 // without sending its message again (fork_message_agent_replay.go).
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -92,4 +93,65 @@ func TestForkMessageAgentReplay(t *testing.T) {
 		SenderChatID:   child.ID,
 	})
 	require.ErrorIs(t, err, sql.ErrNoRows, "a call ID is scoped to its sender")
+}
+
+// forkRecordFirstTool records a message_agent call before it runs the tool it
+// wraps, as a run that a takeover left running does when it commits the same
+// call after the replay looked it up.
+type forkRecordFirstTool struct {
+	fantasy.AgentTool
+	record func(ctx context.Context)
+}
+
+func (s forkRecordFirstTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	s.record(ctx)
+	return s.AgentTool.Run(ctx, call)
+}
+
+// TestForkMessageAgentReplayConcurrentRun covers a replay whose send loses
+// the insert of the call's record to another run of the same call. The send
+// rolls back and the replay returns the recipient instead of an error.
+func TestForkMessageAgentReplayConcurrentRun(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+
+	tools, err := f.server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
+	require.NoError(t, err)
+	tools, err = f.server.appendForkTools(ctx, tools, f.root, f.root.LastModelConfigID)
+	require.NoError(t, err)
+	wrapped, ok := findToolByName(tools, messageAgentToolName).(forkReplaySafeMessageAgentTool)
+	require.True(t, ok)
+
+	callID := uuid.New()
+	wrapped.AgentTool = forkRecordFirstTool{AgentTool: wrapped.AgentTool, record: func(ctx context.Context) {
+		//nolint:gocritic // The test writes chatd's bookkeeping row.
+		require.NoError(t, f.fdb.InsertChatSubagentMessage(dbauthz.AsChatd(ctx), forkdb.InsertChatSubagentMessageParams{
+			ID:              callID,
+			OrganizationID:  f.root.OrganizationID,
+			SenderChatID:    f.root.ID,
+			RecipientChatID: child.ID,
+			CreatedAt:       f.server.clock.Now(),
+		}))
+	}}
+
+	resp, err := wrapped.Run(workspacesdk.WithToolCallID(ctx, callID), fantasy.ToolCall{
+		Input: `{"chat_id":"` + child.ID.String() + `","message":"NOTE-RACE"}`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, child.ID.String(), requireToolResponseMap(t, resp, false)["chat_id"], resp.Content)
+
+	queued, err := f.db.GetChatQueuedMessages(ctx, child.ID)
+	require.NoError(t, err)
+	for _, msg := range queued {
+		require.NotContains(t, string(msg.Content), "NOTE-RACE", "the losing send rolls back")
+	}
+	msgs, err := f.db.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+	require.NoError(t, err)
+	for _, msg := range msgs {
+		require.NotContains(t, string(msg.Content.RawMessage), "NOTE-RACE", "the losing send rolls back")
+	}
 }
