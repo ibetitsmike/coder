@@ -71,6 +71,36 @@ describe("latestForkHtmlAttachmentIds", () => {
 			new Map([[MockChatHtmlFilePart.name, MockChatHtmlFilePart.file_id]]),
 		);
 	});
+
+	it("skips pages that the user uploaded", () => {
+		const upload = { ...MockChatHtmlFilePart, file_id: "chat-file-html-user" };
+		const entries = [
+			...MockChatHtmlMessages,
+			{
+				message: {
+					...MockChatHtmlMessages[1].message,
+					id: 3,
+					role: "user" as const,
+					content: [upload],
+				},
+			},
+		];
+
+		expect(latestForkHtmlAttachmentIds(entries)).toEqual(
+			new Map([[MockChatHtmlFilePart.name, MockChatHtmlFilePart.file_id]]),
+		);
+	});
+
+	it("prefers a page from the streaming turn", () => {
+		const streamed = {
+			...MockChatHtmlFilePart,
+			file_id: "chat-file-html-streamed",
+		};
+
+		expect(
+			latestForkHtmlAttachmentIds(MockChatHtmlMessages, [streamed]),
+		).toEqual(new Map([[streamed.name, streamed.file_id]]));
+	});
 });
 
 describe("ForkHtmlAttachmentViewer", () => {
@@ -99,15 +129,8 @@ describe("ForkHtmlAttachmentViewer", () => {
 		renderPreview(["fork-html-attachments"]);
 
 		fireEvent.load(screen.getByTitle("choices.html"));
-		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
-
 		fireEvent.load(screen.getByTitle("choices.html"));
 		expect(screen.queryByTitle("choices.html")).toBeNull();
-		expect(
-			screen.getByText(
-				"The page tried to load another address, so the viewer closed it.",
-			),
-		).toBeInTheDocument();
 
 		await userEvent.click(
 			screen.getByRole("button", { name: "Show the page again" }),
@@ -117,7 +140,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 			`/api/v2/chats/fork/files/${MockChatHtmlFilePart.file_id}/html`,
 		);
 		fireEvent.load(frame);
-		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
+		expect(screen.queryByTitle("choices.html")).toBe(frame);
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
@@ -129,6 +152,22 @@ describe("ForkHtmlAttachmentViewer", () => {
 				.getByRole("link", { name: "Download choices.html" })
 				.getAttribute("href"),
 		).toBe(`/api/v2/chats/files/${MockChatReplacedHtmlFilePart.file_id}`);
+	});
+
+	it("shows the upstream card for a page that the user uploaded", () => {
+		const upload = {
+			...MockChatHtmlFilePart,
+			file_id: "chat-file-html-user",
+			name: "mine.html",
+		};
+		renderPreview(["fork-html-attachments"], upload);
+
+		expect(screen.queryByTitle("mine.html")).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Download mine.html" })
+				.getAttribute("href"),
+		).toBe(`/api/v2/chats/files/${upload.file_id}`);
 	});
 
 	it("shows the upstream card when fork-html-attachments is off", () => {

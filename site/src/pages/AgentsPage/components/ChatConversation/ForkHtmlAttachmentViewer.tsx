@@ -14,7 +14,7 @@ import {
 	getForkHtmlAttachmentURL,
 	latestForkHtmlAttachmentIds,
 } from "./forkHtmlAttachments";
-import type { ParsedMessageEntry } from "./types";
+import type { ParsedMessageEntry, RenderBlock } from "./types";
 
 type HtmlFilePart = TypesGen.ChatFilePart & { file_id: string; name: string };
 
@@ -24,17 +24,19 @@ const LatestHtmlAttachmentsContext = createContext<
 
 /**
  * Wraps the upstream FileProbeProvider so the timeline needs one hook line,
- * and tells each HTML attachment whether a newer one with its name exists.
+ * and tells each HTML attachment whether it is the newest agent page of its
+ * name.
  */
 export const ForkFileProbeProvider: React.FC<
 	React.PropsWithChildren<{
 		evictedFileIds: ReadonlySet<string>;
 		entries: readonly Pick<ParsedMessageEntry, "message">[];
+		liveBlocks?: readonly RenderBlock[];
 	}>
-> = ({ evictedFileIds, entries, children }) => (
+> = ({ evictedFileIds, entries, liveBlocks, children }) => (
 	<FileProbeProvider evictedFileIds={evictedFileIds}>
 		<LatestHtmlAttachmentsContext.Provider
-			value={latestForkHtmlAttachmentIds(entries)}
+			value={latestForkHtmlAttachmentIds(entries, liveBlocks)}
 		>
 			{children}
 		</LatestHtmlAttachmentsContext.Provider>
@@ -43,18 +45,21 @@ export const ForkFileProbeProvider: React.FC<
 
 type ForkHtmlAttachmentPreviewProps = {
 	block: HtmlFilePart;
-	/** The upstream card, shown for a page that a newer one replaced. */
+	/**
+	 * The upstream card, shown for a page that a newer one replaced and for
+	 * an upload by the user.
+	 */
 	children: React.ReactNode;
 };
 
-/** Only the newest attachment of a name renders as a live page. */
+/** Only the newest agent attachment of a name renders as a live page. */
 export const ForkHtmlAttachmentPreview: React.FC<
 	ForkHtmlAttachmentPreviewProps
 > = ({ block, children }) => {
 	const latestFileId = useContext(LatestHtmlAttachmentsContext)?.get(
 		block.name,
 	);
-	if (latestFileId !== undefined && latestFileId !== block.file_id) {
+	if (latestFileId !== block.file_id) {
 		return children;
 	}
 	return <ForkHtmlAttachmentViewer block={block} />;
@@ -95,7 +100,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			{/* The header sits outside the frame, so the page cannot hide or
 			    restyle it. */}
 			<figcaption className="flex min-w-0 items-center gap-1 text-xs text-content-secondary">
-				<span id={headerId} className="min-w-0">
+				<span id={headerId} className="min-w-0 break-words">
 					Page attached by the agent: {download.displayName}. It cannot see your
 					session. Do not type passwords or secrets.
 				</span>

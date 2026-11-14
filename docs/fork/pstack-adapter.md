@@ -173,6 +173,7 @@ With the `fork-html-attachments` experiment, the web UI shows an attached `.html
 Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets." A download link sits next to it.
 Without the experiment, the page shows as a download card.
 When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
+Only pages that the agent attaches run. An `.html` file that you upload yourself shows as a download card.
 
 The page runs in a sandbox:
 
@@ -756,7 +757,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
   HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
-  The newest page of a name wins, `forkHtmlAttachments.ts:28-40`, and the viewer has the fixed header outside the frame, `ForkHtmlAttachmentViewer.tsx:95-108`, and it closes the frame after a navigation, `ForkHtmlAttachmentViewer.tsx:78-85`, `:109-117`.
+  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:30-51`, `ForkHtmlAttachmentViewer.tsx:59-64`, and the viewer has the fixed header outside the frame, `:100-113`, and closes the frame after a navigation, `:83-90`, `:114-122`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

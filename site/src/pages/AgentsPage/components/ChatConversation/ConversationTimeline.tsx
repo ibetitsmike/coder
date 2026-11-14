@@ -625,6 +625,7 @@ export const ConversationTimeline = memo<ConversationTimelineProps>(
 			<ForkFileProbeProvider
 				evictedFileIds={evictedFileIds}
 				entries={parsedMessages}
+				liveBlocks={liveBlocks}
 			>
 				<LightboxHost>
 					{layout.items.map((item) => {

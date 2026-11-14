@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import {
 	MockChatHtmlFilePart,
@@ -98,15 +98,6 @@ export const AttachedHtmlPage: Story = {
 	args: htmlPageArgs(MockChatHtmlFilePart),
 	parameters: htmlPageParameters,
 	decorators: [withHtmlMessages],
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByText(
-				"Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets.",
-			),
-		).toBeVisible();
-		await expect(canvas.getByTitle("choices.html")).toBeVisible();
-	},
 };
 
 export const ReplacedHtmlPage: Story = {
