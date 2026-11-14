@@ -169,6 +169,7 @@ The actions are `list`, `read`, `write`, which replaces the note, `append`, whic
 A path has 1 to 128 characters from `a-z`, `0-9`, `.`, `_`, `/` and `-`, and starts with a letter or a digit, such as `checkpoint.md` or `findings/auth.md`.
 A note holds 16384 bytes at most, and a chat keeps 20 notes at most.
 A write or an append that breaks a limit fails and stores nothing.
+When Coder Agents runs a batch of tool calls again after a restart, a `write`, `append` or `delete` that already ran returns its first result and changes nothing, so an append adds its line once.
 The notes survive a compaction, so keep the goal, the decisions, the progress and the next steps in `checkpoint.md`.
 
 ### Chat history
@@ -904,10 +905,11 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Composer pill, only with `fork-chat-todos` and a non-empty list, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:19-31`, `ChatTodoPill.tsx:94-108`.
   Checklist card for each call, only with `fork-chat-todos`, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:24-36`, `:43-49`, with its labels, `ForkTodoTool.tsx:12-25`, `:42-52`, and its expandable list or error, `:53-74`, `:90-101`.
   The children's lists in `list_agents`, `coderd/x/chatd/fork_list_agents.go:42`, `:192`, `:212-216`, and the progress on its card, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkListAgentFields.tsx:17-19`, `:28-30`.
-- Notes tool: `coderd/x/chatd/fork_chat_notes.go:74-94`, added only with `fork-token-budget`, `codersdk/fork_experiments.go:63-66`, `coderd/x/chatd/fork_tools.go:119-121`. The plan-mode, `explore` and read-only custom agent allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go` and `customAgentReadOnlyToolAllowed` in `fork_agent_tool_policy.go`, don't list it.
-  The actions and their errors, `fork_chat_notes.go:96-158`, the path rule and the limits, `:21-34`, also checked by the table, `coderd/database/migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql`, and the note cap, `coderd/database/forkdb/queries/chat_notes.sql:13-29`.
-  Each chat reads only its own notes, `chatNotesTool` binds the chat, `fork_chat_notes.go:74-80`.
-  The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:88-94`.
+- Notes tool: `coderd/x/chatd/fork_chat_notes.go:75-95`, added only with `fork-token-budget`, `codersdk/fork_experiments.go:63-66`, `coderd/x/chatd/fork_tools.go:119-121`. The plan-mode, `explore` and read-only custom agent allowlists, `builtinPlanToolAllowed` and `exploreToolAllowed` in `turn_environment.go` and `customAgentReadOnlyToolAllowed` in `fork_agent_tool_policy.go`, don't list it.
+  The actions and their errors, `fork_chat_notes.go:97-187`, the path rule and the limits, `:22-35`, also checked by the table, `coderd/database/migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql`, and the note cap, `coderd/database/forkdb/queries/chat_notes.sql:13-48`.
+  Each chat reads only its own notes, `chatNotesTool` binds the chat, `fork_chat_notes.go:75-81`.
+  The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:89-95`.
+  A replayed call that wrote, appended to or deleted a note returns its first result and changes nothing, `fork_chat_notes.go:138-177`, `:189-207`. The record of each call, `coderd/database/migrations/chatdmig/nodes/01a1d903-ff52-75e8-91c2-e50d900ac0b7_chat_note_calls.up.sql`, is written in the statement that changes the note, `chat_notes.sql:13-69`.
 - Chat history tool: `coderd/x/chatd/fork_chat_history.go:141-158`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:119-121`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
   The windows and the clear floor, `fork_chat_history.go:189-227`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:394-470` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:532-589`. The 16&nbsp;KiB cap, `fork_chat_history.go:26-45`, and the fit of a whole message, `fork_chat_history.go:591-634`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.

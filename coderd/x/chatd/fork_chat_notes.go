@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 const (
@@ -129,15 +130,35 @@ func (p *Server) runChatNotes(ctx context.Context, chatID uuid.UUID, args chatNo
 			return nil, xerrors.Errorf("read note: %w", err)
 		}
 		return chatNoteResult{Path: note.Path, Content: note.Content, UpdatedAt: note.UpdatedAt}, nil
-	case "delete":
-		deleted, err := fdb.DeleteChatNote(ctx, forkdb.DeleteChatNoteParams{ChatID: chatID, Path: args.Path})
+	case "write", "append":
+		if len(args.Content) > maxChatNoteBytes {
+			return nil, xerrors.Errorf("content is %d bytes: a note holds %d bytes at most", len(args.Content), maxChatNoteBytes)
+		}
+	}
+	// When chatd stops in the middle of a tool batch, the next worker runs
+	// the batch again with the same tool call IDs. A call that changed a note
+	// is recorded with its result, and its replay returns that result, so an
+	// append does not add its line twice and a write or delete does not undo
+	// a later call of the batch.
+	callID := uuid.NullUUID{}
+	callID.UUID, callID.Valid = workspacesdk.ToolCallIDFromContext(ctx)
+	if result, found, err := recordedChatNoteCall(ctx, fdb, chatID, callID, args.Action); found || err != nil {
+		return result, err
+	}
+	if args.Action == "delete" {
+		deleted, err := fdb.DeleteChatNote(ctx, forkdb.DeleteChatNoteParams{ChatID: chatID, Path: args.Path, CallID: callID})
+		if deleted == 0 || err != nil {
+			// A run of the same call that a takeover left running can record
+			// the call after the lookup above. This run then deleted nothing,
+			// or failed on the record's primary key and rolled back.
+			if result, found, recErr := recordedChatNoteCall(ctx, fdb, chatID, callID, args.Action); recErr == nil && found {
+				return result, nil
+			}
+		}
 		if err != nil {
 			return nil, xerrors.Errorf("delete note: %w", err)
 		}
 		return chatNoteDeleteResult{Path: args.Path, Deleted: deleted > 0}, nil
-	}
-	if len(args.Content) > maxChatNoteBytes {
-		return nil, xerrors.Errorf("content is %d bytes: a note holds %d bytes at most", len(args.Content), maxChatNoteBytes)
 	}
 	note, err := fdb.WriteChatNote(ctx, forkdb.WriteChatNoteParams{
 		ChatID:   chatID,
@@ -145,7 +166,15 @@ func (p *Server) runChatNotes(ctx context.Context, chatID uuid.UUID, args chatNo
 		Content:  args.Content,
 		MaxNotes: maxChatNotes,
 		Append:   args.Action == "append",
+		CallID:   callID,
 	})
+	if err != nil {
+		// The same race as for delete: the other run recorded the call, so
+		// this run changed nothing or rolled back.
+		if result, found, recErr := recordedChatNoteCall(ctx, fdb, chatID, callID, args.Action); recErr == nil && found {
+			return result, nil
+		}
+	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, xerrors.Errorf("this chat has %d notes, the most it keeps: write to an existing note or delete one first", maxChatNotes)
@@ -155,4 +184,24 @@ func (p *Server) runChatNotes(ctx context.Context, chatID uuid.UUID, args chatNo
 		return nil, xerrors.Errorf("write note: %w", err)
 	}
 	return chatNoteSummary{Path: note.Path, Bytes: int64(len(note.Content)), UpdatedAt: note.UpdatedAt}, nil
+}
+
+// recordedChatNoteCall returns the result that notes call callID of chatID
+// recorded, with found set, or found=false when callID is not set or not
+// recorded.
+func recordedChatNoteCall(ctx context.Context, fdb forkdb.Store, chatID uuid.UUID, callID uuid.NullUUID, action string) (result any, found bool, err error) {
+	if !callID.Valid {
+		return nil, false, nil
+	}
+	call, err := fdb.GetChatNoteCall(ctx, forkdb.GetChatNoteCallParams{ID: callID.UUID, ChatID: chatID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, xerrors.Errorf("read notes call: %w", err)
+	}
+	if action == "delete" {
+		return chatNoteDeleteResult{Path: call.Path, Deleted: call.Deleted}, true, nil
+	}
+	return chatNoteSummary{Path: call.Path, Bytes: call.Bytes, UpdatedAt: call.UpdatedAt}, true, nil
 }

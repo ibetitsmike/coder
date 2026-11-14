@@ -377,6 +377,11 @@ func (f forkQueryMetricsStore) GetChatNote(ctx context.Context, arg forkdb.GetCh
 	return f.s.GetChatNote(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetChatNoteCall(ctx context.Context, arg forkdb.GetChatNoteCallParams) (forkdb.ChatNoteCall, error) {
+	defer f.observe(ctx, "GetChatNoteCall", time.Now())
+	return f.s.GetChatNoteCall(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
 	defer f.observe(ctx, "ListChatHistoryRows", time.Now())
 	return f.s.ListChatHistoryRows(ctx, chatID)
@@ -392,7 +397,7 @@ func (f forkQueryMetricsStore) ListChatNotes(ctx context.Context, chatID uuid.UU
 	return f.s.ListChatNotes(ctx, chatID)
 }
 
-func (f forkQueryMetricsStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.ChatNote, error) {
+func (f forkQueryMetricsStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.WriteChatNoteRow, error) {
 	defer f.observe(ctx, "WriteChatNote", time.Now())
 	return f.s.WriteChatNote(ctx, arg)
 }
