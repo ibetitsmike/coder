@@ -135,6 +135,10 @@ func (p *Server) createSubagentWorkspace(ctx context.Context, child database.Cha
 		if err != nil {
 			return xerrors.Errorf("get child chat: %w", err)
 		}
+		if chat.Archived {
+			// A replay of the spawn retired the child meanwhile.
+			return xerrors.New("create the child's workspace: the child was archived meanwhile")
+		}
 		if !chat.WorkspaceID.Valid {
 			return xerrors.New("create the child's workspace: the child was not bound to it")
 		}
@@ -170,25 +174,53 @@ func (p *Server) createSubagentWorkspace(ctx context.Context, child database.Cha
 // discardSubagent archives the child chatID whose workspace failed and stops
 // the workspace in the background if it has one. Both are best-effort.
 func (p *Server) discardSubagent(ctx context.Context, chatID uuid.UUID) {
+	if _, err := p.discardSubagentUnless(ctx, chatID, nil); err != nil {
+		p.logger.Warn(ctx, "archive subagent whose workspace failed", slog.F("chat_id", chatID), slog.Error(err))
+	}
+}
+
+// discardSubagentUnless archives the child chatID unless keep, run under the
+// lock of the child, reports true. It then stops the workspace of the child
+// in the background if it has one, also when the child was archived before,
+// because a spawn can bind a workspace to a child that a replay archived. It
+// reports whether keep kept the child.
+func (p *Server) discardSubagentUnless(ctx context.Context, chatID uuid.UUID, keep func(context.Context, database.Store) (bool, error)) (bool, error) {
 	// The spawn may have failed because its context was canceled, and the
 	// child must still go.
 	ctx = context.WithoutCancel(ctx)
-	var archived database.Chat
+	var (
+		archived database.Chat
+		kept     bool
+		newly    bool
+	)
 	err := p.newChatMachine(chatID).Update(ctx, func(tx *chatstate.Tx, store database.Store) error {
-		if _, err := tx.SetArchived(chatstate.SetArchivedInput{Archived: true}); err != nil {
+		if keep != nil {
+			var err error
+			if kept, err = keep(ctx, store); err != nil || kept {
+				return err
+			}
+		}
+		chat, err := store.GetChatByID(ctx, chatID)
+		if err != nil {
 			return err
 		}
-		var err error
+		if !chat.Archived {
+			if _, err := tx.SetArchived(chatstate.SetArchivedInput{Archived: true}); err != nil {
+				return err
+			}
+			newly = true
+		}
 		archived, err = store.GetChatByID(ctx, chatID)
 		return err
 	})
-	if err != nil {
-		p.logger.Warn(ctx, "archive subagent whose workspace failed", slog.F("chat_id", chatID), slog.Error(err))
-		return
+	if err != nil || kept {
+		return kept, err
 	}
-	p.publishChatPubsubEvent(archived, codersdk.ChatWatchEventKindDeleted, nil)
+	if newly {
+		p.publishChatPubsubEvent(archived, codersdk.ChatWatchEventKindDeleted, nil)
+	}
 	if !archived.WorkspaceID.Valid || p.stopWorkspaceFn == nil {
-		return
+		return false, nil
 	}
 	// The stop can wait for the create build that the spawn gave up on.
 	stopCtx, stop := p.inflightContext(ctx)
@@ -202,6 +234,7 @@ func (p *Server) discardSubagent(ctx context.Context, chatID uuid.UUID) {
 		stop()
 		p.logger.Warn(ctx, "schedule stop of subagent workspace", slog.F("chat_id", chatID), slog.Error(err))
 	}
+	return false, nil
 }
 
 // stopSubagentWorkspace stops the workspace of child with the stop_workspace

@@ -72,13 +72,17 @@ type forkChildChatOverrides struct {
 }
 
 // forkChildChatID returns the deterministic step chat ID for a workflow step
-// spawn, or a fresh random ID for every other child. The ID is selected
-// before the user prompt hooks dispatch: hook events carry the chat ID, and
-// consumers correlate a chat's events by it, so the admission hook must see
-// the ID the step chat is persisted with.
-func (o childSubagentChatOptions) forkChildChatID() uuid.UUID {
+// spawn, the ID that a replay safe spawn_agent call derived from its tool
+// call ID (fork_spawn_replay.go), or a fresh random ID for every other
+// child. The ID is selected before the user prompt hooks dispatch: hook
+// events carry the chat ID, and consumers correlate a chat's events by it, so
+// the admission hook must see the ID the step chat is persisted with.
+func (o childSubagentChatOptions) forkChildChatID(ctx context.Context) uuid.UUID {
 	if o.fork != nil && o.fork.chatID != uuid.Nil {
 		return o.fork.chatID
+	}
+	if id, ok := ctx.Value(forkSpawnChildIDKey{}).(uuid.UUID); ok && id != uuid.Nil {
+		return id
 	}
 	return uuid.New()
 }
