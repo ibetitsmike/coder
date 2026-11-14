@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/brianvoe/gofakeit/v7"
@@ -1236,4 +1237,350 @@ func TestOrganizationAgentDefinitionOrganizationMembership(t *testing.T) {
 
 func pluginPackObject(pack forkdb.PluginPack) rbac.Object {
 	return rbac.ResourceOrganizationSkill.WithID(pack.ID).InOrg(pack.OrganizationID)
+}
+
+// TestForkQuerierChatdSkipsChatPreReads proves that a subject with site-wide
+// chat permission (chatd, system-restricted) authorizes the fork chat
+// queries in memory and issues no chat, wake-up, workflow run or workflow
+// step pre-read (fork issue #292). The counting store fails the site-wide
+// subtests when a pre-read comes back, which is the negative control that a
+// regression restores and the test catches. A member still takes the
+// pre-read path and is still denied on another user's chat.
+func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
+	t.Parallel()
+
+	chat := testutil.Fake(t, gofakeit.New(0), database.Chat{})
+	wakeup := testutil.Fake(t, gofakeit.New(1), forkdb.ChatWakeup{ChatID: chat.ID})
+	run := testutil.Fake(t, gofakeit.New(2), forkdb.WorkflowRun{ChatID: chat.ID})
+	step := testutil.Fake(t, gofakeit.New(3), forkdb.WorkflowStep{RunID: run.ID})
+
+	// cases run the fork methods that authorize through a chat. run calls
+	// the method under test on the wrapped store.
+	cases := []struct {
+		name string
+		run  func(ctx context.Context, fdb forkdb.Store) error
+	}{
+		{name: "InsertChatSubagent", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.InsertChatSubagent(ctx, forkdb.InsertChatSubagentParams{ChatID: chat.ID})
+			return err
+		}},
+		{name: "GetChatTodosByChatID", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetChatTodosByChatID(ctx, chat.ID)
+			return err
+		}},
+		{name: "GetChatPinnedSkillsByChatID", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetChatPinnedSkillsByChatID(ctx, chat.ID)
+			return err
+		}},
+		{name: "GetChatSubagentByChatID", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
+			return err
+		}},
+		{name: "ListChildChatIDsWithActiveEventsWakeups", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
+			return err
+		}},
+		{name: "ListPendingChatDescendantQuestionsByRoot", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, chat.ID)
+			return err
+		}},
+		{name: "GetChatWakeupByID", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetChatWakeupByID(ctx, wakeup.ID)
+			return err
+		}},
+		{name: "ListChatWakeupRunKeys", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
+			return err
+		}},
+		{name: "FinishChatWakeupClaim", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.FinishChatWakeupClaim(ctx, forkdb.FinishChatWakeupClaimParams{ID: wakeup.ID})
+			return err
+		}},
+		{name: "InsertChatWakeupRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{WakeupID: wakeup.ID})
+			return err
+		}},
+		{name: "GetWorkflowRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetWorkflowRun(ctx, run.ID)
+			return err
+		}},
+		{name: "GetWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetWorkflowStep(ctx, step.ID)
+			return err
+		}},
+		{name: "GetWorkflowStepsByRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.GetWorkflowStepsByRun(ctx, run.ID)
+			return err
+		}},
+		{name: "InsertWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
+			return fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{RunID: run.ID})
+		}},
+		{name: "UpdateWorkflowRunStatus", run: func(ctx context.Context, fdb forkdb.Store) error {
+			return fdb.UpdateWorkflowRunStatus(ctx, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
+		}},
+		{name: "UpdateWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
+			return fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+		}},
+		{name: "FailOpenWorkflowStepsOfRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.FailOpenWorkflowStepsOfRun(ctx, forkdb.FailOpenWorkflowStepsOfRunParams{RunID: run.ID})
+			return err
+		}},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// chatd and system-restricted hold site-wide chat permission:
+			// chatd drives the wake-up worker and the generation step, the
+			// system-restricted subject is the workflow journal's caller.
+			siteWide := []struct {
+				name string
+				ctx  context.Context
+			}{
+				{"chatd", dbauthz.AsChatd(context.Background())},
+				{"system-restricted", dbauthz.AsSystemRestricted(context.Background())},
+			}
+			for _, sw := range siteWide {
+				sw := sw
+				t.Run(sw.name, func(t *testing.T) {
+					t.Parallel()
+
+					counts, az := countingForkStores(t, chat, wakeup, run, step)
+					fq := az.(forkdb.Wrapper).ForkWrap(counts.fdb)
+
+					err := tc.run(sw.ctx, fq)
+					require.NoError(t, err)
+
+					// The chat read is the only true pre-read for every
+					// case. The wake-up, run and step reads are pre-reads
+					// only for callers that discard the row: the Get*
+					// methods return it, so their single call is the query
+					// itself.
+					require.Zero(t, counts.get("GetChatByID"),
+						"%s must not pre-read the chat with %s: %d calls", tc.name, sw.name, counts.get("GetChatByID"))
+					for _, m := range []string{"GetChatWakeupByID", "GetWorkflowRun", "GetWorkflowStep"} {
+						if m == tc.name || (tc.name == "UpdateWorkflowStep" && m == "GetWorkflowStep") {
+							require.Equal(t, int64(1), counts.get(m),
+								"%s must call %s exactly once for the row itself", tc.name, m)
+							continue
+						}
+						require.Zero(t, counts.get(m),
+							"%s must not pre-read %s with %s: %d calls", tc.name, m, sw.name, counts.get(m))
+					}
+				})
+			}
+
+			t.Run("member-denied", func(t *testing.T) {
+				t.Parallel()
+
+				counts, az := countingForkStores(t, chat, wakeup, run, step)
+				fq := az.(forkdb.Wrapper).ForkWrap(counts.fdb)
+
+				// A member of another organization cannot read the chat:
+				// chat.RBACObject is InOrg(chat.OrganizationID), and the
+				// member subject has no org membership.
+				member := rbac.Subject{
+					ID:     uuid.NewString(),
+					Roles:  rbac.RoleIdentifiers{rbac.RoleMember()},
+					Groups: []string{},
+					Scope:  rbac.ScopeAll,
+				}
+				ctx := dbauthz.As(context.Background(), member)
+				err := tc.run(ctx, fq)
+				require.True(t, dbauthz.IsNotAuthorizedError(err),
+					"member must be denied another user's chat, got: %v", err)
+
+				// The member still pays the pre-read that denies them:
+				// the chat read always runs, and the wake-up, run or step
+				// read runs when the slow path needs it to find the chat.
+				readsChatID := counts.get("GetChatByID")
+				require.Equal(t, int64(1), readsChatID, "the chat pre-read must run for a member")
+				switch tc.name {
+				case "InsertChatSubagent", "GetChatTodosByChatID",
+					"GetChatPinnedSkillsByChatID", "GetChatSubagentByChatID",
+					"ListChildChatIDsWithActiveEventsWakeups",
+					"ListPendingChatDescendantQuestionsByRoot":
+					require.Zero(t, counts.get("GetChatWakeupByID"))
+					require.Zero(t, counts.get("GetWorkflowRun"))
+					require.Zero(t, counts.get("GetWorkflowStep"))
+				case "GetChatWakeupByID", "ListChatWakeupRunKeys",
+					"FinishChatWakeupClaim", "InsertChatWakeupRun":
+					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
+					require.Zero(t, counts.get("GetWorkflowRun"))
+					require.Zero(t, counts.get("GetWorkflowStep"))
+				case "GetWorkflowRun", "GetWorkflowStepsByRun",
+					"InsertWorkflowStep", "UpdateWorkflowRunStatus",
+					"FailOpenWorkflowStepsOfRun":
+					require.Zero(t, counts.get("GetChatWakeupByID"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
+					require.Zero(t, counts.get("GetWorkflowStep"))
+				case "GetWorkflowStep":
+					require.Zero(t, counts.get("GetChatWakeupByID"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
+				case "UpdateWorkflowStep":
+					// The step read survives the fast path on purpose: the
+					// UPDATE is a :exec query, so a deleted step would
+					// otherwise vanish silently. The member still pays the
+					// run read to find the chat; the chatd fast path skips
+					// it.
+					require.Zero(t, counts.get("GetChatWakeupByID"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
+				}
+			})
+		})
+	}
+}
+
+// forkCounts records the calls of the counting fork store methods.
+type forkCounts struct {
+	mu    sync.Mutex
+	calls map[string]int64
+	fdb   forkdb.Store
+	db    database.Store
+}
+
+func (c *forkCounts) add(method string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls[method]++
+}
+
+func (c *forkCounts) get(method string) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[method]
+}
+
+// countingForkStores wraps the mocks so the counting methods return the
+// fixture rows. The wrapped methods the tests exercise are GetChatByID on
+// the upstream store and the three fork pre-reads.
+func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWakeup, run forkdb.WorkflowRun, step forkdb.WorkflowStep) (*forkCounts, database.Store) {
+	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	mDB := dbmock.NewMockStore(ctrl)
+	fdbMock := forkdbmock.NewMockStore(ctrl)
+
+	mDB.EXPECT().Wrappers().Return([]string{}).AnyTimes()
+	mDB.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+	fdbMock.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+	fdbMock.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+	fdbMock.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
+	// The queries after authorization succeed so a denied member is the
+	// only possible failure.
+	fdbMock.EXPECT().InsertChatSubagent(gomock.Any(), gomock.Any()).Return(forkdb.ChatSubagent{}, nil).AnyTimes()
+	fdbMock.EXPECT().GetChatTodosByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatTodo{}, nil).AnyTimes()
+	fdbMock.EXPECT().GetChatPinnedSkillsByChatID(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
+	fdbMock.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatSubagent{}, nil).AnyTimes()
+	fdbMock.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
+	fdbMock.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
+	fdbMock.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(nil, nil).AnyTimes()
+	fdbMock.EXPECT().FinishChatWakeupClaim(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
+	fdbMock.EXPECT().InsertChatWakeupRun(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupRun{}, nil).AnyTimes()
+	fdbMock.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(nil, nil).AnyTimes()
+	fdbMock.EXPECT().InsertWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), gomock.Any()).Return(int64(0), nil).AnyTimes()
+
+	az := dbauthz.New(mDB, rbac.NewAuthorizer(prometheus.NewRegistry()), slog.Make(), coderdtest.AccessControlStorePointer())
+
+	c := &forkCounts{calls: map[string]int64{}}
+	c.fdb = &countingForkStore{MockStore: fdbMock, c: c}
+	c.db = &countingDBStore{MockStore: mDB, c: c}
+
+	// dbauthz.New takes database.Store, so hand it the counting wrapper of
+	// the mock to count its GetChatByID pre-reads too.
+	wrapped := dbauthz.New(c.db, rbac.NewAuthorizer(prometheus.NewRegistry()), slog.Make(), coderdtest.AccessControlStorePointer())
+	_ = az
+	return c, wrapped
+}
+
+// countingDBStore counts the upstream store calls that the fork wrappers
+// use as pre-reads.
+type countingDBStore struct {
+	*dbmock.MockStore
+	c *forkCounts
+}
+
+func (s *countingDBStore) GetChatByID(ctx context.Context, id uuid.UUID) (database.Chat, error) {
+	s.c.add("GetChatByID")
+	return s.MockStore.GetChatByID(ctx, id)
+}
+
+// countingForkStore counts the fork store calls that the fork wrappers use
+// as pre-reads.
+type countingForkStore struct {
+	*forkdbmock.MockStore
+	c *forkCounts
+}
+
+func (s *countingForkStore) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	s.c.add("GetChatWakeupByID")
+	return s.MockStore.GetChatWakeupByID(ctx, id)
+}
+
+func (s *countingForkStore) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, error) {
+	s.c.add("GetWorkflowRun")
+	return s.MockStore.GetWorkflowRun(ctx, id)
+}
+
+func (s *countingForkStore) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
+	s.c.add("GetWorkflowStep")
+	return s.MockStore.GetWorkflowStep(ctx, id)
+}
+
+// TestForkActsOnAllChatsMatchesRoles guards the fork chat fast path's
+// invariant: the chatd and system-restricted subject types must keep
+// site-wide chat permission in their roles. actsOnAllChats trusts the
+// subject type without evaluating policy, so a role that loses the chat
+// grant would otherwise let the fast path allow calls the object-level
+// check would deny.
+func TestForkActsOnAllChatsMatchesRoles(t *testing.T) {
+	t.Parallel()
+
+	az := rbac.NewAuthorizer(prometheus.NewRegistry())
+	obj := database.Chat{
+		OwnerID:        uuid.New(),
+		OrganizationID: uuid.New(),
+	}.RBACObject()
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"chatd", dbauthz.AsChatd(context.Background())},
+		{"system-restricted", dbauthz.AsSystemRestricted(context.Background())},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			act, _ := dbauthz.ActorFromContext(tc.ctx)
+			for _, action := range []policy.Action{policy.ActionRead, policy.ActionUpdate} {
+				err := az.Authorize(tc.ctx, act, action, obj)
+				require.NoError(t, err,
+					"%s must keep %s on chats site-wide, or actsOnAllChats grants silently", tc.name, action)
+			}
+		})
+	}
+
+	t.Run("member-denied", func(t *testing.T) {
+		t.Parallel()
+
+		member := rbac.Subject{
+			ID:     uuid.NewString(),
+			Roles:  rbac.RoleIdentifiers{rbac.RoleMember()},
+			Groups: []string{},
+			Scope:  rbac.ScopeAll,
+		}
+		ctx := dbauthz.As(context.Background(), member)
+		act, _ := dbauthz.ActorFromContext(ctx)
+		err := az.Authorize(ctx, act, policy.ActionRead, obj)
+		require.Error(t, err, "a member must not hold site-wide chat permission")
+	})
 }
