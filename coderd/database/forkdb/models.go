@@ -245,6 +245,15 @@ type ChatExcludedPluginPack struct {
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`
 }
 
+// Notes that a chat keeps with the notes tool, such as the checkpoint.md of the fork-token-budget experiment. They outlast compaction and new context windows.
+type ChatNote struct {
+	ChatID    uuid.UUID `db:"chat_id" json:"chat_id"`
+	Path      string    `db:"path" json:"path"`
+	Content   string    `db:"content" json:"content"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
 	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`
