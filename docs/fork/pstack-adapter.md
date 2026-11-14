@@ -201,6 +201,8 @@ The web UI shows a proposal only when all of these hold:
 One gap stays open: the sandbox lets the page navigate its own frame to another site, and that navigation can carry what the user typed in its URL.
 The network policy covers only the attached page, not the site it navigates to.
 The fixed line above the page tells the user not to type secrets, and nothing reaches the chat without the confirmation.
+When the frame loads anything after the page, the viewer closes it, drops an open proposal, and offers to show the page again, so the user does not keep using the other site inside the chat.
+The first request to that site still leaves the browser.
 
 ### Wake-ups
 
@@ -769,9 +771,9 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
-  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:38-42`.
-  The newest page of a name wins, `forkHtmlAttachments.ts:68-80`.
-  The bridge checks the frame, the schema, the click, the interval, and an open proposal, `ForkHtmlAttachmentViewer.tsx:99-125`, and sends only on **Send**, `:127-136`, `:172-195`, under the fixed header, `:151-162`.
+  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
+  The newest page of a name wins, `forkHtmlAttachments.ts:68-80`, and the viewer has the fixed header outside the frame, `ForkHtmlAttachmentViewer.tsx:172-185`, and closes the frame after a navigation, `:105-114`, `:186-194`.
+  The bridge checks the frame, the schema, the click, the interval, and an open proposal, `ForkHtmlAttachmentViewer.tsx:122-148`, and sends only on **Send**, `:150-159`, `:208-232`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

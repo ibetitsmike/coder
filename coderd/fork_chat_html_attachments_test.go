@@ -19,7 +19,9 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-func newForkHTMLAttachmentsAPI(t *testing.T, experiments ...codersdk.Experiment) (*codersdk.Client, database.Store) {
+// newForkHTMLAttachmentsAPI starts a server. A filesRateLimit of 0 keeps the
+// test default, which disables the limit.
+func newForkHTMLAttachmentsAPI(t *testing.T, filesRateLimit int, experiments ...codersdk.Experiment) (*codersdk.Client, database.Store) {
 	t.Helper()
 
 	db, ps := dbtestutil.NewDB(t)
@@ -31,6 +33,7 @@ func newForkHTMLAttachmentsAPI(t *testing.T, experiments ...codersdk.Experiment)
 		DeploymentValues: values,
 		Database:         db,
 		Pubsub:           ps,
+		FilesRateLimit:   filesRateLimit,
 	})
 	return client, db
 }
@@ -85,11 +88,17 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 
 	const page = `<!doctype html><button onclick="parent.postMessage({type:'coder:chat-message',text:'ok'},'*')">OK</button>`
 
+	// The subtests share one server per deployment setup and add their own
+	// files.
+	client, db := newForkHTMLAttachmentsAPI(t, 0, codersdk.ExperimentForkHTMLAttachments)
+	user := coderdtest.CreateFirstUser(t, client)
+	member, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
+	offClient, offDB := newForkHTMLAttachmentsAPI(t, 0)
+	offUser := coderdtest.CreateFirstUser(t, offClient)
+
 	t.Run("ServesSandboxedHTML", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t, codersdk.ExperimentForkHTMLAttachments)
-		user := coderdtest.CreateFirstUser(t, client)
 		// attach_file stores an HTML page as text/plain.
 		fileID := insertForkHTMLChatFile(t, db, user, "status.html", "text/plain", page)
 
@@ -100,6 +109,8 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 		require.Equal(t, "nosniff", res.header.Get("X-Content-Type-Options"))
 		require.Equal(t, "no-referrer", res.header.Get("Referrer-Policy"))
 		require.Equal(t, `inline; filename=status.html`, res.header.Get("Content-Disposition"))
+		// Every load revalidates, so revoked access applies at once.
+		require.Equal(t, "private, no-cache", res.header.Get("Cache-Control"))
 
 		// The policy is what keeps the page away from the session and the
 		// API, so pin it exactly.
@@ -115,8 +126,6 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 	t.Run("AcceptsHTMLMediaTypeAndHtmExtension", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t, codersdk.ExperimentForkHTMLAttachments)
-		user := coderdtest.CreateFirstUser(t, client)
 		fileID := insertForkHTMLChatFile(t, db, user, "PLAN.HTM", "text/html", page)
 
 		res := getForkHTMLAttachment(t, client, fileID.String())
@@ -127,8 +136,6 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 	t.Run("RejectsOtherFiles", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t, codersdk.ExperimentForkHTMLAttachments)
-		user := coderdtest.CreateFirstUser(t, client)
 		for _, file := range []struct{ name, mimetype string }{
 			{"notes.txt", "text/plain"},
 			{"image.html", "image/png"},
@@ -146,10 +153,7 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 	t.Run("HidesOtherUsersFiles", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t, codersdk.ExperimentForkHTMLAttachments)
-		user := coderdtest.CreateFirstUser(t, client)
 		fileID := insertForkHTMLChatFile(t, db, user, "status.html", "text/plain", page)
-		member, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
 
 		res := getForkHTMLAttachment(t, member, fileID.String())
 		require.Equal(t, http.StatusNotFound, res.status)
@@ -158,11 +162,9 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 	t.Run("ExperimentOff", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t)
-		user := coderdtest.CreateFirstUser(t, client)
-		fileID := insertForkHTMLChatFile(t, db, user, "status.html", "text/plain", page)
+		fileID := insertForkHTMLChatFile(t, offDB, offUser, "status.html", "text/plain", page)
 
-		res := getForkHTMLAttachment(t, client, fileID.String())
+		res := getForkHTMLAttachment(t, offClient, fileID.String())
 		require.Equal(t, http.StatusForbidden, res.status)
 		require.Contains(t, res.body, "fork-html-attachments")
 		requireForkHTMLAttachmentSandbox(t, res)
@@ -173,16 +175,10 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 	t.Run("SandboxesEveryResponse", func(t *testing.T) {
 		t.Parallel()
 
-		client, db := newForkHTMLAttachmentsAPI(t, codersdk.ExperimentForkHTMLAttachments)
-		user := coderdtest.CreateFirstUser(t, client)
 		htmlID := insertForkHTMLChatFile(t, db, user, "status.html", "text/plain", page)
 		textID := insertForkHTMLChatFile(t, db, user, "notes.txt", "text/plain", page)
-		member, _ := coderdtest.CreateAnotherUser(t, client, user.OrganizationID)
-		anonymous := codersdk.New(client.URL)
-
-		offClient, offDB := newForkHTMLAttachmentsAPI(t)
-		offUser := coderdtest.CreateFirstUser(t, offClient)
 		offID := insertForkHTMLChatFile(t, offDB, offUser, "status.html", "text/plain", page)
+		anonymous := codersdk.New(client.URL)
 
 		for _, tc := range []struct {
 			name   string
@@ -205,5 +201,21 @@ func TestForkChatHTMLAttachment(t *testing.T) {
 				require.NotContains(t, res.header.Get("Content-Type"), "text/html", tc.name)
 			}
 		}
+	})
+
+	// The route shares the files rate limit of the upstream chat file
+	// routes, and its 429 is sandboxed too.
+	t.Run("RateLimited", func(t *testing.T) {
+		t.Parallel()
+
+		limited, limitedDB := newForkHTMLAttachmentsAPI(t, 1, codersdk.ExperimentForkHTMLAttachments)
+		limitedUser := coderdtest.CreateFirstUser(t, limited)
+		fileID := insertForkHTMLChatFile(t, limitedDB, limitedUser, "status.html", "text/plain", page)
+
+		res := getForkHTMLAttachment(t, limited, fileID.String())
+		require.Equal(t, http.StatusOK, res.status)
+		res = getForkHTMLAttachment(t, limited, fileID.String())
+		require.Equal(t, http.StatusTooManyRequests, res.status)
+		requireForkHTMLAttachmentSandbox(t, res)
 	})
 }

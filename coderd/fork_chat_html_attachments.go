@@ -111,7 +111,9 @@ func (api *API) getForkChatHTMLAttachment(rw http.ResponseWriter, r *http.Reques
 	header := rw.Header()
 	header.Set("Content-Type", "text/html; charset=utf-8")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
-	header.Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Revalidate on every load, so revoked access and the experiment switch
+	// take effect at once. Last-Modified keeps a revalidation cheap.
+	header.Set("Cache-Control", "private, no-cache")
 	header.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": chatFile.Name}))
 	http.ServeContent(rw, r, "", chatFile.CreatedAt, bytes.NewReader(chatFile.Data))
 }

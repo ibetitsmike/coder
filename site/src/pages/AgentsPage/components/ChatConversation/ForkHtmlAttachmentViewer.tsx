@@ -77,7 +77,10 @@ export const ForkHtmlAttachmentPreview: React.FC<
 /**
  * Renders the page in an iframe that may run scripts but has an opaque
  * origin, so it cannot read the Coder session, and whose server policy
- * blocks network access. A page proposes text for the chat with
+ * blocks network access. The sandbox still lets a page navigate its own
+ * frame, so the viewer closes the frame after its first navigation.
+ *
+ * A page proposes text for the chat with
  * `parent.postMessage({ type: "coder:chat-message", text }, "*")`. The viewer
  * takes only proposals from its own frame, right after a click, and at most
  * one per forkHtmlMessageIntervalMs. It shows the exact message and sends it
@@ -95,6 +98,26 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const headerId = useId();
 	const proposalId = useId();
 	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
+	const frameLoads = useRef(0);
+	const [navigatedAway, setNavigatedAway] = useState(false);
+	const [frameKey, setFrameKey] = useState(0);
+
+	// The page itself is the first load. Any later load is the page leaving
+	// for another address, or reloading. A proposal still open may come from
+	// that other address, so it goes too.
+	const onFrameLoad = () => {
+		frameLoads.current += 1;
+		if (frameLoads.current > 1) {
+			setNavigatedAway(true);
+			setProposal(null);
+		}
+	};
+
+	const reopen = () => {
+		frameLoads.current = 0;
+		setFrameKey((key) => key + 1);
+		setNavigatedAway(false);
+	};
 
 	useEffect(() => {
 		// An open proposal stays as shown: the page cannot swap its text
@@ -160,15 +183,28 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 					<DownloadIcon aria-hidden="true" className="size-3.5" />
 				</AttachmentDownloadLink>
 			</figcaption>
-			<iframe
-				ref={frameRef}
-				src={getForkHtmlAttachmentURL(block.file_id)}
-				sandbox="allow-scripts"
-				referrerPolicy="no-referrer"
-				loading="lazy"
-				title={download.displayName}
-				className="h-96 w-full rounded-md border border-solid border-border bg-white"
-			/>
+			{navigatedAway ? (
+				<div className="flex h-96 w-full flex-col items-center justify-center gap-2 rounded-md border border-solid border-border p-4 text-center text-sm text-content-secondary">
+					<p className="m-0">
+						The page tried to load another address, so the viewer closed it.
+					</p>
+					<Button size="sm" variant="outline" onClick={reopen}>
+						Show the page again
+					</Button>
+				</div>
+			) : (
+				<iframe
+					key={frameKey}
+					ref={frameRef}
+					src={getForkHtmlAttachmentURL(block.file_id)}
+					sandbox="allow-scripts"
+					referrerPolicy="no-referrer"
+					loading="lazy"
+					title={download.displayName}
+					onLoad={onFrameLoad}
+					className="h-96 w-full rounded-md border border-solid border-border bg-white"
+				/>
+			)}
 			{proposal !== null && (
 				<section
 					aria-labelledby={proposalId}

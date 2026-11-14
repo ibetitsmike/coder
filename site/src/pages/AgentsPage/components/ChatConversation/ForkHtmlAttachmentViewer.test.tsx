@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -305,6 +305,43 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
 		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("closes the frame when the page navigates away", async () => {
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(screen.queryByTitle("choices.html")).toBeNull();
+		expect(
+			screen.getByText(
+				"The page tried to load another address, so the viewer closed it.",
+			),
+		).toBeInTheDocument();
+
+		await userEvent.click(
+			screen.getByRole("button", { name: "Show the page again" }),
+		);
+		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
+		expect(frame.getAttribute("src")).toBe(
+			`/api/v2/chats/fork/files/${MockChatHtmlFilePart.file_id}/html`,
+		);
+		fireEvent.load(frame);
+		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
+	});
+
+	it("drops an open proposal when the page navigates away", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		postFromFrame(pageMessage("Option A"));
+		await screen.findByRole("region", { name: proposalName });
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(queryProposal()).toBeNull();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
