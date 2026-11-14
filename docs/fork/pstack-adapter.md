@@ -276,7 +276,7 @@ A download link sits next to it.
 Without the experiment, the page shows as a download card.
 When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
 Only pages that the agent attaches run.
-An `.html` file that you upload yourself shows as a download card.
+An `.html` file that the user uploads shows as a download card.
 
 The page runs in a sandbox:
 
@@ -285,6 +285,7 @@ The page runs in a sandbox:
   Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
 - Forms don't submit.
   Handle a choice in a button's click handler instead.
+- The sandbox has no `allow-modals` and no `allow-downloads`, so `alert`, `confirm`, `prompt`, and downloads from inside the page do nothing.
 - The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
 
 Two gaps stay open, so treat what the user does in a page as visible to whoever wrote it.
