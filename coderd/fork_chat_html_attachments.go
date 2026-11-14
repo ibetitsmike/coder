@@ -81,8 +81,10 @@ func isForkHTMLAttachment(chatFile database.ChatFile) bool {
 // @Router /api/v2/chats/fork/files/{file}/html [get]
 // @x-apidocgen {"skip": true}
 // @Description Serves a stored .html or .htm chat file as text/html with a
-// @Description Content-Security-Policy that sandboxes it and blocks network
-// @Description access.
+// @Description Content-Security-Policy that sandboxes it and blocks fetches
+// @Description and subresource loads. It does not stop WebRTC in browsers
+// @Description that ignore webrtc 'block', such as Chromium, and it does not
+// @Description stop the page from navigating itself.
 //
 //nolint:revive // HTTP handler writes to ResponseWriter.
 func (api *API) getForkChatHTMLAttachment(rw http.ResponseWriter, r *http.Request) {

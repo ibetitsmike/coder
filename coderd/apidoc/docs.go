@@ -4617,7 +4617,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/files/{file}/html": {
             "get": {
-                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks network\naccess.",
+                "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks fetches\nand subresource loads. It does not stop WebRTC in browsers\nthat ignore webrtc 'block', such as Chromium, and it does not\nstop the page from navigating itself.",
                 "produces": [
                     "text/html"
                 ],
