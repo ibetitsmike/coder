@@ -1,7 +1,8 @@
 package chatd
 
 // This file is fork code: it holds the view_image tool of the fork-view-image
-// experiment. appendForkTools adds the tool to a turn.
+// experiment and the bound on how many viewed images stay in the prompt.
+// appendForkTools adds the tool to a turn and applies the bound.
 
 import (
 	"bytes"
@@ -19,6 +20,7 @@ import (
 	"charm.land/fantasy"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatfiles"
 	"github.com/coder/coder/v2/codersdk"
@@ -31,6 +33,16 @@ const (
 	// an image. Larger images fail the request, and a stored image would fail
 	// every later request too, so the tool rejects them up front.
 	viewImageMaxDimension = 8000
+	// maxViewedImagesInPrompt and maxViewedImageBytesInPrompt bound the
+	// view_image results a prompt carries. Older images become a text note.
+	// Anthropic lowers the per-image limits when a request holds more than
+	// maxImagesInPrompt images, tool results included, so viewed images only
+	// fill what the prompt's other images leave. Bedrock accepts 20 MB per
+	// request and base64 adds a third, so 10 MiB of images leaves room for
+	// the rest of the request.
+	maxViewedImagesInPrompt     = 8
+	maxImagesInPrompt           = 20
+	maxViewedImageBytesInPrompt = 10 << 20
 )
 
 // viewImageMediaTypes are the image types view_image returns.
@@ -47,7 +59,7 @@ func viewImageTool(model chatprovider.Model, getConn func(context.Context) (work
 		viewImageToolName,
 		"Look at a PNG, JPEG, GIF or WebP image file from the workspace, such as a screenshot. "+
 			"The image is added to your context so you can see it. "+
-			"Use read_file for text files.",
+			"Use read_file for text files. Only the newest viewed images stay in context, so call view_image again to see an older one.",
 		func(ctx context.Context, args viewImageArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// read_file passes the path as given, and so does view_image: a
 			// file name may start or end with whitespace.
@@ -185,4 +197,145 @@ func webpDimensions(data []byte) (width, height int, err error) {
 	default:
 		return 0, 0, xerrors.Errorf("unknown WebP chunk %q", data[12:16])
 	}
+}
+
+// dynamicToolOwnsViewImage reports whether this turn offers a caller-supplied
+// view_image, which it does while fork-view-image is off and appendDynamicTools
+// adds the chat's dynamic tools.
+func (p *Server) dynamicToolOwnsViewImage(chat database.Chat) bool {
+	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) || p.disableCallerSuppliedTools ||
+		isExploreSubagentMode(chat.Mode) || (chat.PlanMode.Valid && chat.PlanMode.ChatPlanMode == database.ChatPlanModePlan) {
+		return false
+	}
+	names, err := parseDynamicToolNames(chat.DynamicTools)
+	return err == nil && names[viewImageToolName]
+}
+
+// limitViewedImagesForModel applies limitViewedImages with another model than
+// the turn's, such as a compaction override. The override can have a lower
+// view_image size limit than the chat model.
+func (p *Server) limitViewedImagesForModel(chat database.Chat, messages []fantasy.Message, model chatprovider.Model) []fantasy.Message {
+	if p.dynamicToolOwnsViewImage(chat) {
+		return messages
+	}
+	return limitViewedImages(messages, nil, &model)
+}
+
+// limitViewedImages keeps the newest view_image results of messages as images,
+// at most maxViewedImagesInPrompt of them, maxImagesInPrompt images and
+// maxViewedImageBytesInPrompt decoded bytes together with the other media of
+// the prompt, and always the newest one. It replaces older ones with a text
+// note. The stored conversation keeps every image and only the prompt drops
+// them, so each turn sends a bounded amount of image data. With a model, it also
+// replaces an image over view_image's size limit for that model, which a chat
+// can hold after it switched from a model with a higher limit. It copies the
+// messages it changes and leaves messages itself unchanged. pending is the
+// tail the turn appends after messages. Its media counts toward the byte
+// budget, and limitViewedImages does not change it.
+func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.Model) []fantasy.Message {
+	sizeLimit := -1
+	if model != nil {
+		sizeLimit, _ = viewImageSizeLimit(*model)
+	}
+	// A result belongs to the newest earlier call with its ID, so a reused
+	// ID does not make another tool's result count as a viewed image.
+	// Other media, such as computer screenshots and attachments, stays in
+	// the prompt, so it takes its share of the byte budget first, and so does
+	// the media of the pending tail.
+	type position struct{ i, j int }
+	var results []position
+	otherBytes, otherImages := 0, 0
+	callTools := map[string]string{}
+	n := len(messages)
+	for i, msg := range append(messages[:n:n], pending...) {
+		for j, part := range msg.Content {
+			if call, ok := toolCallPartOf(part); ok {
+				callTools[call.ToolCallID] = call.ToolName
+				continue
+			}
+			if file, ok := part.(fantasy.FilePart); ok {
+				otherBytes += len(file.Data)
+				if strings.HasPrefix(file.MediaType, "image/") {
+					otherImages++
+				}
+				continue
+			}
+			result, ok := toolResultPartOf(part)
+			if !ok {
+				continue
+			}
+			if callTools[result.ToolCallID] == viewImageToolName && i < n {
+				results = append(results, position{i, j})
+			} else if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output); ok {
+				otherBytes += base64DecodedLen(media.Data)
+				if strings.HasPrefix(media.MediaType, "image/") {
+					otherImages++
+				}
+			}
+		}
+	}
+
+	var out []fantasy.Message
+	cloned := map[int]bool{}
+	kept, keptBytes := 0, otherBytes
+	for k := len(results) - 1; k >= 0; k-- {
+		i, j := results[k].i, results[k].j
+		result, _ := toolResultPartOf(messages[i].Content[j])
+		media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output)
+		if !ok {
+			continue
+		}
+		size := base64DecodedLen(media.Data)
+		var note string
+		switch {
+		case sizeLimit >= 0 && size > sizeLimit:
+			note = fmt.Sprintf("[image omitted: %d bytes is larger than the view_image limit of %d bytes for this model. Scale the image down and call view_image again.]", size, sizeLimit)
+		case kept == 0 || (kept < maxViewedImagesInPrompt && otherImages+kept < maxImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt):
+			kept++
+			keptBytes += size
+			continue
+		default:
+			note = "[image no longer in context: only the newest viewed images are kept. Call view_image again to see it.]"
+		}
+		if media.Text != "" {
+			note += "\n\n" + media.Text
+		}
+		result.Output = fantasy.ToolResultOutputContentText{Text: note}
+		if out == nil {
+			out = slices.Clone(messages)
+		}
+		if !cloned[i] {
+			out[i].Content = slices.Clone(messages[i].Content)
+			cloned[i] = true
+		}
+		out[i].Content[j] = result
+	}
+	if out == nil {
+		return messages
+	}
+	return out
+}
+
+func toolCallPartOf(part fantasy.MessagePart) (fantasy.ToolCallPart, bool) {
+	switch call := part.(type) {
+	case fantasy.ToolCallPart:
+		return call, true
+	case *fantasy.ToolCallPart:
+		if call != nil {
+			return *call, true
+		}
+	}
+	return fantasy.ToolCallPart{}, false
+}
+
+func toolResultPartOf(part fantasy.MessagePart) (fantasy.ToolResultPart, bool) {
+	switch result := part.(type) {
+	case fantasy.ToolResultPart:
+		return result, true
+	case *fantasy.ToolResultPart:
+		if result != nil {
+			return *result, true
+		}
+	}
+	return fantasy.ToolResultPart{}, false
 }

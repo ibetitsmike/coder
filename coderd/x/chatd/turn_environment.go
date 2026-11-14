@@ -740,7 +740,7 @@ func (p *Server) buildTurnEnvironment(
 		}
 	}
 
-	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn), forkToolsWithModel(model)); err != nil {
+	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn), forkToolsWithModel(model, &prompt, pendingPrompt)); err != nil {
 		return turnEnvironment{}, err
 	}
 	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
