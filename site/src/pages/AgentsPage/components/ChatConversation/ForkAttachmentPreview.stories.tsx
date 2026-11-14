@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, userEvent, within } from "storybook/test";
+import { fireEvent, fn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import {
 	MockChatHtmlFilePart,
@@ -104,6 +104,19 @@ export const ReplacedHtmlPage: Story = {
 	args: htmlPageArgs(MockChatReplacedHtmlFilePart),
 	parameters: htmlPageParameters,
 	decorators: [withHtmlMessages],
+};
+
+// Two loads mean the page navigated away, so the viewer shows its closed
+// state.
+export const NavigatedAwayHtmlPage: Story = {
+	args: htmlPageArgs(MockChatHtmlFilePart),
+	parameters: htmlPageParameters,
+	decorators: [withHtmlMessages],
+	play: ({ canvasElement }) => {
+		const frame = within(canvasElement).getByTitle("choices.html");
+		fireEvent.load(frame);
+		fireEvent.load(frame);
+	},
 };
 
 export const HtmlPageExperimentOff: Story = {

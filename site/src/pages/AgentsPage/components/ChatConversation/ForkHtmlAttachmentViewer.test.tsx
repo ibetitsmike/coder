@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -141,6 +141,19 @@ describe("ForkHtmlAttachmentViewer", () => {
 		);
 		fireEvent.load(frame);
 		expect(screen.queryByTitle("choices.html")).toBe(frame);
+	});
+
+	it("moves focus from a closed frame to the reopen button", () => {
+		renderPreview(["fork-html-attachments"]);
+		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
+
+		fireEvent.load(frame);
+		act(() => frame.focus());
+		fireEvent.load(frame);
+
+		expect(
+			screen.getByRole("button", { name: "Show the page again" }),
+		).toHaveFocus();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {

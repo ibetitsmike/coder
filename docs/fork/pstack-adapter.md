@@ -178,16 +178,20 @@ Only pages that the agent attaches run. An `.html` file that you upload yourself
 The page runs in a sandbox:
 
 - Scripts run, but the page has its own opaque origin, so it can't read the user's Coder session, cookies, or storage, or reach the dashboard.
-- The page can't make network requests, so it can't call the Coder API or load anything from elsewhere.
+- The page can't fetch or load anything over the network, so it can't call the Coder API or load anything from elsewhere.
   Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
 - Forms don't submit. Handle a choice in a button's click handler instead.
 - The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
 
-One gap stays open: the sandbox lets the page navigate its own frame to another site, and that navigation can carry what the user typed in its URL.
-The network policy covers only the attached page, not the site it navigates to.
+Two gaps stay open, so treat what the user does in a page as visible to whoever wrote it.
 The fixed line above the page tells the user not to type secrets.
-When the frame loads anything after the page, the viewer closes it and offers to show the page again, so the user does not keep using the other site inside the chat.
-The first request to that site still leaves the browser.
+
+- WebRTC: the content security policy doesn't cover it. The policy sets `webrtc 'block'`, but Chromium ignores that directive, so a page can still send data out over WebRTC.
+- Navigation: the sandbox lets the page navigate its own frame, and that navigation can carry what the user typed in its URL.
+  The dashboard's own policy (`frame-src`) blocks frames from other sites, so the browser refuses such a navigation before any request.
+  It still lets the frame load the Coder origin, the deployment's workspace app hosts, and any frame hosts the deployment adds to its policy.
+  When the frame loads anything after the page, the viewer closes it and offers to show the page again.
+  A page that navigates away before its first load finishes is not detected, because the viewer can't read where a sandboxed frame is.
 
 ### Wake-ups
 
@@ -756,8 +760,9 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
-  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
-  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:30-51`, `ForkHtmlAttachmentViewer.tsx:59-64`, and the viewer has the fixed header outside the frame, `:100-113`, and closes the frame after a navigation, `:83-90`, `:114-122`.
+  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:30-40`, set on every response before authentication, `:45-53`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
+  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:30-51`, `ForkHtmlAttachmentViewer.tsx:59-64`, and the viewer has the fixed header outside the frame, `:111-124`, and closes the frame after a navigation, moving focus to the reopen button, `:85-107`, `:125-133`.
+  The dashboard's `frame-src`, `coderd/httpmw/csp.go:84`, `:126`, `:141-143`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

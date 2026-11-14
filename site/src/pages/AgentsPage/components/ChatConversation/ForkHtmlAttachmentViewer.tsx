@@ -76,16 +76,27 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 }) => {
 	const headerId = useId();
 	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
+	const frameRef = useRef<HTMLIFrameElement>(null);
 	const frameLoads = useRef(0);
+	const focusReopen = useRef(false);
 	const [navigatedAway, setNavigatedAway] = useState(false);
 	const [frameKey, setFrameKey] = useState(0);
 
 	// The page itself is the first load. Any later load is the page leaving
-	// for another address, or reloading.
+	// for another address, or reloading. Focus in the frame would fall to the
+	// document body when the frame goes, so it moves to the reopen button.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
+			focusReopen.current = document.activeElement === frameRef.current;
 			setNavigatedAway(true);
+		}
+	};
+
+	const reopenRef = (button: HTMLButtonElement | null) => {
+		if (button && focusReopen.current) {
+			focusReopen.current = false;
+			button.focus();
 		}
 	};
 
@@ -116,13 +127,14 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 					<p className="m-0">
 						The page tried to load another address, so the viewer closed it.
 					</p>
-					<Button size="sm" variant="outline" onClick={reopen}>
+					<Button ref={reopenRef} size="sm" variant="outline" onClick={reopen}>
 						Show the page again
 					</Button>
 				</div>
 			) : (
 				<iframe
 					key={frameKey}
+					ref={frameRef}
 					src={getForkHtmlAttachmentURL(block.file_id)}
 					sandbox="allow-scripts"
 					referrerPolicy="no-referrer"
