@@ -90,15 +90,12 @@ const renderPreview = (
 	return result;
 };
 
-const originalUserActivation = Object.getOwnPropertyDescriptor(
-	navigator,
-	"userActivation",
-);
+const { userAgent } = navigator;
 
 const setUserActivation = (isActive: boolean) => {
-	Object.defineProperty(navigator, "userActivation", {
-		configurable: true,
-		value: { isActive, hasBeenActive: isActive },
+	vi.stubGlobal("navigator", {
+		userAgent,
+		userActivation: { isActive, hasBeenActive: isActive },
 	});
 };
 
@@ -138,10 +135,11 @@ const queryProposal = () =>
 // Expects the open proposal to show text, then confirms it.
 const confirmProposal = async (text: string) => {
 	const proposal = await screen.findByRole("region", { name: proposalName });
-	expect(within(proposal).getByText(text, { exact: false })).toHaveTextContent(
-		formatForkHtmlMessage("choices.html", text),
-		{ normalizeWhitespace: false },
-	);
+	expect(
+		within(proposal).getByRole("region", { name: "Message to send" }),
+	).toHaveTextContent(formatForkHtmlMessage("choices.html", text), {
+		normalizeWhitespace: false,
+	});
 	await userEvent.click(within(proposal).getByRole("button", { name: "Send" }));
 };
 
@@ -249,15 +247,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 	});
 
 	afterEach(() => {
-		if (originalUserActivation) {
-			Object.defineProperty(
-				navigator,
-				"userActivation",
-				originalUserActivation,
-			);
-		} else {
-			Reflect.deleteProperty(navigator, "userActivation");
-		}
+		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
 
@@ -296,6 +286,36 @@ describe("ForkHtmlAttachmentViewer", () => {
 		await screen.findByText("Sent to the chat");
 		expect(createChatMessage).toHaveBeenCalledTimes(2);
 		expect(queryProposal()).toBeNull();
+	});
+
+	it("returns focus to Send when a send fails", async () => {
+		mockCreateChatMessage().mockRejectedValueOnce(
+			new Error("The message queue is full."),
+		);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option B"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		// Browsers move focus from the disabled Send button to the body. The
+		// test DOM keeps it on the button, so the click comes with focus on
+		// the body.
+		act(() => screen.getByTitle("choices.html").blur());
+		const send = within(proposal).getByRole("button", { name: "Send" });
+		fireEvent.click(send);
+		await screen.findByText("The message queue is full.");
+		expect(send).toHaveFocus();
+	});
+
+	it("lets the keyboard reach the message before Cancel", async () => {
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option B"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		act(() => within(proposal).getByRole("button", { name: "Cancel" }).focus());
+		await userEvent.tab({ shift: true });
+		expect(
+			screen.getByRole("region", { name: "Message to send" }),
+		).toHaveFocus();
 	});
 
 	it("announces a new proposal in place of the last send status", async () => {

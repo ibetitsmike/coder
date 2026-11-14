@@ -101,6 +101,8 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const { reset: resetSend, isPending: sendPending } = sendMessage;
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const proposalRef = useRef<HTMLElement>(null);
+	const sendRef = useRef<HTMLButtonElement>(null);
+	const focusSend = useRef(false);
 	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
 	const lastDashboardInputAt = useRef(Number.NEGATIVE_INFINITY);
 	const [proposal, setProposal] = useState<string | null>(null);
@@ -225,7 +227,8 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	};
 
 	// The proposal stays open until the send succeeds, so a failed send can
-	// be retried.
+	// be retried. A pending send disables the focused Send button, so focus
+	// falls to the document body, and after a failure it goes back to Send.
 	const send = () => {
 		if (!agentId || proposal === null) {
 			return;
@@ -235,9 +238,23 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 				chatId: agentId,
 				req: { content: [{ type: "text", text: proposal }] },
 			},
-			{ onSuccess: closeProposal },
+			{
+				onSuccess: closeProposal,
+				onError: () => {
+					focusSend.current = document.activeElement === document.body;
+				},
+			},
 		);
 	};
+
+	// The error may render in the same commit that ends the pending state,
+	// so this runs after every commit.
+	useEffect(() => {
+		if (!sendPending && focusSend.current) {
+			focusSend.current = false;
+			sendRef.current?.focus();
+		}
+	});
 
 	let status = "";
 	if (sendMessage.isPending) {
@@ -299,7 +316,15 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 					<p id={proposalId} className="m-0 text-content-secondary">
 						The page asks to send this message to the chat:
 					</p>
-					<pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-content-primary">
+					{/* A long message scrolls, and the scroller takes focus so a
+					    keyboard user can read all of it before Send. */}
+					<pre
+						// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
+						tabIndex={0}
+						role="region"
+						aria-label="Message to send"
+						className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-sm font-sans text-content-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
+					>
 						{proposal}
 					</pre>
 					<div className="flex justify-end gap-2">
@@ -311,7 +336,12 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 						>
 							Cancel
 						</Button>
-						<Button size="sm" disabled={sendMessage.isPending} onClick={send}>
+						<Button
+							ref={sendRef}
+							size="sm"
+							disabled={sendMessage.isPending}
+							onClick={send}
+						>
 							Send
 						</Button>
 					</div>
