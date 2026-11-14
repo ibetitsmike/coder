@@ -1,6 +1,7 @@
 package chatd
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -159,7 +160,8 @@ func TestTokenBudgetTriggers(t *testing.T) {
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkTokenBudget}))
 	off := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{})
 	chat := database.Chat{ID: uuid.New()}
-	tools := []fantasy.AgentTool{on.chatNotesTool(chat), on.chatHistoryTool(chat), on.newContextTool(chat)}
+	tools := []fantasy.AgentTool{on.chatNotesTool(chat), on.chatHistoryTool(chat), on.newContextTool(chat, codersdk.ForkTokenBudgetFallbackNewWindow)}
+	summaryTools := []fantasy.AgentTool{on.chatNotesTool(chat), on.chatHistoryTool(chat), on.newContextTool(chat, codersdk.ForkTokenBudgetFallbackSummary)}
 
 	chatTrigger := compactionTrigger{thresholdPercent: 30, contextLimit: 1000}
 	orgTrigger := compactionTrigger{thresholdPercent: 80, contextLimit: 500}
@@ -205,6 +207,36 @@ func TestTokenBudgetTriggers(t *testing.T) {
 		_, _, _, needed := on.tokenBudgetTriggers(tools, rows(100, accepted), chatTrigger, chatTrigger, compactionTriggerSourceChat, compactionTrigger{}, false)
 		require.True(t, needed)
 	})
+	t.Run("SummaryFallbackOverrideBinds", func(t *testing.T) {
+		t.Parallel()
+		// The override's 400 tokens come before the usable 750, so the
+		// override summarizes first, as upstream's does before the threshold.
+		usable := compactionTrigger{thresholdPercent: 75, contextLimit: 1000}
+		binding, source, other, needed := on.tokenBudgetTriggers(summaryTools, rows(399), chatTrigger, orgTrigger, compactionTriggerSourceOrganization, chatTrigger, false)
+		require.Equal(t, orgTrigger, binding)
+		require.Equal(t, compactionTriggerSourceOrganization, source)
+		require.Equal(t, usable, other)
+		require.False(t, needed)
+		_, _, _, needed = on.tokenBudgetTriggers(summaryTools, rows(400), chatTrigger, orgTrigger, compactionTriggerSourceOrganization, chatTrigger, false)
+		require.True(t, needed)
+	})
+	t.Run("SummaryFallbackUsableBinds", func(t *testing.T) {
+		t.Parallel()
+		late := compactionTrigger{thresholdPercent: 90, contextLimit: 1000}
+		binding, source, other, needed := on.tokenBudgetTriggers(summaryTools, rows(749), chatTrigger, chatTrigger, compactionTriggerSourceChat, late, false)
+		require.Equal(t, compactionTrigger{thresholdPercent: 75, contextLimit: 1000}, binding)
+		require.Equal(t, compactionTriggerSourceChat, source)
+		require.Equal(t, late, other)
+		require.False(t, needed)
+	})
+	t.Run("NewWindowFallbackDropsOverride", func(t *testing.T) {
+		t.Parallel()
+		binding, source, other, needed := on.tokenBudgetTriggers(tools, rows(400), chatTrigger, orgTrigger, compactionTriggerSourceOrganization, chatTrigger, false)
+		require.Equal(t, compactionTrigger{thresholdPercent: 75, contextLimit: 1000}, binding)
+		require.Equal(t, compactionTriggerSourceChat, source)
+		require.Equal(t, compactionTrigger{}, other)
+		require.False(t, needed, "a rollover makes no summary, so the override does not trigger one")
+	})
 	t.Run("DisabledThreshold", func(t *testing.T) {
 		t.Parallel()
 		disabled := compactionTrigger{thresholdPercent: 100, contextLimit: 1000}
@@ -244,8 +276,23 @@ func TestTokenBudgetEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, eligible)
 
-	tools := []fantasy.AgentTool{server.chatNotesTool(root), server.chatHistoryTool(root), server.newContextTool(root)}
+	tools := []fantasy.AgentTool{server.chatNotesTool(root), server.chatHistoryTool(root), server.newContextTool(root, codersdk.ForkTokenBudgetFallbackSummary)}
 	require.True(t, server.tokenBudgetEligible(tools))
+	fallback, ok := server.turnTokenBudgetFallback(tools)
+	require.True(t, ok)
+	require.Equal(t, codersdk.ForkTokenBudgetFallbackSummary, fallback)
+	// A dynamic or MCP tool that takes the name does not make a turn
+	// eligible, wrapped or not.
+	foreign := fantasy.NewAgentTool(newContextToolName, "foreign", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	require.False(t, server.tokenBudgetEligible([]fantasy.AgentTool{tools[0], tools[1], foreign}))
+	require.False(t, server.tokenBudgetEligible([]fantasy.AgentTool{tools[0], tools[1], secretAnswerTool{AgentTool: foreign}}))
+	// The secret answer wrapper forwards the fallback of the real tool.
+	wrapped := []fantasy.AgentTool{tools[0], tools[1], secretAnswerTool{AgentTool: tools[2]}}
+	fallback, ok = server.turnTokenBudgetFallback(wrapped)
+	require.True(t, ok)
+	require.Equal(t, codersdk.ForkTokenBudgetFallbackSummary, fallback)
 	// The lead-in points at chat_history, so a policy that drops it keeps
 	// summary compaction.
 	noHistory, _, _ := customAgentToolPolicy{Tools: []string{chatNotesToolName, newContextToolName}}.filter(tools, nil, nil, nil)
