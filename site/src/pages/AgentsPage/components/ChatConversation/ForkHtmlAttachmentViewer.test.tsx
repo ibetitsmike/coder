@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { Experiment } from "#/api/typesGenerated";
@@ -92,6 +93,31 @@ describe("ForkHtmlAttachmentViewer", () => {
 				name: "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets.",
 			}),
 		).toContainElement(screen.getByTitle("choices.html"));
+	});
+
+	it("closes the frame when the page navigates away", async () => {
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(screen.queryByTitle("choices.html")).toBeNull();
+		expect(
+			screen.getByText(
+				"The page tried to load another address, so the viewer closed it.",
+			),
+		).toBeInTheDocument();
+
+		await userEvent.click(
+			screen.getByRole("button", { name: "Show the page again" }),
+		);
+		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
+		expect(frame.getAttribute("src")).toBe(
+			`/api/v2/chats/fork/files/${MockChatHtmlFilePart.file_id}/html`,
+		);
+		fireEvent.load(frame);
+		expect(screen.getByTitle("choices.html")).toBeInTheDocument();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
