@@ -327,6 +327,17 @@ func TestChatHistoryTool(t *testing.T) {
 		require.Len(t, escaped.Parts, 1)
 		require.Equal(t, []int{20000}, escaped.PartBytes)
 		require.Contains(t, escaped.Parts[0].Text, "Coder truncated")
+
+		// A field the cut does not shorten leaves the part out, and reading
+		// that part alone fails instead of going over the cap.
+		longName := insert(t, crowded.ID, message(database.ChatMessageRoleAssistant, database.ChatMessageVisibilityBoth,
+			codersdk.ChatMessageToolCall("call-long", strings.Repeat("n", 20000), json.RawMessage(`{}`))))
+		var named chatHistoryMessageResult
+		decode(t, crowded, chatHistoryArgs{Action: "read_item", ID: longName[0]}, &named)
+		require.Empty(t, named.Parts)
+		require.Empty(t, named.PartBytes)
+		require.Equal(t, 1, named.OmittedParts)
+		require.Contains(t, run(t, crowded, chatHistoryArgs{Action: "read_item", ID: longName[0], Part: 1}, true), "does not fit")
 	})
 
 	t.Run("RejectsInvalidArguments", func(t *testing.T) {

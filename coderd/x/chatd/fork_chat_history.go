@@ -148,7 +148,11 @@ func (p *Server) chatHistoryTool(chat database.Chat) fantasy.AgentTool {
 				text, _ := chatloop.TruncateToolResultText(err.Error(), maxChatHistoryBytes)
 				return fantasy.NewTextErrorResponse(text), nil
 			}
-			return toolJSONResponse(result), nil
+			response := toolJSONResponse(result)
+			if len(response.Content) > maxChatHistoryBytes {
+				return fantasy.NewTextErrorResponse("the result does not fit in 16 KiB"), nil
+			}
+			return response, nil
 		},
 	)
 }
@@ -617,6 +621,12 @@ func historyMessageResult(message chatTranscriptMessage, window string) (chatHis
 		case len(result.Parts) == 1 && partBytes > utf8.UTFMax:
 			partBytes /= 2
 			result.Parts[0] = truncateTranscriptPart(message.Parts[0], partBytes)
+		case len(result.Parts) == 1:
+			// Fields the cut does not shorten, such as a long tool name,
+			// still do not fit, so the part is left out too.
+			result.Parts = result.Parts[:0]
+			result.PartBytes = result.PartBytes[:0]
+			result.OmittedParts++
 		default:
 			return result, nil
 		}
