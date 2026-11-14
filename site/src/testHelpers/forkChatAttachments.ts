@@ -62,3 +62,11 @@ export const MockChatHtmlMessages: readonly { message: ChatMessage }[] = [
 		},
 	},
 ];
+
+/** {@link MockChatHtmlFilePart} with its chat file URL. */
+export const MockChatHtmlAttachment: MessageAttachment = {
+	key: "2:0",
+	role: "assistant",
+	file: MockChatHtmlFilePart,
+	href: getChatFileURL(MockChatHtmlFilePart.file_id),
+};

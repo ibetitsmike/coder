@@ -79,12 +79,14 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const frameLoads = useRef(0);
 	const focusReopen = useRef(false);
+	const focusFrame = useRef(false);
 	const [navigatedAway, setNavigatedAway] = useState(false);
 	const [frameKey, setFrameKey] = useState(0);
 
 	// The page itself is the first load. Any later load is the page leaving
 	// for another address, or reloading. Focus in the frame would fall to the
-	// document body when the frame goes, so it moves to the reopen button.
+	// document body when the frame goes, so it moves to the reopen button,
+	// and back to the frame when the page shows again.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
@@ -100,7 +102,16 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		}
 	};
 
-	const reopen = () => {
+	const setFrame = (frame: HTMLIFrameElement | null) => {
+		frameRef.current = frame;
+		if (frame && focusFrame.current) {
+			focusFrame.current = false;
+			frame.focus();
+		}
+	};
+
+	const reopen = (event: React.MouseEvent<HTMLButtonElement>) => {
+		focusFrame.current = document.activeElement === event.currentTarget;
 		frameLoads.current = 0;
 		setFrameKey((key) => key + 1);
 		setNavigatedAway(false);
@@ -134,7 +145,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			) : (
 				<iframe
 					key={frameKey}
-					ref={frameRef}
+					ref={setFrame}
 					src={getForkHtmlAttachmentURL(block.file_id)}
 					sandbox="allow-scripts"
 					referrerPolicy="no-referrer"

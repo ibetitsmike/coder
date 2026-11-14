@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fireEvent, fn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import {
+	MockChatHtmlAttachment,
 	MockChatHtmlFilePart,
 	MockChatHtmlMessages,
 	MockChatReplacedHtmlFilePart,
@@ -123,4 +124,15 @@ export const HtmlPageExperimentOff: Story = {
 	args: htmlPageArgs(MockChatHtmlFilePart),
 	parameters: { ...htmlPageParameters, experiments: [] },
 	decorators: [withHtmlMessages],
+};
+
+export const HtmlPageAttachmentsMenu: Story = {
+	parameters: htmlPageParameters,
+	decorators: [withHtmlMessages],
+	render: () => <TurnAttachments attachments={[MockChatHtmlAttachment]} />,
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByRole("button", { name: "Attachments (1)" }),
+		);
+	},
 };

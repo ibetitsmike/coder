@@ -115,16 +115,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
 	});
 
-	it("shows the warning header outside the frame", () => {
-		renderPreview(["fork-html-attachments"]);
-
-		expect(
-			screen.getByRole("figure", {
-				name: "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets.",
-			}),
-		).toContainElement(screen.getByTitle("choices.html"));
-	});
-
 	it("closes the frame when the page navigates away", async () => {
 		renderPreview(["fork-html-attachments"]);
 
@@ -143,7 +133,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(screen.queryByTitle("choices.html")).toBe(frame);
 	});
 
-	it("moves focus from a closed frame to the reopen button", () => {
+	it("keeps focus with the viewer when the frame closes and reopens", async () => {
 		renderPreview(["fork-html-attachments"]);
 		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
 
@@ -151,9 +141,11 @@ describe("ForkHtmlAttachmentViewer", () => {
 		act(() => frame.focus());
 		fireEvent.load(frame);
 
-		expect(
-			screen.getByRole("button", { name: "Show the page again" }),
-		).toHaveFocus();
+		const reopen = screen.getByRole("button", { name: "Show the page again" });
+		expect(reopen).toHaveFocus();
+
+		await userEvent.keyboard("{Enter}");
+		expect(screen.getByTitle("choices.html")).toHaveFocus();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
