@@ -322,6 +322,17 @@ func writeForkSavedWorkflowWriteError(ctx context.Context, rw http.ResponseWrite
 			Message: "Saved workflow limit reached.",
 			Detail:  "A user or an organization can have at most 100 saved workflows.",
 		})
+	// The handlers check these limits first, but the database measures some
+	// of them differently, for example args_schema as jsonb text.
+	case database.IsCheckViolation(err,
+		"saved_workflows_name_format", "saved_workflows_name_size",
+		"saved_workflows_description_size", "saved_workflows_script_size",
+		"saved_workflows_args_schema_is_object", "saved_workflows_args_schema_size",
+		"saved_workflows_phases_size"):
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message: "The workflow breaks a storage constraint.",
+			Detail:  err.Error(),
+		})
 	default:
 		httpapi.InternalServerError(rw, err)
 	}

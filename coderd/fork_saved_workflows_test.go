@@ -2,6 +2,7 @@ package coderd_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -62,6 +63,8 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"StringSchema":   {Name: "string-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"string"}`)},
 			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
 			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
+			// Below the limit compact, above it as jsonb text.
+			"SpacedSchema": {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(588)},
 		} {
 			_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, req)
 			_ = requireSDKErrorStatus(t, err, http.StatusBadRequest, name)
@@ -136,6 +139,14 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		_, err = client.CreateForkUserSavedWorkflow(ctx, owner.OrganizationID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{Name: "triage", Script: savedWorkflowScript})
 		_ = requireSDKError(t, err, http.StatusForbidden)
 	})
+}
+
+func spacedArgsSchema(n int) json.RawMessage {
+	props := make([]string, n)
+	for i := range props {
+		props[i] = fmt.Sprintf(`"p%03d":{"type":"string"}`, i)
+	}
+	return json.RawMessage(`{"type":"object","properties":{` + strings.Join(props, ",") + `}}`)
 }
 
 // requireSavedWorkflowMetadata compares metadata whose args schemas the API
