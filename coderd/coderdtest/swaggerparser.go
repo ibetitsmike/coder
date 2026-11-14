@@ -431,7 +431,8 @@ func assertProduce(t *testing.T, comment SwaggerComment) {
 			(comment.router == "/api/v2/organizations/{organization}/ai/spend/export" && comment.method == "get") ||
 			(comment.router == "/api/v2/templatebuilder/compose" && comment.method == "post") ||
 			(comment.router == "/api/v2/chats/files/{file}" && comment.method == "get") ||
-			(comment.router == "/api/v2/chats/files/{file}/download" && comment.method == "get") {
+			(comment.router == "/api/v2/chats/files/{file}/download" && comment.method == "get") ||
+			(comment.router == "/api/v2/chats/fork/files/{file}/html" && comment.method == "get") {
 			return // Exception: HTTP 200 is returned without a response model
 		}
 

@@ -12,6 +12,8 @@ import { RecordingPreview } from "../ChatElements/tools/RecordingPreview";
 import { getAttachmentDownload } from "./AttachmentBlocks";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink";
 import { useFileProbes } from "./FileProbeContext";
+import { ForkHtmlAttachmentPreview } from "./ForkHtmlAttachmentViewer";
+import { isForkHtmlAttachment } from "./forkHtmlAttachments";
 
 type ForkAttachmentPreviewProps = {
 	block: TypesGen.ChatFilePart;
@@ -22,7 +24,8 @@ type ForkAttachmentPreviewProps = {
 /**
  * Agent-attached MP4s, such as review videos, reuse the computer-use
  * recording player. Only stored files qualify, because the player loads the
- * video from its chat file URL.
+ * video from its chat file URL. With fork-html-attachments, an HTML page
+ * renders in a sandboxed viewer.
  */
 export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	block,
@@ -33,6 +36,18 @@ export const ForkAttachmentPreview: React.FC<ForkAttachmentPreviewProps> = ({
 	const experiments = useContext(DashboardContext)?.experiments ?? [];
 	const { hasExpired } = useFileProbes();
 	const nameId = useId();
+
+	if (
+		experiments.includes("fork-html-attachments") &&
+		isForkHtmlAttachment(block) &&
+		!hasExpired(block.file_id)
+	) {
+		return (
+			<ForkHtmlAttachmentPreview block={block}>
+				{children}
+			</ForkHtmlAttachmentPreview>
+		);
+	}
 
 	if (
 		!experiments.includes("fork-chat-todos") ||

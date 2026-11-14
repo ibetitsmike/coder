@@ -342,6 +342,16 @@ func (f forkQueryMetricsStore) GetChatSubagentByChatID(ctx context.Context, chat
 	return f.s.GetChatSubagentByChatID(ctx, chatID)
 }
 
+func (f forkQueryMetricsStore) GetChatSubagentMessageRecipient(ctx context.Context, arg forkdb.GetChatSubagentMessageRecipientParams) (uuid.UUID, error) {
+	defer f.observe(ctx, "GetChatSubagentMessageRecipient", time.Now())
+	return f.s.GetChatSubagentMessageRecipient(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteChatSubagentMessagesBefore(ctx context.Context, arg forkdb.DeleteChatSubagentMessagesBeforeParams) error {
+	defer f.observe(ctx, "DeleteChatSubagentMessagesBefore", time.Now())
+	return f.s.DeleteChatSubagentMessagesBefore(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
 	defer f.observe(ctx, "GetChatSubagentTypesByChatIDs", time.Now())
 	return f.s.GetChatSubagentTypesByChatIDs(ctx, chatIDs)
@@ -355,6 +365,41 @@ func (f forkQueryMetricsStore) GetChatSubagentsByParentChatID(ctx context.Contex
 func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
 	defer f.observe(ctx, "GetChatSubtreeIDs", time.Now())
 	return f.s.GetChatSubtreeIDs(ctx, rootID)
+}
+
+func (f forkQueryMetricsStore) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatNoteParams) (int64, error) {
+	defer f.observe(ctx, "DeleteChatNote", time.Now())
+	return f.s.DeleteChatNote(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatNote(ctx context.Context, arg forkdb.GetChatNoteParams) (forkdb.ChatNote, error) {
+	defer f.observe(ctx, "GetChatNote", time.Now())
+	return f.s.GetChatNote(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatNoteCall(ctx context.Context, arg forkdb.GetChatNoteCallParams) (forkdb.ChatNoteCall, error) {
+	defer f.observe(ctx, "GetChatNoteCall", time.Now())
+	return f.s.GetChatNoteCall(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
+	defer f.observe(ctx, "ListChatHistoryRows", time.Now())
+	return f.s.ListChatHistoryRows(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) SearchChatHistory(ctx context.Context, arg forkdb.SearchChatHistoryParams) ([]forkdb.SearchChatHistoryRow, error) {
+	defer f.observe(ctx, "SearchChatHistory", time.Now())
+	return f.s.SearchChatHistory(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
+	defer f.observe(ctx, "ListChatNotes", time.Now())
+	return f.s.ListChatNotes(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.WriteChatNoteRow, error) {
+	defer f.observe(ctx, "WriteChatNote", time.Now())
+	return f.s.WriteChatNote(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
@@ -445,6 +490,11 @@ func (f forkQueryMetricsStore) InsertChatSecretAnswer(ctx context.Context, arg f
 func (f forkQueryMetricsStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "InsertChatSubagent", time.Now())
 	return f.s.InsertChatSubagent(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertChatSubagentMessage(ctx context.Context, arg forkdb.InsertChatSubagentMessageParams) error {
+	defer f.observe(ctx, "InsertChatSubagentMessage", time.Now())
+	return f.s.InsertChatSubagentMessage(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) InsertChatWakeup(ctx context.Context, arg forkdb.InsertChatWakeupParams) (forkdb.ChatWakeup, error) {

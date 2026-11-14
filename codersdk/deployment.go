@@ -5551,6 +5551,9 @@ const (
 )
 
 func (e Experiment) DisplayName() string {
+	if name, ok := forkExperimentDisplayName(e); ok {
+		return name
+	}
 	switch e {
 	case ExperimentExample:
 		return "Example Experiment"

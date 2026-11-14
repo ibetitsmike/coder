@@ -131,7 +131,7 @@ export const ForkWaitForEventsToolRenderer: React.FC<ForkToolRendererProps> = ({
 										<span className="font-mono text-xs">
 											{process.outputPattern}
 										</span>
-										{")"}
+										)
 									</>
 								)}
 							</div>

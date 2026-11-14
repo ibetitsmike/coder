@@ -130,6 +130,7 @@ func (p *Server) sendSubagentMessage(
 		CreatedBy:    targetChat.OwnerID,
 		Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText(message)},
 		BusyBehavior: SendMessageBusyBehaviorSteer,
+		forkAdmit:    p.forkRecordSubagentMessage(ctx, parentChatID, targetChatID),
 	})
 	if err != nil {
 		return database.Chat{}, err
@@ -374,7 +375,7 @@ func (p *Server) createChildSubagentChatWithOptions(
 	}
 
 	// Review before persistence so spawned chats cannot bypass prompt policy.
-	childChatID := opts.forkChildChatID()
+	childChatID := opts.forkChildChatID(ctx)
 	var promptResult *chathooks.Result
 	if p.hooks.Enabled() {
 		mintedTurnID := uuid.New()

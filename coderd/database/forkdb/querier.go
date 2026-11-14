@@ -43,9 +43,15 @@ type Querier interface {
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
+	// DeleteChatNote deletes a note and returns the number of deleted notes.
+	// With call_id set it records the call like WriteChatNote, and deletes
+	// nothing when the call is recorded already, so a replayed delete does not
+	// delete a note that a later call wrote.
+	DeleteChatNote(ctx context.Context, arg DeleteChatNoteParams) (int64, error)
 	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
+	DeleteChatSubagentMessagesBefore(ctx context.Context, arg DeleteChatSubagentMessagesBeforeParams) error
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
@@ -74,12 +80,15 @@ type Querier interface {
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
+	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
+	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetChatSubagentMessageRecipient(ctx context.Context, arg GetChatSubagentMessageRecipientParams) (uuid.UUID, error)
 	// Returns the agent type of each child chat in @chat_ids and of each root chat
 	// in @chat_ids that started as an agent type. A child spawned without a
 	// chat_subagents row gets its type from its mode, as subagentTypeFromChat in
@@ -143,6 +152,7 @@ type Querier interface {
 	InsertChatPluginPack(ctx context.Context, arg InsertChatPluginPackParams) (ChatPluginPack, error)
 	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
+	InsertChatSubagentMessage(ctx context.Context, arg InsertChatSubagentMessageParams) error
 	// The organization comes from the chat.
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)
 	// Returns no row when the run of this occurrence already exists. The chat and
@@ -163,6 +173,13 @@ type Querier interface {
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
+	// ListChatHistoryRows lists the rows that shape the context windows of a
+	// chat: the compressed boundary rows, with their content, and the messages
+	// that both the user and the model see, with an empty boundary_content.
+	// Calls and results of the chat_history and read_chat_transcript tools are
+	// left out, because the history tool skips them.
+	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
+	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
 	// A failed send of an events entry records its run under a key of its own,
 	// so it never blocks a later run of the entry.
 	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
@@ -185,6 +202,11 @@ type Querier interface {
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// SearchChatHistory returns the newest messages between after_id and
+	// before_id, with before_id 0 for no upper bound, whose content holds
+	// needle. The caller lowercases needle and escapes it as JSON string text,
+	// since the match runs on the stored JSON.
+	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
@@ -225,6 +247,16 @@ type Querier interface {
 	// Relinking an external identity to another user clears the active chat so
 	// replies never reach a chat the new user does not own.
 	UpsertPluginUserLink(ctx context.Context, arg UpsertPluginUserLinkParams) (PluginUserLink, error)
+	// WriteChatNote replaces a note, or with append set adds content as a new
+	// line at its end. It creates a missing note only while the chat has fewer
+	// than max_notes notes, and returns no row when the chat is at the limit. The
+	// table check keeps the size cap. With call_id set it records the call and
+	// its result in chat_note_calls, and changes nothing when the call is
+	// recorded already, so a replayed call does not append twice. Two runs of
+	// the same call that start together both change the note, and the second
+	// then fails on the record's primary key and rolls back. It also drops the
+	// chat's records older than a day.
+	WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (WriteChatNoteRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -396,6 +396,7 @@ func buildCompactionMessages(input buildCompactionMessagesInput) (compactionMess
 	if err != nil {
 		return compactionMessagesForCommit{}, xerrors.Errorf("marshal compaction result: %w", err)
 	}
+	summaryResult = withContextWindowResult(summaryResult, input.compaction.ContextWindow)
 	toolContent, err := chatprompt.MarshalParts([]codersdk.ChatMessagePart{
 		codersdk.ChatMessageToolResult(input.toolCallID, toolName, summaryResult, false, false),
 	})

@@ -6079,10 +6079,13 @@ export type Experiment =
 	| "fork-chat-todos"
 	| "fork-chat-wakeups"
 	| "fork-family-messages"
+	| "fork-html-attachments"
 	| "fork-nested-subagents"
 	| "fork-pinned-skills"
 	| "fork-plugin-packs"
 	| "fork-subagent-isolation"
+	| "fork-token-budget"
+	| "fork-view-image"
 	| "fork-workflows"
 	| "mcp-server-http"
 	| "no_nats_pubsub"
@@ -6169,10 +6172,13 @@ export const Experiments: Experiment[] = [
 	"fork-chat-todos",
 	"fork-chat-wakeups",
 	"fork-family-messages",
+	"fork-html-attachments",
 	"fork-nested-subagents",
 	"fork-pinned-skills",
 	"fork-plugin-packs",
 	"fork-subagent-isolation",
+	"fork-token-budget",
+	"fork-view-image",
 	"fork-workflows",
 	"mcp-server-http",
 	"no_nats_pubsub",
