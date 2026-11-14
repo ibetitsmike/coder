@@ -73,6 +73,11 @@ const renderPreview = (
 		),
 	);
 
+const originalUserActivation = Object.getOwnPropertyDescriptor(
+	navigator,
+	"userActivation",
+);
+
 const setUserActivation = (isActive: boolean) => {
 	Object.defineProperty(navigator, "userActivation", {
 		configurable: true,
@@ -225,7 +230,15 @@ describe("ForkHtmlAttachmentViewer", () => {
 	});
 
 	afterEach(() => {
-		Reflect.deleteProperty(navigator, "userActivation");
+		if (originalUserActivation) {
+			Object.defineProperty(
+				navigator,
+				"userActivation",
+				originalUserActivation,
+			);
+		} else {
+			Reflect.deleteProperty(navigator, "userActivation");
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -322,6 +335,40 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
 		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("counts Tab into the frame as input in the dashboard", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		await userEvent.keyboard("{Tab}");
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		postFromFrame(pageMessage("On focus"));
+		expect(queryProposal()).toBeNull();
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("returns focus to the page when the proposal closes", async () => {
+		mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+		const frame = screen.getByTitle("choices.html");
+
+		postFromFrame(pageMessage("Option A"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		await userEvent.click(
+			within(proposal).getByRole("button", { name: "Cancel" }),
+		);
+		expect(frame).toHaveFocus();
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		postFromFrame(pageMessage("Option B"));
+		await confirmProposal("Option B");
+		await screen.findByText("Sent to the chat");
+		expect(frame).toHaveFocus();
 	});
 
 	it("ignores messages sent without a click", async () => {
@@ -422,6 +469,19 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 		fireEvent.load(screen.getByTitle("choices.html"));
 		expect(queryProposal()).toBeNull();
+	});
+
+	it("moves focus from a closed frame to the reopen button", () => {
+		renderPreview(["fork-html-attachments"]);
+		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
+
+		fireEvent.load(frame);
+		act(() => frame.focus());
+		fireEvent.load(frame);
+
+		expect(
+			screen.getByRole("button", { name: "Show the page again" }),
+		).toHaveFocus();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {

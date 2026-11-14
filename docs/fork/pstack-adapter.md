@@ -178,9 +178,10 @@ Only pages that the agent attaches run. An `.html` file that you upload yourself
 The page runs in a sandbox:
 
 - Scripts run, but the page has its own opaque origin, so it can't read the user's Coder session, cookies, or storage, or reach the dashboard.
-- The page can't make network requests, so it can't call the Coder API or load anything from elsewhere.
+- The page can't fetch or load anything over the network, so it can't call the Coder API or load anything from elsewhere.
   Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
-- Forms don't submit. Handle a choice in a button's click handler instead.
+- Forms don't submit.
+  Handle a choice in a button's click handler instead.
 - The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
 
 The page can propose the user's choice as a new user message in the chat:
@@ -191,24 +192,34 @@ parent.postMessage({ type: "coder:chat-message", text: "Option B" }, "*");
 
 The web UI shows the exact message below the page with **Send** and **Cancel**, and sends it only when the user selects **Send**.
 If the message fails to send, the proposal stays open with the error, so the user can select **Send** again.
+When the proposal closes, focus goes back to the page.
 The chat gets the text under a line that names the page, such as `Message from the attached page "choices.html":`.
 The web UI shows a proposal only when all of these hold:
 
 - The message has exactly the fields `type` and `text`.
-- The trimmed text has 1 to 4000 characters.
-- The user just selected something in the page, and the page's frame has focus. A message that a script sends on its own is dropped.
-- The dashboard saw no click or key press, other than Tab and Shift, in the last 5 seconds.
-- No proposal from the page came in the last 5 seconds.
-- No proposal is open. While one is open, the page can't change its text.
+- The trimmed text has 1 to 4000&nbsp;characters.
+- The user just selected something in the page, and the page's frame has focus.
+  A message that a script sends on its own is dropped.
+- The dashboard saw no click or key press, Tab included, in the last 5&nbsp;seconds.
+  A keyboard user who tabs into the page waits 5&nbsp;seconds before a choice in it counts.
+- No proposal from the page came in the last 5&nbsp;seconds.
+- No proposal is open.
+  While one is open, the page can't change its text.
 
-A page can take focus on its own. If a chat shows two attached pages, a hostile page that takes focus right after the user selects something in the other page can propose a message as if the user had selected it.
+A page can take focus on its own.
+If a chat shows two attached pages, a hostile page that takes focus right after the user selects something in the other page can propose a message as if the user had selected it.
 The proposal names the page that sent it, and nothing reaches the chat until the user selects **Send**.
 
-One gap stays open: the sandbox lets the page navigate its own frame to another site, and that navigation can carry what the user typed in its URL.
-The network policy covers only the attached page, not the site it navigates to.
-The fixed line above the page tells the user not to type secrets, and nothing reaches the chat without the confirmation.
-When the frame loads anything after the page, the viewer closes it, drops an open proposal, and offers to show the page again, so the user does not keep using the other site inside the chat.
-The first request to that site still leaves the browser.
+Two gaps stay open, so treat what the user does in a page as visible to whoever wrote it.
+The fixed line above the page tells the user not to type secrets.
+
+- WebRTC: the content security policy doesn't cover it.
+  The policy sets `webrtc 'block'`, but Chromium ignores that directive, so a page can still send data out over WebRTC.
+- Navigation: the sandbox lets the page navigate its own frame, and that navigation can carry what the user typed in its URL.
+  The dashboard's own policy (`frame-src`) blocks frames from other sites, so the browser refuses such a navigation before any request.
+  It still lets the frame load the Coder origin, the deployment's workspace app hosts, and any frame hosts the deployment adds to its policy.
+  When the frame loads anything after the page, the viewer closes it, drops an open proposal, and offers to show the page again.
+  A page that navigates away before its first load finishes is not detected, because the viewer can't read where a sandboxed frame is.
 
 ### Wake-ups
 
@@ -777,9 +788,10 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
-  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
-  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:65-92`, `ForkHtmlAttachmentViewer.tsx:70-80`, and the viewer has the fixed header outside the frame, `:213-226`, and closes the frame after a navigation, `:113-128`, `:227-236`.
-  The bridge checks the frame, the schema, the click, the focus, the dashboard input, the interval, and an open proposal, `ForkHtmlAttachmentViewer.tsx:130-185`, and sends only on **Send**, keeping the proposal after a failure, `:187-200`, `:249-273`.
+  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:30-40`, set on every response before authentication, `:45-53`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
+  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:71-92`, `ForkHtmlAttachmentViewer.tsx:70-80`, and the viewer has the fixed header outside the frame, `:228-242`, and closes the frame after a navigation, moving focus to the reopen button, `:115-133`, `:243-251`.
+  The dashboard's `frame-src`, `coderd/httpmw/csp.go:84`, `:126`, `:141-143`.
+  The bridge checks the frame, the schema, the click, the focus, the dashboard input, the interval, and an open proposal, `ForkHtmlAttachmentViewer.tsx:141-191`, and sends only on **Send**, keeping the proposal after a failure and returning focus to the page when it closes, `:193-216`, `:265-290`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

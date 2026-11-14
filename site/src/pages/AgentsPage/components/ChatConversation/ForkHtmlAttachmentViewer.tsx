@@ -100,6 +100,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const sendMessage = useMutation(createChatMessageByChatId(queryClient));
 	const { reset: resetSend } = sendMessage;
 	const frameRef = useRef<HTMLIFrameElement>(null);
+	const proposalRef = useRef<HTMLElement>(null);
 	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
 	const lastDashboardInputAt = useRef(Number.NEGATIVE_INFINITY);
 	const [proposal, setProposal] = useState<string | null>(null);
@@ -107,17 +108,27 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const proposalId = useId();
 	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
 	const frameLoads = useRef(0);
+	const focusReopen = useRef(false);
 	const [navigatedAway, setNavigatedAway] = useState(false);
 	const [frameKey, setFrameKey] = useState(0);
 
 	// The page itself is the first load. Any later load is the page leaving
 	// for another address, or reloading. A proposal still open may come from
-	// that other address, so it goes too.
+	// that other address, so it goes too. Focus in the frame would fall to the
+	// document body when the frame goes, so it moves to the reopen button.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
+			focusReopen.current = document.activeElement === frameRef.current;
 			setNavigatedAway(true);
 			setProposal(null);
+		}
+	};
+
+	const reopenRef = (button: HTMLButtonElement | null) => {
+		if (button && focusReopen.current) {
+			focusReopen.current = false;
+			button.focus();
 		}
 	};
 
@@ -128,16 +139,11 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	};
 
 	// Input inside a frame never reaches the dashboard, so recent dashboard
-	// input means the activation came from the dashboard, not the page. Tab
-	// only moves focus, often into the frame, so it does not count.
+	// input means the activation came from the dashboard, not the page. That
+	// includes Tab: a key press that moves focus into the frame activates the
+	// dashboard too.
 	useEffect(() => {
-		const onInput = (event: Event) => {
-			if (
-				event instanceof KeyboardEvent &&
-				(event.key === "Tab" || event.key === "Shift")
-			) {
-				return;
-			}
+		const onInput = () => {
 			lastDashboardInputAt.current = Date.now();
 		};
 		window.addEventListener("pointerdown", onInput, true);
@@ -184,6 +190,16 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		return () => window.removeEventListener("message", onMessage);
 	}, [agentId, block.name, proposal, resetSend]);
 
+	// Focus on the proposal, or on a button that a pending send disabled,
+	// would fall to the document body, so it goes back to the page.
+	const closeProposal = () => {
+		const active = document.activeElement;
+		if (active === document.body || proposalRef.current?.contains(active)) {
+			frameRef.current?.focus();
+		}
+		setProposal(null);
+	};
+
 	// The proposal stays open until the send succeeds, so a failed send can
 	// be retried.
 	const send = () => {
@@ -195,7 +211,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 				chatId: agentId,
 				req: { content: [{ type: "text", text: proposal }] },
 			},
-			{ onSuccess: () => setProposal(null) },
+			{ onSuccess: closeProposal },
 		);
 	};
 
@@ -229,7 +245,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 					<p className="m-0">
 						The page tried to load another address, so the viewer closed it.
 					</p>
-					<Button size="sm" variant="outline" onClick={reopen}>
+					<Button ref={reopenRef} size="sm" variant="outline" onClick={reopen}>
 						Show the page again
 					</Button>
 				</div>
@@ -248,6 +264,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			)}
 			{proposal !== null && (
 				<section
+					ref={proposalRef}
 					aria-labelledby={proposalId}
 					className="flex flex-col gap-2 rounded-md border border-solid border-border p-2 text-sm"
 				>
@@ -262,7 +279,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 							size="sm"
 							variant="outline"
 							disabled={sendMessage.isPending}
-							onClick={() => setProposal(null)}
+							onClick={closeProposal}
 						>
 							Cancel
 						</Button>
@@ -274,7 +291,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			)}
 			<span
 				role="status"
-				className="truncate text-xs text-content-secondary empty:hidden"
+				className="break-words text-xs text-content-secondary empty:hidden"
 			>
 				{status}
 			</span>
