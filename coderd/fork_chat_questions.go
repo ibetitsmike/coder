@@ -25,13 +25,14 @@ import (
 	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/x/chatd"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
 )
 
 const (
 	// questionAnswerPrefix starts the user message that answers an
 	// ask_user_question call; the tool tells the model to expect it.
-	questionAnswerPrefix = "Answer to ask_user_question call "
+	questionAnswerPrefix = chatstate.QuestionAnswerPrefix
 	// minSecretAnswerLength keeps the scrub of tool output, which replaces
 	// every occurrence of the value, from hitting ordinary text.
 	minSecretAnswerLength = 8

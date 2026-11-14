@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
@@ -259,6 +258,16 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	require.Contains(t, result, "tool_calls")
 	require.Equal(t, descendantQuestionNote, result["note"])
 
+	sendAnswer := func() {
+		t.Helper()
+		_, err := f.server.SendMessage(ctx, SendMessageOptions{
+			ChatID: child.ID, CreatedBy: child.OwnerID,
+			Content:      []codersdk.ChatMessagePart{codersdk.ChatMessageText("Use Postgres")},
+			BusyBehavior: SendMessageBusyBehaviorQueue,
+		})
+		require.NoError(t, err)
+	}
+
 	// An answer during the wait lets the call wait on the child for the
 	// rest of the timeout, and the answered question is no longer reported.
 	subagentAwaitTrap := mClock.Trap().NewTimer("chatd", "subagent_await")
@@ -268,12 +277,7 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	done = waitAsync(child.ID, 10)
 	awaitTrap.MustWait(ctx).MustRelease(ctx)
 	pollTrap.MustWait(ctx).MustRelease(ctx)
-	dbgen.ChatMessage(t, f.db, database.ChatMessage{
-		ChatID:        child.ID,
-		ModelConfigID: uuid.NullUUID{UUID: child.LastModelConfigID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-	})
-	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusRunning, "")
+	sendAnswer()
 	mClock.Advance(descendantQuestionPollInterval).MustWait(ctx)
 	call := subagentAwaitTrap.MustWait(ctx)
 	require.Equal(t, 8*time.Second, call.Duration)
@@ -311,11 +315,7 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 
 	// A question the child asks before the wait times out is reported even
 	// though the child is still running.
-	dbgen.ChatMessage(t, f.db, database.ChatMessage{
-		ChatID:        child.ID,
-		ModelConfigID: uuid.NullUUID{UUID: child.LastModelConfigID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-	})
+	sendAnswer()
 	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusRunning, "")
 	done = waitAsync(child.ID, 2)
 	subagentAwaitTrap.MustWait(ctx).MustRelease(ctx)

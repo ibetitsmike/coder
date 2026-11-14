@@ -148,6 +148,48 @@ func TestForkChatDescendantQuestions(t *testing.T) {
 		_ = res.Body.Close()
 		require.Equal(t, http.StatusNotFound, res.StatusCode)
 	})
+
+	// The list reads the stored answered state, so it never reads the
+	// chats' messages. A lock on chat_messages that blocks every query of
+	// the table does not block it.
+	t.Run("NoMessageReads", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+		values := coderdtest.DeploymentValues(t)
+		values.Experiments = serpent.StringArray{string(codersdk.ExperimentForkNestedSubagents)}
+		client := coderdtest.New(t, &coderdtest.Options{DeploymentValues: values, Database: db, Pubsub: ps})
+		user := coderdtest.CreateFirstUser(t, client)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		root := newChat(t, db, user, nil)
+		child := newChat(t, db, user, &root)
+		_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+			ChatID:     child.ID,
+			ToolCallID: "call-child",
+			Questions:  json.RawMessage(`[{"header": "DB", "question": "Which database?"}]`),
+		})
+		require.NoError(t, err)
+
+		lock, err := sqlDB.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = lock.Rollback() }()
+		_, err = lock.ExecContext(ctx, "LOCK TABLE chatd.chat_messages IN ACCESS EXCLUSIVE MODE")
+		require.NoError(t, err)
+		blockedCtx, cancelBlocked := context.WithTimeout(ctx, testutil.IntervalMedium)
+		defer cancelBlocked()
+		_, err = db.GetChatMessagesByChatID(blockedCtx, database.GetChatMessagesByChatIDParams{ChatID: child.ID})
+		require.Error(t, err, "the lock blocks a read of chat_messages")
+
+		listCtx, cancel := context.WithTimeout(ctx, testutil.WaitShort)
+		defer cancel()
+		got, err := client.ChatDescendantQuestions(listCtx, root.ID)
+		require.NoError(t, err, "the list must not wait on chat_messages")
+		require.Len(t, got, 1)
+		require.Equal(t, child.ID, got[0].ChatID)
+		require.NoError(t, lock.Rollback())
+	})
 }
 
 func TestForkChatSecretAnswer(t *testing.T) {

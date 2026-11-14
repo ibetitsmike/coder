@@ -1,80 +1,65 @@
 -- name: UpsertChatDescendantQuestion :one
-INSERT INTO chat_descendant_questions (chat_id, tool_call_id, questions)
-VALUES (@chat_id, @tool_call_id, @questions)
+-- A new question of the chat replaces the old one and is pending. The root
+-- comes from chats.root_chat_id; a chat without one names itself.
+INSERT INTO chat_descendant_questions (chat_id, root_chat_id, tool_call_id, questions)
+SELECT c.id, COALESCE(c.root_chat_id, c.id), @tool_call_id::text, @questions::jsonb
+FROM chats c
+WHERE c.id = @chat_id::uuid
 ON CONFLICT (chat_id) DO UPDATE SET
+    root_chat_id = EXCLUDED.root_chat_id,
     tool_call_id = EXCLUDED.tool_call_id,
     questions = EXCLUDED.questions,
-    created_at = now()
+    created_at = now(),
+    answered_at = NULL,
+    answered_by = NULL
 RETURNING *;
 
 -- name: GetPendingChatDescendantQuestion :one
-SELECT q.*
-FROM chat_descendant_questions q
+SELECT *
+FROM chat_descendant_questions
+WHERE chat_id = @chat_id::uuid
+    AND answered_at IS NULL;
+
+-- name: RetireChatDescendantQuestion :execrows
+-- Marks the pending question of @chat_id answered by the user messages that
+-- the transaction inserts into the chat's history. @compressed is true when
+-- one of them is a context boundary, a clear or a compaction, which retires
+-- any question. @visible is true when one is user-visible, which answers a
+-- question that is not secret; it fails closed like
+-- ChatDescendantQuestion.Secret. @answers holds the text of the visible
+-- messages' text parts after chatstate.QuestionAnswerPrefix. Only an answer
+-- that names the question's tool call answers a secret question, and
+-- answered_by is secret_answer only for a secret question.
+UPDATE chat_descendant_questions q
+SET answered_at = now(),
+    answered_by = CASE
+        WHEN @visible::boolean
+                AND jsonb_typeof(q.questions) = 'array'
+                AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)')
+            THEN 'message'
+        WHEN EXISTS (SELECT 1 FROM unnest(@answers::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
+            THEN 'secret_answer'
+        ELSE 'context_boundary'
+    END
 WHERE q.chat_id = @chat_id::uuid
-    AND NOT EXISTS (
-        SELECT 1
-        FROM chat_messages m
-        WHERE m.chat_id = q.chat_id
-            AND m.role = 'user'
-            AND m.created_at > q.created_at
-            AND (
-                (NOT m.deleted
-                    AND (
-                        -- A context boundary, such as a clear, retires the question.
-                        m.compressed
-                        OR (m.visibility <> 'model'
-                            -- Fails closed like forkdb.ChatDescendantQuestion.Secret.
-                            AND jsonb_typeof(q.questions) = 'array'
-                            AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)'))
-                    ))
-                -- Only the message of the secret answer route, which starts
-                -- with coderd's questionAnswerPrefix, answers a secret
-                -- question. A queued message that the turn's end promotes
-                -- leaves it pending. The message retires the question even
-                -- after an edit deletes it, since the consumed answer must not
-                -- be asked for again.
-                OR (m.visibility <> 'model'
-                    AND EXISTS (
-                        SELECT 1
-                        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.content) = 'array' THEN m.content ELSE '[]'::jsonb END) AS part
-                        WHERE part->>'type' = 'text'
-                            AND starts_with(part->>'text', 'Answer to ask_user_question call ' || q.tool_call_id || ':')
-                    ))
-            )
+    AND q.answered_at IS NULL
+    AND (
+        @compressed::boolean
+        OR (@visible::boolean
+            AND jsonb_typeof(q.questions) = 'array'
+            AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)'))
+        OR EXISTS (SELECT 1 FROM unnest(@answers::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
     );
 
 -- name: ListPendingChatDescendantQuestionsByRoot :many
 -- Lists the unanswered questions of the unarchived descendants of
--- @root_chat_id, oldest first, with the pending rule of
--- GetPendingChatDescendantQuestion.
+-- @root_chat_id, oldest first.
 SELECT q.chat_id, q.tool_call_id, q.questions, q.created_at,
     c.title AS chat_title, c.parent_chat_id
 FROM chat_descendant_questions q
 JOIN chats c ON c.id = q.chat_id
-WHERE c.root_chat_id = @root_chat_id::uuid
-    AND c.id <> @root_chat_id::uuid
+WHERE q.root_chat_id = @root_chat_id::uuid
+    AND q.answered_at IS NULL
+    AND q.chat_id <> @root_chat_id::uuid
     AND c.archived = false
-    AND NOT EXISTS (
-        SELECT 1
-        FROM chat_messages m
-        WHERE m.chat_id = q.chat_id
-            AND m.role = 'user'
-            AND m.created_at > q.created_at
-            AND (
-                (NOT m.deleted
-                    AND (
-                        m.compressed
-                        OR (m.visibility <> 'model'
-                            AND jsonb_typeof(q.questions) = 'array'
-                            AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)'))
-                    ))
-                OR (m.visibility <> 'model'
-                    AND EXISTS (
-                        SELECT 1
-                        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(m.content) = 'array' THEN m.content ELSE '[]'::jsonb END) AS part
-                        WHERE part->>'type' = 'text'
-                            AND starts_with(part->>'text', 'Answer to ask_user_question call ' || q.tool_call_id || ':')
-                    ))
-            )
-    )
 ORDER BY q.created_at, q.chat_id;
