@@ -1533,3 +1533,54 @@ func (s *countingForkStore) GetWorkflowStep(ctx context.Context, id uuid.UUID) (
 	s.c.add("GetWorkflowStep")
 	return s.MockStore.GetWorkflowStep(ctx, id)
 }
+
+// TestForkActsOnAllChatsMatchesRoles guards the fork chat fast path's
+// invariant: the chatd and system-restricted subject types must keep
+// site-wide chat permission in their roles. actsOnAllChats trusts the
+// subject type without evaluating policy, so a role that loses the chat
+// grant would otherwise let the fast path allow calls the object-level
+// check would deny.
+func TestForkActsOnAllChatsMatchesRoles(t *testing.T) {
+	t.Parallel()
+
+	az := rbac.NewAuthorizer(prometheus.NewRegistry())
+	obj := database.Chat{
+		OwnerID:        uuid.New(),
+		OrganizationID: uuid.New(),
+	}.RBACObject()
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"chatd", dbauthz.AsChatd(context.Background())},
+		{"system-restricted", dbauthz.AsSystemRestricted(context.Background())},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			act, _ := dbauthz.ActorFromContext(tc.ctx)
+			for _, action := range []policy.Action{policy.ActionRead, policy.ActionUpdate} {
+				err := az.Authorize(tc.ctx, act, action, obj)
+				require.NoError(t, err,
+					"%s must keep %s on chats site-wide, or actsOnAllChats grants silently", tc.name, action)
+			}
+		})
+	}
+
+	t.Run("member-denied", func(t *testing.T) {
+		t.Parallel()
+
+		member := rbac.Subject{
+			ID:     uuid.NewString(),
+			Roles:  rbac.RoleIdentifiers{rbac.RoleMember()},
+			Groups: []string{},
+			Scope:  rbac.ScopeAll,
+		}
+		ctx := dbauthz.As(context.Background(), member)
+		act, _ := dbauthz.ActorFromContext(ctx)
+		err := az.Authorize(ctx, act, policy.ActionRead, obj)
+		require.Error(t, err, "a member must not hold site-wide chat permission")
+	})
+}
