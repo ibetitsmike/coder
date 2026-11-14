@@ -1160,3 +1160,89 @@ func (f *forkQuerier) authorizeUserAgentDefinition(ctx context.Context, action p
 	}
 	return f.q.authorizeContext(ctx, action, rbac.ResourceUserSkill.WithOwner(userID.String()))
 }
+
+// The saved workflow queries authorize like the agent definition queries of
+// the same tier: a user-tier row is a personal skill of its owner in one
+// organization, and an organization-tier row is an organization skill with
+// its ACLs.
+
+func (f *forkQuerier) InsertUserSavedWorkflow(ctx context.Context, arg forkdb.InsertUserSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionCreate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.InsertUserSavedWorkflow(ctx, arg)
+}
+
+func (f *forkQuerier) GetUserSavedWorkflowByName(ctx context.Context, arg forkdb.GetUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.GetUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) ListUserSavedWorkflowMetadata(ctx context.Context, arg forkdb.ListUserSavedWorkflowMetadataParams) ([]forkdb.ListUserSavedWorkflowMetadataRow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return nil, err
+	}
+	return f.db.ListUserSavedWorkflowMetadata(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateUserSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionUpdate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.UpdateUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteUserSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionDelete, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.DeleteUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) InsertOrganizationSavedWorkflow(ctx context.Context, arg forkdb.InsertOrganizationSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.InsertOrganizationSavedWorkflow(ctx, arg)
+}
+
+func (f *forkQuerier) GetOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationSavedWorkflowByName)(ctx, arg)
+}
+
+func (f *forkQuerier) GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameForUpdateParams) (forkdb.SavedWorkflow, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationSavedWorkflowByNameForUpdate)(ctx, arg)
+}
+
+func (f *forkQuerier) ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationSavedWorkflowMetadataRow, error) {
+	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationSavedWorkflowMetadata)(ctx, organizationID)
+}
+
+func (f *forkQuerier) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return updateWithReturn(f.q.log, f.q.auth, fetch, f.db.UpdateOrganizationSavedWorkflowByName)(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionShare, fetch, f.db.UpdateOrganizationSavedWorkflowACLByName)(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams(arg))
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationSavedWorkflowByName)(ctx, arg)
+}

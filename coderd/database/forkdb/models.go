@@ -456,6 +456,30 @@ type PluginUserLink struct {
 	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }
 
+// Saved Starlark workflows of the fork-workflows experiment. A row is in the organization tier when user_id is NULL and in the user tier when user_id is set. Only users save workflows; agents run them by name.
+type SavedWorkflow struct {
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	// The owner of a user-tier row. A user-tier row also belongs to one organization of the user.
+	UserID uuid.NullUUID `db:"user_id" json:"user_id"`
+	// The user who saved the workflow. NULL when that user was deleted.
+	CreatedBy   uuid.NullUUID `db:"created_by" json:"created_by"`
+	Name        string        `db:"name" json:"name"`
+	Description string        `db:"description" json:"description"`
+	// The Starlark source. It defines main(args), as a run_workflow script does.
+	Script string `db:"script" json:"script"`
+	// An optional JSON Schema object for the args of a run.
+	ArgsSchema pqtype.NullRawMessage `db:"args_schema" json:"args_schema"`
+	// The declared phase names of the workflow, in order. Empty when it declares none.
+	Phases []string `db:"phases" json:"phases"`
+	// Group permissions on an organization-tier row. Empty on the user tier.
+	GroupAcl database.ChatACL `db:"group_acl" json:"group_acl"`
+	// User permissions on an organization-tier row. Empty on the user tier.
+	UserAcl   database.ChatACL `db:"user_acl" json:"user_acl"`
+	CreatedAt time.Time        `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
+}
+
 // Workflow runs of the fork-workflows experiment. chatd journals run state here so a restart resumes a run.
 type WorkflowRun struct {
 	ID            uuid.UUID             `db:"id" json:"id"`

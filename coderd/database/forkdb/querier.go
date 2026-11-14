@@ -56,6 +56,7 @@ type Querier interface {
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
 	DeletePluginPackByID(ctx context.Context, id uuid.UUID) error
@@ -64,6 +65,7 @@ type Querier interface {
 	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	DeleteUserSavedWorkflowByName(ctx context.Context, arg DeleteUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// Binds every top-level, unarchived chat of a linked user in the plugin's
 	// organization. Chats created after the link start at cursor 0 so their whole
 	// history is delivered. Older chats start at their newest message so linking
@@ -114,6 +116,8 @@ type Querier interface {
 	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
+	GetOrganizationSavedWorkflowByName(ctx context.Context, arg GetOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
+	GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg GetOrganizationSavedWorkflowByNameForUpdateParams) (SavedWorkflow, error)
 	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
@@ -132,6 +136,7 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetUserSavedWorkflowByName(ctx context.Context, arg GetUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error)
 	// One row per run and step status of a chat, for the step_counts of the run
 	// list. done means reported; running means running or reminded.
@@ -161,6 +166,7 @@ type Querier interface {
 	// chat that owns it.
 	InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupRunParams) (ChatWakeupRun, error)
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
+	InsertOrganizationSavedWorkflow(ctx context.Context, arg InsertOrganizationSavedWorkflowParams) (SavedWorkflow, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertPluginPack(ctx context.Context, arg InsertPluginPackParams) (PluginPack, error)
@@ -170,6 +176,7 @@ type Querier interface {
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
+	InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSavedWorkflowParams) (SavedWorkflow, error)
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
@@ -189,12 +196,14 @@ type Querier interface {
 	// so a caller checks every child in one read.
 	ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
+	ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationSavedWorkflowMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
 	// @root_chat_id, oldest first, with the pending rule of
 	// GetPendingChatDescendantQuestion.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
+	ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUserSavedWorkflowMetadataParams) ([]ListUserSavedWorkflowMetadataRow, error)
 	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
@@ -221,6 +230,8 @@ type Querier interface {
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)
 	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowACLByNameParams) (SavedWorkflow, error)
+	UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
 	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
@@ -229,6 +240,7 @@ type Querier interface {
 	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// result is the full terminal snapshot of the run, or NULL for interrupted.
 	// A terminal status stamps finished_at; interrupted keeps the run open, so
 	// a resume can end it later. The param stays uncast so sqlc ties it to the
