@@ -148,11 +148,10 @@ type stepSummary struct {
 // forkWorkflowTools returns run_workflow, await_workflow and list_workflows
 // for a root chat turn that is not in plan mode. Every chat owner gets them:
 // a run belongs to its chat, so the chat's own access rules cover the run.
-// The gate runs on
-// every turn, so an admin can turn the experiment on at runtime without a
-// restart. getConn is the workspace connection of the live turn; a nil
-// getConn keeps inline scripts working and makes script_path fail with a
-// clear error.
+// The gate runs on every turn, so an admin can turn the experiment on at
+// runtime without a restart. getConn is the workspace connection of the live
+// turn; a nil getConn keeps inline scripts working and makes script_path fail
+// with a clear error.
 func (p *Server) forkWorkflowTools(
 	ctx context.Context,
 	chat database.Chat,
