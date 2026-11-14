@@ -40,18 +40,21 @@ func testPNG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-// testWebP returns a lossless WebP header for a width x height canvas. The
-// tool reads only the header.
+// testWebP returns a lossless WebP file with a width x height canvas. The tool
+// checks the header and the chunks, not the lossless bitstream.
 func testWebP(width, height uint32) []byte {
-	chunk := make([]byte, 5)
+	chunk := make([]byte, 10)
 	chunk[0] = 0x2f
 	binary.LittleEndian.PutUint32(chunk[1:], (width-1)|(height-1)<<14)
-	data := []byte("RIFF\x00\x00\x00\x00WEBPVP8L")
-	data = binary.LittleEndian.AppendUint32(data, 5)
+	return testRIFF("VP8L", chunk)
+}
+
+// testRIFF returns a WebP file with one chunk.
+func testRIFF(name string, chunk []byte) []byte {
+	data := []byte("RIFF\x00\x00\x00\x00WEBP" + name)
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(chunk))) //nolint:gosec // Test chunks are small.
 	data = append(data, chunk...)
-	data = append(data, make([]byte, 16)...)
-	// RIFF size: 4 (WEBP) + 8 (chunk header) + 5 (chunk) + 16 (padding).
-	binary.LittleEndian.PutUint32(data[4:8], 33)
+	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)-8)) //nolint:gosec // Test files are small.
 	return data
 }
 
@@ -109,11 +112,26 @@ func TestViewImageTool(t *testing.T) {
 		"/bad.png":      append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 40)...),
 		"/ spaced.png ": pngData, //nolint:gocritic // The test needs a path with outer spaces.
 		// Each header decodes, but the rest of the file is missing or damaged.
-		"/cut.png":  pngData[:len(pngData)-4],
-		"/crc.png":  badCRC,
-		"/cut.jpg":  jpegBuf.Bytes()[:jpegBuf.Len()-2],
-		"/cut.gif":  gifBuf.Bytes()[:gifBuf.Len()-1],
-		"/cut.webp": testWebP(9, 10)[:37],
+		"/cut.png": pngData[:len(pngData)-4],
+		"/crc.png": badCRC,
+		"/cut.jpg": jpegBuf.Bytes()[:jpegBuf.Len()-2],
+		"/cut.gif": gifBuf.Bytes()[:gifBuf.Len()-1],
+		// The RIFF size names 2 bytes past the end of the file.
+		"/cut.webp": func() []byte {
+			data := testWebP(9, 10)
+			binary.LittleEndian.PutUint32(data[4:8], 24)
+			return data
+		}(),
+		// The VP8L chunk claims 2 bytes past the RIFF end.
+		"/chunk.webp": func() []byte {
+			data := testWebP(9, 10)
+			binary.LittleEndian.PutUint32(data[16:20], 12)
+			return data
+		}(),
+		// A key frame whose tag names a 100 byte first partition.
+		"/vp8.webp": testRIFF("VP8 ", []byte{100 << 5 & 0xff, 100 >> 3, 0, 0x9d, 0x01, 0x2a, 9, 0, 10, 0}),
+		// An extended header with no image chunk after it.
+		"/noimage.webp": testRIFF("VP8X", make([]byte, 10)),
 	})
 
 	t.Run("DetectsTypeByContent", func(t *testing.T) {
@@ -177,11 +195,14 @@ func TestViewImageTool(t *testing.T) {
 		require.Contains(t, runViewImage(t, anthropic, conn, "/missing.png").Content, "file not found")
 		require.Contains(t, runViewImage(t, anthropic, conn, " ").Content, "path is required")
 		for path, want := range map[string]string{
-			"/cut.png":  "truncated",
-			"/crc.png":  `bad CRC in chunk "IDAT"`,
-			"/cut.jpg":  "truncated before the end of image marker",
-			"/cut.gif":  "truncated before the GIF trailer",
-			"/cut.webp": "shorter than its RIFF size",
+			"/cut.png":      "truncated",
+			"/crc.png":      `bad CRC in chunk "IDAT"`,
+			"/cut.jpg":      "truncated before the end of image marker",
+			"/cut.gif":      "truncated before the GIF trailer",
+			"/cut.webp":     "shorter than its RIFF size",
+			"/chunk.webp":   `chunk "VP8L" is longer than the file`,
+			"/vp8.webp":     "VP8 chunk is shorter than its first partition",
+			"/noimage.webp": "no image data",
 		} {
 			resp := runViewImage(t, openai, conn, path)
 			require.True(t, resp.IsError, path)

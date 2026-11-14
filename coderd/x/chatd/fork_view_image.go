@@ -207,9 +207,57 @@ func imageComplete(data []byte, mediaType string) error {
 			return xerrors.New("truncated before the GIF trailer")
 		}
 	case "image/webp":
-		if int64(binary.LittleEndian.Uint32(data[4:8]))+8 > int64(len(data)) {
-			return xerrors.New("shorter than its RIFF size")
+		return webpComplete(data)
+	}
+	return nil
+}
+
+// webpComplete walks the RIFF chunks up to the RIFF size, per the WebP
+// container specification. Each chunk must fit in the file, and the file must
+// hold image data: a VP8 or VP8L chunk, or animation frames. A VP8 chunk must
+// also hold the first partition its frame tag names. Without a WebP decoder,
+// the lossless and partition data itself is not checked.
+func webpComplete(data []byte) error {
+	end := int64(binary.LittleEndian.Uint32(data[4:8])) + 8
+	if end > int64(len(data)) {
+		return xerrors.New("shorter than its RIFF size")
+	}
+	hasImage := false
+	for offset := int64(12); offset < end; {
+		if end-offset < 8 {
+			return xerrors.New("truncated chunk header")
 		}
+		name := data[offset : offset+4]
+		size := int64(binary.LittleEndian.Uint32(data[offset+4:]))
+		payload := offset + 8
+		if size > end-payload {
+			return xerrors.Errorf("chunk %q is longer than the file", name)
+		}
+		switch string(name) {
+		case "VP8 ":
+			// A 3 byte frame tag with the first partition size in bits 5 to
+			// 23, then 7 bytes of start code and sizes.
+			if size < 10 {
+				return xerrors.New("truncated VP8 chunk")
+			}
+			tag := int64(data[payload]) | int64(data[payload+1])<<8 | int64(data[payload+2])<<16
+			if tag>>5+10 > size {
+				return xerrors.New("VP8 chunk is shorter than its first partition")
+			}
+			hasImage = true
+		case "VP8L":
+			if size < 5 {
+				return xerrors.New("truncated VP8L chunk")
+			}
+			hasImage = true
+		case "ANMF":
+			hasImage = true
+		}
+		// A chunk with an odd size has a pad byte.
+		offset = payload + size + size&1
+	}
+	if !hasImage {
+		return xerrors.New("no image data")
 	}
 	return nil
 }
