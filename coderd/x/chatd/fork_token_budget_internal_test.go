@@ -352,3 +352,58 @@ func TestContextWindowRolloverHookContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, result.SystemSummary, "Context from a pre_compact hook:\nKeep the release branch frozen.\n</context_window>")
 }
+
+func TestContextWindowRolloverStreamsWindow(t *testing.T) {
+	t.Parallel()
+
+	db, ps := dbtestutil.NewDB(t)
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkTokenBudget}))
+	ctx := chatdTestContext(t)
+	user, org, model := seedInternalChatDeps(t, db)
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
+
+	var streamed []codersdk.ChatMessagePart
+	result, err := server.contextWindowRollover(ctx, chat, chatloop.GenerateCompactionOptions{
+		Source:     chatloop.CompactionSourceAutomatic,
+		ToolCallID: "call-1",
+		ToolName:   "chat_summarized",
+		PublishMessagePart: func(role codersdk.ChatMessageRole, part codersdk.ChatMessagePart) {
+			if role == codersdk.ChatMessageRoleTool {
+				streamed = append(streamed, part)
+			}
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerContextLimit}, result.ContextWindow)
+	require.Len(t, streamed, 1)
+	var got struct {
+		ContextWindow *chatloop.ContextWindowBoundary `json:"context_window"`
+	}
+	require.NoError(t, json.Unmarshal(streamed[0].Result, &got))
+	require.Equal(t, result.ContextWindow, got.ContextWindow)
+}
+
+func TestWithContextWindowResult(t *testing.T) {
+	t.Parallel()
+
+	window := &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerNewContext}
+	tests := []struct {
+		name   string
+		result string
+		window *chatloop.ContextWindowBoundary
+		want   string
+	}{
+		{name: "NoWindow", result: `{"summary":"s"}`, want: `{"summary":"s"}`},
+		{name: "Adds", result: `{"summary":"s"}`, window: window, want: `{"context_window":{"id":"w:2","trigger":"new_context"},"summary":"s"}`},
+		{name: "Replaces", result: `{"context_window":1}`, window: window, want: `{"context_window":{"id":"w:2","trigger":"new_context"}}`},
+		{name: "Null", result: `null`, window: window, want: `null`},
+		{name: "NotAnObject", result: `"s"`, window: window, want: `"s"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, string(withContextWindowResult(json.RawMessage(tt.result), tt.window)))
+		})
+	}
+}

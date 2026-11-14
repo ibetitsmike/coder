@@ -19,6 +19,7 @@ import { DiffFileHeader } from "./DiffFileHeader";
 import { EditFilesTool } from "./EditFilesTool";
 import { ExecuteTool as ExecuteToolComponent } from "./ExecuteTool";
 import { type FindToolsMatch, FindToolsTool } from "./FindToolsTool";
+import { withForkContextWindow } from "./ForkContextWindowDivider";
 import { hasSecretQuestion } from "./forkSecretQuestions";
 import { createForkToolRenderers } from "./forkToolRenderers";
 import { ListAgentsTool } from "./ListAgentsTool";
@@ -1190,7 +1191,7 @@ export const toolRenderers: Record<string, React.FC<ToolRendererProps>> = {
 	read_skill: ReadSkillRenderer,
 	read_skill_file: ReadSkillFileRenderer,
 	chat_cleared: ChatClearedRenderer,
-	chat_summarized: ChatSummarizedRenderer,
+	chat_summarized: withForkContextWindow(ChatSummarizedRenderer),
 	ask_user_question: AskUserQuestionRenderer,
 	propose_plan: ProposePlanRenderer,
 	advisor: AdvisorRenderer,
