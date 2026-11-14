@@ -101,6 +101,7 @@ func TestForkWorktreeBindingTools(t *testing.T) {
 		{name: "ReadFileAbsolute", tool: "read_file", input: `{"path":"/etc/hosts"}`, want: `{"path":"/etc/hosts"}`},
 		{name: "WriteFileSpaces", tool: "write_file", input: `{"path":" a/b.txt ","content":"x"}`, want: `{"content":"x","path":"` + dir + `/a/b.txt"}`},
 		{name: "AttachFileRelative", tool: "attach_file", input: `{"path":"out.png"}`, want: `{"path":"` + dir + `/out.png"}`},
+		{name: "ViewImageRelative", tool: viewImageToolName, input: `{"path":"shot.png"}`, want: `{"path":"` + dir + `/shot.png"}`},
 		{
 			name:  "EditFiles",
 			tool:  "edit_files",
@@ -118,6 +119,14 @@ func TestForkWorktreeBindingTools(t *testing.T) {
 			require.JSONEq(t, tc.want, (*inputs)[0])
 		})
 	}
+
+	t.Run("DynamicViewImageUnbound", func(t *testing.T) {
+		t.Parallel()
+		dynamic := &dynamicTool{name: viewImageToolName}
+		tools, err := f.server.appendForkTools(chatdTestContext(t), []fantasy.AgentTool{dynamic}, worktreeChild, worktreeChild.LastModelConfigID)
+		require.NoError(t, err)
+		require.Equal(t, []fantasy.AgentTool{dynamic}, tools)
+	})
 
 	t.Run("WorkspaceContextDirectory", func(t *testing.T) {
 		t.Parallel()

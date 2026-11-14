@@ -19,6 +19,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
+	ExperimentForkViewImage,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -58,6 +59,10 @@ const ExperimentForkWorkflows Experiment = "fork-workflows"
 // ExperimentForkFamilyMessages lets a chat message its parent, siblings and
 // other chats in its family with the message_family_chat tool.
 const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
+
+// ExperimentForkViewImage enables the view_image chat tool, which loads a PNG,
+// JPEG, GIF or WebP file from the workspace into the model's context.
+const ExperimentForkViewImage Experiment = "fork-view-image"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they
