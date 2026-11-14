@@ -602,6 +602,8 @@ Chat routes are registered by `registerChatAPIRoutes` and mounted under `/api/v2
 
 Fork-only chat routes are registered by `registerForkChatRoutes` and mounted under `/api/v2/chats/fork`. The mount reserves that segment even when no fork route is registered: it answers `httpapi.RouteNotFound` instead of matching the `{chat}` wildcard and failing UUID parsing. Each route group is gated by `httpmw.RequireExperiment` for its fork experiment, and covers chat todos, the family tree, descendant and secret questions, wake-ups and their controls, organization subagent limits and wake-up caps, agent definitions, plugin packs and their enablement, pinned skills, and workflow runs with a stop route.
 
+The `fork-html-attachments` route `GET /api/v2/chats/fork/files/{file}/html` is registered by `registerForkChatRoutes` outside that mount, so its sandbox headers run before authentication, the files rate limit, and the experiment check, and cover every response. It serves a stored `.html` or `.htm` chat file as `text/html` with `Content-Security-Policy: sandbox allow-scripts; default-src 'none'`, `nosniff`, and `no-referrer`.
+
 ### Organization-scoped model discovery
 
 Clients discover models through `GET /api/v2/organizations/{organization}/chats/models`. The handler requires either full API token scope or chat model configuration read scope, then queries only configs in the requested organization that pass the caller's RBAC filter.

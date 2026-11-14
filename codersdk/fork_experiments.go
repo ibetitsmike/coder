@@ -19,6 +19,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
+	ExperimentForkHTMLAttachments,
 	ExperimentForkTokenBudget,
 	ExperimentForkViewImage,
 }
@@ -61,6 +62,10 @@ const ExperimentForkWorkflows Experiment = "fork-workflows"
 // other chats in its family with the message_family_chat tool.
 const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
 
+// ExperimentForkHTMLAttachments renders an HTML file that a chat attaches in
+// a sandboxed viewer, from which a click can send a message to the chat.
+const ExperimentForkHTMLAttachments Experiment = "fork-html-attachments"
+
 // ExperimentForkTokenBudget gives chats token-budget context windows: the
 // notes tool keeps a checkpoint, and a chat starts a new context window from
 // it instead of summarizing its history.
@@ -69,6 +74,19 @@ const ExperimentForkTokenBudget Experiment = "fork-token-budget"
 // ExperimentForkViewImage enables the view_image chat tool, which loads a PNG,
 // JPEG, GIF or WebP file from the workspace into the model's context.
 const ExperimentForkViewImage Experiment = "fork-view-image"
+
+// forkExperimentDisplayNames names the fork experiments whose title-cased
+// names read wrong, such as "Html".
+var forkExperimentDisplayNames = map[Experiment]string{
+	ExperimentForkHTMLAttachments: "Fork HTML Attachments",
+}
+
+// forkExperimentDisplayName returns the display name of a fork experiment
+// that has one. Experiment.DisplayName calls it first.
+func forkExperimentDisplayName(e Experiment) (string, bool) {
+	name, ok := forkExperimentDisplayNames[e]
+	return name, ok
+}
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they
