@@ -136,7 +136,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			{navigatedAway ? (
 				<div className="flex h-96 w-full flex-col items-center justify-center gap-2 rounded-md border border-solid border-border p-4 text-center text-sm text-content-secondary">
 					<p className="m-0">
-						The page tried to load another address, so the viewer closed it.
+						The page reloaded or navigated away, so the viewer closed it.
 					</p>
 					<Button ref={reopenRef} size="sm" variant="outline" onClick={reopen}>
 						Show the page again
