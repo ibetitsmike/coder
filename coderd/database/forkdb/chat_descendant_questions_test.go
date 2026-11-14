@@ -128,8 +128,16 @@ func TestChatDescendantQuestionDeletedWithChat(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Deleting the root deletes the questions of its family.
+	// Deleting the root, as dbpurge can before a descendant, keeps the
+	// descendant's pending question.
 	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", root.ID)
+	require.NoError(t, err)
+	q, err := fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, "call-1", q.ToolCallID)
+
+	// Deleting the chat deletes its question.
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", child.ID)
 	require.NoError(t, err)
 	var count int
 	err = sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.chat_descendant_questions WHERE chat_id = $1", child.ID).Scan(&count)
