@@ -3,11 +3,9 @@ package forkdb_test
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -17,110 +15,125 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-func TestGetPendingChatDescendantQuestion(t *testing.T) {
+func TestRetireChatDescendantQuestion(t *testing.T) {
+	t.Parallel()
+
+	const (
+		plain  = `[{"header": "DB"}]`
+		hidden = `[{"header": "Token", "secret": true}]`
+	)
+	for _, tc := range []struct {
+		name       string
+		questions  string
+		arg        forkdb.RetireChatDescendantQuestionParams
+		answeredBy string // empty: the question stays pending
+	}{
+		{name: "VisibleMessage", questions: plain, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true}, answeredBy: "message"},
+		{name: "ModelOnlyMessage", questions: plain},
+		{name: "ContextBoundary", questions: plain, arg: forkdb.RetireChatDescendantQuestionParams{Compressed: true}, answeredBy: "context_boundary"},
+		{name: "SecretVisibleMessage", questions: hidden, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true}},
+		{name: "SecretOtherCallAnswer", questions: hidden, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true, Answers: []string{"call-other:\nThe user gave a secret answer."}}},
+		{name: "SecretAnswer", questions: hidden, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true, Answers: []string{"call-1:\nThe user gave a secret answer."}}, answeredBy: "secret_answer"},
+		{name: "SecretContextBoundary", questions: hidden, arg: forkdb.RetireChatDescendantQuestionParams{Compressed: true}, answeredBy: "context_boundary"},
+		// A question that is not an array fails closed like Secret.
+		{name: "MalformedVisibleMessage", questions: `{"header": "DB"}`, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+			fdb := mustFrom(t, db)
+			ctx := testutil.Context(t, testutil.WaitShort)
+
+			model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
+			chat := dbgen.Chat(t, db, database.Chat{
+				OrganizationID:    dbgen.Organization(t, db, database.Organization{}).ID,
+				OwnerID:           dbgen.User(t, db, database.User{}).ID,
+				LastModelConfigID: model.ID,
+			})
+			_, err := fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+				ChatID:     chat.ID,
+				ToolCallID: "call-1",
+				Questions:  json.RawMessage(tc.questions),
+			})
+			require.NoError(t, err)
+
+			arg := tc.arg
+			arg.ChatID = chat.ID
+			n, err := fdb.RetireChatDescendantQuestion(ctx, arg)
+			require.NoError(t, err)
+			q, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
+			if tc.answeredBy == "" {
+				require.Zero(t, n)
+				require.NoError(t, err, "the question stays pending")
+				require.False(t, q.AnsweredAt.Valid)
+				return
+			}
+			require.EqualValues(t, 1, n)
+			require.ErrorIs(t, err, sql.ErrNoRows, "the question is answered")
+			var (
+				answeredAt sql.NullTime
+				answeredBy sql.NullString
+			)
+			err = sqlDB.QueryRowContext(ctx, "SELECT answered_at, answered_by FROM chatd.chat_descendant_questions WHERE chat_id = $1", chat.ID).
+				Scan(&answeredAt, &answeredBy)
+			require.NoError(t, err)
+			require.True(t, answeredAt.Valid)
+			require.Equal(t, tc.answeredBy, answeredBy.String)
+
+			// A later event leaves the answer as it is.
+			n, err = fdb.RetireChatDescendantQuestion(ctx, forkdb.RetireChatDescendantQuestionParams{ChatID: chat.ID, Compressed: true})
+			require.NoError(t, err)
+			require.Zero(t, n)
+
+			// A new question of the chat is pending again.
+			_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+				ChatID:     chat.ID,
+				ToolCallID: "call-2",
+				Questions:  json.RawMessage(plain),
+			})
+			require.NoError(t, err)
+			q, err = fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
+			require.NoError(t, err)
+			require.Equal(t, "call-2", q.ToolCallID)
+			require.False(t, q.AnsweredAt.Valid)
+			require.False(t, q.AnsweredBy.Valid)
+		})
+	}
+}
+
+func TestChatDescendantQuestionDeletedWithChat(t *testing.T) {
 	t.Parallel()
 
 	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
+	orgID := dbgen.Organization(t, db, database.Organization{}).ID
+	ownerID := dbgen.User(t, db, database.User{}).ID
 	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
-	chat := dbgen.Chat(t, db, database.Chat{
-		OrganizationID:    dbgen.Organization(t, db, database.Organization{}).ID,
-		OwnerID:           dbgen.User(t, db, database.User{}).ID,
+	root := dbgen.Chat(t, db, database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: model.ID})
+	child := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    orgID,
+		OwnerID:           ownerID,
 		LastModelConfigID: model.ID,
+		ParentChatID:      uuid.NullUUID{UUID: root.ID, Valid: true},
+		RootChatID:        uuid.NullUUID{UUID: root.ID, Valid: true},
 	})
-	message := func(role database.ChatMessageRole, visibility database.ChatMessageVisibility) {
-		dbgen.ChatMessage(t, db, database.ChatMessage{
-			ChatID:        chat.ID,
-			ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-			Role:          role,
-			Visibility:    visibility,
-		})
-	}
-	ask := func(callID, questions string) {
-		_, err := fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
-			ChatID:     chat.ID,
-			ToolCallID: callID,
-			Questions:  json.RawMessage(questions),
-		})
-		require.NoError(t, err)
-	}
-	pending := func() (forkdb.ChatDescendantQuestion, bool) {
-		q, err := fdb.GetPendingChatDescendantQuestion(ctx, chat.ID)
-		if err == nil {
-			return q, true
-		}
-		require.ErrorIs(t, err, sql.ErrNoRows)
-		return q, false
-	}
-
-	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityBoth)
-	_, ok := pending()
-	require.False(t, ok, "a chat starts without a question")
-
-	ask("call-1", `[{"header": "DB"}]`)
-	message(database.ChatMessageRoleAssistant, database.ChatMessageVisibilityBoth)
-	// Lifecycle hooks add model-only user rows, which the user never wrote.
-	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityModel)
-	got, ok := pending()
-	require.True(t, ok, "only a user message the user sees answers the question")
-	require.Equal(t, "call-1", got.ToolCallID)
-
-	message(database.ChatMessageRoleUser, database.ChatMessageVisibilityBoth)
-	_, ok = pending()
-	require.False(t, ok, "a later user message answers the question")
-
-	ask("call-2", `[{"header": "API"}]`)
-	got, ok = pending()
-	require.True(t, ok, "asking again after the answer makes a new question pending")
-	require.Equal(t, "call-2", got.ToolCallID)
-	require.JSONEq(t, `[{"header": "API"}]`, string(got.Questions))
-
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        chat.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-		Visibility:    database.ChatMessageVisibilityModel,
-		Compressed:    true,
+	_, err := fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
+		ChatID:     child.ID,
+		ToolCallID: "call-1",
+		Questions:  json.RawMessage(`[{"header": "DB"}]`),
 	})
-	_, ok = pending()
-	require.False(t, ok, "a context boundary, such as a clear, retires the question")
-
-	text := func(text string) {
-		dbgen.ChatMessage(t, db, database.ChatMessage{
-			ChatID:        chat.ID,
-			ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-			Role:          database.ChatMessageRoleUser,
-			Visibility:    database.ChatMessageVisibilityBoth,
-			Content: pqtype.NullRawMessage{
-				RawMessage: json.RawMessage(fmt.Sprintf(`[{"type": "text", "text": %q}]`, text)),
-				Valid:      true,
-			},
-		})
-	}
-	ask("call-secret", `[{"header": "DB"}, {"header": "Token", "secret": true}]`)
-	// The turn's end promotes a message the user queued before the question.
-	text("Also check the staging database.")
-	text("Answer to ask_user_question call call-other:\nThe user gave a secret answer.")
-	got, ok = pending()
-	require.True(t, ok, "only the secret answer's message answers a secret question")
-	require.Equal(t, "call-secret", got.ToolCallID)
-	text("Answer to ask_user_question call call-secret:\nThe user gave a secret answer.")
-	_, ok = pending()
-	require.False(t, ok, "the secret answer's message answers the secret question")
-	// An edit of the secret answer's message soft-deletes it.
-	_, err := sqlDB.ExecContext(ctx, "UPDATE chatd.chat_messages SET deleted = true WHERE chat_id = $1", chat.ID)
 	require.NoError(t, err)
-	_, ok = pending()
-	require.False(t, ok, "a deleted secret answer's message keeps the secret question answered")
 
-	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", chat.ID)
+	// Deleting the root deletes the questions of its family.
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", root.ID)
 	require.NoError(t, err)
 	var count int
-	err = sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.chat_descendant_questions WHERE chat_id = $1", chat.ID).Scan(&count)
+	err = sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chatd.chat_descendant_questions WHERE chat_id = $1", child.ID).Scan(&count)
 	require.NoError(t, err)
-	require.Zero(t, count, "deleting the chat deletes its question")
+	require.Zero(t, count)
 }
 
 func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
@@ -158,8 +171,6 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	grandchild := chat(&child)
 	answered := chat(&root)
 	archived := chat(&root)
-	cleared := chat(&root)
-	editedSecret := chat(&root)
 	otherRoot := chat(nil)
 	otherChild := chat(&otherRoot)
 	emptyRoot := chat(nil)
@@ -168,47 +179,11 @@ func TestListPendingChatDescendantQuestionsByRoot(t *testing.T) {
 	ask(root, "root")
 	ask(grandchild, "grandchild")
 	ask(child, "child")
-	// A model-only user row is not the user's answer.
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        child.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-		Visibility:    database.ChatMessageVisibilityModel,
-	})
 	ask(answered, "answered")
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        answered.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-	})
+	_, err := fdb.RetireChatDescendantQuestion(ctx, forkdb.RetireChatDescendantQuestionParams{ChatID: answered.ID, Visible: true})
+	require.NoError(t, err)
 	ask(archived, "archived")
-	_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET archived = true WHERE id = $1", archived.ID)
-	require.NoError(t, err)
-	ask(cleared, "cleared")
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        cleared.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-		Visibility:    database.ChatMessageVisibilityModel,
-		Compressed:    true,
-	})
-	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
-		ChatID:     editedSecret.ID,
-		ToolCallID: "edited-secret",
-		Questions:  json.RawMessage(`[{"header": "Token", "secret": true}]`),
-	})
-	require.NoError(t, err)
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        editedSecret.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-		Content: pqtype.NullRawMessage{
-			RawMessage: json.RawMessage(`[{"type": "text", "text": "Answer to ask_user_question call edited-secret:\nThe user gave a secret answer."}]`),
-			Valid:      true,
-		},
-	})
-	// An edit soft-deletes the message of the secret answer.
-	_, err = sqlDB.ExecContext(ctx, "UPDATE chatd.chat_messages SET deleted = true WHERE chat_id = $1", editedSecret.ID)
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chats SET archived = true WHERE id = $1", archived.ID)
 	require.NoError(t, err)
 	ask(otherChild, "other")
 

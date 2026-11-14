@@ -587,6 +587,11 @@ func (f forkQueryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID
 	return f.s.ReleasePluginLeases(ctx, runnerID)
 }
 
+func (f forkQueryMetricsStore) RetireChatDescendantQuestion(ctx context.Context, arg forkdb.RetireChatDescendantQuestionParams) (int64, error) {
+	defer f.observe(ctx, "RetireChatDescendantQuestion", time.Now())
+	return f.s.RetireChatDescendantQuestion(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, arg forkdb.SetPluginUserLinkActiveChatParams) error {
 	defer f.observe(ctx, "SetPluginUserLinkActiveChat", time.Now())
 	return f.s.SetPluginUserLinkActiveChat(ctx, arg)

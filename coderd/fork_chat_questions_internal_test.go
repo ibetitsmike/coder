@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/google/uuid"
-	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -49,16 +47,14 @@ func TestStoreSecretAnswer(t *testing.T) {
 	reportQueued, err = storeSecretAnswer(ctx, db, answer("second-value"))
 	require.NoError(t, err, "no message reports the answer, so a new answer replaces it")
 	require.False(t, reportQueued)
-	dbgen.ChatMessage(t, db, database.ChatMessage{
-		ChatID:        chat.ID,
-		ModelConfigID: uuid.NullUUID{UUID: model.ID, Valid: true},
-		Role:          database.ChatMessageRoleUser,
-		Visibility:    database.ChatMessageVisibilityBoth,
-		Content: pqtype.NullRawMessage{
-			RawMessage: json.RawMessage(`[{"type": "text", "text": "Answer to ask_user_question call call-secret:\nThe user gave a secret answer."}]`),
-			Valid:      true,
-		},
+	// Delivering the report through the chat's state machine stores the
+	// question as answered.
+	_, err = fdb.RetireChatDescendantQuestion(ctx, forkdb.RetireChatDescendantQuestionParams{
+		ChatID:  chat.ID,
+		Visible: true,
+		Answers: []string{"call-secret:\nThe user gave a secret answer."},
 	})
+	require.NoError(t, err)
 	_, err = storeSecretAnswer(ctx, db, answer("third-value"))
 	require.ErrorIs(t, err, errSecretQuestionNotPending, "a delivered message answers the question")
 	answers, err := fdb.GetChatSecretAnswersByChatID(ctx, chat.ID)

@@ -229,12 +229,17 @@ type AgentDefinition struct {
 	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
 }
 
-// The latest question each descendant chat asked the user with ask_user_question. The question is pending until a user message reaches that chat after created_at.
+// The latest question each descendant chat asked the user with ask_user_question. The question is pending while answered_at is NULL. The transaction that inserts the user message that answers or retires it sets answered_at, and a new question of the chat clears it.
 type ChatDescendantQuestion struct {
 	ChatID     uuid.UUID       `db:"chat_id" json:"chat_id"`
 	ToolCallID string          `db:"tool_call_id" json:"tool_call_id"`
 	Questions  json.RawMessage `db:"questions" json:"questions"`
 	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
+	// The root of the chat's family, or the chat itself when it names no root.
+	RootChatID uuid.UUID    `db:"root_chat_id" json:"root_chat_id"`
+	AnsweredAt sql.NullTime `db:"answered_at" json:"answered_at"`
+	// What retired the question: message (a user-visible user message), secret_answer (the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).
+	AnsweredBy sql.NullString `db:"answered_by" json:"answered_by"`
 }
 
 // Plugin packs turned off for one chat and its subagents, even when its project or the chat enables them.
