@@ -62,9 +62,11 @@ func (s *taskStarter) syncForkContext(
 			// Do not fail the task here: runTaskWithRetry would retry it
 			// with no attempt cap, while a consumer loading its own rows
 			// under the prepare retry errors the chat when the failure
-			// persists.
+			// persists. Continue with nil rows, so the checks fall back to
+			// their own loads and a step that is due a fork context message
+			// still gets it.
 			s.server.logger.Warn(ctx, "failed to load prompt messages", slog.F("chat_id", chat.ID), slog.Error(err))
-			return sessionStartResult{}, nil, nil
+			promptRows = nil
 		}
 	}
 	message, ok, err := s.server.todoSnapshotMessage(ctx, chat, promptRows)
