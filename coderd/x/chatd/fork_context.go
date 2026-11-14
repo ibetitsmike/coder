@@ -40,7 +40,8 @@ const todoSnapshotVersionLine = "Version: "
 // PromptRows is nil. When it committed nothing, Chat is zero and PromptRows
 // holds the rows this step's prompt builds from, loaded once for the step.
 // Fork context is optional: a lookup failure is logged and the turn continues
-// without it.
+// without it, either with the loaded rows or with every consumer loading its
+// own.
 func (s *taskStarter) syncForkContext(
 	ctx context.Context,
 	machine *chatstate.ChatMachine,
@@ -58,7 +59,12 @@ func (s *taskStarter) syncForkContext(
 	if s.server.forkContextSharesPromptRows() {
 		promptRows, err = s.server.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
 		if err != nil {
-			return sessionStartResult{}, nil, xerrors.Errorf("load prompt messages: %w", err)
+			// Do not fail the task here: runTaskWithRetry would retry it
+			// with no attempt cap, while a consumer loading its own rows
+			// under the prepare retry errors the chat when the failure
+			// persists.
+			s.server.logger.Warn(ctx, "failed to load prompt messages", slog.F("chat_id", chat.ID), slog.Error(err))
+			return sessionStartResult{}, nil, nil
 		}
 	}
 	message, ok, err := s.server.todoSnapshotMessage(ctx, chat, promptRows)
@@ -78,7 +84,7 @@ func (s *taskStarter) syncForkContext(
 	message, ok, err = s.server.tokenBudgetMessage(ctx, chat, promptRows)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat context budget request", slog.F("chat_id", chat.ID), slog.Error(err))
-		return sessionStartResult{}, nil, nil
+		return sessionStartResult{}, promptRows, nil
 	}
 	if !ok {
 		return sessionStartResult{}, promptRows, nil
