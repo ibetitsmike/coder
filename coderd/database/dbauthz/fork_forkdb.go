@@ -264,6 +264,22 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
 }
 
+// GetChatSubagentMessageRecipient authorizes as a read of the sender chat.
+func (f *forkQuerier) GetChatSubagentMessageRecipient(ctx context.Context, arg forkdb.GetChatSubagentMessageRecipientParams) (uuid.UUID, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.SenderChatID); err != nil {
+		return uuid.Nil, err
+	}
+	return f.db.GetChatSubagentMessageRecipient(ctx, arg)
+}
+
+// DeleteChatSubagentMessagesBefore authorizes as an update of the sender chat.
+func (f *forkQuerier) DeleteChatSubagentMessagesBefore(ctx context.Context, arg forkdb.DeleteChatSubagentMessagesBeforeParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.SenderChatID); err != nil {
+		return err
+	}
+	return f.db.DeleteChatSubagentMessagesBefore(ctx, arg)
+}
+
 // GetChatSubagentTypesByChatIDs is system-only: it reads many chats at once,
 // so callers must already have read the chats they pass.
 func (f *forkQuerier) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs []uuid.UUID) ([]forkdb.GetChatSubagentTypesByChatIDsRow, error) {
@@ -544,6 +560,15 @@ func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.Ins
 		return err
 	}
 	return f.db.InsertChatSecretAnswer(ctx, arg)
+}
+
+// InsertChatSubagentMessage authorizes as an update of the recipient chat,
+// which the message is sent to.
+func (f *forkQuerier) InsertChatSubagentMessage(ctx context.Context, arg forkdb.InsertChatSubagentMessageParams) error {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.RecipientChatID); err != nil {
+		return err
+	}
+	return f.db.InsertChatSubagentMessage(ctx, arg)
 }
 
 // InsertChatSubagent authorizes as an update of the owning chat, like

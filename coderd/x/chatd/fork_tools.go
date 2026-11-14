@@ -111,6 +111,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = p.withDescendantQuestionWait(tools, chat)
 		tools = p.withForkListDescendants(tools, chat)
 	}
+	tools = p.withForkReplaySafeMessageAgent(tools, chat)
 	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
 	if p.experiments.Enabled(codersdk.ExperimentForkFamilyMessages) {
 		tools = append(tools, p.familyMessageTools(chat)...)
