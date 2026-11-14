@@ -3,6 +3,7 @@ package chatd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"image"
@@ -11,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,6 +22,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
@@ -199,6 +202,159 @@ func TestViewImageTool(t *testing.T) {
 	})
 }
 
+func TestLimitViewedImages(t *testing.T) {
+	t.Parallel()
+
+	media := func(size int, text string) fantasy.ToolResultOutputContent {
+		return fantasy.ToolResultOutputContentMedia{
+			Data:      base64.StdEncoding.EncodeToString(make([]byte, size)),
+			MediaType: "image/png",
+			Text:      text,
+		}
+	}
+	turn := func(id, tool string, output fantasy.ToolResultOutputContent) []fantasy.Message {
+		return []fantasy.Message{
+			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.ToolCallPart{ToolCallID: id, ToolName: tool}}},
+			{Role: fantasy.MessageRoleTool, Content: []fantasy.MessagePart{fantasy.ToolResultPart{ToolCallID: id, Output: output}}},
+		}
+	}
+	isMedia := func(msg fantasy.Message) bool {
+		_, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](msg.Content[0].(fantasy.ToolResultPart).Output)
+		return ok
+	}
+
+	t.Run("KeepsNewestByCount", func(t *testing.T) {
+		t.Parallel()
+		var messages []fantasy.Message
+		// A computer-use screenshot is not a view_image result and stays.
+		messages = append(messages, turn("shot", "computer", media(10, "screenshot"))...)
+		for i := range maxViewedImagesInPrompt + 2 {
+			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, "image "+string(rune('a'+i))))...)
+		}
+		before, err := json.Marshal(messages)
+		require.NoError(t, err)
+
+		out := limitViewedImages(messages, nil, nil)
+		require.True(t, isMedia(out[1]), "other tools keep their media")
+		for i := range maxViewedImagesInPrompt + 2 {
+			result := out[3+2*i]
+			if i < 2 {
+				require.False(t, isMedia(result), "old image %d is dropped", i)
+				text := result.Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText).Text
+				require.Contains(t, text, "Call view_image again")
+				require.Contains(t, text, "image "+string(rune('a'+i)))
+				continue
+			}
+			require.True(t, isMedia(result), "new image %d is kept", i)
+		}
+		after, err := json.Marshal(messages)
+		require.NoError(t, err)
+		require.JSONEq(t, string(before), string(after), "the input is unchanged")
+	})
+
+	t.Run("KeepsNewestByBytes", func(t *testing.T) {
+		t.Parallel()
+		big := maxViewedImageBytesInPrompt/2 + 1
+		messages := append(turn("a", viewImageToolName, media(big, "")), turn("b", viewImageToolName, media(big, ""))...)
+		messages = append(messages, turn("c", viewImageToolName, media(big, ""))...)
+		out := limitViewedImages(messages, nil, nil)
+		require.False(t, isMedia(out[1]))
+		require.False(t, isMedia(out[3]), "two halves exceed the byte bound")
+		require.True(t, isMedia(out[5]))
+
+		// The newest image always stays, even over the bound.
+		huge := turn("d", viewImageToolName, media(maxViewedImageBytesInPrompt+1, ""))
+		require.True(t, isMedia(limitViewedImages(huge, nil, nil)[1]))
+	})
+
+	t.Run("NoViewImage", func(t *testing.T) {
+		t.Parallel()
+		messages := turn("shot", "computer", media(10, ""))
+		out := limitViewedImages(messages, nil, nil)
+		require.Same(t, &messages[0], &out[0], "the prompt is returned as is")
+	})
+
+	t.Run("OtherMediaTakesBudget", func(t *testing.T) {
+		t.Parallel()
+		other := maxViewedImageBytesInPrompt - 15
+		for name, first := range map[string][]fantasy.Message{
+			"Screenshot": turn("shot", "computer", media(other, "")),
+			"Attachment": {{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, other), MediaType: "image/png"}}}},
+		} {
+			messages := slices.Concat(first, turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(10, "")))
+			out := limitViewedImages(messages, nil, nil)
+			n := len(first)
+			require.False(t, isMedia(out[n+1]), "%s: the older image does not fit next to the other media", name)
+			require.True(t, isMedia(out[n+3]), "%s: the newest image stays", name)
+		}
+	})
+
+	t.Run("PendingMediaTakesBudget", func(t *testing.T) {
+		t.Parallel()
+		// The unanswered user tail is appended after the bound, so its
+		// attachments count here.
+		pending := []fantasy.Message{{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, maxViewedImageBytesInPrompt-15), MediaType: "image/png"}}}}
+		messages := append(turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(10, ""))...)
+		out := limitViewedImages(messages, pending, nil)
+		require.Len(t, out, len(messages))
+		require.False(t, isMedia(out[1]), "the older image does not fit next to the pending attachment")
+		require.True(t, isMedia(out[3]), "the newest image stays")
+		require.True(t, isMedia(limitViewedImages(messages, nil, nil)[1]), "without the tail both images fit")
+	})
+
+	t.Run("OtherImagesTakeCount", func(t *testing.T) {
+		t.Parallel()
+		// Anthropic tightens its limits above 20 images in a request.
+		var messages []fantasy.Message
+		for range maxImagesInPrompt - 3 {
+			messages = append(messages, fantasy.Message{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, 10), MediaType: "image/png"}}})
+		}
+		// A PDF is not an image and takes no share of the count.
+		messages = append(messages, fantasy.Message{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, 10), MediaType: "application/pdf"}}})
+		n := len(messages)
+		for i := range 5 {
+			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, ""))...)
+		}
+		out := limitViewedImages(messages, nil, nil)
+		for i := range 5 {
+			require.Equal(t, i >= 2, isMedia(out[n+2*i+1]), "viewed image %d", i)
+		}
+	})
+
+	t.Run("ReusedCallID", func(t *testing.T) {
+		t.Parallel()
+		// A later computer call reuses a view_image call's ID. Its
+		// screenshot is not a viewed image and stays.
+		messages := append(turn("x", viewImageToolName, media(10, "")), turn("x", "computer", media(10, ""))...)
+		for i := range maxViewedImagesInPrompt {
+			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, ""))...)
+		}
+		out := limitViewedImages(messages, nil, nil)
+		require.False(t, isMedia(out[1]), "the oldest viewed image is dropped")
+		require.True(t, isMedia(out[3]), "the computer screenshot stays")
+	})
+
+	t.Run("ModelSizeLimit", func(t *testing.T) {
+		t.Parallel()
+		// Viewed on a model without an inline cap, then the chat switched to
+		// Anthropic, whose limit applies to the base64 form.
+		limit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
+		messages := append(turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(limit+1, "too big"))...)
+		anthropic := routedModel("anthropic", "anthropic")
+		out := limitViewedImages(messages, nil, &anthropic)
+		require.True(t, isMedia(out[1]), "the older image fits and stays")
+		require.False(t, isMedia(out[3]))
+		text := out[3].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText).Text
+		require.Contains(t, text, "larger than the view_image limit of 3932160 bytes for this model")
+		require.Contains(t, text, "too big")
+
+		openai := routedModel("openai", "openai")
+		out = limitViewedImages(messages, nil, &openai)
+		require.True(t, isMedia(out[1]))
+		require.True(t, isMedia(out[3]))
+	})
+}
+
 func TestViewImageCustomAgentPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -235,13 +391,17 @@ func TestViewImageToolGate(t *testing.T) {
 		name        string
 		experiments codersdk.Experiments
 		dynamic     bool
+		planMode    bool
 		want        []string
+		bounded     bool
 	}{
-		{name: "Off", want: []string{}},
-		{name: "On", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, want: []string{viewImageToolName}},
-		// appendDynamicTools adds a caller-supplied view_image, not appendForkTools.
-		{name: "OffWithDynamicTool", dynamic: true, want: []string{}},
-		{name: "OnWithDynamicTool", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, dynamic: true, want: []string{viewImageToolName}},
+		{name: "Off", want: []string{}, bounded: true},
+		{name: "On", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, want: []string{viewImageToolName}, bounded: true},
+		// A caller-supplied view_image owns the name, so its results stay.
+		{name: "OffWithDynamicTool", dynamic: true, want: []string{}, bounded: false},
+		{name: "OnWithDynamicTool", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, dynamic: true, want: []string{viewImageToolName}, bounded: true},
+		// Plan mode offers no dynamic tools, so the results are the built-in's.
+		{name: "OffWithDynamicToolInPlanMode", dynamic: true, planMode: true, want: []string{}, bounded: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -252,12 +412,31 @@ func TestViewImageToolGate(t *testing.T) {
 			chat, err := server.CreateChat(ctx, CreateOptions{OrganizationID: org.ID, OwnerID: user.ID, Title: "view", ModelConfigID: modelConfig.ID, InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("hello")}})
 			require.NoError(t, err)
 			require.NoError(t, WaitUntilIdleForTest(ctx, server))
+
+			var prompt []fantasy.Message
+			for i := range maxViewedImagesInPrompt + 1 {
+				id := string(rune('a' + i))
+				prompt = append(prompt,
+					fantasy.Message{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.ToolCallPart{ToolCallID: id, ToolName: viewImageToolName}}},
+					fantasy.Message{Role: fantasy.MessageRoleTool, Content: []fantasy.MessagePart{fantasy.ToolResultPart{ToolCallID: id, Output: fantasy.ToolResultOutputContentMedia{Data: "AAAA", MediaType: "image/png"}}}},
+				)
+			}
 			if tt.dynamic {
 				chat.DynamicTools = pqtype.NullRawMessage{RawMessage: json.RawMessage(`[{"name":"view_image"}]`), Valid: true}
 			}
-			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model))
+			if tt.planMode {
+				chat.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
+			}
+			original := prompt
+			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt, nil))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, toolNames(tools))
+			_, isText := prompt[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
+			require.Equal(t, tt.bounded, isText, "the prompt bound in case %s", tt.name)
+			// A compaction override model gets the same bound.
+			compaction := server.limitViewedImagesForModel(chat, original, model)
+			_, isText = compaction[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
+			require.Equal(t, tt.bounded, isText, "the compaction bound in case %s", tt.name)
 		})
 	}
 }
