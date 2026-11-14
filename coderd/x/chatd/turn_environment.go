@@ -170,6 +170,12 @@ func (p *Server) buildTurnEnvironment(
 	usesMCPServers := turnUsesMCPServers(chat)
 	var g errgroup.Group
 	g.Go(func() error {
+		// The fork loads the prompt history once per step and hands the rows
+		// here, so this is nil only with the fork experiments off.
+		if input.PromptRows != nil {
+			promptRows = input.PromptRows
+			return nil
+		}
 		var err error
 		promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
 		if err != nil {

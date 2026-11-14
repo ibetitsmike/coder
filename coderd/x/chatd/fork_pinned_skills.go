@@ -53,7 +53,10 @@ var pinnedSkillTagPattern = regexp.MustCompile(`(?i)<\s*/?\s*pinned-skill\b[^>]*
 // list, so the cached prompt prefix stays intact, and a compaction that drops
 // it brings it back on the next step. The fingerprint covers the loaded
 // bodies, so an edited, deleted or disabled skill changes it too.
-func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
+//
+// promptRows are the rows the prompt is built from, loaded by the caller; nil
+// loads them here, so a caller outside syncForkContext still works.
+func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat, promptRows []database.ChatMessage) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkPinnedSkills) {
 		return chatstate.Message{}, false, nil
 	}
@@ -65,16 +68,26 @@ func (p *Server) pinnedSkillsMessage(ctx context.Context, chat database.Chat) (c
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("read pinned skills: %w", err)
 	}
-	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
-	if err != nil {
-		return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+	if promptRows == nil {
+		promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		if err != nil {
+			return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+		}
 	}
 	if deferred, err := forkContextDeferred(chat, promptRows); err != nil || deferred {
 		return chatstate.Message{}, false, err
 	}
-	list, err := p.renderPinnedSkills(ctx, chat, pins)
-	if err != nil {
-		return chatstate.Message{}, false, err
+	// With no pins the list is the constant pinnedSkillsNone, so the render
+	// and the skill loads it does are skipped and the fingerprint of that
+	// constant is used instead.
+	var list string
+	if len(pins) == 0 {
+		list = pinnedSkillsNone
+	} else {
+		list, err = p.renderPinnedSkills(ctx, chat, pins)
+		if err != nil {
+			return chatstate.Message{}, false, err
+		}
 	}
 	sum := sha256.Sum256([]byte(list))
 	fingerprint := hex.EncodeToString(sum[:8])

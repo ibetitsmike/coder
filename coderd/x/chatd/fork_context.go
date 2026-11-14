@@ -34,8 +34,11 @@ const todoSnapshotHeader = "Your todo list for this chat, read from the store. I
 const todoSnapshotVersionLine = "Version: "
 
 // syncForkContext commits the model-only messages the fork features want in
-// the prompt before this step, if any, and returns the reloaded chat when it
-// committed one, which restarts the step so it reads the new history version.
+// the prompt before this step, if any, and returns the reloaded chat and the
+// prompt rows it loaded. When it committed a message, the caller restarts the
+// step with the reloaded chat, and the rows are stale, so Chat.ID is set and
+// PromptRows is nil. When it committed nothing, Chat is zero and PromptRows
+// holds the rows this step's prompt builds from, loaded once for the step.
 // Fork context is optional: a lookup failure is logged and the turn continues
 // without it.
 func (s *taskStarter) syncForkContext(
@@ -44,32 +47,54 @@ func (s *taskStarter) syncForkContext(
 	input chatWorkerTaskStartInput,
 	chat database.Chat,
 	history []database.ChatMessage,
-) (sessionStartResult, error) {
+) (sessionStartResult, []database.ChatMessage, error) {
 	synced, err := s.syncMemoryIndex(ctx, machine, input, chat, history)
 	if err != nil || synced.Chat.ID != uuid.Nil {
-		return synced, err
+		return synced, nil, err
 	}
-	message, ok, err := s.server.todoSnapshotMessage(ctx, chat)
+	// One load feeds the todo snapshot, the pinned skills and the token
+	// budget checks, and the turn environment that builds this step's prompt.
+	var promptRows []database.ChatMessage
+	if s.server.forkContextSharesPromptRows() {
+		promptRows, err = s.server.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		if err != nil {
+			return sessionStartResult{}, nil, xerrors.Errorf("load prompt messages: %w", err)
+		}
+	}
+	message, ok, err := s.server.todoSnapshotMessage(ctx, chat, promptRows)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat todo snapshot", slog.F("chat_id", chat.ID), slog.Error(err))
 	} else if ok {
-		return s.commitForkContextMessage(ctx, machine, input, message)
+		synced, err := s.commitForkContextMessage(ctx, machine, input, message)
+		return synced, nil, err
 	}
-	message, ok, err = s.server.pinnedSkillsMessage(ctx, chat)
+	message, ok, err = s.server.pinnedSkillsMessage(ctx, chat, promptRows)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat pinned skills", slog.F("chat_id", chat.ID), slog.Error(err))
 	} else if ok {
-		return s.commitForkContextMessage(ctx, machine, input, message)
+		synced, err := s.commitForkContextMessage(ctx, machine, input, message)
+		return synced, nil, err
 	}
-	message, ok, err = s.server.tokenBudgetMessage(ctx, chat)
+	message, ok, err = s.server.tokenBudgetMessage(ctx, chat, promptRows)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat context budget request", slog.F("chat_id", chat.ID), slog.Error(err))
-		return sessionStartResult{}, nil
+		return sessionStartResult{}, nil, nil
 	}
 	if !ok {
-		return sessionStartResult{}, nil
+		return sessionStartResult{}, promptRows, nil
 	}
-	return s.commitForkContextMessage(ctx, machine, input, message)
+	synced, err = s.commitForkContextMessage(ctx, machine, input, message)
+	return synced, nil, err
+}
+
+// forkContextSharesPromptRows reports whether this step runs a fork context
+// check that reads prompt rows, so loading them once here is cheaper than
+// every check loading its own. With no fork experiment on, loading stays
+// upstream's: the turn environment loads its own rows.
+func (p *Server) forkContextSharesPromptRows() bool {
+	return p.experiments.Enabled(codersdk.ExperimentForkChatTodos) ||
+		p.experiments.Enabled(codersdk.ExperimentForkPinnedSkills) ||
+		p.experiments.Enabled(codersdk.ExperimentForkTokenBudget)
 }
 
 // commitForkContextMessage stores one model-only message in its own
@@ -112,9 +137,12 @@ func (s *taskStarter) commitForkContextMessage(
 // cleared, reaches it too. Like the memory index, the snapshot is an appended
 // message so the cached prompt prefix stays intact.
 //
+// promptRows are the rows the prompt is built from, loaded by the caller; nil
+// loads them here, so a caller outside syncForkContext still works.
+//
 // A subagent chat gets a snapshot too: its todo list is its own, so it loses
 // its plan the same way.
-func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
+func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat, promptRows []database.ChatMessage) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkChatTodos) {
 		return chatstate.Message{}, false, nil
 	}
@@ -128,9 +156,11 @@ func (p *Server) todoSnapshotMessage(ctx context.Context, chat database.Chat) (c
 	}
 	// Prompt rows include the model-only rows this sends, and exclude rows
 	// compaction has replaced.
-	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
-	if err != nil {
-		return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+	if promptRows == nil {
+		promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		if err != nil {
+			return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+		}
 	}
 	if deferred, err := forkContextDeferred(chat, promptRows); err != nil || deferred {
 		return chatstate.Message{}, false, err

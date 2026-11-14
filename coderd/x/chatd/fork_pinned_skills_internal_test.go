@@ -87,7 +87,9 @@ func TestPinnedSkillsMessage(t *testing.T) {
 	// syncForkContext commits it before the step runs.
 	syncPins := func(t *testing.T) (string, bool) {
 		t.Helper()
-		message, ok, err := server.pinnedSkillsMessage(ctx, chat)
+		promptRows, err := db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		require.NoError(t, err)
+		message, ok, err := server.pinnedSkillsMessage(ctx, chat, promptRows)
 		require.NoError(t, err)
 		if !ok {
 			return "", false
