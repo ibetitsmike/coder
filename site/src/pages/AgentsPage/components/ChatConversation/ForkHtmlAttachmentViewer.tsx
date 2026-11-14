@@ -98,7 +98,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const { agentId } = useParams();
 	const queryClient = useQueryClient();
 	const sendMessage = useMutation(createChatMessageByChatId(queryClient));
-	const { reset: resetSend } = sendMessage;
+	const { reset: resetSend, isPending: sendPending } = sendMessage;
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const proposalRef = useRef<HTMLElement>(null);
 	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
@@ -121,7 +121,10 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
-			focusReopen.current = document.activeElement === frameRef.current;
+			const active = document.activeElement;
+			focusReopen.current =
+				active === frameRef.current ||
+				(proposalRef.current?.contains(active) ?? false);
 			setNavigatedAway(true);
 			setProposal(null);
 		}
@@ -152,8 +155,11 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	// Input inside a frame never reaches the dashboard, so recent dashboard
 	// input means the activation came from the dashboard, not the page. That
 	// includes Tab: a key press that moves focus into the frame activates the
-	// dashboard too.
+	// dashboard too. The viewer counts its own mount as input, because a click
+	// in the dashboard, such as on the Attachments menu, may have mounted it
+	// before its listeners existed.
 	useEffect(() => {
+		lastDashboardInputAt.current = Date.now();
 		const onInput = () => {
 			lastDashboardInputAt.current = Date.now();
 		};
@@ -167,8 +173,9 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 
 	useEffect(() => {
 		// An open proposal stays as shown: the page cannot swap its text
-		// while the user reads it.
-		if (!agentId || proposal !== null) {
+		// while the user reads it. A send still in flight, for a proposal
+		// that a navigation closed, keeps the next one out until it settles.
+		if (!agentId || proposal !== null || sendPending) {
 			return;
 		}
 		const onMessage = (event: MessageEvent) => {
@@ -176,21 +183,24 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 			if (!frameWindow || event.source !== frameWindow) {
 				return;
 			}
-			const text = parseForkHtmlMessage(event.data);
 			// A click in the frame activates this page and focuses the frame,
 			// and the dashboard does not see it. Without all three, a script
 			// in the page could propose messages on its own, or ride a click
-			// in the dashboard.
+			// in the dashboard. These checks come before parsing, so a page
+			// cannot make the dashboard parse its messages on its own.
 			const now = Date.now();
 			if (
-				text === null ||
 				!navigator.userActivation?.isActive ||
 				document.activeElement !== frameRef.current ||
 				now - lastDashboardInputAt.current < forkHtmlMessageIntervalMs
 			) {
 				return;
 			}
-			if (now - lastProposedAt.current < forkHtmlMessageIntervalMs) {
+			const text = parseForkHtmlMessage(event.data);
+			if (
+				text === null ||
+				now - lastProposedAt.current < forkHtmlMessageIntervalMs
+			) {
 				return;
 			}
 			lastProposedAt.current = now;
@@ -199,7 +209,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		};
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
-	}, [agentId, block.name, proposal, resetSend]);
+	}, [agentId, block.name, proposal, resetSend, sendPending]);
 
 	// Focus on the proposal, or on a button that a pending send disabled,
 	// would fall to the document body, so it goes back to the page.

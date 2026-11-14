@@ -31,11 +31,19 @@ import {
 
 const chatId = "chat-html-1";
 
+// The viewer tests read Date.now from this clock.
+let clock = 1_000_000;
+const advance = (ms: number) => {
+	clock += ms;
+};
+
+// The viewer counts its mount as dashboard input, so the clock moves past
+// that before a test posts from the page.
 const renderPreview = (
 	experiments: Experiment[],
 	block: typeof MockChatHtmlFilePart = MockChatHtmlFilePart,
-) =>
-	renderWithRouter(
+) => {
+	const result = renderWithRouter(
 		createMemoryRouter(
 			[
 				{
@@ -72,6 +80,9 @@ const renderPreview = (
 			{ initialEntries: [`/agents/${chatId}`] },
 		),
 	);
+	advance(forkHtmlMessageIntervalMs);
+	return result;
+};
 
 const originalUserActivation = Object.getOwnPropertyDescriptor(
 	navigator,
@@ -227,6 +238,8 @@ describe("latestForkHtmlAttachmentIds", () => {
 describe("ForkHtmlAttachmentViewer", () => {
 	beforeEach(() => {
 		setUserActivation(true);
+		clock = 1_000_000;
+		vi.spyOn(Date, "now").mockImplementation(() => clock);
 	});
 
 	afterEach(() => {
@@ -281,14 +294,13 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 	it("clears the last send status for a new proposal", async () => {
 		mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		postFromFrame(pageMessage("Option A"));
 		await confirmProposal("Option A");
 		await screen.findByText("Sent to the chat");
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(forkHtmlMessageIntervalMs);
 		postFromFrame(pageMessage("Option B"));
 		await screen.findByRole("region", { name: proposalName });
 		expect(screen.getByRole("status").textContent).toBe("");
@@ -325,35 +337,32 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 	it("ignores messages right after input in the dashboard", async () => {
 		const createChatMessage = mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		await userEvent.click(screen.getByRole("figure"));
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		advance(forkHtmlMessageIntervalMs - 1);
 		postFromFrame(pageMessage("After a click in the dashboard"));
 		expect(queryProposal()).toBeNull();
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(1);
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
 	it("counts Tab into the frame as input in the dashboard", async () => {
 		const createChatMessage = mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		await userEvent.keyboard("{Tab}");
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		advance(forkHtmlMessageIntervalMs - 1);
 		postFromFrame(pageMessage("On focus"));
 		expect(queryProposal()).toBeNull();
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(1);
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
 	it("returns focus to the page when the proposal closes", async () => {
 		mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 		const frame = screen.getByTitle("choices.html");
 
@@ -364,7 +373,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 		);
 		expect(frame).toHaveFocus();
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(forkHtmlMessageIntervalMs);
 		postFromFrame(pageMessage("Option B"));
 		await confirmProposal("Option B");
 		await screen.findByText("Sent to the chat");
@@ -384,7 +393,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 	it("sends nothing until the user confirms", async () => {
 		const createChatMessage = mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		postFromFrame(pageMessage("Option A"));
@@ -394,18 +402,17 @@ describe("ForkHtmlAttachmentViewer", () => {
 		);
 		expect(queryProposal()).toBeNull();
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(forkHtmlMessageIntervalMs);
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
 	it("keeps an open proposal when the page sends another", async () => {
 		const createChatMessage = mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		postFromFrame(pageMessage("Option B"));
 		await screen.findByRole("region", { name: proposalName });
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(forkHtmlMessageIntervalMs);
 		postFromFrame(pageMessage("Option C"));
 
 		await confirmProposal("Option B");
@@ -415,7 +422,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 
 	it("proposes at most one message per interval", async () => {
 		const createChatMessage = mockCreateChatMessage();
-		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		postFromFrame(pageMessage("Option A"));
@@ -423,11 +429,11 @@ describe("ForkHtmlAttachmentViewer", () => {
 		await userEvent.click(
 			within(proposal).getByRole("button", { name: "Cancel" }),
 		);
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		advance(forkHtmlMessageIntervalMs - 1);
 		postFromFrame(pageMessage("Option C"));
 		expect(queryProposal()).toBeNull();
 
-		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		advance(1);
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
@@ -450,7 +456,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 	});
 
 	it("drops an open proposal when the page navigates away", async () => {
-		vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 		renderPreview(["fork-html-attachments"]);
 
 		fireEvent.load(screen.getByTitle("choices.html"));
@@ -458,6 +463,56 @@ describe("ForkHtmlAttachmentViewer", () => {
 		await screen.findByRole("region", { name: proposalName });
 
 		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(queryProposal()).toBeNull();
+	});
+
+	it("moves focus from a proposal that a navigation closes to the reopen button", async () => {
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		postFromFrame(pageMessage("Option A"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		act(() => within(proposal).getByRole("button", { name: "Cancel" }).focus());
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(
+			screen.getByRole("button", { name: "Show the page again" }),
+		).toHaveFocus();
+	});
+
+	it("proposes nothing while a send from a closed page is in flight", async () => {
+		let finishSend: (value: { queued: boolean }) => void = () => {};
+		mockCreateChatMessage().mockReturnValueOnce(
+			new Promise((resolve) => {
+				finishSend = resolve;
+			}),
+		);
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		postFromFrame(pageMessage("Option A"));
+		await confirmProposal("Option A");
+		fireEvent.load(screen.getByTitle("choices.html"));
+		await userEvent.click(
+			screen.getByRole("button", { name: "Show the page again" }),
+		);
+
+		advance(forkHtmlMessageIntervalMs);
+		postFromFrame(pageMessage("Option B"));
+		expect(queryProposal()).toBeNull();
+
+		await act(async () => finishSend({ queued: false }));
+		await screen.findByText("Sent to the chat");
+		postFromFrame(pageMessage("Option B"));
+		await screen.findByRole("region", { name: proposalName });
+	});
+
+	it("counts its own mount as input in the dashboard", () => {
+		renderPreview(["fork-html-attachments"]);
+
+		// renderPreview moves the clock to the end of the mount guard.
+		advance(-1);
+		postFromFrame(pageMessage("Right after the mount"));
 		expect(queryProposal()).toBeNull();
 	});
 

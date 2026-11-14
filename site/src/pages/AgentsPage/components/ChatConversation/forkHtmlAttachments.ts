@@ -51,6 +51,11 @@ export const parseForkHtmlMessage = (data: unknown): string | null => {
 		return null;
 	}
 	const text = data.text.trim();
+	// A code point takes at most two UTF-16 units, so a longer string is
+	// rejected before it is split into code points.
+	if (text.length > forkHtmlMessageMaxLength * 2) {
+		return null;
+	}
 	const length = [...text].length;
 	if (length === 0 || length > forkHtmlMessageMaxLength) {
 		return null;
