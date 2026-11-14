@@ -64,7 +64,10 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
 			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
 			// Below the limit compact, above it as jsonb text.
-			"SpacedSchema": {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(588)},
+			"SpacedSchema":   {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(588)},
+			"NULDescription": {Name: "nul", Script: savedWorkflowScript, Description: "bad\x00description"},
+			"NULScript":      {Name: "nul", Script: savedWorkflowScript + "# \x00\n"},
+			"NULSchema":      {Name: "nul", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","title":"a\u0000b"}`)},
 		} {
 			_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, req)
 			_ = requireSDKErrorStatus(t, err, http.StatusBadRequest, name)
