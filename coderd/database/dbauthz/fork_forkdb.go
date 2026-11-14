@@ -266,7 +266,7 @@ func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.U
 
 // GetChatSubagentMessageRecipient authorizes as a read of the sender chat.
 func (f *forkQuerier) GetChatSubagentMessageRecipient(ctx context.Context, arg forkdb.GetChatSubagentMessageRecipientParams) (uuid.UUID, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.SenderChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.SenderChatID); err != nil {
 		return uuid.Nil, err
 	}
 	return f.db.GetChatSubagentMessageRecipient(ctx, arg)
@@ -315,7 +315,7 @@ func (f *forkQuerier) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatN
 
 // GetChatNote authorizes through the owning chat.
 func (f *forkQuerier) GetChatNote(ctx context.Context, arg forkdb.GetChatNoteParams) (forkdb.ChatNote, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return forkdb.ChatNote{}, err
 	}
 	return f.db.GetChatNote(ctx, arg)
@@ -323,7 +323,7 @@ func (f *forkQuerier) GetChatNote(ctx context.Context, arg forkdb.GetChatNotePar
 
 // GetChatNoteCall authorizes through the owning chat.
 func (f *forkQuerier) GetChatNoteCall(ctx context.Context, arg forkdb.GetChatNoteCallParams) (forkdb.ChatNoteCall, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return forkdb.ChatNoteCall{}, err
 	}
 	return f.db.GetChatNoteCall(ctx, arg)
@@ -725,7 +725,7 @@ func (f *forkQuerier) ListChatFamilyMembers(ctx context.Context, arg forkdb.List
 // ListChatHistoryRows authorizes through the chat, like
 // GetChatMessagesByChatID.
 func (f *forkQuerier) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.ListChatHistoryRows(ctx, chatID)
@@ -733,7 +733,7 @@ func (f *forkQuerier) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID)
 
 // ListChatNotes authorizes through the owning chat.
 func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.ListChatNotes(ctx, chatID)
@@ -1028,7 +1028,7 @@ func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChat
 // SearchChatHistory authorizes through the chat, like
 // GetChatMessagesByChatID.
 func (f *forkQuerier) SearchChatHistory(ctx context.Context, arg forkdb.SearchChatHistoryParams) ([]forkdb.SearchChatHistoryRow, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return nil, err
 	}
 	return f.db.SearchChatHistory(ctx, arg)
