@@ -117,7 +117,11 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = append(tools, p.familyMessageTools(chat)...)
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) {
-		tools = append(tools, p.chatNotesTool(chat), p.chatHistoryTool(chat), p.newContextTool(chat))
+		tokenBudgetTools, err := p.tokenBudgetTools(ctx, chat)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tokenBudgetTools...)
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) && opt.model != nil {
 		tools = append(tools, viewImageTool(*opt.model, opt.getWorkspaceConn))

@@ -327,6 +327,11 @@ func (f forkQueryMetricsStore) GetChatAwaitingWorker(ctx context.Context, arg fo
 	return f.s.GetChatAwaitingWorker(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationTokenBudget, error) {
+	defer f.observe(ctx, "GetChatOrganizationTokenBudget", time.Now())
+	return f.s.GetChatOrganizationTokenBudget(ctx, organizationID)
+}
+
 func (f forkQueryMetricsStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	defer f.observe(ctx, "GetChatOrganizationSubagentLimits", time.Now())
 	return f.s.GetChatOrganizationSubagentLimits(ctx, organizationID)
@@ -670,6 +675,11 @@ func (f forkQueryMetricsStore) FailOpenWorkflowStepsOfRun(ctx context.Context, a
 func (f forkQueryMetricsStore) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
 	defer f.observe(ctx, "UpsertChatDescendantQuestion", time.Now())
 	return f.s.UpsertChatDescendantQuestion(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpsertChatOrganizationTokenBudget(ctx context.Context, arg forkdb.UpsertChatOrganizationTokenBudgetParams) (forkdb.ChatOrganizationTokenBudget, error) {
+	defer f.observe(ctx, "UpsertChatOrganizationTokenBudget", time.Now())
+	return f.s.UpsertChatOrganizationTokenBudget(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {

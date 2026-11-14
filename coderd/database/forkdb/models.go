@@ -275,6 +275,14 @@ type ChatOrganizationSubagentLimit struct {
 	UpdatedAt              time.Time     `db:"updated_at" json:"updated_at"`
 }
 
+// Compaction strategy of the fork-token-budget experiment for an organization. Without a row the organization uses summary compaction, and the fallback is a new context window.
+type ChatOrganizationTokenBudget struct {
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	Strategy       string    `db:"strategy" json:"strategy"`
+	Fallback       string    `db:"fallback" json:"fallback"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
+}
+
 // Daily wake-up caps of an organization. A NULL cap uses the built-in default.
 type ChatOrganizationWakeupCap struct {
 	OrganizationID                   uuid.UUID     `db:"organization_id" json:"organization_id"`

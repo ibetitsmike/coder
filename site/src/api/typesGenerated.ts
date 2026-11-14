@@ -6692,6 +6692,25 @@ export interface ForkOrganizationSubagentLimitsResponse {
 	readonly effective: ForkSubagentLimitValues;
 }
 
+// From codersdk/fork_token_budget.go
+/**
+ * ForkOrganizationTokenBudget is the compaction setting of an organization.
+ * An organization that never saved one uses the summary strategy and the
+ * new_window fallback.
+ */
+export interface ForkOrganizationTokenBudget {
+	/**
+	 * Strategy is how chats compact their context.
+	 */
+	readonly strategy: ForkTokenBudgetStrategy;
+	/**
+	 * Fallback is what a token-budget chat does when it reaches the usable
+	 * limit without calling new_context. It applies only with the
+	 * token_budget strategy.
+	 */
+	readonly fallback: ForkTokenBudgetFallback;
+}
+
 // From codersdk/fork_wakeup_caps.go
 /**
  * ForkOrganizationWakeupCaps are the daily wake-up caps of an organization,
@@ -6807,6 +6826,22 @@ export interface ForkSubagentLimitValues {
 	 */
 	readonly max_live_per_family: number;
 }
+
+// From codersdk/fork_token_budget.go
+export type ForkTokenBudgetFallback = "new_window" | "summary";
+
+export const ForkTokenBudgetFallbacks: ForkTokenBudgetFallback[] = [
+	"new_window",
+	"summary",
+];
+
+export const ForkTokenBudgetStrategies: ForkTokenBudgetStrategy[] = [
+	"summary",
+	"token_budget",
+];
+
+// From codersdk/fork_token_budget.go
+export type ForkTokenBudgetStrategy = "summary" | "token_budget";
 
 // From codersdk/fork_wakeup_caps.go
 /**
