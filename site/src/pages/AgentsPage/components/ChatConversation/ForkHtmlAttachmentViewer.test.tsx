@@ -292,7 +292,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(queryProposal()).toBeNull();
 	});
 
-	it("clears the last send status for a new proposal", async () => {
+	it("announces a new proposal in place of the last send status", async () => {
 		mockCreateChatMessage();
 		renderPreview(["fork-html-attachments"]);
 
@@ -303,7 +303,9 @@ describe("ForkHtmlAttachmentViewer", () => {
 		advance(forkHtmlMessageIntervalMs);
 		postFromFrame(pageMessage("Option B"));
 		await screen.findByRole("region", { name: proposalName });
-		expect(screen.getByRole("status").textContent).toBe("");
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"The page asks to send a message. Review it below the page.",
+		);
 	});
 
 	it("ignores messages from other windows", async () => {

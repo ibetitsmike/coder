@@ -243,6 +243,10 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		status = getErrorMessage(sendMessage.error, "Could not send to the chat.");
 	} else if (sendMessage.isSuccess) {
 		status = "Sent to the chat";
+	} else if (proposal !== null) {
+		// Focus stays in the page, so the live status tells keyboard and
+		// screen reader users that a proposal opened.
+		status = "The page asks to send a message. Review it below the page.";
 	}
 
 	return (
