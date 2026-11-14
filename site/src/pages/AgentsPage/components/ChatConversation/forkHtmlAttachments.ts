@@ -3,6 +3,19 @@
 import type * as TypesGen from "#/api/typesGenerated";
 import type { ParsedMessageEntry } from "./types";
 
+/** The `type` of the message a page posts to send text to the chat. */
+export const forkHtmlMessageType = "coder:chat-message";
+
+/** The longest text, in UTF-16 code units, that a page may send. */
+export const forkHtmlMessageMaxLength = 4000;
+
+/**
+ * The shortest time between two messages from one viewer. Browsers keep a
+ * click's activation for about this long, so one click sends at most one
+ * message.
+ */
+export const forkHtmlMessageIntervalMs = 5000;
+
 /**
  * Where the viewer loads a page from. The route serves it as text/html with a
  * policy that sandboxes it and blocks network access.
@@ -20,6 +33,33 @@ export const isForkHtmlAttachment = (
 	Boolean(block.file_id) &&
 	/\.html?$/i.test(block.name ?? "") &&
 	(block.media_type === "text/plain" || block.media_type === "text/html");
+
+/**
+ * Returns the text of a message a page posted, or null unless it has exactly
+ * the fields `type` and `text` and the trimmed text is 1 to
+ * forkHtmlMessageMaxLength characters long.
+ */
+export const parseForkHtmlMessage = (data: unknown): string | null => {
+	if (typeof data !== "object" || data === null || Array.isArray(data)) {
+		return null;
+	}
+	const keys = Object.keys(data);
+	if (keys.length !== 2 || !("type" in data) || !("text" in data)) {
+		return null;
+	}
+	if (data.type !== forkHtmlMessageType || typeof data.text !== "string") {
+		return null;
+	}
+	const text = data.text.trim();
+	if (text.length === 0 || text.length > forkHtmlMessageMaxLength) {
+		return null;
+	}
+	return text;
+};
+
+/** The user message that carries a page's text and names the page. */
+export const formatForkHtmlMessage = (name: string, text: string) =>
+	`Message from the attached page "${name}":\n\n${text}`;
 
 /**
  * Maps each HTML attachment name to the file ID of its newest attachment in

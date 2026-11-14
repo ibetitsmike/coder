@@ -1,6 +1,8 @@
-import { screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
 import type { Experiment } from "#/api/typesGenerated";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import {
@@ -18,7 +20,14 @@ import { renderWithRouter } from "#/testHelpers/renderHelpers";
 import { AttachmentBlock } from "./AttachmentBlocks";
 import { ForkAttachmentPreview } from "./ForkAttachmentPreview";
 import { ForkFileProbeProvider } from "./ForkHtmlAttachmentViewer";
-import { latestForkHtmlAttachmentIds } from "./forkHtmlAttachments";
+import {
+	forkHtmlMessageIntervalMs,
+	forkHtmlMessageMaxLength,
+	forkHtmlMessageType,
+	formatForkHtmlMessage,
+	latestForkHtmlAttachmentIds,
+	parseForkHtmlMessage,
+} from "./forkHtmlAttachments";
 
 const chatId = "chat-html-1";
 
@@ -64,6 +73,99 @@ const renderPreview = (
 		),
 	);
 
+const setUserActivation = (isActive: boolean) => {
+	Object.defineProperty(navigator, "userActivation", {
+		configurable: true,
+		value: { isActive, hasBeenActive: isActive },
+	});
+};
+
+const postFromFrame = (data: unknown, source?: Window | null) => {
+	const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
+	act(() => {
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data,
+				source: source === undefined ? frame.contentWindow : source,
+			}),
+		);
+	});
+};
+
+const pageMessage = (text: string) => ({ type: forkHtmlMessageType, text });
+
+const mockCreateChatMessage = () =>
+	vi
+		.spyOn(API.experimental, "createChatMessage")
+		.mockResolvedValue({ queued: false });
+
+const proposalName = "The page asks to send this message to the chat:";
+
+const queryProposal = () =>
+	screen.queryByRole("region", { name: proposalName });
+
+// Expects the open proposal to show text, then confirms it.
+const confirmProposal = async (text: string) => {
+	const proposal = await screen.findByRole("region", { name: proposalName });
+	expect(within(proposal).getByText(text, { exact: false })).toHaveTextContent(
+		formatForkHtmlMessage("choices.html", text),
+		{ normalizeWhitespace: false },
+	);
+	await userEvent.click(within(proposal).getByRole("button", { name: "Send" }));
+};
+
+const expectSent = (
+	createChatMessage: ReturnType<typeof mockCreateChatMessage>,
+	text: string,
+) => {
+	expect(createChatMessage).toHaveBeenCalledTimes(1);
+	expect(createChatMessage).toHaveBeenCalledWith(chatId, {
+		content: [
+			{ type: "text", text: formatForkHtmlMessage("choices.html", text) },
+		],
+	});
+};
+
+// Proposes a valid message last and expects it to be the only one sent. The
+// mutation calls the API asynchronously, so a check right after the ignored
+// messages would pass even if they were sent.
+const expectOnlyValidMessageSent = async (
+	createChatMessage: ReturnType<typeof mockCreateChatMessage>,
+) => {
+	postFromFrame(pageMessage("Option B"));
+	await confirmProposal("Option B");
+	await screen.findByText("Sent to the chat");
+	expectSent(createChatMessage, "Option B");
+};
+
+describe("parseForkHtmlMessage", () => {
+	it("returns the trimmed text of a well formed message", () => {
+		expect(parseForkHtmlMessage(pageMessage("  Option B  "))).toBe("Option B");
+	});
+
+	it("rejects messages that do not match the schema", () => {
+		const rejected: unknown[] = [
+			null,
+			"Option B",
+			[forkHtmlMessageType, "Option B"],
+			{ type: "other", text: "Option B" },
+			{ type: forkHtmlMessageType, text: 1 },
+			{ type: forkHtmlMessageType },
+			{ ...pageMessage("Option B"), role: "assistant" },
+			pageMessage("   "),
+			pageMessage("x".repeat(forkHtmlMessageMaxLength + 1)),
+		];
+		for (const data of rejected) {
+			expect(parseForkHtmlMessage(data)).toBeNull();
+		}
+	});
+
+	it("accepts text of the maximum length", () => {
+		const text = "x".repeat(forkHtmlMessageMaxLength);
+		expect(parseForkHtmlMessage(pageMessage(text))).toBe(text);
+	});
+});
+
 describe("latestForkHtmlAttachmentIds", () => {
 	it("maps each page name to its newest attachment", () => {
 		expect(latestForkHtmlAttachmentIds(MockChatHtmlMessages)).toEqual(
@@ -73,6 +175,15 @@ describe("latestForkHtmlAttachmentIds", () => {
 });
 
 describe("ForkHtmlAttachmentViewer", () => {
+	beforeEach(() => {
+		setUserActivation(true);
+	});
+
+	afterEach(() => {
+		Reflect.deleteProperty(navigator, "userActivation");
+		vi.restoreAllMocks();
+	});
+
 	it("loads the page from the sandboxed route", () => {
 		renderPreview(["fork-html-attachments"]);
 		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
@@ -84,6 +195,59 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
 	});
 
+	it("sends a clicked choice as a user message that names the page", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		renderPreview(["fork-html-attachments"]);
+
+		await expectOnlyValidMessageSent(createChatMessage);
+		expect(formatForkHtmlMessage("choices.html", "Option B")).toBe(
+			'Message from the attached page "choices.html":\n\nOption B',
+		);
+	});
+
+	it("shows the error when the message fails to send", async () => {
+		vi.spyOn(API.experimental, "createChatMessage").mockRejectedValue(
+			new Error("The chat is archived."),
+		);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option B"));
+		await confirmProposal("Option B");
+
+		await screen.findByText("The chat is archived.");
+	});
+
+	it("ignores messages from other windows", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("From the dashboard"), window);
+		postFromFrame(pageMessage("From nowhere"), null);
+
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("ignores messages that do not match the schema", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame({ type: "coder:api", path: "/api/v2/users/me" });
+		postFromFrame(pageMessage("x".repeat(forkHtmlMessageMaxLength + 1)));
+
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("ignores messages sent without a click", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		setUserActivation(false);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Without a click"));
+		setUserActivation(true);
+
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
 	it("shows the warning header outside the frame", () => {
 		renderPreview(["fork-html-attachments"]);
 
@@ -92,6 +256,55 @@ describe("ForkHtmlAttachmentViewer", () => {
 				name: "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets.",
 			}),
 		).toContainElement(screen.getByTitle("choices.html"));
+	});
+
+	it("sends nothing until the user confirms", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option A"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		await userEvent.click(
+			within(proposal).getByRole("button", { name: "Cancel" }),
+		);
+		expect(queryProposal()).toBeNull();
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		await expectOnlyValidMessageSent(createChatMessage);
+	});
+
+	it("keeps an open proposal when the page sends another", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option B"));
+		await screen.findByRole("region", { name: proposalName });
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		postFromFrame(pageMessage("Option C"));
+
+		await confirmProposal("Option B");
+		await screen.findByText("Sent to the chat");
+		expectSent(createChatMessage, "Option B");
+	});
+
+	it("proposes at most one message per interval", async () => {
+		const createChatMessage = mockCreateChatMessage();
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option A"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		await userEvent.click(
+			within(proposal).getByRole("button", { name: "Cancel" }),
+		);
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs - 1);
+		postFromFrame(pageMessage("Option C"));
+		expect(queryProposal()).toBeNull();
+
+		now.mockReturnValue(1_000_000 + forkHtmlMessageIntervalMs);
+		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
