@@ -3,9 +3,12 @@
 -- requires: 01a1da86-66a9-72e8-b76d-645efa0c0ff0_chat_organization_token_budget
 
 -- Stores whether a descendant question is answered, which reads derived
--- from the chat's later user messages before.
+-- from the chat's later user messages before. root_chat_id is a copy, not a
+-- foreign key: dbpurge can delete an archived root before a descendant, and
+-- the descendant's question must survive that. The row still goes with its
+-- own chat through chat_id.
 ALTER TABLE chat_descendant_questions
-    ADD COLUMN root_chat_id uuid REFERENCES chats(id) ON DELETE CASCADE,
+    ADD COLUMN root_chat_id uuid,
     ADD COLUMN answered_at timestamp with time zone,
     ADD COLUMN answered_by text;
 
@@ -58,5 +61,5 @@ CREATE INDEX chat_descendant_questions_root_idx
     ON chat_descendant_questions (root_chat_id);
 
 COMMENT ON TABLE chat_descendant_questions IS 'The latest question each descendant chat asked the user with ask_user_question. The question is pending while answered_at is NULL. The transaction that inserts the user message that answers or retires it sets answered_at, and a new question of the chat clears it.';
-COMMENT ON COLUMN chat_descendant_questions.root_chat_id IS 'The root of the chat''s family, or the chat itself when it names no root.';
+COMMENT ON COLUMN chat_descendant_questions.root_chat_id IS 'The root of the chat''s family, or the chat itself when it names no root. Not a foreign key, so it can name a root that was deleted.';
 COMMENT ON COLUMN chat_descendant_questions.answered_by IS 'What retired the question: message (a user-visible user message that answers a question that is not secret), secret_answer (a user message that answers this call of a secret question, such as the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).';

@@ -235,7 +235,7 @@ type ChatDescendantQuestion struct {
 	ToolCallID string          `db:"tool_call_id" json:"tool_call_id"`
 	Questions  json.RawMessage `db:"questions" json:"questions"`
 	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
-	// The root of the chat's family, or the chat itself when it names no root.
+	// The root of the chat's family, or the chat itself when it names no root. Not a foreign key, so it can name a root that was deleted.
 	RootChatID uuid.UUID    `db:"root_chat_id" json:"root_chat_id"`
 	AnsweredAt sql.NullTime `db:"answered_at" json:"answered_at"`
 	// What retired the question: message (a user-visible user message that answers a question that is not secret), secret_answer (a user message that answers this call of a secret question, such as the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).
