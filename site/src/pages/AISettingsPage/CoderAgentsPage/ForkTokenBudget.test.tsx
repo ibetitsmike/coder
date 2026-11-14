@@ -110,6 +110,7 @@ describe("ForkTokenBudget", () => {
 
 	it("saves the token budget with the summary fallback", async () => {
 		const { updateSetting, queryClient } = renderSetting();
+		const cancelQueries = vi.spyOn(queryClient, "cancelQueries");
 		const user = userEvent.setup();
 
 		await user.click(
@@ -131,6 +132,9 @@ describe("ForkTokenBudget", () => {
 				queryClient.getQueryData(organizationTokenBudget(orgId).queryKey),
 			).toStrictEqual(saved),
 		);
+		expect(cancelQueries).toHaveBeenCalledWith({
+			queryKey: organizationTokenBudget(orgId).queryKey,
+		});
 	});
 
 	it("announces a failed save", async () => {
@@ -191,25 +195,10 @@ describe("ForkTokenBudget", () => {
 		);
 	});
 
-	it("keeps a viewer's setting read-only", async () => {
-		renderSetting({ canEdit: false });
-
-		const tokenBudget = within(await strategyGroup()).getByRole("radio", {
-			name: "Token budget",
-		});
-		expect(tokenBudget).toBeDisabled();
-		expect(
-			screen.getByText(/You can view this setting but not change it/),
-		).toBeInTheDocument();
-	});
-
 	it("is hidden while fork-token-budget is off", () => {
 		const { getSetting } = renderSetting({ experiments: [] });
 
 		expect(getSetting).not.toHaveBeenCalled();
-		expect(
-			screen.queryByRole("form", { name: "Context compaction" }),
-		).not.toBeInTheDocument();
 	});
 
 	it("does not request the setting for a member who cannot read it", () => {

@@ -26,10 +26,10 @@ export const updateOrganizationTokenBudget = (
 	mutationOptions({
 		mutationFn: (req: ForkOrganizationTokenBudget) =>
 			putOrganizationTokenBudget(organizationId, req),
-		onSuccess: (setting) => {
-			queryClient.setQueryData(
-				organizationTokenBudgetKey(organizationId),
-				setting,
-			);
+		onSuccess: async (setting) => {
+			const queryKey = organizationTokenBudgetKey(organizationId);
+			// A refetch that started before the save would overwrite it.
+			await queryClient.cancelQueries({ queryKey });
+			queryClient.setQueryData(queryKey, setting);
 		},
 	});

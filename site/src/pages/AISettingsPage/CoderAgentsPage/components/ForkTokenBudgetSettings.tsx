@@ -172,7 +172,7 @@ const TokenBudgetForm: React.FC<TokenBudgetFormProps> = ({
 				<OptionGroup
 					name="fallback"
 					legend="Fallback at the usable limit"
-					hint="Applies only with the token budget, when a chat reaches the usable limit without calling new_context."
+					hint="Applies only with the token budget, when a chat reaches the usable limit without calling new_context. With summary, a compaction model override that triggers earlier still summarizes first."
 					options={fallbackOptions}
 					value={form.values.fallback}
 					onChange={(value) => changeValue("fallback", value)}
@@ -203,6 +203,7 @@ const OptionGroup = <T extends string>({
 	disabled,
 }: OptionGroupProps<T>) => {
 	const legendId = `fork-token-budget-${name}`;
+	const hintId = `${legendId}-hint`;
 	return (
 		<div className="flex flex-col gap-3">
 			<div>
@@ -212,10 +213,15 @@ const OptionGroup = <T extends string>({
 				>
 					{legend}
 				</p>
-				{hint && <p className="m-0 text-xs text-content-secondary">{hint}</p>}
+				{hint && (
+					<p id={hintId} className="m-0 text-xs text-content-secondary">
+						{hint}
+					</p>
+				)}
 			</div>
 			<RadioGroup
 				aria-labelledby={legendId}
+				aria-describedby={hint ? hintId : undefined}
 				value={value}
 				onValueChange={(next) => {
 					const option = options.find((o) => o.value === next);
@@ -227,14 +233,23 @@ const OptionGroup = <T extends string>({
 			>
 				{options.map((option) => {
 					const id = `${legendId}-${option.value}`;
+					const descriptionId = `${id}-description`;
 					return (
 						<div key={option.value} className="flex items-start gap-2">
-							<RadioGroupItem id={id} value={option.value} className="mt-0.5" />
+							<RadioGroupItem
+								id={id}
+								value={option.value}
+								aria-describedby={descriptionId}
+								className="mt-0.5"
+							/>
 							<div className="flex flex-col">
 								<Label htmlFor={id} className="cursor-pointer font-normal">
 									{option.label}
 								</Label>
-								<span className="text-xs text-content-secondary">
+								<span
+									id={descriptionId}
+									className="text-xs text-content-secondary"
+								>
 									{option.description}
 								</span>
 							</div>
