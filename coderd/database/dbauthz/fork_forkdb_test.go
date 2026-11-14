@@ -88,6 +88,21 @@ func TestForkQuerier(t *testing.T) {
 				Asserts(rbac.ResourceChatModelConfig.InOrg(limits.OrganizationID), policy.ActionRead).
 				Returns(limits)
 		},
+		"GetChatOrganizationTokenBudget": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			setting := testutil.Fake(t, faker, forkdb.ChatOrganizationTokenBudget{})
+			fdb.EXPECT().GetChatOrganizationTokenBudget(gomock.Any(), setting.OrganizationID).Return(setting, nil).AnyTimes()
+			check.Args(setting.OrganizationID).
+				Asserts(rbac.ResourceChatModelConfig.InOrg(setting.OrganizationID), policy.ActionRead).
+				Returns(setting)
+		},
+		"UpsertChatOrganizationTokenBudget": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			setting := testutil.Fake(t, faker, forkdb.ChatOrganizationTokenBudget{})
+			arg := forkdb.UpsertChatOrganizationTokenBudgetParams{OrganizationID: setting.OrganizationID, Strategy: setting.Strategy, Fallback: setting.Fallback}
+			fdb.EXPECT().UpsertChatOrganizationTokenBudget(gomock.Any(), arg).Return(setting, nil).AnyTimes()
+			check.Args(arg).
+				Asserts(rbac.ResourceChatModelConfig.InOrg(setting.OrganizationID), policy.ActionUpdate).
+				Returns(setting)
+		},
 		"GetChatOrganizationWakeupCaps": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			caps := testutil.Fake(t, faker, forkdb.ChatOrganizationWakeupCap{})
 			fdb.EXPECT().GetChatOrganizationWakeupCaps(gomock.Any(), caps.OrganizationID).Return(caps, nil).AnyTimes()

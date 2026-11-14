@@ -554,6 +554,21 @@ func (mr *MockStoreMockRecorder) GetChatOrganizationSubagentLimits(ctx, organiza
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatOrganizationSubagentLimits", reflect.TypeOf((*MockStore)(nil).GetChatOrganizationSubagentLimits), ctx, organizationID)
 }
 
+// GetChatOrganizationTokenBudget mocks base method.
+func (m *MockStore) GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationTokenBudget, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatOrganizationTokenBudget", ctx, organizationID)
+	ret0, _ := ret[0].(forkdb.ChatOrganizationTokenBudget)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatOrganizationTokenBudget indicates an expected call of GetChatOrganizationTokenBudget.
+func (mr *MockStoreMockRecorder) GetChatOrganizationTokenBudget(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatOrganizationTokenBudget", reflect.TypeOf((*MockStore)(nil).GetChatOrganizationTokenBudget), ctx, organizationID)
+}
+
 // GetChatOrganizationWakeupCaps mocks base method.
 func (m *MockStore) GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationWakeupCap, error) {
 	m.ctrl.T.Helper()
@@ -1856,6 +1871,21 @@ func (m *MockStore) UpsertChatOrganizationSubagentLimits(ctx context.Context, ar
 func (mr *MockStoreMockRecorder) UpsertChatOrganizationSubagentLimits(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatOrganizationSubagentLimits", reflect.TypeOf((*MockStore)(nil).UpsertChatOrganizationSubagentLimits), ctx, arg)
+}
+
+// UpsertChatOrganizationTokenBudget mocks base method.
+func (m *MockStore) UpsertChatOrganizationTokenBudget(ctx context.Context, arg forkdb.UpsertChatOrganizationTokenBudgetParams) (forkdb.ChatOrganizationTokenBudget, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChatOrganizationTokenBudget", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatOrganizationTokenBudget)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChatOrganizationTokenBudget indicates an expected call of UpsertChatOrganizationTokenBudget.
+func (mr *MockStoreMockRecorder) UpsertChatOrganizationTokenBudget(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatOrganizationTokenBudget", reflect.TypeOf((*MockStore)(nil).UpsertChatOrganizationTokenBudget), ctx, arg)
 }
 
 // UpsertChatOrganizationWakeupCaps mocks base method.

@@ -11,7 +11,9 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -22,6 +24,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
@@ -102,22 +105,53 @@ func (b tokenBudget) usablePercent() int32 {
 // Explore children and readonly or allowlisted custom agent types drop those
 // tools, so they keep summary compaction too.
 func (p *Server) tokenBudgetEligible(tools []fantasy.AgentTool) bool {
+	_, ok := p.turnTokenBudgetFallback(tools)
+	return ok
+}
+
+// turnTokenBudgetFallback returns the fallback of an eligible turn, which
+// its new_context tool took from the organization setting when the turn's
+// tools were built. Only the server's own new_context counts, so a dynamic
+// or MCP tool of that name does not make a turn eligible.
+func (p *Server) turnTokenBudgetFallback(tools []fantasy.AgentTool) (codersdk.ForkTokenBudgetFallback, bool) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) {
-		return false
+		return "", false
 	}
 	has := func(name string) bool {
 		return slices.ContainsFunc(tools, func(tool fantasy.AgentTool) bool {
 			return tool.Info().Name == name
 		})
 	}
-	return has(chatNotesToolName) && has(chatHistoryToolName) && has(newContextToolName)
+	if !has(chatNotesToolName) || !has(chatHistoryToolName) {
+		return "", false
+	}
+	for _, tool := range tools {
+		if tool.Info().Name != newContextToolName {
+			continue
+		}
+		if snapshot, ok := tool.(tokenBudgetFallbackTool); ok {
+			if fallback, ok := snapshot.tokenBudgetFallback(); ok {
+				return fallback, true
+			}
+		}
+	}
+	return "", false
+}
+
+// tokenBudgetFallbackTool is the server's new_context tool, or a wrapper that
+// forwards to it. ok is false for a wrapper of any other tool.
+type tokenBudgetFallbackTool interface {
+	tokenBudgetFallback() (fallback codersdk.ForkTokenBudgetFallback, ok bool)
 }
 
 // tokenBudgetTriggers replaces the automatic compaction trigger of an
 // eligible turn. The window rolls over when the last step's prompt reached
-// the usable limit, or when new_context succeeded in this window. The other
-// triggers, including the compaction model override's, do not apply, since a
-// rollover makes no summary. The trigger the decision checks after a rollover
+// the usable limit, or when new_context succeeded in this window. With the
+// new_window fallback the other triggers, including the compaction model
+// override's, do not apply, since a rollover makes no summary. With the
+// summary fallback the override writes the summary, so its trigger still
+// applies and binds when it comes before the usable limit, as upstream's
+// does before the threshold. The trigger the decision checks after a rollover
 // becomes the usable limit of the chat model, so a window that starts at that
 // limit fails as compaction that stayed over its limit does. Other turns get
 // their triggers back unchanged.
@@ -130,16 +164,29 @@ func (p *Server) tokenBudgetTriggers(
 	other compactionTrigger,
 	needed bool,
 ) (compactionTrigger, compactionTriggerSource, compactionTrigger, bool) {
-	if !p.tokenBudgetEligible(tools) {
+	fallback, ok := p.turnTokenBudgetFallback(tools)
+	if !ok {
 		return binding, source, other, needed
 	}
-	binding = chatTrigger
+	override := other
+	if source == compactionTriggerSourceOrganization {
+		override = binding
+	}
+	usable := chatTrigger
+	usage := latestPromptUsage(promptRows)
 	needed = newContextRequested(promptRows)
 	if budget, ok := newTokenBudget(chatTrigger.contextLimit, chatTrigger.thresholdPercent); ok {
-		binding.thresholdPercent = budget.usablePercent()
-		needed = needed || contextTokensFromUsage(latestPromptUsage(promptRows)) >= budget.usable
+		usable.thresholdPercent = budget.usablePercent()
+		needed = needed || contextTokensFromUsage(usage) >= budget.usable
 	}
-	return binding, compactionTriggerSourceChat, compactionTrigger{}, needed
+	if fallback != codersdk.ForkTokenBudgetFallbackSummary || !override.enabled() {
+		return usable, compactionTriggerSourceChat, compactionTrigger{}, needed
+	}
+	if bindingCompactionTriggerSource(usable, override) == compactionTriggerSourceOrganization {
+		needed = needed || shouldCompactPromptUsage(usage, override.contextLimit, override.thresholdPercent)
+		return override, compactionTriggerSourceOrganization, usable, needed
+	}
+	return usable, compactionTriggerSourceChat, override, needed
 }
 
 // newContextRequested reports whether a new_context call succeeded in the
@@ -165,13 +212,71 @@ func newContextRequested(promptRows []database.ChatMessage) bool {
 
 // forkGenerateCompaction runs one compaction. An automatic compaction of an
 // eligible turn is a rollover: it starts the next window with a lead-in and
-// makes no model call. A manual compaction and every other turn summarize as
-// upstream does.
+// makes no model call. When the turn's fallback is summary, a rollover that
+// the model did not ask for with new_context summarizes as upstream does. A
+// manual compaction and every other turn summarize as upstream does. The
+// fallback comes from the turn's tools, so the compaction follows the setting
+// the turn was built with even if an admin changed it since.
 func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnvironment, opts chatloop.GenerateCompactionOptions) (chatloop.CompactionResult, error) {
-	if opts.Source != chatloop.CompactionSourceAutomatic || !p.tokenBudgetEligible(prepared.Tools) {
+	if opts.Source != chatloop.CompactionSourceAutomatic {
 		return chatloop.GenerateCompaction(ctx, opts)
 	}
+	fallback, ok := p.turnTokenBudgetFallback(prepared.Tools)
+	if !ok {
+		return chatloop.GenerateCompaction(ctx, opts)
+	}
+	if fallback == codersdk.ForkTokenBudgetFallbackSummary {
+		promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
+		if err != nil {
+			return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+		}
+		if !newContextRequested(promptRows) {
+			return chatloop.GenerateCompaction(ctx, opts)
+		}
+	}
 	return p.contextWindowRollover(ctx, prepared.Chat, opts)
+}
+
+// organizationTokenBudget returns the compaction setting of an organization,
+// or the default when it never saved one. buildTurnEnvironment reads it once
+// per step, through appendForkTools, to decide whether the turn gets
+// new_context, which keeps the fallback for the rest of the step. A turn
+// without new_context is not eligible, so it takes upstream's path: summary
+// compaction and no requests. tokenBudgetMessage reads it before the step
+// only when a request is due.
+func (p *Server) organizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (codersdk.ForkOrganizationTokenBudget, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return codersdk.ForkOrganizationTokenBudget{}, xerrors.Errorf("fork queries: %w", err)
+	}
+	//nolint:gocritic // Chat owners cannot read organization config, so chatd reads it.
+	row, err := fdb.GetChatOrganizationTokenBudget(dbauthz.AsChatd(ctx), organizationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return codersdk.DefaultForkOrganizationTokenBudget(), nil
+	}
+	if err != nil {
+		return codersdk.ForkOrganizationTokenBudget{}, xerrors.Errorf("get token budget setting of organization %s: %w", organizationID, err)
+	}
+	return codersdk.ForkOrganizationTokenBudget{
+		Strategy: codersdk.ForkTokenBudgetStrategy(row.Strategy),
+		Fallback: codersdk.ForkTokenBudgetFallback(row.Fallback),
+	}, nil
+}
+
+// tokenBudgetTools returns the fork-token-budget tools of a turn of chat.
+// notes and chat_history stay with the summary strategy, since they help
+// without windows, and new_context comes only with the token_budget
+// strategy.
+func (p *Server) tokenBudgetTools(ctx context.Context, chat database.Chat) ([]fantasy.AgentTool, error) {
+	tools := []fantasy.AgentTool{p.chatNotesTool(chat), p.chatHistoryTool(chat)}
+	setting, err := p.organizationTokenBudget(ctx, chat.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+	if setting.Strategy == codersdk.ForkTokenBudgetStrategyTokenBudget {
+		tools = append(tools, p.newContextTool(chat, setting.Fallback))
+	}
+	return tools, nil
 }
 
 // contextWindowRollover returns the compaction result that starts the next
@@ -300,8 +405,8 @@ func formatContextWindowLeadIn(windowID string, notes []forkdb.ListChatNotesRow,
 // newContextTool returns the new_context tool of chat. It runs after the
 // other calls of its step, in call order, so a notes write in the same step
 // counts.
-func (p *Server) newContextTool(chat database.Chat) fantasy.AgentTool {
-	return serialNewContextTool{AgentTool: fantasy.NewAgentTool(
+func (p *Server) newContextTool(chat database.Chat, fallback codersdk.ForkTokenBudgetFallback) fantasy.AgentTool {
+	return serialNewContextTool{fallback: fallback, AgentTool: fantasy.NewAgentTool(
 		newContextToolName,
 		newContextToolDescription,
 		func(ctx context.Context, _ struct{}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -323,12 +428,18 @@ func (p *Server) newContextTool(chat database.Chat) fantasy.AgentTool {
 }
 
 // serialNewContextTool runs new_context after the concurrent calls of its
-// step and in call order with the notes calls.
+// step and in call order with the notes calls. It holds the fallback of the
+// organization setting its turn was built with.
 type serialNewContextTool struct {
 	fantasy.AgentTool
+	fallback codersdk.ForkTokenBudgetFallback
 }
 
 func (serialNewContextTool) SerialToolCalls() bool { return true }
+
+func (t serialNewContextTool) tokenBudgetFallback() (codersdk.ForkTokenBudgetFallback, bool) {
+	return t.fallback, true
+}
 
 // notesChangedInWindow reports whether a note of chat was written or appended
 // in the current window. In the first window every note counts, and in a
@@ -405,6 +516,12 @@ func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat, pro
 	if !ok {
 		return chatstate.Message{}, false, nil
 	}
+	// Read the setting only when a request is due, so a step that sends
+	// none does not read it here.
+	setting, err := p.organizationTokenBudget(ctx, chat.OrganizationID)
+	if err != nil || setting.Strategy != codersdk.ForkTokenBudgetStrategyTokenBudget {
+		return chatstate.Message{}, false, err
+	}
 	message, err := forkContextTextMessage(chat, formatTokenBudgetRequest(header, budget, tokens))
 	if err != nil {
 		return chatstate.Message{}, false, xerrors.Errorf("marshal context budget request: %w", err)
@@ -419,7 +536,7 @@ func (p *Server) tokenBudgetChatEligible(ctx context.Context, chat database.Chat
 	if isExploreSubagentMode(chat.Mode) {
 		return false, nil
 	}
-	tools := filterToolsForTurn([]fantasy.AgentTool{p.chatNotesTool(chat), p.chatHistoryTool(chat), p.newContextTool(chat)}, chat.PlanMode, chat.ParentChatID, nil)
+	tools := filterToolsForTurn([]fantasy.AgentTool{p.chatNotesTool(chat), p.chatHistoryTool(chat), p.newContextTool(chat, codersdk.ForkTokenBudgetFallbackNewWindow)}, chat.PlanMode, chat.ParentChatID, nil)
 	policy, err := p.customAgentToolPolicyOfChat(ctx, chat)
 	if err != nil {
 		return false, err

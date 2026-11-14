@@ -6181,6 +6181,86 @@ const docTemplate = `{
                 ]
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/token-budget": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get organization token budget setting",
+                "operationId": "get-organization-token-budget-setting",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationTokenBudget"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update organization token budget setting",
+                "operationId": "update-organization-token-budget-setting",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Organization ID",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationTokenBudget"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkOrganizationTokenBudget"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ]
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/wakeup-caps": {
             "get": {
                 "produces": [
@@ -25113,20 +25193,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -30319,6 +30399,35 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ForkOrganizationTokenBudget": {
+            "type": "object",
+            "properties": {
+                "fallback": {
+                    "description": "Fallback is what a token-budget chat does when it reaches the usable\nlimit without calling new_context. It applies only with the\ntoken_budget strategy.",
+                    "enum": [
+                        "new_window",
+                        "summary"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkTokenBudgetFallback"
+                        }
+                    ]
+                },
+                "strategy": {
+                    "description": "Strategy is how chats compact their context.",
+                    "enum": [
+                        "summary",
+                        "token_budget"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkTokenBudgetStrategy"
+                        }
+                    ]
+                }
+            }
+        },
         "codersdk.ForkOrganizationWakeupCaps": {
             "type": "object",
             "properties": {
@@ -30469,6 +30578,28 @@ const docTemplate = `{
                     "example": 6
                 }
             }
+        },
+        "codersdk.ForkTokenBudgetFallback": {
+            "type": "string",
+            "enum": [
+                "new_window",
+                "summary"
+            ],
+            "x-enum-varnames": [
+                "ForkTokenBudgetFallbackNewWindow",
+                "ForkTokenBudgetFallbackSummary"
+            ]
+        },
+        "codersdk.ForkTokenBudgetStrategy": {
+            "type": "string",
+            "enum": [
+                "summary",
+                "token_budget"
+            ],
+            "x-enum-varnames": [
+                "ForkTokenBudgetStrategySummary",
+                "ForkTokenBudgetStrategyTokenBudget"
+            ]
         },
         "codersdk.ForkWakeupCapValues": {
             "type": "object",
