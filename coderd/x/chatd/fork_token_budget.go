@@ -226,9 +226,13 @@ func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnviro
 		return chatloop.GenerateCompaction(ctx, opts)
 	}
 	if fallback == codersdk.ForkTokenBudgetFallbackSummary {
-		promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
-		if err != nil {
-			return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+		promptRows := prepared.PromptRows
+		if promptRows == nil {
+			var err error
+			promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
+			if err != nil {
+				return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+			}
 		}
 		if !newContextRequested(promptRows) {
 			return chatloop.GenerateCompaction(ctx, opts)

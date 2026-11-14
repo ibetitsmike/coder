@@ -46,6 +46,12 @@ type turnEnvironment struct {
 	Chat     database.Chat
 	Messages []database.ChatMessage
 
+	// PromptRows holds the rows the step's prompt builds from when the fork
+	// context sync loaded them once for the step. It is nil when the fork
+	// experiments are off or the shared load failed, and every consumer then
+	// loads its own rows.
+	PromptRows []database.ChatMessage
+
 	Model              chatprovider.Model
 	Prompt             []fantasy.Message
 	Tools              []fantasy.AgentTool
@@ -1080,6 +1086,7 @@ func (p *Server) buildTurnEnvironment(
 	return turnEnvironment{
 		Chat:                 refreshedChat,
 		Messages:             input.Messages,
+		PromptRows:           promptRows,
 		Model:                model,
 		Prompt:               prompt,
 		Tools:                tools,
