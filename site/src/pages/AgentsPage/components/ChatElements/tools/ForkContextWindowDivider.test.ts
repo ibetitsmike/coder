@@ -60,7 +60,7 @@ describe("parseForkContextWindow", () => {
 describe("forkContextWindowLabel", () => {
 	it("names the trigger of the window", () => {
 		expect(forkContextWindowLabel({ id: "w:2", trigger: "new_context" })).toBe(
-			"Context window w:2 started after a checkpoint",
+			"Context window w:2 started at the agent's request",
 		);
 		expect(
 			forkContextWindowLabel({ id: "w:3", trigger: "context_limit" }),

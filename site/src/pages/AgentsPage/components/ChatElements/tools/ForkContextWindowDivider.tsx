@@ -30,7 +30,7 @@ export const parseForkContextWindow = (
 const triggerReason = (trigger: string): string | undefined => {
 	switch (trigger) {
 		case "new_context":
-			return "after a checkpoint";
+			return "at the agent's request";
 		case "context_limit":
 			return "at the context limit";
 		default:

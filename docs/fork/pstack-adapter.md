@@ -216,7 +216,7 @@ If the chat doesn't call it, the window rolls over by itself when a prompt reach
 A rollover waits for the results of the step's tool calls, so a call and its result stay in the same window.
 The next window starts with a model-only message that starts with `<context_window id="w:2">`, with the window's ID.
 It lists the notes and says to read `checkpoint.md` first, and holds nothing of the earlier conversation.
-A rollover makes no model call, and the conversation shows a divider line, `Context window w:2 started after a checkpoint` when the chat called `new_context`, or `Context window w:2 started at the context limit` when the window filled up.
+A rollover makes no model call, and the conversation shows a divider line, `Context window w:2 started at the agent's request` when the chat called `new_context`, or `Context window w:2 started at the context limit` when the window filled up.
 Without the experiment, the same entry shows as a summary card that says `Context window w:2 started from the notes of this chat. No summary was made.`
 Use `chat_history` to find a message of an earlier window.
 
