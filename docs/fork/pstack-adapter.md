@@ -765,7 +765,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
-- View images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:54-84`, with the path as given, `:61-66`, added in `coderd/x/chatd/fork_tools.go:118-120`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
+- View images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:54-84`, with the path as given, `:61-66`, added in `coderd/x/chatd/fork_tools.go:119-121`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
   The model check, `fork_view_image.go:88-94`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
   The size limit, `fork_view_image.go:100-105`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:125-128`, the structure check, `:133-139`, `:170-263`, and the pixel limit, `:33-36`, `:140-143`.
   Stored as a media tool result, `coderd/x/chatd/chatprompt/chatprompt.go:555-556`, and sent again on later turns, `:1142-1157`.
