@@ -346,6 +346,34 @@ func TestTokenBudgetWindows(t *testing.T) {
 		requireContextWindow(t, messages, nil)
 	})
 
+	// With the summary fallback, a new_context call still rolls the window
+	// over without a summary.
+	t.Run("SummaryFallbackNewContext", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, db, chat, streams, summaries := tokenBudgetChat(t, experiments, "do the work",
+			func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
+				switch n {
+				case 1:
+					return toolCallWithTokens("notes", `{"action":"write","path":"checkpoint.md","content":"goal: finish the work"}`, 100)
+				case 2:
+					return toolCallWithTokens("new_context", `{}`, 120)
+				case 3:
+					require.Contains(t, text, `<context_window id="w:2">`)
+					require.NotContains(t, text, "summary of the window")
+					return textWithTokens("after rollover", 50)
+				default:
+					t.Errorf("unexpected stream request %d", n)
+					return textWithTokens("extra", 50)
+				}
+			}, withTokenBudget(codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackSummary))
+		require.Equal(t, int32(3), streams.Load())
+		require.Zero(t, summaries.Load(), "a rollover the model asked for makes no summary call")
+		messages := chatMessages(ctx, t, db, chat.ID)
+		requireTextPart(t, messages[len(messages)-1], "after rollover")
+		requireContextWindow(t, messages, &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerNewContext})
+	})
+
 	// The default summary strategy runs main's path: no new_context, no
 	// requests, and a summary at the compression threshold. notes and
 	// chat_history stay.
@@ -359,17 +387,25 @@ func TestTokenBudgetWindows(t *testing.T) {
 				require.NotContains(t, text, tokenBudgetToolLine+"new_context\n")
 				require.Contains(t, text, tokenBudgetToolLine+"notes\n")
 				require.Contains(t, text, tokenBudgetToolLine+"chat_history\n")
+				// 320 tokens pass the handoff point, so a token_budget
+				// chat would get a request here.
 				switch n {
 				case 1:
-					return toolCallWithTokens("notes", `{"action":"list"}`, 800)
+					return toolCallWithTokens("notes", `{"action":"list"}`, 100)
+				case 2:
+					return toolCallWithTokens("notes", `{"action":"list"}`, 320)
 				default:
 					require.Contains(t, text, "summary of the window")
 					return textWithTokens("summarized", 50)
 				}
 			})
-		require.Equal(t, int32(2), streams.Load())
+		require.Equal(t, int32(3), streams.Load())
 		require.Equal(t, int32(1), summaries.Load())
-		requireContextWindow(t, chatMessages(ctx, t, db, chat.ID), nil)
+		messages := chatMessages(ctx, t, db, chat.ID)
+		for _, msg := range messages {
+			require.NotContains(t, string(msg.Content.RawMessage), "context_budget")
+		}
+		requireContextWindow(t, messages, nil)
 	})
 
 	// A plan mode chat has no notes, so it keeps summary compaction and
@@ -388,6 +424,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 					return textWithTokens("planned", 50)
 				}
 			},
+			withTokenBudget(codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackNewWindow),
 			func(_ *testing.T, _ database.Store, _ *chatd.Config, opts *chatd.CreateOptions) {
 				opts.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
 			})
