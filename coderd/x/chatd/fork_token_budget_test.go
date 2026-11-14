@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/x/chatd"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -222,6 +223,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 		require.Len(t, compressed.results, 1)
 		result := singlePartOfType(t, compressed.results[0], codersdk.ChatMessagePartTypeToolResult)
 		require.Contains(t, string(result.Result), "Context window w:2 started from the notes of this chat")
+		requireContextWindow(t, messages, &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerNewContext})
 		requireTextPart(t, messages[len(messages)-1], "done")
 		require.NotEmpty(t, readID)
 		require.Less(t, mustParseID(t, readID), anchors[0].ID)
@@ -283,6 +285,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 		require.Less(t, lastCall, lastResult)
 		require.Less(t, lastResult, anchors[0].ID)
 		requireTextPart(t, messages[len(messages)-1], "after rollover")
+		requireContextWindow(t, messages, &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerContextLimit})
 	})
 
 	// A plan mode chat has no notes, so it keeps summary compaction and
@@ -312,7 +315,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 	t.Run("ExperimentOff", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, _, streams, summaries := tokenBudgetChat(t, codersdk.Experiments{}, "read the file",
+		ctx, db, chat, streams, summaries := tokenBudgetChat(t, codersdk.Experiments{}, "read the file",
 			func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
 				require.NotContains(t, text, "<context_budget")
 				require.NotContains(t, text, "<context_window")
@@ -340,7 +343,25 @@ func TestTokenBudgetWindows(t *testing.T) {
 			})
 		require.Equal(t, int32(2), streams.Load())
 		require.Equal(t, int32(1), summaries.Load())
+		requireContextWindow(t, chatMessages(ctx, t, db, chat.ID), nil)
 	})
+}
+
+// requireContextWindow checks the context_window of the one compressed
+// chat_summarized result in messages. A nil want means a summary, which has
+// none.
+func requireContextWindow(t *testing.T, messages []database.ChatMessage, want *chatloop.ContextWindowBoundary) {
+	t.Helper()
+	compressed := compressedChatSummarizedMessages(t, messages)
+	require.Len(t, compressed.results, 1)
+	part := singlePartOfType(t, compressed.results[0], codersdk.ChatMessagePartTypeToolResult)
+	var got struct {
+		Summary       string                          `json:"summary"`
+		ContextWindow *chatloop.ContextWindowBoundary `json:"context_window"`
+	}
+	require.NoError(t, json.Unmarshal(part.Result, &got))
+	require.NotEmpty(t, got.Summary)
+	require.Equal(t, want, got.ContextWindow)
 }
 
 func mustParseID(t *testing.T, s string) int64 {
