@@ -306,6 +306,16 @@ func (p *Server) dynamicToolOwnsViewImage(chat database.Chat) bool {
 	return err == nil && names[viewImageToolName]
 }
 
+// limitViewedImagesForModel applies limitViewedImages with another model than
+// the turn's, such as a compaction override. The override can have a lower
+// view_image size limit than the chat model.
+func (p *Server) limitViewedImagesForModel(chat database.Chat, messages []fantasy.Message, model chatprovider.Model) []fantasy.Message {
+	if p.dynamicToolOwnsViewImage(chat) {
+		return messages
+	}
+	return limitViewedImages(messages, nil, &model)
+}
+
 // limitViewedImages keeps the newest view_image results of messages as images,
 // at most maxViewedImagesInPrompt of them and maxViewedImageBytesInPrompt
 // decoded bytes together with the other media of the prompt, and always the

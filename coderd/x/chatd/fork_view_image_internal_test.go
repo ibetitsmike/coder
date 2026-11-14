@@ -446,11 +446,16 @@ func TestViewImageToolGate(t *testing.T) {
 			if tt.planMode {
 				chat.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
 			}
+			original := prompt
 			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt, nil))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, toolNames(tools))
 			_, isText := prompt[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
 			require.Equal(t, tt.bounded, isText, "the prompt bound in case %s", tt.name)
+			// A compaction override model gets the same bound.
+			compaction := server.limitViewedImagesForModel(chat, original, model)
+			_, isText = compaction[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
+			require.Equal(t, tt.bounded, isText, "the compaction bound in case %s", tt.name)
 		})
 	}
 }
