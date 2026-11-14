@@ -6,6 +6,7 @@ package coderd
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,6 +39,7 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 	r.With(
 		forkHTMLAttachmentHeaders,
 		apiKeyMiddleware,
+		httpmw.RateLimit(api.FilesRateLimit, time.Minute),
 		httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkHTMLAttachments),
 	).Get("/chats/fork/files/{file}/html", api.getForkChatHTMLAttachment)
 
