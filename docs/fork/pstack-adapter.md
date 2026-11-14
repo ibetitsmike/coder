@@ -170,10 +170,12 @@ Coder Agents doesn't send an attached file back to the model in later turns, so 
 #### HTML pages
 
 With the `fork-html-attachments` experiment, the web UI shows an attached `.html` or `.htm` file as a live page, inline and in the turn's **Attachments** menu.
-Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets." A download link sits next to it.
+Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets."
+A download link sits next to it.
 Without the experiment, the page shows as a download card.
 When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
-Only pages that the agent attaches run. An `.html` file that you upload yourself shows as a download card.
+Only pages that the agent attaches run.
+An `.html` file that you upload yourself shows as a download card.
 
 The page runs in a sandbox:
 
