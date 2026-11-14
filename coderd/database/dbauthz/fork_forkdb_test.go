@@ -146,7 +146,7 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"DeleteChatNote": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := forkdb.DeleteChatNoteParams{ChatID: chat.ID, Path: "checkpoint.md"}
+			arg := forkdb.DeleteChatNoteParams{ChatID: chat.ID, Path: "checkpoint.md", CallID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().DeleteChatNote(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
@@ -158,6 +158,14 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatNote(gomock.Any(), arg).Return(note, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(note)
+		},
+		"GetChatNoteCall": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.GetChatNoteCallParams{ID: uuid.New(), ChatID: chat.ID}
+			call := testutil.Fake(t, faker, forkdb.ChatNoteCall{ID: arg.ID, ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatNoteCall(gomock.Any(), arg).Return(call, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(call)
 		},
 		"ListChatHistoryRows": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -183,8 +191,8 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"WriteChatNote": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := forkdb.WriteChatNoteParams{ChatID: chat.ID, Path: "checkpoint.md", Content: "goal", MaxNotes: 20}
-			note := testutil.Fake(t, faker, forkdb.ChatNote{ChatID: chat.ID, Path: arg.Path})
+			arg := forkdb.WriteChatNoteParams{ChatID: chat.ID, Path: "checkpoint.md", Content: "goal", MaxNotes: 20, CallID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
+			note := testutil.Fake(t, faker, forkdb.WriteChatNoteRow{ChatID: chat.ID, Path: arg.Path})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().WriteChatNote(gomock.Any(), arg).Return(note, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(note)

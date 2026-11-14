@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
@@ -19,6 +20,7 @@ import (
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
 func TestChatNotesTool(t *testing.T) {
@@ -131,4 +133,103 @@ func TestChatNotesTool(t *testing.T) {
 	offTools, err := offServer.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)
 	require.Empty(t, toolNames(offTools))
+}
+
+// TestChatNotesToolReplay runs a batch of notes calls again with the same
+// tool call IDs, as the next worker does after chatd stops in the middle of
+// the batch. The replay returns the first results and changes no note.
+func TestChatNotesToolReplay(t *testing.T) {
+	t.Parallel()
+
+	db, ps, rawDB := dbtestutil.NewDBWithSQLDB(t)
+	authzDB := dbauthz.New(db, rbac.NewStrictCachingAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, nil), nil)
+	server := newInternalTestServer(t, authzDB, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkTokenBudget}))
+	ctx := chatdTestContext(t)
+	user, org, model := seedInternalChatDeps(t, db)
+
+	chat, err := server.CreateChat(ctx, CreateOptions{OrganizationID: org.ID, OwnerID: user.ID, Title: "notes", ModelConfigID: model.ID, InitialUserContent: []codersdk.ChatMessagePart{codersdk.ChatMessageText("hello")}})
+	require.NoError(t, err)
+	require.NoError(t, WaitUntilIdleForTest(ctx, server))
+	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+	require.NoError(t, err)
+
+	type call struct {
+		id   uuid.UUID
+		args chatNotesArgs
+	}
+	batch := []call{
+		{uuid.New(), chatNotesArgs{Action: "write", Path: "checkpoint.md", Content: "goal"}},
+		{uuid.New(), chatNotesArgs{Action: "append", Path: "checkpoint.md", Content: "next"}},
+		{uuid.New(), chatNotesArgs{Action: "append", Path: "log.md", Content: "one"}},
+		{uuid.New(), chatNotesArgs{Action: "append", Path: "log.md", Content: "two"}},
+		{uuid.New(), chatNotesArgs{Action: "write", Path: "tmp.md", Content: "x"}},
+		{uuid.New(), chatNotesArgs{Action: "delete", Path: "tmp.md"}},
+		{uuid.New(), chatNotesArgs{Action: "append", Path: "tmp.md", Content: "y"}},
+	}
+	runBatch := func() []string {
+		results := make([]string, 0, len(batch))
+		for _, c := range batch {
+			results = append(results, runChatTodoTool(workspacesdk.WithToolCallID(ctx, c.id), t, tools, chatNotesToolName, c.args, false))
+		}
+		return results
+	}
+	read := func(path string) string {
+		t.Helper()
+		var note chatNoteResult
+		require.NoError(t, json.Unmarshal([]byte(runChatTodoTool(ctx, t, tools, chatNotesToolName, chatNotesArgs{Action: "read", Path: path}, false)), &note))
+		return note.Content
+	}
+	want := map[string]string{"checkpoint.md": "goal\nnext", "log.md": "one\ntwo", "tmp.md": "y"}
+
+	first := runBatch()
+	for path, content := range want {
+		require.Equal(t, content, read(path), path)
+	}
+	require.JSONEq(t, `{"path": "tmp.md", "deleted": true}`, first[5])
+
+	// Without the records, the appends would add their lines again, the
+	// write of checkpoint.md would drop "next", and the delete would remove
+	// the tmp.md that the last call wrote.
+	require.Equal(t, first, runBatch())
+	for path, content := range want {
+		require.Equal(t, content, read(path), path)
+	}
+
+	// Two runs of one call at the same time, as when a takeover leaves the
+	// old run going, append once and return the same result.
+	raced := call{uuid.New(), chatNotesArgs{Action: "append", Path: "log.md", Content: "three"}}
+	racedInput, err := json.Marshal(raced.args)
+	require.NoError(t, err)
+	notesTool := findToolByName(tools, chatNotesToolName)
+	var eg errgroup.Group
+	results := make([]fantasy.ToolResponse, 8)
+	for i := range results {
+		eg.Go(func() error {
+			var err error
+			results[i], err = notesTool.Run(workspacesdk.WithToolCallID(ctx, raced.id), fantasy.ToolCall{ID: uuid.NewString(), Name: chatNotesToolName, Input: string(racedInput)})
+			return err
+		})
+	}
+	require.NoError(t, eg.Wait())
+	for _, result := range results {
+		require.False(t, result.IsError, result.Content)
+		require.JSONEq(t, results[0].Content, result.Content)
+	}
+	require.Equal(t, "one\ntwo\nthree", read("log.md"))
+
+	// A call without a tool call ID records nothing and runs every time.
+	runChatTodoTool(ctx, t, tools, chatNotesToolName, chatNotesArgs{Action: "append", Path: "log.md", Content: "four"}, false)
+	runChatTodoTool(ctx, t, tools, chatNotesToolName, chatNotesArgs{Action: "append", Path: "log.md", Content: "four"}, false)
+	require.Equal(t, "one\ntwo\nthree\nfour\nfour", read("log.md"))
+
+	// A note change drops the chat's records older than a day.
+	var records int
+	require.NoError(t, rawDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_note_calls WHERE chat_id = $1`, chat.ID).Scan(&records))
+	require.Equal(t, len(batch)+1, records)
+	_, err = rawDB.ExecContext(ctx, `UPDATE chat_note_calls SET created_at = now() - interval '25 hours' WHERE chat_id = $1`, chat.ID)
+	require.NoError(t, err)
+	runChatTodoTool(workspacesdk.WithToolCallID(ctx, uuid.New()), t, tools, chatNotesToolName, chatNotesArgs{Action: "write", Path: "tmp.md", Content: "z"}, false)
+	require.NoError(t, rawDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_note_calls WHERE chat_id = $1`, chat.ID).Scan(&records))
+	require.Equal(t, 1, records)
 }
