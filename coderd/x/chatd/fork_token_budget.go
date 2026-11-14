@@ -226,9 +226,13 @@ func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnviro
 		return chatloop.GenerateCompaction(ctx, opts)
 	}
 	if fallback == codersdk.ForkTokenBudgetFallbackSummary {
-		promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
-		if err != nil {
-			return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+		promptRows := prepared.PromptRows
+		if promptRows == nil {
+			var err error
+			promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
+			if err != nil {
+				return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+			}
 		}
 		if !newContextRequested(promptRows) {
 			return chatloop.GenerateCompaction(ctx, opts)
@@ -476,7 +480,10 @@ func (p *Server) notesChangedInWindow(ctx context.Context, chat database.Chat) (
 // turn's tools exist: plan mode, Explore children and custom agent types
 // whose policy drops the notes, chat_history or new_context tool get no
 // requests.
-func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
+//
+// promptRows are the rows the prompt is built from, loaded by the caller; nil
+// loads them here, so a caller outside syncForkContext still works.
+func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat, promptRows []database.ChatMessage) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) || chat.LastModelConfigID == uuid.Nil {
 		return chatstate.Message{}, false, nil
 	}
@@ -500,9 +507,11 @@ func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat) (ch
 	if !ok {
 		return chatstate.Message{}, false, nil
 	}
-	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
-	if err != nil {
-		return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+	if promptRows == nil {
+		promptRows, err = p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		if err != nil {
+			return chatstate.Message{}, false, xerrors.Errorf("load prompt messages: %w", err)
+		}
 	}
 	if deferred, err := forkContextDeferred(chat, promptRows); err != nil || deferred {
 		return chatstate.Message{}, false, err
