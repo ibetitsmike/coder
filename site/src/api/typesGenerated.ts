@@ -4838,6 +4838,24 @@ export interface CreateForkPluginPackRequest {
 	readonly ref: string;
 }
 
+// From codersdk/fork_saved_workflows.go
+/**
+ * CreateForkSavedWorkflowRequest saves a workflow.
+ */
+export interface CreateForkSavedWorkflowRequest {
+	/**
+	 * Name is lowercase letters and digits in dash-separated words.
+	 */
+	readonly name: string;
+	readonly description?: string;
+	/**
+	 * Script is Starlark that defines main(args), as a run_workflow script.
+	 */
+	readonly script: string;
+	readonly args_schema?: Record<string, string>;
+	readonly phases?: readonly string[];
+}
+
 // From codersdk/groups.go
 export interface CreateGroupRequest {
 	readonly name: string;
@@ -6799,6 +6817,49 @@ export interface ForkPluginPackFile {
  */
 export interface ForkPluginPackSources {
 	readonly hosts: readonly string[];
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflow is a saved workflow with its script.
+ */
+export interface ForkSavedWorkflow extends ForkSavedWorkflowMetadata {
+	readonly script: string;
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflowMetadata describes a saved Starlark workflow without its
+ * script.
+ */
+export interface ForkSavedWorkflowMetadata {
+	readonly id: string;
+	readonly organization_id: string;
+	/**
+	 * UserID is the owner of a personal workflow. It is empty on an
+	 * organization workflow.
+	 */
+	readonly user_id?: string;
+	/**
+	 * CreatedBy is the user who saved the workflow. It is empty when that
+	 * user was deleted.
+	 */
+	readonly created_by?: string;
+	/**
+	 * Name is what run_workflow takes to run the workflow.
+	 */
+	readonly name: string;
+	readonly description: string;
+	/**
+	 * ArgsSchema is an optional JSON Schema object for the args of a run.
+	 */
+	readonly args_schema?: Record<string, string>;
+	/**
+	 * Phases are the declared phase names of the workflow, in order.
+	 */
+	readonly phases: readonly string[];
+	readonly created_at: string;
+	readonly updated_at: string;
 }
 
 // From codersdk/fork_subagent_limits.go
@@ -12048,6 +12109,19 @@ export interface UpdateForkPluginPackRequest {
 	 * Ref replaces the ref of the pack. Empty fetches the current ref again.
 	 */
 	readonly ref?: string;
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * UpdateForkSavedWorkflowRequest updates a saved workflow. At least one field
+ * must be set. An args_schema of null removes the schema, and an empty
+ * phases list removes the phases.
+ */
+export interface UpdateForkSavedWorkflowRequest {
+	readonly description?: string;
+	readonly script?: string;
+	readonly args_schema?: Record<string, string>;
+	readonly phases?: string[];
 }
 
 // From healthsdk/healthsdk.go
