@@ -19,6 +19,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkPinnedSkills,
 	ExperimentForkWorkflows,
 	ExperimentForkFamilyMessages,
+	ExperimentForkTokenBudget,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -58,6 +59,11 @@ const ExperimentForkWorkflows Experiment = "fork-workflows"
 // ExperimentForkFamilyMessages lets a chat message its parent, siblings and
 // other chats in its family with the message_family_chat tool.
 const ExperimentForkFamilyMessages Experiment = "fork-family-messages"
+
+// ExperimentForkTokenBudget gives chats token-budget context windows: the
+// notes tool keeps a checkpoint, and a chat starts a new context window from
+// it instead of summarizing its history.
+const ExperimentForkTokenBudget Experiment = "fork-token-budget"
 
 // init adds the fork experiments to the known list so the CLI flag, the
 // deployment config and the experiment evaluator accept them the same way they

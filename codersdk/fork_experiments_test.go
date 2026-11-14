@@ -28,4 +28,7 @@ func TestForkExperiments(t *testing.T) {
 	// The append in init must add to the upstream list rather than replace it,
 	// which is what happens if it runs before ExperimentsKnown initializes.
 	require.Contains(t, codersdk.ExperimentsKnown, codersdk.ExperimentExample)
+
+	// Fork experiments use the title-cased fallback display name.
+	require.Equal(t, "Fork Token Budget", codersdk.ExperimentForkTokenBudget.DisplayName())
 }
