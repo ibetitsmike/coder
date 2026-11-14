@@ -59,3 +59,10 @@ export const ContextLimit: Story = {
 export const ExperimentOff: Story = {
 	parameters: { experiments: [] },
 };
+
+export const ErrorResult: Story = {
+	args: {
+		isError: true,
+		result: { ...mockContextWindowResult, error: "compaction failed" },
+	},
+};

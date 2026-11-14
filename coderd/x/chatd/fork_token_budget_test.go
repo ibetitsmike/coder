@@ -293,7 +293,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 	t.Run("PlanModeSummarizes", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, _, streams, summaries := tokenBudgetChat(t, experiments, "plan the work",
+		ctx, db, chat, streams, summaries := tokenBudgetChat(t, experiments, "plan the work",
 			func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
 				require.NotContains(t, text, "<context_budget")
 				switch n {
@@ -309,6 +309,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 			})
 		require.Equal(t, int32(2), streams.Load())
 		require.Equal(t, int32(1), summaries.Load())
+		requireContextWindow(t, chatMessages(ctx, t, db, chat.ID), nil)
 	})
 
 	// With the experiment off, compaction summarizes as upstream does.
