@@ -182,6 +182,9 @@ An image over 25,000,000&nbsp;pixels in total fails too, which bounds the memory
 A truncated or damaged file fails with `... is not a valid image/png image: ...`, because the tool checks the file's structure: the PNG chunk checksums, the JPEG and GIF end markers, and the WebP chunks, which must fit in the file and hold image data.
 The tool then decodes a PNG, a JPEG, or the first frame of a GIF, so damaged image data behind an intact structure fails as well.
 WebP gets only the structure check, because Go has no WebP decoder in its standard library.
+An animated GIF fails with `... is an animated GIF with N frames, and view_image accepts only still images`, because OpenAI rejects animated GIFs.
+One model response can call `view_image` at most 8 times, since only 8 viewed images stay in context.
+Further calls in that response fail with `view_image runs at most 8 times per response`.
 The tool doesn't resize images, so scale a large one down first.
 The tool uses the path as given, as `read_file` does, so it doesn't trim spaces from it.
 
@@ -191,7 +194,8 @@ The OpenAI-compatible, OpenRouter, and Vercel providers report that they take an
 
 The image stays in the chat's stored history like other tool results, and later turns send it again.
 Each request carries at most the 8 newest `view_image` images, always with the newest one.
-Their size and the size of the prompt's other images, such as `computer` screenshots and attachments, including those of the message being answered, add up to at most 15&nbsp;MiB, except that the newest one stays even when it goes over.
+Together with the prompt's other images, such as `computer` screenshots and attachments, including those of the message being answered, a request carries at most 20 images, because Anthropic tightens its per-image limits above 20.
+Their size and the size of those other images add up to at most 10&nbsp;MiB, so the base64 form fits Bedrock's 20&nbsp;MB request limit, except that the newest one stays even when it goes over.
 An older one becomes the note `[image no longer in context: only the newest viewed images are kept. Call view_image again to see it.]`, so call `view_image` again to see it.
 After a switch to a model with a lower size limit, such as from OpenAI to Anthropic, and in the summary request of a compaction model override with a lower limit, an earlier image over the new limit becomes the note `[image omitted: ... is larger than the view_image limit of ... bytes for this model. ...]` and doesn't count toward the 8 images.
 While the experiment is off, a chat whose client supplies its own `view_image` tool keeps that tool's results as they are, on turns that offer the client's tools.
@@ -769,11 +773,11 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
-- View images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:63-93`, with the path as given, `:70-75`, added in `coderd/x/chatd/fork_tools.go:119-121`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
-  The model check, `fork_view_image.go:97-103`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
-  The size limit, `fork_view_image.go:109-114`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:134-137`, the structure check, `:142-148`, `:189-232`, `:260-308`, the pixel limits, `:33-41`, `:149-156`, and the full decode, `:157-162`, `:234-258`.
+- View images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:68-105`, with the path as given, `:78-83`, at most 8 calls per response, `:69-71`, `:84-87`, added in `coderd/x/chatd/fork_tools.go:119-121`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
+  The model check, `fork_view_image.go:109-115`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
+  The size limit, `fork_view_image.go:121-126`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:146-149`, the structure check, `:154-160`, `:213-256`, `:338-386`, the pixel limits, `:34-42`, `:161-168`, the full decode, `:169-174`, `:258-282`, and no animated GIF, `:175-186`, `:284-336`.
   Stored as a media tool result, `coderd/x/chatd/chatprompt/chatprompt.go:555-556`, and sent again on later turns, `:1142-1157`.
-  The bound on the prompt, `fork_view_image.go:42-47`, `:364-475`, with the other media and the pending tail first, `:380-410`, `coderd/x/chatd/turn_environment.go:743`, and the model's size limit, `fork_view_image.go:376-379`, `:424-426`, also with a compaction override model, `:354-362`, `coderd/x/chatd/generation.go:1339`, applied on every turn unless a caller-supplied tool owns the name, `fork_tools.go:64-70`, `fork_view_image.go:342-352`.
+  The bound on the prompt, `fork_view_image.go:43-52`, `:442-559`, with the other media and the pending tail first, counted by bytes and by images, `:458-494`, `coderd/x/chatd/turn_environment.go:743`, and the model's size limit, `fork_view_image.go:454-457`, `:508-510`, also with a compaction override model, `:432-440`, `coderd/x/chatd/generation.go:1339`, applied on every turn unless a caller-supplied tool owns the name, `fork_tools.go:64-70`, `fork_view_image.go:420-430`.
   The tool card with the image, `site/src/pages/AgentsPage/components/ChatElements/tools/Tool.tsx:964-978`.
   Kept by `Read` and `readonly: true`, `coderd/x/chatd/fork_agent_tool_policy.go:51`, `:185-189`, but not as a caller-supplied tool, `:211-215`, and bound to the worktree, `fork_isolation_binding.go:128-133`, unless it is a caller-supplied tool, `:131`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.

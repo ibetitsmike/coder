@@ -17,6 +17,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/fantasy"
 	"golang.org/x/xerrors"
@@ -40,11 +41,15 @@ const (
 	// 200 MB, and viewImageDecodeSlot runs one at a time.
 	viewImageMaxPixels = 25_000_000
 	// maxViewedImagesInPrompt and maxViewedImageBytesInPrompt bound the
-	// view_image results a prompt carries. Anthropic accepts 100 images and
-	// 32 MB per request, and lowers the per-image size limit when a request
-	// holds more than 20 images. Older images become a text note.
+	// view_image results a prompt carries. Older images become a text note.
+	// Anthropic lowers the per-image limits when a request holds more than
+	// maxImagesInPrompt images, tool results included, so viewed images only
+	// fill what the prompt's other images leave. Bedrock accepts 20 MB per
+	// request and base64 adds a third, so 10 MiB of images leaves room for
+	// the rest of the request.
 	maxViewedImagesInPrompt     = 8
-	maxViewedImageBytesInPrompt = 15 << 20
+	maxImagesInPrompt           = 20
+	maxViewedImageBytesInPrompt = 10 << 20
 )
 
 // viewImageMediaTypes are the image types view_image returns.
@@ -61,6 +66,9 @@ type viewImageArgs struct {
 // viewImageTool returns the view_image tool, which loads a raster image from
 // the workspace into the model's context as an image tool result.
 func viewImageTool(model chatprovider.Model, getConn func(context.Context) (workspacesdk.AgentConn, error)) fantasy.AgentTool {
+	// buildTurnEnvironment builds the tools for each step, so calls counts
+	// the calls of one model response, which chatloop runs concurrently.
+	var calls atomic.Int64
 	return fantasy.NewAgentTool(
 		viewImageToolName,
 		"Look at a PNG, JPEG, GIF or WebP image file from the workspace, such as a screenshot. "+
@@ -72,6 +80,10 @@ func viewImageTool(model chatprovider.Model, getConn func(context.Context) (work
 			path := args.Path
 			if strings.TrimSpace(path) == "" {
 				return fantasy.NewTextErrorResponse("path is required (use an absolute path, e.g. /home/coder/screenshot.png)"), nil
+			}
+			if calls.Add(1) > maxViewedImagesInPrompt {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("view_image runs at most %d times per response, because only the newest %d viewed images stay in context. View the other images in a later response",
+					maxViewedImagesInPrompt, maxViewedImagesInPrompt)), nil
 			}
 			if err := viewImageModelSupported(model); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -159,6 +171,18 @@ func viewImage(ctx context.Context, conn workspacesdk.AgentConn, model chatprovi
 			return fantasy.ToolResponse{}, ctx.Err()
 		}
 		return fantasy.ToolResponse{}, xerrors.Errorf("%s is not a valid %s image: %w", path, mediaType, err)
+	}
+	if mediaType == "image/gif" {
+		// OpenAI rejects animated GIFs, and the stored result would fail
+		// every later request.
+		frames, err := gifFrames(data)
+		if err != nil {
+			return fantasy.ToolResponse{}, xerrors.Errorf("%s is not a valid %s image: %w", path, mediaType, err)
+		}
+		if frames > 1 {
+			return fantasy.ToolResponse{}, xerrors.Errorf("%s is an animated GIF with %d frames, and view_image accepts only still images. Save one frame as a PNG and view that",
+				path, frames)
+		}
 	}
 	resp := fantasy.NewImageResponse(data, mediaType)
 	resp.Content = fmt.Sprintf("Image %s (%s, %d bytes, %dx%d pixels).", path, mediaType, len(data), width, height)
@@ -255,6 +279,60 @@ func imageDecodes(ctx context.Context, data []byte, mediaType string) error {
 	defer func() { <-viewImageDecodeSlot }()
 	_, err := decode(bytes.NewReader(data))
 	return err
+}
+
+// gifFrames walks the blocks of a GIF up to its trailer and returns the
+// number of frames, without decoding them.
+func gifFrames(data []byte) (int, error) {
+	truncated := xerrors.New("truncated GIF block")
+	if len(data) < 13 {
+		return 0, truncated
+	}
+	// The header and the logical screen descriptor, then the global color
+	// table if its flag is set.
+	offset := 13
+	if data[10]&0x80 != 0 {
+		offset += 3 << (data[10]&7 + 1)
+	}
+	// skipSubBlocks skips data sub-blocks up to their terminator.
+	skipSubBlocks := func() bool {
+		for offset < len(data) {
+			n := int(data[offset])
+			offset += 1 + n
+			if n == 0 {
+				return true
+			}
+		}
+		return false
+	}
+	frames := 0
+	for offset < len(data) {
+		switch data[offset] {
+		case 0x3b:
+			return frames, nil
+		case 0x21:
+			// An extension: the introducer, the label, then sub-blocks.
+			offset += 2
+		case 0x2c:
+			// An image descriptor, its local color table if set, and the
+			// LZW minimum code size before the sub-blocks.
+			if len(data)-offset < 10 {
+				return 0, truncated
+			}
+			flags := data[offset+9]
+			offset += 11
+			if flags&0x80 != 0 {
+				offset += 3 << (flags&7 + 1)
+			}
+			frames++
+		default:
+			return 0, xerrors.Errorf("unknown GIF block 0x%02x", data[offset])
+		}
+		if !skipSubBlocks() {
+			return 0, truncated
+		}
+	}
+	return 0, truncated
 }
 
 // webpComplete walks the RIFF chunks up to the RIFF size, per the WebP
@@ -362,11 +440,11 @@ func (p *Server) limitViewedImagesForModel(chat database.Chat, messages []fantas
 }
 
 // limitViewedImages keeps the newest view_image results of messages as images,
-// at most maxViewedImagesInPrompt of them and maxViewedImageBytesInPrompt
-// decoded bytes together with the other media of the prompt, and always the
-// newest one. It replaces older ones with a text note. The stored conversation
-// keeps every image and only the prompt drops them, so each turn sends a
-// bounded amount of image data. With a model, it also
+// at most maxViewedImagesInPrompt of them, maxImagesInPrompt images and
+// maxViewedImageBytesInPrompt decoded bytes together with the other media of
+// the prompt, and always the newest one. It replaces older ones with a text
+// note. The stored conversation keeps every image and only the prompt drops
+// them, so each turn sends a bounded amount of image data. With a model, it also
 // replaces an image over view_image's size limit for that model, which a chat
 // can hold after it switched from a model with a higher limit. It copies the
 // messages it changes and leaves messages itself unchanged. pending is the
@@ -384,7 +462,7 @@ func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.
 	// the media of the pending tail.
 	type position struct{ i, j int }
 	var results []position
-	otherBytes := 0
+	otherBytes, otherImages := 0, 0
 	callTools := map[string]string{}
 	n := len(messages)
 	for i, msg := range append(messages[:n:n], pending...) {
@@ -395,6 +473,9 @@ func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.
 			}
 			if file, ok := part.(fantasy.FilePart); ok {
 				otherBytes += len(file.Data)
+				if strings.HasPrefix(file.MediaType, "image/") {
+					otherImages++
+				}
 				continue
 			}
 			result, ok := toolResultPartOf(part)
@@ -405,6 +486,9 @@ func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.
 				results = append(results, position{i, j})
 			} else if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output); ok {
 				otherBytes += base64DecodedLen(media.Data)
+				if strings.HasPrefix(media.MediaType, "image/") {
+					otherImages++
+				}
 			}
 		}
 	}
@@ -424,7 +508,7 @@ func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.
 		switch {
 		case sizeLimit >= 0 && size > sizeLimit:
 			note = fmt.Sprintf("[image omitted: %d bytes is larger than the view_image limit of %d bytes for this model. Scale the image down and call view_image again.]", size, sizeLimit)
-		case kept == 0 || (kept < maxViewedImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt):
+		case kept == 0 || (kept < maxViewedImagesInPrompt && otherImages+kept < maxImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt):
 			kept++
 			keptBytes += size
 			continue

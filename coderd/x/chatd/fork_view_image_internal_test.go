@@ -122,6 +122,8 @@ func TestViewImageTool(t *testing.T) {
 	var noisyJPEG, noisyGIF bytes.Buffer
 	require.NoError(t, jpeg.Encode(&noisyJPEG, noisy, nil))
 	require.NoError(t, gif.Encode(&noisyGIF, noisy, nil))
+	var animatedGIF bytes.Buffer
+	require.NoError(t, gif.EncodeAll(&animatedGIF, &gif.GIF{Image: []*image.Paletted{noisy, noisy}, Delay: []int{10, 10}}))
 	anthropicLimit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
 	// A valid PNG header padded past the limit.
 	bigPNG := append(testPNG(t, 2, 2), make([]byte, anthropicLimit)...)
@@ -148,6 +150,7 @@ func TestViewImageTool(t *testing.T) {
 		"/noidat.png": testPNGHeader(4, 3),
 		"/scan.jpg":   append(bytes.Clone(noisyJPEG.Bytes()[:noisyJPEG.Len()-40]), 0xff, 0xd9),
 		"/frame.gif":  append(bytes.Clone(noisyGIF.Bytes()[:noisyGIF.Len()-20]), 0x3b),
+		"/moving.gif": animatedGIF.Bytes(),
 		// The RIFF size names 2 bytes past the end of the file.
 		"/cut.webp": func() []byte {
 			data := testWebP(9, 10)
@@ -254,6 +257,32 @@ func TestViewImageTool(t *testing.T) {
 		resp := runViewImage(t, anthropic, conn, "/ spaced.png ")
 		require.False(t, resp.IsError, resp.Content)
 		require.Equal(t, pngData, resp.Data)
+	})
+
+	t.Run("AnimatedGIF", func(t *testing.T) {
+		t.Parallel()
+		resp := runViewImage(t, anthropic, conn, "/moving.gif")
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "/moving.gif is an animated GIF with 2 frames")
+		frames, err := gifFrames(noisyGIF.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, 1, frames)
+	})
+
+	t.Run("CallsPerResponse", func(t *testing.T) {
+		t.Parallel()
+		// One tool serves one step, so its calls are one response's calls.
+		tool := viewImageTool(openai, func(context.Context) (workspacesdk.AgentConn, error) { return conn, nil })
+		for i := range maxViewedImagesInPrompt + 1 {
+			resp, err := tool.Run(context.Background(), fantasy.ToolCall{ID: "call", Name: viewImageToolName, Input: `{"path":"/shot.txt"}`})
+			require.NoError(t, err)
+			if i < maxViewedImagesInPrompt {
+				require.False(t, resp.IsError, resp.Content)
+				continue
+			}
+			require.True(t, resp.IsError)
+			require.Contains(t, resp.Content, "view_image runs at most 8 times per response")
+		}
 	})
 
 	t.Run("ModelWithoutImageInput", func(t *testing.T) {
@@ -376,6 +405,25 @@ func TestLimitViewedImages(t *testing.T) {
 		require.False(t, isMedia(out[1]), "the older image does not fit next to the pending attachment")
 		require.True(t, isMedia(out[3]), "the newest image stays")
 		require.True(t, isMedia(limitViewedImages(messages, nil, nil)[1]), "without the tail both images fit")
+	})
+
+	t.Run("OtherImagesTakeCount", func(t *testing.T) {
+		t.Parallel()
+		// Anthropic tightens its limits above 20 images in a request.
+		var messages []fantasy.Message
+		for range maxImagesInPrompt - 3 {
+			messages = append(messages, fantasy.Message{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, 10), MediaType: "image/png"}}})
+		}
+		// A PDF is not an image and takes no share of the count.
+		messages = append(messages, fantasy.Message{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, 10), MediaType: "application/pdf"}}})
+		n := len(messages)
+		for i := range 5 {
+			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, ""))...)
+		}
+		out := limitViewedImages(messages, nil, nil)
+		for i := range 5 {
+			require.Equal(t, i >= 2, isMedia(out[n+2*i+1]), "viewed image %d", i)
+		}
 	})
 
 	t.Run("ReusedCallID", func(t *testing.T) {
