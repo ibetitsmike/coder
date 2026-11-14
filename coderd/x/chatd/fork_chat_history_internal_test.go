@@ -342,6 +342,10 @@ func TestChatHistoryTool(t *testing.T) {
 			{chatHistoryArgs{Action: "delete"}, "unknown action"},
 			{chatHistoryArgs{Action: "list_items"}, "needs a window"},
 			{chatHistoryArgs{Action: "list_items", Window: "w:9"}, "unknown window"},
+			// run checks that an error that repeats a long argument still
+			// fits the 16 KiB result.
+			{chatHistoryArgs{Action: strings.Repeat("a", 20000)}, "unknown action"},
+			{chatHistoryArgs{Action: "list_items", Window: strings.Repeat("w", 20000)}, "unknown window"},
 			{chatHistoryArgs{Action: "list_items", Window: "w:1", Limit: maxHistoryItems + 1}, "limit must be"},
 			{chatHistoryArgs{Action: "search", Query: "x"}, "query must be"},
 			{chatHistoryArgs{Action: "search", Query: strings.Repeat("x", maxHistoryQueryBytes+1)}, "query must be"},

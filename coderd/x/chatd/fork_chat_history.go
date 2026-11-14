@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -33,6 +34,7 @@ const (
 	maxHistoryQueryBytes = 200
 	historyPreviewBytes  = 240
 	historySnippetBytes  = 320
+	historyEchoBytes     = 64
 	// historyChunkBytes is the most text of one part that read_item returns
 	// at a time. JSON escaping can grow it, so the result is checked again.
 	historyChunkBytes = 12 << 10
@@ -143,7 +145,8 @@ func (p *Server) chatHistoryTool(chat database.Chat) fantasy.AgentTool {
 		func(ctx context.Context, args chatHistoryArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			result, err := p.runChatHistory(ctx, chat, args)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
+				text, _ := chatloop.TruncateToolResultText(err.Error(), maxChatHistoryBytes)
+				return fantasy.NewTextErrorResponse(text), nil
 			}
 			return toolJSONResponse(result), nil
 		},
@@ -160,7 +163,7 @@ func (p *Server) runChatHistory(ctx context.Context, chat database.Chat, args ch
 	switch args.Action {
 	case "list_windows", "list_items", "search", "read_item":
 	default:
-		return nil, xerrors.Errorf("unknown action %q: use list_windows, list_items, search or read_item", args.Action)
+		return nil, xerrors.Errorf("unknown action %q: use list_windows, list_items, search or read_item", historyEcho(args.Action))
 	}
 	rows, err := fdb.ListChatHistoryRows(ctx, chat.ID)
 	if err != nil {
@@ -257,7 +260,15 @@ func findHistoryWindow(windows []chatHistoryWindow, id string) (chatHistoryWindo
 			return window, nil
 		}
 	}
-	return chatHistoryWindow{}, xerrors.Errorf("unknown window %q: list_windows lists w:1 to w:%d", id, len(windows))
+	return chatHistoryWindow{}, xerrors.Errorf("unknown window %q: list_windows lists w:1 to w:%d", historyEcho(id), len(windows))
+}
+
+// historyEcho shortens an argument of the model that an error repeats.
+func historyEcho(value string) string {
+	if len(value) <= historyEchoBytes {
+		return value
+	}
+	return strings.ToValidUTF8(value[:historyEchoBytes], "") + "..."
 }
 
 // historyWindowOf returns the ID of the window that holds message id, or ""
