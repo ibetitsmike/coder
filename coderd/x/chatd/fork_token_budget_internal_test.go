@@ -146,7 +146,7 @@ func TestTokenBudgetTriggers(t *testing.T) {
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkTokenBudget}))
 	off := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{})
 	chat := database.Chat{ID: uuid.New()}
-	tools := []fantasy.AgentTool{on.chatNotesTool(chat), on.newContextTool(chat)}
+	tools := []fantasy.AgentTool{on.chatNotesTool(chat), on.chatHistoryTool(chat), on.newContextTool(chat)}
 
 	chatTrigger := compactionTrigger{thresholdPercent: 30, contextLimit: 1000}
 	orgTrigger := compactionTrigger{thresholdPercent: 80, contextLimit: 500}
@@ -231,8 +231,13 @@ func TestTokenBudgetEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, eligible)
 
-	tools := []fantasy.AgentTool{server.chatNotesTool(root), server.newContextTool(root)}
+	tools := []fantasy.AgentTool{server.chatNotesTool(root), server.chatHistoryTool(root), server.newContextTool(root)}
 	require.True(t, server.tokenBudgetEligible(tools))
+	// The lead-in points at chat_history, so a policy that drops it keeps
+	// summary compaction.
+	noHistory, _, _ := customAgentToolPolicy{Tools: []string{chatNotesToolName, newContextToolName}}.filter(tools, nil, nil, nil)
+	require.Len(t, noHistory, 2)
+	require.False(t, server.tokenBudgetEligible(noHistory))
 	readonly, _, _ := customAgentToolPolicy{ReadOnly: true}.filter(tools, nil, nil, nil)
 	require.False(t, server.tokenBudgetEligible(readonly))
 	allowlist, _, _ := customAgentToolPolicy{Tools: []string{chatNotesToolName}}.filter(tools, nil, nil, nil)

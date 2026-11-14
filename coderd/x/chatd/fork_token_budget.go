@@ -1,8 +1,8 @@
 package chatd
 
 // This file is fork code: it holds the context windows of the
-// fork-token-budget experiment. A chat that has the notes and new_context
-// tools works in token-budget windows instead of summary compaction: it gets
+// fork-token-budget experiment. A chat that has the notes, chat_history and
+// new_context tools works in token-budget windows instead of summary compaction: it gets
 // a handoff request and a final request as its window fills, saves a
 // checkpoint in its notes and calls new_context, and the next window starts
 // with a short lead-in instead of a summary. turn_environment.go calls
@@ -96,9 +96,11 @@ func (b tokenBudget) usablePercent() int32 {
 }
 
 // tokenBudgetEligible reports whether a turn with tools works in token-budget
-// windows: the experiment is on and the turn kept both the notes and the
-// new_context tool. Plan mode, Explore children and readonly or allowlisted
-// custom agent types drop those tools, so they keep summary compaction.
+// windows: the experiment is on and the turn kept the notes, chat_history
+// and new_context tools. The lead-in of a window points the model at
+// chat_history, so a turn without it keeps summary compaction. Plan mode,
+// Explore children and readonly or allowlisted custom agent types drop those
+// tools, so they keep summary compaction too.
 func (p *Server) tokenBudgetEligible(tools []fantasy.AgentTool) bool {
 	if !p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) {
 		return false
@@ -108,7 +110,7 @@ func (p *Server) tokenBudgetEligible(tools []fantasy.AgentTool) bool {
 			return tool.Info().Name == name
 		})
 	}
-	return has(chatNotesToolName) && has(newContextToolName)
+	return has(chatNotesToolName) && has(chatHistoryToolName) && has(newContextToolName)
 }
 
 // tokenBudgetTriggers replaces the automatic compaction trigger of an
@@ -322,7 +324,8 @@ func (p *Server) notesChangedInWindow(ctx context.Context, chat database.Chat) (
 // tokenBudgetMessage returns the handoff or final request that is due for
 // chat, or ok=false when none is. It mirrors tokenBudgetEligible before the
 // turn's tools exist: plan mode, Explore children and custom agent types
-// whose policy drops the notes or new_context tool get no requests.
+// whose policy drops the notes, chat_history or new_context tool get no
+// requests.
 func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat) (chatstate.Message, bool, error) {
 	if !p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) || chat.LastModelConfigID == uuid.Nil {
 		return chatstate.Message{}, false, nil
@@ -365,14 +368,14 @@ func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat) (ch
 	return message, true, nil
 }
 
-// tokenBudgetChatEligible reports whether the turns of chat keep the notes
-// and new_context tools, by running both through the filters
+// tokenBudgetChatEligible reports whether the turns of chat keep the notes,
+// chat_history and new_context tools, by running them through the filters
 // buildTurnEnvironment applies.
 func (p *Server) tokenBudgetChatEligible(ctx context.Context, chat database.Chat) (bool, error) {
 	if isExploreSubagentMode(chat.Mode) {
 		return false, nil
 	}
-	tools := filterToolsForTurn([]fantasy.AgentTool{p.chatNotesTool(chat), p.newContextTool(chat)}, chat.PlanMode, chat.ParentChatID, nil)
+	tools := filterToolsForTurn([]fantasy.AgentTool{p.chatNotesTool(chat), p.chatHistoryTool(chat), p.newContextTool(chat)}, chat.PlanMode, chat.ParentChatID, nil)
 	policy, err := p.customAgentToolPolicyOfChat(ctx, chat)
 	if err != nil {
 		return false, err
@@ -380,7 +383,7 @@ func (p *Server) tokenBudgetChatEligible(ctx context.Context, chat database.Chat
 	if policy != nil {
 		tools, _, _ = policy.filter(tools, nil, nil, nil)
 	}
-	return len(tools) == 2, nil
+	return len(tools) == 3, nil
 }
 
 // tokenBudgetRequestDue returns the header of the request that is due in the

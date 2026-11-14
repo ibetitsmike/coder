@@ -193,8 +193,8 @@ A window that a [rollover](#context-windows) started shows `chat_summarized`, as
 
 ### Context windows
 
-With the `fork-token-budget` experiment, a chat that has `notes` and `new_context` works in context windows instead of summaries.
-Plan-mode turns, `explore` children, read-only custom agent types and custom agent types whose tool policy drops `notes` or `new_context` keep the summary.
+With the `fork-token-budget` experiment, a chat that has `notes`, `chat_history` and `new_context` works in context windows instead of summaries.
+Plan-mode turns, `explore` children, read-only custom agent types and custom agent types whose tool policy drops `notes`, `chat_history` or `new_context` keep the summary.
 Each chat has its own windows and its own notes, a child included, and a child's window doesn't change its parent's.
 
 The points of a window come from the model's context limit and the chat's compression threshold, which is the model's threshold or the user's override of it:
@@ -943,9 +943,9 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:88-94`.
 - Chat history tool: `coderd/x/chatd/fork_chat_history.go:141-158`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:119-121`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
   The windows and the clear floor, `fork_chat_history.go:189-227`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:394-470` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:532-589`. The 16&nbsp;KiB cap, `fork_chat_history.go:26-45`, and the fit of a whole message, `fork_chat_history.go:591-634`.
-- Context windows: `new_context`, `coderd/x/chatd/fork_token_budget.go:259-320`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:120`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists. Eligible turns keep both `notes` and `new_context`, `fork_token_budget.go:98-112`.
-  The points of a window, `newTokenBudget`, `fork_token_budget.go:76-89`. The requests, `tokenBudgetMessage` and `tokenBudgetRequestDue`, `fork_token_budget.go:322-437`, sent before each step, `coderd/x/chatd/fork_context.go:64-72`.
-  The rollover trigger, `tokenBudgetTriggers`, `fork_token_budget.go:114-141`, called from `coderd/x/chatd/turn_environment.go:1042`. The lead-in without a model call, `fork_token_budget.go:164-257`, called from `coderd/x/chatd/generation.go:1360` for automatic compactions only. Unanswered tool calls run before a compaction, `decideGenerationAction`, `generation.go:198`.
+- Context windows: `new_context`, `coderd/x/chatd/fork_token_budget.go:261-322`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:120`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists. Eligible turns keep `notes`, `chat_history` and `new_context`, `fork_token_budget.go:98-114`.
+  The points of a window, `newTokenBudget`, `fork_token_budget.go:76-89`. The requests, `tokenBudgetMessage` and `tokenBudgetRequestDue`, `fork_token_budget.go:324-440`, sent before each step, `coderd/x/chatd/fork_context.go:64-72`.
+  The rollover trigger, `tokenBudgetTriggers`, `fork_token_budget.go:116-143`, called from `coderd/x/chatd/turn_environment.go:1042`. The lead-in without a model call, `fork_token_budget.go:166-259`, called from `coderd/x/chatd/generation.go:1360` for automatic compactions only. Unanswered tool calls run before a compaction, `decideGenerationAction`, `generation.go:198`.
   Tests: `TestTokenBudgetWindows` in `coderd/x/chatd/fork_token_budget_test.go` and the unit tests in `fork_token_budget_internal_test.go`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
