@@ -5918,6 +5918,354 @@
 				]
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/workflows": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "List organization saved workflows",
+				"operationId": "list-organization-saved-workflows",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/codersdk.ForkSavedWorkflowMetadata"
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"post": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Create an organization saved workflow",
+				"operationId": "create-an-organization-saved-workflow",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.CreateForkSavedWorkflowRequest"
+						}
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/workflows/{workflow}": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get an organization saved workflow",
+				"operationId": "get-an-organization-saved-workflow",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"delete": {
+				"tags": ["Chats"],
+				"summary": "Delete an organization saved workflow",
+				"operationId": "delete-an-organization-saved-workflow",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"patch": {
+				"consumes": ["application/json"],
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Update an organization saved workflow",
+				"operationId": "update-an-organization-saved-workflow",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.UpdateForkSavedWorkflowRequest"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/workflows/{workflow}/acl": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get an organization saved workflow ACL",
+				"operationId": "get-an-organization-saved-workflow-acl",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.OrganizationSkillACL"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			},
+			"patch": {
+				"consumes": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Update an organization saved workflow ACL",
+				"operationId": "update-an-organization-saved-workflow-acl",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					},
+					{
+						"description": "Request body",
+						"name": "request",
+						"in": "body",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/codersdk.UpdateOrganizationSkillACLRequest"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "No Content"
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
+		"/api/v2/chats/fork/organizations/{organization}/workflows/{workflow}/acl/available": {
+			"get": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Get available organization saved workflow ACL users and groups",
+				"operationId": "get-available-organization-saved-workflow-acl-users-and-groups",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "User search query; free-text search also applies to groups",
+						"name": "q",
+						"in": "query"
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "User after ID",
+						"name": "after_id",
+						"in": "query"
+					},
+					{
+						"type": "integer",
+						"description": "Page limit for users and groups, if 0 returns all candidates",
+						"name": "limit",
+						"in": "query"
+					},
+					{
+						"type": "integer",
+						"description": "User page offset",
+						"name": "offset",
+						"in": "query"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ACLAvailable"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/{chat}/excluded-plugin-packs": {
 			"get": {
 				"produces": ["application/json"],
@@ -22982,20 +23330,20 @@
 		"codersdk.ChatContextResourceKind": {
 			"type": "string",
 			"enum": [
+				"subagent",
 				"instruction_file",
 				"skill",
 				"mcp_config",
 				"mcp_server",
-				"acp_harness",
-				"subagent"
+				"acp_harness"
 			],
 			"x-enum-varnames": [
+				"ChatContextResourceKindSubagent",
 				"ChatContextResourceKindInstructionFile",
 				"ChatContextResourceKindSkill",
 				"ChatContextResourceKindMCPConfig",
 				"ChatContextResourceKindMCPServer",
-				"ChatContextResourceKindACPHarness",
-				"ChatContextResourceKindSubagent"
+				"ChatContextResourceKindACPHarness"
 			]
 		},
 		"codersdk.ChatContextResourceStatus": {
@@ -27397,18 +27745,6 @@
 		"codersdk.Experiment": {
 			"type": "string",
 			"enum": [
-				"fork-chat-todos",
-				"fork-nested-subagents",
-				"fork-agent-definitions",
-				"fork-subagent-isolation",
-				"fork-chat-wakeups",
-				"fork-plugin-packs",
-				"fork-pinned-skills",
-				"fork-workflows",
-				"fork-family-messages",
-				"fork-html-attachments",
-				"fork-token-budget",
-				"fork-view-image",
 				"example",
 				"notifications",
 				"workspace-usage",
@@ -27426,7 +27762,19 @@
 				"enable-ai-workspace-debug",
 				"chat-stage-metrics",
 				"chat-acp-subagents",
-				"chat-automations"
+				"chat-automations",
+				"fork-chat-todos",
+				"fork-nested-subagents",
+				"fork-agent-definitions",
+				"fork-subagent-isolation",
+				"fork-chat-wakeups",
+				"fork-plugin-packs",
+				"fork-pinned-skills",
+				"fork-workflows",
+				"fork-family-messages",
+				"fork-html-attachments",
+				"fork-token-budget",
+				"fork-view-image"
 			],
 			"x-enum-comments": {
 				"ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -27449,18 +27797,6 @@
 				"ExperimentWorkspaceUsage": "Enables the new workspace usage tracking."
 			},
 			"x-enum-descriptions": [
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
 				"This isn't used for anything.",
 				"Sends notifications via SMTP and webhooks following certain events.",
 				"Enables the new workspace usage tracking.",
@@ -27478,21 +27814,21 @@
 				"Enables debugging failed workspace builds with Coder Agents.",
 				"Exposes chat lifecycle stage durations as Prometheus metrics.",
 				"Enables workspace-local ACP subagent tools in root chats.",
-				"Enables webhook and scheduled automations that deliver prompts to agent chats."
+				"Enables webhook and scheduled automations that deliver prompts to agent chats.",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				"",
+				""
 			],
 			"x-enum-varnames": [
-				"ExperimentForkChatTodos",
-				"ExperimentForkNestedSubagents",
-				"ExperimentForkAgentDefinitions",
-				"ExperimentForkSubagentIsolation",
-				"ExperimentForkChatWakeups",
-				"ExperimentForkPluginPacks",
-				"ExperimentForkPinnedSkills",
-				"ExperimentForkWorkflows",
-				"ExperimentForkFamilyMessages",
-				"ExperimentForkHTMLAttachments",
-				"ExperimentForkTokenBudget",
-				"ExperimentForkViewImage",
 				"ExperimentExample",
 				"ExperimentNotifications",
 				"ExperimentWorkspaceUsage",
@@ -27510,7 +27846,19 @@
 				"ExperimentEnableAIWorkspaceDebug",
 				"ExperimentChatStageMetrics",
 				"ExperimentChatACPSubagents",
-				"ExperimentChatAutomations"
+				"ExperimentChatAutomations",
+				"ExperimentForkChatTodos",
+				"ExperimentForkNestedSubagents",
+				"ExperimentForkAgentDefinitions",
+				"ExperimentForkSubagentIsolation",
+				"ExperimentForkChatWakeups",
+				"ExperimentForkPluginPacks",
+				"ExperimentForkPinnedSkills",
+				"ExperimentForkWorkflows",
+				"ExperimentForkFamilyMessages",
+				"ExperimentForkHTMLAttachments",
+				"ExperimentForkTokenBudget",
+				"ExperimentForkViewImage"
 			]
 		},
 		"codersdk.ExperimentRule": {

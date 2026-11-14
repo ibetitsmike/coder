@@ -195,5 +195,19 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		userSavedWorkflows.Get(userSavedWorkflowsPath+"/{workflow}", api.forkUserSavedWorkflow)
 		userSavedWorkflows.Patch(userSavedWorkflowsPath+"/{workflow}", api.patchForkUserSavedWorkflow)
 		userSavedWorkflows.Delete(userSavedWorkflowsPath+"/{workflow}", api.deleteForkUserSavedWorkflow)
+
+		orgSavedWorkflows := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkWorkflows),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		const orgSavedWorkflowsPath = "/organizations/{organization}/workflows"
+		orgSavedWorkflows.Get(orgSavedWorkflowsPath, api.forkOrganizationSavedWorkflows)
+		orgSavedWorkflows.Post(orgSavedWorkflowsPath, api.postForkOrganizationSavedWorkflow)
+		orgSavedWorkflows.Get(orgSavedWorkflowsPath+"/{workflow}", api.forkOrganizationSavedWorkflow)
+		orgSavedWorkflows.Patch(orgSavedWorkflowsPath+"/{workflow}", api.patchForkOrganizationSavedWorkflow)
+		orgSavedWorkflows.Delete(orgSavedWorkflowsPath+"/{workflow}", api.deleteForkOrganizationSavedWorkflow)
+		orgSavedWorkflows.Get(orgSavedWorkflowsPath+"/{workflow}/acl", api.forkOrganizationSavedWorkflowACL)
+		orgSavedWorkflows.Get(orgSavedWorkflowsPath+"/{workflow}/acl/available", api.forkOrganizationSavedWorkflowACLAvailable)
+		orgSavedWorkflows.Patch(orgSavedWorkflowsPath+"/{workflow}/acl", api.patchForkOrganizationSavedWorkflowACL)
 	})
 }

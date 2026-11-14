@@ -96,3 +96,60 @@ func (c *Client) UpdateForkUserSavedWorkflow(ctx context.Context, organizationID
 func (c *Client) DeleteForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string) error {
 	return requestNoContent(ctx, c, http.MethodDelete, forkUserSavedWorkflowPath(organizationID, user, name), nil)
 }
+
+func forkOrganizationSavedWorkflowsPath(organizationID uuid.UUID) string {
+	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/workflows", organizationID)
+}
+
+func forkOrganizationSavedWorkflowPath(organizationID uuid.UUID, name string) string {
+	return forkOrganizationSavedWorkflowsPath(organizationID) + "/" + url.PathEscape(name)
+}
+
+// ForkOrganizationSavedWorkflows lists the organization workflows the caller
+// can read.
+func (c *Client) ForkOrganizationSavedWorkflows(ctx context.Context, organizationID uuid.UUID) ([]ForkSavedWorkflowMetadata, error) {
+	return requestJSON[[]ForkSavedWorkflowMetadata](ctx, c, http.MethodGet, forkOrganizationSavedWorkflowsPath(organizationID), http.StatusOK, nil)
+}
+
+// ForkOrganizationSavedWorkflow returns an organization workflow by name.
+func (c *Client) ForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodGet, forkOrganizationSavedWorkflowPath(organizationID, name), http.StatusOK, nil)
+}
+
+// CreateForkOrganizationSavedWorkflow saves a workflow for an organization.
+// Every member can read it until its ACL is narrowed.
+func (c *Client) CreateForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, req CreateForkSavedWorkflowRequest) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPost, forkOrganizationSavedWorkflowsPath(organizationID), http.StatusCreated, req)
+}
+
+// UpdateForkOrganizationSavedWorkflow updates an organization workflow.
+func (c *Client) UpdateForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string, req UpdateForkSavedWorkflowRequest) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPatch, forkOrganizationSavedWorkflowPath(organizationID, name), http.StatusOK, req)
+}
+
+// DeleteForkOrganizationSavedWorkflow deletes an organization workflow.
+func (c *Client) DeleteForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkOrganizationSavedWorkflowPath(organizationID, name), nil)
+}
+
+// ForkOrganizationSavedWorkflowACL returns the users and groups that an
+// organization workflow is shared with.
+func (c *Client) ForkOrganizationSavedWorkflowACL(ctx context.Context, organizationID uuid.UUID, name string) (OrganizationSkillACL, error) {
+	return requestJSON[OrganizationSkillACL](ctx, c, http.MethodGet, forkOrganizationSavedWorkflowPath(organizationID, name)+"/acl", http.StatusOK, nil)
+}
+
+// ForkOrganizationSavedWorkflowACLAvailable returns the organization members
+// and groups that can be granted read access to an organization workflow.
+// Pass UsersRequest{} when no filtering is desired.
+func (c *Client) ForkOrganizationSavedWorkflowACLAvailable(ctx context.Context, organizationID uuid.UUID, name string, req UsersRequest) (ACLAvailable, error) {
+	return requestJSON[ACLAvailable](ctx, c, http.MethodGet, forkOrganizationSavedWorkflowPath(organizationID, name)+"/acl/available", http.StatusOK, nil,
+		req.Pagination.asRequestOption(),
+		req.asRequestOption(),
+	)
+}
+
+// UpdateForkOrganizationSavedWorkflowACL grants or revokes read access to an
+// organization workflow for organization members and groups.
+func (c *Client) UpdateForkOrganizationSavedWorkflowACL(ctx context.Context, organizationID uuid.UUID, name string, req UpdateOrganizationSkillACLRequest) error {
+	return requestNoContent(ctx, c, http.MethodPatch, forkOrganizationSavedWorkflowPath(organizationID, name)+"/acl", req)
+}
