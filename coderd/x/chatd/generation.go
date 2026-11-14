@@ -1357,7 +1357,7 @@ func (s *taskStarter) generateCompaction(
 		attribute.String(chatloop.AttrCompactionSource, string(source)),
 	)
 	compactionSpan.SetModel(compactionModel)
-	outcome, err := chatloop.GenerateCompaction(compactionCtx, compactionOpts)
+	outcome, err := s.server.forkGenerateCompaction(compactionCtx, prepared, compactionOpts)
 	compactionSpan.End(err)
 	if err != nil {
 		s.server.metrics.RecordCompaction(metricProvider, metricModel, false, err)
