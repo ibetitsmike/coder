@@ -238,7 +238,7 @@ type ChatDescendantQuestion struct {
 	// The root of the chat's family, or the chat itself when it names no root.
 	RootChatID uuid.UUID    `db:"root_chat_id" json:"root_chat_id"`
 	AnsweredAt sql.NullTime `db:"answered_at" json:"answered_at"`
-	// What retired the question: message (a user-visible user message), secret_answer (the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).
+	// What retired the question: message (a user-visible user message that answers a question that is not secret), secret_answer (a user message that answers this call of a secret question, such as the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).
 	AnsweredBy sql.NullString `db:"answered_by" json:"answered_by"`
 }
 

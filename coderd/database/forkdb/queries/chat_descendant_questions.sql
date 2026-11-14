@@ -28,16 +28,17 @@ WHERE chat_id = @chat_id::uuid
 -- question that is not secret; it fails closed like
 -- ChatDescendantQuestion.Secret. @answers holds the text of the visible
 -- messages' text parts after chatstate.QuestionAnswerPrefix. Only an answer
--- that names the question's tool call answers a secret question.
+-- that names the question's tool call answers a secret question, and
+-- answered_by is secret_answer only for a secret question.
 UPDATE chat_descendant_questions q
 SET answered_at = now(),
     answered_by = CASE
-        WHEN EXISTS (SELECT 1 FROM unnest(@answers::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
-            THEN 'secret_answer'
         WHEN @visible::boolean
                 AND jsonb_typeof(q.questions) = 'array'
                 AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)')
             THEN 'message'
+        WHEN EXISTS (SELECT 1 FROM unnest(@answers::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
+            THEN 'secret_answer'
         ELSE 'context_boundary'
     END
 WHERE q.chat_id = @chat_id::uuid
