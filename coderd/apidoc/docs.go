@@ -25110,20 +25110,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -29661,6 +29661,8 @@ const docTemplate = `{
                 "fork-workflows",
                 "fork-family-messages",
                 "fork-html-attachments",
+                "fork-token-budget",
+                "fork-view-image",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -29711,6 +29713,8 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29741,6 +29745,8 @@ const docTemplate = `{
                 "ExperimentForkWorkflows",
                 "ExperimentForkFamilyMessages",
                 "ExperimentForkHTMLAttachments",
+                "ExperimentForkTokenBudget",
+                "ExperimentForkViewImage",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
