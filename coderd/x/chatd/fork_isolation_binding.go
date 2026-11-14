@@ -123,8 +123,14 @@ func (p *Server) withForkWorktreeBinding(ctx context.Context, tools []fantasy.Ag
 	}
 	for i, tool := range tools {
 		switch tool.Info().Name {
-		case chattool.ExecuteToolName, "read_file", chattool.WriteFileToolName, chattool.EditFilesToolName, "attach_file", viewImageToolName:
+		case chattool.ExecuteToolName, "read_file", chattool.WriteFileToolName, chattool.EditFilesToolName, "attach_file":
 			tools[i] = worktreeBoundTool{AgentTool: tool, dir: worktree.path}
+		case viewImageToolName:
+			// A caller-supplied view_image stays a *dynamicTool, which the
+			// custom agent tool policy needs to recognize it.
+			if _, dynamic := tool.(*dynamicTool); !dynamic {
+				tools[i] = worktreeBoundTool{AgentTool: tool, dir: worktree.path}
+			}
 		}
 	}
 	return tools, nil

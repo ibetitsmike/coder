@@ -591,6 +591,7 @@ The child works in its worktree.
 A system message before its prompt names the worktree and the branch, and tells the child to make and commit every change there.
 `execute` without a `workdir` runs in the worktree.
 A relative `workdir` of `execute`, and a relative path of `read_file`, `write_file`, `edit_files`, `attach_file`, or `view_image`, resolves against the worktree.
+A caller-supplied `view_image` is not bound, so a custom agent's tool policy still sees it as one.
 An absolute path or an absolute `workdir` still reaches the rest of the workspace.
 With `fork-nested-subagents`, a `shared` child of the worktree child works in the same worktree, and its system message says so.
 
@@ -774,7 +775,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Stored as a media tool result, `coderd/x/chatd/chatprompt/chatprompt.go:555-556`, and sent again on later turns, `:1142-1157`.
   The bound on the prompt, `fork_view_image.go:42-47`, `:364-475`, with the other media and the pending tail first, `:380-410`, `coderd/x/chatd/turn_environment.go:743`, and the model's size limit, `fork_view_image.go:376-379`, `:424-426`, also with a compaction override model, `:354-362`, `coderd/x/chatd/generation.go:1339`, applied on every turn unless a caller-supplied tool owns the name, `fork_tools.go:64-70`, `fork_view_image.go:342-352`.
   The tool card with the image, `site/src/pages/AgentsPage/components/ChatElements/tools/Tool.tsx:964-978`.
-  Kept by `Read` and `readonly: true`, `coderd/x/chatd/fork_agent_tool_policy.go:51`, `:185-189`, but not as a caller-supplied tool, `:211-215`, and bound to the worktree, `fork_isolation_binding.go:126`.
+  Kept by `Read` and `readonly: true`, `coderd/x/chatd/fork_agent_tool_policy.go:51`, `:185-189`, but not as a caller-supplied tool, `:211-215`, and bound to the worktree, `fork_isolation_binding.go:128-133`, unless it is a caller-supplied tool, `:131`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.
@@ -786,7 +787,7 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The **Branch:** and **Worktree:** lines and the diff summary on the cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/ForkSubagentFields.tsx:72-120`, `:151`, `:171`, `:179-202`.
   Branch name, `fork_isolation.go:275-297`, path, `agent/agentgit/fork_worktrees.go:63`, `:178`, `:221-222`.
   The worktree of a child, or of its nearest worktree ancestor through `shared` chats, `coderd/x/chatd/fork_isolation_binding.go:39-70`, named in a system message, `:95-112`, added at spawn, `fork_subagents.go:298-308`, `:344-347`.
-  Relative paths and the default `workdir`, `fork_isolation_binding.go:116-131`, `:140-210`.
+  Relative paths and the default `workdir`, `fork_isolation_binding.go:116-137`, `:146-216`.
 - Workspace isolation, only with `fork-subagent-isolation`: the `isolation` values and description, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-101`, checks, `:117-118`, `:72-74`, result fields, `:152-158`, and in `wait_agent`, `coderd/x/chatd/fork_isolation_report.go:78-82`.
   **Workspace:** or the error on the cards, only with the experiment, `ForkSubagentFields.tsx:121-134`, `:151`, `:171`, `:194`.
   The template and the latest build's parameters, and the errors, `coderd/x/chatd/fork_isolation_workspace.go:35-70`, created with `create_workspace` as the chat owner and refused without a ready agent and finished startup scripts, `:102-130`, then the prompt, `:72-86`, `:132-167`, called at spawn, `coderd/x/chatd/fork_subagents.go:325-334`, `:413-418`.
