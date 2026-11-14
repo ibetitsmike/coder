@@ -1,5 +1,4 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import type { FC, PropsWithChildren } from "react";
 import { QueryClientProvider } from "react-query";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
@@ -16,7 +15,7 @@ import { MockChatWorkflowRun } from "#/testHelpers/forkWorkflows";
 import { createTestQueryClient } from "#/testHelpers/renderHelpers";
 import { useForkWorkflowsTab } from "./useForkWorkflowsTab";
 
-const Wrapper: FC<PropsWithChildren> = ({ children }) => (
+const Wrapper: React.FC<React.PropsWithChildren> = ({ children }) => (
 	<QueryClientProvider client={createTestQueryClient()}>
 		<DashboardContext.Provider
 			value={{
