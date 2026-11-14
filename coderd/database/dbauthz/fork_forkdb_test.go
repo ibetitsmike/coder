@@ -1410,7 +1410,8 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
-				case "InsertWorkflowStep", "UpdateWorkflowRunStatus",
+				case "GetWorkflowRun", "GetWorkflowStepsByRun",
+					"InsertWorkflowStep", "UpdateWorkflowRunStatus",
 					"FailOpenWorkflowStepsOfRun":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
