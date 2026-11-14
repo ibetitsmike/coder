@@ -18,8 +18,8 @@ type ForkTokenBudgetProps = {
 };
 
 /**
- * Renders the organization's token budget setting when fork-token-budget is on
- * and the user can read the organization's chat model configs.
+ * Requests the setting only after the permissions check passes, because the
+ * API answers members without chat model config access with a 404.
  */
 export const ForkTokenBudget: React.FC<ForkTokenBudgetProps> = ({
 	organization,

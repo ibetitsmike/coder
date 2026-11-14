@@ -67,8 +67,8 @@ type ForkTokenBudgetSettingsProps = {
 };
 
 /**
- * Shows how an organization's chats compact their context and lets editors
- * pick the summary or the token budget.
+ * A new `setting` resets the form only while it has no draft, so a refetch
+ * during an edit keeps the edit until it is saved.
  */
 export const ForkTokenBudgetSettings: React.FC<
 	ForkTokenBudgetSettingsProps

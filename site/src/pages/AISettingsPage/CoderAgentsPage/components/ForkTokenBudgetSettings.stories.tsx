@@ -46,14 +46,16 @@ export const TokenBudget: Story = {
 	},
 };
 
+const selectTokenBudget: Story["play"] = async ({ canvasElement }) => {
+	const canvas = within(canvasElement);
+	const strategy = canvas.getByRole("radiogroup", { name: "Strategy" });
+	await userEvent.click(
+		within(strategy).getByRole("radio", { name: "Token budget" }),
+	);
+};
+
 export const Edited: Story = {
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const strategy = canvas.getByRole("radiogroup", { name: "Strategy" });
-		await userEvent.click(
-			within(strategy).getByRole("radio", { name: "Token budget" }),
-		);
-	},
+	play: selectTokenBudget,
 };
 
 export const Saving: Story = {
@@ -84,4 +86,6 @@ export const SaveError: Story = {
 	args: {
 		saveError: mockApiError({ message: "Invalid token budget setting." }),
 	},
+	// A failed save leaves the edit in place with Save still shown.
+	play: selectTokenBudget,
 };
