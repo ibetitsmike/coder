@@ -1,4 +1,4 @@
--- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema
+-- requires: 01a1d6ec-bf25-76dd-8035-184db759fb30_chat_subagent_messages
 
 CREATE TABLE chat_notes (
     chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,

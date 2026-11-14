@@ -277,6 +277,20 @@ func (mr *MockStoreMockRecorder) DeleteChatSecretAnswer(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSecretAnswer", reflect.TypeOf((*MockStore)(nil).DeleteChatSecretAnswer), ctx, arg)
 }
 
+// DeleteChatSubagentMessagesBefore mocks base method.
+func (m *MockStore) DeleteChatSubagentMessagesBefore(ctx context.Context, arg forkdb.DeleteChatSubagentMessagesBeforeParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatSubagentMessagesBefore", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatSubagentMessagesBefore indicates an expected call of DeleteChatSubagentMessagesBefore.
+func (mr *MockStoreMockRecorder) DeleteChatSubagentMessagesBefore(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSubagentMessagesBefore", reflect.TypeOf((*MockStore)(nil).DeleteChatSubagentMessagesBefore), ctx, arg)
+}
+
 // DeleteOldChatSecretAnswers mocks base method.
 func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
@@ -583,6 +597,21 @@ func (m *MockStore) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUI
 func (mr *MockStoreMockRecorder) GetChatSubagentByChatID(ctx, chatID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentByChatID", reflect.TypeOf((*MockStore)(nil).GetChatSubagentByChatID), ctx, chatID)
+}
+
+// GetChatSubagentMessageRecipient mocks base method.
+func (m *MockStore) GetChatSubagentMessageRecipient(ctx context.Context, arg forkdb.GetChatSubagentMessageRecipientParams) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatSubagentMessageRecipient", ctx, arg)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatSubagentMessageRecipient indicates an expected call of GetChatSubagentMessageRecipient.
+func (mr *MockStoreMockRecorder) GetChatSubagentMessageRecipient(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSubagentMessageRecipient", reflect.TypeOf((*MockStore)(nil).GetChatSubagentMessageRecipient), ctx, arg)
 }
 
 // GetChatSubagentTypesByChatIDs mocks base method.
@@ -1135,6 +1164,20 @@ func (m *MockStore) InsertChatSubagent(ctx context.Context, arg forkdb.InsertCha
 func (mr *MockStoreMockRecorder) InsertChatSubagent(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatSubagent", reflect.TypeOf((*MockStore)(nil).InsertChatSubagent), ctx, arg)
+}
+
+// InsertChatSubagentMessage mocks base method.
+func (m *MockStore) InsertChatSubagentMessage(ctx context.Context, arg forkdb.InsertChatSubagentMessageParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatSubagentMessage", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertChatSubagentMessage indicates an expected call of InsertChatSubagentMessage.
+func (mr *MockStoreMockRecorder) InsertChatSubagentMessage(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatSubagentMessage", reflect.TypeOf((*MockStore)(nil).InsertChatSubagentMessage), ctx, arg)
 }
 
 // InsertChatWakeup mocks base method.

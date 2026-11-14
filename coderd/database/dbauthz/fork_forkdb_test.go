@@ -449,6 +449,28 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatFamilyMessageRecipient(gomock.Any(), arg).Return(recipient, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(recipient)
 		},
+		"InsertChatSubagentMessage": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.InsertChatSubagentMessageParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: uuid.New(), RecipientChatID: chat.ID, CreatedAt: dbtime.Now()}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().InsertChatSubagentMessage(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"DeleteChatSubagentMessagesBefore": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.DeleteChatSubagentMessagesBeforeParams{OrganizationID: chat.OrganizationID, SenderChatID: chat.ID, Before: dbtime.Now()}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().DeleteChatSubagentMessagesBefore(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
+		"GetChatSubagentMessageRecipient": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			recipient := uuid.New()
+			arg := forkdb.GetChatSubagentMessageRecipientParams{ID: uuid.New(), OrganizationID: chat.OrganizationID, SenderChatID: chat.ID}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatSubagentMessageRecipient(gomock.Any(), arg).Return(recipient, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(recipient)
+		},
 		"ListChatFamilyMembers": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.ListChatFamilyMembersParams{RootID: chat.ID, LimitCount: 101}

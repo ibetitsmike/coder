@@ -50,7 +50,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	if err != nil {
 		return nil, err
 	}
-	tools = append(tools, nested...)
+	tools = p.withForkReplaySafeSpawn(append(tools, nested...), chat)
 	if p.nestedSubagentsEnabled() {
 		tools = p.withForkArchiveAgent(tools, chat)
 	}
@@ -82,6 +82,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		tools = p.withDescendantQuestionWait(tools, chat)
 		tools = p.withForkListDescendants(tools, chat)
 	}
+	tools = p.withForkReplaySafeMessageAgent(tools, chat)
 	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
 	if p.experiments.Enabled(codersdk.ExperimentForkFamilyMessages) {
 		tools = append(tools, p.familyMessageTools(chat)...)

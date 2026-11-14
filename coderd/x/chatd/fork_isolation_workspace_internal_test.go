@@ -26,7 +26,7 @@ import (
 // connects to, through conn when it is set, until the workspace is stopped.
 // Its build fails with buildFails, it has no agent with noAgent,
 // its startup scripts fail with startupFails, and createErr fails the creation
-// itself.
+// itself. beforeCreate, when set, runs first in each creation.
 type fakeWorkspaces struct {
 	t            *testing.T
 	db           database.Store
@@ -36,6 +36,7 @@ type fakeWorkspaces struct {
 	buildFails   bool
 	noAgent      bool
 	startupFails bool
+	beforeCreate func(chatID uuid.UUID)
 
 	mu      sync.Mutex
 	creates []codersdk.CreateWorkspaceRequest
@@ -45,6 +46,9 @@ type fakeWorkspaces struct {
 }
 
 func (w *fakeWorkspaces) create(ctx context.Context, ownerID, chatID uuid.UUID, req codersdk.CreateWorkspaceRequest) (codersdk.Workspace, database.Chat, error) {
+	if w.beforeCreate != nil {
+		w.beforeCreate(chatID)
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.creates = append(w.creates, req)

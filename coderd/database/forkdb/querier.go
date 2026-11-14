@@ -47,6 +47,7 @@ type Querier interface {
 	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
+	DeleteChatSubagentMessagesBefore(ctx context.Context, arg DeleteChatSubagentMessagesBeforeParams) error
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
@@ -82,6 +83,7 @@ type Querier interface {
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
+	GetChatSubagentMessageRecipient(ctx context.Context, arg GetChatSubagentMessageRecipientParams) (uuid.UUID, error)
 	// Returns the agent type of each child chat in @chat_ids and of each root chat
 	// in @chat_ids that started as an agent type. A child spawned without a
 	// chat_subagents row gets its type from its mode, as subagentTypeFromChat in
@@ -145,6 +147,7 @@ type Querier interface {
 	InsertChatPluginPack(ctx context.Context, arg InsertChatPluginPackParams) (ChatPluginPack, error)
 	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
+	InsertChatSubagentMessage(ctx context.Context, arg InsertChatSubagentMessageParams) error
 	// The organization comes from the chat.
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)
 	// Returns no row when the run of this occurrence already exists. The chat and
