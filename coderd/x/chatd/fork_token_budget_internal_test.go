@@ -319,7 +319,7 @@ func TestContextWindowLeadIn(t *testing.T) {
 	leadIn := formatContextWindowLeadIn("w:2", []forkdb.ListChatNotesRow{
 		{Path: chatCheckpointNotePath, Bytes: 120},
 		{Path: "plan/steps.md", Bytes: 40},
-	})
+	}, "")
 	require.True(t, strings.HasPrefix(leadIn, `<context_window id="w:2">`))
 	require.True(t, strings.HasSuffix(leadIn, "</context_window>"))
 	require.Contains(t, leadIn, "- checkpoint.md (120 bytes)")
@@ -327,7 +327,28 @@ func TestContextWindowLeadIn(t *testing.T) {
 	require.Contains(t, leadIn, "Read checkpoint.md")
 	require.Contains(t, leadIn, chatHistoryToolName)
 
-	empty := formatContextWindowLeadIn("w:3", nil)
+	empty := formatContextWindowLeadIn("w:3", nil, "")
 	require.Contains(t, empty, "This chat has no notes.")
 	require.Contains(t, empty, "There is no checkpoint.md")
+	require.NotContains(t, empty, "pre_compact")
+}
+
+// A rollover keeps the model context of a pre_compact hook, which a summary
+// would carry.
+func TestContextWindowRolloverHookContext(t *testing.T) {
+	t.Parallel()
+
+	db, ps := dbtestutil.NewDB(t)
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkTokenBudget}))
+	ctx := chatdTestContext(t)
+	user, org, model := seedInternalChatDeps(t, db)
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
+
+	result, err := server.contextWindowRollover(ctx, chat, chatloop.GenerateCompactionOptions{
+		Source:      chatloop.CompactionSourceAutomatic,
+		SummaryHint: "Keep the release branch frozen.",
+	})
+	require.NoError(t, err)
+	require.Contains(t, result.SystemSummary, "Context from a pre_compact hook:\nKeep the release branch frozen.\n</context_window>")
 }

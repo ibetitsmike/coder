@@ -176,7 +176,8 @@ func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnviro
 
 // contextWindowRollover returns the compaction result that starts the next
 // window of chat. Its system summary is the lead-in the model reads, and its
-// report is the line the user sees.
+// report is the line the user sees. The model context of a pre_compact hook,
+// which a summary would carry, goes into the lead-in.
 func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, opts chatloop.GenerateCompactionOptions) (chatloop.CompactionResult, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -191,7 +192,7 @@ func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, 
 		return chatloop.CompactionResult{}, xerrors.Errorf("list notes: %w", err)
 	}
 	windowID := "w:" + strconv.Itoa(len(chatHistoryWindows(chat, rows))+1)
-	leadIn := formatContextWindowLeadIn(windowID, notes)
+	leadIn := formatContextWindowLeadIn(windowID, notes, opts.SummaryHint)
 	report := "Context window " + windowID + " started from the notes of this chat. No summary was made."
 
 	contextTokens := contextTokensFromUsage(opts.StepUsage)
@@ -232,8 +233,9 @@ func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, 
 
 // formatContextWindowLeadIn renders the lead-in of window windowID. It lists
 // the notes and points the model to its checkpoint, and holds nothing of the
-// earlier conversation.
-func formatContextWindowLeadIn(windowID string, notes []forkdb.ListChatNotesRow) string {
+// earlier conversation except hookContext, the model context of a pre_compact
+// hook.
+func formatContextWindowLeadIn(windowID string, notes []forkdb.ListChatNotesRow, hookContext string) string {
 	var sb strings.Builder
 	_, _ = fmt.Fprintf(&sb, "<context_window id=%q>\n", windowID)
 	_, _ = sb.WriteString("A new context window started. The earlier conversation of this chat is no longer in your context; your notes are.\n")
@@ -254,6 +256,10 @@ func formatContextWindowLeadIn(windowID string, notes []forkdb.ListChatNotesRow)
 		_, _ = sb.WriteString("There is no " + chatCheckpointNotePath + ". Read the notes you have, and use chat_history to recover the task.\n")
 	}
 	_, _ = sb.WriteString("To find a message of an earlier window, use chat_history.\n")
+	if hookContext = strings.TrimSpace(hookContext); hookContext != "" {
+		_, _ = sb.WriteString("Context from a pre_compact hook:\n")
+		_, _ = sb.WriteString(hookContext + "\n")
+	}
 	_, _ = sb.WriteString("</context_window>")
 	return sb.String()
 }
