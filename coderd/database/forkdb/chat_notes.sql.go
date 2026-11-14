@@ -12,21 +12,39 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteChatNote = `-- name: DeleteChatNote :execrows
-DELETE FROM chat_notes WHERE chat_id = $1::uuid AND path = $2::text
+const deleteChatNote = `-- name: DeleteChatNote :one
+WITH deleted AS (
+    DELETE FROM chat_notes
+    WHERE chat_id = $1::uuid AND path = $2::text
+        AND NOT EXISTS (SELECT 1 FROM chat_note_calls WHERE id = $3::uuid)
+    RETURNING path
+), recorded AS (
+    INSERT INTO chat_note_calls (id, chat_id, path, deleted, updated_at)
+    SELECT $3::uuid, $1::uuid, $2::text, EXISTS (SELECT 1 FROM deleted), now()
+    WHERE $3::uuid IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM chat_note_calls WHERE id = $3::uuid)
+), expired AS (
+    DELETE FROM chat_note_calls
+    WHERE chat_id = $1::uuid AND created_at < now() - interval '1 day'
+)
+SELECT COUNT(*)::bigint FROM deleted
 `
 
 type DeleteChatNoteParams struct {
-	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
-	Path   string    `db:"path" json:"path"`
+	ChatID uuid.UUID     `db:"chat_id" json:"chat_id"`
+	Path   string        `db:"path" json:"path"`
+	CallID uuid.NullUUID `db:"call_id" json:"call_id"`
 }
 
+// DeleteChatNote deletes a note and returns the number of deleted notes.
+// With call_id set it records the call like WriteChatNote, and deletes
+// nothing when the call is recorded already, so a replayed delete does not
+// delete a note that a later call wrote.
 func (q *Queries) DeleteChatNote(ctx context.Context, arg DeleteChatNoteParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteChatNote, arg.ChatID, arg.Path)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	row := q.db.QueryRowContext(ctx, deleteChatNote, arg.ChatID, arg.Path, arg.CallID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const getChatNote = `-- name: GetChatNote :one
@@ -47,6 +65,30 @@ func (q *Queries) GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatN
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getChatNoteCall = `-- name: GetChatNoteCall :one
+SELECT id, chat_id, path, bytes, updated_at, deleted, created_at FROM chat_note_calls WHERE id = $1::uuid AND chat_id = $2::uuid
+`
+
+type GetChatNoteCallParams struct {
+	ID     uuid.UUID `db:"id" json:"id"`
+	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
+}
+
+func (q *Queries) GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error) {
+	row := q.db.QueryRowContext(ctx, getChatNoteCall, arg.ID, arg.ChatID)
+	var i ChatNoteCall
+	err := row.Scan(
+		&i.ID,
+		&i.ChatID,
+		&i.Path,
+		&i.Bytes,
+		&i.UpdatedAt,
+		&i.Deleted,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -91,41 +133,70 @@ func (q *Queries) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListCh
 }
 
 const writeChatNote = `-- name: WriteChatNote :one
-INSERT INTO chat_notes (chat_id, path, content)
-SELECT $1::uuid, $2::text, $3::text
-WHERE EXISTS (SELECT 1 FROM chat_notes WHERE chat_id = $1::uuid AND path = $2::text)
-    OR (SELECT COUNT(*) FROM chat_notes WHERE chat_id = $1::uuid) < $4::bigint
-ON CONFLICT (chat_id, path) DO UPDATE
-SET
-    content = CASE
-        WHEN $5::boolean AND chat_notes.content <> '' THEN chat_notes.content || E'\n' || EXCLUDED.content
-        ELSE EXCLUDED.content
-    END,
-    updated_at = now()
-RETURNING chat_id, path, content, created_at, updated_at
+WITH note AS (
+    INSERT INTO chat_notes (chat_id, path, content)
+    SELECT $1::uuid, $2::text, $3::text
+    WHERE (
+            EXISTS (SELECT 1 FROM chat_notes WHERE chat_id = $1::uuid AND path = $2::text)
+            OR (SELECT COUNT(*) FROM chat_notes WHERE chat_id = $1::uuid) < $4::bigint
+        )
+        AND NOT EXISTS (SELECT 1 FROM chat_note_calls WHERE id = $5::uuid)
+    ON CONFLICT (chat_id, path) DO UPDATE
+    SET
+        content = CASE
+            WHEN $6::boolean AND chat_notes.content <> '' THEN chat_notes.content || E'\n' || EXCLUDED.content
+            ELSE EXCLUDED.content
+        END,
+        updated_at = now()
+    RETURNING chat_id, path, content, created_at, updated_at
+), recorded AS (
+    INSERT INTO chat_note_calls (id, chat_id, path, bytes, updated_at)
+    SELECT $5::uuid, note.chat_id, note.path, octet_length(note.content), note.updated_at
+    FROM note
+    WHERE $5::uuid IS NOT NULL
+), expired AS (
+    DELETE FROM chat_note_calls
+    WHERE chat_id = $1::uuid AND created_at < now() - interval '1 day'
+)
+SELECT note.chat_id, note.path, note.content, note.created_at, note.updated_at FROM note
 `
 
 type WriteChatNoteParams struct {
-	ChatID   uuid.UUID `db:"chat_id" json:"chat_id"`
-	Path     string    `db:"path" json:"path"`
-	Content  string    `db:"content" json:"content"`
-	MaxNotes int64     `db:"max_notes" json:"max_notes"`
-	Append   bool      `db:"append" json:"append"`
+	ChatID   uuid.UUID     `db:"chat_id" json:"chat_id"`
+	Path     string        `db:"path" json:"path"`
+	Content  string        `db:"content" json:"content"`
+	MaxNotes int64         `db:"max_notes" json:"max_notes"`
+	CallID   uuid.NullUUID `db:"call_id" json:"call_id"`
+	Append   bool          `db:"append" json:"append"`
+}
+
+type WriteChatNoteRow struct {
+	ChatID    uuid.UUID `db:"chat_id" json:"chat_id"`
+	Path      string    `db:"path" json:"path"`
+	Content   string    `db:"content" json:"content"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // WriteChatNote replaces a note, or with append set adds content as a new
 // line at its end. It creates a missing note only while the chat has fewer
 // than max_notes notes, and returns no row when the chat is at the limit. The
-// table check keeps the size cap.
-func (q *Queries) WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (ChatNote, error) {
+// table check keeps the size cap. With call_id set it records the call and
+// its result in chat_note_calls, and changes nothing when the call is
+// recorded already, so a replayed call does not append twice. Two runs of
+// the same call that start together both change the note, and the second
+// then fails on the record's primary key and rolls back. It also drops the
+// chat's records older than a day.
+func (q *Queries) WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (WriteChatNoteRow, error) {
 	row := q.db.QueryRowContext(ctx, writeChatNote,
 		arg.ChatID,
 		arg.Path,
 		arg.Content,
 		arg.MaxNotes,
+		arg.CallID,
 		arg.Append,
 	)
-	var i ChatNote
+	var i WriteChatNoteRow
 	err := row.Scan(
 		&i.ChatID,
 		&i.Path,

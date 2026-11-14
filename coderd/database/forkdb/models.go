@@ -254,6 +254,17 @@ type ChatNote struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// Notes calls that changed a note, so that a replayed call returns its result without changing the note again.
+type ChatNoteCall struct {
+	ID        uuid.UUID `db:"id" json:"id"`
+	ChatID    uuid.UUID `db:"chat_id" json:"chat_id"`
+	Path      string    `db:"path" json:"path"`
+	Bytes     int64     `db:"bytes" json:"bytes"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	Deleted   bool      `db:"deleted" json:"deleted"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 // Subagent limits of an organization. A NULL limit uses the deployment value, and a set limit cannot raise it.
 type ChatOrganizationSubagentLimit struct {
 	OrganizationID         uuid.UUID     `db:"organization_id" json:"organization_id"`

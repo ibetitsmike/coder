@@ -43,6 +43,10 @@ type Querier interface {
 	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
+	// DeleteChatNote deletes a note and returns the number of deleted notes.
+	// With call_id set it records the call like WriteChatNote, and deletes
+	// nothing when the call is recorded already, so a replayed delete does not
+	// delete a note that a later call wrote.
 	DeleteChatNote(ctx context.Context, arg DeleteChatNoteParams) (int64, error)
 	DeleteChatPinnedSkills(ctx context.Context, chatID uuid.UUID) error
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
@@ -77,6 +81,7 @@ type Querier interface {
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
+	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
@@ -245,8 +250,13 @@ type Querier interface {
 	// WriteChatNote replaces a note, or with append set adds content as a new
 	// line at its end. It creates a missing note only while the chat has fewer
 	// than max_notes notes, and returns no row when the chat is at the limit. The
-	// table check keeps the size cap.
-	WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (ChatNote, error)
+	// table check keeps the size cap. With call_id set it records the call and
+	// its result in chat_note_calls, and changes nothing when the call is
+	// recorded already, so a replayed call does not append twice. Two runs of
+	// the same call that start together both change the note, and the second
+	// then fails on the record's primary key and rolls back. It also drops the
+	// chat's records older than a day.
+	WriteChatNote(ctx context.Context, arg WriteChatNoteParams) (WriteChatNoteRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

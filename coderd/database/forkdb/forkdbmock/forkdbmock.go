@@ -524,6 +524,21 @@ func (mr *MockStoreMockRecorder) GetChatNote(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatNote", reflect.TypeOf((*MockStore)(nil).GetChatNote), ctx, arg)
 }
 
+// GetChatNoteCall mocks base method.
+func (m *MockStore) GetChatNoteCall(ctx context.Context, arg forkdb.GetChatNoteCallParams) (forkdb.ChatNoteCall, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatNoteCall", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatNoteCall)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatNoteCall indicates an expected call of GetChatNoteCall.
+func (mr *MockStoreMockRecorder) GetChatNoteCall(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatNoteCall", reflect.TypeOf((*MockStore)(nil).GetChatNoteCall), ctx, arg)
+}
+
 // GetChatOrganizationSubagentLimits mocks base method.
 func (m *MockStore) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	m.ctrl.T.Helper()
@@ -1904,10 +1919,10 @@ func (mr *MockStoreMockRecorder) UpsertPluginUserLink(ctx, arg any) *gomock.Call
 }
 
 // WriteChatNote mocks base method.
-func (m *MockStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.ChatNote, error) {
+func (m *MockStore) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.WriteChatNoteRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "WriteChatNote", ctx, arg)
-	ret0, _ := ret[0].(forkdb.ChatNote)
+	ret0, _ := ret[0].(forkdb.WriteChatNoteRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
