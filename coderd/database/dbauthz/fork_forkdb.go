@@ -701,6 +701,15 @@ func (f *forkQuerier) ListChatFamilyMembers(ctx context.Context, arg forkdb.List
 	return f.db.ListChatFamilyMembers(ctx, arg)
 }
 
+// ListChatHistoryRows authorizes through the chat, like
+// GetChatMessagesByChatID.
+func (f *forkQuerier) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatHistoryRows(ctx, chatID)
+}
+
 // ListChatNotes authorizes through the owning chat.
 func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
 	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
@@ -993,6 +1002,15 @@ func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChat
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.UpsertChatTodos(ctx, arg)
+}
+
+// SearchChatHistory authorizes through the chat, like
+// GetChatMessagesByChatID.
+func (f *forkQuerier) SearchChatHistory(ctx context.Context, arg forkdb.SearchChatHistoryParams) ([]forkdb.SearchChatHistoryRow, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+		return nil, err
+	}
+	return f.db.SearchChatHistory(ctx, arg)
 }
 
 // WriteChatNote authorizes as an update of the owning chat, like
