@@ -14,7 +14,7 @@ import {
 	providerInfoByIDFromDescriptors,
 } from "#/pages/AgentsPage/utils/modelOptions";
 import { splitModelQueryErrors } from "../ModelsPage/organizationModels";
-import { ForkSubagentLimits } from "./ForkSubagentLimits";
+import { ForkOrganizationAgentSettings } from "./ForkOrganizationAgentSettings";
 import OrganizationAgentSettingsView, {
 	type SaveModelOverride,
 } from "./OrganizationAgentSettingsView";
@@ -44,7 +44,7 @@ export const OrganizationAgentSettings: React.FC<
 			canEdit={canEdit}
 			showComputerUse={showComputerUse}
 		/>
-		<ForkSubagentLimits
+		<ForkOrganizationAgentSettings
 			key={`fork-subagent-limits-${organization.id}`}
 			organization={organization}
 			canEdit={canEdit}
