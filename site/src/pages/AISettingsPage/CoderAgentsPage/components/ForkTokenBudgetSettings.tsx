@@ -104,7 +104,6 @@ const TokenBudgetForm: React.FC<TokenBudgetFormProps> = ({
 	const { isSavedVisible, showSavedState } = useTemporarySavedState();
 	const [hasDraft, setHasDraft] = useState(false);
 	const form = useFormik<ForkOrganizationTokenBudget>({
-		// A refetch updates an unedited form but must not discard a draft.
 		enableReinitialize: !hasDraft,
 		initialValues: setting,
 		onSubmit: (values, { resetForm }) => {
@@ -243,7 +242,12 @@ const OptionGroup = <T extends string>({
 								className="mt-0.5"
 							/>
 							<div className="flex flex-col">
-								<Label htmlFor={id} className="cursor-pointer font-normal">
+								<Label
+									htmlFor={id}
+									className={
+										disabled ? "font-normal" : "cursor-pointer font-normal"
+									}
+								>
 									{option.label}
 								</Label>
 								<span

@@ -36,8 +36,6 @@ export const ForkTokenBudget: React.FC<ForkTokenBudgetProps> = ({
 		...organizationsPermissions([organization.id]),
 		enabled: isExperimentEnabled,
 	});
-	// The API returns 404 to members who cannot read the organization's chat
-	// model configs, so the section is hidden for them.
 	const canView =
 		permissionsQuery.data?.[organization.id]?.viewChatModelConfigs ?? false;
 	const isVisible = isExperimentEnabled && canView;
