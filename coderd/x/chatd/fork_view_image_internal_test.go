@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -38,6 +39,24 @@ func testPNG(t *testing.T, width, height int) []byte {
 	var buf bytes.Buffer
 	require.NoError(t, png.Encode(&buf, img))
 	return buf.Bytes()
+}
+
+// testPNGHeader returns a PNG with a valid IHDR and IEND chunk and no image
+// data, so its structure checks out but it does not decode.
+func testPNGHeader(width, height uint32) []byte {
+	data := []byte("\x89PNG\r\n\x1a\n")
+	chunk := func(name string, body []byte) {
+		data = binary.BigEndian.AppendUint32(data, uint32(len(body))) //nolint:gosec // Test chunks are small.
+		start := len(data)
+		data = append(data, name...)
+		data = append(data, body...)
+		data = binary.BigEndian.AppendUint32(data, crc32.ChecksumIEEE(data[start:]))
+	}
+	ihdr := binary.BigEndian.AppendUint32(nil, width)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, height)
+	chunk("IHDR", append(ihdr, 8, 6, 0, 0, 0))
+	chunk("IEND", nil)
+	return data
 }
 
 // testWebP returns a lossless WebP file with a width x height canvas. The tool
@@ -95,6 +114,14 @@ func TestViewImageTool(t *testing.T) {
 	var jpegBuf, gifBuf bytes.Buffer
 	require.NoError(t, jpeg.Encode(&jpegBuf, image.NewRGBA(image.Rect(0, 0, 5, 6)), nil))
 	require.NoError(t, gif.Encode(&gifBuf, image.NewPaletted(image.Rect(0, 0, 7, 8), color.Palette{color.Black}), nil))
+	// Noise gives the JPEG and GIF scans data to cut.
+	noisy := image.NewPaletted(image.Rect(0, 0, 32, 32), color.Palette{color.Black, color.White})
+	for i := range noisy.Pix {
+		noisy.Pix[i] = uint8(i * 7 % 3 % 2) //nolint:gosec // The value is 0 or 1.
+	}
+	var noisyJPEG, noisyGIF bytes.Buffer
+	require.NoError(t, jpeg.Encode(&noisyJPEG, noisy, nil))
+	require.NoError(t, gif.Encode(&noisyGIF, noisy, nil))
 	anthropicLimit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
 	// A valid PNG header padded past the limit.
 	bigPNG := append(testPNG(t, 2, 2), make([]byte, anthropicLimit)...)
@@ -108,6 +135,7 @@ func TestViewImageTool(t *testing.T) {
 		"/notes.md":     []byte("# notes\nnot an image\n"),
 		"/big.png":      bigPNG,
 		"/wide.png":     testPNG(t, viewImageMaxDimension+1, 1),
+		"/huge.png":     testPNGHeader(6000, 5000),
 		"/empty.png":    {},
 		"/bad.png":      append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 40)...),
 		"/ spaced.png ": pngData, //nolint:gocritic // The test needs a path with outer spaces.
@@ -116,6 +144,10 @@ func TestViewImageTool(t *testing.T) {
 		"/crc.png": badCRC,
 		"/cut.jpg": jpegBuf.Bytes()[:jpegBuf.Len()-2],
 		"/cut.gif": gifBuf.Bytes()[:gifBuf.Len()-1],
+		// The structure checks out, but the image data is missing or cut.
+		"/noidat.png": testPNGHeader(4, 3),
+		"/scan.jpg":   append(bytes.Clone(noisyJPEG.Bytes()[:noisyJPEG.Len()-40]), 0xff, 0xd9),
+		"/frame.gif":  append(bytes.Clone(noisyGIF.Bytes()[:noisyGIF.Len()-20]), 0x3b),
 		// The RIFF size names 2 bytes past the end of the file.
 		"/cut.webp": func() []byte {
 			data := testWebP(9, 10)
@@ -186,6 +218,9 @@ func TestViewImageTool(t *testing.T) {
 		resp := runViewImage(t, anthropic, conn, "/wide.png")
 		require.True(t, resp.IsError)
 		require.Contains(t, resp.Content, "8001x1 pixels, and view_image accepts at most 8000 pixels per side")
+		resp = runViewImage(t, anthropic, conn, "/huge.png")
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "6000x5000 pixels, and view_image accepts at most 25000000 pixels in total")
 	})
 
 	t.Run("InvalidImages", func(t *testing.T) {
@@ -203,6 +238,9 @@ func TestViewImageTool(t *testing.T) {
 			"/chunk.webp":   `chunk "VP8L" is longer than the file`,
 			"/vp8.webp":     "VP8 chunk is shorter than its first partition",
 			"/noimage.webp": "no image data",
+			"/noidat.png":   "png: invalid format",
+			"/scan.jpg":     "invalid JPEG format",
+			"/frame.gif":    "gif: not enough image data",
 		} {
 			resp := runViewImage(t, openai, conn, path)
 			require.True(t, resp.IsError, path)

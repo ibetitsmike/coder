@@ -34,6 +34,11 @@ const (
 	// an image. Larger images fail the request, and a stored image would fail
 	// every later request too, so the tool rejects them up front.
 	viewImageMaxDimension = 8000
+	// viewImageMaxPixels bounds the memory of the full decode in
+	// imageDecodes. The standard library decoders hold the whole image, up
+	// to 8 bytes per pixel for a 16-bit PNG, so one decode takes at most
+	// 200 MB, and viewImageDecodeSlot runs one at a time.
+	viewImageMaxPixels = 25_000_000
 	// maxViewedImagesInPrompt and maxViewedImageBytesInPrompt bound the
 	// view_image results a prompt carries. Anthropic accepts 100 images and
 	// 32 MB per request, and lowers the per-image size limit when a request
@@ -44,6 +49,10 @@ const (
 
 // viewImageMediaTypes are the image types view_image returns.
 var viewImageMediaTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+// viewImageDecodeSlot lets one view_image decode run at a time on this
+// server.
+var viewImageDecodeSlot = make(chan struct{}, 1)
 
 type viewImageArgs struct {
 	Path string `json:"path" description:"Path of a PNG, JPEG, GIF or WebP file in the workspace. Prefer an absolute path."`
@@ -141,6 +150,16 @@ func viewImage(ctx context.Context, conn workspacesdk.AgentConn, model chatprovi
 		return fantasy.ToolResponse{}, xerrors.Errorf("%s is %dx%d pixels, and view_image accepts at most %d pixels per side. Scale the image down and try again",
 			path, width, height, viewImageMaxDimension)
 	}
+	if width*height > viewImageMaxPixels {
+		return fantasy.ToolResponse{}, xerrors.Errorf("%s is %dx%d pixels, and view_image accepts at most %d pixels in total. Scale the image down and try again",
+			path, width, height, viewImageMaxPixels)
+	}
+	if err := imageDecodes(ctx, data, mediaType); err != nil {
+		if ctx.Err() != nil {
+			return fantasy.ToolResponse{}, ctx.Err()
+		}
+		return fantasy.ToolResponse{}, xerrors.Errorf("%s is not a valid %s image: %w", path, mediaType, err)
+	}
 	resp := fantasy.NewImageResponse(data, mediaType)
 	resp.Content = fmt.Sprintf("Image %s (%s, %d bytes, %dx%d pixels).", path, mediaType, len(data), width, height)
 	return resp, nil
@@ -210,6 +229,32 @@ func imageComplete(data []byte, mediaType string) error {
 		return webpComplete(data)
 	}
 	return nil
+}
+
+// imageDecodes decodes the pixels of a PNG, JPEG or GIF, so that damaged
+// image data behind an intact structure fails here too. A GIF decodes its
+// first frame, as gif.Decode does. WebP has no decoder in the standard
+// library, so only imageComplete checks it.
+func imageDecodes(ctx context.Context, data []byte, mediaType string) error {
+	var decode func(io.Reader) (image.Image, error)
+	switch mediaType {
+	case "image/png":
+		decode = png.Decode
+	case "image/jpeg":
+		decode = jpeg.Decode
+	case "image/gif":
+		decode = gif.Decode
+	default:
+		return nil
+	}
+	select {
+	case viewImageDecodeSlot <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-viewImageDecodeSlot }()
+	_, err := decode(bytes.NewReader(data))
+	return err
 }
 
 // webpComplete walks the RIFF chunks up to the RIFF size, per the WebP
