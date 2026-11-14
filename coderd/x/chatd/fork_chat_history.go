@@ -36,8 +36,9 @@ const (
 	// historyChunkBytes is the most text of one part that read_item returns
 	// at a time. JSON escaping can grow it, so the result is checked again.
 	historyChunkBytes = 12 << 10
-	// historyMessageBytes bounds the JSON of the message read_item returns
-	// without a part, which leaves room for the other fields.
+	// historyMessageBytes / 2 is the first cut of each part of the message
+	// read_item returns without a part. historyMessageResult then fits the
+	// whole result in maxChatHistoryBytes.
 	historyMessageBytes = maxChatHistoryBytes - 1024
 )
 
@@ -344,7 +345,7 @@ func historyMessage(row database.ChatMessage) (chatTranscriptMessage, bool) {
 	if row.Compressed {
 		return chatTranscriptMessage{}, false
 	}
-	return transcriptMessage(row, nil, nil, 0)
+	return transcriptMessage(row, nil, nil, 0, true)
 }
 
 // historyPreview describes parts in one line of at most
@@ -419,7 +420,7 @@ func searchChatHistory(ctx context.Context, fdb forkdb.Store, chat database.Chat
 			Content:        row.Content,
 			ContentVersion: row.ContentVersion,
 			Visibility:     database.ChatMessageVisibilityBoth,
-		}, nil, nil, 0)
+		}, nil, nil, 0, true)
 		// The SQL match also hits JSON keys and parts the transcript
 		// drops, so a row counts only when a part it shows matches.
 		if ok {
@@ -572,25 +573,43 @@ func (p *Server) readHistoryItem(ctx context.Context, chat database.Chat, window
 	}
 }
 
+// historyMessageResult fits the whole result in maxChatHistoryBytes: it
+// drops trailing parts with their sizes, and then cuts a last part that is
+// still too large to a smaller size.
 func historyMessageResult(message chatTranscriptMessage, window string) (chatHistoryMessageResult, error) {
-	partBytes := make([]int, 0, len(message.Parts))
-	for i, part := range message.Parts {
-		partBytes = append(partBytes, len(historyPartText(part)))
-		message.Parts[i] = truncateTranscriptPart(part, historyMessageBytes/2)
-	}
-	message, _, err := fitTranscriptMessage(message, historyMessageBytes)
-	if err != nil {
-		return chatHistoryMessageResult{}, xerrors.Errorf("encode chat message %d: %w", message.ID, err)
-	}
-	return chatHistoryMessageResult{
+	result := chatHistoryMessageResult{
 		ID:           message.ID,
 		Window:       window,
 		Role:         message.Role,
 		CreatedAt:    message.CreatedAt,
-		Parts:        message.Parts,
-		PartBytes:    partBytes,
+		Parts:        make([]codersdk.ChatMessagePart, 0, len(message.Parts)),
+		PartBytes:    make([]int, 0, len(message.Parts)),
 		OmittedParts: message.OmittedParts,
-	}, nil
+	}
+	partBytes := historyMessageBytes / 2
+	for _, part := range message.Parts {
+		result.PartBytes = append(result.PartBytes, len(historyPartText(part)))
+		result.Parts = append(result.Parts, truncateTranscriptPart(part, partBytes))
+	}
+	for {
+		size, err := jsonSize(result)
+		if err != nil {
+			return chatHistoryMessageResult{}, xerrors.Errorf("encode chat message %d: %w", message.ID, err)
+		}
+		switch {
+		case size <= maxChatHistoryBytes:
+			return result, nil
+		case len(result.Parts) > 1:
+			result.Parts = result.Parts[:len(result.Parts)-1]
+			result.PartBytes = result.PartBytes[:len(result.PartBytes)-1]
+			result.OmittedParts++
+		case len(result.Parts) == 1 && partBytes > utf8.UTFMax:
+			partBytes /= 2
+			result.Parts[0] = truncateTranscriptPart(message.Parts[0], partBytes)
+		default:
+			return result, nil
+		}
+	}
 }
 
 // historyPartText returns the main text of part: its text, its file

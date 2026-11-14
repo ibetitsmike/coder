@@ -305,6 +305,28 @@ func TestChatHistoryTool(t *testing.T) {
 		for _, item := range page.Items {
 			require.LessOrEqual(t, len(item.Preview), historyPreviewBytes)
 		}
+
+		// read_item fits the whole result, the part sizes too, when a
+		// message has many parts or a part that JSON escaping grows.
+		parts := make([]codersdk.ChatMessagePart, 0, 3000)
+		for range 3000 {
+			parts = append(parts, codersdk.ChatMessageText("p"))
+		}
+		crowded := newChat(t)
+		ids := insert(t, crowded.ID,
+			message(database.ChatMessageRoleUser, database.ChatMessageVisibilityBoth, parts...),
+			userText(strings.Repeat("\x01", 20000)),
+		)
+		var many chatHistoryMessageResult
+		decode(t, crowded, chatHistoryArgs{Action: "read_item", ID: ids[0]}, &many)
+		require.Positive(t, many.OmittedParts)
+		require.Len(t, many.PartBytes, len(many.Parts))
+		require.Equal(t, 3000, len(many.Parts)+many.OmittedParts)
+		var escaped chatHistoryMessageResult
+		decode(t, crowded, chatHistoryArgs{Action: "read_item", ID: ids[1]}, &escaped)
+		require.Len(t, escaped.Parts, 1)
+		require.Equal(t, []int{20000}, escaped.PartBytes)
+		require.Contains(t, escaped.Parts[0].Text, "Coder truncated")
 	})
 
 	t.Run("RejectsInvalidArguments", func(t *testing.T) {

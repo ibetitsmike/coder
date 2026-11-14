@@ -183,7 +183,7 @@ The actions are:
 - `list_windows` lists the windows, with what started each one, `chat_start`, `chat_summarized` or `chat_cleared`, and their first and last message IDs.
 - `list_items` with a `window` lists its messages with a short preview, 20 at a time and 50 at most with `limit`. Pass `next_after_id` as `after_id` for the next page.
 - `search` with a `query` of 2 to 200 bytes finds the newest messages whose text, tool calls or tool results contain it, in any case. Pass `window` to look in one window, and `next_before_id` as `before_id` for older matches.
-- `read_item` with an `id` reads one message, with long parts cut. `part_bytes` gives the full size of each part. Add `part`, starting at 1, to read that part in full, a slice at a time, and pass `next_offset` as `offset` until `has_more` is false.
+- `read_item` with an `id` reads one message, with long parts cut. `part_bytes` gives the full size of each part it returns, and `omitted_parts` counts the trailing parts that did not fit. Add `part`, starting at 1, to read that part in full, a slice at a time, and pass `next_offset` as `offset` until `has_more` is false.
 
 Each result holds 16&nbsp;KiB at most.
 It skips its own calls and those of `read_chat_transcript`, and messages that only the model or only the user sees.
@@ -862,8 +862,8 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The actions and their errors, `fork_chat_notes.go:96-158`, the path rule and the limits, `:21-34`, also checked by the table, `coderd/database/migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql`, and the note cap, `coderd/database/forkdb/queries/chat_notes.sql:13-29`.
   Each chat reads only its own notes, `chatNotesTool` binds the chat, `fork_chat_notes.go:74-80`.
   The calls of one step run one at a time in call order, `serialChatNotesTool`, `fork_chat_notes.go:88-94`.
-- Chat history tool: `coderd/x/chatd/fork_chat_history.go:138-150`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:89-91`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
-  The windows and the clear floor, `fork_chat_history.go:181-219`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:378-454` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:516-573`. The 16&nbsp;KiB cap, `fork_chat_history.go:25-42`.
+- Chat history tool: `coderd/x/chatd/fork_chat_history.go:139-151`, added only with `fork-token-budget`, `coderd/x/chatd/fork_tools.go:89-91`, and not listed by the plan-mode, `explore` and read-only custom agent allowlists.
+  The windows and the clear floor, `fork_chat_history.go:182-220`, from `coderd/database/forkdb/queries/chat_history.sql:1-25`. The search, `fork_chat_history.go:379-455` with `chat_history.sql:27-49`. The slices of `read_item`, `fork_chat_history.go:517-574`. The 16&nbsp;KiB cap, `fork_chat_history.go:25-43`, and the fit of a whole message, `fork_chat_history.go:576-613`.
 - Transcript tool: `coderd/x/chatd/fork_chat_transcript.go:68-85`, added only with `fork-chat-todos`, `coderd/x/chatd/fork_tools.go:30-35`.
   Reads as the chat owner, `fork_chat_transcript.go:109-116`.
   `include_tool_calls` on `wait_agent`: `coderd/x/chatd/fork_wait_agent.go:31`, `:38`, `:84-85`, `:101-106`, added with the same experiment, `fork_tools.go:34`.
