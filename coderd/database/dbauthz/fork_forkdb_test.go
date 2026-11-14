@@ -1361,7 +1361,7 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Zero(t, counts.get("GetChatByID"),
 						"%s must not pre-read the chat with %s: %d calls", tc.name, sw.name, counts.get("GetChatByID"))
 					for _, m := range []string{"GetChatWakeupByID", "GetWorkflowRun", "GetWorkflowStep"} {
-						if m == tc.name {
+						if m == tc.name || (tc.name == "UpdateWorkflowStep" && m == "GetWorkflowStep") {
 							require.Equal(t, int64(1), counts.get(m),
 								"%s must call %s exactly once for the row itself", tc.name, m)
 							continue
@@ -1410,13 +1410,21 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
-				case "GetWorkflowRun", "GetWorkflowStepsByRun",
-					"InsertWorkflowStep", "UpdateWorkflowRunStatus",
+				case "InsertWorkflowStep", "UpdateWorkflowRunStatus",
 					"FailOpenWorkflowStepsOfRun":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
-				case "GetWorkflowStep", "UpdateWorkflowStep":
+				case "GetWorkflowStep":
+					require.Zero(t, counts.get("GetChatWakeupByID"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
+					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
+				case "UpdateWorkflowStep":
+					// The step read survives the fast path on purpose: the
+					// UPDATE is a :exec query, so a deleted step would
+					// otherwise vanish silently. The member still pays the
+					// run read to find the chat; the chatd fast path skips
+					// it.
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
