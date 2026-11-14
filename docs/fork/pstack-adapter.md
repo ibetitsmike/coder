@@ -167,6 +167,25 @@ With the `fork-chat-todos` experiment, the web UI shows an MP4 as a player with 
 Without the experiment, an MP4 shows as a download card, as an SVG does.
 Coder Agents doesn't send an attached file back to the model in later turns, so describe in your reply what the file shows.
 
+#### HTML pages
+
+With the `fork-html-attachments` experiment, the web UI shows an attached `.html` or `.htm` file as a live page, inline and in the turn's **Attachments** menu.
+Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets." A download link sits next to it.
+Without the experiment, the page shows as a download card.
+When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
+
+The page runs in a sandbox:
+
+- Scripts run, but the page has its own opaque origin, so it can't read the user's Coder session, cookies, or storage, or reach the dashboard.
+- The page can't make network requests, so it can't call the Coder API or load anything from elsewhere.
+  Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
+- Forms don't submit. Handle a choice in a button's click handler instead.
+- The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
+
+One gap stays open: the sandbox lets the page navigate its own frame to another site, and that navigation can carry what the user typed in its URL.
+The network policy covers only the attached page, not the site it navigates to.
+The fixed line above the page tells the user not to type secrets.
+
 ### Wake-ups
 
 When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup`, `wait_for_events`, and [`notify_user`](#notifications), except in plan-mode turns and in `explore` children.
@@ -733,7 +752,9 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:710-713`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
-  MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
+  MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
+  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:28-37`, set on every response before authentication, `:42-50`, `coderd/fork_chat_routes.go:38-42`.
+  The newest page of a name wins, `forkHtmlAttachments.ts:28-40`, and the viewer has the fixed header outside the frame, `ForkHtmlAttachmentViewer.tsx:77-88`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

@@ -19,8 +19,8 @@ import { AssistantOutput } from "./AssistantOutput";
 import type { PreviewTextAttachment } from "./AttachmentBlocks";
 import type { AskUserQuestionState } from "./askUserQuestionState";
 import { isActiveChatStatus } from "./chatStore";
-import { FileProbeProvider } from "./FileProbeContext";
 import { FoldFocusRestorer, foldFocusItems } from "./FoldFocusRestorer";
+import { ForkFileProbeProvider } from "./ForkHtmlAttachmentViewer";
 import {
 	emptyLiveBlockKeys,
 	reconcileLiveBlockKeys,
@@ -622,7 +622,10 @@ export const ConversationTimeline = memo<ConversationTimelineProps>(
 		};
 
 		return (
-			<FileProbeProvider evictedFileIds={evictedFileIds}>
+			<ForkFileProbeProvider
+				evictedFileIds={evictedFileIds}
+				entries={parsedMessages}
+			>
 				<LightboxHost>
 					{layout.items.map((item) => {
 						if (item.type === "block") {
@@ -712,7 +715,7 @@ export const ConversationTimeline = memo<ConversationTimelineProps>(
 						items={foldFocusItems(layout.items, renderRows, getItemKey)}
 					/>
 				</LightboxHost>
-			</FileProbeProvider>
+			</ForkFileProbeProvider>
 		);
 	},
 );
