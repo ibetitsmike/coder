@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -266,6 +267,13 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	}
 	if description != nil && len(*description) > maxForkSavedWorkflowDescriptionBytes {
 		return pqtype.NullRawMessage{}, xerrors.Errorf("the description is longer than %d bytes", maxForkSavedWorkflowDescriptionBytes)
+	}
+	// PostgreSQL text and jsonb cannot hold a NUL character.
+	if (description != nil && strings.ContainsRune(*description, 0)) ||
+		(script != nil && strings.ContainsRune(*script, 0)) ||
+		slices.ContainsFunc(phases, func(p string) bool { return strings.ContainsRune(p, 0) }) ||
+		bytes.Contains(argsSchema, []byte(`\u0000`)) {
+		return pqtype.NullRawMessage{}, xerrors.New("the workflow must not contain NUL characters")
 	}
 	if script != nil {
 		if err := chatd.ValidateWorkflowScript(*script); err != nil {
