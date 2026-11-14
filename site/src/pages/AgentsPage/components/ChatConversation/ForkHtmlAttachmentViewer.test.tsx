@@ -1,4 +1,10 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import {
+	act,
+	fireEvent,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -475,6 +481,31 @@ describe("ForkHtmlAttachmentViewer", () => {
 		postFromFrame(pageMessage("Option A"));
 		const proposal = await screen.findByRole("region", { name: proposalName });
 		act(() => within(proposal).getByRole("button", { name: "Cancel" }).focus());
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		expect(
+			screen.getByRole("button", { name: "Show the page again" }),
+		).toHaveFocus();
+	});
+
+	it("moves focus to the reopen button when a navigation interrupts a send", async () => {
+		mockCreateChatMessage().mockReturnValueOnce(new Promise(() => {}));
+		renderPreview(["fork-html-attachments"]);
+
+		fireEvent.load(screen.getByTitle("choices.html"));
+		postFromFrame(pageMessage("Option A"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		// Browsers move focus from the disabled Send button to the body. The
+		// test DOM keeps it on the button, so the click comes with focus on
+		// the body.
+		const cancel = within(proposal).getByRole("button", { name: "Cancel" });
+		act(() => {
+			cancel.focus();
+			cancel.blur();
+		});
+		fireEvent.click(within(proposal).getByRole("button", { name: "Send" }));
+		await waitFor(() => expect(cancel).toBeDisabled());
+		expect(document.body).toHaveFocus();
 
 		fireEvent.load(screen.getByTitle("choices.html"));
 		expect(

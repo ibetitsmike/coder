@@ -117,14 +117,17 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	// for another address, or reloading. A proposal still open may come from
 	// that other address, so it goes too. Focus in the frame would fall to the
 	// document body when the frame goes, so it moves to the reopen button,
-	// and back to the frame when the page shows again.
+	// and back to the frame when the page shows again. A pending send disables
+	// the focused Send button, so focus on the body with a proposal open was
+	// on the proposal too.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
 			const active = document.activeElement;
+			const open = proposalRef.current;
 			focusReopen.current =
 				active === frameRef.current ||
-				(proposalRef.current?.contains(active) ?? false);
+				(open !== null && (active === document.body || open.contains(active)));
 			setNavigatedAway(true);
 			setProposal(null);
 		}
