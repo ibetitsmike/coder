@@ -176,11 +176,44 @@ describe("ForkTokenBudget", () => {
 		const { getSetting } = renderSetting({ experiments: [] });
 
 		expect(getSetting).not.toHaveBeenCalled();
+		expect(screen.queryByText("Context compaction")).toBeNull();
 	});
 
 	it("does not request the setting for a member who cannot read it", () => {
 		const { getSetting } = renderSetting({ canView: false });
 
 		expect(getSetting).not.toHaveBeenCalled();
+		expect(screen.queryByText("Context compaction")).toBeNull();
+	});
+
+	it("keeps a viewer's setting read-only", async () => {
+		renderSetting({ canEdit: false });
+
+		const radios = [
+			...within(await strategyGroup()).getAllByRole("radio"),
+			...within(await fallbackGroup()).getAllByRole("radio"),
+		];
+		for (const radio of radios) {
+			expect(radio).toBeDisabled();
+		}
+		expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+	});
+
+	it("enables the fallback only with the token budget strategy", async () => {
+		renderSetting();
+		const user = userEvent.setup();
+
+		const fallbackRadios = within(await fallbackGroup()).getAllByRole("radio");
+		for (const radio of fallbackRadios) {
+			expect(radio).toBeDisabled();
+		}
+		await user.click(
+			within(await strategyGroup()).getByRole("radio", {
+				name: "Token budget",
+			}),
+		);
+		for (const radio of fallbackRadios) {
+			expect(radio).toBeEnabled();
+		}
 	});
 });

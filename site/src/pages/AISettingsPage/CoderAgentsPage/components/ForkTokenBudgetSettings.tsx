@@ -172,7 +172,7 @@ const TokenBudgetForm: React.FC<TokenBudgetFormProps> = ({
 				<OptionGroup
 					name="fallback"
 					legend="Fallback at the usable limit"
-					hint="Applies only with the token budget, when a chat reaches the usable limit without calling new_context. With summary, a compaction model override that triggers earlier still summarizes first."
+					hint="Applies only with the token budget, when a chat reaches the usable limit without calling new_context. With the summary fallback, a compaction model override that triggers earlier still summarizes first."
 					options={fallbackOptions}
 					value={form.values.fallback}
 					onChange={(value) => changeValue("fallback", value)}
