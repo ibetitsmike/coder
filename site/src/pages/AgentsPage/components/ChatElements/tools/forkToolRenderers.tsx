@@ -1,5 +1,5 @@
-// This file is fork code: it is the only place fork features add tool
-// renderers, so an upstream sync of Tool.tsx stays clean.
+// This file is fork code: fork tools add their renderers here, so an upstream
+// sync of Tool.tsx stays clean. Upstream tools are wrapped in Tool.tsx.
 
 import type React from "react";
 import type { Experiment } from "#/api/typesGenerated";

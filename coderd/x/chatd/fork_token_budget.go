@@ -177,7 +177,8 @@ func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnviro
 // contextWindowRollover returns the compaction result that starts the next
 // window of chat. Its system summary is the lead-in the model reads, and its
 // report is the line the user sees. The model context of a pre_compact hook,
-// which a summary would carry, goes into the lead-in.
+// which a summary would carry, goes into the lead-in. The result names the
+// window and its trigger, so the UI shows a window divider.
 func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, opts chatloop.GenerateCompactionOptions) (chatloop.CompactionResult, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -190,6 +191,14 @@ func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, 
 	notes, err := fdb.ListChatNotes(ctx, chat.ID)
 	if err != nil {
 		return chatloop.CompactionResult{}, xerrors.Errorf("list notes: %w", err)
+	}
+	promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+	if err != nil {
+		return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+	}
+	trigger := chatloop.ContextWindowTriggerContextLimit
+	if newContextRequested(promptRows) {
+		trigger = chatloop.ContextWindowTriggerNewContext
 	}
 	windowID := "w:" + strconv.Itoa(len(chatHistoryWindows(chat, rows))+1)
 	leadIn := formatContextWindowLeadIn(windowID, notes, opts.SummaryHint)
@@ -210,6 +219,7 @@ func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, 
 		ChatContextLimit:       opts.ChatContextLimit,
 		EstimatedContextTokens: int64((len(leadIn) + leadInBytesPerToken - 1) / leadInBytesPerToken),
 		TriggerContextLimit:    opts.ContextLimit,
+		ContextWindow:          &chatloop.ContextWindowBoundary{ID: windowID, Trigger: trigger},
 	}
 	if opts.PublishMessagePart != nil && opts.ToolCallID != "" {
 		opts.PublishMessagePart(codersdk.ChatMessageRoleAssistant, codersdk.ChatMessageToolCall(opts.ToolCallID, opts.ToolName, nil))
@@ -226,9 +236,32 @@ func (p *Server) contextWindowRollover(ctx context.Context, chat database.Chat, 
 		if err != nil {
 			return chatloop.CompactionResult{}, xerrors.Errorf("marshal rollover result: %w", err)
 		}
-		opts.PublishMessagePart(codersdk.ChatMessageRoleTool, codersdk.ChatMessageToolResult(opts.ToolCallID, opts.ToolName, resultJSON, false, false))
+		opts.PublishMessagePart(codersdk.ChatMessageRoleTool, codersdk.ChatMessageToolResult(opts.ToolCallID, opts.ToolName, withContextWindowResult(resultJSON, result.ContextWindow), false, false))
 	}
 	return result, nil
+}
+
+// withContextWindowResult adds window to a chat_summarized tool result as
+// context_window. buildCompactionMessages calls it for the persisted result.
+// A result it cannot decode stays as it is, which the UI shows as a summary.
+func withContextWindowResult(result json.RawMessage, window *chatloop.ContextWindowBoundary) json.RawMessage {
+	if window == nil {
+		return result
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(result, &fields); err != nil || fields == nil {
+		return result
+	}
+	encoded, err := json.Marshal(window)
+	if err != nil {
+		return result
+	}
+	fields["context_window"] = encoded
+	merged, err := json.Marshal(fields)
+	if err != nil {
+		return result
+	}
+	return merged
 }
 
 // formatContextWindowLeadIn renders the lead-in of window windowID. It lists
