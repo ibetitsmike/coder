@@ -233,6 +233,7 @@ func (p *Server) createSubagentWorktree(
 	})
 	if err != nil {
 		release()
+		forkNoteWorktreeConflict(ctx, err)
 		return workspacesdk.ForkWorktree{}, nil, worktreeCreateError(err)
 	}
 	p.logger.Info(ctx, "created subagent worktree",

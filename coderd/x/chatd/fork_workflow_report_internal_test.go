@@ -504,13 +504,18 @@ func TestForkWorkflowReport(t *testing.T) {
 	t.Run("ForkChildChatID", func(t *testing.T) {
 		t.Parallel()
 		opts := childSubagentChatOptions{}
-		first := opts.forkChildChatID()
+		ctx := context.Background()
+		first := opts.forkChildChatID(ctx)
 		assert.NotEqual(t, uuid.Nil, first)
-		assert.NotEqual(t, first, opts.forkChildChatID(), "each non-step spawn gets a fresh ID")
+		assert.NotEqual(t, first, opts.forkChildChatID(ctx), "each non-step spawn gets a fresh ID")
+
+		spawnID := uuid.New()
+		spawnCtx := context.WithValue(ctx, forkSpawnChildIDKey{}, spawnID)
+		assert.Equal(t, spawnID, opts.forkChildChatID(spawnCtx), "a replay safe spawn keeps its derived ID")
 
 		opts.fork = &forkChildChatOverrides{chatID: workflowStepID(uuid.New(), "k", 0)}
-		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID())
-		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID(), "the step ID is stable")
+		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID(ctx))
+		assert.Equal(t, opts.fork.chatID, opts.forkChildChatID(spawnCtx), "the step ID is stable")
 	})
 }
 
