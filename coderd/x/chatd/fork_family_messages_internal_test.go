@@ -3,11 +3,13 @@ package chatd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"cdr.dev/slog/v3/sloggers/slogtest"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/agenthooks/dispatch"
 	"github.com/coder/coder/v2/coderd/x/chatd/chathooks"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
@@ -246,6 +249,61 @@ func TestFamilyMessageReplayedCallDeliversOnce(t *testing.T) {
 
 	require.JSONEq(t, fmt.Sprintf(`{"chat_id": %q, "status": "waiting", "title": %q}`, ft.b.ID, ft.b.Title), replay)
 	require.Len(t, ft.f.wakeMessages(t, ft.b, "<agent-message"), 1)
+	require.Len(t, ft.familyMessageRows(t), 1)
+}
+
+// TestFamilyMessageReplayConcurrentRun covers a replay whose send loses the
+// insert of the call's record to another run of the same call. The send rolls
+// back and the replay returns the recipient instead of an error.
+func TestFamilyMessageReplayConcurrentRun(t *testing.T) {
+	t.Parallel()
+	ft := newFamilyMessageTest(t)
+	callID := uuid.New()
+
+	// The other run of the same call records the message while this run's
+	// send is between its lookup and its insert, as a run that a takeover
+	// left running does when it commits. The user_prompt_submit hook of
+	// the send runs there, so it injects the record.
+	var (
+		hookMu  sync.Mutex
+		hookErr error
+	)
+	consumer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		fdb, err := forkdb.From(ft.f.db)
+		hookMu.Lock()
+		hookErr = errors.Join(hookErr, err)
+		hookMu.Unlock()
+		if err != nil {
+			http.Error(rw, "hook handler failed", http.StatusInternalServerError)
+			return
+		}
+		//nolint:gocritic // The test writes chatd's bookkeeping row.
+		err = fdb.InsertChatFamilyMessage(ft.ctx, forkdb.InsertChatFamilyMessageParams{
+			ID:              callID,
+			OrganizationID:  ft.a.OrganizationID,
+			SenderChatID:    ft.a.ID,
+			RecipientChatID: ft.b.ID,
+			CreatedAt:       time.Now(),
+		})
+		hookMu.Lock()
+		hookErr = errors.Join(hookErr, err)
+		hookMu.Unlock()
+		_, _ = rw.Write([]byte(`{}`))
+	}))
+	t.Cleanup(consumer.Close)
+	logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
+	ft.server.hooks = chathooks.NewTrigger(dispatch.New(logger, consumer.Client(), consumer.URL, false,
+		"test-hook-secret-32-bytes-minimum!!", time.Second, "test-deployment", "test-version", prometheus.NewRegistry()))
+
+	replay := ft.sendCall(t, callID, ft.a, ft.b.ID, "NOTE-RACE", false)
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	require.NoError(t, hookErr)
+	// The loser reports the recipient that the winning run recorded.
+	require.JSONEq(t, fmt.Sprintf(`{"chat_id": %q, "status": "waiting", "title": %q}`, ft.b.ID, ft.b.Title), replay)
+	// The losing send rolled back, so the recipient got the message once,
+	// from the run that recorded the call.
+	require.Empty(t, ft.f.wakeMessages(t, ft.b, "<agent-message"))
 	require.Len(t, ft.familyMessageRows(t), 1)
 }
 

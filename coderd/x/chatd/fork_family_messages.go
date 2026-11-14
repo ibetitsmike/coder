@@ -94,6 +94,16 @@ type serialFamilyMessageTool struct {
 
 func (serialFamilyMessageTool) SerialToolCalls() bool { return true }
 
+// familyMessageResultChat loads the recipient chat of a recorded family
+// message for the tool result.
+func (p *Server) familyMessageResultChat(ctx context.Context, recipientID uuid.UUID) (database.Chat, error) {
+	target, err := p.db.GetChatByID(ctx, recipientID)
+	if err != nil {
+		return database.Chat{}, xerrors.Errorf("get target chat: %w", err)
+	}
+	return target, nil
+}
+
 // sendFamilyMessage sends args.Message from sender to the chat args.ChatID of
 // the same family, the way message_agent sends to a child: an idle recipient
 // starts a turn, a busy one gets the message before its next model call, and
@@ -133,9 +143,9 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 		SenderChatID:   sender.ID,
 	})
 	if err == nil {
-		target, err := p.db.GetChatByID(ctx, recipientID)
+		target, err := p.familyMessageResultChat(ctx, recipientID)
 		if err != nil {
-			return database.Chat{}, false, xerrors.Errorf("get target chat: %w", err)
+			return database.Chat{}, false, err
 		}
 		return target, false, nil
 	}
@@ -222,7 +232,28 @@ func (p *Server) sendFamilyMessage(ctx context.Context, sender database.Chat, ar
 		},
 	})
 	if err != nil {
-		return database.Chat{}, false, err
+		// A run of the same call that a takeover left running can record
+		// the call after the lookup above. This send then fails on the
+		// record's primary key and rolls back, and the message went out
+		// once. Report the record instead of a failure the model would
+		// retry.
+		if !database.IsUniqueViolation(err) {
+			return database.Chat{}, false, err
+		}
+		//nolint:gocritic // chatd reads its own bookkeeping rows.
+		recordedID, rerr := fdb.GetChatFamilyMessageRecipient(dbauthz.AsChatd(ctx), forkdb.GetChatFamilyMessageRecipientParams{
+			ID:             messageID,
+			OrganizationID: sender.OrganizationID,
+			SenderChatID:   sender.ID,
+		})
+		if rerr != nil {
+			return database.Chat{}, false, err
+		}
+		target, err := p.familyMessageResultChat(ctx, recordedID)
+		if err != nil {
+			return database.Chat{}, false, err
+		}
+		return target, false, nil
 	}
 	return result.Chat, result.Queued, nil
 }
