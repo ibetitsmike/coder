@@ -56,6 +56,25 @@ export const ContextLimit: Story = {
 	},
 };
 
+export const UnknownTrigger: Story = {
+	args: {
+		result: {
+			...mockContextWindowResult,
+			context_window: { id: "w:4", trigger: "other" },
+		},
+	},
+};
+
+export const NarrowPane: Story = {
+	decorators: [
+		(Story) => (
+			<div className="w-48">
+				<Story />
+			</div>
+		),
+	],
+};
+
 export const ExperimentOff: Story = {
 	parameters: { experiments: [] },
 };

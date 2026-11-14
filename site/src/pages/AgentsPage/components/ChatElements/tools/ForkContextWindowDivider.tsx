@@ -1,6 +1,6 @@
 // This file is fork code: it renders the context window divider of the
-// fork-token-budget experiment. A rollover records a chat_summarized result
-// with a context_window field instead of a summary.
+// fork-token-budget experiment. A rollover's chat_summarized result keeps its
+// summary and adds a context_window field, which replaces the summary card.
 
 import type React from "react";
 import { Separator } from "#/components/Separator/Separator";
@@ -15,7 +15,10 @@ type ForkContextWindow = {
 	trigger: string;
 };
 
-/** Returns the context window a chat_summarized result started, or null. */
+/**
+ * Reads context_window from a result object or its JSON. The id is trimmed
+ * and required; a trigger that is not a string becomes "".
+ */
 export const parseForkContextWindow = (
 	result: unknown,
 ): ForkContextWindow | null => {
@@ -38,7 +41,7 @@ const triggerReason = (trigger: string): string | undefined => {
 	}
 };
 
-/** Returns the divider text. A trigger it does not know adds no reason. */
+/** A trigger it does not know adds no reason to the text. */
 export const forkContextWindowLabel = ({
 	id,
 	trigger,
@@ -49,21 +52,23 @@ export const forkContextWindowLabel = ({
 		: `Context window ${id} started`;
 };
 
-const ForkContextWindowDivider: React.FC<{
+type ForkContextWindowDividerProps = {
 	contextWindow: ForkContextWindow;
-}> = ({ contextWindow }) => (
+};
+
+const ForkContextWindowDivider: React.FC<ForkContextWindowDividerProps> = ({
+	contextWindow,
+}) => (
 	<div className="flex w-full items-center gap-3 py-1 text-xs text-content-secondary">
-		<Separator className="flex-1" />
-		<span className="shrink-0">{forkContextWindowLabel(contextWindow)}</span>
-		<Separator className="flex-1" />
+		<Separator className="min-w-4 flex-1" />
+		<span className="min-w-0 text-center">
+			{forkContextWindowLabel(contextWindow)}
+		</span>
+		<Separator className="min-w-4 flex-1" />
 	</div>
 );
 
-/**
- * Wraps the upstream chat_summarized renderer. With fork-token-budget on, a
- * result that started a context window shows a divider instead of a summary.
- * Upstream is a parameter, not an import, to avoid an import cycle.
- */
+/** Upstream is a parameter, not an import, to avoid an import cycle. */
 export const withForkContextWindow = (Upstream: ToolRenderer): ToolRenderer => {
 	const ContextWindowRenderer: ToolRenderer = (props) => {
 		const enabled = useForkExperiment("fork-token-budget");
