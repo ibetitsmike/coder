@@ -314,8 +314,10 @@ func (p *Server) dynamicToolOwnsViewImage(chat database.Chat) bool {
 // bounded amount of image data. With a model, it also
 // replaces an image over view_image's size limit for that model, which a chat
 // can hold after it switched from a model with a higher limit. It copies the
-// messages it changes and leaves messages itself unchanged.
-func limitViewedImages(messages []fantasy.Message, model *chatprovider.Model) []fantasy.Message {
+// messages it changes and leaves messages itself unchanged. pending is the
+// tail the turn appends after messages. Its media counts toward the byte
+// budget, and limitViewedImages does not change it.
+func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.Model) []fantasy.Message {
 	sizeLimit := -1
 	if model != nil {
 		sizeLimit, _ = viewImageSizeLimit(*model)
@@ -323,12 +325,14 @@ func limitViewedImages(messages []fantasy.Message, model *chatprovider.Model) []
 	// A result belongs to the newest earlier call with its ID, so a reused
 	// ID does not make another tool's result count as a viewed image.
 	// Other media, such as computer screenshots and attachments, stays in
-	// the prompt, so it takes its share of the byte budget first.
+	// the prompt, so it takes its share of the byte budget first, and so does
+	// the media of the pending tail.
 	type position struct{ i, j int }
 	var results []position
 	otherBytes := 0
 	callTools := map[string]string{}
-	for i, msg := range messages {
+	n := len(messages)
+	for i, msg := range append(messages[:n:n], pending...) {
 		for j, part := range msg.Content {
 			if call, ok := toolCallPartOf(part); ok {
 				callTools[call.ToolCallID] = call.ToolName
@@ -342,7 +346,7 @@ func limitViewedImages(messages []fantasy.Message, model *chatprovider.Model) []
 			if !ok {
 				continue
 			}
-			if callTools[result.ToolCallID] == viewImageToolName {
+			if callTools[result.ToolCallID] == viewImageToolName && i < n {
 				results = append(results, position{i, j})
 			} else if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Output); ok {
 				otherBytes += base64DecodedLen(media.Data)

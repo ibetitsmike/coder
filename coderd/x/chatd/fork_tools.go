@@ -24,6 +24,7 @@ type forkToolsOption struct {
 	getWorkspaceConn func(context.Context) (workspacesdk.AgentConn, error)
 	model            *chatprovider.Model
 	prompt           *[]fantasy.Message
+	pending          []fantasy.Message
 }
 
 // forkToolsWithWorkspaceConn hands the turn's workspace connection getter to
@@ -34,9 +35,11 @@ func forkToolsWithWorkspaceConn(get func(context.Context) (workspacesdk.AgentCon
 
 // forkToolsWithModel hands the turn's model and prompt to the fork features
 // that depend on the model or bound the prompt: view_image checks that the
-// model takes images, and limitViewedImages rewrites *prompt.
-func forkToolsWithModel(model chatprovider.Model, prompt *[]fantasy.Message) forkToolsOption {
-	return forkToolsOption{model: &model, prompt: prompt}
+// model takes images, and limitViewedImages rewrites *prompt. pending is the
+// unanswered user tail that the turn appends to *prompt later, so its media
+// counts toward the image budget.
+func forkToolsWithModel(model chatprovider.Model, prompt *[]fantasy.Message, pending []fantasy.Message) forkToolsOption {
+	return forkToolsOption{model: &model, prompt: prompt, pending: pending}
 }
 
 // appendForkTools returns the turn tool list plus the tools of the fork
@@ -55,6 +58,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 		}
 		if o.prompt != nil {
 			opt.prompt = o.prompt
+			opt.pending = o.pending
 		}
 	}
 	// The bound applies with the experiment off too, so a chat that viewed
@@ -62,7 +66,7 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	// caller-supplied tool owns the name while the experiment is off, and its
 	// results are not viewed images.
 	if opt.prompt != nil && !p.dynamicToolOwnsViewImage(chat) {
-		*opt.prompt = limitViewedImages(*opt.prompt, opt.model)
+		*opt.prompt = limitViewedImages(*opt.prompt, opt.pending, opt.model)
 	}
 	// A workflow step child gets workflow_report before the dynamic tools,
 	// so the server tool wins the name (fork-workflows).

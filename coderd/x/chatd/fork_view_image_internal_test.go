@@ -272,7 +272,7 @@ func TestLimitViewedImages(t *testing.T) {
 		before, err := json.Marshal(messages)
 		require.NoError(t, err)
 
-		out := limitViewedImages(messages, nil)
+		out := limitViewedImages(messages, nil, nil)
 		require.True(t, isMedia(out[1]), "other tools keep their media")
 		for i := range maxViewedImagesInPrompt + 2 {
 			result := out[3+2*i]
@@ -295,20 +295,20 @@ func TestLimitViewedImages(t *testing.T) {
 		big := maxViewedImageBytesInPrompt/2 + 1
 		messages := append(turn("a", viewImageToolName, media(big, "")), turn("b", viewImageToolName, media(big, ""))...)
 		messages = append(messages, turn("c", viewImageToolName, media(big, ""))...)
-		out := limitViewedImages(messages, nil)
+		out := limitViewedImages(messages, nil, nil)
 		require.False(t, isMedia(out[1]))
 		require.False(t, isMedia(out[3]), "two halves exceed the byte bound")
 		require.True(t, isMedia(out[5]))
 
 		// The newest image always stays, even over the bound.
 		huge := turn("d", viewImageToolName, media(maxViewedImageBytesInPrompt+1, ""))
-		require.True(t, isMedia(limitViewedImages(huge, nil)[1]))
+		require.True(t, isMedia(limitViewedImages(huge, nil, nil)[1]))
 	})
 
 	t.Run("NoViewImage", func(t *testing.T) {
 		t.Parallel()
 		messages := turn("shot", "computer", media(10, ""))
-		out := limitViewedImages(messages, nil)
+		out := limitViewedImages(messages, nil, nil)
 		require.Same(t, &messages[0], &out[0], "the prompt is returned as is")
 	})
 
@@ -320,11 +320,24 @@ func TestLimitViewedImages(t *testing.T) {
 			"Attachment": {{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, other), MediaType: "image/png"}}}},
 		} {
 			messages := slices.Concat(first, turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(10, "")))
-			out := limitViewedImages(messages, nil)
+			out := limitViewedImages(messages, nil, nil)
 			n := len(first)
 			require.False(t, isMedia(out[n+1]), "%s: the older image does not fit next to the other media", name)
 			require.True(t, isMedia(out[n+3]), "%s: the newest image stays", name)
 		}
+	})
+
+	t.Run("PendingMediaTakesBudget", func(t *testing.T) {
+		t.Parallel()
+		// The unanswered user tail is appended after the bound, so its
+		// attachments count here.
+		pending := []fantasy.Message{{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, maxViewedImageBytesInPrompt-15), MediaType: "image/png"}}}}
+		messages := append(turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(10, ""))...)
+		out := limitViewedImages(messages, pending, nil)
+		require.Len(t, out, len(messages))
+		require.False(t, isMedia(out[1]), "the older image does not fit next to the pending attachment")
+		require.True(t, isMedia(out[3]), "the newest image stays")
+		require.True(t, isMedia(limitViewedImages(messages, nil, nil)[1]), "without the tail both images fit")
 	})
 
 	t.Run("ReusedCallID", func(t *testing.T) {
@@ -335,7 +348,7 @@ func TestLimitViewedImages(t *testing.T) {
 		for i := range maxViewedImagesInPrompt {
 			messages = append(messages, turn("view"+string(rune('a'+i)), viewImageToolName, media(10, ""))...)
 		}
-		out := limitViewedImages(messages, nil)
+		out := limitViewedImages(messages, nil, nil)
 		require.False(t, isMedia(out[1]), "the oldest viewed image is dropped")
 		require.True(t, isMedia(out[3]), "the computer screenshot stays")
 	})
@@ -347,7 +360,7 @@ func TestLimitViewedImages(t *testing.T) {
 		limit := codersdk.AnthropicInlineImageCapBytes / 4 * 3
 		messages := append(turn("a", viewImageToolName, media(10, "")), turn("b", viewImageToolName, media(limit+1, "too big"))...)
 		anthropic := routedModel("anthropic", "anthropic")
-		out := limitViewedImages(messages, &anthropic)
+		out := limitViewedImages(messages, nil, &anthropic)
 		require.True(t, isMedia(out[1]), "the older image fits and stays")
 		require.False(t, isMedia(out[3]))
 		text := out[3].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText).Text
@@ -355,7 +368,7 @@ func TestLimitViewedImages(t *testing.T) {
 		require.Contains(t, text, "too big")
 
 		openai := routedModel("openai", "openai")
-		out = limitViewedImages(messages, &openai)
+		out = limitViewedImages(messages, nil, &openai)
 		require.True(t, isMedia(out[1]))
 		require.True(t, isMedia(out[3]))
 	})
@@ -433,7 +446,7 @@ func TestViewImageToolGate(t *testing.T) {
 			if tt.planMode {
 				chat.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
 			}
-			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt))
+			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt, nil))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, toolNames(tools))
 			_, isText := prompt[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
