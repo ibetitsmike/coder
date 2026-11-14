@@ -4618,6 +4618,9 @@ const docTemplate = `{
         "/api/v2/chats/fork/files/{file}/html": {
             "get": {
                 "description": "Serves a stored .html or .htm chat file as text/html with a\nContent-Security-Policy that sandboxes it and blocks network\naccess.",
+                "produces": [
+                    "text/html"
+                ],
                 "tags": [
                     "Chats"
                 ],

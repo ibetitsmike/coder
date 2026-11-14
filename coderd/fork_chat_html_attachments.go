@@ -41,13 +41,16 @@ const forkHTMLAttachmentCSP = "sandbox allow-scripts; " +
 
 // forkHTMLAttachmentHeaders sets the sandbox policy on every response of the
 // HTML attachment route, so an error page cannot run a script on the Coder
-// origin either.
+// origin either. Every response revalidates, so a cached denial does not
+// outlive a share and a cached page does not outlive revoked access or the
+// experiment switch. Last-Modified keeps a revalidation cheap.
 func forkHTMLAttachmentHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		header := rw.Header()
 		header.Set("Content-Security-Policy", forkHTMLAttachmentCSP)
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "no-referrer")
+		header.Set("Cache-Control", "private, no-cache")
 		next.ServeHTTP(rw, r)
 	})
 }
@@ -71,6 +74,7 @@ func isForkHTMLAttachment(chatFile database.ChatFile) bool {
 // @Summary Get a chat HTML attachment for the sandboxed viewer
 // @ID get-a-chat-html-attachment-for-the-sandboxed-viewer
 // @Security CoderSessionToken
+// @Produce text/html
 // @Tags Chats
 // @Param file path string true "File ID" format(uuid)
 // @Success 200
@@ -114,9 +118,6 @@ func (api *API) getForkChatHTMLAttachment(rw http.ResponseWriter, r *http.Reques
 	header := rw.Header()
 	header.Set("Content-Type", "text/html; charset=utf-8")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
-	// Revalidate on every load, so revoked access and the experiment switch
-	// take effect at once. Last-Modified keeps a revalidation cheap.
-	header.Set("Cache-Control", "private, no-cache")
 	header.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": chatFile.Name}))
 	http.ServeContent(rw, r, "", chatFile.CreatedAt, bytes.NewReader(chatFile.Data))
 }

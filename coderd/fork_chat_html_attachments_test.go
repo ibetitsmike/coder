@@ -81,6 +81,7 @@ func requireForkHTMLAttachmentSandbox(t *testing.T, res forkHTMLAttachmentRespon
 	require.NotContains(t, csp, "allow-same-origin", "status %d", res.status)
 	require.Equal(t, "nosniff", res.header.Get("X-Content-Type-Options"), "status %d", res.status)
 	require.Equal(t, "no-referrer", res.header.Get("Referrer-Policy"), "status %d", res.status)
+	require.Equal(t, "private, no-cache", res.header.Get("Cache-Control"), "status %d", res.status)
 }
 
 func TestForkChatHTMLAttachment(t *testing.T) {
