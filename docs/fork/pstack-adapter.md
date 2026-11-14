@@ -269,6 +269,66 @@ After a compaction, the images before the summary are no longer sent, like any o
 The web UI shows the call as a tool card with the image.
 Plan-mode turns and `explore` children don't get `view_image`.
 
+#### HTML pages
+
+With the `fork-html-attachments` experiment, the web UI shows an attached `.html` or `.htm` file as a live page, inline and in the turn's **Attachments** menu.
+Above the page, outside it, a fixed line names the page and warns the user, for example "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets."
+A download link sits next to it.
+Without the experiment, the page shows as a download card.
+When you attach a file with the same name again in the same chat, the new page replaces the earlier one, and the earlier attachment shows as a download card.
+Only pages that the agent attaches run.
+An `.html` file that the user uploads shows as a download card.
+
+The page runs in a sandbox:
+
+- Scripts run, but the page has its own opaque origin, so it can't read the user's Coder session, cookies, or storage, or reach the dashboard.
+- The page can't fetch or load anything over the network, so it can't call the Coder API or load anything from elsewhere.
+  Put scripts, styles, images, and fonts in the file, with images and fonts as `data:` URLs.
+- Forms don't submit.
+  Handle a choice in a button's click handler instead.
+- The sandbox has no `allow-modals` and no `allow-downloads`, so `alert`, `confirm`, `prompt`, and downloads from inside the page do nothing.
+- The page route sends the same sandbox policy on every response, errors included, so opening its URL directly never runs a script on the Coder origin.
+
+The page can propose the user's choice as a new user message in the chat:
+
+```js
+parent.postMessage({ type: "coder:chat-message", text: "Option B" }, "*");
+```
+
+The web UI shows the exact message below the page with **Send** and **Cancel**, and sends it only when the user selects **Send**.
+A long message scrolls, and keyboard users can reach it with Tab.
+If the message fails to send, the proposal stays open with the error, and focus goes to **Send**, so the user can select it again.
+Focus stays in the page, and a status line below it announces the proposal.
+When the proposal closes, focus goes back to the page, unless the user acted elsewhere in the dashboard while the message was sending.
+The chat gets the text under a line that names the page, such as `Message from the attached page "choices.html":`.
+The web UI shows a proposal only when all of these hold:
+
+- The message has exactly the fields `type` and `text`.
+- The trimmed text has 1 to 4000&nbsp;characters.
+- The user just selected something in the page, and the page's frame has focus.
+  A message that a script sends on its own is dropped.
+- The dashboard saw no pointer or key press, Tab included, in the last 5&nbsp;seconds.
+  A keyboard user who tabs into the page waits 5&nbsp;seconds before a choice in it counts.
+  The page appearing counts as such input too, because a selection in the dashboard, such as on the **Attachments** menu, may have opened it.
+- No proposal from the page came in the last 5&nbsp;seconds.
+- No proposal is open, and no message from the page is still sending.
+  While a proposal is open, the page can't change its text.
+
+A page can take focus on its own.
+If a chat shows two attached pages, a hostile page that takes focus right after the user selects something in the other page can propose a message as if the user had selected it.
+The proposal names the page that sent it, and nothing reaches the chat until the user selects **Send**.
+
+Two gaps stay open, so treat what the user does in a page as visible to whoever wrote it.
+The fixed line above the page tells the user not to type secrets.
+
+- WebRTC: the content security policy doesn't cover it.
+  The policy sets `webrtc 'block'`, but Chromium ignores that directive, so a page can still send data out over WebRTC.
+- Navigation: the sandbox lets the page navigate its own frame, and that navigation can carry what the user typed in its URL.
+  The dashboard's own policy (`frame-src`) blocks frames from other sites, so the browser refuses such a navigation before any request.
+  It still lets the frame load the Coder origin, the deployment's workspace app hosts, and any frame hosts the deployment adds to its policy.
+  When the frame loads anything after the page, the viewer closes it, drops an open proposal, and offers to show the page again.
+  A page that navigates away before its first load finishes is not detected, because the viewer can't read where a sandboxed frame is.
+
 ### Wake-ups
 
 When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup`, `wait_for_events`, and [`notify_user`](#notifications), except in plan-mode turns and in `explore` children.
@@ -838,7 +898,11 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
 - Attachments: `coderd/x/chatd/chattool/attachfile.go:26-31`, built with the file tools, `coderd/x/chatd/turn_environment.go:710-713`, with the size limit, `coderd/x/chatd/chattool/attachment.go:17`, `:48-50`.
   Not sent back to the model, `coderd/x/chatd/chatprompt/chatprompt.go:106-109`.
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
-  MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:37-58`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
+  MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
+  HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:30-40`, set on every response before authentication, `:47-56`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
+  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:76-97`, `ForkHtmlAttachmentViewer.tsx:70-80`, and the viewer has the fixed header outside the frame, `:285-298`, and closes the frame after a navigation, moving focus to the reopen button and back to the frame, `:119-154`, `:299-307`.
+  The dashboard's `frame-src`, `coderd/httpmw/csp.go:84`, `:126`, `:141-143`.
+  The bridge checks the frame, the schema, the user activation, the focus, the dashboard input, the interval, and an open proposal or a pending send, `ForkHtmlAttachmentViewer.tsx:156-214`, and sends only on **Send**, keeping the proposal after a failure and returning focus to the page when it closes, `:216-281`, `:321-366`.
 - View images, only with `fork-view-image`: `coderd/x/chatd/fork_view_image.go:68-105`, with the path as given, `:78-83`, at most 8 calls per response, `:69-71`, `:84-87`, added in `coderd/x/chatd/fork_tools.go:122-124`, with the turn's model, `coderd/x/chatd/turn_environment.go:743`.
   The model check, `fork_view_image.go:109-115`, against the route's media, `coderd/x/chatd/chatprovider/chatprovider.go:125-164`, where OpenAI-compatible, OpenRouter, and Vercel take any image, `:155-163`.
   The size limit, `fork_view_image.go:121-126`, from `codersdk.AnthropicInlineImageCapBytes` and `codersdk.MaxChatFileSizeBytes`, the type by content, `:146-149`, the structure check, `:154-160`, `:213-256`, `:338-386`, the pixel limits, `:34-42`, `:161-168`, the full decode, `:169-174`, `:258-282`, and no animated GIF, `:175-186`, `:284-336`.
