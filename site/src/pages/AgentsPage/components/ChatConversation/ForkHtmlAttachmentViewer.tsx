@@ -1,9 +1,20 @@
 // This file is fork code: the sandboxed viewer of the fork-html-attachments
-// experiment.
+// experiment, and the bridge that turns a click in a page into a user message.
 
 import { DownloadIcon } from "lucide-react";
 import type React from "react";
-import { createContext, useContext, useId, useRef, useState } from "react";
+import {
+	createContext,
+	useContext,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from "react";
+import { useMutation, useQueryClient } from "react-query";
+import { useParams } from "react-router";
+import { getErrorMessage } from "#/api/errors";
+import { createChatMessageByChatId } from "#/api/queries/chats";
 import type * as TypesGen from "#/api/typesGenerated";
 import { Button } from "#/components/Button/Button";
 import { getChatFileURL } from "../../utils/chatAttachments";
@@ -11,8 +22,11 @@ import { getAttachmentDownload } from "./AttachmentBlocks";
 import { AttachmentDownloadLink } from "./AttachmentDownloadLink";
 import { FileProbeProvider } from "./FileProbeContext";
 import {
+	forkHtmlMessageIntervalMs,
+	formatForkHtmlMessage,
 	getForkHtmlAttachmentURL,
 	latestForkHtmlAttachmentIds,
+	parseForkHtmlMessage,
 } from "./forkHtmlAttachments";
 import type { ParsedMessageEntry, RenderBlock } from "./types";
 
@@ -70,13 +84,32 @@ export const ForkHtmlAttachmentPreview: React.FC<
  * origin, so it cannot read the Coder session, and whose server policy
  * blocks network access. The sandbox still lets a page navigate its own
  * frame, so the viewer closes the frame after its first navigation.
+ *
+ * A page proposes text for the chat with
+ * `parent.postMessage({ type: "coder:chat-message", text }, "*")`. The viewer
+ * takes only proposals from its own frame, right after a click in that frame
+ * and no input in the dashboard, and at most one per
+ * forkHtmlMessageIntervalMs. It shows the exact message and sends it only
+ * when the user confirms outside the frame.
  */
 const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	block,
 }) => {
-	const headerId = useId();
-	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
+	const { agentId } = useParams();
+	const queryClient = useQueryClient();
+	const sendMessage = useMutation(createChatMessageByChatId(queryClient));
+	const { reset: resetSend, isPending: sendPending } = sendMessage;
 	const frameRef = useRef<HTMLIFrameElement>(null);
+	const proposalRef = useRef<HTMLElement>(null);
+	const sendRef = useRef<HTMLButtonElement>(null);
+	const focusSend = useRef(false);
+	const sendTookFocus = useRef(false);
+	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
+	const lastDashboardInputAt = useRef(Number.NEGATIVE_INFINITY);
+	const [proposal, setProposal] = useState<string | null>(null);
+	const headerId = useId();
+	const proposalId = useId();
+	const download = getAttachmentDownload(block, getChatFileURL(block.file_id));
 	const frameLoads = useRef(0);
 	const focusReopen = useRef(false);
 	const focusFrame = useRef(false);
@@ -84,14 +117,17 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const [frameKey, setFrameKey] = useState(0);
 
 	// The page itself is the first load. Any later load is the page leaving
-	// for another address, or reloading. Focus in the frame would fall to the
+	// for another address, or reloading. A proposal still open may come from
+	// that other address, so it goes too. Focus in the frame would fall to the
 	// document body when the frame goes, so it moves to the reopen button,
 	// and back to the frame when the page shows again.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
-			focusReopen.current = document.activeElement === frameRef.current;
+			focusReopen.current =
+				document.activeElement === frameRef.current || focusOnProposal(false);
 			setNavigatedAway(true);
+			setProposal(null);
 		}
 	};
 
@@ -116,6 +152,133 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		setFrameKey((key) => key + 1);
 		setNavigatedAway(false);
 	};
+
+	// Input inside a frame never reaches the dashboard, so recent dashboard
+	// input means the activation came from the dashboard, not the page. That
+	// includes Tab: a key press that moves focus into the frame activates the
+	// dashboard too. The viewer counts its own mount as input, because a click
+	// in the dashboard, such as on the Attachments menu, may have mounted it
+	// before its listeners existed.
+	useEffect(() => {
+		lastDashboardInputAt.current = Date.now();
+		const onInput = () => {
+			lastDashboardInputAt.current = Date.now();
+			sendTookFocus.current = false;
+		};
+		window.addEventListener("pointerdown", onInput, true);
+		window.addEventListener("keydown", onInput, true);
+		return () => {
+			window.removeEventListener("pointerdown", onInput, true);
+			window.removeEventListener("keydown", onInput, true);
+		};
+	}, []);
+
+	useEffect(() => {
+		// An open proposal stays as shown: the page cannot swap its text
+		// while the user reads it. A send still in flight, for a proposal
+		// that a navigation closed, keeps the next one out until it settles.
+		if (!agentId || proposal !== null || sendPending) {
+			return;
+		}
+		const onMessage = (event: MessageEvent) => {
+			const frameWindow = frameRef.current?.contentWindow;
+			if (!frameWindow || event.source !== frameWindow) {
+				return;
+			}
+			// A click in the frame activates this page and focuses the frame,
+			// and the dashboard does not see it. Without all three, a script
+			// in the page could propose messages on its own, or ride a click
+			// in the dashboard. These checks come before parsing, so a page
+			// cannot make the dashboard parse its messages on its own.
+			const now = Date.now();
+			if (
+				!navigator.userActivation?.isActive ||
+				document.activeElement !== frameRef.current ||
+				now - lastDashboardInputAt.current < forkHtmlMessageIntervalMs
+			) {
+				return;
+			}
+			const text = parseForkHtmlMessage(event.data);
+			if (
+				text === null ||
+				now - lastProposedAt.current < forkHtmlMessageIntervalMs
+			) {
+				return;
+			}
+			lastProposedAt.current = now;
+			resetSend();
+			setProposal(formatForkHtmlMessage(block.name, text));
+		};
+		window.addEventListener("message", onMessage);
+		return () => window.removeEventListener("message", onMessage);
+	}, [agentId, block.name, proposal, resetSend, sendPending]);
+
+	// A pending send disables the focused Send button, so focus falls to the
+	// document body. Focus on the body counts as focus on the proposal until
+	// the next dashboard input, which may have moved it there on purpose.
+	function focusOnProposal(bodyCounts: boolean) {
+		const active = document.activeElement;
+		return (
+			(proposalRef.current?.contains(active) ?? false) ||
+			((bodyCounts || sendTookFocus.current) && active === document.body)
+		);
+	}
+
+	// Focus on the proposal would fall to the document body when it closes,
+	// so it goes back to the page. Cancel itself may leave focus on the body.
+	const closeProposal = (bodyCounts: boolean) => {
+		if (focusOnProposal(bodyCounts)) {
+			frameRef.current?.focus();
+		}
+		setProposal(null);
+	};
+
+	// The proposal stays open until the send succeeds, so a failed send can
+	// be retried, and focus that the pending send took goes back to Send.
+	const send = () => {
+		if (!agentId || proposal === null) {
+			return;
+		}
+		sendTookFocus.current = true;
+		sendMessage.mutate(
+			{
+				chatId: agentId,
+				req: { content: [{ type: "text", text: proposal }] },
+			},
+			{
+				onSuccess: () => closeProposal(false),
+				onError: () => {
+					focusSend.current =
+						sendTookFocus.current && document.activeElement === document.body;
+				},
+				onSettled: () => {
+					sendTookFocus.current = false;
+				},
+			},
+		);
+	};
+
+	// The error may render in the same commit that ends the pending state,
+	// so this runs after every commit.
+	useEffect(() => {
+		if (!sendPending && focusSend.current) {
+			focusSend.current = false;
+			sendRef.current?.focus();
+		}
+	});
+
+	let status = "";
+	if (sendMessage.isPending) {
+		status = "Sending to the chat";
+	} else if (sendMessage.isError) {
+		status = getErrorMessage(sendMessage.error, "Could not send to the chat.");
+	} else if (sendMessage.isSuccess) {
+		status = "Sent to the chat";
+	} else if (proposal !== null) {
+		// Focus stays in the page, so the live status tells keyboard and
+		// screen reader users that a proposal opened.
+		status = "The page asks to send a message. Review it below the page.";
+	}
 
 	return (
 		<figure aria-labelledby={headerId} className="flex w-full flex-col gap-1">
@@ -155,6 +318,52 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 					className="h-96 w-full rounded-md border border-solid border-border bg-white"
 				/>
 			)}
+			{proposal !== null && (
+				<section
+					ref={proposalRef}
+					aria-labelledby={proposalId}
+					className="flex flex-col gap-2 rounded-md border border-solid border-border p-2 text-sm"
+				>
+					<p id={proposalId} className="m-0 text-content-secondary">
+						The page asks to send this message to the chat:
+					</p>
+					{/* A long message scrolls, and the scroller takes focus so a
+					    keyboard user can read all of it before Send. */}
+					<pre
+						// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
+						tabIndex={0}
+						role="region"
+						aria-label="Message to send"
+						className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-sm font-sans text-content-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
+					>
+						{proposal}
+					</pre>
+					<div className="flex justify-end gap-2">
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={sendMessage.isPending}
+							onClick={() => closeProposal(true)}
+						>
+							Cancel
+						</Button>
+						<Button
+							ref={sendRef}
+							size="sm"
+							disabled={sendMessage.isPending}
+							onClick={send}
+						>
+							Send
+						</Button>
+					</div>
+				</section>
+			)}
+			<span
+				role="status"
+				className="break-words text-xs text-content-secondary empty:hidden"
+			>
+				{status}
+			</span>
 		</figure>
 	);
 };
