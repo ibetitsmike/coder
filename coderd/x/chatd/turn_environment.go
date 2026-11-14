@@ -1039,6 +1039,7 @@ func (p *Server) buildTurnEnvironment(
 	}
 	compactionStepUsage := latestPromptUsage(promptRows)
 	compactionNeeded := shouldCompactPromptUsage(compactionStepUsage, binding.contextLimit, binding.thresholdPercent)
+	binding, bindingSource, otherTrigger, compactionNeeded = p.tokenBudgetTriggers(tools, promptRows, chatTrigger, binding, bindingSource, otherTrigger, compactionNeeded)
 	// The options carry the chat model; generateCompaction swaps in the
 	// override client when one is configured.
 	compactionOptions := chatloop.GenerateCompactionOptions{

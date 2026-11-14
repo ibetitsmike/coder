@@ -58,6 +58,12 @@ func (s *taskStarter) syncForkContext(
 	message, ok, err = s.server.pinnedSkillsMessage(ctx, chat)
 	if err != nil {
 		s.server.logger.Warn(ctx, "failed to sync chat pinned skills", slog.F("chat_id", chat.ID), slog.Error(err))
+	} else if ok {
+		return s.commitForkContextMessage(ctx, machine, input, message)
+	}
+	message, ok, err = s.server.tokenBudgetMessage(ctx, chat)
+	if err != nil {
+		s.server.logger.Warn(ctx, "failed to sync chat context budget request", slog.F("chat_id", chat.ID), slog.Error(err))
 		return sessionStartResult{}, nil
 	}
 	if !ok {

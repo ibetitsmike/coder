@@ -4694,6 +4694,7 @@ func waitForChatProcessed(
 
 func newChatdServer(t testing.TB, ps dbpubsub.Pubsub, cfg chatd.Config) *chatd.Server {
 	t.Helper()
+	cfg.Experiments = forkUpstreamTestExperiments(cfg.Experiments)
 	server, err := chatd.New(ps, cfg)
 	require.NoError(t, err)
 	return server
