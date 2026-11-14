@@ -88,6 +88,12 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		)
 		orgSubagents.Get("/organizations/{organization}/subagent-limits", api.forkOrganizationSubagentLimits)
 		orgSubagents.Put("/organizations/{organization}/subagent-limits", api.updateForkOrganizationSubagentLimits)
+		orgTokenBudget := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkTokenBudget),
+			httpmw.ExtractOrganizationParam(api.Database),
+		)
+		orgTokenBudget.Get("/organizations/{organization}/token-budget", api.forkOrganizationTokenBudget)
+		orgTokenBudget.Put("/organizations/{organization}/token-budget", api.updateForkOrganizationTokenBudget)
 
 		orgAgentDefinitions := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAgentDefinitions),

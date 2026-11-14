@@ -26,6 +26,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/coderd/x/chatd/mcpclient"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // secretInputTools get the value in place of its placeholder. Tools that
@@ -114,6 +115,15 @@ func (t secretAnswerTool) ObserveStepToolResults(names []string, errored []bool)
 	if observer, ok := t.AgentTool.(interface{ ObserveStepToolResults([]string, []bool) }); ok {
 		observer.ObserveStepToolResults(names, errored)
 	}
+}
+
+// The token budget finds the turn's fallback on its new_context tool.
+func (t secretAnswerTool) tokenBudgetFallback() (codersdk.ForkTokenBudgetFallback, bool) {
+	snapshot, ok := t.AgentTool.(tokenBudgetFallbackTool)
+	if !ok {
+		return "", false
+	}
+	return snapshot.tokenBudgetFallback()
 }
 
 type secretAnswerMCPTool struct {
