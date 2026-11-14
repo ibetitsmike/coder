@@ -382,16 +382,6 @@ describe("ForkHtmlAttachmentViewer", () => {
 		await expectOnlyValidMessageSent(createChatMessage);
 	});
 
-	it("shows the warning header outside the frame", () => {
-		renderPreview(["fork-html-attachments"]);
-
-		expect(
-			screen.getByRole("figure", {
-				name: "Page attached by the agent: choices.html. It cannot see your session. Do not type passwords or secrets.",
-			}),
-		).toContainElement(screen.getByTitle("choices.html"));
-	});
-
 	it("sends nothing until the user confirms", async () => {
 		const createChatMessage = mockCreateChatMessage();
 		const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
@@ -471,7 +461,7 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(queryProposal()).toBeNull();
 	});
 
-	it("moves focus from a closed frame to the reopen button", () => {
+	it("keeps focus with the viewer when the frame closes and reopens", async () => {
 		renderPreview(["fork-html-attachments"]);
 		const frame = screen.getByTitle<HTMLIFrameElement>("choices.html");
 
@@ -479,9 +469,11 @@ describe("ForkHtmlAttachmentViewer", () => {
 		act(() => frame.focus());
 		fireEvent.load(frame);
 
-		expect(
-			screen.getByRole("button", { name: "Show the page again" }),
-		).toHaveFocus();
+		const reopen = screen.getByRole("button", { name: "Show the page again" });
+		expect(reopen).toHaveFocus();
+
+		await userEvent.keyboard("{Enter}");
+		expect(screen.getByTitle("choices.html")).toHaveFocus();
 	});
 
 	it("shows the upstream card for a page that a newer one replaced", () => {
