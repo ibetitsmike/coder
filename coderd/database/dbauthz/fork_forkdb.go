@@ -72,7 +72,7 @@ func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg f
 
 // CountChatFamilyMessagesSince authorizes as a read of the sender chat.
 func (f *forkQuerier) CountChatFamilyMessagesSince(ctx context.Context, arg forkdb.CountChatFamilyMessagesSinceParams) (int64, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.SenderChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.SenderChatID); err != nil {
 		return 0, err
 	}
 	return f.db.CountChatFamilyMessagesSince(ctx, arg)
@@ -88,7 +88,7 @@ func (f *forkQuerier) DeleteChatFamilyMessagesBefore(ctx context.Context, arg fo
 
 // GetChatFamilyMessageRecipient authorizes as a read of the sender chat.
 func (f *forkQuerier) GetChatFamilyMessageRecipient(ctx context.Context, arg forkdb.GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.SenderChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.SenderChatID); err != nil {
 		return uuid.Nil, err
 	}
 	return f.db.GetChatFamilyMessageRecipient(ctx, arg)
@@ -112,7 +112,7 @@ func (f *forkQuerier) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.C
 
 // CountLiveSubagentsInFamily authorizes through the family's root chat.
 func (f *forkQuerier) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
-	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, rootChatID); err != nil {
 		return 0, err
 	}
 	return f.db.CountLiveSubagentsInFamily(ctx, rootChatID)
@@ -229,7 +229,7 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 }
 
 func (f *forkQuerier) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.ID); err != nil {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
 	return f.db.FinishChatWakeupClaim(ctx, arg)
@@ -258,7 +258,7 @@ func (f *forkQuerier) GetChatOrganizationWakeupCaps(ctx context.Context, organiz
 
 // GetChatSubagentByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatSubagent, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return forkdb.ChatSubagent{}, err
 	}
 	return f.db.GetChatSubagentByChatID(ctx, chatID)
@@ -275,7 +275,7 @@ func (f *forkQuerier) GetChatSubagentTypesByChatIDs(ctx context.Context, chatIDs
 
 // GetChatSubagentsByParentChatID authorizes through the parent chat.
 func (f *forkQuerier) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
-	if _, err := f.q.GetChatByID(ctx, parentChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, parentChatID); err != nil {
 		return nil, err
 	}
 	return f.db.GetChatSubagentsByParentChatID(ctx, parentChatID)
@@ -283,7 +283,7 @@ func (f *forkQuerier) GetChatSubagentsByParentChatID(ctx context.Context, parent
 
 // GetChatSubtreeIDs authorizes through the subtree's root chat.
 func (f *forkQuerier) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
-	if _, err := f.q.GetChatByID(ctx, rootID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, rootID); err != nil {
 		return nil, err
 	}
 	return f.db.GetChatSubtreeIDs(ctx, rootID)
@@ -291,7 +291,7 @@ func (f *forkQuerier) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) (
 
 // GetChatTodosByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.GetChatTodosByChatID(ctx, chatID)
@@ -299,7 +299,7 @@ func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID
 
 // GetPendingChatDescendantQuestion authorizes through the owning chat.
 func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (forkdb.ChatDescendantQuestion, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return forkdb.ChatDescendantQuestion{}, err
 	}
 	return f.db.GetPendingChatDescendantQuestion(ctx, chatID)
@@ -307,7 +307,7 @@ func (f *forkQuerier) GetPendingChatDescendantQuestion(ctx context.Context, chat
 
 // GetChatPinnedSkillsByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatPinnedSkill, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.GetChatPinnedSkillsByChatID(ctx, chatID)
@@ -327,7 +327,7 @@ func (f *forkQuerier) GetChatWakeupByID(ctx context.Context, id uuid.UUID) (fork
 }
 
 func (f *forkQuerier) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, id); err != nil {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, id); err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
 	return f.db.GetChatWakeupByIDForUpdate(ctx, id)
@@ -335,26 +335,35 @@ func (f *forkQuerier) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UU
 
 // GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
 func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.RootChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.RootChatID); err != nil {
 		return nil, err
 	}
 	return f.db.GetFamilySubagentsAwaitingWorker(ctx, arg)
 }
 
-// GetWorkflowRun authorizes through the run's chat.
+// GetWorkflowRun authorizes through the run's chat. A caller with site-wide
+// chat permission skips the read of the chat, which no longer contributes to
+// the decision (fork issue #292).
 func (f *forkQuerier) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, error) {
 	run, err := f.db.GetWorkflowRun(ctx, id)
 	if err != nil {
 		return forkdb.WorkflowRun{}, err
 	}
-	if err := f.authorizeChat(ctx, policy.ActionRead, run.ChatID); err != nil {
-		return forkdb.WorkflowRun{}, err
+	if !f.actsOnAllChats(ctx, policy.ActionRead) {
+		if err := f.authorizeChat(ctx, policy.ActionRead, run.ChatID); err != nil {
+			return forkdb.WorkflowRun{}, err
+		}
 	}
 	return run, nil
 }
 
-// GetWorkflowStepsByRun authorizes through the run's chat.
+// GetWorkflowStepsByRun authorizes through the run's chat. A caller with
+// site-wide chat permission skips the reads, which no longer contribute to
+// the decision (fork issue #292).
 func (f *forkQuerier) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
+	if f.actsOnAllChats(ctx, policy.ActionRead) {
+		return f.db.GetWorkflowStepsByRun(ctx, runID)
+	}
 	run, err := f.db.GetWorkflowRun(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -365,18 +374,22 @@ func (f *forkQuerier) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID
 	return f.db.GetWorkflowStepsByRun(ctx, runID)
 }
 
-// GetWorkflowStep authorizes through the step's run's chat.
+// GetWorkflowStep authorizes through the step's run's chat. A caller with
+// site-wide chat permission skips the reads of the run and the chat, which no
+// longer contribute to the decision (fork issue #292).
 func (f *forkQuerier) GetWorkflowStep(ctx context.Context, id uuid.UUID) (forkdb.WorkflowStep, error) {
 	step, err := f.db.GetWorkflowStep(ctx, id)
 	if err != nil {
 		return forkdb.WorkflowStep{}, err
 	}
-	run, err := f.db.GetWorkflowRun(ctx, step.RunID)
-	if err != nil {
-		return forkdb.WorkflowStep{}, err
-	}
-	if err := f.authorizeChat(ctx, policy.ActionRead, run.ChatID); err != nil {
-		return forkdb.WorkflowStep{}, err
+	if !f.actsOnAllChats(ctx, policy.ActionRead) {
+		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
+		if err != nil {
+			return forkdb.WorkflowStep{}, err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionRead, run.ChatID); err != nil {
+			return forkdb.WorkflowStep{}, err
+		}
 	}
 	return step, nil
 }
@@ -421,7 +434,7 @@ func (f *forkQuerier) GetPluginPackSources(ctx context.Context, organizationID u
 // GetExcludedPluginPacksByChatID authorizes through the owning chat, like
 // GetPluginPacksByChatID.
 func (f *forkQuerier) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetExcludedPluginPacksByChatIDRow, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.GetExcludedPluginPacksByChatID(ctx, chatID)
@@ -431,7 +444,7 @@ func (f *forkQuerier) GetExcludedPluginPacksByChatID(ctx context.Context, chatID
 // the names and commits of packs, which members of the chat may see even
 // though they cannot read the packs.
 func (f *forkQuerier) GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetPluginPacksByChatIDRow, error) {
-	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
 	}
 	return f.db.GetPluginPacksByChatID(ctx, chatID)
@@ -549,11 +562,7 @@ func (f *forkQuerier) InsertChatSecretAnswer(ctx context.Context, arg forkdb.Ins
 // InsertChatSubagent authorizes as an update of the owning chat, like
 // InsertChatDebugRun.
 func (f *forkQuerier) InsertChatSubagent(ctx context.Context, arg forkdb.InsertChatSubagentParams) (forkdb.ChatSubagent, error) {
-	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
-	if err != nil {
-		return forkdb.ChatSubagent{}, err
-	}
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return forkdb.ChatSubagent{}, err
 	}
 	return f.db.InsertChatSubagent(ctx, arg)
@@ -567,7 +576,7 @@ func (f *forkQuerier) InsertChatWakeup(ctx context.Context, arg forkdb.InsertCha
 }
 
 func (f *forkQuerier) InsertChatWakeupRun(ctx context.Context, arg forkdb.InsertChatWakeupRunParams) (forkdb.ChatWakeupRun, error) {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
 		return forkdb.ChatWakeupRun{}, err
 	}
 	return f.db.InsertChatWakeupRun(ctx, arg)
@@ -582,14 +591,18 @@ func (f *forkQuerier) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWo
 	return f.db.InsertWorkflowRun(ctx, arg)
 }
 
-// InsertWorkflowStep authorizes as an update of the run's chat.
+// InsertWorkflowStep authorizes as an update of the run's chat. A caller
+// with site-wide chat permission skips the read of the run, which no longer
+// contributes to the decision (fork issue #292).
 func (f *forkQuerier) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
-	run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
-	if err != nil {
-		return err
-	}
-	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-		return err
+	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
 	}
 	return f.db.InsertWorkflowStep(ctx, arg)
 }
@@ -654,14 +667,14 @@ func (f *forkQuerier) InsertUserAgentDefinition(ctx context.Context, arg forkdb.
 
 // ListChatFamilyMembers authorizes as a read of the root chat.
 func (f *forkQuerier) ListChatFamilyMembers(ctx context.Context, arg forkdb.ListChatFamilyMembersParams) ([]forkdb.ListChatFamilyMembersRow, error) {
-	if _, err := f.q.GetChatByID(ctx, arg.RootID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.RootID); err != nil {
 		return nil, err
 	}
 	return f.db.ListChatFamilyMembers(ctx, arg)
 }
 
 func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionRead, wakeupID); err != nil {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionRead, wakeupID); err != nil {
 		return nil, err
 	}
 	return f.db.ListChatWakeupRunKeys(ctx, wakeupID)
@@ -688,7 +701,7 @@ func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Contex
 // ListPendingChatDescendantQuestionsByRoot authorizes through the family's
 // root chat.
 func (f *forkQuerier) ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]forkdb.ListPendingChatDescendantQuestionsByRootRow, error) {
-	if _, err := f.q.GetChatByID(ctx, rootChatID); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionRead, rootChatID); err != nil {
 		return nil, err
 	}
 	return f.db.ListPendingChatDescendantQuestionsByRoot(ctx, rootChatID)
@@ -719,11 +732,7 @@ func (f *forkQuerier) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errTe
 // LockChatForNoKeyUpdate authorizes as an update of the chat, like
 // InsertChatSubagent.
 func (f *forkQuerier) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
-	chat, err := f.q.db.GetChatByID(ctx, id)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, id); err != nil {
 		return uuid.Nil, err
 	}
 	return f.db.LockChatForNoKeyUpdate(ctx, id)
@@ -768,7 +777,7 @@ func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg for
 }
 
 func (f *forkQuerier) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {
-	if _, err := f.authorizeChatWakeup(ctx, policy.ActionUpdate, arg.ID); err != nil {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
 	return f.db.UpdateChatWakeupStatus(ctx, arg)
@@ -850,30 +859,38 @@ func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg f
 	return f.db.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
-// UpdateWorkflowRunStatus authorizes as an update of the run's chat.
+// UpdateWorkflowRunStatus authorizes as an update of the run's chat. A caller
+// with site-wide chat permission skips the read, which no longer contributes
+// to the decision (fork issue #292).
 func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
-	run, err := f.db.GetWorkflowRun(ctx, arg.ID)
-	if err != nil {
-		return err
-	}
-	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-		return err
+	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
 	}
 	return f.db.UpdateWorkflowRunStatus(ctx, arg)
 }
 
-// UpdateWorkflowStep authorizes as an update of the step run's chat.
+// UpdateWorkflowStep authorizes as an update of the step run's chat. A caller
+// with site-wide chat permission skips the reads, which no longer contribute
+// to the decision (fork issue #292).
 func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
-	step, err := f.db.GetWorkflowStep(ctx, arg.ID)
-	if err != nil {
-		return err
-	}
-	run, err := f.db.GetWorkflowRun(ctx, step.RunID)
-	if err != nil {
-		return err
-	}
-	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-		return err
+	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+		step, err := f.db.GetWorkflowStep(ctx, arg.ID)
+		if err != nil {
+			return err
+		}
+		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
 	}
 	return f.db.UpdateWorkflowStep(ctx, arg)
 }
@@ -895,25 +912,25 @@ func (f *forkQuerier) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID
 }
 
 // FailOpenWorkflowStepsOfRun authorizes as an update of the run's chat: the
-// API stop of a run fails its open steps, like the engine's own stop does.
+// API stop of a run fails its open steps, like the engine's own stop does. A
+// caller with site-wide chat permission skips the read, which no longer
+// contributes to the decision (fork issue #292).
 func (f *forkQuerier) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.FailOpenWorkflowStepsOfRunParams) (int64, error) {
-	run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
-	if err != nil {
-		return 0, err
-	}
-	if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-		return 0, err
+	if !f.actsOnAllChats(ctx, policy.ActionUpdate) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
+		if err != nil {
+			return 0, err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return 0, err
+		}
 	}
 	return f.db.FailOpenWorkflowStepsOfRun(ctx, arg)
 }
 
 // UpsertChatDescendantQuestion authorizes as an update of the owning chat.
 func (f *forkQuerier) UpsertChatDescendantQuestion(ctx context.Context, arg forkdb.UpsertChatDescendantQuestionParams) (forkdb.ChatDescendantQuestion, error) {
-	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
-	if err != nil {
-		return forkdb.ChatDescendantQuestion{}, err
-	}
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return forkdb.ChatDescendantQuestion{}, err
 	}
 	return f.db.UpsertChatDescendantQuestion(ctx, arg)
@@ -936,11 +953,7 @@ func (f *forkQuerier) UpsertChatOrganizationWakeupCaps(ctx context.Context, arg 
 // UpsertChatTodos authorizes as an update of the owning chat, like
 // InsertChatSubagent.
 func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChatTodosParams) (forkdb.ChatTodo, error) {
-	chat, err := f.q.db.GetChatByID(ctx, arg.ChatID)
-	if err != nil {
-		return forkdb.ChatTodo{}, err
-	}
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.UpsertChatTodos(ctx, arg)
@@ -960,9 +973,27 @@ func (f *forkQuerier) UpsertPluginUserLink(ctx context.Context, arg forkdb.Upser
 	return f.db.UpsertPluginUserLink(ctx, arg)
 }
 
+// actsOnAllChats reports whether the caller holds action on the chat type
+// itself, like chatd does. The rego policy votes site-level grants on the
+// object type alone and ID-restricted scopes fail this check, so a pass
+// proves that reading one chat to authorize it cannot change the outcome.
+// The check stays quiet on a failure: the caller falls back to the
+// object-level path, which reports any denial itself.
+func (f *forkQuerier) actsOnAllChats(ctx context.Context, action policy.Action) bool {
+	act, ok := ActorFromContext(ctx)
+	if !ok {
+		return false
+	}
+	return f.q.auth.Authorize(ctx, act, action, rbac.ResourceChat) == nil
+}
+
 // authorizeChat authorizes action on the chat that owns a fork row, like
-// UpsertChatTodos.
+// UpsertChatTodos. A caller with site-wide chat permission skips the read,
+// which no longer contributes to the decision (fork issue #292).
 func (f *forkQuerier) authorizeChat(ctx context.Context, action policy.Action, chatID uuid.UUID) error {
+	if f.actsOnAllChats(ctx, action) {
+		return nil
+	}
 	chat, err := f.q.db.GetChatByID(ctx, chatID)
 	if err != nil {
 		return err
@@ -970,15 +1001,32 @@ func (f *forkQuerier) authorizeChat(ctx context.Context, action policy.Action, c
 	return f.q.authorizeContext(ctx, action, chat)
 }
 
+// authorizeChatWakeupID authorizes action on the chat that owns wake-up id
+// for callers that discard the wake-up row. A caller with site-wide chat
+// permission issues no read at all (fork issue #292).
+func (f *forkQuerier) authorizeChatWakeupID(ctx context.Context, action policy.Action, id uuid.UUID) error {
+	if f.actsOnAllChats(ctx, action) {
+		return nil
+	}
+	wakeup, err := f.db.GetChatWakeupByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return f.authorizeChat(ctx, action, wakeup.ChatID)
+}
+
 // authorizeChatWakeup authorizes action on the chat that owns wake-up id and
-// returns the wake-up.
+// returns the wake-up. A caller with site-wide chat permission skips the chat
+// read, which no longer contributes to the decision (fork issue #292).
 func (f *forkQuerier) authorizeChatWakeup(ctx context.Context, action policy.Action, id uuid.UUID) (forkdb.ChatWakeup, error) {
 	wakeup, err := f.db.GetChatWakeupByID(ctx, id)
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
-	if err := f.authorizeChat(ctx, action, wakeup.ChatID); err != nil {
-		return forkdb.ChatWakeup{}, err
+	if !f.actsOnAllChats(ctx, action) {
+		if err := f.authorizeChat(ctx, action, wakeup.ChatID); err != nil {
+			return forkdb.ChatWakeup{}, err
+		}
 	}
 	return wakeup, nil
 }
