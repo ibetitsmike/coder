@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
@@ -47,7 +48,25 @@ const (
 	tokenBudgetHandoffHeader = `<context_budget request="handoff">`
 	tokenBudgetFinalHeader   = `<context_budget request="final">`
 	tokenBudgetSummaryPrompt = "You are performing a context compaction"
+	// tokenBudgetToolLine starts a line of the text tokenBudgetChat passes
+	// to step for each tool of the request.
+	tokenBudgetToolLine = "request tool: "
 )
+
+// withTokenBudget saves the token budget setting of the chat's
+// organization before the chat starts.
+func withTokenBudget(strategy codersdk.ForkTokenBudgetStrategy, fallback codersdk.ForkTokenBudgetFallback) func(*testing.T, database.Store, *chatd.Config, *chatd.CreateOptions) {
+	return func(t *testing.T, db database.Store, _ *chatd.Config, opts *chatd.CreateOptions) {
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		_, err = fdb.UpsertChatOrganizationTokenBudget(testutil.Context(t, testutil.WaitShort), forkdb.UpsertChatOrganizationTokenBudgetParams{
+			OrganizationID: opts.OrganizationID,
+			Strategy:       string(strategy),
+			Fallback:       string(fallback),
+		})
+		require.NoError(t, err)
+	}
+}
 
 // anthropicRequestText returns every string of the request's messages,
 // decoded, one per line, so the test can look for text that JSON escapes.
@@ -119,6 +138,9 @@ func tokenBudgetChat(
 		}
 		if !req.Stream {
 			return chattest.AnthropicNonStreamingResponse("title")
+		}
+		for _, tool := range req.Tools {
+			text += tokenBudgetToolLine + tool.Name + "\n"
 		}
 		return step(t, streams.Add(1), text)
 	})
@@ -211,7 +233,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 					t.Errorf("unexpected stream request %d", n)
 					return textWithTokens("extra", 80)
 				}
-			})
+			}, withTokenBudget(codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackNewWindow))
 		require.Equal(t, int32(7), streams.Load())
 		require.Zero(t, summaries.Load(), "a rollover makes no summary call")
 
@@ -259,7 +281,7 @@ func TestTokenBudgetWindows(t *testing.T) {
 					t.Errorf("unexpected stream request %d", n)
 					return textWithTokens("extra", 50)
 				}
-			})
+			}, withTokenBudget(codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackNewWindow))
 		require.Equal(t, int32(5), streams.Load())
 		require.Zero(t, summaries.Load())
 
@@ -286,6 +308,68 @@ func TestTokenBudgetWindows(t *testing.T) {
 		require.Less(t, lastResult, anchors[0].ID)
 		requireTextPart(t, messages[len(messages)-1], "after rollover")
 		requireContextWindow(t, messages, &chatloop.ContextWindowBoundary{ID: "w:2", Trigger: chatloop.ContextWindowTriggerContextLimit})
+	})
+
+	// With the summary fallback, a chat that ignores both requests gets a
+	// summary at the usable limit instead of a new window.
+	t.Run("SummaryFallback", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, db, chat, streams, summaries := tokenBudgetChat(t, experiments, "do the work",
+			func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
+				require.Contains(t, text, tokenBudgetToolLine+"new_context\n")
+				switch n {
+				case 1:
+					return toolCallWithTokens("notes", `{"action":"list"}`, 100)
+				case 2:
+					return toolCallWithTokens("notes", `{"action":"list"}`, 320)
+				case 3:
+					require.Equal(t, 1, strings.Count(text, tokenBudgetHandoffHeader))
+					return toolCallWithTokens("notes", `{"action":"list"}`, 400)
+				case 4:
+					require.Equal(t, 1, strings.Count(text, tokenBudgetFinalHeader))
+					return toolCallWithTokens("notes", `{"action":"list"}`, 760)
+				case 5:
+					require.Contains(t, text, "summary of the window")
+					require.NotContains(t, text, "<context_window")
+					require.NotContains(t, text, tokenBudgetFinalHeader)
+					return textWithTokens("after summary", 50)
+				default:
+					t.Errorf("unexpected stream request %d", n)
+					return textWithTokens("extra", 50)
+				}
+			}, withTokenBudget(codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackSummary))
+		require.Equal(t, int32(5), streams.Load())
+		require.Equal(t, int32(1), summaries.Load())
+		messages := chatMessages(ctx, t, db, chat.ID)
+		requireTextPart(t, messages[len(messages)-1], "after summary")
+		requireContextWindow(t, messages, nil)
+	})
+
+	// The default summary strategy runs main's path: no new_context, no
+	// requests, and a summary at the compression threshold. notes and
+	// chat_history stay.
+	t.Run("SummaryStrategy", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, db, chat, streams, summaries := tokenBudgetChat(t, experiments, "do the work",
+			func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
+				require.NotContains(t, text, "<context_budget")
+				require.NotContains(t, text, "<context_window")
+				require.NotContains(t, text, tokenBudgetToolLine+"new_context\n")
+				require.Contains(t, text, tokenBudgetToolLine+"notes\n")
+				require.Contains(t, text, tokenBudgetToolLine+"chat_history\n")
+				switch n {
+				case 1:
+					return toolCallWithTokens("notes", `{"action":"list"}`, 800)
+				default:
+					require.Contains(t, text, "summary of the window")
+					return textWithTokens("summarized", 50)
+				}
+			})
+		require.Equal(t, int32(2), streams.Load())
+		require.Equal(t, int32(1), summaries.Load())
+		requireContextWindow(t, chatMessages(ctx, t, db, chat.ID), nil)
 	})
 
 	// A plan mode chat has no notes, so it keeps summary compaction and

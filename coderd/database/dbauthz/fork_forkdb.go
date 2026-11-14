@@ -249,6 +249,13 @@ func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, org
 	return f.db.GetChatOrganizationSubagentLimits(ctx, organizationID)
 }
 
+func (f *forkQuerier) GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationTokenBudget, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
+		return forkdb.ChatOrganizationTokenBudget{}, err
+	}
+	return f.db.GetChatOrganizationTokenBudget(ctx, organizationID)
+}
+
 func (f *forkQuerier) GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationWakeupCap, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
 		return forkdb.ChatOrganizationWakeupCap{}, err
@@ -1004,6 +1011,13 @@ func (f *forkQuerier) UpsertChatDescendantQuestion(ctx context.Context, arg fork
 		return forkdb.ChatDescendantQuestion{}, err
 	}
 	return f.db.UpsertChatDescendantQuestion(ctx, arg)
+}
+
+func (f *forkQuerier) UpsertChatOrganizationTokenBudget(ctx context.Context, arg forkdb.UpsertChatOrganizationTokenBudgetParams) (forkdb.ChatOrganizationTokenBudget, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChatModelConfig.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.ChatOrganizationTokenBudget{}, err
+	}
+	return f.db.UpsertChatOrganizationTokenBudget(ctx, arg)
 }
 
 func (f *forkQuerier) UpsertChatOrganizationSubagentLimits(ctx context.Context, arg forkdb.UpsertChatOrganizationSubagentLimitsParams) (forkdb.ChatOrganizationSubagentLimit, error) {

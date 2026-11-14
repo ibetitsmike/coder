@@ -11,7 +11,9 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -22,6 +24,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatloop"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
@@ -165,13 +168,68 @@ func newContextRequested(promptRows []database.ChatMessage) bool {
 
 // forkGenerateCompaction runs one compaction. An automatic compaction of an
 // eligible turn is a rollover: it starts the next window with a lead-in and
-// makes no model call. A manual compaction and every other turn summarize as
+// makes no model call. When the organization's fallback is summary, a
+// rollover that the model did not ask for with new_context summarizes as
+// upstream does. A manual compaction and every other turn summarize as
 // upstream does.
 func (p *Server) forkGenerateCompaction(ctx context.Context, prepared turnEnvironment, opts chatloop.GenerateCompactionOptions) (chatloop.CompactionResult, error) {
 	if opts.Source != chatloop.CompactionSourceAutomatic || !p.tokenBudgetEligible(prepared.Tools) {
 		return chatloop.GenerateCompaction(ctx, opts)
 	}
+	setting, err := p.organizationTokenBudget(ctx, prepared.Chat.OrganizationID)
+	if err != nil {
+		return chatloop.CompactionResult{}, err
+	}
+	if setting.Fallback == codersdk.ForkTokenBudgetFallbackSummary {
+		promptRows, err := p.db.GetChatMessagesForPromptByChatID(ctx, prepared.Chat.ID)
+		if err != nil {
+			return chatloop.CompactionResult{}, xerrors.Errorf("get chat messages for prompt: %w", err)
+		}
+		if !newContextRequested(promptRows) {
+			return chatloop.GenerateCompaction(ctx, opts)
+		}
+	}
 	return p.contextWindowRollover(ctx, prepared.Chat, opts)
+}
+
+// organizationTokenBudget returns the compaction setting of an organization,
+// or the default when it never saved one. buildTurnEnvironment reads it once,
+// through appendForkTools, to decide whether the turn gets new_context. A
+// turn without new_context is not eligible, so it takes upstream's path:
+// summary compaction and no requests.
+func (p *Server) organizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (codersdk.ForkOrganizationTokenBudget, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return codersdk.ForkOrganizationTokenBudget{}, xerrors.Errorf("fork queries: %w", err)
+	}
+	//nolint:gocritic // Chat owners cannot read organization config, so chatd reads it.
+	row, err := fdb.GetChatOrganizationTokenBudget(dbauthz.AsChatd(ctx), organizationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return codersdk.DefaultForkOrganizationTokenBudget(), nil
+	}
+	if err != nil {
+		return codersdk.ForkOrganizationTokenBudget{}, xerrors.Errorf("get token budget setting of organization %s: %w", organizationID, err)
+	}
+	return codersdk.ForkOrganizationTokenBudget{
+		Strategy: codersdk.ForkTokenBudgetStrategy(row.Strategy),
+		Fallback: codersdk.ForkTokenBudgetFallback(row.Fallback),
+	}, nil
+}
+
+// tokenBudgetTools returns the fork-token-budget tools of a turn of chat.
+// notes and chat_history stay with the summary strategy, since they help
+// without windows, and new_context comes only with the token_budget
+// strategy.
+func (p *Server) tokenBudgetTools(ctx context.Context, chat database.Chat) ([]fantasy.AgentTool, error) {
+	tools := []fantasy.AgentTool{p.chatNotesTool(chat), p.chatHistoryTool(chat)}
+	setting, err := p.organizationTokenBudget(ctx, chat.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+	if setting.Strategy == codersdk.ForkTokenBudgetStrategyTokenBudget {
+		tools = append(tools, p.newContextTool(chat))
+	}
+	return tools, nil
 }
 
 // contextWindowRollover returns the compaction result that starts the next
@@ -399,6 +457,12 @@ func (p *Server) tokenBudgetMessage(ctx context.Context, chat database.Chat) (ch
 	header, tokens, ok := tokenBudgetRequestDue(budget, promptRows)
 	if !ok {
 		return chatstate.Message{}, false, nil
+	}
+	// Read the setting only when a request is due, so a step that sends
+	// none does not read it here.
+	setting, err := p.organizationTokenBudget(ctx, chat.OrganizationID)
+	if err != nil || setting.Strategy != codersdk.ForkTokenBudgetStrategyTokenBudget {
+		return chatstate.Message{}, false, err
 	}
 	message, err := forkContextTextMessage(chat, formatTokenBudgetRequest(header, budget, tokens))
 	if err != nil {

@@ -33,6 +33,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1d6ec-bf25-76dd-8035-184db759fb30_chat_subagent_messages.up.sql"
       - "../migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql"
       - "../migrations/chatdmig/nodes/01a1d903-ff52-75e8-91c2-e50d900ac0b7_chat_note_calls.up.sql"
+      - "../migrations/chatdmig/nodes/01a1da86-66a9-72e8-b76d-645efa0c0ff0_chat_organization_token_budget.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

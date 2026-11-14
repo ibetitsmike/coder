@@ -40,7 +40,13 @@ func TestChatNotesTool(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
+	// The default summary strategy keeps notes and chat_history and drops
+	// new_context.
 	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"notes", "chat_history"}, toolNames(tools))
+	setForkTokenBudget(t, db, org.ID, codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackNewWindow)
+	tools, err = server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"notes", "chat_history", "new_context"}, toolNames(tools))
 	// The calls of a step run in call order, so a read sees the writes

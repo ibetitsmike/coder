@@ -1697,6 +1697,93 @@ curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organizati
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
+## Get organization token budget setting
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X GET http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/token-budget \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`GET /api/v2/chats/fork/organizations/{organization}/token-budget`
+
+### Parameters
+
+| Name           | In   | Type         | Required | Description     |
+|----------------|------|--------------|----------|-----------------|
+| `organization` | path | string(uuid) | true     | Organization ID |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "fallback": "new_window",
+  "strategy": "summary"
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                 |
+|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationTokenBudget](schemas.md#codersdkforkorganizationtokenbudget) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
+## Update organization token budget setting
+
+### Code samples
+
+```sh
+# Example request using curl
+curl -X PUT http://coder-server:8080/api/v2/chats/fork/organizations/{organization}/token-budget \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Coder-Session-Token: API_KEY'
+```
+
+`PUT /api/v2/chats/fork/organizations/{organization}/token-budget`
+
+> Body parameter
+
+```json
+{
+  "fallback": "new_window",
+  "strategy": "summary"
+}
+```
+
+### Parameters
+
+| Name           | In   | Type                                                                                   | Required | Description     |
+|----------------|------|----------------------------------------------------------------------------------------|----------|-----------------|
+| `organization` | path | string(uuid)                                                                           | true     | Organization ID |
+| `body`         | body | [codersdk.ForkOrganizationTokenBudget](schemas.md#codersdkforkorganizationtokenbudget) | true     | Request body    |
+
+### Example responses
+
+> 200 Response
+
+```json
+{
+  "fallback": "new_window",
+  "strategy": "summary"
+}
+```
+
+### Responses
+
+| Status | Meaning                                                 | Description | Schema                                                                                 |
+|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------|
+| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ForkOrganizationTokenBudget](schemas.md#codersdkforkorganizationtokenbudget) |
+
+To perform this operation, you must be authenticated. [Learn more](authentication.md).
+
 ## Get organization wake-up caps
 
 ### Code samples

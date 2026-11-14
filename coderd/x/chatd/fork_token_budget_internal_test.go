@@ -20,6 +20,19 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 )
 
+// setForkTokenBudget saves the token budget setting of an organization.
+func setForkTokenBudget(t *testing.T, db database.Store, organizationID uuid.UUID, strategy codersdk.ForkTokenBudgetStrategy, fallback codersdk.ForkTokenBudgetFallback) {
+	t.Helper()
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	_, err = fdb.UpsertChatOrganizationTokenBudget(chatdTestContext(t), forkdb.UpsertChatOrganizationTokenBudgetParams{
+		OrganizationID: organizationID,
+		Strategy:       string(strategy),
+		Fallback:       string(fallback),
+	})
+	require.NoError(t, err)
+}
+
 func TestTokenBudgetLadder(t *testing.T) {
 	t.Parallel()
 
@@ -254,6 +267,7 @@ func TestNewContextTool(t *testing.T) {
 	ctx := chatdTestContext(t)
 	user, org, model := seedInternalChatDeps(t, db)
 	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: user.ID, LastModelConfigID: model.ID})
+	setForkTokenBudget(t, db, org.ID, codersdk.ForkTokenBudgetStrategyTokenBudget, codersdk.ForkTokenBudgetFallbackNewWindow)
 
 	tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID)
 	require.NoError(t, err)

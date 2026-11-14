@@ -10827,6 +10827,29 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `effective`    | [codersdk.ForkSubagentLimitValues](#codersdkforksubagentlimitvalues)               | false    |              | Effective holds the limits in force in the organization.                 |
 | `organization` | [codersdk.ForkOrganizationSubagentLimits](#codersdkforkorganizationsubagentlimits) | false    |              | Organization holds the stored organization limits. A nil limit is unset. |
 
+## codersdk.ForkOrganizationTokenBudget
+
+```json
+{
+  "fallback": "new_window",
+  "strategy": "summary"
+}
+```
+
+### Properties
+
+| Name       | Type                                                                 | Required | Restrictions | Description                                                                                                                                             |
+|------------|----------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `fallback` | [codersdk.ForkTokenBudgetFallback](#codersdkforktokenbudgetfallback) | false    |              | Fallback is what a token-budget chat does when it reaches the usable limit without calling new_context. It applies only with the token_budget strategy. |
+| `strategy` | [codersdk.ForkTokenBudgetStrategy](#codersdkforktokenbudgetstrategy) | false    |              | Strategy is how chats compact their context.                                                                                                            |
+
+#### Enumerated Values
+
+| Property   | Value(s)                  |
+|------------|---------------------------|
+| `fallback` | `new_window`, `summary`   |
+| `strategy` | `summary`, `token_budget` |
+
 ## codersdk.ForkOrganizationWakeupCaps
 
 ```json
@@ -10899,6 +10922,34 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `max_concurrent_per_family` | integer | false    |              | Max concurrent per family is the maximum number of running subagent chats under one root chat. |
 | `max_depth`                 | integer | false    |              | Max depth is the maximum depth of nested subagent chats.                                       |
 | `max_live_per_family`       | integer | false    |              | Max live per family is the maximum number of live subagent chats under one root chat.          |
+
+## codersdk.ForkTokenBudgetFallback
+
+```json
+"new_window"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                |
+|-------------------------|
+| `new_window`, `summary` |
+
+## codersdk.ForkTokenBudgetStrategy
+
+```json
+"summary"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                  |
+|---------------------------|
+| `summary`, `token_budget` |
 
 ## codersdk.ForkWakeupCapValues
 
