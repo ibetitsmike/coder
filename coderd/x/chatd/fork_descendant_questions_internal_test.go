@@ -4,6 +4,7 @@ package chatd
 // the needs_input report of wait_agent behind fork-nested-subagents.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -13,9 +14,13 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbmetrics"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
@@ -268,8 +273,9 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// An answer during the wait lets the call wait on the child for the
-	// rest of the timeout, and the answered question is no longer reported.
+	// An answer during the wait wakes the call on the child's state
+	// channel, without a clock advance, and the call waits on the child for
+	// the rest of the timeout. The answered question is no longer reported.
 	subagentAwaitTrap := mClock.Trap().NewTimer("chatd", "subagent_await")
 	defer subagentAwaitTrap.Close()
 	subagentPollTrap := mClock.Trap().NewTicker("chatd", "subagent_poll")
@@ -278,9 +284,8 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	awaitTrap.MustWait(ctx).MustRelease(ctx)
 	pollTrap.MustWait(ctx).MustRelease(ctx)
 	sendAnswer()
-	mClock.Advance(descendantQuestionPollInterval).MustWait(ctx)
 	call := subagentAwaitTrap.MustWait(ctx)
-	require.Equal(t, 8*time.Second, call.Duration)
+	require.Equal(t, 10*time.Second, call.Duration, "no time passed before the call woke")
 	call.MustRelease(ctx)
 	subagentPollTrap.MustWait(ctx).MustRelease(ctx)
 	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusWaiting, "")
@@ -334,7 +339,8 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	require.Equal(t, true, result["needs_input"])
 
 	// A question that replaces the awaited one ends the wait at the next
-	// poll instead of at the timeout.
+	// fallback tick instead of at the timeout: a new question commits
+	// outside the child's state machine and publishes nothing.
 	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusWaiting, "")
 	done = waitAsync(child.ID, 10)
 	awaitTrap.MustWait(ctx).MustRelease(ctx)
@@ -343,7 +349,11 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 		fantasy.ToolCall{ID: uuid.NewString(), Name: askUserQuestionToolName, Input: descendantQuestionInput})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
-	mClock.Advance(descendantQuestionPollInterval).MustWait(ctx)
+	for elapsed := time.Duration(0); elapsed < subagentAwaitFallbackPoll; {
+		d, w := mClock.AdvanceNext()
+		w.MustWait(ctx)
+		elapsed += d
+	}
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, true, result["needs_input"])
 	require.NotEmpty(t, result["questions"])
@@ -366,4 +376,95 @@ func TestDescendantQuestionWaitAgent(t *testing.T) {
 	result = decode(testutil.RequireReceive(ctx, t, done))
 	require.Equal(t, true, result["needs_input"])
 	require.Equal(t, descendantSecretQuestionNote, result["note"])
+}
+
+// TestDescendantQuestionWaitReads checks that a wait_agent call on a child
+// with an unanswered question reads the question once at the start, once
+// per fallback tick and once after the short wait for the child, and not
+// on a short interval.
+func TestDescendantQuestionWaitReads(t *testing.T) {
+	t.Parallel()
+
+	const query = "GetPendingChatDescendantQuestion"
+	raw, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	reg := prometheus.NewRegistry()
+	db := dbmetrics.NewQueryMetrics(raw, slogtest.Make(t, nil), reg)
+	reads := func() int {
+		families, err := reg.Gather()
+		require.NoError(t, err)
+		var n float64
+		for _, family := range families {
+			if family.GetName() != "coderd_db_query_counts_total" {
+				continue
+			}
+			for _, m := range family.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "query" && l.GetValue() == query {
+						n += m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		return int(n)
+	}
+
+	mClock := quartz.NewMock(t)
+	f := newNestedSubagentsFixtureOn(t, db, ps, sqlDB, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{},
+		withInternalTestServerClock(mClock))
+	ctx := chatdTestContext(t)
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	resp, err := f.server.newDescendantQuestionTool(child).Run(ctx,
+		fantasy.ToolCall{ID: uuid.NewString(), Name: askUserQuestionToolName, Input: descendantQuestionInput})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	setChatStatus(ctx, t, f.db, child.ID, database.ChatStatusWaiting, "")
+
+	tools, err := f.server.subagentTools(ctx, func() database.Chat { return f.root }, f.root.LastModelConfigID)
+	require.NoError(t, err)
+	tools, err = f.server.appendForkTools(ctx, tools, f.root, f.root.LastModelConfigID)
+	require.NoError(t, err)
+	wait := findToolByName(tools, waitAgentToolName)
+
+	awaitTrap := mClock.Trap().NewTimer("chatd", "descendant_question_await")
+	defer awaitTrap.Close()
+	pollTrap := mClock.Trap().NewTicker("chatd", "descendant_question_poll")
+	defer pollTrap.Close()
+
+	before := reads()
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		input := fmt.Sprintf(`{"chat_id":%q,"timeout_seconds":60}`, child.ID)
+		resp, err := wait.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: waitAgentToolName, Input: input})
+		if err != nil {
+			resp = fantasy.NewTextErrorResponse(err.Error())
+		}
+		done <- resp
+	}()
+	awaitTrap.MustWait(ctx).MustRelease(ctx)
+	pollTrap.MustWait(ctx).MustRelease(ctx)
+	require.Equal(t, 1, reads()-before, "the initial read")
+
+	// Server tickers can fire between the fallback ticks, and Advance
+	// cannot pass them.
+	advance := func(d time.Duration) {
+		for elapsed := time.Duration(0); elapsed < d; {
+			step, w := mClock.AdvanceNext()
+			w.MustWait(ctx)
+			elapsed += step
+		}
+	}
+	for tick := 1; tick*int(subagentAwaitFallbackPoll) < int(time.Minute); tick++ {
+		advance(subagentAwaitFallbackPoll)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return reads()-before >= 1+tick
+		}, testutil.IntervalFast, "fallback tick %d reads the question", tick)
+	}
+	advance(subagentAwaitFallbackPoll)
+	// The child waits, so the short wait for it returns at once.
+	result := testutil.RequireReceive(ctx, t, done)
+	require.False(t, result.IsError, result.Content)
+	require.Contains(t, result.Content, `"needs_input":true`)
+	t.Logf("question reads in 60s: %d", reads()-before)
+	require.LessOrEqual(t, reads()-before, 13, "one read per fallback tick plus the initial read and the final one")
 }
