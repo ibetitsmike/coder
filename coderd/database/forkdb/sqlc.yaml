@@ -34,6 +34,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1d71e-84b7-78ae-99dd-2cb2e94742e3_chat_notes.up.sql"
       - "../migrations/chatdmig/nodes/01a1d903-ff52-75e8-91c2-e50d900ac0b7_chat_note_calls.up.sql"
       - "../migrations/chatdmig/nodes/01a1da86-66a9-72e8-b76d-645efa0c0ff0_chat_organization_token_budget.up.sql"
+      - "../migrations/chatdmig/nodes/01a1db0e-3208-7130-8ea1-b956b53f0f6f_saved_workflows.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
@@ -70,6 +71,14 @@ sql:
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
               type: "ChatACL"
+          - column: "saved_workflows.group_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
+          - column: "saved_workflows.user_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
           # jsonb params: a plain json.RawMessage reaches pq as a zero-length
           # []byte even when nil, which Postgres rejects as invalid JSON on
           # nullable jsonb columns. NullRawMessage sends a real NULL.
@@ -78,6 +87,10 @@ sql:
               import: "github.com/sqlc-dev/pqtype"
               type: "NullRawMessage"
           - column: "workflow_runs.result"
+            go_type:
+              import: "github.com/sqlc-dev/pqtype"
+              type: "NullRawMessage"
+          - column: "saved_workflows.args_schema"
             go_type:
               import: "github.com/sqlc-dev/pqtype"
               type: "NullRawMessage"
