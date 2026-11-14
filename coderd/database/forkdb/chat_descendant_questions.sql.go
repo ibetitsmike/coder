@@ -93,28 +93,28 @@ const retireChatDescendantQuestion = `-- name: RetireChatDescendantQuestion :exe
 UPDATE chat_descendant_questions q
 SET answered_at = now(),
     answered_by = CASE
-        WHEN EXISTS (SELECT 1 FROM unnest($1::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
-            THEN 'secret_answer'
-        WHEN $2::boolean
+        WHEN $1::boolean
                 AND jsonb_typeof(q.questions) = 'array'
                 AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)')
             THEN 'message'
+        WHEN EXISTS (SELECT 1 FROM unnest($2::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
+            THEN 'secret_answer'
         ELSE 'context_boundary'
     END
 WHERE q.chat_id = $3::uuid
     AND q.answered_at IS NULL
     AND (
         $4::boolean
-        OR ($2::boolean
+        OR ($1::boolean
             AND jsonb_typeof(q.questions) = 'array'
             AND NOT jsonb_path_exists(q.questions, '$[*] ? (@.secret == true)'))
-        OR EXISTS (SELECT 1 FROM unnest($1::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
+        OR EXISTS (SELECT 1 FROM unnest($2::text[]) AS a WHERE starts_with(a, q.tool_call_id || ':'))
     )
 `
 
 type RetireChatDescendantQuestionParams struct {
-	Answers    []string  `db:"answers" json:"answers"`
 	Visible    bool      `db:"visible" json:"visible"`
+	Answers    []string  `db:"answers" json:"answers"`
 	ChatID     uuid.UUID `db:"chat_id" json:"chat_id"`
 	Compressed bool      `db:"compressed" json:"compressed"`
 }
@@ -126,11 +126,12 @@ type RetireChatDescendantQuestionParams struct {
 // question that is not secret; it fails closed like
 // ChatDescendantQuestion.Secret. @answers holds the text of the visible
 // messages' text parts after chatstate.QuestionAnswerPrefix. Only an answer
-// that names the question's tool call answers a secret question.
+// that names the question's tool call answers a secret question, and
+// answered_by is secret_answer only for a secret question.
 func (q *Queries) RetireChatDescendantQuestion(ctx context.Context, arg RetireChatDescendantQuestionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retireChatDescendantQuestion,
-		pq.Array(arg.Answers),
 		arg.Visible,
+		pq.Array(arg.Answers),
 		arg.ChatID,
 		arg.Compressed,
 	)

@@ -208,7 +208,8 @@ type Querier interface {
 	// question that is not secret; it fails closed like
 	// ChatDescendantQuestion.Secret. @answers holds the text of the visible
 	// messages' text parts after chatstate.QuestionAnswerPrefix. Only an answer
-	// that names the question's tool call answers a secret question.
+	// that names the question's tool call answers a secret question, and
+	// answered_by is secret_answer only for a secret question.
 	RetireChatDescendantQuestion(ctx context.Context, arg RetireChatDescendantQuestionParams) (int64, error)
 	// SearchChatHistory returns the newest messages between after_id and
 	// before_id, with before_id 0 for no upper bound, whose content holds

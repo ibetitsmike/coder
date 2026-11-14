@@ -49,13 +49,13 @@ ALTER TABLE chat_descendant_questions
     ADD CONSTRAINT chat_descendant_questions_answered_by_check CHECK (
         (answered_at IS NULL AND answered_by IS NULL)
         OR (answered_at IS NOT NULL
+            AND answered_by IS NOT NULL
             AND answered_by IN ('message', 'secret_answer', 'context_boundary', 'migrated'))
     );
 
-CREATE INDEX chat_descendant_questions_open_root_idx
-    ON chat_descendant_questions (root_chat_id)
-    WHERE answered_at IS NULL;
+CREATE INDEX chat_descendant_questions_root_idx
+    ON chat_descendant_questions (root_chat_id);
 
 COMMENT ON TABLE chat_descendant_questions IS 'The latest question each descendant chat asked the user with ask_user_question. The question is pending while answered_at is NULL. The transaction that inserts the user message that answers or retires it sets answered_at, and a new question of the chat clears it.';
 COMMENT ON COLUMN chat_descendant_questions.root_chat_id IS 'The root of the chat''s family, or the chat itself when it names no root.';
-COMMENT ON COLUMN chat_descendant_questions.answered_by IS 'What retired the question: message (a user-visible user message), secret_answer (the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).';
+COMMENT ON COLUMN chat_descendant_questions.answered_by IS 'What retired the question: message (a user-visible user message that answers a question that is not secret), secret_answer (a user message that answers this call of a secret question, such as the message of the secret answer route), context_boundary (a clear or a compaction), or migrated (retired before answered_at was stored).';

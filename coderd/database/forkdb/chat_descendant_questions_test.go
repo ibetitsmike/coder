@@ -29,6 +29,7 @@ func TestRetireChatDescendantQuestion(t *testing.T) {
 		answeredBy string // empty: the question stays pending
 	}{
 		{name: "VisibleMessage", questions: plain, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true}, answeredBy: "message"},
+		{name: "PrefixedAnswer", questions: plain, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true, Answers: []string{"call-1:\nPostgres"}}, answeredBy: "message"},
 		{name: "ModelOnlyMessage", questions: plain},
 		{name: "ContextBoundary", questions: plain, arg: forkdb.RetireChatDescendantQuestionParams{Compressed: true}, answeredBy: "context_boundary"},
 		{name: "SecretVisibleMessage", questions: hidden, arg: forkdb.RetireChatDescendantQuestionParams{Visible: true}},
