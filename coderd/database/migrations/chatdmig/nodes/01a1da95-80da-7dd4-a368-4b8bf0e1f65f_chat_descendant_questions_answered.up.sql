@@ -1,5 +1,6 @@
 -- requires: 01a1c256-cefe-797e-8c6a-1c0558040659_chat_descendant_questions
 -- requires: 01a1d903-ff52-75e8-91c2-e50d900ac0b7_chat_note_calls
+-- requires: 01a1da86-66a9-72e8-b76d-645efa0c0ff0_chat_organization_token_budget
 
 -- Stores whether a descendant question is answered, which reads derived
 -- from the chat's later user messages before.

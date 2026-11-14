@@ -83,6 +83,7 @@ type Querier interface {
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
 	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
 	GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationSubagentLimit, error)
+	GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationTokenBudget, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
@@ -252,6 +253,7 @@ type Querier interface {
 	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
+	UpsertChatOrganizationTokenBudget(ctx context.Context, arg UpsertChatOrganizationTokenBudgetParams) (ChatOrganizationTokenBudget, error)
 	UpsertChatOrganizationWakeupCaps(ctx context.Context, arg UpsertChatOrganizationWakeupCapsParams) (ChatOrganizationWakeupCap, error)
 	UpsertChatTodos(ctx context.Context, arg UpsertChatTodosParams) (ChatTodo, error)
 	UpsertPluginPackSources(ctx context.Context, arg UpsertPluginPackSourcesParams) (PluginPackSource, error)
