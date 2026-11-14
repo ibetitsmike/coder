@@ -53,6 +53,28 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 
 		_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{Name: "triage", Script: savedWorkflowScript})
 		_ = requireSDKError(t, err, http.StatusConflict)
+
+		// Every field at its limit, in characters JSON escapes as \u00XX.
+		phases := make([]string, 32)
+		for i := range phases {
+			phases[i] = fmt.Sprintf("%02d", i) + strings.Repeat("\x01", 126)
+		}
+		largest, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:        "largest",
+			Description: strings.Repeat("\x01", 4096),
+			Script:      savedWorkflowScript + "#" + strings.Repeat("\x01", 65536-len(savedWorkflowScript)-2) + "\n",
+			Phases:      phases,
+			// An escaped backslash before u0000 is no NUL character.
+			ArgsSchema: json.RawMessage(`{"type":"object","title":"a\\u0000b"}`),
+		})
+		require.NoError(t, err)
+		require.Equal(t, `a\u0000b`, func() string {
+			var s struct{ Title string }
+			require.NoError(t, json.Unmarshal(largest.ArgsSchema, &s))
+			return s.Title
+		}())
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "largest"))
+
 		for name, req := range map[string]codersdk.CreateForkSavedWorkflowRequest{
 			"BadName":        {Name: "Triage", Script: savedWorkflowScript},
 			"NoMain":         {Name: "no-main", Script: "x = 1\n"},

@@ -34,7 +34,9 @@ const (
 	maxForkSavedWorkflowArgsSchemaBytes  = 16384
 	maxForkSavedWorkflowPhases           = 32
 	maxForkSavedWorkflowPhaseBytes       = 128
-	maxForkSavedWorkflowRequestBytes     = (65536+maxForkSavedWorkflowDescriptionBytes)*skillJSONEscapeExpansion +
+	// Each phase also takes two quotes and a comma.
+	maxForkSavedWorkflowRequestBytes = (65536+maxForkSavedWorkflowDescriptionBytes+maxForkSavedWorkflowNameBytes)*skillJSONEscapeExpansion +
+		maxForkSavedWorkflowPhases*(maxForkSavedWorkflowPhaseBytes*skillJSONEscapeExpansion+3) +
 		maxForkSavedWorkflowArgsSchemaBytes + skillRequestEnvelopeBytes
 )
 
@@ -272,7 +274,7 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	if (description != nil && strings.ContainsRune(*description, 0)) ||
 		(script != nil && strings.ContainsRune(*script, 0)) ||
 		slices.ContainsFunc(phases, func(p string) bool { return strings.ContainsRune(p, 0) }) ||
-		bytes.Contains(argsSchema, []byte(`\u0000`)) {
+		jsonHasNUL(argsSchema) {
 		return pqtype.NullRawMessage{}, xerrors.New("the workflow must not contain NUL characters")
 	}
 	if script != nil {
@@ -303,6 +305,21 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 		return pqtype.NullRawMessage{}, err
 	}
 	return pqtype.NullRawMessage{RawMessage: argsSchema, Valid: true}, nil
+}
+
+// jsonHasNUL reports whether a string or key of raw holds a NUL character.
+// It stops at the first syntax error, which the schema check reports.
+func jsonHasNUL(raw json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		if s, ok := tok.(string); ok && strings.ContainsRune(s, 0) {
+			return true
+		}
+	}
 }
 
 func writeForkSavedWorkflowInvalid(ctx context.Context, rw http.ResponseWriter, err error) {
