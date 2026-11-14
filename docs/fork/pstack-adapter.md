@@ -196,7 +196,7 @@ The web UI shows the exact message below the page with **Send** and **Cancel**, 
 A long message scrolls, and keyboard users can reach it with Tab.
 If the message fails to send, the proposal stays open with the error, and focus goes to **Send**, so the user can select it again.
 Focus stays in the page, and a status line below it announces the proposal.
-When the proposal closes, focus goes back to the page.
+When the proposal closes, focus goes back to the page, unless the user acted elsewhere in the dashboard while the message was sending.
 The chat gets the text under a line that names the page, such as `Message from the attached page "choices.html":`.
 The web UI shows a proposal only when all of these hold:
 
@@ -794,9 +794,9 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   Text preview and image thumbnail, `site/src/pages/AgentsPage/components/ChatConversation/AttachmentBlocks.tsx:115-117`, `:637`, `:682-691`, raster images only, `coderd/x/chatfiles/mime.go:131-133`.
   MP4 player only with `fork-chat-todos`, `ForkAttachmentPreview.tsx:52-73`, also in the Attachments menu, `TurnAttachments.tsx:116-118`.
   HTML viewer only with `fork-html-attachments`, `ForkAttachmentPreview.tsx:40-50`, with its sandbox policy, `coderd/fork_chat_html_attachments.go:30-40`, set on every response before authentication, `:45-53`, `coderd/fork_chat_routes.go:39-44`, with the files rate limit, `:42`.
-  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:76-97`, `ForkHtmlAttachmentViewer.tsx:70-80`, and the viewer has the fixed header outside the frame, `:274-287`, and closes the frame after a navigation, moving focus to the reopen button and back to the frame, `:118-158`, `:288-296`.
+  The newest agent page of a name wins, streamed pages included, `forkHtmlAttachments.ts:76-97`, `ForkHtmlAttachmentViewer.tsx:70-80`, and the viewer has the fixed header outside the frame, `:285-298`, and closes the frame after a navigation, moving focus to the reopen button and back to the frame, `:119-154`, `:299-307`.
   The dashboard's `frame-src`, `coderd/httpmw/csp.go:84`, `:126`, `:141-143`.
-  The bridge checks the frame, the schema, the user activation, the focus, the dashboard input, the interval, and an open proposal or a pending send, `ForkHtmlAttachmentViewer.tsx:160-217`, and sends only on **Send**, keeping the proposal after a failure and returning focus to the page when it closes, `:219-270`, `:310-355`.
+  The bridge checks the frame, the schema, the user activation, the focus, the dashboard input, the interval, and an open proposal or a pending send, `ForkHtmlAttachmentViewer.tsx:156-214`, and sends only on **Send**, keeping the proposal after a failure and returning focus to the page when it closes, `:216-281`, `:321-366`.
 - Child shares the parent workspace: `coderd/x/chatd/subagent_operations.go:466-471`.
 - Worktree isolation, only with `fork-subagent-isolation`: `coderd/x/chatd/fork_tools.go:58-64`, arguments, `coderd/x/chatd/fork_isolation.go:43-47`, `:97-105`, checks, `:107-125`, `:72-74`, with the error prefix, `coderd/x/chatd/subagent_operations.go:493`, result fields, `fork_isolation.go:152-158`.
   The definition's `isolation`, checked at parse, `codersdk/workspacesdk/fork_agentdefinition.go:191-196`, used when the call sets none and the experiment is on, `coderd/x/chatd/fork_isolation.go:64-76`, and an explicit `shared` kept, `:119-121`.

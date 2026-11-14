@@ -306,6 +306,26 @@ describe("ForkHtmlAttachmentViewer", () => {
 		expect(send).toHaveFocus();
 	});
 
+	it("leaves focus alone when the user acts in the dashboard during a send", async () => {
+		let finishSend: (value: { queued: boolean }) => void = () => {};
+		mockCreateChatMessage().mockReturnValueOnce(
+			new Promise((resolve) => {
+				finishSend = resolve;
+			}),
+		);
+		renderPreview(["fork-html-attachments"]);
+
+		postFromFrame(pageMessage("Option B"));
+		const proposal = await screen.findByRole("region", { name: proposalName });
+		act(() => screen.getByTitle("choices.html").blur());
+		fireEvent.click(within(proposal).getByRole("button", { name: "Send" }));
+		fireEvent.pointerDown(document.body);
+
+		await act(async () => finishSend({ queued: false }));
+		await screen.findByText("Sent to the chat");
+		expect(document.body).toHaveFocus();
+	});
+
 	it("lets the keyboard reach the message before Cancel", async () => {
 		renderPreview(["fork-html-attachments"]);
 

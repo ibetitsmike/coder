@@ -103,6 +103,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	const proposalRef = useRef<HTMLElement>(null);
 	const sendRef = useRef<HTMLButtonElement>(null);
 	const focusSend = useRef(false);
+	const sendTookFocus = useRef(false);
 	const lastProposedAt = useRef(Number.NEGATIVE_INFINITY);
 	const lastDashboardInputAt = useRef(Number.NEGATIVE_INFINITY);
 	const [proposal, setProposal] = useState<string | null>(null);
@@ -119,17 +120,12 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 	// for another address, or reloading. A proposal still open may come from
 	// that other address, so it goes too. Focus in the frame would fall to the
 	// document body when the frame goes, so it moves to the reopen button,
-	// and back to the frame when the page shows again. A pending send disables
-	// the focused Send button, so focus on the body with a proposal open was
-	// on the proposal too.
+	// and back to the frame when the page shows again.
 	const onFrameLoad = () => {
 		frameLoads.current += 1;
 		if (frameLoads.current > 1) {
-			const active = document.activeElement;
-			const open = proposalRef.current;
 			focusReopen.current =
-				active === frameRef.current ||
-				(open !== null && (active === document.body || open.contains(active)));
+				document.activeElement === frameRef.current || focusOnProposal(false);
 			setNavigatedAway(true);
 			setProposal(null);
 		}
@@ -167,6 +163,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		lastDashboardInputAt.current = Date.now();
 		const onInput = () => {
 			lastDashboardInputAt.current = Date.now();
+			sendTookFocus.current = false;
 		};
 		window.addEventListener("pointerdown", onInput, true);
 		window.addEventListener("keydown", onInput, true);
@@ -216,32 +213,46 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 		return () => window.removeEventListener("message", onMessage);
 	}, [agentId, block.name, proposal, resetSend, sendPending]);
 
-	// Focus on the proposal, or on a button that a pending send disabled,
-	// would fall to the document body, so it goes back to the page.
-	const closeProposal = () => {
+	// A pending send disables the focused Send button, so focus falls to the
+	// document body. Focus on the body counts as focus on the proposal until
+	// the next dashboard input, which may have moved it there on purpose.
+	function focusOnProposal(bodyCounts: boolean) {
 		const active = document.activeElement;
-		if (active === document.body || proposalRef.current?.contains(active)) {
+		return (
+			(proposalRef.current?.contains(active) ?? false) ||
+			((bodyCounts || sendTookFocus.current) && active === document.body)
+		);
+	}
+
+	// Focus on the proposal would fall to the document body when it closes,
+	// so it goes back to the page. Cancel itself may leave focus on the body.
+	const closeProposal = (bodyCounts: boolean) => {
+		if (focusOnProposal(bodyCounts)) {
 			frameRef.current?.focus();
 		}
 		setProposal(null);
 	};
 
 	// The proposal stays open until the send succeeds, so a failed send can
-	// be retried. A pending send disables the focused Send button, so focus
-	// falls to the document body, and after a failure it goes back to Send.
+	// be retried, and focus that the pending send took goes back to Send.
 	const send = () => {
 		if (!agentId || proposal === null) {
 			return;
 		}
+		sendTookFocus.current = true;
 		sendMessage.mutate(
 			{
 				chatId: agentId,
 				req: { content: [{ type: "text", text: proposal }] },
 			},
 			{
-				onSuccess: closeProposal,
+				onSuccess: () => closeProposal(false),
 				onError: () => {
-					focusSend.current = document.activeElement === document.body;
+					focusSend.current =
+						sendTookFocus.current && document.activeElement === document.body;
+				},
+				onSettled: () => {
+					sendTookFocus.current = false;
 				},
 			},
 		);
@@ -332,7 +343,7 @@ const ForkHtmlAttachmentViewer: React.FC<{ block: HtmlFilePart }> = ({
 							size="sm"
 							variant="outline"
 							disabled={sendMessage.isPending}
-							onClick={closeProposal}
+							onClick={() => closeProposal(true)}
 						>
 							Cancel
 						</Button>
