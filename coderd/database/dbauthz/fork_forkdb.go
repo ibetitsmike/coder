@@ -305,6 +305,30 @@ func (f *forkQuerier) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) (
 	return f.db.GetChatSubtreeIDs(ctx, rootID)
 }
 
+// DeleteChatNote authorizes as an update of the owning chat.
+func (f *forkQuerier) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatNoteParams) (int64, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteChatNote(ctx, arg)
+}
+
+// GetChatNote authorizes through the owning chat.
+func (f *forkQuerier) GetChatNote(ctx context.Context, arg forkdb.GetChatNoteParams) (forkdb.ChatNote, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+		return forkdb.ChatNote{}, err
+	}
+	return f.db.GetChatNote(ctx, arg)
+}
+
+// GetChatNoteCall authorizes through the owning chat.
+func (f *forkQuerier) GetChatNoteCall(ctx context.Context, arg forkdb.GetChatNoteCallParams) (forkdb.ChatNoteCall, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+		return forkdb.ChatNoteCall{}, err
+	}
+	return f.db.GetChatNoteCall(ctx, arg)
+}
+
 // GetChatTodosByChatID authorizes through the owning chat.
 func (f *forkQuerier) GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (forkdb.ChatTodo, error) {
 	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
@@ -685,6 +709,23 @@ func (f *forkQuerier) ListChatFamilyMembers(ctx context.Context, arg forkdb.List
 	return f.db.ListChatFamilyMembers(ctx, arg)
 }
 
+// ListChatHistoryRows authorizes through the chat, like
+// GetChatMessagesByChatID.
+func (f *forkQuerier) ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatHistoryRowsRow, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatHistoryRows(ctx, chatID)
+}
+
+// ListChatNotes authorizes through the owning chat.
+func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListChatNotesRow, error) {
+	if _, err := f.q.GetChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatNotes(ctx, chatID)
+}
+
 func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
 	if _, err := f.authorizeChatWakeup(ctx, policy.ActionRead, wakeupID); err != nil {
 		return nil, err
@@ -969,6 +1010,24 @@ func (f *forkQuerier) UpsertChatTodos(ctx context.Context, arg forkdb.UpsertChat
 		return forkdb.ChatTodo{}, err
 	}
 	return f.db.UpsertChatTodos(ctx, arg)
+}
+
+// SearchChatHistory authorizes through the chat, like
+// GetChatMessagesByChatID.
+func (f *forkQuerier) SearchChatHistory(ctx context.Context, arg forkdb.SearchChatHistoryParams) ([]forkdb.SearchChatHistoryRow, error) {
+	if _, err := f.q.GetChatByID(ctx, arg.ChatID); err != nil {
+		return nil, err
+	}
+	return f.db.SearchChatHistory(ctx, arg)
+}
+
+// WriteChatNote authorizes as an update of the owning chat, like
+// UpsertChatTodos.
+func (f *forkQuerier) WriteChatNote(ctx context.Context, arg forkdb.WriteChatNoteParams) (forkdb.WriteChatNoteRow, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return forkdb.WriteChatNoteRow{}, err
+	}
+	return f.db.WriteChatNote(ctx, arg)
 }
 
 func (f *forkQuerier) UpsertPluginPackSources(ctx context.Context, arg forkdb.UpsertPluginPackSourcesParams) (forkdb.PluginPackSource, error) {

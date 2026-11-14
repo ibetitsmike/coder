@@ -152,6 +152,29 @@ func TestReadChatTranscript(t *testing.T) {
 		require.Equal(t, []string{"assistant:text:answer"}, texts(filtered))
 	})
 
+	t.Run("SkipsChatHistoryOnlyWithTheExperiment", func(t *testing.T) {
+		t.Parallel()
+		chat := newChat(t, user.ID, uuid.NullUUID{}, uuid.NullUUID{})
+		insert(t, chat.ID,
+			userText("question"),
+			row{role: database.ChatMessageRoleAssistant, visibility: database.ChatMessageVisibilityBoth, parts: []codersdk.ChatMessagePart{
+				codersdk.ChatMessageText("history-sibling-text"),
+				codersdk.ChatMessageToolCall("call-1", chatHistoryToolName, json.RawMessage(`{"action":"list_windows"}`)),
+			}},
+		)
+		// Without fork-token-budget a tool named chat_history is a dynamic
+		// or MCP tool, so its rows stay in the transcript.
+		require.Contains(t, read(t, chat, readChatTranscriptArgs{}, false), "history-sibling-text")
+
+		budget := newInternalTestServer(t, authzDB, ps, chatprovider.ProviderAPIKeys{},
+			withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkChatTodos, codersdk.ExperimentForkTokenBudget}))
+		tools, err := budget.appendForkTools(chatdTestContext(t), nil, chat, chat.LastModelConfigID)
+		require.NoError(t, err)
+		raw := runChatTodoTool(chatdTestContext(t), t, tools, readChatTranscriptToolName, readChatTranscriptArgs{}, false)
+		require.Contains(t, raw, "question")
+		require.NotContains(t, raw, "history-sibling-text")
+	})
+
 	t.Run("BoundsThePageSize", func(t *testing.T) {
 		t.Parallel()
 		chat := newChat(t, user.ID, uuid.NullUUID{}, uuid.NullUUID{})

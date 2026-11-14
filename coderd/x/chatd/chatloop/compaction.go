@@ -113,6 +113,7 @@ type CompactionResult struct {
 	// ProviderResponseID identifies the summary response. See
 	// PersistedStep.ProviderResponseID.
 	ProviderResponseID string
+	ContextWindow      *ContextWindowBoundary
 }
 
 // CompactionToolResult is the chat_summarized tool result payload, both

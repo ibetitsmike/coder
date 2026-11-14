@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -21,12 +22,24 @@ import (
 // can supply. The variadic keeps every existing caller valid.
 type forkToolsOption struct {
 	getWorkspaceConn func(context.Context) (workspacesdk.AgentConn, error)
+	model            *chatprovider.Model
+	prompt           *[]fantasy.Message
+	pending          []fantasy.Message
 }
 
 // forkToolsWithWorkspaceConn hands the turn's workspace connection getter to
 // the fork tools that read workspace files during a tool call.
 func forkToolsWithWorkspaceConn(get func(context.Context) (workspacesdk.AgentConn, error)) forkToolsOption {
 	return forkToolsOption{getWorkspaceConn: get}
+}
+
+// forkToolsWithModel hands the turn's model and prompt to the fork features
+// that depend on the model or bound the prompt: view_image checks that the
+// model takes images, and limitViewedImages rewrites *prompt. pending is the
+// unanswered user tail that the turn appends to *prompt later, so its media
+// counts toward the image budget.
+func forkToolsWithModel(model chatprovider.Model, prompt *[]fantasy.Message, pending []fantasy.Message) forkToolsOption {
+	return forkToolsOption{model: &model, prompt: prompt, pending: pending}
 }
 
 // appendForkTools returns the turn tool list plus the tools of the fork
@@ -36,8 +49,24 @@ func forkToolsWithWorkspaceConn(get func(context.Context) (workspacesdk.AgentCon
 // the list is exactly the upstream list.
 func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool, chat database.Chat, modelConfigID uuid.UUID, opts ...forkToolsOption) ([]fantasy.AgentTool, error) {
 	var opt forkToolsOption
-	if len(opts) > 0 {
-		opt = opts[0]
+	for _, o := range opts {
+		if o.getWorkspaceConn != nil {
+			opt.getWorkspaceConn = o.getWorkspaceConn
+		}
+		if o.model != nil {
+			opt.model = o.model
+		}
+		if o.prompt != nil {
+			opt.prompt = o.prompt
+			opt.pending = o.pending
+		}
+	}
+	// The bound applies with the experiment off too, so a chat that viewed
+	// images before the experiment was turned off stays bounded. A
+	// caller-supplied tool owns the name while the experiment is off, and its
+	// results are not viewed images.
+	if opt.prompt != nil && !p.dynamicToolOwnsViewImage(chat) {
+		*opt.prompt = limitViewedImages(*opt.prompt, opt.pending, opt.model)
 	}
 	// A workflow step child gets workflow_report before the dynamic tools,
 	// so the server tool wins the name (fork-workflows).
@@ -86,6 +115,12 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 	tools = p.withStoredSubagentTypes(p.withComputerUseSpawnOverrides(tools), chat)
 	if p.experiments.Enabled(codersdk.ExperimentForkFamilyMessages) {
 		tools = append(tools, p.familyMessageTools(chat)...)
+	}
+	if p.experiments.Enabled(codersdk.ExperimentForkTokenBudget) {
+		tools = append(tools, p.chatNotesTool(chat), p.chatHistoryTool(chat), p.newContextTool(chat))
+	}
+	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) && opt.model != nil {
+		tools = append(tools, viewImageTool(*opt.model, opt.getWorkspaceConn))
 	}
 	if p.experiments.Enabled(codersdk.ExperimentForkSubagentIsolation) {
 		tools = p.withForkSpawnIsolation(tools, chat)
