@@ -9,6 +9,8 @@ import (
 
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/pluginpacks/pluginpackstest"
 	"github.com/coder/coder/v2/codersdk"
@@ -112,6 +114,15 @@ func TestForkPluginPacksAudit(t *testing.T) {
 
 	_, err := client.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1"}})
 	require.NoError(t, err)
+	// A key that may update but not read the sources can still update them.
+	_, token := dbgen.APIKey(t, api.Database, database.APIKey{
+		UserID: owner.UserID,
+		Scopes: database.APIKeyScopes{"organization:read", "organization_skill:update"},
+	})
+	updater := codersdk.New(client.URL)
+	updater.SetSessionToken(token)
+	_, err = updater.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1", "example.com"}})
+	require.NoError(t, err)
 	install := codersdk.CreateForkPluginPackRequest{Name: "demo", SourceURL: repo.URL, SourcePath: "pack", Ref: "main"}
 	_, err = member.CreateForkPluginPack(ctx, orgID, install)
 	_ = requireSDKError(t, err, http.StatusNotFound)
@@ -122,10 +133,12 @@ func TestForkPluginPacksAudit(t *testing.T) {
 	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
 
 	sources := forkAuditEntries(t, auditor, orgID, "plugin_pack_sources")
-	require.Len(t, sources, 1)
+	require.Len(t, sources, 2)
 	require.Equal(t, "update", sources[0].Operation)
 	require.JSONEq(t, `[]`, string(sources[0].Changes["hosts"].Old))
 	require.JSONEq(t, `["127.0.0.1"]`, string(sources[0].Changes["hosts"].New))
+	require.JSONEq(t, `["127.0.0.1"]`, string(sources[1].Changes["hosts"].Old))
+	require.JSONEq(t, `["127.0.0.1","example.com"]`, string(sources[1].Changes["hosts"].New))
 
 	entries := forkAuditEntries(t, auditor, orgID, "plugin_pack")
 	require.Len(t, entries, 3, "the denied install is not audited")

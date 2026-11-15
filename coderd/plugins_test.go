@@ -278,11 +278,15 @@ func TestPluginsAudit(t *testing.T) {
 		Enabled: &disabled,
 	})
 	require.NoError(t, err)
+	_, err = client.UpdatePlugin(ctx, plugin.ID, codersdk.UpdatePluginRequest{
+		Config: &map[string]string{"token": "second-secret-value"},
+	})
+	require.NoError(t, err)
 	require.NoError(t, client.DeletePlugin(ctx, plugin.ID))
 
 	entries := forkAuditEntries(t, auditor, owner.OrganizationID, "plugin")
-	require.Len(t, entries, 3)
-	for i, op := range []string{"create", "update", "delete"} {
+	require.Len(t, entries, 4)
+	for i, op := range []string{"create", "update", "update", "delete"} {
 		require.Equal(t, op, entries[i].Operation)
 		require.Equal(t, plugin.ID.String(), entries[i].ResourceID)
 		require.Equal(t, plugin.Name, entries[i].ResourceName)
@@ -293,7 +297,8 @@ func TestPluginsAudit(t *testing.T) {
 	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
 	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
 	require.NotContains(t, entries[1].Changes, "config_keys", "the keys did not change")
-	require.JSONEq(t, `"`+plugin.Name+`"`, string(entries[2].Changes["name"].Old))
+	require.Empty(t, entries[2].Changes, "the same config again changes nothing")
+	require.JSONEq(t, `"`+plugin.Name+`"`, string(entries[3].Changes["name"].Old))
 
 	for _, log := range auditor.AuditLogs() {
 		for _, raw := range [][]byte{log.AdditionalFields, log.Diff} {

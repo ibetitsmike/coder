@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -95,7 +96,10 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	old, err := fdb.GetChatOrganizationSubagentLimits(ctx, organization.ID)
+	// The caller may hold update without read, so the audit-only read of
+	// the old limits runs as the system after the update check above.
+	//nolint:gocritic // Authorized by the update check above.
+	old, err := fdb.GetChatOrganizationSubagentLimits(dbauthz.AsSystemRestricted(ctx), organization.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching organization subagent limits.",

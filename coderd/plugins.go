@@ -414,7 +414,7 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fa.diff(forkAuditPlugin(old), forkAuditPlugin(p))
-	if req.Config != nil {
+	if req.Config != nil && p.Config != old.Config {
 		fa.secret("config")
 	}
 	api.publishPluginsChanged()

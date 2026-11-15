@@ -8,6 +8,8 @@ import (
 
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -172,7 +174,7 @@ func TestForkChatOrganizationSubagentLimitsAudit(t *testing.T) {
 
 	ctx := testutil.Context(t, testutil.WaitLong)
 	auditor := audit.NewMock()
-	client := coderdtest.New(t, &coderdtest.Options{
+	client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
 		Auditor: auditor,
 		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
 			dv.Experiments = []string{string(codersdk.ExperimentForkNestedSubagents)}
@@ -186,7 +188,14 @@ func TestForkChatOrganizationSubagentLimitsAudit(t *testing.T) {
 	_ = requireSDKError(t, err, http.StatusNotFound)
 	_, err = client.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{MaxDepth: ptr.Ref[int32](3)})
 	require.NoError(t, err)
-	_, err = client.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{MaxConcurrent: ptr.Ref[int32](10)})
+	// A key that may update but not read the limits can still update them.
+	_, token := dbgen.APIKey(t, db, database.APIKey{
+		UserID: owner.UserID,
+		Scopes: database.APIKeyScopes{"organization:read", "chat_model_config:update"},
+	})
+	updater := codersdk.New(client.URL)
+	updater.SetSessionToken(token)
+	_, err = updater.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{MaxConcurrent: ptr.Ref[int32](10)})
 	require.NoError(t, err)
 
 	entries := forkAuditEntries(t, auditor, orgID, "subagent_limits")

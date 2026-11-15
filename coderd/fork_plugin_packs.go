@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
@@ -104,7 +105,10 @@ func (api *API) updateForkPluginPackSources(rw http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	oldHosts, err := forkPluginPackSourceHosts(ctx, fdb, httpmw.OrganizationParam(r).ID)
+	// The caller may hold update without read, so the audit-only read of
+	// the old hosts runs as the system after the update check above.
+	//nolint:gocritic // Authorized by authorizeForkPluginPacks.
+	oldHosts, err := forkPluginPackSourceHosts(dbauthz.AsSystemRestricted(ctx), fdb, httpmw.OrganizationParam(r).ID)
 	if err != nil {
 		writeForkPluginPackError(rw, err)
 		return
