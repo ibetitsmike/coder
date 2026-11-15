@@ -152,7 +152,7 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	now := wakeupTestSlot
 	tick := func() {
 		t.Helper()
-		now = now.Add(wakeupPollInterval + time.Second)
+		now = now.Add(eventsPollInterval + time.Second)
 		worker.wakeupOnce(ctx, now)
 	}
 
@@ -160,7 +160,7 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt), "the process still runs")
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
-	require.WithinDuration(t, now.Add(wakeupPollInterval), got.NextRunAt.Time, time.Second, "polls again")
+	require.WithinDuration(t, now.Add(eventsPollInterval), got.NextRunAt.Time, time.Second, "polls again")
 
 	tick()
 	require.Equal(t, []string{
@@ -223,7 +223,7 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status, "the process still runs")
 
-	tick(wakeupPollInterval + time.Second)
+	tick(eventsPollInterval + time.Second)
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "in the cool-down")
 
 	tick(time.Minute)
@@ -232,7 +232,7 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	tick(2 * time.Minute)
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 2, "no line messages after the maximum")
 
-	tick(wakeupPollInterval + time.Second)
+	tick(eventsPollInterval + time.Second)
 	messages := f.wakeMessages(t, chat, wakeup.Prompt)
 	require.Len(t, messages, 3)
 	require.True(t, strings.HasPrefix(messages[2], prefix+"exited with code 1."), messages[2])
