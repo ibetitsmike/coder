@@ -318,7 +318,9 @@ func (r *runner) syncSubscriptions(ctx context.Context) {
 }
 
 // subscribeUsers keeps one chat watch subscription for each user in users.
-// It reports whether it subscribed to a user it did not follow before.
+// It reports whether a user in users was not followed before, also when the
+// subscription failed: no event reports that user's chats, so every scan
+// binds them until a subscription starts.
 func (r *runner) subscribeUsers(ctx context.Context, users map[uuid.UUID]struct{}) bool {
 	r.subsMu.Lock()
 	defer r.subsMu.Unlock()
@@ -333,13 +335,13 @@ func (r *runner) subscribeUsers(ctx context.Context, users map[uuid.UUID]struct{
 		if _, ok := r.subs[id]; ok {
 			continue
 		}
+		added = true
 		cancel, err := r.m.opts.Pubsub.Subscribe(coderdpubsub.ChatWatchEventChannel(id), r.onChatEvent)
 		if err != nil {
 			r.logger.Warn(ctx, "subscribe to chat events", slog.F("user_id", id), slog.Error(err))
 			continue
 		}
 		r.subs[id] = cancel
-		added = true
 	}
 	return added
 }

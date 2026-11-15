@@ -302,6 +302,28 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 	r.scan(ctx)
 	fullBinds, _ = binds()
 	require.Equal(t, 4, fullBinds)
+
+	// While a user's subscription fails, every scan binds, since no event
+	// reports that user's chats.
+	r.m.opts.Pubsub = failingChatSubscribe{ps}
+	mu.Lock()
+	links = append(links, forkdb.PluginUserLink{UserID: uuid.New()})
+	mu.Unlock()
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 6, fullBinds)
+	r.m.opts.Pubsub = ps
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 7, fullBinds)
+}
+
+type failingChatSubscribe struct{ pubsub.Pubsub }
+
+func (failingChatSubscribe) Subscribe(string, pubsub.Listener) (func(), error) {
+	return nil, xerrors.New("subscribe failed")
 }
 
 // newDeliveryRunner returns a runner with the bridge plugin loaded
