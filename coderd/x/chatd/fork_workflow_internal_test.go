@@ -583,7 +583,7 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		require.Empty(t, f.user.RBACRoles)
 		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
 		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
-		require.Len(t, tools, 2, "a member's own chat runs workflows")
+		require.Len(t, tools, 3, "a member's own chat runs workflows")
 
 		input, err := json.Marshal(runWorkflowArgs{
 			Script: journalReviewScript,
@@ -613,7 +613,7 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		})
 		require.NoError(t, err)
 		otherTools := f.server.forkWorkflowTools(ctx, otherChat, f.model.ID, nil)
-		require.Len(t, otherTools, 2)
+		require.Len(t, otherTools, 3)
 		awaitInput := `{"run_id":"` + runID.String() + `","wait_seconds":0}`
 		resp, err = otherTools[1].Run(ctx, fantasy.ToolCall{Input: awaitInput})
 		require.NoError(t, err)
@@ -629,13 +629,15 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		assert.Equal(t, workflowStatusStopped, stopped.Status, stopped.Error)
 	})
 
-	t.Run("RootTurnGetsBothTools", func(t *testing.T) {
+	t.Run("RootTurnGetsWorkflowTools", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
 		tools := f.server.forkWorkflowTools(chatdTestContext(t), f.parent(chatdTestContext(t), t), uuid.New(), nil)
-		require.Len(t, tools, 2)
+		require.Len(t, tools, 3)
 		assert.Equal(t, runWorkflowToolName, tools[0].Info().Name)
 		assert.Equal(t, awaitWorkflowToolName, tools[1].Info().Name)
+		assert.Equal(t, listWorkflowsToolName, tools[2].Info().Name)
+		assert.Contains(t, tools[0].Info().Parameters, "name", "run_workflow runs saved workflows by name")
 		// run_workflow serializes against the other tool calls of the batch,
 		// so a script_path read sees a write from the same batch.
 		assert.True(t, tools[0].(interface{ SerialToolCalls() bool }).SerialToolCalls())
@@ -646,7 +648,7 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		f := newForkWorkflowFixture(t)
 		ctx := chatdTestContext(t)
 		tools := f.server.forkWorkflowTools(ctx, f.parent(ctx, t), uuid.New(), nil)
-		require.Len(t, tools, 2)
+		require.Len(t, tools, 3)
 		ctx = workspacesdk.WithToolCallID(ctx, uuid.New())
 		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"script_path":"/home/coder/w.star"}`})
 		require.NoError(t, err)
