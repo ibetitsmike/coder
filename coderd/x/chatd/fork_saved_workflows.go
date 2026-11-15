@@ -6,6 +6,7 @@ package chatd
 // create, edit and delete them through the coderd routes.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,12 +36,16 @@ const (
 	// listWorkflowsPageBytes bounds one page of the list below the smallest
 	// tool result budget (16 KiB), so chatloop never cuts the JSON.
 	listWorkflowsPageBytes = 12 << 10
+
+	// workflowDetailBytes bounds the result of list_workflows with a name
+	// below the same budget.
+	workflowDetailBytes = 15 << 10
 )
 
 const listWorkflowsDescription = `List the saved workflows that run_workflow can run by name. ` +
 	`They are your personal workflows and the organization workflows shared with you. ` +
 	`Without "name", it returns a page of workflows, each with its name, tier (personal or organization), a short description and whether it has an args schema, and "next_offset" when more remain: send it as "offset" for the next page. ` +
-	`With "name", it returns that workflow's full description, args schema and phases. ` +
+	`With "name", it returns that workflow's full description, args schema and phases, and a "note" when some of it does not fit. ` +
 	`This tool only reads. Users save and edit workflows in Coder; agents cannot.`
 
 // maxWorkflowArgsSchemaDepth bounds the nesting of a saved args schema.
@@ -87,6 +92,7 @@ type listedWorkflow struct {
 	Phases        []string        `json:"phases,omitempty"`
 	HasArgsSchema bool            `json:"has_args_schema"`
 	ArgsSchema    json.RawMessage `json:"args_schema,omitempty"`
+	Note          string          `json:"note,omitempty"`
 }
 
 // savedWorkflowStore returns the fork queries and a context that reads as
@@ -276,35 +282,69 @@ func (p *Server) listWorkflowsTool(chat database.Chat) fantasy.AgentTool {
 		listWorkflowsToolName,
 		listWorkflowsDescription,
 		func(ctx context.Context, args listWorkflowsArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			var out any
 			if name := strings.TrimSpace(args.Name); name != "" {
 				entry, _, err := p.loadSavedWorkflow(ctx, chat, name)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
-				out = entry
-			} else {
-				entries, err := p.listSavedWorkflows(ctx, chat)
+				data, err := marshalWorkflowDetail(entry)
 				if err != nil {
-					return fantasy.NewTextErrorResponse(err.Error()), nil
+					return fantasy.NewTextErrorResponse("marshal saved workflow: " + err.Error()), nil
 				}
-				page, next, err := pageListedWorkflows(entries, args.Offset)
-				if err != nil {
-					return fantasy.NewTextErrorResponse(err.Error()), nil
-				}
-				list := map[string]any{"workflows": page}
-				if next > 0 {
-					list["next_offset"] = next
-				}
-				out = list
+				return fantasy.NewTextResponse(string(data)), nil
 			}
-			data, err := json.Marshal(out)
+			entries, err := p.listSavedWorkflows(ctx, chat)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			page, next, err := pageListedWorkflows(entries, args.Offset)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			list := map[string]any{"workflows": page}
+			if next > 0 {
+				list["next_offset"] = next
+			}
+			data, err := json.Marshal(list)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("marshal saved workflows: " + err.Error()), nil
 			}
 			return fantasy.NewTextResponse(string(data)), nil
 		},
 	)
+}
+
+// marshalWorkflowDetail encodes entry in at most workflowDetailBytes. When
+// it does not fit, it cuts the description, then drops the phases, then the
+// args schema, which run_workflow still checks args against.
+func marshalWorkflowDetail(entry listedWorkflow) ([]byte, error) {
+	steps := []func(*listedWorkflow){
+		func(e *listedWorkflow) {
+			e.Description = truncateWorkflowDescription(e.Description)
+			e.Note = "The description is cut to fit one tool result."
+		},
+		func(e *listedWorkflow) {
+			e.Phases = nil
+			e.Note = "The description is cut and the phases are left out to fit one tool result."
+		},
+		func(e *listedWorkflow) {
+			e.ArgsSchema = nil
+			e.Note = "The args schema is too large for one tool result. run_workflow reports which args do not match it."
+		},
+	}
+	for i := 0; ; i++ {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(entry); err != nil {
+			return nil, xerrors.Errorf("encode: %w", err)
+		}
+		data := bytes.TrimRight(buf.Bytes(), "\n")
+		if len(data) <= workflowDetailBytes || i == len(steps) {
+			return data, nil
+		}
+		steps[i](&entry)
+	}
 }
 
 // checkJSONDepth fails when raw nests objects and arrays deeper than limit.

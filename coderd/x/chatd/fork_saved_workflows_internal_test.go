@@ -251,6 +251,43 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 		assert.True(t, resp.IsError)
 	})
 
+	t.Run("LargeDetail", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		phases := make([]string, 32)
+		for i := range phases {
+			phases[i] = fmt.Sprintf("%02d", i) + strings.Repeat("\x01", 126)
+		}
+		// The routes cap a schema at 12 KiB; the table allows 16 KiB.
+		for name, schemaBytes := range map[string]int{"capped": 12 << 10, "table": 16000} {
+			schema := `{"type":"object","title":"` + strings.Repeat("<", schemaBytes-30) + `"}`
+			_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
+				OrganizationID: f.org.ID,
+				UserID:         f.user.ID,
+				Name:           name,
+				Description:    strings.Repeat("\x01", 4096),
+				Script:         greetWorkflowScript,
+				Phases:         phases,
+				ArgsSchema:     pqtype.NullRawMessage{RawMessage: json.RawMessage(schema), Valid: true},
+			})
+			require.NoError(t, err)
+		}
+		tools := f.server.forkWorkflowTools(ctx, f.parent(ctx, t), f.model.ID, nil)
+
+		for name, wantSchema := range map[string]bool{"capped": true, "table": false} {
+			resp := runTool(ctx, t, tools[2], `{"name":"`+name+`"}`)
+			require.False(t, resp.IsError, resp.Content)
+			require.LessOrEqual(t, len(resp.Content), 16<<10, "the detail fits the smallest tool result budget")
+			var got listedWorkflow
+			require.NoError(t, json.Unmarshal([]byte(resp.Content), &got), name)
+			assert.True(t, got.HasArgsSchema, name)
+			assert.Equal(t, wantSchema, len(got.ArgsSchema) > 0, name)
+			assert.NotEmpty(t, got.Note, name)
+			assert.LessOrEqual(t, len(got.Description), maxListedWorkflowDescription+3, name)
+		}
+	})
+
 	t.Run("RejectsBadInput", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
