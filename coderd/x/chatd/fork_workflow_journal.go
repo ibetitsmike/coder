@@ -16,9 +16,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"github.com/sqlc-dev/pqtype"
-
 	"cdr.dev/slog/v3"
+	"github.com/sqlc-dev/pqtype"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
