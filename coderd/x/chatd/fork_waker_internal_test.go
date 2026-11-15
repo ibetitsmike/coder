@@ -281,6 +281,34 @@ func TestWakerPausedBeforeDelivery(t *testing.T) {
 	require.Zero(t, got.RunCount)
 }
 
+// A delivery that finds its chat busy writes nothing and does not poke the
+// chat again, so a chat that turns busy between the list and the send cannot
+// spin the waker. The end of the turn pokes it instead.
+func TestWakerBusyDeliveryDoesNotPoke(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+	server := newUnstartedServer(t, f.pubsub, f.db)
+
+	var deliveries atomic.Int64
+	runWakerPass(ctx, server, f.db, quartz.NewReal(), wakeupTestSlot.Add(time.Second), func(ctx context.Context, fdb forkdb.Store, w forkdb.ChatWakeup, now time.Time) error {
+		if deliveries.Add(1) > 1 {
+			return server.deliverWakeupSafely(ctx, fdb, w, now)
+		}
+		// The chat is busy for the delivery and idle again right after,
+		// with no commit that pokes. Only a poke by the delivery itself
+		// could start a second one.
+		forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
+		err := server.deliverWakeupSafely(ctx, fdb, w, now)
+		forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+		return err
+	})
+	require.EqualValues(t, 1, deliveries.Load())
+	require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt))
+}
+
 // Wake-ups that wait for their busy chats cost one statement per sweep and
 // no delivery.
 func TestWakerWaitingWakeupsCostOneStatementPerSweep(t *testing.T) {

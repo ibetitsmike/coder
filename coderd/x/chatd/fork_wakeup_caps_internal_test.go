@@ -204,7 +204,7 @@ func TestWakeupCaps(t *testing.T) {
 		require.True(t, listed[0].Due)
 		forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
 
-		require.NoError(t, worker.server.deliverWakeupSafely(ctx, fdb, listed[0].ChatWakeup, now))
+		require.ErrorIs(t, worker.server.deliverWakeupSafely(ctx, fdb, listed[0].ChatWakeup, now), errWakeupChatBusy)
 		got := f.wakeup(t, wakeup.ID)
 		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)

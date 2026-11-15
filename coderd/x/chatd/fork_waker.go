@@ -287,6 +287,8 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 		cancel()
 		switch {
 		case err == nil, ctx.Err() != nil:
+		case errors.Is(err, errWakeupChatBusy):
+			// Nothing was written, and the end of the turn pokes the chat.
 		case errors.Is(err, errWakeupNotDue):
 			k.logger.Debug(ctx, "chat wake-up changed before its delivery",
 				slog.F("wakeup_id", wakeup.ID),
@@ -304,8 +306,9 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 		delete(k.inflight, wakeup.ChatID)
 		k.mu.Unlock()
 		// A delivery that ended its occurrence may have set the next run
-		// time, so the chat gets a pass that moves the timer. A failure
-		// waits for the sweep, unless a pass found more meanwhile.
+		// time, so the chat gets a pass that moves the timer. A failure or
+		// a busy chat waits for the sweep or the end of the turn, unless a
+		// pass found more meanwhile.
 		if err == nil || again {
 			k.poke(wakeup.ChatID)
 		}

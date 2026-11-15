@@ -59,8 +59,8 @@ type wakeupFinish struct {
 
 // deliverWakeup sends the prompt of a due wake-up to its chat as the chat
 // owner and records the occurrence. A busy chat gets nothing and nothing is
-// written: the wake-up stays due, and the commit that ends the turn pokes the
-// waker.
+// written, which returns errWakeupChatBusy: the wake-up stays due, and the
+// commit that ends the turn pokes the waker.
 func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, now time.Time) error {
 	chat, err := p.db.GetChatByID(ctx, wakeup.ChatID)
 	if err != nil {
@@ -80,7 +80,7 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 			slog.F("chat_id", chat.ID),
 			slog.F("chat_status", chat.Status),
 		)
-		return nil
+		return errWakeupChatBusy
 	case wakeup.Kind == forkdb.ChatWakeupKindEvents:
 		return p.deliverEventsWakeup(ctx, fdb, chat, wakeup, now)
 	}
@@ -110,7 +110,7 @@ func (p *Server) finishWakeupSend(ctx context.Context, chat database.Chat, wakeu
 	case errors.Is(err, errWakeupChatBusy), errors.Is(err, chatstate.ErrMessageQueueFull):
 		// The chat turned busy after the status check. The wake-up stays
 		// due for the end of the turn.
-		return nil
+		return errWakeupChatBusy
 	case errors.Is(err, errWakeupOccurrenceRan):
 		return p.finishWakeup(ctx, chat, wakeup, now, nextWakeupRun(wakeup, now, 0))
 	}
