@@ -143,7 +143,9 @@ func TestTodoSnapshotMessage(t *testing.T) {
 	// as due.
 	snapshotText := func(t *testing.T, srv *Server, chat database.Chat) (string, bool) {
 		t.Helper()
-		message, ok, err := srv.todoSnapshotMessage(chatdTestContext(t), chat)
+		promptRows, err := db.GetChatMessagesForPromptByChatID(chatdTestContext(t), chat.ID)
+		require.NoError(t, err)
+		message, ok, err := srv.todoSnapshotMessage(chatdTestContext(t), chat, promptRows)
 		require.NoError(t, err)
 		if !ok {
 			return "", false
