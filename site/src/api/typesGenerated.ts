@@ -4125,10 +4125,10 @@ export interface ChatTodoList {
 }
 
 // From codersdk/fork_chat_todos.go
-export type ChatTodoStatus = "cancelled" | "done" | "in_progress" | "pending";
+export type ChatTodoStatus = "canceled" | "done" | "in_progress" | "pending";
 
 export const ChatTodoStatuses: ChatTodoStatus[] = [
-	"cancelled",
+	"canceled",
 	"done",
 	"in_progress",
 	"pending",

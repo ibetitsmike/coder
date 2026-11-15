@@ -25193,20 +25193,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -27273,7 +27273,7 @@ const docTemplate = `{
                 "pending",
                 "in_progress",
                 "done",
-                "cancelled"
+                "canceled"
             ],
             "x-enum-varnames": [
                 "ChatTodoStatusPending",
@@ -29734,6 +29734,18 @@ const docTemplate = `{
         "codersdk.Experiment": {
             "type": "string",
             "enum": [
+                "fork-chat-todos",
+                "fork-nested-subagents",
+                "fork-agent-definitions",
+                "fork-subagent-isolation",
+                "fork-chat-wakeups",
+                "fork-plugin-packs",
+                "fork-pinned-skills",
+                "fork-workflows",
+                "fork-family-messages",
+                "fork-html-attachments",
+                "fork-token-budget",
+                "fork-view-image",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -29751,19 +29763,7 @@ const docTemplate = `{
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
                 "chat-acp-subagents",
-                "chat-automations",
-                "fork-chat-todos",
-                "fork-nested-subagents",
-                "fork-agent-definitions",
-                "fork-subagent-isolation",
-                "fork-chat-wakeups",
-                "fork-plugin-packs",
-                "fork-pinned-skills",
-                "fork-workflows",
-                "fork-family-messages",
-                "fork-html-attachments",
-                "fork-token-budget",
-                "fork-view-image"
+                "chat-automations"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -29786,6 +29786,18 @@ const docTemplate = `{
                 "ExperimentWorkspaceUsage": "Enables the new workspace usage tracking."
             },
             "x-enum-descriptions": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -29803,21 +29815,21 @@ const docTemplate = `{
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
                 "Enables workspace-local ACP subagent tools in root chats.",
-                "Enables webhook and scheduled automations that deliver prompts to agent chats.",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                ""
+                "Enables webhook and scheduled automations that deliver prompts to agent chats."
             ],
             "x-enum-varnames": [
+                "ExperimentForkChatTodos",
+                "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions",
+                "ExperimentForkSubagentIsolation",
+                "ExperimentForkChatWakeups",
+                "ExperimentForkPluginPacks",
+                "ExperimentForkPinnedSkills",
+                "ExperimentForkWorkflows",
+                "ExperimentForkFamilyMessages",
+                "ExperimentForkHTMLAttachments",
+                "ExperimentForkTokenBudget",
+                "ExperimentForkViewImage",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -29835,19 +29847,7 @@ const docTemplate = `{
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
                 "ExperimentChatACPSubagents",
-                "ExperimentChatAutomations",
-                "ExperimentForkChatTodos",
-                "ExperimentForkNestedSubagents",
-                "ExperimentForkAgentDefinitions",
-                "ExperimentForkSubagentIsolation",
-                "ExperimentForkChatWakeups",
-                "ExperimentForkPluginPacks",
-                "ExperimentForkPinnedSkills",
-                "ExperimentForkWorkflows",
-                "ExperimentForkFamilyMessages",
-                "ExperimentForkHTMLAttachments",
-                "ExperimentForkTokenBudget",
-                "ExperimentForkViewImage"
+                "ExperimentChatAutomations"
             ]
         },
         "codersdk.ExperimentRule": {

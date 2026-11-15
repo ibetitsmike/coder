@@ -956,6 +956,25 @@ func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.Up
 	return f.db.UpdateWorkflowRunStatus(ctx, arg)
 }
 
+// MarkWorkflowStepReused authorizes as an update of the step run's chat, like
+// UpdateWorkflowStep.
+func (f *forkQuerier) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	step, err := f.db.GetWorkflowStep(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
+	}
+	return f.db.MarkWorkflowStepReused(ctx, id)
+}
+
 // MarkWorkflowStepsReusedByRun authorizes as an update of the run's chat, like
 // UpdateWorkflowRunStatus.
 func (f *forkQuerier) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {

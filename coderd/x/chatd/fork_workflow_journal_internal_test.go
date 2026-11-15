@@ -223,8 +223,9 @@ func TestForkWorkflowJournal(t *testing.T) {
 }
 
 // TestForkWorkflowLiveLogs covers the log write-through of a live run: the
-// journal keeps the lines the script printed so far, capped like the result,
-// a restart keeps them, and the terminal snapshot replaces the column.
+// journal keeps the lines the script printed so far, a burst lands in one
+// paced write, a restart keeps them, and the terminal snapshot replaces the
+// column.
 func TestForkWorkflowLiveLogs(t *testing.T) {
 	t.Parallel()
 
@@ -253,6 +254,15 @@ def main(args):
 		assert.Equal(t, []string{"first line", "second line"}, journalLogs())
 		assert.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id))
 
+		// The write-through paces itself: the next burst waits for the
+		// interval instead of writing one row per line.
+		before, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		run.log("third line")
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.Equal(t, before.UpdatedAt, row.UpdatedAt, "a line inside the interval does not write yet")
+
 		// A restart keeps the live lines: the sweep only flips the status.
 		f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {
@@ -270,17 +280,19 @@ def main(args):
 		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
 		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
 		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
-		assert.Equal(t, []string{"first line", "second line"}, res.Logs)
-		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		assert.Equal(t, []string{"first line", "second line", "third line"}, res.Logs)
+		row, err = fdb.GetWorkflowRun(ctx, run.id)
 		require.NoError(t, err)
 		require.True(t, row.Result.Valid)
 		var snapshot struct {
 			Logs []string `json:"logs"`
 		}
 		require.NoError(t, json.Unmarshal(row.Result.RawMessage, &snapshot))
-		assert.Equal(t, []string{"first line", "second line"}, snapshot.Logs)
+		assert.Equal(t, []string{"first line", "second line", "third line"}, snapshot.Logs)
 	})
 
+	// A script that logs in a loop keeps a single write in flight, so its
+	// journal column ends capped like the result.
 	t.Run("CappedLikeTheResult", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)

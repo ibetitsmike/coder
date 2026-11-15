@@ -92,6 +92,11 @@ func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg 
 	return f.s.UpdateWorkflowRunStatus(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	defer f.observe(ctx, "MarkWorkflowStepReused", time.Now())
+	return f.s.MarkWorkflowStepReused(ctx, id)
+}
+
 func (f forkQueryMetricsStore) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
 	defer f.observe(ctx, "MarkWorkflowStepsReusedByRun", time.Now())
 	return f.s.MarkWorkflowStepsReusedByRun(ctx, runID)

@@ -295,6 +295,17 @@ func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText s
 	return result.RowsAffected()
 }
 
+const markWorkflowStepReused = `-- name: MarkWorkflowStepReused :exec
+UPDATE workflow_steps SET reused = true WHERE id = $1
+`
+
+// The replay of a finished step flips only the reuse flag: its status, value
+// and finished_at stay as the journal holds them.
+func (q *Queries) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markWorkflowStepReused, id)
+	return err
+}
+
 const markWorkflowStepsReusedByRun = `-- name: MarkWorkflowStepsReusedByRun :exec
 UPDATE workflow_steps SET reused = true
 WHERE run_id = $1 AND NOT reused

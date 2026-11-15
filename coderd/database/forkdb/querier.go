@@ -201,6 +201,9 @@ type Querier interface {
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// The replay of a finished step flips only the reuse flag: its status, value
+	// and finished_at stay as the journal holds them.
+	MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error
 	// The resume of a terminal run replays every step of the stored snapshot, so
 	// the run detail reads the flag from the rows without the snapshot.
 	MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error

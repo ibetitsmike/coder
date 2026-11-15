@@ -83,7 +83,7 @@ curl -X GET http://coder-server:8080/api/v2/chats \
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -485,7 +485,7 @@ curl -X POST http://coder-server:8080/api/v2/chats \
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -632,7 +632,7 @@ curl -X POST http://coder-server:8080/api/v2/chats \
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -1969,7 +1969,7 @@ curl -X GET http://coder-server:8080/api/v2/chats/watch \
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -2170,7 +2170,7 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat} \
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2317,7 +2317,7 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat} \
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -2614,7 +2614,7 @@ curl -X PUT http://coder-server:8080/api/v2/chats/{chat}/context \
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2761,7 +2761,7 @@ curl -X PUT http://coder-server:8080/api/v2/chats/{chat}/context \
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3050,7 +3050,7 @@ If the chat has nothing to interrupt, for example because its turn already ended
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -3197,7 +3197,7 @@ If the chat has nothing to interrupt, for example because its turn already ended
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -4269,7 +4269,7 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/reconcile-invalid \
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -4416,7 +4416,7 @@ curl -X POST http://coder-server:8080/api/v2/chats/{chat}/reconcile-invalid \
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",

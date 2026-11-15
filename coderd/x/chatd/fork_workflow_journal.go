@@ -185,6 +185,20 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 	}
 }
 
+// markStepReused journals the reuse flag of a replayed step. A finished row
+// keeps its status, value and finished_at; only the flag flips. Best effort
+// like updateStep.
+func (j workflowJournal) markStepReused(ctx context.Context, id uuid.UUID) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		j.warn(ctx, "open workflow journal store", id, err)
+		return
+	}
+	if err := fdb.MarkWorkflowStepReused(journalCtx(ctx), id); err != nil {
+		j.warn(ctx, "journal workflow step reused", id, err)
+	}
+}
+
 // markStepsReused journals the reused flag of every step of a run. The
 // resume of a terminal run replays its whole snapshot, so the rows can carry
 // the flag the result already reports. Best effort like updateStep.
@@ -251,6 +265,24 @@ func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, logs []st
 	}
 }
 
+// restoreWorkflowLogs decodes the retained lines of a live run. It returns
+// nil for a column that holds no JSON array, for example on a row written
+// before the live-logs node.
+func restoreWorkflowLogs(raw json.RawMessage) ([]string, int) {
+	if len(raw) == 0 || !json.Valid(raw) || raw[0] != '[' {
+		return nil, 0
+	}
+	var logs []string
+	if err := json.Unmarshal(raw, &logs); err != nil || logs == nil {
+		return nil, 0
+	}
+	bytes := 0
+	for _, line := range logs {
+		bytes += len(line)
+	}
+	return logs, bytes
+}
+
 func (j workflowJournal) getSteps(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
@@ -290,7 +322,8 @@ func (p *Server) resumeWorkflowRun(
 			return nil, err
 		}
 		// The replayed steps mark reused in the journal rows too, so the
-		// run detail reads the flag without the snapshot.
+		// run detail reads the flag without the snapshot. The flush is
+		// best effort and leaves the terminal snapshot untouched.
 		p.workflowJournal().markStepsReused(ctx, row.ID)
 		if _, added := p.workflows.add(run); !added {
 			return p.workflows.get(row.ID), nil
@@ -353,6 +386,11 @@ func (p *Server) rehydrateWorkflowRun(
 		seen:          map[string]int{},
 		done:          make(chan struct{}),
 	}
+	// The replay keeps the retained pre-restart lines as its journal
+	// baseline: replayed log() lines and the snapshot that finish writes
+	// carry them, so the first replayed line does not shorten the column.
+	run.logs, run.logBytes = restoreWorkflowLogs(row.Logs)
+	run.logSeq = len(run.logs)
 	for _, srow := range stepRows {
 		step := &workflowStep{
 			id:         srow.ID,

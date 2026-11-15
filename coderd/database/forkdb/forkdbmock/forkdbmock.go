@@ -1566,6 +1566,20 @@ func (mr *MockStoreMockRecorder) MarkOpenWorkflowRunsInterrupted(ctx, errText an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkOpenWorkflowRunsInterrupted", reflect.TypeOf((*MockStore)(nil).MarkOpenWorkflowRunsInterrupted), ctx, errText)
 }
 
+// MarkWorkflowStepReused mocks base method.
+func (m *MockStore) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkWorkflowStepReused", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkWorkflowStepReused indicates an expected call of MarkWorkflowStepReused.
+func (mr *MockStoreMockRecorder) MarkWorkflowStepReused(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkWorkflowStepReused", reflect.TypeOf((*MockStore)(nil).MarkWorkflowStepReused), ctx, id)
+}
+
 // MarkWorkflowStepsReusedByRun mocks base method.
 func (m *MockStore) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
 	m.ctrl.T.Helper()

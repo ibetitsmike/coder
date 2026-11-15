@@ -64,6 +64,11 @@ JOIN workflow_runs r ON r.id = s.run_id
 WHERE r.chat_id = @chat_id
 GROUP BY s.run_id, s.status;
 
+-- name: MarkWorkflowStepReused :exec
+-- The replay of a finished step flips only the reuse flag: its status, value
+-- and finished_at stay as the journal holds them.
+UPDATE workflow_steps SET reused = true WHERE id = @id;
+
 -- name: MarkWorkflowStepsReusedByRun :exec
 -- The resume of a terminal run replays every step of the stored snapshot, so
 -- the run detail reads the flag from the rows without the snapshot.

@@ -2388,7 +2388,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2535,7 +2535,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3002,7 +3002,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "subagent",
+      "kind": "instruction_file",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
@@ -3036,7 +3036,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "subagent",
+  "kind": "instruction_file",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
@@ -3073,7 +3073,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatContextResourceKind
 
 ```json
-"subagent"
+"instruction_file"
 ```
 
 ### Properties
@@ -6110,9 +6110,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 #### Enumerated Values
 
-| Value(s)                                      |
-|-----------------------------------------------|
-| `cancelled`, `done`, `in_progress`, `pending` |
+| Value(s)                                     |
+|----------------------------------------------|
+| `canceled`, `done`, `in_progress`, `pending` |
 
 ## codersdk.ChatUnsupportedProvider
 
@@ -6324,7 +6324,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -10383,7 +10383,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"example"
+"fork-chat-todos"
 ```
 
 ### Properties

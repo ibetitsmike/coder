@@ -344,11 +344,16 @@ type workflowRun struct {
 	logSeq          int
 	journalMu       sync.Mutex
 	journaledLogSeq int
-	result          *runWorkflowResult
-	done            chan struct{}
-	awaiters        int
-	delivered       bool // an await_workflow call returned the end
-	notified        bool // the parent got the end message
+	// The write-through of the logs paces itself: lastLogFlush is when the
+	// journal last accepted a snapshot and logFlushTimer holds the pending
+	// flush of a burst. journalMu guards both.
+	lastLogFlush  time.Time
+	logFlushTimer *time.Timer
+	result        *runWorkflowResult
+	done          chan struct{}
+	awaiters      int
+	delivered     bool // an await_workflow call returned the end
+	notified      bool // the parent got the end message
 	// stopRequested marks a run that stop_workflow is unwinding. finish
 	// turns its outcome into a stopped run, not a failed one. cancel is the
 	// cancel of the script context, set before the script starts.
@@ -558,6 +563,10 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
+	// The end lands the last log burst: the scheduled flush of the final
+	// lines must not outlive the run.
+	r.cancelLogFlush()
+	r.flushLogs()
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -687,7 +696,7 @@ func (r *workflowRun) log(msg string) {
 	r.mu.Lock()
 	r.appendLogLocked(msg)
 	r.mu.Unlock()
-	r.flushLogs()
+	r.scheduleLogFlush()
 }
 
 func (r *workflowRun) appendLogLocked(msg string) {
@@ -699,6 +708,46 @@ func (r *workflowRun) appendLogLocked(msg string) {
 		r.logBytes -= len(r.logs[0])
 		r.logs = r.logs[1:]
 	}
+}
+
+// workflowLogFlushInterval paces the log write-through: a script that logs
+// in a loop must not issue a journal write per line. A run flushes at most
+// once per interval, and once more after it ends, so a mid-run read lags the
+// live lines at most by the interval.
+const workflowLogFlushInterval = 2 * time.Second
+
+// scheduleLogFlush flushes now when the last flush is older than the
+// interval, and otherwise arms one flush at the end of the interval. The
+// timer holds the flush, so a burst of lines lands in one write.
+func (r *workflowRun) scheduleLogFlush() {
+	r.journalMu.Lock()
+	defer r.journalMu.Unlock()
+	if r.logFlushTimer != nil {
+		return
+	}
+	now := time.Now()
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
+	if wait <= 0 {
+		go r.flushLogs()
+		return
+	}
+	r.logFlushTimer = time.AfterFunc(wait, func() {
+		r.journalMu.Lock()
+		r.logFlushTimer = nil
+		r.journalMu.Unlock()
+		r.flushLogs()
+	})
+}
+
+// cancelLogFlush drops a pending paced flush. finish calls it, so the last
+// write of the run is its own flushLogs call.
+func (r *workflowRun) cancelLogFlush() {
+	r.journalMu.Lock()
+	if r.logFlushTimer != nil {
+		r.logFlushTimer.Stop()
+		r.logFlushTimer = nil
+	}
+	r.journalMu.Unlock()
 }
 
 // flushLogs writes the retained log lines of a live run through to the
@@ -716,11 +765,13 @@ func (r *workflowRun) flushLogs() {
 		return
 	}
 	r.journalMu.Lock()
-	defer r.journalMu.Unlock()
 	if seq <= r.journaledLogSeq {
+		r.journalMu.Unlock()
 		return
 	}
 	r.journaledLogSeq = seq
+	r.lastLogFlush = time.Now()
+	r.journalMu.Unlock()
 	r.p.workflowJournal().setLogs(dbauthz.AsSystemRestricted(context.Background()), r.id, logs)
 }
 
@@ -781,12 +832,17 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	if journaled != nil {
 		// The step came from the journal: whether it finished before the
 		// restart or is still open, the script does not run it again, so
-		// the await result reports it as reused. The flag goes to the
-		// journal too, so the run detail reads it after the resume.
+		// the await result reports it as reused. A finished row keeps its
+		// status, value and finished_at; only the flag flips in the
+		// journal, so the run detail reads it after the resume.
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
-		r.p.workflowJournal().updateStep(ctx, journaled)
+		if journaled.status == stepStatusReported || journaled.status == stepStatusFailed {
+			r.p.workflowJournal().markStepReused(ctx, journaled.id)
+		} else {
+			r.p.workflowJournal().updateStep(ctx, journaled)
+		}
 		return journaled, nil
 	}
 
