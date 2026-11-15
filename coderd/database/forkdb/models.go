@@ -208,6 +208,67 @@ func AllChatWakeupStatusValues() []ChatWakeupStatus {
 	}
 }
 
+type ChatWakeupWatchKind string
+
+const (
+	ChatWakeupWatchKindChildDone   ChatWakeupWatchKind = "child_done"
+	ChatWakeupWatchKindProcess     ChatWakeupWatchKind = "process"
+	ChatWakeupWatchKindPullRequest ChatWakeupWatchKind = "pull_request"
+)
+
+func (e *ChatWakeupWatchKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChatWakeupWatchKind(s)
+	case string:
+		*e = ChatWakeupWatchKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChatWakeupWatchKind: %T", src)
+	}
+	return nil
+}
+
+type NullChatWakeupWatchKind struct {
+	ChatWakeupWatchKind ChatWakeupWatchKind `json:"chat_wakeup_watch_kind"`
+	Valid               bool                `json:"valid"` // Valid is true if ChatWakeupWatchKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChatWakeupWatchKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChatWakeupWatchKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChatWakeupWatchKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChatWakeupWatchKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChatWakeupWatchKind), nil
+}
+
+func (e ChatWakeupWatchKind) Valid() bool {
+	switch e {
+	case ChatWakeupWatchKindChildDone,
+		ChatWakeupWatchKindProcess,
+		ChatWakeupWatchKindPullRequest:
+		return true
+	}
+	return false
+}
+
+func AllChatWakeupWatchKindValues() []ChatWakeupWatchKind {
+	return []ChatWakeupWatchKind{
+		ChatWakeupWatchKindChildDone,
+		ChatWakeupWatchKindProcess,
+		ChatWakeupWatchKindPullRequest,
+	}
+}
+
 // Stored custom agent definitions. A row is in the organization tier when user_id and project_id are NULL, in the user tier when user_id is set, and in the project tier when project_id is set.
 type AgentDefinition struct {
 	ID             uuid.UUID `db:"id" json:"id"`
@@ -376,6 +437,26 @@ type ChatWakeupRun struct {
 	Error          sql.NullString      `db:"error" json:"error"`
 	CreatedAt      time.Time           `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time           `db:"updated_at" json:"updated_at"`
+}
+
+type ChatWakeupWatch struct {
+	ID             uuid.UUID             `db:"id" json:"id"`
+	WakeupID       uuid.UUID             `db:"wakeup_id" json:"wakeup_id"`
+	ChatID         uuid.UUID             `db:"chat_id" json:"chat_id"`
+	OrganizationID uuid.UUID             `db:"organization_id" json:"organization_id"`
+	Kind           ChatWakeupWatchKind   `db:"kind" json:"kind"`
+	Ordinal        int32                 `db:"ordinal" json:"ordinal"`
+	ChildChatID    uuid.NullUUID         `db:"child_chat_id" json:"child_chat_id"`
+	AgentID        uuid.NullUUID         `db:"agent_id" json:"agent_id"`
+	ProcessID      sql.NullString        `db:"process_id" json:"process_id"`
+	PullRequestUrl sql.NullString        `db:"pull_request_url" json:"pull_request_url"`
+	Spec           json.RawMessage       `db:"spec" json:"spec"`
+	FiredAt        sql.NullTime          `db:"fired_at" json:"fired_at"`
+	FiredPayload   pqtype.NullRawMessage `db:"fired_payload" json:"fired_payload"`
+	DeliveredAt    sql.NullTime          `db:"delivered_at" json:"delivered_at"`
+	Deliveries     int32                 `db:"deliveries" json:"deliveries"`
+	FailedAt       sql.NullTime          `db:"failed_at" json:"failed_at"`
+	CreatedAt      time.Time             `db:"created_at" json:"created_at"`
 }
 
 type Plugin struct {
