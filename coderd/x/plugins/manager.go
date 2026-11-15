@@ -5,8 +5,9 @@
 // Each runner keeps a delivery cursor per bound chat. A runner binds every
 // chat of its linked users when it subscribes to a new user, after a link
 // is created, and once every bind interval as a fallback. A created chat
-// watch event binds that one chat. The scan every scan interval only finds
-// due chats and binds nothing.
+// watch event binds that one chat. The scan every scan interval finds due
+// chats, and binds every chat only after a full bind failed or pubsub
+// dropped chat watch events.
 package plugins
 
 import (

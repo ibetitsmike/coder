@@ -76,9 +76,9 @@ type runner struct {
 	// delivery has not bound yet.
 	newChatsMu sync.Mutex
 	newChats   map[uuid.UUID]struct{}
-	// bindFailed is set while the last full bind failed, so the next scan
-	// tries again.
-	bindFailed atomic.Bool
+	// bindAgain is set when the last full bind failed or pubsub dropped
+	// chat events, so the next scan runs a full bind.
+	bindAgain atomic.Bool
 }
 
 func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
@@ -310,7 +310,7 @@ func (r *runner) syncSubscriptions(ctx context.Context) {
 	for _, l := range links {
 		users[l.UserID] = struct{}{}
 	}
-	if r.subscribeUsers(ctx, users) || r.bindFailed.Load() {
+	if r.subscribeUsers(ctx, users) || r.bindAgain.Load() {
 		// Bind after the subscription starts, so a chat the new user
 		// creates meanwhile is bound by this pass or by its event.
 		r.bindAll(ctx)
@@ -336,7 +336,7 @@ func (r *runner) subscribeUsers(ctx context.Context, users map[uuid.UUID]struct{
 			continue
 		}
 		added = true
-		cancel, err := r.m.opts.Pubsub.Subscribe(coderdpubsub.ChatWatchEventChannel(id), r.onChatEvent)
+		cancel, err := r.m.opts.Pubsub.SubscribeWithErr(coderdpubsub.ChatWatchEventChannel(id), r.onChatEvent)
 		if err != nil {
 			r.logger.Warn(ctx, "subscribe to chat events", slog.F("user_id", id), slog.Error(err))
 			continue

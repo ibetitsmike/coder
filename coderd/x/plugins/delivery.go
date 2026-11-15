@@ -60,8 +60,15 @@ func (r *runner) deliver(ctx context.Context) {
 
 // onChatEvent handles a chat watch event of a linked user. A created event
 // names a chat that may need a binding: a new chat, or one that was
-// unarchived. Every event wakes delivery.
-func (r *runner) onChatEvent(_ context.Context, message []byte) {
+// unarchived. Every event wakes delivery. When pubsub dropped events, the
+// next scan binds every chat, so a lost created event costs one scan
+// interval.
+func (r *runner) onChatEvent(_ context.Context, message []byte, err error) {
+	if err != nil {
+		r.bindAgain.Store(true)
+		r.wakeDelivery()
+		return
+	}
 	var event codersdk.ChatWatchEvent
 	if err := json.Unmarshal(message, &event); err == nil &&
 		event.Kind == codersdk.ChatWatchEventKindCreated &&
@@ -76,16 +83,18 @@ func (r *runner) onChatEvent(_ context.Context, message []byte) {
 
 // bindAll binds every top-level chat of the plugin's linked users. It runs
 // when the runner follows a new user, every bind interval, and on the next
-// scan after a full bind failed.
+// scan after a full bind failed or pubsub dropped chat events.
 func (r *runner) bindAll(ctx context.Context) {
 	if !r.delivers() {
 		return
 	}
+	// Clear the flag first, so events dropped during the query bind again.
+	r.bindAgain.Store(false)
 	err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID)
 	if err != nil {
 		r.logger.Warn(ctx, "bind chats to plugin", slog.Error(err))
+		r.bindAgain.Store(true)
 	}
-	r.bindFailed.Store(err != nil)
 }
 
 // bindNewChats binds the chats that created events named. A chat whose

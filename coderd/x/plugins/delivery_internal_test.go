@@ -318,11 +318,19 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 	r.scan(ctx)
 	fullBinds, _ = binds()
 	require.Equal(t, 7, fullBinds)
+
+	// When pubsub dropped chat events, the next scan binds once.
+	r.onChatEvent(ctx, nil, pubsub.ErrDroppedMessages)
+	testutil.TryReceive(ctx, t, r.deliverWake)
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 8, fullBinds)
 }
 
 type failingChatSubscribe struct{ pubsub.Pubsub }
 
-func (failingChatSubscribe) Subscribe(string, pubsub.Listener) (func(), error) {
+func (failingChatSubscribe) SubscribeWithErr(string, pubsub.ListenerWithErr) (func(), error) {
 	return nil, xerrors.New("subscribe failed")
 }
 
