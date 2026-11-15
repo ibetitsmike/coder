@@ -27,6 +27,7 @@ import (
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/x/pluginpacks"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/safedial"
 )
 
 const (
@@ -378,7 +379,7 @@ func (api *API) fetchForkPluginPack(ctx context.Context, rw http.ResponseWriter,
 		writeForkPluginPackError(rw, err)
 		return pluginpacks.Snapshot{}, false
 	}
-	fetcher := pluginpacks.Fetcher{AllowedHosts: hosts}
+	fetcher := pluginpacks.Fetcher{AllowedHosts: hosts, AllowedPrefixes: api.MCPAllowedPrivateCIDRs}
 	if api.HTTPClient != nil {
 		fetcher.Transport = api.HTTPClient.Transport
 	}
@@ -386,9 +387,14 @@ func (api *API) fetchForkPluginPack(ctx context.Context, rw http.ResponseWriter,
 	defer cancel()
 	snap, err := fetcher.Fetch(fetchCtx, src)
 	if err != nil {
+		detail := err.Error()
+		var blocked *safedial.BlockedError
+		if errors.As(err, &blocked) {
+			detail = "The source or a redirect resolves to a private or reserved address that the deployment does not allow."
+		}
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: "Failed to fetch the plugin pack.",
-			Detail:  err.Error(),
+			Detail:  detail,
 		})
 		return pluginpacks.Snapshot{}, false
 	}

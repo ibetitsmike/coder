@@ -2,6 +2,7 @@ package coderd_test
 
 import (
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -88,6 +89,35 @@ func TestForkPluginPacks(t *testing.T) {
 	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
 	_, err = client.ForkPluginPack(ctx, orgID, pack.ID)
 	_ = requireSDKError(t, err, http.StatusNotFound)
+}
+
+// TestForkPluginPacksPrivateAddress checks that an allowed source host that
+// resolves to loopback is refused without a request when the deployment
+// allows no private CIDRs.
+func TestForkPluginPacksPrivateAddress(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	repo := pluginpackstest.New(t)
+	client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkPluginPacks)}
+		}),
+		MCPAllowedPrivateCIDRs: []netip.Prefix{},
+	})
+	api.HTTPClient = repo.Client
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	_, err := client.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1", "localhost"}})
+	require.NoError(t, err)
+
+	for _, src := range []string{repo.URL, strings.Replace(repo.URL, "127.0.0.1", "localhost", 1)} {
+		_, err = client.CreateForkPluginPack(ctx, orgID, codersdk.CreateForkPluginPackRequest{Name: "demo", SourceURL: src, SourcePath: "pack", Ref: "main"})
+		sdkErr := requireSDKError(t, err, http.StatusBadRequest)
+		require.Contains(t, sdkErr.Detail, "private or reserved address", src)
+		require.NotContains(t, sdkErr.Detail, "127.0.0.1", src)
+	}
+	require.Zero(t, repo.Requests(), "a refused address must not reach the server")
 }
 
 func skillHash(t *testing.T, pack codersdk.ForkPluginPack) string {
