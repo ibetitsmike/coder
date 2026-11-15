@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
@@ -36,6 +37,14 @@ func newNestedSubagentsFixture(t *testing.T, experiments codersdk.Experiments, l
 	t.Helper()
 
 	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	return newNestedSubagentsFixtureOn(t, db, ps, sqlDB, experiments, limits, opts...)
+}
+
+// newNestedSubagentsFixtureOn is newNestedSubagentsFixture on db, which a
+// test can wrap to observe the queries of the server.
+func newNestedSubagentsFixtureOn(t *testing.T, db database.Store, ps pubsub.Pubsub, sqlDB *sql.DB, experiments codersdk.Experiments, limits Limits, opts ...internalTestServerOpt) nestedSubagentsFixture {
+	t.Helper()
+
 	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
 		append([]internalTestServerOpt{
 			withInternalTestServerExperiments(experiments),
