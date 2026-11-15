@@ -148,6 +148,8 @@ func (p *Server) buildTurnEnvironment(
 	input generationPrepareInput,
 ) (env turnEnvironment, err error) {
 	chat := input.Chat
+	// Fork: the fork hooks below read each per-chat fact once per step.
+	defer p.withForkStepFacts(&ctx, chat)() //nolint:revive // The deferred call seals the facts the first call installs.
 	logger := p.logger.With(
 		slog.F("chat_id", chat.ID),
 		slog.F("owner_id", chat.OwnerID),

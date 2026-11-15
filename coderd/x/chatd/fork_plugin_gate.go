@@ -278,14 +278,24 @@ type enabledPack struct {
 // also see the packs of the chats that spawned them. A pack that the chat or
 // an ancestor turned off is left out, even when another place enables it. A
 // pack enabled in more than one place is listed more than once. A failed
-// lookup is logged and enables nothing, so the gate fails closed.
+// lookup is logged and enables nothing, so the gate fails closed. A
+// generation step resolves the packs of its chat once.
 func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabledPack {
-	var enabled []enabledPack
+	return stepEnabledPacks(ctx, chat, func() ([]enabledPack, bool) {
+		return p.loadEnabledPacks(ctx, chat)
+	})
+}
+
+// loadEnabledPacks reads the packs that enabledPacks returns. complete is
+// false when a pack lookup failed. A failed project or ancestor lookup is
+// logged where it happens and still counts as complete.
+func (p *Server) loadEnabledPacks(ctx context.Context, chat database.Chat) (enabled []enabledPack, complete bool) {
+	complete = true
 	logger := p.logger.With(slog.F("chat_id", chat.ID))
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		logger.Warn(ctx, "fork queries unavailable for plugin pack enablement", slog.Error(err))
-		return enabled
+		return enabled, false
 	}
 	// Like project skills, enablement and the usable-project check run as
 	// chatd and answer for the chat owner, so the gate does not depend on
@@ -296,6 +306,7 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 		rows, err := fdb.GetPluginPacksByProjectID(chatdCtx, projectID.UUID)
 		if err != nil {
 			logger.Warn(ctx, "failed to list project plugin packs", slog.F("project_id", projectID.UUID), slog.Error(err))
+			complete = false
 		}
 		for _, row := range rows {
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
@@ -318,6 +329,7 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 		// The agent type catalog passes a chat that does not exist yet.
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn(ctx, "failed to list chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
+			complete = false
 		}
 		for _, row := range rows {
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
@@ -325,11 +337,11 @@ func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabled
 		excludedRows, err := fdb.GetExcludedPluginPacksByChatID(chatdCtx, chatID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn(ctx, "failed to list excluded chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
-			return nil
+			return nil, false
 		}
 		for _, row := range excludedRows {
 			excluded[row.ID] = true
 		}
 	}
-	return slices.DeleteFunc(enabled, func(pack enabledPack) bool { return excluded[pack.ID] })
+	return slices.DeleteFunc(enabled, func(pack enabledPack) bool { return excluded[pack.ID] }), complete
 }

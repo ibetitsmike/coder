@@ -10,9 +10,7 @@ package chatd
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 
@@ -245,14 +243,11 @@ func (p *Server) customAgentToolPolicyOfChat(ctx context.Context, chat database.
 	if err != nil {
 		return nil, xerrors.Errorf("fork queries: %w", err)
 	}
-	row, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	row, found, err := chatSubagentRow(ctx, fdb, chat.ID)
 	if err != nil {
 		return nil, xerrors.Errorf("get tool policy of chat %s: %w", chat.ID, err)
 	}
-	if !row.ToolPolicy.Valid {
+	if !found || !row.ToolPolicy.Valid {
 		return nil, nil
 	}
 	var policy customAgentToolPolicy

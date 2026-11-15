@@ -7,9 +7,7 @@ package chatd
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -35,24 +33,30 @@ type subagentWorktree struct {
 // chatWorktree returns the worktree chat works in: its own when it was
 // spawned with isolation worktree, else the nearest such ancestor's when every
 // chat between them is shared. ok is false when chat works in the workspace
-// agent's checkout.
+// agent's checkout. A generation step resolves it once.
 func (p *Server) chatWorktree(ctx context.Context, chat database.Chat) (subagentWorktree, bool, error) {
 	if !chat.ParentChatID.Valid {
 		return subagentWorktree{}, false, nil
 	}
+	return stepChatWorktree(ctx, chat, func() (subagentWorktree, bool, error) {
+		return p.walkChatWorktree(ctx, chat)
+	})
+}
+
+func (p *Server) walkChatWorktree(ctx context.Context, chat database.Chat) (subagentWorktree, bool, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		return subagentWorktree{}, false, xerrors.Errorf("fork queries: %w", err)
 	}
 	current := chat
 	for range maxAncestorWalk {
-		row, err := fdb.GetChatSubagentByChatID(ctx, current.ID)
+		row, found, err := chatSubagentRow(ctx, fdb, current.ID)
 		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			// A shared child spawned without nested subagents, a custom
-			// agent or isolation has no row.
 		case err != nil:
 			return subagentWorktree{}, false, xerrors.Errorf("get chat subagent %s: %w", current.ID, err)
+		case !found:
+			// A shared child spawned without nested subagents, a custom
+			// agent or isolation has no row.
 		case row.Isolation == subagentIsolationWorktree:
 			return subagentWorktree{path: row.WorktreePath, branch: row.Branch}, true, nil
 		case row.Isolation != subagentIsolationShared:
