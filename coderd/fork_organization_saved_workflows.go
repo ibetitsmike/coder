@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
@@ -168,6 +167,10 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
@@ -176,7 +179,7 @@ func (api *API) deleteForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *h
 	// work. A caller who can neither delete nor read gets 404.
 	_, err := fdb.DeleteOrganizationSavedWorkflowByName(ctx, forkdb.DeleteOrganizationSavedWorkflowByNameParams{
 		OrganizationID: httpmw.OrganizationParam(r).ID,
-		Name:           chi.URLParam(r, "workflow"),
+		Name:           name,
 	})
 	if httpapi.IsUnauthorizedError(err) {
 		if _, ok := api.readForkOrganizationSavedWorkflow(rw, r); !ok {
@@ -326,13 +329,17 @@ func (api *API) patchForkOrganizationSavedWorkflowACL(rw http.ResponseWriter, r 
 // the path. Updates read it first so that a caller who cannot read the
 // workflow gets 404, and only readers get 403.
 func (api *API) readForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *http.Request) (forkdb.SavedWorkflow, bool) {
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return forkdb.SavedWorkflow{}, false
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return forkdb.SavedWorkflow{}, false
 	}
 	row, err := fdb.GetOrganizationSavedWorkflowByName(r.Context(), forkdb.GetOrganizationSavedWorkflowByNameParams{
 		OrganizationID: httpmw.OrganizationParam(r).ID,
-		Name:           chi.URLParam(r, "workflow"),
+		Name:           name,
 	})
 	if err != nil {
 		writeForkAgentDefinitionReadError(rw, err)
@@ -345,6 +352,10 @@ func (api *API) readForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *htt
 // named in the path for the ACL routes. It admits only callers who can share
 // the workflow, so readers cannot list its grants. Everyone else gets 404.
 func (api *API) readForkOrganizationSavedWorkflowForShare(rw http.ResponseWriter, r *http.Request) (forkdb.SavedWorkflow, bool) {
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return forkdb.SavedWorkflow{}, false
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return forkdb.SavedWorkflow{}, false
@@ -352,7 +363,7 @@ func (api *API) readForkOrganizationSavedWorkflowForShare(rw http.ResponseWriter
 	//nolint:gocritic // The share check below owns authorization.
 	row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(r.Context()), forkdb.GetOrganizationSavedWorkflowByNameParams{
 		OrganizationID: httpmw.OrganizationParam(r).ID,
-		Name:           chi.URLParam(r, "workflow"),
+		Name:           name,
 	})
 	if err != nil {
 		writeForkAgentDefinitionReadError(rw, err)
