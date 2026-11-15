@@ -37,8 +37,9 @@ const (
 	// final poll is retried, so a rate limit at the expiry does not lose the
 	// activity since the poll before. It covers GitHub's hourly reset.
 	pullRequestFinalRetryWindow = time.Hour
-	// pullRequestReadTimeout bounds one read by the worker, well within
-	// wakeupLease, so a stalled provider cannot block the worker loop.
+	// pullRequestReadTimeout bounds one read, well within
+	// wakeupDeliveryTimeout, so a stalled provider holds one delivery slot
+	// of the waker for a bounded time.
 	pullRequestReadTimeout = 30 * time.Second
 	// maxPullRequestSummaryItems caps the review and comment lines of one
 	// wake-up message.

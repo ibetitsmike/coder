@@ -76,93 +76,6 @@ func (q *Queries) CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatW
 	return items, nil
 }
 
-const claimDueChatWakeups = `-- name: ClaimDueChatWakeups :many
-UPDATE chat_wakeups
-SET
-    lease_expires_at = $1::timestamptz,
-    updated_at = $2::timestamptz
-WHERE id IN (
-    SELECT cw.id
-    FROM chat_wakeups cw
-    WHERE cw.status = 'active'
-        AND cw.next_run_at <= $2::timestamptz
-        AND (cw.lease_expires_at IS NULL OR cw.lease_expires_at <= $2::timestamptz)
-        AND NOT EXISTS (
-            SELECT 1
-            FROM chats c
-            WHERE c.id = cw.chat_id
-                AND NOT c.archived
-                AND (
-                    c.status IN ('running', 'interrupting', 'requires_action', 'paused')
-                    OR (
-                        c.status = 'error'
-                        AND EXISTS (SELECT 1 FROM chat_queued_messages q WHERE q.chat_id = c.id)
-                    )
-                )
-        )
-    ORDER BY cw.next_run_at, cw.id
-    LIMIT $3::int
-    FOR UPDATE SKIP LOCKED
-)
-RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
-`
-
-type ClaimDueChatWakeupsParams struct {
-	LeaseExpiresAt time.Time `db:"lease_expires_at" json:"lease_expires_at"`
-	Now            time.Time `db:"now" json:"now"`
-	LimitCount     int32     `db:"limit_count" json:"limit_count"`
-}
-
-// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-// workers from blocking on, or claiming, the same rows. Rows of chats that
-// would queue a new message stay unclaimed, so they cannot fill the batch and
-// starve the rows of idle chats. Those are the busy and paused chats, and the
-// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
-// Archived chats are always claimed so the worker cancels their wake-ups.
-func (q *Queries) ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error) {
-	rows, err := q.db.QueryContext(ctx, claimDueChatWakeups, arg.LeaseExpiresAt, arg.Now, arg.LimitCount)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ChatWakeup
-	for rows.Next() {
-		var i ChatWakeup
-		if err := rows.Scan(
-			&i.ID,
-			&i.ChatID,
-			&i.OrganizationID,
-			&i.CreatedBy,
-			&i.Source,
-			&i.Kind,
-			&i.Prompt,
-			&i.IntervalSeconds,
-			&i.Cron,
-			&i.Timezone,
-			&i.Status,
-			&i.StatusReason,
-			&i.NextRunAt,
-			&i.LeaseExpiresAt,
-			&i.ExpiresAt,
-			&i.MaxRuns,
-			&i.RunCount,
-			&i.LastRunAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countChatUserNotificationsSince = `-- name: CountChatUserNotificationsSince :one
 SELECT COUNT(DISTINCT (payload, DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')))
 FROM notification_messages
@@ -235,72 +148,6 @@ func (q *Queries) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg 
 	return count, err
 }
 
-const finishChatWakeupClaim = `-- name: FinishChatWakeupClaim :one
-UPDATE chat_wakeups
-SET
-    next_run_at = $1,
-    status = $2,
-    status_reason = $3,
-    run_count = run_count + $4::int,
-    last_run_at = COALESCE($5::timestamptz, last_run_at),
-    lease_expires_at = NULL,
-    updated_at = $6
-WHERE id = $7
-    AND lease_expires_at = $8::timestamptz
-RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
-`
-
-type FinishChatWakeupClaimParams struct {
-	NextRunAt      sql.NullTime     `db:"next_run_at" json:"next_run_at"`
-	Status         ChatWakeupStatus `db:"status" json:"status"`
-	StatusReason   sql.NullString   `db:"status_reason" json:"status_reason"`
-	RunCountDelta  int32            `db:"run_count_delta" json:"run_count_delta"`
-	LastRunAt      sql.NullTime     `db:"last_run_at" json:"last_run_at"`
-	UpdatedAt      time.Time        `db:"updated_at" json:"updated_at"`
-	ID             uuid.UUID        `db:"id" json:"id"`
-	LeaseExpiresAt time.Time        `db:"lease_expires_at" json:"lease_expires_at"`
-}
-
-// Records a run of a claimed wake-up and ends the claim. Pass the
-// lease_expires_at that ClaimDueChatWakeups returned: no row means another
-// worker took over the expired lease.
-func (q *Queries) FinishChatWakeupClaim(ctx context.Context, arg FinishChatWakeupClaimParams) (ChatWakeup, error) {
-	row := q.db.QueryRowContext(ctx, finishChatWakeupClaim,
-		arg.NextRunAt,
-		arg.Status,
-		arg.StatusReason,
-		arg.RunCountDelta,
-		arg.LastRunAt,
-		arg.UpdatedAt,
-		arg.ID,
-		arg.LeaseExpiresAt,
-	)
-	var i ChatWakeup
-	err := row.Scan(
-		&i.ID,
-		&i.ChatID,
-		&i.OrganizationID,
-		&i.CreatedBy,
-		&i.Source,
-		&i.Kind,
-		&i.Prompt,
-		&i.IntervalSeconds,
-		&i.Cron,
-		&i.Timezone,
-		&i.Status,
-		&i.StatusReason,
-		&i.NextRunAt,
-		&i.LeaseExpiresAt,
-		&i.ExpiresAt,
-		&i.MaxRuns,
-		&i.RunCount,
-		&i.LastRunAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getChatWakeupByID = `-- name: GetChatWakeupByID :one
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1
 `
@@ -337,8 +184,8 @@ const getChatWakeupByIDForUpdate = `-- name: GetChatWakeupByIDForUpdate :one
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1 FOR UPDATE
 `
 
-// Locks the wake-up until the transaction ends, so a worker that finishes its
-// claim in between waits and then finds its lease gone.
+// Locks the wake-up until the transaction ends, so a delivery that starts in
+// between skips it.
 func (q *Queries) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error) {
 	row := q.db.QueryRowContext(ctx, getChatWakeupByIDForUpdate, id)
 	var i ChatWakeup
@@ -589,6 +436,152 @@ func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID)
 	return items, nil
 }
 
+const listDueChatWakeups = `-- name: ListDueChatWakeups :many
+WITH due AS (
+    SELECT cw.id
+    FROM chat_wakeups cw
+    WHERE cw.status = 'active'
+        AND ($1::uuid IS NULL OR cw.chat_id = $1::uuid)
+        AND cw.next_run_at <= $2::timestamptz
+        AND (cw.next_run_at, cw.id) > ($3::timestamptz, $4::uuid)
+        AND NOT EXISTS (
+            SELECT 1
+            FROM chats c
+            WHERE c.id = cw.chat_id
+                AND NOT c.archived
+                AND (
+                    c.status IN ('running', 'interrupting', 'requires_action', 'paused')
+                    OR (
+                        c.status = 'error'
+                        AND EXISTS (SELECT 1 FROM chat_queued_messages q WHERE q.chat_id = c.id)
+                    )
+                )
+        )
+    ORDER BY cw.next_run_at, cw.id
+    LIMIT $5::int
+),
+upcoming AS (
+    SELECT cw.id
+    FROM chat_wakeups cw
+    WHERE cw.status = 'active'
+        AND ($1::uuid IS NULL OR cw.chat_id = $1::uuid)
+        AND cw.next_run_at > $2::timestamptz
+    ORDER BY cw.next_run_at, cw.id
+    LIMIT 1
+)
+SELECT w.id, w.chat_id, w.organization_id, w.created_by, w.source, w.kind, w.prompt, w.interval_seconds, w.cron, w.timezone, w.status, w.status_reason, w.next_run_at, w.lease_expires_at, w.expires_at, w.max_runs, w.run_count, w.last_run_at, w.created_at, w.updated_at, (w.id IN (SELECT id FROM due))::boolean AS due
+FROM chat_wakeups w
+WHERE w.id IN (SELECT id FROM due) OR w.id IN (SELECT id FROM upcoming)
+ORDER BY w.next_run_at, w.id
+`
+
+type ListDueChatWakeupsParams struct {
+	ChatID     uuid.NullUUID `db:"chat_id" json:"chat_id"`
+	Now        time.Time     `db:"now" json:"now"`
+	AfterRunAt time.Time     `db:"after_run_at" json:"after_run_at"`
+	AfterID    uuid.UUID     `db:"after_id" json:"after_id"`
+	LimitCount int32         `db:"limit_count" json:"limit_count"`
+}
+
+type ListDueChatWakeupsRow struct {
+	ChatWakeup ChatWakeup `db:"chat_wakeup" json:"chat_wakeup"`
+	Due        bool       `db:"due" json:"due"`
+}
+
+// Lists, in one statement, the due wake-ups and the earliest active wake-up
+// that is not due, which sets the timer of the waker. It reads and locks
+// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
+// is due when its run time has come and its chat would not queue a new
+// message. Those are the busy and paused chats, and the errored chats with a
+// non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
+// archived chats are always due, so the waker cancels them. chat_id limits
+// the list to one chat. The due rows page by (next_run_at, id) after
+// after_run_at and after_id.
+func (q *Queries) ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDueChatWakeups,
+		arg.ChatID,
+		arg.Now,
+		arg.AfterRunAt,
+		arg.AfterID,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueChatWakeupsRow
+	for rows.Next() {
+		var i ListDueChatWakeupsRow
+		if err := rows.Scan(
+			&i.ChatWakeup.ID,
+			&i.ChatWakeup.ChatID,
+			&i.ChatWakeup.OrganizationID,
+			&i.ChatWakeup.CreatedBy,
+			&i.ChatWakeup.Source,
+			&i.ChatWakeup.Kind,
+			&i.ChatWakeup.Prompt,
+			&i.ChatWakeup.IntervalSeconds,
+			&i.ChatWakeup.Cron,
+			&i.ChatWakeup.Timezone,
+			&i.ChatWakeup.Status,
+			&i.ChatWakeup.StatusReason,
+			&i.ChatWakeup.NextRunAt,
+			&i.ChatWakeup.LeaseExpiresAt,
+			&i.ChatWakeup.ExpiresAt,
+			&i.ChatWakeup.MaxRuns,
+			&i.ChatWakeup.RunCount,
+			&i.ChatWakeup.LastRunAt,
+			&i.ChatWakeup.CreatedAt,
+			&i.ChatWakeup.UpdatedAt,
+			&i.Due,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockActiveChatWakeup = `-- name: LockActiveChatWakeup :one
+SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1 AND status = 'active' FOR UPDATE SKIP LOCKED
+`
+
+// Locks an active wake-up for its delivery. SKIP LOCKED returns no row while
+// another transaction holds the wake-up, which then decides it.
+func (q *Queries) LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (ChatWakeup, error) {
+	row := q.db.QueryRowContext(ctx, lockActiveChatWakeup, id)
+	var i ChatWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.ChatID,
+		&i.OrganizationID,
+		&i.CreatedBy,
+		&i.Source,
+		&i.Kind,
+		&i.Prompt,
+		&i.IntervalSeconds,
+		&i.Cron,
+		&i.Timezone,
+		&i.Status,
+		&i.StatusReason,
+		&i.NextRunAt,
+		&i.LeaseExpiresAt,
+		&i.ExpiresAt,
+		&i.MaxRuns,
+		&i.RunCount,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const sumChatCostMicrosSince = `-- name: SumChatCostMicrosSince :one
 SELECT COALESCE(SUM(total_cost_micros), 0)::bigint
 FROM chat_messages
@@ -631,6 +624,66 @@ func (q *Queries) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, 
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const updateChatWakeupRun = `-- name: UpdateChatWakeupRun :one
+UPDATE chat_wakeups
+SET
+    next_run_at = $1,
+    status = $2,
+    status_reason = $3,
+    run_count = run_count + $4::int,
+    last_run_at = COALESCE($5::timestamptz, last_run_at),
+    updated_at = $6
+WHERE id = $7
+RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, lease_expires_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
+`
+
+type UpdateChatWakeupRunParams struct {
+	NextRunAt     sql.NullTime     `db:"next_run_at" json:"next_run_at"`
+	Status        ChatWakeupStatus `db:"status" json:"status"`
+	StatusReason  sql.NullString   `db:"status_reason" json:"status_reason"`
+	RunCountDelta int32            `db:"run_count_delta" json:"run_count_delta"`
+	LastRunAt     sql.NullTime     `db:"last_run_at" json:"last_run_at"`
+	UpdatedAt     time.Time        `db:"updated_at" json:"updated_at"`
+	ID            uuid.UUID        `db:"id" json:"id"`
+}
+
+// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+func (q *Queries) UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error) {
+	row := q.db.QueryRowContext(ctx, updateChatWakeupRun,
+		arg.NextRunAt,
+		arg.Status,
+		arg.StatusReason,
+		arg.RunCountDelta,
+		arg.LastRunAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var i ChatWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.ChatID,
+		&i.OrganizationID,
+		&i.CreatedBy,
+		&i.Source,
+		&i.Kind,
+		&i.Prompt,
+		&i.IntervalSeconds,
+		&i.Cron,
+		&i.Timezone,
+		&i.Status,
+		&i.StatusReason,
+		&i.NextRunAt,
+		&i.LeaseExpiresAt,
+		&i.ExpiresAt,
+		&i.MaxRuns,
+		&i.RunCount,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateChatWakeupStatus = `-- name: UpdateChatWakeupStatus :one
