@@ -328,7 +328,6 @@ func insertEventsWakeup(ctx context.Context, t *testing.T, fdb forkdb.Store, cha
 		Kind:      forkdb.ChatWakeupKindEvents,
 		Prompt:    "continue",
 		Timezone:  "UTC",
-		Events:    json.RawMessage(`[]`),
 		Status:    forkdb.ChatWakeupStatusActive,
 		NextRunAt: sql.NullTime{Time: now, Valid: true},
 		ExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true},

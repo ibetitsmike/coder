@@ -3,7 +3,6 @@ package chatd
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -826,9 +825,9 @@ func (f *workerTestFixture) createWakeupChild(t *testing.T, root database.Chat, 
 	return res.Chat
 }
 
-// insertWakeup inserts a wake-up of chat that is due at wakeupTestSlot. arg
-// sets the schedule and, for kind events, the events.
-func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg forkdb.InsertChatWakeupParams) forkdb.ChatWakeup {
+// insertWakeup inserts a wake-up of chat that is due at wakeupTestSlot, with
+// a watch row for each of events. arg sets the schedule.
+func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg forkdb.InsertChatWakeupParams, events ...wakeupEvent) forkdb.ChatWakeup {
 	t.Helper()
 	fdb, err := forkdb.From(f.db)
 	require.NoError(t, err)
@@ -838,15 +837,14 @@ func (f *workerTestFixture) insertWakeup(t *testing.T, chat database.Chat, arg f
 	arg.Source = "schedule_wakeup"
 	arg.Prompt = "wake up " + arg.ID.String()
 	arg.Timezone = "UTC"
-	if arg.Events == nil {
-		arg.Events = json.RawMessage(`[]`)
-	}
 	arg.Status = forkdb.ChatWakeupStatusActive
 	arg.NextRunAt = sql.NullTime{Time: wakeupTestSlot, Valid: true}
 	arg.CreatedAt = wakeupTestSlot.Add(-time.Hour)
 	arg.UpdatedAt = arg.CreatedAt
-	wakeup, err := fdb.InsertChatWakeup(testutil.Context(t, testutil.WaitShort), arg)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	wakeup, err := fdb.InsertChatWakeup(ctx, arg)
 	require.NoError(t, err)
+	require.NoError(t, insertWakeupWatches(ctx, fdb, wakeup, events))
 	return wakeup
 }
 

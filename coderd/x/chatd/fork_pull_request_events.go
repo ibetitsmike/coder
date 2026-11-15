@@ -125,12 +125,6 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	}, nil
 }
 
-// pullRequestRunKey names the run of a pull_request event, so each pull
-// request wakes the chat once.
-func pullRequestRunKey(url string) string {
-	return wakeupEventPullRequest + ":" + url
-}
-
 // pullRequestWakeupText reads the pull request of event as the owner of chat
 // and returns the summary of its activity until until, or "" when nothing
 // event watches for happened. A zero until has no bound. The bound keeps a

@@ -753,13 +753,6 @@ func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]fo
 	return f.db.ListChatNotes(ctx, chatID)
 }
 
-func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
-	if err := f.authorizeChatWakeupID(ctx, policy.ActionRead, wakeupID); err != nil {
-		return nil, err
-	}
-	return f.db.ListChatWakeupRunKeys(ctx, wakeupID)
-}
-
 func (f *forkQuerier) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
@@ -779,13 +772,6 @@ func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.U
 		return nil, err
 	}
 	return f.db.ListChatWakeupsByChatID(ctx, chatID)
-}
-
-func (f *forkQuerier) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
-	if err := f.authorizeChat(ctx, policy.ActionRead, parentChatID); err != nil {
-		return nil, err
-	}
-	return f.db.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
 }
 
 func (f *forkQuerier) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {

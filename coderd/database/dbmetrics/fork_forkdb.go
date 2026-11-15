@@ -587,19 +587,9 @@ func (f forkQueryMetricsStore) ListChatFamilyMembers(ctx context.Context, arg fo
 	return f.s.ListChatFamilyMembers(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
-	defer f.observe(ctx, "ListChatWakeupRunKeys", time.Now())
-	return f.s.ListChatWakeupRunKeys(ctx, wakeupID)
-}
-
 func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "ListChatWakeupsByChatID", time.Now())
 	return f.s.ListChatWakeupsByChatID(ctx, chatID)
-}
-
-func (f forkQueryMetricsStore) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
-	defer f.observe(ctx, "ListChildChatIDsWithActiveEventsWakeups", time.Now())
-	return f.s.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
 }
 
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {

@@ -184,15 +184,9 @@ type Querier interface {
 	// left out, because the history tool skips them.
 	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
-	// A failed send of an events entry records its run under a key of its own,
-	// so it never blocks a later run of the entry.
-	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
 	ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeupWatch, error)
 	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
-	// Lists the children of @parent_chat_id that wait for events of their own,
-	// so a caller checks every child in one read.
-	ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
 	// Lists the children of @parent_chat_id that wait for events of their own:
 	// they have an open watch on an active wake-up. ListReadyChatWakeupWatches
 	// uses the same rule.
