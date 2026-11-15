@@ -16,13 +16,6 @@ type Querier interface {
 	// concurrent replicas from blocking on, or double leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
-	// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-	// workers from blocking on, or claiming, the same rows. Rows of chats that
-	// would queue a new message stay unclaimed, so they cannot fill the batch and
-	// starve the rows of idle chats. Those are the busy and paused chats, and the
-	// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
-	// Archived chats are always claimed so the worker cancels their wake-ups.
-	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
 	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
@@ -56,6 +49,7 @@ type Querier interface {
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
 	DeletePluginLinkCodesByUser(ctx context.Context, arg DeletePluginLinkCodesByUserParams) error
 	DeletePluginPackByID(ctx context.Context, id uuid.UUID) error
@@ -64,6 +58,7 @@ type Querier interface {
 	DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	DeleteUserSavedWorkflowByName(ctx context.Context, arg DeleteUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// Binds every top-level, unarchived chat of a linked user in the plugin's
 	// organization. Chats created after the link start at cursor 0 so their whole
 	// history is delivered. Older chats start at their newest message so linking
@@ -72,10 +67,6 @@ type Querier interface {
 	// stop_workflow fails the open steps of a run that it stops. err_text, not
 	// error: it becomes a mock parameter name.
 	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
-	// Records a run of a claimed wake-up and ends the claim. Pass the
-	// lease_expires_at that ClaimDueChatWakeups returned: no row means another
-	// worker took over the expired lease.
-	FinishChatWakeupClaim(ctx context.Context, arg FinishChatWakeupClaimParams) (ChatWakeup, error)
 	// Reports whether no worker with a fresh heartbeat owns the chat, with the
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
@@ -101,8 +92,8 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
-	// Locks the wake-up until the transaction ends, so a worker that finishes its
-	// claim in between waits and then finds its lease gone.
+	// Locks the wake-up until the transaction ends, so a delivery that starts in
+	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
@@ -114,6 +105,8 @@ type Querier interface {
 	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
+	GetOrganizationSavedWorkflowByName(ctx context.Context, arg GetOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
+	GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg GetOrganizationSavedWorkflowByNameForUpdateParams) (SavedWorkflow, error)
 	GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (ChatDescendantQuestion, error)
 	GetPluginByID(ctx context.Context, id uuid.UUID) (Plugin, error)
 	// A binding is due when its chat is idle and has undelivered user-visible
@@ -132,6 +125,7 @@ type Querier interface {
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetUserSavedWorkflowByName(ctx context.Context, arg GetUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error)
 	// One row per run and step status of a chat, for the step_counts of the run
 	// list. done means reported; running means running or reminded.
@@ -164,6 +158,7 @@ type Querier interface {
 	// wake-up is gone.
 	InsertChatWakeupWatch(ctx context.Context, arg InsertChatWakeupWatchParams) (ChatWakeupWatch, error)
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
+	InsertOrganizationSavedWorkflow(ctx context.Context, arg InsertOrganizationSavedWorkflowParams) (SavedWorkflow, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
 	InsertPluginLinkCode(ctx context.Context, arg InsertPluginLinkCodeParams) error
 	InsertPluginPack(ctx context.Context, arg InsertPluginPackParams) (PluginPack, error)
@@ -173,11 +168,12 @@ type Querier interface {
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
+	InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSavedWorkflowParams) (SavedWorkflow, error)
 	// phases holds the declared phases of the script plus every undeclared name
 	// that phase() reached, in display order. Empty when the script declares no
-	// phases. COALESCE(@phases, '{}'::text[]) keeps a nil Go slice out of the
-	// NOT NULL column: pq encodes a nil []string as NULL, and the '{}' literal
-	// alone leaves the parameter typed as text.
+	// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+	// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+	// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
 	// phase is the name that was current when the step started, or '' when the
 	// script called no phase() before it.
@@ -198,10 +194,21 @@ type Querier interface {
 	// they have an open watch on an active wake-up. ListReadyChatWakeupWatches
 	// uses the same rule.
 	ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
+	// Lists, in one statement, the due wake-ups and the earliest active wake-up
+	// that is not due, which sets the timer of the waker. It reads and locks
+	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
+	// is due when its run time has come and its chat would not queue a new
+	// message. Those are the busy and paused chats, and the errored chats with a
+	// non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
+	// archived chats are always due, so the waker cancels them. chat_id limits
+	// the list to one chat. The due rows page by (next_run_at, id) after
+	// after_run_at and after_id.
+	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
 	// delivered, so a new watch can leave out what an earlier one still watches.
 	ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ListOpenChatWakeupWatchesByChatIDRow, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
+	ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationSavedWorkflowMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
 	// @root_chat_id, oldest first.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
@@ -215,6 +222,10 @@ type Querier interface {
 	// @chat_id and @wakeup_id narrow the list when set.
 	ListReadyChatWakeupWatches(ctx context.Context, arg ListReadyChatWakeupWatchesParams) ([]ChatWakeupWatch, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
+	ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUserSavedWorkflowMetadataParams) ([]ListUserSavedWorkflowMetadataRow, error)
+	// Locks an active wake-up for its delivery. SKIP LOCKED returns no row while
+	// another transaction holds the wake-up, which then decides it.
+	LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
@@ -256,11 +267,17 @@ type Querier interface {
 	// chats that only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
+	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+	// It clears a lease that a replica of an older version took with its claim,
+	// so that replica's FinishChatWakeupClaim writes nothing over this result.
+	UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)
 	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowACLByNameParams) (SavedWorkflow, error)
+	UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
 	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
 	UpdatePluginConfig(ctx context.Context, arg UpdatePluginConfigParams) (Plugin, error)
@@ -269,6 +286,7 @@ type Querier interface {
 	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// phase() journals the phase state of a live run as it changes: the display
 	// list and the current name. The write does not touch status, error or
 	// result, which updateRunStatus owns, so the two best-effort writers never

@@ -483,7 +483,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				slog.F("wakeup_id", wakeup.ID),
 				slog.Error(err),
 			)
-			return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
+			return p.finishWakeup(ctx, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
 		}
 		switch watch.Kind {
 		case forkdb.ChatWakeupWatchKindChildDone:
@@ -512,16 +512,15 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			// At most one read per tick: a later watch waits until next is
 			// delivered.
 			if next == nil {
-				// The worker delivers its claimed batch one by one under
-				// one lease, so a read that may stall starts only while
-				// half the lease is left for the rest of the batch. Later
-				// rows end their claim and stay due for the next tick.
-				if wakeup.LeaseExpiresAt.Valid && now.Add(2*pullRequestReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
-					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
+				// A read that may stall starts only while the delivery
+				// has time left for it and its message. Otherwise the
+				// wake-up stays due for the next pass.
+				if !wakeupReadFits(ctx, pullRequestReadTimeout) {
+					return nil
 				}
 				summary, err := p.pullRequestWakeupText(ctx, chat, event, wakeup.ExpiresAt.Time)
 				if err != nil {
-					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
+					return p.finishWakeup(ctx, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
 				}
 				if summary != "" {
 					next = &wakeupDelivery{
@@ -536,8 +535,8 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			pullRequestPending = true
 		case forkdb.ChatWakeupWatchKindProcess:
 			if next == nil {
-				if wakeup.LeaseExpiresAt.Valid && now.Add(2*processReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
-					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
+				if !wakeupReadFits(ctx, processReadTimeout) {
+					return nil
 				}
 				var endedBy time.Time
 				if lateFinalPoll && !watch.FailedAt.Valid {
@@ -585,10 +584,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		// A failed read on the final poll could miss an exit by the expiry.
 		if processErrors > 0 {
 			if retry, ok := eventsFinalRetry(wakeup, now, now.Add(processErrorRetry)); ok {
-				return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, retry)
+				return p.finishWakeup(ctx, chat, wakeup, now, retry)
 			}
 		}
-		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, interval))
+		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, interval))
 	}
 	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
 		return err
@@ -599,7 +598,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, interval)
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, delivery, err)
+	return p.finishWakeupSend(ctx, chat, wakeup, now, delivery, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched entry still

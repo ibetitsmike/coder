@@ -227,7 +227,7 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 
 const insertWorkflowRun = `-- name: InsertWorkflowRun :exec
 INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7, '{}'::text[]), $8)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7::text[], '{}'::text[]), $8)
 `
 
 type InsertWorkflowRunParams struct {
@@ -243,9 +243,9 @@ type InsertWorkflowRunParams struct {
 
 // phases holds the declared phases of the script plus every undeclared name
 // that phase() reached, in display order. Empty when the script declares no
-// phases. COALESCE(@phases, '{}'::text[]) keeps a nil Go slice out of the
-// NOT NULL column: pq encodes a nil []string as NULL, and the '{}' literal
-// alone leaves the parameter typed as text.
+// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error {
 	_, err := q.db.ExecContext(ctx, insertWorkflowRun,
 		arg.ID,
@@ -311,7 +311,7 @@ func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText s
 
 const updateWorkflowRunPhases = `-- name: UpdateWorkflowRunPhases :exec
 UPDATE workflow_runs
-SET phases = COALESCE($1, '{}'::text[]), current_phase = $2, updated_at = now()
+SET phases = COALESCE($1::text[], '{}'::text[]), current_phase = $2, updated_at = now()
 WHERE id = $3
 `
 
@@ -333,7 +333,7 @@ func (q *Queries) UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflo
 const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :exec
 UPDATE workflow_runs
 SET status = $1, error = $2, result = $3,
-    phases = COALESCE($4, '{}'::text[]), current_phase = $5,
+    phases = COALESCE($4::text[], '{}'::text[]), current_phase = $5,
     updated_at = now(),
     finished_at = CASE WHEN $1::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
 WHERE id = $6

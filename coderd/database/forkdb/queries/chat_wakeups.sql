@@ -44,8 +44,8 @@ RETURNING *;
 -- name: GetChatWakeupByID :one
 SELECT * FROM chat_wakeups WHERE id = @id;
 
--- Locks the wake-up until the transaction ends, so a worker that finishes its
--- claim in between waits and then finds its lease gone.
+-- Locks the wake-up until the transaction ends, so a delivery that starts in
+-- between skips it.
 -- name: GetChatWakeupByIDForUpdate :one
 SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
 
@@ -77,23 +77,23 @@ WHERE chat_id = @chat_id
     AND status IN ('active', 'paused')
 RETURNING *;
 
--- Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
--- workers from blocking on, or claiming, the same rows. Rows of chats that
--- would queue a new message stay unclaimed, so they cannot fill the batch and
--- starve the rows of idle chats. Those are the busy and paused chats, and the
--- errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
--- Archived chats are always claimed so the worker cancels their wake-ups.
--- name: ClaimDueChatWakeups :many
-UPDATE chat_wakeups
-SET
-    lease_expires_at = @lease_expires_at::timestamptz,
-    updated_at = @now::timestamptz
-WHERE id IN (
+-- Lists, in one statement, the due wake-ups and the earliest active wake-up
+-- that is not due, which sets the timer of the waker. It reads and locks
+-- nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
+-- is due when its run time has come and its chat would not queue a new
+-- message. Those are the busy and paused chats, and the errored chats with a
+-- non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
+-- archived chats are always due, so the waker cancels them. chat_id limits
+-- the list to one chat. The due rows page by (next_run_at, id) after
+-- after_run_at and after_id.
+-- name: ListDueChatWakeups :many
+WITH due AS (
     SELECT cw.id
     FROM chat_wakeups cw
     WHERE cw.status = 'active'
+        AND (sqlc.narg('chat_id')::uuid IS NULL OR cw.chat_id = sqlc.narg('chat_id')::uuid)
         AND cw.next_run_at <= @now::timestamptz
-        AND (cw.lease_expires_at IS NULL OR cw.lease_expires_at <= @now::timestamptz)
+        AND (cw.next_run_at, cw.id) > (@after_run_at::timestamptz, @after_id::uuid)
         AND NOT EXISTS (
             SELECT 1
             FROM chats c
@@ -109,14 +109,34 @@ WHERE id IN (
         )
     ORDER BY cw.next_run_at, cw.id
     LIMIT @limit_count::int
-    FOR UPDATE SKIP LOCKED
+),
+upcoming AS (
+    SELECT cw.id
+    FROM chat_wakeups cw
+    WHERE cw.status = 'active'
+        AND (sqlc.narg('chat_id')::uuid IS NULL OR cw.chat_id = sqlc.narg('chat_id')::uuid)
+        AND cw.next_run_at > @now::timestamptz
+    ORDER BY cw.next_run_at, cw.id
+    LIMIT 1
 )
-RETURNING *;
+SELECT sqlc.embed(w), l.due::boolean AS due
+FROM (
+    SELECT id, true AS due FROM due
+    UNION ALL
+    SELECT id, false AS due FROM upcoming
+) l
+JOIN chat_wakeups w ON w.id = l.id
+ORDER BY w.next_run_at, w.id;
 
--- Records a run of a claimed wake-up and ends the claim. Pass the
--- lease_expires_at that ClaimDueChatWakeups returned: no row means another
--- worker took over the expired lease.
--- name: FinishChatWakeupClaim :one
+-- Locks an active wake-up for its delivery. SKIP LOCKED returns no row while
+-- another transaction holds the wake-up, which then decides it.
+-- name: LockActiveChatWakeup :one
+SELECT * FROM chat_wakeups WHERE id = @id AND status = 'active' FOR UPDATE SKIP LOCKED;
+
+-- Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+-- It clears a lease that a replica of an older version took with its claim,
+-- so that replica's FinishChatWakeupClaim writes nothing over this result.
+-- name: UpdateChatWakeupRun :one
 UPDATE chat_wakeups
 SET
     next_run_at = @next_run_at,
@@ -127,7 +147,6 @@ SET
     lease_expires_at = NULL,
     updated_at = @updated_at
 WHERE id = @id
-    AND lease_expires_at = @lease_expires_at::timestamptz
 RETURNING *;
 
 -- Returns no row when the run of this occurrence already exists. The chat and

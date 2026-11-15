@@ -1,11 +1,11 @@
 -- name: InsertWorkflowRun :exec
 -- phases holds the declared phases of the script plus every undeclared name
 -- that phase() reached, in display order. Empty when the script declares no
--- phases. COALESCE(@phases, '{}'::text[]) keeps a nil Go slice out of the
--- NOT NULL column: pq encodes a nil []string as NULL, and the '{}' literal
--- alone leaves the parameter typed as text.
+-- phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+-- bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+-- slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
-VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status, COALESCE(@phases, '{}'::text[]), @current_phase);
+VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status, COALESCE(@phases::text[], '{}'::text[]), @current_phase);
 
 -- name: GetWorkflowRun :one
 SELECT * FROM workflow_runs WHERE id = @id;
@@ -19,7 +19,7 @@ SELECT * FROM workflow_steps WHERE run_id = @run_id ORDER BY ordinal;
 -- result, which updateRunStatus owns, so the two best-effort writers never
 -- overwrite each other's columns.
 UPDATE workflow_runs
-SET phases = COALESCE(@phases, '{}'::text[]), current_phase = @current_phase, updated_at = now()
+SET phases = COALESCE(@phases::text[], '{}'::text[]), current_phase = @current_phase, updated_at = now()
 WHERE id = @id;
 
 -- name: UpdateWorkflowRunStatus :exec
@@ -31,7 +31,7 @@ WHERE id = @id;
 -- rejects on jsonb.
 UPDATE workflow_runs
 SET status = @status, error = @error, result = @result,
-    phases = COALESCE(@phases, '{}'::text[]), current_phase = @current_phase,
+    phases = COALESCE(@phases::text[], '{}'::text[]), current_phase = @current_phase,
     updated_at = now(),
     finished_at = CASE WHEN @status::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
 WHERE id = @id;

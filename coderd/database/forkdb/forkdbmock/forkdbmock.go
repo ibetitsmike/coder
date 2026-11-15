@@ -72,21 +72,6 @@ func (mr *MockStoreMockRecorder) CancelChatWakeupsByChatID(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).CancelChatWakeupsByChatID), ctx, arg)
 }
 
-// ClaimDueChatWakeups mocks base method.
-func (m *MockStore) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimDueChatWakeupsParams) ([]forkdb.ChatWakeup, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ClaimDueChatWakeups", ctx, arg)
-	ret0, _ := ret[0].([]forkdb.ChatWakeup)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ClaimDueChatWakeups indicates an expected call of ClaimDueChatWakeups.
-func (mr *MockStoreMockRecorder) ClaimDueChatWakeups(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimDueChatWakeups", reflect.TypeOf((*MockStore)(nil).ClaimDueChatWakeups), ctx, arg)
-}
-
 // ConsumePluginLinkCode mocks base method.
 func (m *MockStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	m.ctrl.T.Helper()
@@ -321,6 +306,21 @@ func (mr *MockStoreMockRecorder) DeleteOrganizationAgentDefinitionByName(ctx, ar
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOrganizationAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).DeleteOrganizationAgentDefinitionByName), ctx, arg)
 }
 
+// DeleteOrganizationSavedWorkflowByName mocks base method.
+func (m *MockStore) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOrganizationSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOrganizationSavedWorkflowByName indicates an expected call of DeleteOrganizationSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) DeleteOrganizationSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOrganizationSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).DeleteOrganizationSavedWorkflowByName), ctx, arg)
+}
+
 // DeletePluginByID mocks base method.
 func (m *MockStore) DeletePluginByID(ctx context.Context, id uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -435,6 +435,21 @@ func (mr *MockStoreMockRecorder) DeleteUserAgentDefinitionByName(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).DeleteUserAgentDefinitionByName), ctx, arg)
 }
 
+// DeleteUserSavedWorkflowByName mocks base method.
+func (m *MockStore) DeleteUserSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteUserSavedWorkflowByName indicates an expected call of DeleteUserSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) DeleteUserSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).DeleteUserSavedWorkflowByName), ctx, arg)
+}
+
 // EnsurePluginChatBindings mocks base method.
 func (m *MockStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
 	m.ctrl.T.Helper()
@@ -462,21 +477,6 @@ func (m *MockStore) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.F
 func (mr *MockStoreMockRecorder) FailOpenWorkflowStepsOfRun(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOpenWorkflowStepsOfRun", reflect.TypeOf((*MockStore)(nil).FailOpenWorkflowStepsOfRun), ctx, arg)
-}
-
-// FinishChatWakeupClaim mocks base method.
-func (m *MockStore) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FinishChatWakeupClaim", ctx, arg)
-	ret0, _ := ret[0].(forkdb.ChatWakeup)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// FinishChatWakeupClaim indicates an expected call of FinishChatWakeupClaim.
-func (mr *MockStoreMockRecorder) FinishChatWakeupClaim(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FinishChatWakeupClaim", reflect.TypeOf((*MockStore)(nil).FinishChatWakeupClaim), ctx, arg)
 }
 
 // GetChatAwaitingWorker mocks base method.
@@ -794,6 +794,36 @@ func (mr *MockStoreMockRecorder) GetOrganizationAgentDefinitionByNameForUpdate(c
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationAgentDefinitionByNameForUpdate", reflect.TypeOf((*MockStore)(nil).GetOrganizationAgentDefinitionByNameForUpdate), ctx, arg)
 }
 
+// GetOrganizationSavedWorkflowByName mocks base method.
+func (m *MockStore) GetOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrganizationSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrganizationSavedWorkflowByName indicates an expected call of GetOrganizationSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) GetOrganizationSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).GetOrganizationSavedWorkflowByName), ctx, arg)
+}
+
+// GetOrganizationSavedWorkflowByNameForUpdate mocks base method.
+func (m *MockStore) GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameForUpdateParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrganizationSavedWorkflowByNameForUpdate", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrganizationSavedWorkflowByNameForUpdate indicates an expected call of GetOrganizationSavedWorkflowByNameForUpdate.
+func (mr *MockStoreMockRecorder) GetOrganizationSavedWorkflowByNameForUpdate(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrganizationSavedWorkflowByNameForUpdate", reflect.TypeOf((*MockStore)(nil).GetOrganizationSavedWorkflowByNameForUpdate), ctx, arg)
+}
+
 // GetPendingChatDescendantQuestion mocks base method.
 func (m *MockStore) GetPendingChatDescendantQuestion(ctx context.Context, chatID uuid.UUID) (forkdb.ChatDescendantQuestion, error) {
 	m.ctrl.T.Helper()
@@ -1034,6 +1064,21 @@ func (mr *MockStoreMockRecorder) GetUserAgentDefinitionByName(ctx, arg any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetUserAgentDefinitionByName), ctx, arg)
 }
 
+// GetUserSavedWorkflowByName mocks base method.
+func (m *MockStore) GetUserSavedWorkflowByName(ctx context.Context, arg forkdb.GetUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUserSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUserSavedWorkflowByName indicates an expected call of GetUserSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) GetUserSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).GetUserSavedWorkflowByName), ctx, arg)
+}
+
 // GetWorkflowRun mocks base method.
 func (m *MockStore) GetWorkflowRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, error) {
 	m.ctrl.T.Helper()
@@ -1270,6 +1315,21 @@ func (mr *MockStoreMockRecorder) InsertOrganizationAgentDefinition(ctx, arg any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertOrganizationAgentDefinition", reflect.TypeOf((*MockStore)(nil).InsertOrganizationAgentDefinition), ctx, arg)
 }
 
+// InsertOrganizationSavedWorkflow mocks base method.
+func (m *MockStore) InsertOrganizationSavedWorkflow(ctx context.Context, arg forkdb.InsertOrganizationSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertOrganizationSavedWorkflow", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertOrganizationSavedWorkflow indicates an expected call of InsertOrganizationSavedWorkflow.
+func (mr *MockStoreMockRecorder) InsertOrganizationSavedWorkflow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertOrganizationSavedWorkflow", reflect.TypeOf((*MockStore)(nil).InsertOrganizationSavedWorkflow), ctx, arg)
+}
+
 // InsertPlugin mocks base method.
 func (m *MockStore) InsertPlugin(ctx context.Context, arg forkdb.InsertPluginParams) (forkdb.Plugin, error) {
 	m.ctrl.T.Helper()
@@ -1371,6 +1431,21 @@ func (m *MockStore) InsertUserAgentDefinition(ctx context.Context, arg forkdb.In
 func (mr *MockStoreMockRecorder) InsertUserAgentDefinition(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserAgentDefinition", reflect.TypeOf((*MockStore)(nil).InsertUserAgentDefinition), ctx, arg)
+}
+
+// InsertUserSavedWorkflow mocks base method.
+func (m *MockStore) InsertUserSavedWorkflow(ctx context.Context, arg forkdb.InsertUserSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertUserSavedWorkflow", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertUserSavedWorkflow indicates an expected call of InsertUserSavedWorkflow.
+func (mr *MockStoreMockRecorder) InsertUserSavedWorkflow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserSavedWorkflow", reflect.TypeOf((*MockStore)(nil).InsertUserSavedWorkflow), ctx, arg)
 }
 
 // InsertWorkflowRun mocks base method.
@@ -1506,6 +1581,21 @@ func (mr *MockStoreMockRecorder) ListChildChatIDsWithOpenWakeupWatches(ctx, pare
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChildChatIDsWithOpenWakeupWatches", reflect.TypeOf((*MockStore)(nil).ListChildChatIDsWithOpenWakeupWatches), ctx, parentChatID)
 }
 
+// ListDueChatWakeups mocks base method.
+func (m *MockStore) ListDueChatWakeups(ctx context.Context, arg forkdb.ListDueChatWakeupsParams) ([]forkdb.ListDueChatWakeupsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListDueChatWakeups", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.ListDueChatWakeupsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListDueChatWakeups indicates an expected call of ListDueChatWakeups.
+func (mr *MockStoreMockRecorder) ListDueChatWakeups(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDueChatWakeups", reflect.TypeOf((*MockStore)(nil).ListDueChatWakeups), ctx, arg)
+}
+
 // ListOpenChatWakeupWatchesByChatID mocks base method.
 func (m *MockStore) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
 	m.ctrl.T.Helper()
@@ -1534,6 +1624,21 @@ func (m *MockStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context,
 func (mr *MockStoreMockRecorder) ListOrganizationAgentDefinitionMetadata(ctx, organizationID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOrganizationAgentDefinitionMetadata", reflect.TypeOf((*MockStore)(nil).ListOrganizationAgentDefinitionMetadata), ctx, organizationID)
+}
+
+// ListOrganizationSavedWorkflowMetadata mocks base method.
+func (m *MockStore) ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationSavedWorkflowMetadataRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListOrganizationSavedWorkflowMetadata", ctx, organizationID)
+	ret0, _ := ret[0].([]forkdb.ListOrganizationSavedWorkflowMetadataRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListOrganizationSavedWorkflowMetadata indicates an expected call of ListOrganizationSavedWorkflowMetadata.
+func (mr *MockStoreMockRecorder) ListOrganizationSavedWorkflowMetadata(ctx, organizationID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOrganizationSavedWorkflowMetadata", reflect.TypeOf((*MockStore)(nil).ListOrganizationSavedWorkflowMetadata), ctx, organizationID)
 }
 
 // ListPendingChatDescendantQuestionsByRoot mocks base method.
@@ -1594,6 +1699,36 @@ func (m *MockStore) ListUserAgentDefinitionMetadata(ctx context.Context, arg for
 func (mr *MockStoreMockRecorder) ListUserAgentDefinitionMetadata(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserAgentDefinitionMetadata", reflect.TypeOf((*MockStore)(nil).ListUserAgentDefinitionMetadata), ctx, arg)
+}
+
+// ListUserSavedWorkflowMetadata mocks base method.
+func (m *MockStore) ListUserSavedWorkflowMetadata(ctx context.Context, arg forkdb.ListUserSavedWorkflowMetadataParams) ([]forkdb.ListUserSavedWorkflowMetadataRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUserSavedWorkflowMetadata", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.ListUserSavedWorkflowMetadataRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUserSavedWorkflowMetadata indicates an expected call of ListUserSavedWorkflowMetadata.
+func (mr *MockStoreMockRecorder) ListUserSavedWorkflowMetadata(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserSavedWorkflowMetadata", reflect.TypeOf((*MockStore)(nil).ListUserSavedWorkflowMetadata), ctx, arg)
+}
+
+// LockActiveChatWakeup mocks base method.
+func (m *MockStore) LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockActiveChatWakeup", ctx, id)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockActiveChatWakeup indicates an expected call of LockActiveChatWakeup.
+func (mr *MockStoreMockRecorder) LockActiveChatWakeup(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockActiveChatWakeup", reflect.TypeOf((*MockStore)(nil).LockActiveChatWakeup), ctx, id)
 }
 
 // LockChatForNoKeyUpdate mocks base method.
@@ -1757,6 +1892,21 @@ func (mr *MockStoreMockRecorder) UpdateChatSubagentWorkspaceID(ctx, arg any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatSubagentWorkspaceID", reflect.TypeOf((*MockStore)(nil).UpdateChatSubagentWorkspaceID), ctx, arg)
 }
 
+// UpdateChatWakeupRun mocks base method.
+func (m *MockStore) UpdateChatWakeupRun(ctx context.Context, arg forkdb.UpdateChatWakeupRunParams) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateChatWakeupRun", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateChatWakeupRun indicates an expected call of UpdateChatWakeupRun.
+func (mr *MockStoreMockRecorder) UpdateChatWakeupRun(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatWakeupRun", reflect.TypeOf((*MockStore)(nil).UpdateChatWakeupRun), ctx, arg)
+}
+
 // UpdateChatWakeupStatus mocks base method.
 func (m *MockStore) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {
 	m.ctrl.T.Helper()
@@ -1800,6 +1950,36 @@ func (m *MockStore) UpdateOrganizationAgentDefinitionByName(ctx context.Context,
 func (mr *MockStoreMockRecorder) UpdateOrganizationAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOrganizationAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).UpdateOrganizationAgentDefinitionByName), ctx, arg)
+}
+
+// UpdateOrganizationSavedWorkflowACLByName mocks base method.
+func (m *MockStore) UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateOrganizationSavedWorkflowACLByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateOrganizationSavedWorkflowACLByName indicates an expected call of UpdateOrganizationSavedWorkflowACLByName.
+func (mr *MockStoreMockRecorder) UpdateOrganizationSavedWorkflowACLByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOrganizationSavedWorkflowACLByName", reflect.TypeOf((*MockStore)(nil).UpdateOrganizationSavedWorkflowACLByName), ctx, arg)
+}
+
+// UpdateOrganizationSavedWorkflowByName mocks base method.
+func (m *MockStore) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateOrganizationSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateOrganizationSavedWorkflowByName indicates an expected call of UpdateOrganizationSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) UpdateOrganizationSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOrganizationSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).UpdateOrganizationSavedWorkflowByName), ctx, arg)
 }
 
 // UpdatePluginChatBindingDelivered mocks base method.
@@ -1917,6 +2097,21 @@ func (m *MockStore) UpdateUserAgentDefinitionByName(ctx context.Context, arg for
 func (mr *MockStoreMockRecorder) UpdateUserAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).UpdateUserAgentDefinitionByName), ctx, arg)
+}
+
+// UpdateUserSavedWorkflowByName mocks base method.
+func (m *MockStore) UpdateUserSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateUserSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateUserSavedWorkflowByName indicates an expected call of UpdateUserSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) UpdateUserSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).UpdateUserSavedWorkflowByName), ctx, arg)
 }
 
 // UpdateWorkflowRunPhases mocks base method.

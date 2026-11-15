@@ -183,5 +183,17 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		chatWorkflowRuns.Get("/{chat}/workflow-runs", api.getChatWorkflowRuns)
 		chatWorkflowRuns.Get("/{chat}/workflow-runs/{workflowrun}", api.getChatWorkflowRun)
 		chatWorkflowRuns.Post("/{chat}/workflow-runs/{workflowrun}/stop", api.postStopChatWorkflowRun)
+
+		userSavedWorkflows := r.With(
+			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkWorkflows),
+			httpmw.ExtractOrganizationParam(api.Database),
+			httpmw.ExtractOrganizationMemberParam(api.Database),
+		)
+		const userSavedWorkflowsPath = "/organizations/{organization}/members/{user}/workflows"
+		userSavedWorkflows.Get(userSavedWorkflowsPath, api.forkUserSavedWorkflows)
+		userSavedWorkflows.Post(userSavedWorkflowsPath, api.postForkUserSavedWorkflow)
+		userSavedWorkflows.Get(userSavedWorkflowsPath+"/{workflow}", api.forkUserSavedWorkflow)
+		userSavedWorkflows.Patch(userSavedWorkflowsPath+"/{workflow}", api.patchForkUserSavedWorkflow)
+		userSavedWorkflows.Delete(userSavedWorkflowsPath+"/{workflow}", api.deleteForkUserSavedWorkflow)
 	})
 }

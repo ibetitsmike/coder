@@ -1311,6 +1311,7 @@ func New(ps pubsub.Pubsub, cfg Config) (*Server, error) {
 	if err := validateInternalMCPServers(cfg.InternalMCPServers); err != nil {
 		return nil, xerrors.Errorf("chatd: %w", err)
 	}
+	ps = withForkWaker(ps)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pendingChatAcquireInterval := cfg.PendingChatAcquireInterval

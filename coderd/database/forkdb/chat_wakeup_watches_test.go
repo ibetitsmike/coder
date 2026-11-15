@@ -256,8 +256,9 @@ func TestChatWakeupWatchRows(t *testing.T) {
 }
 
 // TestListReadyChatWakeupWatchesPlan checks that the poll of the whole
-// deployment stays cheap when nothing waits: with 10,000 finished wake-ups
-// and no open watch, the plan reads no table in full.
+// deployment and the sweep of the waker stay cheap when nothing waits: with
+// 10,000 finished wake-ups and no open watch, their plans read no table in
+// full.
 func TestListReadyChatWakeupWatchesPlan(t *testing.T) {
 	t.Parallel()
 
@@ -300,26 +301,35 @@ func TestListReadyChatWakeupWatchesPlan(t *testing.T) {
 	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chat_wakeups WHERE status = 'completed'").Scan(&count))
 	require.Equal(t, 10000, count)
 
-	var raw []byte
-	require.NoError(t, sqlDB.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+forkdb.ListReadyChatWakeupWatchesSQL, nil, nil, 100).Scan(&raw))
-	var plan []struct {
-		Plan planNode `json:"Plan"`
+	for _, q := range []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{"ListReadyChatWakeupWatches", forkdb.ListReadyChatWakeupWatchesSQL, []any{nil, nil, 100}},
+		{"ListDueChatWakeups", forkdb.ListDueChatWakeupsSQL, []any{nil, dbtime.Now(), time.Time{}, uuid.Nil, 64}},
+	} {
+		var raw []byte
+		require.NoError(t, sqlDB.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+q.sql, q.args...).Scan(&raw), q.name)
+		var plan []struct {
+			Plan planNode `json:"Plan"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &plan))
+		require.Len(t, plan, 1)
+		// chat_descendant_questions stays empty here, so a scan of it costs
+		// nothing and the planner may pick one.
+		var scans []string
+		plan[0].Plan.walk(func(node planNode) {
+			if node.NodeType != "Seq Scan" {
+				return
+			}
+			switch node.RelationName {
+			case "chat_wakeups", "chats", "chat_messages", "chat_wakeup_watches":
+				scans = append(scans, node.RelationName)
+			}
+		})
+		require.Empty(t, scans, "%s: sequential scans in plan:\n%s", q.name, raw)
 	}
-	require.NoError(t, json.Unmarshal(raw, &plan))
-	require.Len(t, plan, 1)
-	// chat_descendant_questions stays empty here, so a scan of it costs
-	// nothing and the planner may pick one.
-	var scans []string
-	plan[0].Plan.walk(func(node planNode) {
-		if node.NodeType != "Seq Scan" {
-			return
-		}
-		switch node.RelationName {
-		case "chat_wakeups", "chats", "chat_messages", "chat_wakeup_watches":
-			scans = append(scans, node.RelationName)
-		}
-	})
-	require.Empty(t, scans, "sequential scans in plan:\n%s", raw)
 }
 
 type planNode struct {

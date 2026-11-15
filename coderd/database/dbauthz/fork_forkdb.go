@@ -48,14 +48,6 @@ func (f *forkQuerier) CancelChatWakeupsByChatID(ctx context.Context, arg forkdb.
 	return f.db.CancelChatWakeupsByChatID(ctx, arg)
 }
 
-// ClaimDueChatWakeups spans chats, so it needs site-wide chat access, like chatd's.
-func (f *forkQuerier) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimDueChatWakeupsParams) ([]forkdb.ChatWakeup, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
-		return nil, err
-	}
-	return f.db.ClaimDueChatWakeups(ctx, arg)
-}
-
 func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return forkdb.PluginLinkCode{}, err
@@ -226,13 +218,6 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 		return err
 	}
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
-}
-
-func (f *forkQuerier) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
-	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
-		return forkdb.ChatWakeup{}, err
-	}
-	return f.db.FinishChatWakeupClaim(ctx, arg)
 }
 
 func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
@@ -781,6 +766,21 @@ func (f *forkQuerier) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context,
 	return f.db.ListChildChatIDsWithOpenWakeupWatches(ctx, parentChatID)
 }
 
+// ListDueChatWakeups spans chats unless it names a chat, so it then needs
+// site-wide chat access, like chatd's.
+func (f *forkQuerier) ListDueChatWakeups(ctx context.Context, arg forkdb.ListDueChatWakeupsParams) ([]forkdb.ListDueChatWakeupsRow, error) {
+	var err error
+	if arg.ChatID.Valid {
+		err = f.authorizeChat(ctx, policy.ActionRead, arg.ChatID.UUID)
+	} else {
+		err = f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f.db.ListDueChatWakeups(ctx, arg)
+}
+
 func (f *forkQuerier) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
@@ -864,6 +864,13 @@ func (f *forkQuerier) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) 
 	return f.db.LockChatForNoKeyUpdate(ctx, id)
 }
 
+func (f *forkQuerier) LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, id); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.LockActiveChatWakeup(ctx, id)
+}
+
 func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
 		return err
@@ -908,6 +915,13 @@ func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg for
 		return err
 	}
 	return f.db.UpdateChatSubagentWorkspaceID(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateChatWakeupRun(ctx context.Context, arg forkdb.UpdateChatWakeupRunParams) (forkdb.ChatWakeup, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.UpdateChatWakeupRun(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {
@@ -1235,4 +1249,90 @@ func (f *forkQuerier) authorizeUserAgentDefinition(ctx context.Context, action p
 		return err
 	}
 	return f.q.authorizeContext(ctx, action, rbac.ResourceUserSkill.WithOwner(userID.String()))
+}
+
+// The saved workflow queries authorize like the agent definition queries of
+// the same tier: a user-tier row is a personal skill of its owner in one
+// organization, and an organization-tier row is an organization skill with
+// its ACLs.
+
+func (f *forkQuerier) InsertUserSavedWorkflow(ctx context.Context, arg forkdb.InsertUserSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionCreate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.InsertUserSavedWorkflow(ctx, arg)
+}
+
+func (f *forkQuerier) GetUserSavedWorkflowByName(ctx context.Context, arg forkdb.GetUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.GetUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) ListUserSavedWorkflowMetadata(ctx context.Context, arg forkdb.ListUserSavedWorkflowMetadataParams) ([]forkdb.ListUserSavedWorkflowMetadataRow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return nil, err
+	}
+	return f.db.ListUserSavedWorkflowMetadata(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateUserSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionUpdate, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.UpdateUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteUserSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionDelete, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.DeleteUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f *forkQuerier) InsertOrganizationSavedWorkflow(ctx context.Context, arg forkdb.InsertOrganizationSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.InsertOrganizationSavedWorkflow(ctx, arg)
+}
+
+func (f *forkQuerier) GetOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationSavedWorkflowByName)(ctx, arg)
+}
+
+func (f *forkQuerier) GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameForUpdateParams) (forkdb.SavedWorkflow, error) {
+	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationSavedWorkflowByNameForUpdate)(ctx, arg)
+}
+
+func (f *forkQuerier) ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationSavedWorkflowMetadataRow, error) {
+	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.ListOrganizationSavedWorkflowMetadata)(ctx, organizationID)
+}
+
+func (f *forkQuerier) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return updateWithReturn(f.q.log, f.q.auth, fetch, f.db.UpdateOrganizationSavedWorkflowByName)(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionShare, fetch, f.db.UpdateOrganizationSavedWorkflowACLByName)(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams(arg))
+	}
+	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationSavedWorkflowByName)(ctx, arg)
 }

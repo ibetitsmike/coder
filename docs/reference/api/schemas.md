@@ -6110,9 +6110,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 #### Enumerated Values
 
-| Value(s)                                      |
-|-----------------------------------------------|
-| `cancelled`, `done`, `in_progress`, `pending` |
+| Value(s)                                     |
+|----------------------------------------------|
+| `canceled`, `done`, `in_progress`, `pending` |
 
 ## codersdk.ChatUnsupportedProvider
 
@@ -7591,6 +7591,30 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `ref`         | string | false    |              | Ref is a tag, a branch or a full commit SHA.                            |
 | `source_path` | string | false    |              | Source path is the pack directory in the repository. Empty is the root. |
 | `source_url`  | string | false    |              |                                                                         |
+
+## codersdk.CreateForkSavedWorkflowRequest
+
+```json
+{
+  "args_schema": {},
+  "description": "string",
+  "name": "string",
+  "phases": [
+    "string"
+  ],
+  "script": "string"
+}
+```
+
+### Properties
+
+| Name          | Type            | Required | Restrictions | Description                                                           |
+|---------------|-----------------|----------|--------------|-----------------------------------------------------------------------|
+| `args_schema` | object          | false    |              |                                                                       |
+| `description` | string          | false    |              |                                                                       |
+| `name`        | string          | false    |              | Name is lowercase letters and digits in dash-separated words.         |
+| `phases`      | array of string | false    |              |                                                                       |
+| `script`      | string          | false    |              | Script is Starlark that defines main(args), as a run_workflow script. |
 
 ## codersdk.CreateGroupRequest
 
@@ -10383,7 +10407,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"fork-chat-todos"
+"example"
 ```
 
 ### Properties
@@ -11061,6 +11085,76 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | Name    | Type            | Required | Restrictions | Description |
 |---------|-----------------|----------|--------------|-------------|
 | `hosts` | array of string | false    |              |             |
+
+## codersdk.ForkSavedWorkflow
+
+```json
+{
+  "args_schema": {},
+  "created_at": "2019-08-24T14:15:22Z",
+  "created_by": "ee824cad-d7a6-4f48-87dc-e8461a9201c4",
+  "description": "string",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "phases": [
+    "string"
+  ],
+  "script": "string",
+  "updated_at": "2019-08-24T14:15:22Z",
+  "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5"
+}
+```
+
+### Properties
+
+| Name              | Type            | Required | Restrictions | Description                                                                            |
+|-------------------|-----------------|----------|--------------|----------------------------------------------------------------------------------------|
+| `args_schema`     | object          | false    |              | Args schema is an optional JSON Schema object for the args of a run.                   |
+| `created_at`      | string          | false    |              |                                                                                        |
+| `created_by`      | string          | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted. |
+| `description`     | string          | false    |              |                                                                                        |
+| `id`              | string          | false    |              |                                                                                        |
+| `name`            | string          | false    |              | Name is what run_workflow takes to run the workflow.                                   |
+| `organization_id` | string          | false    |              |                                                                                        |
+| `phases`          | array of string | false    |              | Phases are the declared phase names of the workflow, in order.                         |
+| `script`          | string          | false    |              |                                                                                        |
+| `updated_at`      | string          | false    |              |                                                                                        |
+| `user_id`         | string          | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.  |
+
+## codersdk.ForkSavedWorkflowMetadata
+
+```json
+{
+  "args_schema": {},
+  "created_at": "2019-08-24T14:15:22Z",
+  "created_by": "ee824cad-d7a6-4f48-87dc-e8461a9201c4",
+  "description": "string",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "phases": [
+    "string"
+  ],
+  "updated_at": "2019-08-24T14:15:22Z",
+  "user_id": "a169451c-8525-4352-b8ca-070dd449a1a5"
+}
+```
+
+### Properties
+
+| Name              | Type            | Required | Restrictions | Description                                                                            |
+|-------------------|-----------------|----------|--------------|----------------------------------------------------------------------------------------|
+| `args_schema`     | object          | false    |              | Args schema is an optional JSON Schema object for the args of a run.                   |
+| `created_at`      | string          | false    |              |                                                                                        |
+| `created_by`      | string          | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted. |
+| `description`     | string          | false    |              |                                                                                        |
+| `id`              | string          | false    |              |                                                                                        |
+| `name`            | string          | false    |              | Name is what run_workflow takes to run the workflow.                                   |
+| `organization_id` | string          | false    |              |                                                                                        |
+| `phases`          | array of string | false    |              | Phases are the declared phase names of the workflow, in order.                         |
+| `updated_at`      | string          | false    |              |                                                                                        |
+| `user_id`         | string          | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.  |
 
 ## codersdk.ForkSubagentLimitValues
 
@@ -18469,6 +18563,28 @@ The cursor is owner-scoped, so only the chat owner may set this. Opening a chat'
 | Name  | Type   | Required | Restrictions | Description                                                            |
 |-------|--------|----------|--------------|------------------------------------------------------------------------|
 | `ref` | string | false    |              | Ref replaces the ref of the pack. Empty fetches the current ref again. |
+
+## codersdk.UpdateForkSavedWorkflowRequest
+
+```json
+{
+  "args_schema": {},
+  "description": "string",
+  "phases": [
+    "string"
+  ],
+  "script": "string"
+}
+```
+
+### Properties
+
+| Name          | Type            | Required | Restrictions | Description |
+|---------------|-----------------|----------|--------------|-------------|
+| `args_schema` | object          | false    |              |             |
+| `description` | string          | false    |              |             |
+| `phases`      | array of string | false    |              |             |
+| `script`      | string          | false    |              |             |
 
 ## codersdk.UpdateMCPServerConfigACLRequest
 

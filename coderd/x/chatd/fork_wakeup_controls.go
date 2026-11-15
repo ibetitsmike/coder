@@ -34,10 +34,14 @@ const (
 // ErrChatWakeupFinished with the finished wake-up as before when the wake-up
 // already completed or was canceled.
 func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wakeupID uuid.UUID, status forkdb.ChatWakeupStatus) (before, after forkdb.ChatWakeup, err error) {
-	// The row lock makes a worker that finishes its claim in between wait,
-	// and the update clears the lease, so the worker's finish then changes
-	// nothing and a control never overwrites a run.
-	err = forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
+	// The locks of the chat and then of the wake-up, the order a delivery
+	// takes them in, make a delivery in between skip the wake-up. The update
+	// changes updated_at, so a delivery that listed the wake-up before then
+	// finds it changed and writes nothing: a control never loses to a run.
+	err = forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+		if _, err := tx.GetChatByIDForUpdate(ctx, chat.ID); err != nil {
+			return err
+		}
 		wakeup, err := ftx.GetChatWakeupByIDForUpdate(ctx, wakeupID)
 		if err != nil {
 			return err
@@ -71,6 +75,10 @@ func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wa
 	}
 	if err != nil {
 		return forkdb.ChatWakeup{}, forkdb.ChatWakeup{}, err
+	}
+	if after.Status != before.Status {
+		// A resumed wake-up may be due now, or earlier than the timer.
+		p.forkWaker().poke(chat.ID)
 	}
 	return before, after, nil
 }
