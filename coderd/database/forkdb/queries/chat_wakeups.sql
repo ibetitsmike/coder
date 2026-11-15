@@ -157,6 +157,8 @@ ORDER BY w.next_run_at, w.id;
 SELECT * FROM chat_wakeups WHERE id = @id AND status = 'active' FOR UPDATE SKIP LOCKED;
 
 -- Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+-- It clears a lease that a replica of an older version took with its claim,
+-- so that replica's FinishChatWakeupClaim writes nothing over this result.
 -- name: UpdateChatWakeupRun :one
 UPDATE chat_wakeups
 SET
@@ -165,6 +167,7 @@ SET
     status_reason = @status_reason,
     run_count = run_count + @run_count_delta::int,
     last_run_at = COALESCE(sqlc.narg('last_run_at')::timestamptz, last_run_at),
+    lease_expires_at = NULL,
     updated_at = @updated_at
 WHERE id = @id
 RETURNING *;

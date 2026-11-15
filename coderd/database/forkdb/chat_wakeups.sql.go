@@ -655,6 +655,7 @@ SET
     status_reason = $3,
     run_count = run_count + $4::int,
     last_run_at = COALESCE($5::timestamptz, last_run_at),
+    lease_expires_at = NULL,
     updated_at = $6
 WHERE id = $7
 RETURNING id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at
@@ -671,6 +672,8 @@ type UpdateChatWakeupRunParams struct {
 }
 
 // Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+// It clears a lease that a replica of an older version took with its claim,
+// so that replica's FinishChatWakeupClaim writes nothing over this result.
 func (q *Queries) UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error) {
 	row := q.db.QueryRowContext(ctx, updateChatWakeupRun,
 		arg.NextRunAt,
