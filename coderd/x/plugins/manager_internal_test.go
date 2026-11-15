@@ -28,6 +28,9 @@ type fakeLeases struct {
 	held     []forkdb.Plugin
 	summarys int
 	acquires int
+	// onAcquire runs once inside the next AcquirePluginLeases, as a slow
+	// query.
+	onAcquire func()
 }
 
 func (f *fakeLeases) set(summary forkdb.GetPluginLeaseSummaryRow, held ...forkdb.Plugin) {
@@ -71,6 +74,10 @@ func startLeaseHarness(t *testing.T, ps pubsub.Pubsub) *leaseHarness {
 			leases.mu.Lock()
 			defer leases.mu.Unlock()
 			leases.acquires++
+			if f := leases.onAcquire; f != nil {
+				leases.onAcquire = nil
+				f()
+			}
 			return leases.held, nil
 		}).AnyTimes()
 	// A held plugin in these tests has a manifest that does not decode, so
@@ -99,8 +106,10 @@ func startLeaseHarness(t *testing.T, ps pubsub.Pubsub) *leaseHarness {
 func (h *leaseHarness) next(ctx context.Context, t *testing.T, want time.Duration) {
 	t.Helper()
 	call := h.trap.MustWait(ctx)
-	require.Equal(t, want, call.Duration)
+	// Release first, so a failed check does not block the loop and the
+	// cleanup.
 	call.MustRelease(ctx)
+	require.Equal(t, want, call.Duration)
 }
 
 func (h *leaseHarness) fire(ctx context.Context, d time.Duration) {
@@ -206,6 +215,33 @@ func TestManagerStandbyWatchesLeases(t *testing.T) {
 	h.waitRunners(ctx, t)
 	_, acquires = h.leases.calls()
 	require.Equal(t, 1, acquires)
+}
+
+// TestManagerRenewalCountsReconcileTime verifies the time a renewal takes
+// shortens the wait for the next one, so a slow query does not push the
+// next renewal past the lease expiry.
+func TestManagerRenewalCountsReconcileTime(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	h := startLeaseHarness(t, pubsub.NewInMemory())
+	h.next(ctx, t, defaultIdleInterval)
+
+	h.leases.mu.Lock()
+	h.leases.summary = forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}
+	h.leases.held = []forkdb.Plugin{brokenPlugin()}
+	h.leases.onAcquire = func() { h.clock.Advance(4 * time.Second) }
+	h.leases.mu.Unlock()
+	require.NoError(t, h.ps.Publish(ChangedChannel, nil))
+	h.next(ctx, t, defaultLeaseInterval-4*time.Second)
+
+	h.leases.mu.Lock()
+	h.leases.onAcquire = func() { h.clock.Advance(defaultLeaseInterval + time.Second) }
+	h.leases.mu.Unlock()
+	h.fire(ctx, defaultLeaseInterval-4*time.Second)
+	h.next(ctx, t, 0)
+	// The timer fires at once and the next renewal is quick.
+	h.next(ctx, t, defaultLeaseInterval)
+	h.waitRunners(ctx, t)
 }
 
 type failingSubscribe struct{ pubsub.Pubsub }

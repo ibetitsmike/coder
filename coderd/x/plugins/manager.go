@@ -191,10 +191,14 @@ func (m *Manager) loop() {
 	}
 
 	for {
-		next := m.opts.LeaseInterval
+		start := m.clock.Now()
+		idle := m.reconcile(ctx)
+		// Count the time reconcile took, so a slow renewal does not push
+		// the next one past the lease expiry.
+		next := max(m.opts.LeaseInterval-m.clock.Since(start), 0)
 		// Without the subscription no message reports a change, so an idle
 		// replica keeps the short interval.
-		if m.reconcile(ctx) && subscribed {
+		if idle && subscribed {
 			next = m.opts.IdleInterval
 		}
 		timer := m.clock.NewTimer(next, "plugins", "lease")
