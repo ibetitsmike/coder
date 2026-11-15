@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -31,7 +32,8 @@ import (
 const (
 	maxForkSavedWorkflowNameBytes        = 128
 	maxForkSavedWorkflowDescriptionBytes = 4096
-	// Below the 16 KiB row limit so one list_workflows result holds it.
+	// Below the 16 KiB row limit, which counts the spaced jsonb text, so
+	// one list_workflows result holds it.
 	maxForkSavedWorkflowArgsSchemaBytes = 12 << 10
 	maxForkSavedWorkflowPhases          = 32
 	maxForkSavedWorkflowPhaseBytes      = 128
@@ -105,6 +107,7 @@ func (api *API) postForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reques
 	row, err := fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
+		CreatedBy:      httpmw.APIKey(r).UserID,
 		Name:           req.Name,
 		Description:    req.Description,
 		Script:         req.Script,
@@ -248,7 +251,11 @@ func readForkSavedWorkflowCreate(ctx context.Context, rw http.ResponseWriter, r 
 // readForkSavedWorkflowUpdate reads and checks a PATCH request for the
 // workflow named in the path.
 func readForkSavedWorkflowUpdate(ctx context.Context, rw http.ResponseWriter, r *http.Request) (forkdb.UpdateUserSavedWorkflowByNameParams, bool) {
-	update := forkdb.UpdateUserSavedWorkflowByNameParams{Name: chi.URLParam(r, "workflow")}
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return forkdb.UpdateUserSavedWorkflowByNameParams{}, false
+	}
+	update := forkdb.UpdateUserSavedWorkflowByNameParams{Name: name}
 	var req codersdk.UpdateForkSavedWorkflowRequest
 	if !httpapi.ReadLimit(ctx, rw, r, maxForkSavedWorkflowRequestBytes, &req) {
 		return update, false
@@ -308,8 +315,9 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	}
 	seen := make(map[string]bool, len(phases))
 	for _, phase := range phases {
-		if phase == "" || strings.TrimSpace(phase) != phase || len(phase) > maxForkSavedWorkflowPhaseBytes {
-			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q must be non-empty text without surrounding spaces, at most %d bytes", phase, maxForkSavedWorkflowPhaseBytes)
+		if phase == "" || strings.TrimSpace(phase) != phase || len(phase) > maxForkSavedWorkflowPhaseBytes ||
+			strings.ContainsFunc(phase, isForkSavedWorkflowPhaseHidden) {
+			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q must be non-empty text without surrounding spaces, control or format characters, at most %d bytes", phase, maxForkSavedWorkflowPhaseBytes)
 		}
 		if seen[phase] {
 			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q is declared twice", phase)
@@ -319,7 +327,10 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	if len(argsSchema) == 0 || bytes.Equal(bytes.TrimSpace(argsSchema), []byte("null")) {
 		return pqtype.NullRawMessage{}, nil
 	}
-	if len(argsSchema) > maxForkSavedWorkflowArgsSchemaBytes {
+	// Bound the size before the schema check resolves the schema. Invalid
+	// JSON fails to compact here and the schema check reports it.
+	var compact bytes.Buffer
+	if json.Compact(&compact, argsSchema) == nil && compact.Len() > maxForkSavedWorkflowArgsSchemaBytes {
 		return pqtype.NullRawMessage{}, xerrors.Errorf("the args schema is larger than %d bytes", maxForkSavedWorkflowArgsSchemaBytes)
 	}
 	if err := chatd.ValidateWorkflowArgsSchema(argsSchema); err != nil {
@@ -329,11 +340,19 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	if err != nil {
 		return pqtype.NullRawMessage{}, xerrors.Errorf("args schema: %w", err)
 	}
-	// Invalid UTF-8 bytes come back as \ufffd escapes, so the size can grow.
+	// The limit applies to the compact form. Whitespace does not count, and
+	// invalid UTF-8 bytes come back as \ufffd escapes, so the size can grow.
 	if len(normalized) > maxForkSavedWorkflowArgsSchemaBytes {
 		return pqtype.NullRawMessage{}, xerrors.Errorf("the args schema is larger than %d bytes", maxForkSavedWorkflowArgsSchemaBytes)
 	}
 	return pqtype.NullRawMessage{RawMessage: normalized, Valid: true}, nil
+}
+
+// isForkSavedWorkflowPhaseHidden reports characters that a phase name must
+// not hold: control characters, and format characters such as bidi
+// overrides and zero-width spaces, which hide or reorder text.
+func isForkSavedWorkflowPhaseHidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
 
 // reencodeJSON decodes raw and encodes it again. The decoder turns unpaired
