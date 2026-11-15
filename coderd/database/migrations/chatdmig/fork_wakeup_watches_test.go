@@ -101,6 +101,13 @@ func TestWakeupWatchesBackfill(t *testing.T) {
 	insertRun(completed, "child_done:"+waiting.ID.String(), "delivered", deliveredAt)
 	canceled := insertWakeup("canceled", fmt.Sprintf(`[{"type": "child_done", "chat_id": %q}]`, waiting.ID))
 	notArray := insertWakeup("active", `{"type": "child_done"}`)
+	// Events that give no watch: only unknown or malformed entries pause the
+	// wake-up, as an unreadable events value did. An empty list, or only
+	// children that no longer exist, completed before and still does.
+	unknownOnly := insertWakeup("active", fmt.Sprintf(`[{"type": "pr_merged", "url": %q}, {"type": "child_done", "chat_id": "not-a-uuid"}]`, prURL))
+	empty := insertWakeup("active", `[]`)
+	goneOnly := insertWakeup("active", fmt.Sprintf(`[{"type": "child_done", "chat_id": %q}]`, uuid.New()))
+	pausedUnknown := insertWakeup("paused", `[{"type": "pr_merged"}]`)
 
 	statuses := func() map[uuid.UUID]string {
 		t.Helper()
@@ -122,7 +129,15 @@ func TestWakeupWatchesBackfill(t *testing.T) {
 	require.NoError(t, migrations.UpAll(sqlDB))
 	require.NoError(t, migrations.EnsureCleanAll(sqlDB))
 
-	require.Equal(t, before, statuses(), "the node changes no wake-up")
+	after := statuses()
+	for _, id := range []uuid.UUID{notArray, unknownOnly} {
+		require.Equal(t, "paused:invalid_events:0:", after[id], "an active wake-up whose events give no watch pauses")
+		after[id] = before[id]
+	}
+	require.Equal(t, before, after, "the node changes no other wake-up")
+	require.Contains(t, before[empty], "active")
+	require.Contains(t, before[goneOnly], "active")
+	require.Contains(t, before[pausedUnknown], "paused::")
 	var hasEvents bool
 	require.NoError(t, sqlDB.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_wakeups' AND column_name = 'events')`).Scan(&hasEvents))
 	require.False(t, hasEvents, "the events column is gone")
@@ -217,6 +232,10 @@ func TestWakeupWatchesBackfill(t *testing.T) {
 	require.Equal(t, waiting.ID, canceledWatches[0].Child.UUID)
 	require.False(t, canceledWatches[0].DeliveredAt.Valid)
 	require.Empty(t, watches(notArray))
+	require.Empty(t, watches(unknownOnly))
+	require.Empty(t, watches(empty))
+	require.Empty(t, watches(goneOnly))
+	require.Empty(t, watches(pausedUnknown))
 
 	var open int
 	require.NoError(t, sqlDB.QueryRow(`SELECT count(*) FROM chat_wakeup_watches x JOIN chat_wakeups w ON w.id = x.wakeup_id

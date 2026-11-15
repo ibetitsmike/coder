@@ -109,4 +109,34 @@ WHERE e.kind IS NOT NULL
     AND (e.kind <> 'process' OR e.process_id IS NOT NULL)
     AND (e.kind <> 'pull_request' OR e.pull_request_url IS NOT NULL);
 
+-- An active events wake-up whose events gave no watch would complete on its
+-- next poll without a message. The old reader paused a wake-up whose events
+-- it could not read, so pause it the same way. Events that are an empty
+-- array, or only name child chats that no longer exist, had nothing left to
+-- wait for and completed before, so they still do.
+UPDATE chat_wakeups w
+SET
+    status = 'paused',
+    status_reason = 'invalid_events',
+    next_run_at = NULL,
+    lease_expires_at = NULL,
+    updated_at = now()
+WHERE w.kind = 'events'
+    AND w.status = 'active'
+    AND NOT EXISTS (SELECT 1 FROM chat_wakeup_watches x WHERE x.wakeup_id = w.id)
+    AND (
+        jsonb_typeof(w.events) IS DISTINCT FROM 'array'
+        OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(w.events) = 'array' THEN w.events ELSE '[]'::jsonb END
+            ) AS x(entry)
+            WHERE NOT (
+                jsonb_typeof(x.entry) = 'object'
+                AND x.entry->>'type' = 'child_done'
+                AND COALESCE(x.entry->>'chat_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$', false)
+            )
+        )
+    );
+
 ALTER TABLE chat_wakeups DROP COLUMN events;
