@@ -1,6 +1,6 @@
 -- name: InsertUserSavedWorkflow :one
 INSERT INTO saved_workflows (organization_id, user_id, created_by, name, description, script, args_schema, phases)
-VALUES (@organization_id::uuid, @user_id::uuid, @user_id::uuid, @name::text, @description::text, @script::text, @args_schema, COALESCE(@phases::text[], '{}'))
+VALUES (@organization_id::uuid, @user_id::uuid, @created_by::uuid, @name::text, @description::text, @script::text, @args_schema, COALESCE(@phases::text[], '{}'))
 RETURNING *;
 
 -- name: GetUserSavedWorkflowByName :one

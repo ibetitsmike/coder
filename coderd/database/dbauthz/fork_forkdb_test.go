@@ -1458,7 +1458,7 @@ func TestSavedWorkflowRBAC(t *testing.T) {
 	read := database.ChatACLEntry{Permissions: []policy.Action{policy.ActionRead}}
 
 	// User tier: the owner has full access, another member has none.
-	_, err = fdb.InsertUserSavedWorkflow(member, forkdb.InsertUserSavedWorkflowParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine", Script: "def main(args):\n    return 1\n"})
+	_, err = fdb.InsertUserSavedWorkflow(member, forkdb.InsertUserSavedWorkflowParams{OrganizationID: org.ID, UserID: memberUser.ID, CreatedBy: memberUser.ID, Name: "mine", Script: "def main(args):\n    return 1\n"})
 	require.NoError(t, err)
 	_, err = fdb.GetUserSavedWorkflowByName(member, forkdb.GetUserSavedWorkflowByNameParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine"})
 	require.NoError(t, err)
