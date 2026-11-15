@@ -345,15 +345,17 @@ type workflowRun struct {
 	journalMu       sync.Mutex
 	journaledLogSeq int
 	// The write-through of the logs paces itself: lastLogFlush is when the
-	// journal last accepted a snapshot and logFlushTimer holds the pending
-	// flush of a burst. journalMu guards both.
-	lastLogFlush  time.Time
-	logFlushTimer *time.Timer
-	result        *runWorkflowResult
-	done          chan struct{}
-	awaiters      int
-	delivered     bool // an await_workflow call returned the end
-	notified      bool // the parent got the end message
+	// journal last accepted a snapshot, logFlushTimer holds the pending
+	// flush of a burst, and logFlushInFlight marks the goroutine that
+	// flushes now. journalMu guards all three.
+	lastLogFlush     time.Time
+	logFlushTimer    *time.Timer
+	logFlushInFlight bool
+	result           *runWorkflowResult
+	done             chan struct{}
+	awaiters         int
+	delivered        bool // an await_workflow call returned the end
+	notified         bool // the parent got the end message
 	// stopRequested marks a run that stop_workflow is unwinding. finish
 	// turns its outcome into a stopped run, not a failed one. cancel is the
 	// cancel of the script context, set before the script starts.
@@ -718,17 +720,25 @@ const workflowLogFlushInterval = 2 * time.Second
 
 // scheduleLogFlush flushes now when the last flush is older than the
 // interval, and otherwise arms one flush at the end of the interval. The
-// timer holds the flush, so a burst of lines lands in one write.
+// timer holds the flush, so a burst of lines lands in one write. A flush in
+// flight counts as pending, so the first burst cannot launch one goroutine
+// per line.
 func (r *workflowRun) scheduleLogFlush() {
 	r.journalMu.Lock()
 	defer r.journalMu.Unlock()
-	if r.logFlushTimer != nil {
+	if r.logFlushTimer != nil || r.logFlushInFlight {
 		return
 	}
 	now := time.Now()
 	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
 	if wait <= 0 {
-		go r.flushLogs()
+		r.logFlushInFlight = true
+		go func() {
+			r.flushLogs()
+			r.journalMu.Lock()
+			r.logFlushInFlight = false
+			r.journalMu.Unlock()
+		}()
 		return
 	}
 	r.logFlushTimer = time.AfterFunc(wait, func() {
@@ -740,7 +750,9 @@ func (r *workflowRun) scheduleLogFlush() {
 }
 
 // cancelLogFlush drops a pending paced flush. finish calls it, so the last
-// write of the run is its own flushLogs call.
+// write of the run is its own flushLogs call. A flush already in flight
+// cannot write again: it must win the seq check that the final flush below
+// also runs under journalMu.
 func (r *workflowRun) cancelLogFlush() {
 	r.journalMu.Lock()
 	if r.logFlushTimer != nil {
@@ -753,9 +765,10 @@ func (r *workflowRun) cancelLogFlush() {
 // flushLogs writes the retained log lines of a live run through to the
 // journal, so a mid-run read of the run detail and a restart keep the lines
 // the script printed so far. The write is best effort: the terminal snapshot
-// carries the final lines. A caller that loses the race with a newer snapshot
-// skips its write, so the journal never reads older lines than the run
-// already wrote.
+// carries the final lines. The seq check runs before the write, so a caller
+// that loses the race with a newer snapshot skips its write and the journal
+// never reads older lines than the run already wrote. scheduleLogFlush
+// serializes the callers, so the check and the write stay ordered.
 func (r *workflowRun) flushLogs() {
 	r.mu.Lock()
 	logs := append([]string(nil), r.logs...)
@@ -834,15 +847,14 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		// restart or is still open, the script does not run it again, so
 		// the await result reports it as reused. A finished row keeps its
 		// status, value and finished_at; only the flag flips in the
-		// journal, so the run detail reads it after the resume.
+		// journal, so the run detail reads it after the resume. An open row
+		// flips the flag alone too: a report the child sent while the run
+		// was interrupted can land between the rehydration and the replay,
+		// and the full update would reset that row to running.
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
-		if journaled.status == stepStatusReported || journaled.status == stepStatusFailed {
-			r.p.workflowJournal().markStepReused(ctx, journaled.id)
-		} else {
-			r.p.workflowJournal().updateStep(ctx, journaled)
-		}
+		r.p.workflowJournal().markStepReused(ctx, journaled.id)
 		return journaled, nil
 	}
 
