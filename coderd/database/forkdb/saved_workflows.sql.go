@@ -230,13 +230,14 @@ func (q *Queries) InsertOrganizationSavedWorkflow(ctx context.Context, arg Inser
 
 const insertUserSavedWorkflow = `-- name: InsertUserSavedWorkflow :one
 INSERT INTO saved_workflows (organization_id, user_id, created_by, name, description, script, args_schema, phases)
-VALUES ($1::uuid, $2::uuid, $2::uuid, $3::text, $4::text, $5::text, $6, COALESCE($7::text[], '{}'))
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7, COALESCE($8::text[], '{}'))
 RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
 `
 
 type InsertUserSavedWorkflowParams struct {
 	OrganizationID uuid.UUID             `db:"organization_id" json:"organization_id"`
 	UserID         uuid.UUID             `db:"user_id" json:"user_id"`
+	CreatedBy      uuid.UUID             `db:"created_by" json:"created_by"`
 	Name           string                `db:"name" json:"name"`
 	Description    string                `db:"description" json:"description"`
 	Script         string                `db:"script" json:"script"`
@@ -248,6 +249,7 @@ func (q *Queries) InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSav
 	row := q.db.QueryRowContext(ctx, insertUserSavedWorkflow,
 		arg.OrganizationID,
 		arg.UserID,
+		arg.CreatedBy,
 		arg.Name,
 		arg.Description,
 		arg.Script,
