@@ -818,6 +818,14 @@ func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUI
 	return f.db.ReleasePluginLeases(ctx, runnerID)
 }
 
+// RetireChatDescendantQuestion authorizes as an update of the owning chat.
+func (f *forkQuerier) RetireChatDescendantQuestion(ctx context.Context, arg forkdb.RetireChatDescendantQuestionParams) (int64, error) {
+	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
+		return 0, err
+	}
+	return f.db.RetireChatDescendantQuestion(ctx, arg)
+}
+
 func (f *forkQuerier) SetPluginUserLinkActiveChat(ctx context.Context, arg forkdb.SetPluginUserLinkActiveChatParams) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
 		return err
