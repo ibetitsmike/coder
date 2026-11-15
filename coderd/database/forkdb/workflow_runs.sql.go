@@ -322,19 +322,26 @@ const setWorkflowRunLogs = `-- name: SetWorkflowRunLogs :exec
 UPDATE workflow_runs
 SET logs = $1::jsonb, updated_at = now()
 WHERE id = $2
+	AND (
+		logs IS NULL
+		OR logs = 'null'::jsonb
+		OR COALESCE(logs->'fork_seq', '0'::jsonb)::bigint <= $3::bigint
+	)
 `
 
 type SetWorkflowRunLogsParams struct {
-	Lines json.RawMessage `db:"lines" json:"lines"`
-	ID    uuid.UUID       `db:"id" json:"id"`
+	Lines   json.RawMessage `db:"lines" json:"lines"`
+	ID      uuid.UUID       `db:"id" json:"id"`
+	ForkSeq int64           `db:"fork_seq" json:"fork_seq"`
 }
 
 // The engine writes the log lines of a live run through to the journal, capped
-// to the last workflowLiveLogs lines. lines replaces the retained lines, so
-// the cap holds across restarts and the detail of a mid-run read matches the
-// terminal snapshot.
+// to the last workflowLiveLogs lines. lines replaces the retained lines when
+// it is at least as new as the stored sequence, so a stalled write of an
+// older snapshot cannot replace newer lines. The caller keeps the sequence in
+// the lines payload under the fork_seq key.
 func (q *Queries) SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error {
-	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs, arg.Lines, arg.ID)
+	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs, arg.Lines, arg.ID, arg.ForkSeq)
 	return err
 }
 

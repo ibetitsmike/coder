@@ -339,17 +339,20 @@ type workflowRun struct {
 	logs     []string
 	logBytes int // the bytes of the retained logs
 	// logSeq counts the appended lines. journalMu guards journaledLogSeq, the
-	// seq of the last snapshot the journal accepted, so a slower write of an
-	// older snapshot cannot replace newer lines in the journal.
-	logSeq          int
-	journalMu       sync.Mutex
-	journaledLogSeq int
+	// seq the journal last accepted, and journalLogWrite, which serializes the
+	// journal writes so the write of an older snapshot cannot replace newer
+	// lines after a stalled one.
+	logSeq           int
+	journalMu        sync.Mutex
+	journaledLogSeq  int
+	journalLogWrite  chan struct{}
+	journalWriteDone chan struct{}
 	// logEchoBase holds the journal lines a replay restored: the replayed
 	// script prints them again, and appendLogLocked suppresses each line
 	// that still matches the baseline, so the view and the journal keep one
-	// copy of the pre-restart history. A line that diverges from the
-	// baseline drops it, because the new attempt replaces the old output.
-	// mu guards both fields.
+	// copy of the pre-restart history. A line that breaks the match drops
+	// the baseline, because the new attempt replaces the old output. mu
+	// guards both fields.
 	logEchoBase []string
 	logEcho     int
 	// The write-through of the logs paces itself: lastLogFlush is when the
@@ -431,19 +434,21 @@ func (p *Server) startWorkflowRun(
 		return nil, err
 	}
 	run, added := p.workflows.add(&workflowRun{
-		p:             p,
-		id:            runID,
-		parent:        parent,
-		modelConfigID: modelConfigID,
-		program:       program,
-		script:        args.Script,
-		argsJSON:      argsJSON,
-		seen:          map[string]int{},
-		done:          make(chan struct{}),
+		p:               p,
+		id:              runID,
+		parent:          parent,
+		modelConfigID:   modelConfigID,
+		program:         program,
+		script:          args.Script,
+		argsJSON:        argsJSON,
+		seen:            map[string]int{},
+		done:            make(chan struct{}),
+		journalLogWrite: make(chan struct{}, 1),
 	})
 	if !added {
 		return run, nil
 	}
+	run.journalLogWrite <- struct{}{}
 	if err := p.workflowJournal().insertRun(ctx, run); err != nil {
 		p.workflows.remove(runID)
 		return nil, xerrors.Errorf("journal the workflow run: %w", err)
@@ -711,14 +716,25 @@ func (r *workflowRun) log(msg string) {
 
 func (r *workflowRun) appendLogLocked(msg string) {
 	msg = truncateLogLine(msg, maxWorkflowLogLine)
-	// The replay of a restored run echoes the baseline lines: suppress the
+	// The replay of a restored run echoes the retained lines: suppress the
 	// matching prefix so the view and the journal do not duplicate the
-	// pre-restart history. A line that breaks the match drops the baseline,
-	// because the new attempt replaces the old output.
+	// pre-restart history. The baseline may start mid-stream, when the
+	// journal kept only the last lines of a long run, so an unmatched
+	// baseline prefix never breaks the match. A line that breaks the match
+	// drops the baseline, because the new attempt replaces the old output.
 	if r.logEchoBase != nil {
 		if r.logEcho < len(r.logEchoBase) {
 			if msg == r.logEchoBase[r.logEcho] {
 				r.logEcho++
+				return
+			}
+			if r.logEcho == 0 {
+				// The baseline still holds a line the replay has not
+				// echoed: the match may start later in the baseline.
+				r.logEchoBase = r.logEchoBase[1:]
+				if len(r.logEchoBase) == 0 {
+					r.logEchoBase = nil
+				}
 				return
 			}
 			r.logs = nil
@@ -813,11 +829,21 @@ func (r *workflowRun) rearmLogFlush() {
 // flushLogs writes the retained log lines of a live run through to the
 // journal, so a mid-run read of the run detail and a restart keep the lines
 // the script printed so far. The write is best effort: the terminal snapshot
-// carries the final lines. The seq check runs before the write, so a caller
-// that loses the race with a newer snapshot skips its write and the journal
-// never reads older lines than the run already wrote. scheduleLogFlush
-// serializes the callers, so the check and the write stay ordered.
+// carries the final lines. The callers take the write channel before the seq
+// check and release it after the write, so a stalled write of an older
+// snapshot cannot replace newer lines: the newer caller waits for the
+// channel and then wins the seq check. The journal query drops a payload
+// older than the stored sequence on top.
 func (r *workflowRun) flushLogs() {
+	if r.journalLogWrite == nil {
+		return
+	}
+	select {
+	case <-r.journalLogWrite:
+	default:
+		return
+	}
+	defer func() { r.journalLogWrite <- struct{}{} }()
 	r.mu.Lock()
 	logs := append([]string(nil), r.logs...)
 	seq := r.logSeq
@@ -833,7 +859,7 @@ func (r *workflowRun) flushLogs() {
 	r.journaledLogSeq = seq
 	r.lastLogFlush = time.Now()
 	r.journalMu.Unlock()
-	r.p.workflowJournal().setLogs(dbauthz.AsSystemRestricted(context.Background()), r.id, logs)
+	r.p.workflowJournal().setLogs(dbauthz.AsSystemRestricted(context.Background()), r.id, int64(seq), logs)
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the

@@ -244,8 +244,7 @@ def main(args):
 		journalLogs := func() []string {
 			row, err := fdb.GetWorkflowRun(ctx, run.id)
 			require.NoError(t, err)
-			var logs []string
-			require.NoError(t, json.Unmarshal(row.Logs, &logs))
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
 			return logs
 		}
 		testutil.Eventually(ctx, t, func(context.Context) bool {
@@ -290,7 +289,7 @@ def main(args):
 		}
 		require.NoError(t, json.Unmarshal(row.Result.RawMessage, &snapshot))
 		assert.Equal(t, []string{"first line", "second line", "third line"}, snapshot.Logs)
-		logs, _ := restoreWorkflowLogs(row.Logs)
+		logs, _, _ := restoreWorkflowLogs(row.Logs)
 		assert.Equal(t, []string{"first line", "second line", "third line"}, logs,
 			"the journal column holds one copy of the replayed history")
 	})
@@ -313,8 +312,7 @@ def main(args):
 		journalLogs := func() []string {
 			row, err := fdb.GetWorkflowRun(ctx, run.id)
 			require.NoError(t, err)
-			var logs []string
-			require.NoError(t, json.Unmarshal(row.Logs, &logs))
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
 			return logs
 		}
 		testutil.Eventually(ctx, t, func(context.Context) bool {
@@ -354,7 +352,7 @@ def main(args):
 			if err != nil {
 				return false
 			}
-			logs, _ := restoreWorkflowLogs(row.Logs)
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
 			return len(logs) == 2
 		}, testutil.IntervalFast)
 
@@ -371,6 +369,55 @@ def main(args):
 		require.NoError(t, json.Unmarshal([]byte(resp.Content), &out))
 		assert.Equal(t, workflowStatusInterrupted, out.Status)
 		assert.Equal(t, []string{"first line", "second line"}, out.Logs)
+	})
+
+	// A restart of a capped run replays the script from its first line, but
+	// the journal holds only the retained tail: the replayed prefix that the
+	// tail does not contain must not drop it.
+	t.Run("ReplayKeepsACappedTail", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    for i in range(80):
+        log("line %d" % i)
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		journalLogs := func() []string {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			require.NoError(t, err)
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
+			return logs
+		}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == maxWorkflowLogs
+		}, testutil.IntervalFast)
+
+		// The restart interrupts the run, and the resume replays it from
+		// the first line, which the capped tail no longer contains.
+		f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		assert.Equal(t, "line 30", journalLogs()[0], "the restart keeps the tail")
+		resumed, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+
+		// The replay echoes past the tail and keeps appending: the first
+		// lines the tail dropped come back as the replay output, and the
+		// later ones extend it.
+		step := f.steps(ctx, t, resumed, 1)[0]
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		require.Len(t, res.Logs, maxWorkflowLogs)
+		assert.Equal(t, "line 30", res.Logs[0],
+			"the replayed lines that the tail dropped append after it")
+		assert.Equal(t, "line 79", res.Logs[49])
 	})
 
 	// A script that logs in a loop keeps a single write in flight, so its
@@ -393,8 +440,7 @@ def main(args):
 		}, testutil.IntervalFast)
 		row, err := fdb.GetWorkflowRun(ctx, run.id)
 		require.NoError(t, err)
-		var logs []string
-		require.NoError(t, json.Unmarshal(row.Logs, &logs))
+		logs, _, _ := restoreWorkflowLogs(row.Logs)
 		require.Len(t, logs, maxWorkflowLogs, "the journal keeps the capped lines")
 		assert.Equal(t, "line 30", logs[0], "the retained lines are the last ones")
 		assert.Equal(t, "line 79", logs[len(logs)-1])

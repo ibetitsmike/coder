@@ -244,43 +244,53 @@ func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) err
 }
 
 // setLogs writes the retained log lines of a live run through to the journal,
-// best effort like updateRunStatus. The write replaces the column, so the cap
-// holds and a mid-run read sees the lines the script printed so far.
-func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, logs []string) {
+// best effort like updateRunStatus. seq orders the write: the query replaces
+// the column only when the stored sequence is not ahead, so a stalled write
+// of an older snapshot cannot replace newer lines. The cap holds because the
+// engine always writes the retained tail.
+func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, seq int64, logs []string) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		j.warn(ctx, "open workflow journal store", runID, err)
 		return
 	}
-	raw, err := json.Marshal(logs)
+	stored := struct {
+		ForkSeq int64    `json:"fork_seq"`
+		Lines   []string `json:"lines"`
+	}{ForkSeq: seq, Lines: logs}
+	raw, err := json.Marshal(stored)
 	if err != nil {
 		j.warn(ctx, "marshal workflow run logs", runID, err)
 		return
 	}
 	if err := fdb.SetWorkflowRunLogs(journalCtx(ctx), forkdb.SetWorkflowRunLogsParams{
-		ID:    runID,
-		Lines: raw,
+		ID:      runID,
+		Lines:   raw,
+		ForkSeq: seq,
 	}); err != nil {
 		j.warn(ctx, "journal workflow run logs", runID, err)
 	}
 }
 
-// restoreWorkflowLogs decodes the retained lines of a live run. It returns
-// nil for a column that holds no JSON array, for example on a row written
-// before the live-logs node.
-func restoreWorkflowLogs(raw json.RawMessage) ([]string, int) {
-	if len(raw) == 0 || !json.Valid(raw) || raw[0] != '[' {
-		return nil, 0
+// restoreWorkflowLogs decodes the retained lines of a live run with their
+// journal sequence. It returns nil for a column that holds no payload, for
+// example on a row written before the live-logs node.
+func restoreWorkflowLogs(raw json.RawMessage) ([]string, int64, int) {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil, 0, 0
 	}
-	var logs []string
-	if err := json.Unmarshal(raw, &logs); err != nil || logs == nil {
-		return nil, 0
+	var stored struct {
+		ForkSeq int64    `json:"fork_seq"`
+		Lines   []string `json:"lines"`
+	}
+	if err := json.Unmarshal(raw, &stored); err != nil || stored.Lines == nil {
+		return nil, 0, 0
 	}
 	bytes := 0
-	for _, line := range logs {
+	for _, line := range stored.Lines {
 		bytes += len(line)
 	}
-	return logs, bytes
+	return stored.Lines, stored.ForkSeq, bytes
 }
 
 func (j workflowJournal) getSteps(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
@@ -389,9 +399,16 @@ func (p *Server) rehydrateWorkflowRun(
 	// The replay keeps the retained pre-restart lines as its baseline: the
 	// view and the journal start from them, and appendLogLocked suppresses
 	// the replayed lines that echo them, so the history holds one copy.
-	run.logs, run.logBytes = restoreWorkflowLogs(row.Logs)
+	run.logs, _, run.logBytes = restoreWorkflowLogs(row.Logs)
 	run.logSeq = len(run.logs)
 	run.logEchoBase = append([]string(nil), run.logs...)
+	// The journal holds the lines at the sequence its payload carries, so a
+	// replayed line that matches the baseline does not write again.
+	run.journalLogWrite = make(chan struct{}, 1)
+	run.journalLogWrite <- struct{}{}
+	run.journalWriteDone = make(chan struct{})
+	close(run.journalWriteDone)
+	run.journaledLogSeq = int(len(run.logs))
 	for _, srow := range stepRows {
 		step := &workflowStep{
 			id:         srow.ID,
@@ -473,7 +490,7 @@ func (p *Server) workflowResultFromJournal(
 	}
 	// The journal holds the live lines of an open run, so await_workflow
 	// reports them the way a run this replica holds does.
-	logs, _ := restoreWorkflowLogs(row.Logs)
+	logs, _, _ := restoreWorkflowLogs(row.Logs)
 	res = runWorkflowResult{
 		RunID:  row.ID.String(),
 		Status: row.Status,

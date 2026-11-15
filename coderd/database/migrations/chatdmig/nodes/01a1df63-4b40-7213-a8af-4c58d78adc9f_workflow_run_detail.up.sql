@@ -26,5 +26,5 @@ WHERE r.id = s.run_id
         '$[*] ? (@.chat_id == $id && @.reused == true)',
         jsonb_build_object('id', s.id::text));
 
-COMMENT ON COLUMN workflow_runs.logs IS 'The last log lines of a live run, written through as the script logs. The terminal snapshot of result replaces them.';
+COMMENT ON COLUMN workflow_runs.logs IS 'The last log lines of a live run with their journal sequence under fork_seq, written through as the script logs. The terminal snapshot of result replaces them.';
 COMMENT ON COLUMN workflow_steps.reused IS 'True when a resumed run replayed this step instead of running it again.';
