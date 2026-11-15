@@ -90,14 +90,18 @@ func (api *API) forkOrganizationAgentDefinitionACLAvailable(rw http.ResponseWrit
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkOrganizationAgentDefinitionACL(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "organization_agent_definition", forkAuditUpdate)
+	defer commitAudit()
 	current, ok := api.readForkOrganizationAgentDefinitionForShare(rw, r)
 	if !ok {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), current.ID, current.Name)
 	var req codersdk.UpdateOrganizationSkillACLRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	var old, updated forkdb.AgentDefinition
 	err := forkdb.InTx(api.Database, func(tx database.Store, ftx forkdb.Store) error {
 		// Lock granted users' memberships before the definition row, in the
 		// same order as a member removal and its trigger, so a removal cannot
@@ -124,11 +128,12 @@ func (api *API) patchForkOrganizationAgentDefinitionACL(rw http.ResponseWriter, 
 		if len(validations) > 0 {
 			return &organizationSkillACLValidationError{validations: validations}
 		}
+		old = locked
 		userACL := maps.Clone(locked.UserAcl)
 		groupACL := maps.Clone(locked.GroupAcl)
 		applyACLReadRoles(userACL, userRoles)
 		applyACLReadRoles(groupACL, groupRoles)
-		_, err = ftx.UpdateOrganizationAgentDefinitionACLByName(ctx, forkdb.UpdateOrganizationAgentDefinitionACLByNameParams{
+		updated, err = ftx.UpdateOrganizationAgentDefinitionACLByName(ctx, forkdb.UpdateOrganizationAgentDefinitionACLByNameParams{
 			GroupAcl:       groupACL,
 			UserAcl:        userACL,
 			OrganizationID: current.OrganizationID,
@@ -151,6 +156,7 @@ func (api *API) patchForkOrganizationAgentDefinitionACL(rw http.ResponseWriter, 
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.diff(forkAuditAgentDefinition(old), forkAuditAgentDefinition(updated))
 	rw.WriteHeader(http.StatusNoContent)
 }
 

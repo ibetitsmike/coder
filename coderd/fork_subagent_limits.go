@@ -10,6 +10,8 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -63,6 +65,8 @@ func (api *API) forkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.R
 func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	organization := httpmw.OrganizationParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "subagent_limits", forkAuditUpdate)
+	defer commitAudit()
 	object := rbac.ResourceChatModelConfig.InOrg(organization.ID)
 	if !api.Authorize(r, policy.ActionUpdate, object) {
 		if api.Authorize(r, policy.ActionRead, object) {
@@ -72,6 +76,7 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 		}
 		return
 	}
+	fa.target(organization, uuid.Nil, "")
 
 	var req codersdk.ForkOrganizationSubagentLimits
 	if !httpapi.Read(ctx, rw, r, &req) {
@@ -90,6 +95,14 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 		httpapi.InternalServerError(rw, err)
 		return
 	}
+	old, err := fdb.GetChatOrganizationSubagentLimits(ctx, organization.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Internal error fetching organization subagent limits.",
+			Detail:  err.Error(),
+		})
+		return
+	}
 	row, err := fdb.UpsertChatOrganizationSubagentLimits(ctx, forkdb.UpsertChatOrganizationSubagentLimitsParams{
 		OrganizationID:         organization.ID,
 		MaxDepth:               forkNullInt32(req.MaxDepth),
@@ -104,6 +117,7 @@ func (api *API) updateForkOrganizationSubagentLimits(rw http.ResponseWriter, r *
 		})
 		return
 	}
+	fa.diff(convertForkOrganizationSubagentLimits(old), convertForkOrganizationSubagentLimits(row))
 	httpapi.Write(ctx, rw, http.StatusOK, api.forkOrganizationSubagentLimitsResponse(row))
 }
 

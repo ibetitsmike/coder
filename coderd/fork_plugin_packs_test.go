@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/pluginpacks/pluginpackstest"
@@ -88,6 +89,58 @@ func TestForkPluginPacks(t *testing.T) {
 	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
 	_, err = client.ForkPluginPack(ctx, orgID, pack.ID)
 	_ = requireSDKError(t, err, http.StatusNotFound)
+}
+
+// TestForkPluginPacksAudit checks that every change to the sources and packs
+// of an organization is audited, and that a denied request is not.
+func TestForkPluginPacksAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	repo := pluginpackstest.New(t)
+	auditor := audit.NewMock()
+	client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+		Auditor: auditor,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkPluginPacks)}
+		}),
+	})
+	api.HTTPClient = repo.Client
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+
+	_, err := client.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1"}})
+	require.NoError(t, err)
+	install := codersdk.CreateForkPluginPackRequest{Name: "demo", SourceURL: repo.URL, SourcePath: "pack", Ref: "main"}
+	_, err = member.CreateForkPluginPack(ctx, orgID, install)
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	pack, err := client.CreateForkPluginPack(ctx, orgID, install)
+	require.NoError(t, err)
+	_, err = client.UpdateForkPluginPack(ctx, orgID, pack.ID, codersdk.UpdateForkPluginPackRequest{Ref: "v1"})
+	require.NoError(t, err)
+	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
+
+	sources := forkAuditEntries(t, auditor, orgID, "plugin_pack_sources")
+	require.Len(t, sources, 1)
+	require.Equal(t, "update", sources[0].Operation)
+	require.JSONEq(t, `[]`, string(sources[0].Changes["hosts"].Old))
+	require.JSONEq(t, `["127.0.0.1"]`, string(sources[0].Changes["hosts"].New))
+
+	entries := forkAuditEntries(t, auditor, orgID, "plugin_pack")
+	require.Len(t, entries, 3, "the denied install is not audited")
+	for i, op := range []string{"create", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, pack.ID.String(), entries[i].ResourceID)
+		require.Equal(t, "demo", entries[i].ResourceName)
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+	require.JSONEq(t, `"`+repo.Second+`"`, string(entries[0].Changes["commit_sha"].New))
+	require.JSONEq(t, `"main"`, string(entries[1].Changes["ref"].Old))
+	require.JSONEq(t, `"v1"`, string(entries[1].Changes["ref"].New))
+	require.JSONEq(t, `"`+repo.First+`"`, string(entries[1].Changes["commit_sha"].New))
+	require.JSONEq(t, `"demo"`, string(entries[2].Changes["name"].Old))
+	require.Empty(t, entries[2].Changes["name"].New)
 }
 
 func skillHash(t *testing.T, pack codersdk.ForkPluginPack) string {

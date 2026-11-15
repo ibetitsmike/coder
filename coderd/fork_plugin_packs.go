@@ -70,9 +70,12 @@ func (api *API) forkPluginPackSources(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) updateForkPluginPackSources(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin_pack_sources", forkAuditUpdate)
+	defer commitAudit()
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionUpdate, rbac.ResourceOrganizationSkill.InOrg(httpmw.OrganizationParam(r).ID)) {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), uuid.Nil, "")
 	var req codersdk.ForkPluginPackSources
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
@@ -101,6 +104,11 @@ func (api *API) updateForkPluginPackSources(rw http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	oldHosts, err := forkPluginPackSourceHosts(ctx, fdb, httpmw.OrganizationParam(r).ID)
+	if err != nil {
+		writeForkPluginPackError(rw, err)
+		return
+	}
 	row, err := fdb.UpsertPluginPackSources(ctx, forkdb.UpsertPluginPackSourcesParams{
 		OrganizationID: httpmw.OrganizationParam(r).ID,
 		Hosts:          hosts,
@@ -110,6 +118,7 @@ func (api *API) updateForkPluginPackSources(rw http.ResponseWriter, r *http.Requ
 		writeForkPluginPackError(rw, err)
 		return
 	}
+	fa.diff(codersdk.ForkPluginPackSources{Hosts: oldHosts}, codersdk.ForkPluginPackSources{Hosts: row.Hosts})
 	httpapi.Write(ctx, rw, http.StatusOK, codersdk.ForkPluginPackSources{Hosts: row.Hosts})
 }
 
@@ -178,6 +187,8 @@ func (api *API) forkPluginPack(rw http.ResponseWriter, r *http.Request) {
 func (api *API) postForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	organization := httpmw.OrganizationParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin_pack", forkAuditCreate)
+	defer commitAudit()
 	// Authorize before the fetch, so a user who cannot install never makes
 	// the server fetch a repository.
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(organization.ID)) {
@@ -232,6 +243,8 @@ func (api *API) postForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 		writeForkPluginPackError(rw, err)
 		return
 	}
+	fa.target(organization, pack.ID, pack.Name)
+	fa.diff(nil, forkAuditPluginPack(pack))
 	api.writeForkPluginPack(ctx, rw, fdb, pack, http.StatusCreated)
 }
 
@@ -249,6 +262,8 @@ func (api *API) postForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) updateForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin_pack", forkAuditUpdate)
+	defer commitAudit()
 	fdb, pack, ok := api.forkPluginPackParam(rw, r)
 	if !ok {
 		return
@@ -256,6 +271,8 @@ func (api *API) updateForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionUpdate, pack) {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), pack.ID, pack.Name)
+	old := pack
 	var req codersdk.UpdateForkPluginPackRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
@@ -289,6 +306,7 @@ func (api *API) updateForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 		writeForkPluginPackError(rw, err)
 		return
 	}
+	fa.diff(forkAuditPluginPack(old), forkAuditPluginPack(pack))
 	api.writeForkPluginPack(ctx, rw, fdb, pack, http.StatusOK)
 }
 
@@ -303,6 +321,8 @@ func (api *API) updateForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin_pack", forkAuditDelete)
+	defer commitAudit()
 	fdb, pack, ok := api.forkPluginPackParam(rw, r)
 	if !ok {
 		return
@@ -310,10 +330,12 @@ func (api *API) deleteForkPluginPack(rw http.ResponseWriter, r *http.Request) {
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionDelete, pack) {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), pack.ID, pack.Name)
 	if err := fdb.DeletePluginPackByID(ctx, pack.ID); err != nil {
 		writeForkPluginPackError(rw, err)
 		return
 	}
+	fa.diff(forkAuditPluginPack(pack), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 
@@ -426,6 +448,17 @@ func insertForkPluginPackFiles(ctx context.Context, ftx forkdb.Store, packID uui
 		arg.ContentHashes = append(arg.ContentHashes, hex.EncodeToString(sum[:]))
 	}
 	return ftx.InsertPluginPackResources(ctx, arg)
+}
+
+// forkAuditPluginPack is the audit view of a plugin pack.
+func forkAuditPluginPack(pack forkdb.PluginPack) any {
+	return struct {
+		Name       string `json:"name"`
+		SourceURL  string `json:"source_url"`
+		SourcePath string `json:"source_path"`
+		Ref        string `json:"ref"`
+		CommitSHA  string `json:"commit_sha"`
+	}{pack.Name, forkAuditURL(pack.SourceUrl), pack.SourcePath, pack.Ref, pack.CommitSha}
 }
 
 func convertForkPluginPack(pack forkdb.PluginPack, resources []forkdb.PluginPackResource) codersdk.ForkPluginPack {
