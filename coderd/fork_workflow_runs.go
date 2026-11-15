@@ -273,7 +273,7 @@ func workflowRunItem(row forkdb.WorkflowRun, counts codersdk.WorkflowRunStepCoun
 		UpdatedAt:     row.UpdatedAt,
 		Title:         "",
 		ScriptPreview: workflowScriptPreview(row.Script),
-		Phases:        append([]string(nil), row.Phases...),
+		Phases:        append([]string{}, row.Phases...),
 		CurrentPhase:  row.CurrentPhase,
 		StepCounts:    counts,
 	}
@@ -327,7 +327,7 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		Title:        "",
 		Script:       row.Script,
 		Logs:         []string{},
-		Phases:       append([]string(nil), row.Phases...),
+		Phases:       append([]string{}, row.Phases...),
 		CurrentPhase: row.CurrentPhase,
 		Steps:        make([]codersdk.WorkflowRunStep, 0, len(steps)),
 	}

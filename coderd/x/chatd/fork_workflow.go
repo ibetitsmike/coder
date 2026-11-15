@@ -134,8 +134,8 @@ type runWorkflowResult struct {
 	Error  string          `json:"error,omitempty"`
 	// Phases lists the phases of the run in display order and CurrentPhase
 	// names the one the script set last. Both are empty for a run whose
-	// script uses no phases.
-	Phases       []string      `json:"phases,omitempty"`
+	// script uses no phases. Phases is a JSON array, never null.
+	Phases       []string      `json:"phases"`
 	CurrentPhase string        `json:"current_phase,omitempty"`
 	Steps        []stepSummary `json:"steps"`
 	Logs         []string      `json:"logs,omitempty"`
@@ -354,8 +354,8 @@ type workflowRun struct {
 	// script's PHASES list first, then every undeclared name that phase()
 	// reached, in first-reach order. currentPhase is the phase that the
 	// script set last, and it tags the steps that start after the call.
-	// Both are owned by the script goroutine, so a step reads them without
-	// the run lock.
+	// Writes come from the script goroutine; reads take the run lock, the
+	// way the steps and the logs do.
 	phases       []string
 	currentPhase string
 
@@ -467,7 +467,10 @@ func (p *Server) startWorkflowRun(
 	if err != nil {
 		stop()
 		p.workflows.remove(runID)
-		p.workflowJournal().updateRunStatus(ctx, runID, workflowStatusFailed, "start the run: "+err.Error(), nil, nil)
+		run.mu.Lock()
+		phases := run.phasesSnapshot()
+		run.mu.Unlock()
+		p.workflowJournal().updateRunStatus(ctx, runID, workflowStatusFailed, "start the run: "+err.Error(), nil, phases)
 		return nil, xerrors.Errorf("start workflow run: %w", err)
 	}
 	return run, nil
@@ -569,8 +572,8 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 		defer stop()
 		jctx = fresh
 	}
-	// finish runs on the script goroutine, so it snapshots the phase state
-	// before the write: phase() cannot change it meanwhile.
+	// finish runs on the script goroutine, so the phase state it snapshots
+	// cannot change while the write starts: phase() runs on this goroutine.
 	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
 
 	r.mu.Lock()
@@ -689,7 +692,7 @@ func (r *workflowRun) snapshotLocked() runWorkflowResult {
 	res := runWorkflowResult{
 		RunID:        r.id.String(),
 		Status:       workflowStatusRunning,
-		Phases:       append([]string(nil), r.phases...),
+		Phases:       append([]string{}, r.phases...),
 		CurrentPhase: r.currentPhase,
 		Steps:        make([]stepSummary, 0, len(r.steps)),
 		Logs:         append([]string(nil), r.logs...),

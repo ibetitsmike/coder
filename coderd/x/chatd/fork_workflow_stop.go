@@ -97,7 +97,8 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 	if _, err := p.workflowJournal().failOpenSteps(ictx, row.ID); err != nil {
 		return xerrors.Errorf("fail the open steps of run %s: %w", row.ID, err)
 	}
-	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, nil, nil)
+	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, nil,
+		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 	return nil
 }
 

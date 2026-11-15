@@ -445,15 +445,19 @@ func (h *workflowHost) phase(
 // see it. The write is best effort: a lost write only delays the rail, the
 // way a lost log line does.
 func (r *workflowRun) setPhase(ctx context.Context, name string) {
+	r.mu.Lock()
 	if !slices.Contains(r.phases, name) {
 		if len(r.phases) >= maxWorkflowPhases {
+			r.mu.Unlock()
 			r.log(fmt.Sprintf("phase %q ignored: the run reached more than %d phases", name, maxWorkflowPhases))
 			return
 		}
 		r.phases = append(r.phases, name)
 	}
 	r.currentPhase = name
-	r.p.workflowJournal().updateRunPhases(ctx, r.id, r.phasesSnapshot())
+	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: name}
+	r.mu.Unlock()
+	r.p.workflowJournal().updateRunPhases(ctx, r.id, snapshot)
 }
 
 // readDeclaredPhases reads the script's optional top-level PHASES list
@@ -486,9 +490,11 @@ func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
 		if len(name) > maxWorkflowPhaseName {
 			return xerrors.Errorf("PHASES[%d] is longer than %d bytes", i, maxWorkflowPhaseName)
 		}
+		r.mu.Lock()
 		if !slices.Contains(r.phases, name) {
 			r.phases = append(r.phases, name)
 		}
+		r.mu.Unlock()
 	}
 	return nil
 }
