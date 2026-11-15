@@ -1,6 +1,12 @@
 // Package plugins runs sandboxed Wasm plugins for Coder Agents chats. Each
 // plugin runs in its own plugin-host child process. The Manager holds a
 // lease for each plugin it runs, so one replica runs each plugin.
+//
+// Each runner keeps a delivery cursor per bound chat. A runner binds every
+// chat of its linked users when it subscribes to a new user, after a link
+// is created, and once every bind interval as a fallback. A created chat
+// watch event binds that one chat. The scan every scan interval only finds
+// due chats and binds nothing.
 package plugins
 
 import (

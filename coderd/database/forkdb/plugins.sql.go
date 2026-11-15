@@ -148,6 +148,42 @@ func (q *Queries) DeletePluginUserLink(ctx context.Context, arg DeletePluginUser
 	return err
 }
 
+const ensurePluginChatBinding = `-- name: EnsurePluginChatBinding :exec
+INSERT INTO plugin_chat_bindings (plugin_id, chat_id, sent_message_id, sent_status)
+SELECT DISTINCT ON (c.id)
+    l.plugin_id,
+    c.id,
+    CASE
+        WHEN c.created_at >= l.created_at THEN 0
+        ELSE COALESCE((SELECT max(m.id) FROM chat_messages m WHERE m.chat_id = c.id), 0)
+    END,
+    CASE
+        WHEN c.created_at >= l.created_at THEN NULL
+        ELSE c.status
+    END
+FROM plugin_user_links l
+JOIN plugins p ON p.id = l.plugin_id
+JOIN chats c ON c.owner_id = l.user_id AND c.organization_id = p.organization_id
+WHERE l.plugin_id = $1
+    AND c.id = $2
+    AND c.parent_chat_id IS NULL
+    AND NOT c.archived
+ORDER BY c.id, l.created_at
+ON CONFLICT (plugin_id, chat_id) DO NOTHING
+`
+
+type EnsurePluginChatBindingParams struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ChatID   uuid.UUID `db:"chat_id" json:"chat_id"`
+}
+
+// EnsurePluginChatBinding is EnsurePluginChatBindings for one chat, for a
+// chat that was just created or unarchived.
+func (q *Queries) EnsurePluginChatBinding(ctx context.Context, arg EnsurePluginChatBindingParams) error {
+	_, err := q.db.ExecContext(ctx, ensurePluginChatBinding, arg.PluginID, arg.ChatID)
+	return err
+}
+
 const ensurePluginChatBindings = `-- name: EnsurePluginChatBindings :exec
 INSERT INTO plugin_chat_bindings (plugin_id, chat_id, sent_message_id, sent_status)
 SELECT DISTINCT ON (c.id)

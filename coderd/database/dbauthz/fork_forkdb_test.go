@@ -785,6 +785,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
 		},
+		"EnsurePluginChatBinding": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.EnsurePluginChatBindingParams{PluginID: uuid.New(), ChatID: uuid.New()}
+			fdb.EXPECT().EnsurePluginChatBinding(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
+		},
 		"EnsurePluginChatBindings": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			pluginID := uuid.New()
 			fdb.EXPECT().EnsurePluginChatBindings(gomock.Any(), pluginID).Return(nil).AnyTimes()

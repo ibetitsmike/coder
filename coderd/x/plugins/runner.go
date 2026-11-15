@@ -28,6 +28,8 @@ import (
 const (
 	// scanInterval finds chat events that pubsub lost.
 	scanInterval = 15 * time.Second
+	// bindInterval binds the chats whose created event pubsub lost.
+	bindInterval = 10 * time.Minute
 	// maxWebhookBodyBytes caps the body of one webhook request.
 	maxWebhookBodyBytes = 1 << 20
 )
@@ -68,6 +70,11 @@ type runner struct {
 
 	subsMu sync.Mutex
 	subs   map[uuid.UUID]func()
+
+	// newChats holds the chats that created watch events named and
+	// delivery has not bound yet.
+	newChatsMu sync.Mutex
+	newChats   map[uuid.UUID]struct{}
 }
 
 func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
@@ -85,6 +92,7 @@ func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
 		logLimiter:  rate.NewLimiter(20, 100),
 		keys:        map[uuid.UUID]userClient{},
 		subs:        map[uuid.UUID]func(){},
+		newChats:    map[uuid.UUID]struct{}{},
 	}
 	// Decode before the goroutine starts: webhook calls read these fields
 	// from other goroutines.
@@ -196,6 +204,8 @@ func (r *runner) run(ctx context.Context) error {
 	}
 	scan := r.m.clock.NewTicker(scanInterval, "plugins", "scan")
 	defer scan.Stop()
+	bind := r.m.clock.NewTicker(bindInterval, "plugins", "bind")
+	defer bind.Stop()
 
 	r.scan(ctx)
 	for {
@@ -208,6 +218,9 @@ func (r *runner) run(ctx context.Context) error {
 			r.tick(ctx)
 		case <-scan.C:
 			r.scan(ctx)
+		case <-bind.C:
+			r.bindAll(ctx)
+			r.deliver(ctx)
 		case <-r.deliverWake:
 			r.deliver(ctx)
 		}
@@ -267,7 +280,8 @@ func (r *runner) tick(ctx context.Context) {
 }
 
 // scan keeps one chat watch subscription for each linked user and then
-// delivers. A watch event only wakes delivery; the scan finds lost events.
+// delivers. A watch event wakes delivery and binds a created chat; the scan
+// finds lost events.
 func (r *runner) scan(ctx context.Context) {
 	if r.delivers() {
 		r.syncSubscriptions(ctx)
@@ -292,6 +306,16 @@ func (r *runner) syncSubscriptions(ctx context.Context) {
 	for _, l := range links {
 		users[l.UserID] = struct{}{}
 	}
+	if r.subscribeUsers(ctx, users) {
+		// Bind after the subscription starts, so a chat the new user
+		// creates meanwhile is bound by this pass or by its event.
+		r.bindAll(ctx)
+	}
+}
+
+// subscribeUsers keeps one chat watch subscription for each user in users.
+// It reports whether it subscribed to a user it did not follow before.
+func (r *runner) subscribeUsers(ctx context.Context, users map[uuid.UUID]struct{}) bool {
 	r.subsMu.Lock()
 	defer r.subsMu.Unlock()
 	for id, cancel := range r.subs {
@@ -300,19 +324,20 @@ func (r *runner) syncSubscriptions(ctx context.Context) {
 			delete(r.subs, id)
 		}
 	}
+	added := false
 	for id := range users {
 		if _, ok := r.subs[id]; ok {
 			continue
 		}
-		cancel, err := r.m.opts.Pubsub.Subscribe(coderdpubsub.ChatWatchEventChannel(id), func(context.Context, []byte) {
-			r.wakeDelivery()
-		})
+		cancel, err := r.m.opts.Pubsub.Subscribe(coderdpubsub.ChatWatchEventChannel(id), r.onChatEvent)
 		if err != nil {
 			r.logger.Warn(ctx, "subscribe to chat events", slog.F("user_id", id), slog.Error(err))
 			continue
 		}
 		r.subs[id] = cancel
+		added = true
 	}
+	return added
 }
 
 func (r *runner) unsubscribeAll() {
