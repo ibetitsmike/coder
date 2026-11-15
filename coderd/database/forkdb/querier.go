@@ -261,6 +261,8 @@ type Querier interface {
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+	// It clears a lease that a replica of an older version took with its claim,
+	// so that replica's FinishChatWakeupClaim writes nothing over this result.
 	UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.

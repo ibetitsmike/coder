@@ -125,12 +125,15 @@ func TestLockActiveChatWakeupSkipsLockedRows(t *testing.T) {
 func TestUpdateChatWakeupRun(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 	chat := wakeupTestChat(t, db)
 	now := dbtime.Now()
 	wakeup := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
+	// A replica of an older version claimed the wake-up.
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET lease_expires_at = $2 WHERE id = $1", wakeup.ID, now.Add(time.Minute))
+	require.NoError(t, err)
 
 	finished, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
 		ID:            wakeup.ID,
@@ -144,6 +147,7 @@ func TestUpdateChatWakeupRun(t *testing.T) {
 	require.EqualValues(t, 1, finished.RunCount)
 	require.False(t, finished.NextRunAt.Valid)
 	require.True(t, finished.LastRunAt.Valid)
+	require.False(t, finished.LeaseExpiresAt.Valid, "the run clears the older claim, so its finish writes nothing")
 
 	again, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
 		ID:        wakeup.ID,
