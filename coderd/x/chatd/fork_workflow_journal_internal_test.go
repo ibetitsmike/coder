@@ -222,6 +222,162 @@ func TestForkWorkflowJournal(t *testing.T) {
 	})
 }
 
+// TestForkWorkflowLiveLogs covers the log write-through of a live run: the
+// journal keeps the lines the script printed so far, capped like the result,
+// a restart keeps them, and the terminal snapshot replaces the column.
+func TestForkWorkflowLiveLogs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WriteThroughWhileRunning", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    log("second line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		journalLogs := func() []string {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			require.NoError(t, err)
+			var logs []string
+			require.NoError(t, json.Unmarshal(row.Logs, &logs))
+			return logs
+		}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 2
+		}, testutil.IntervalFast)
+		assert.Equal(t, []string{"first line", "second line"}, journalLogs())
+		assert.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id))
+
+		// A restart keeps the live lines: the sweep only flips the status.
+		f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		assert.Equal(t, []string{"first line", "second line"}, journalLogs(),
+			"a restart keeps the live lines")
+
+		// The run resumes and completes; the terminal snapshot carries the
+		// lines the script printed, live and replayed ones alike.
+		resumed, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		step := f.steps(ctx, t, resumed, 1)[0]
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.Equal(t, []string{"first line", "second line"}, res.Logs)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		require.True(t, row.Result.Valid)
+		var snapshot struct {
+			Logs []string `json:"logs"`
+		}
+		require.NoError(t, json.Unmarshal(row.Result.RawMessage, &snapshot))
+		assert.Equal(t, []string{"first line", "second line"}, snapshot.Logs)
+	})
+
+	t.Run("CappedLikeTheResult", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    for i in range(80):
+        log("line %d" % i)
+    return {}
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			return err == nil && row.Status == workflowStatusCompleted
+		}, testutil.IntervalFast)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		var logs []string
+		require.NoError(t, json.Unmarshal(row.Logs, &logs))
+		require.Len(t, logs, maxWorkflowLogs, "the journal keeps the capped lines")
+		assert.Equal(t, "line 30", logs[0], "the retained lines are the last ones")
+		assert.Equal(t, "line 79", logs[len(logs)-1])
+	})
+}
+
+// TestForkWorkflowReusedJournal covers the per-step reuse flag that the
+// journal rows carry: a first-process run marks its steps not reused, and a
+// resume that replays them marks the rows and the await result reused.
+func TestForkWorkflowReusedJournal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("FreshRunJournalsFalse", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: `def main(args):
+    return agent("Say hi.", title = "hi")
+`,
+		})
+		step := f.steps(ctx, t, run, 1)[0]
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.False(t, res.Steps[0].Reused)
+		fdb := forkWorkflowDB(t, f.db)
+		stepRow, err := fdb.GetWorkflowStep(ctx, uuid.MustParse(step.ChatID))
+		require.NoError(t, err)
+		assert.False(t, stepRow.Reused)
+	})
+
+	t.Run("ResumeJournalsTheFlag", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: journalReviewScript,
+			Args:   map[string]any{"files": []string{"a.go", "b.go"}},
+		})
+		steps := f.steps(ctx, t, run, 2)
+		f.report(ctx, t, steps[0].ChatID, `{"bugs":["nil map write"]}`)
+		f.report(ctx, t, steps[1].ChatID, `{"bugs":[]}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, run))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+
+		fdb := forkWorkflowDB(t, f.db)
+		stepRows, err := fdb.GetWorkflowStepsByRun(ctx, run.id)
+		require.NoError(t, err)
+		require.Len(t, stepRows, 2)
+		for _, srow := range stepRows {
+			assert.False(t, srow.Reused, "a first-process step is not reused")
+		}
+
+		// A resume over the completed run replays every step and journals
+		// the flag, so the run detail reads it without the snapshot.
+		restarted := f.restartWorkflowServer(t)
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		out := resumed.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusCompleted, out.Status, out.Error)
+		require.Len(t, out.Steps, 2)
+		for i, step := range out.Steps {
+			assert.True(t, step.Reused, "step %d must be reused", i)
+		}
+		stepRows, err = fdb.GetWorkflowStepsByRun(ctx, run.id)
+		require.NoError(t, err)
+		require.Len(t, stepRows, 2)
+		for i, srow := range stepRows {
+			assert.True(t, srow.Reused, "journaled step %d must read reused after the resume", i)
+		}
+	})
+}
+
 func TestForkWorkflowStop(t *testing.T) {
 	t.Parallel()
 

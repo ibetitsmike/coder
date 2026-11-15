@@ -16,8 +16,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"cdr.dev/slog/v3"
 	"github.com/sqlc-dev/pqtype"
+
+	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -148,6 +149,7 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 		Title:      step.title,
 		Status:     step.status,
 		Value:      jsonbValue(step.value),
+		Reused:     step.reused,
 	})
 }
 
@@ -177,8 +179,23 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 		Status: step.status,
 		Value:  jsonbValue(step.value),
 		Error:  step.err,
+		Reused: step.reused,
 	}); err != nil {
 		j.warn(ctx, "journal workflow step status", step.id, err)
+	}
+}
+
+// markStepsReused journals the reused flag of every step of a run. The
+// resume of a terminal run replays its whole snapshot, so the rows can carry
+// the flag the result already reports. Best effort like updateStep.
+func (j workflowJournal) markStepsReused(ctx context.Context, runID uuid.UUID) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		j.warn(ctx, "open workflow journal store", runID, err)
+		return
+	}
+	if err := fdb.MarkWorkflowStepsReusedByRun(journalCtx(ctx), runID); err != nil {
+		j.warn(ctx, "journal workflow steps reused", runID, err)
 	}
 }
 
@@ -208,7 +225,30 @@ func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) err
 		Status: step.status,
 		Value:  jsonbValue(step.value),
 		Error:  step.err,
+		Reused: step.reused,
 	})
+}
+
+// setLogs writes the retained log lines of a live run through to the journal,
+// best effort like updateRunStatus. The write replaces the column, so the cap
+// holds and a mid-run read sees the lines the script printed so far.
+func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, logs []string) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		j.warn(ctx, "open workflow journal store", runID, err)
+		return
+	}
+	raw, err := json.Marshal(logs)
+	if err != nil {
+		j.warn(ctx, "marshal workflow run logs", runID, err)
+		return
+	}
+	if err := fdb.SetWorkflowRunLogs(journalCtx(ctx), forkdb.SetWorkflowRunLogsParams{
+		ID:    runID,
+		Lines: raw,
+	}); err != nil {
+		j.warn(ctx, "journal workflow run logs", runID, err)
+	}
 }
 
 func (j workflowJournal) getSteps(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
@@ -249,6 +289,9 @@ func (p *Server) resumeWorkflowRun(
 		if err != nil {
 			return nil, err
 		}
+		// The replayed steps mark reused in the journal rows too, so the
+		// run detail reads the flag without the snapshot.
+		p.workflowJournal().markStepsReused(ctx, row.ID)
 		if _, added := p.workflows.add(run); !added {
 			return p.workflows.get(row.ID), nil
 		}
@@ -318,14 +361,16 @@ func (p *Server) rehydrateWorkflowRun(
 			occurrence: int(srow.Occurrence),
 			ordinal:    int(srow.Ordinal),
 			title:      srow.Title,
-			reused:     true,
-			status:     srow.Status,
-			err:        srow.Error,
+			// Every step of a rehydrated run is replayed, never run again,
+			// so the journal marks it reused and the detail reads the flag.
+			reused: true,
+			status: srow.Status,
+			err:    srow.Error,
 			// The previous process may already have sent the one reminder.
 			sentReminder: srow.Status == stepStatusReminded,
 		}
 		if srow.Value.Valid {
-			step.value = json.RawMessage(srow.Value.RawMessage)
+			step.value = srow.Value.RawMessage
 		}
 		run.steps = append(run.steps, step)
 	}

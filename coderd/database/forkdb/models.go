@@ -474,6 +474,8 @@ type WorkflowRun struct {
 	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time             `db:"updated_at" json:"updated_at"`
 	FinishedAt    sql.NullTime          `db:"finished_at" json:"finished_at"`
+	// The last log lines of a live run, written through as the script logs. The terminal snapshot of result replaces them.
+	Logs json.RawMessage `db:"logs" json:"logs"`
 }
 
 // Workflow steps (child chats) of a fork-workflows run. Finished steps replay from this table without running again.
@@ -489,4 +491,6 @@ type WorkflowStep struct {
 	Error      string                `db:"error" json:"error"`
 	StartedAt  time.Time             `db:"started_at" json:"started_at"`
 	FinishedAt sql.NullTime          `db:"finished_at" json:"finished_at"`
+	// True when a resumed run replayed this step instead of running it again.
+	Reused bool `db:"reused" json:"reused"`
 }

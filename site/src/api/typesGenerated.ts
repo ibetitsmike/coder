@@ -13182,10 +13182,10 @@ export interface WorkflowRun {
 
 // From codersdk/fork_workflow_runs.go
 /**
- * WorkflowRunDetail is the full view of one run: its script, its steps, and
- * for a terminal run the result snapshot and the log lines the script
- * printed. A live run has empty logs: the journal keeps no live log lines,
- * only the terminal snapshot.
+ * WorkflowRunDetail is the full view of one run: its script, its args, its
+ * steps, and for a terminal run the result snapshot. The logs are the last
+ * log lines of a terminal run, from its snapshot, or of a live run, written
+ * through to the journal as the script logs.
  */
 export interface WorkflowRunDetail {
 	readonly id: string;
@@ -13197,6 +13197,10 @@ export interface WorkflowRunDetail {
 	readonly finished_at?: string;
 	readonly title: string;
 	readonly script: string;
+	/**
+	 * Args is the JSON object that main(args) received.
+	 */
+	readonly args?: Record<string, string>;
 	/**
 	 * Result is the value that main returned, for a terminal run.
 	 */
@@ -13230,6 +13234,8 @@ export const WorkflowRunStatuses: WorkflowRunStatus[] = [
 // From codersdk/fork_workflow_runs.go
 /**
  * WorkflowRunStep is one step of a run. The step ID is the child chat ID.
+ * Reused is true when a resumed run replayed the step instead of running it
+ * again.
  */
 export interface WorkflowRunStep {
 	readonly id: string;

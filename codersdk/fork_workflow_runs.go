@@ -71,6 +71,8 @@ type WorkflowRun struct {
 }
 
 // WorkflowRunStep is one step of a run. The step ID is the child chat ID.
+// Reused is true when a resumed run replayed the step instead of running it
+// again.
 type WorkflowRunStep struct {
 	ID      string `json:"id" format:"uuid"`
 	RunID   string `json:"run_id" format:"uuid"`
@@ -88,10 +90,10 @@ type WorkflowRunStep struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 }
 
-// WorkflowRunDetail is the full view of one run: its script, its steps, and
-// for a terminal run the result snapshot and the log lines the script
-// printed. A live run has empty logs: the journal keeps no live log lines,
-// only the terminal snapshot.
+// WorkflowRunDetail is the full view of one run: its script, its args, its
+// steps, and for a terminal run the result snapshot. The logs are the last
+// log lines of a terminal run, from its snapshot, or of a live run, written
+// through to the journal as the script logs.
 type WorkflowRunDetail struct {
 	ID         string     `json:"id" format:"uuid"`
 	ChatID     string     `json:"chat_id" format:"uuid"`
@@ -102,6 +104,8 @@ type WorkflowRunDetail struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
+	// Args is the JSON object that main(args) received.
+	Args json.RawMessage `json:"args,omitempty"`
 	// Result is the value that main returned, for a terminal run.
 	Result json.RawMessage `json:"result,omitempty"`
 	// Logs are the last log lines of a terminal run, from its snapshot.

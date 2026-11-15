@@ -642,6 +642,30 @@ Must be at least 1.
 - YAML key: `chat.maxConcurrentRecordingUploads`
 - Default value: `25`
 
+### Max concurrent subagents
+
+Maximum number of running subagent chats in the deployment when the fork-nested-subagents experiment is enabled.
+A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit.
+An organization can set a lower value for its own chats.
+
+- Type: `int`
+- Environment variable: `CODER_CHAT_MAX_CONCURRENT_SUBAGENTS`
+- CLI flag: [`--chat-max-concurrent-subagents`](../../reference/cli/server/index.md#--chat-max-concurrent-subagents)
+- YAML key: `chat.maxConcurrentSubagents`
+- Default value: `0`
+
+### Max concurrent subagents per family
+
+Maximum number of running subagent chats under one root chat when the fork-nested-subagents experiment is enabled.
+A subagent's own ancestors do not count against it, so nested subagents can exceed the limit. 0 means no limit.
+An organization can set a lower value.
+
+- Type: `int`
+- Environment variable: `CODER_CHAT_MAX_CONCURRENT_SUBAGENTS_PER_FAMILY`
+- CLI flag: [`--chat-max-concurrent-subagents-per-family`](../../reference/cli/server/index.md#--chat-max-concurrent-subagents-per-family)
+- YAML key: `chat.maxConcurrentSubagentsPerFamily`
+- Default value: `0`
+
 ### Max generation retries
 
 Maximum number of consecutive retries after a model generation fails with a transient error, such as a rate limit, an overloaded provider, or a stream that stops sending data.
@@ -655,6 +679,19 @@ Must be at least 1.
 - CLI flag: [`--chat-max-generation-retries`](../../reference/cli/server/index.md#--chat-max-generation-retries)
 - YAML key: `chat.maxGenerationRetries`
 - Default value: `25`
+
+### Max live subagents per family
+
+Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled.
+A live subagent has not finished and is not archived.
+Spawning a subagent, or resuming a finished one with message_agent, fails at the limit. 0 means no limit.
+An organization can set a lower value.
+
+- Type: `int`
+- Environment variable: `CODER_CHAT_MAX_LIVE_SUBAGENTS_PER_FAMILY`
+- CLI flag: [`--chat-max-live-subagents-per-family`](../../reference/cli/server/index.md#--chat-max-live-subagents-per-family)
+- YAML key: `chat.maxLiveSubagentsPerFamily`
+- Default value: `0`
 
 ### Max prompt bytes
 
@@ -693,6 +730,19 @@ Must be at least 1.
 - CLI flag: [`--chat-max-steps-per-turn`](../../reference/cli/server/index.md#--chat-max-steps-per-turn)
 - YAML key: `chat.maxStepsPerTurn`
 - Default value: `1200`
+
+### Max subagent depth
+
+Maximum depth of nested subagent chats when the fork-nested-subagents experiment is enabled.
+A root chat is at depth 0 and its subagents at depth 1.
+Explore and computer use subagents never spawn subagents.
+Must be between 1 and 16.
+
+- Type: `int`
+- Environment variable: `CODER_CHAT_MAX_SUBAGENT_DEPTH`
+- CLI flag: [`--chat-max-subagent-depth`](../../reference/cli/server/index.md#--chat-max-subagent-depth)
+- YAML key: `chat.maxSubagentDepth`
+- Default value: `2`
 
 ### Stream silence timeout
 

@@ -334,15 +334,21 @@ type workflowRun struct {
 	// seen is owned by the script goroutine.
 	seen map[string]int
 
-	mu        sync.Mutex
-	steps     []*workflowStep
-	logs      []string
-	logBytes  int // the bytes of the retained logs
-	result    *runWorkflowResult
-	done      chan struct{}
-	awaiters  int
-	delivered bool // an await_workflow call returned the end
-	notified  bool // the parent got the end message
+	mu       sync.Mutex
+	steps    []*workflowStep
+	logs     []string
+	logBytes int // the bytes of the retained logs
+	// logSeq counts the appended lines. journalMu guards journaledLogSeq, the
+	// seq of the last snapshot the journal accepted, so a slower write of an
+	// older snapshot cannot replace newer lines in the journal.
+	logSeq          int
+	journalMu       sync.Mutex
+	journaledLogSeq int
+	result          *runWorkflowResult
+	done            chan struct{}
+	awaiters        int
+	delivered       bool // an await_workflow call returned the end
+	notified        bool // the parent got the end message
 	// stopRequested marks a run that stop_workflow is unwinding. finish
 	// turns its outcome into a stopped run, not a failed one. cancel is the
 	// cancel of the script context, set before the script starts.
@@ -679,18 +685,43 @@ func (r *workflowRun) snapshotLocked() runWorkflowResult {
 
 func (r *workflowRun) log(msg string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.appendLogLocked(msg)
+	r.mu.Unlock()
+	r.flushLogs()
 }
 
 func (r *workflowRun) appendLogLocked(msg string) {
 	msg = truncateLogLine(msg, maxWorkflowLogLine)
 	r.logs = append(r.logs, msg)
 	r.logBytes += len(msg)
+	r.logSeq++
 	for len(r.logs) > maxWorkflowLogs || r.logBytes > maxResultBytes {
 		r.logBytes -= len(r.logs[0])
 		r.logs = r.logs[1:]
 	}
+}
+
+// flushLogs writes the retained log lines of a live run through to the
+// journal, so a mid-run read of the run detail and a restart keep the lines
+// the script printed so far. The write is best effort: the terminal snapshot
+// carries the final lines. A caller that loses the race with a newer snapshot
+// skips its write, so the journal never reads older lines than the run
+// already wrote.
+func (r *workflowRun) flushLogs() {
+	r.mu.Lock()
+	logs := append([]string(nil), r.logs...)
+	seq := r.logSeq
+	r.mu.Unlock()
+	if seq == 0 {
+		return
+	}
+	r.journalMu.Lock()
+	defer r.journalMu.Unlock()
+	if seq <= r.journaledLogSeq {
+		return
+	}
+	r.journaledLogSeq = seq
+	r.p.workflowJournal().setLogs(dbauthz.AsSystemRestricted(context.Background()), r.id, logs)
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the
@@ -750,10 +781,12 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	if journaled != nil {
 		// The step came from the journal: whether it finished before the
 		// restart or is still open, the script does not run it again, so
-		// the await result reports it as reused.
+		// the await result reports it as reused. The flag goes to the
+		// journal too, so the run detail reads it after the resume.
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
+		r.p.workflowJournal().updateStep(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -848,6 +881,7 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 	step.status, step.err = stepStatusFailed, reason
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
 	r.mu.Unlock()
+	r.flushLogs()
 	r.p.workflowJournal().updateStep(ctx, step)
 }
 

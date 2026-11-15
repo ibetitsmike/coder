@@ -132,9 +132,12 @@ func (api *API) getChatWorkflowRuns(rw http.ResponseWriter, r *http.Request) {
 // @Failure 404 {object} codersdk.Response
 // @Router /api/v2/chats/fork/{chat}/workflow-runs/{workflowrun} [get]
 // @x-apidocgen {"skip": true}
-// @Description Returns one run with its script, its steps and, when the run
-// @Description ended, its result and the log lines of the terminal snapshot.
-// @Description A live run has no logs: the journal keeps no live log lines.
+// @Description Returns one run with its script, its args, its steps and, for
+// @Description a terminal run, its result. The logs are the last log lines of
+// @Description a live run, written through as the script logs, or of the
+// @Description terminal snapshot. A live run also reports the value of every
+// @Description step that has reported so far, and which steps a resume
+// @Description replayed.
 func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
@@ -296,8 +299,8 @@ func workflowScriptPreview(script string) string {
 }
 
 // readChatWorkflowRun builds the detail of one run from its journal rows.
-// The terminal snapshot keeps the result and the log lines; a live run has
-// neither.
+// The log lines come from the terminal snapshot of a run that ended, and from
+// the journal's live column while the run still runs.
 func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID) (codersdk.WorkflowRunDetail, error) {
 	fdb, err := forkdb.From(api.Database)
 	if err != nil {
@@ -324,6 +327,7 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		UpdatedAt: row.UpdatedAt,
 		Title:     "",
 		Script:    row.Script,
+		Args:      row.Args,
 		Logs:      []string{},
 		Steps:     make([]codersdk.WorkflowRunStep, 0, len(steps)),
 	}
@@ -332,7 +336,8 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		detail.FinishedAt = &finishedAt
 	}
 	// The snapshot of a terminal run keeps the script's result and its last
-	// log lines.
+	// log lines. The logs column of a live run carries the lines the script
+	// printed so far.
 	if row.Result.Valid {
 		var snapshot struct {
 			Result json.RawMessage `json:"result"`
@@ -346,6 +351,13 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		if detail.Logs == nil {
 			detail.Logs = []string{}
 		}
+	} else if len(row.Logs) > 0 {
+		if err := json.Unmarshal(row.Logs, &detail.Logs); err != nil {
+			return codersdk.WorkflowRunDetail{}, err
+		}
+		if detail.Logs == nil {
+			detail.Logs = []string{}
+		}
 	}
 	for _, step := range steps {
 		sdkStep := codersdk.WorkflowRunStep{
@@ -353,13 +365,13 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 			RunID:     step.RunID.String(),
 			Title:     step.Title,
 			Status:    step.Status,
-			Reused:    false,
+			Reused:    step.Reused,
 			Error:     step.Error,
 			Ordinal:   int(step.Ordinal),
 			StartedAt: step.StartedAt,
 		}
 		if step.Value.Valid {
-			sdkStep.Value = json.RawMessage(step.Value.RawMessage)
+			sdkStep.Value = step.Value.RawMessage
 		}
 		if step.FinishedAt.Valid {
 			finishedAt := step.FinishedAt.Time

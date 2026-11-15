@@ -35,7 +35,7 @@ func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWo
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -53,6 +53,7 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.Logs,
 	)
 	return i, err
 }
@@ -97,7 +98,7 @@ func (q *Queries) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uui
 }
 
 const getWorkflowRunsByChat = `-- name: GetWorkflowRunsByChat :many
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at FROM workflow_runs
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs FROM workflow_runs
 WHERE chat_id = $1
   AND ($2::timestamptz IS NULL
        OR (created_at, id) < ($2::timestamptz, $3::uuid))
@@ -141,6 +142,7 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
+			&i.Logs,
 		); err != nil {
 			return nil, err
 		}
@@ -156,7 +158,7 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 }
 
 const getWorkflowStep = `-- name: GetWorkflowStep :one
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at FROM workflow_steps WHERE id = $1
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused FROM workflow_steps WHERE id = $1
 `
 
 // The authorizer of UpdateWorkflowStep reads the step to find its run.
@@ -175,12 +177,13 @@ func (q *Queries) GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowSt
 		&i.Error,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.Reused,
 	)
 	return i, err
 }
 
 const getWorkflowStepsByRun = `-- name: GetWorkflowStepsByRun :many
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
 `
 
 func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error) {
@@ -204,6 +207,7 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 			&i.Error,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.Reused,
 		); err != nil {
 			return nil, err
 		}
@@ -245,8 +249,8 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 }
 
 const insertWorkflowStep = `-- name: InsertWorkflowStep :exec
-INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertWorkflowStepParams struct {
@@ -258,6 +262,7 @@ type InsertWorkflowStepParams struct {
 	Title      string                `db:"title" json:"title"`
 	Status     string                `db:"status" json:"status"`
 	Value      pqtype.NullRawMessage `db:"value" json:"value"`
+	Reused     bool                  `db:"reused" json:"reused"`
 }
 
 func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error {
@@ -270,6 +275,7 @@ func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStep
 		arg.Title,
 		arg.Status,
 		arg.Value,
+		arg.Reused,
 	)
 	return err
 }
@@ -287,6 +293,38 @@ func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText s
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const markWorkflowStepsReusedByRun = `-- name: MarkWorkflowStepsReusedByRun :exec
+UPDATE workflow_steps SET reused = true
+WHERE run_id = $1 AND NOT reused
+`
+
+// The resume of a terminal run replays every step of the stored snapshot, so
+// the run detail reads the flag from the rows without the snapshot.
+func (q *Queries) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markWorkflowStepsReusedByRun, runID)
+	return err
+}
+
+const setWorkflowRunLogs = `-- name: SetWorkflowRunLogs :exec
+UPDATE workflow_runs
+SET logs = $1::jsonb, updated_at = now()
+WHERE id = $2
+`
+
+type SetWorkflowRunLogsParams struct {
+	Lines json.RawMessage `db:"lines" json:"lines"`
+	ID    uuid.UUID       `db:"id" json:"id"`
+}
+
+// The engine writes the log lines of a live run through to the journal, capped
+// to the last workflowLiveLogs lines. lines replaces the retained lines, so
+// the cap holds across restarts and the detail of a mid-run read matches the
+// terminal snapshot.
+func (q *Queries) SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error {
+	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs, arg.Lines, arg.ID)
+	return err
 }
 
 const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :exec
@@ -322,15 +360,16 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
 UPDATE workflow_steps
-SET status = $1, value = $2, error = $3,
+SET status = $1, value = $2, error = $3, reused = $4,
     finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
-WHERE id = $4
+WHERE id = $5
 `
 
 type UpdateWorkflowStepParams struct {
 	Status string                `db:"status" json:"status"`
 	Value  pqtype.NullRawMessage `db:"value" json:"value"`
 	Error  string                `db:"error" json:"error"`
+	Reused bool                  `db:"reused" json:"reused"`
 	ID     uuid.UUID             `db:"id" json:"id"`
 }
 
@@ -342,6 +381,7 @@ func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStep
 		arg.Status,
 		arg.Value,
 		arg.Error,
+		arg.Reused,
 		arg.ID,
 	)
 	return err

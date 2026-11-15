@@ -61,8 +61,8 @@ func newForkWorkflowRunsAPI(t *testing.T, enabled bool) (*codersdk.Client, datab
 	return client, db, user
 }
 
-// insertForkWorkflowRun journals a completed run with one reported step, the
-// way a finished run reads to the API.
+// insertForkWorkflowRun journals a completed run with one reported step and
+// a reused one, the way a finished run reads to the API.
 func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) forkdb.WorkflowRun {
 	t.Helper()
 
@@ -74,7 +74,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		ChatID:        chat.ID,
 		ModelConfigID: chat.LastModelConfigID,
 		Script:        "def main(args):\n    pass\n",
-		Args:          []byte(`{}`),
+		Args:          []byte(`{"files":["a.go"]}`),
 		Status:        "running",
 	})
 	require.NoError(t, err)
@@ -87,6 +87,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		Title:      "step one",
 		Status:     "reported",
 		Value:      pqtype.NullRawMessage{RawMessage: json.RawMessage(`{"text":"done"}`), Valid: true},
+		Reused:     true,
 	})
 	require.NoError(t, err)
 	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true}}`
@@ -140,8 +141,10 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		require.Len(t, detail.Steps, 1)
 		assert.Equal(t, "step one", detail.Steps[0].Title)
 		assert.JSONEq(t, `{"text":"done"}`, string(detail.Steps[0].Value))
+		assert.True(t, detail.Steps[0].Reused, "the detail reads reused from the step row")
 		require.NotEmpty(t, detail.Script)
 		assert.Equal(t, "def main(args):\n    pass\n", detail.Script)
+		assert.JSONEq(t, `{"files":["a.go"]}`, string(detail.Args))
 		assert.Equal(t, []string{"all done"}, detail.Logs)
 		assert.JSONEq(t, `{"ok":true}`, string(detail.Result))
 		require.NotNil(t, detail.FinishedAt)
@@ -153,6 +156,37 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		// An unknown run is 404.
 		err = client.StopChatWorkflowRun(ctx, chat.ID, uuid.New())
 		requireForkStatus(t, err, http.StatusNotFound)
+	})
+
+	t.Run("LiveLogsAndArgs", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newForkWorkflowRunsAPI(t, true)
+		chat := newForkChatTodosChat(t, db, user)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		runID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            runID,
+			ChatID:        chat.ID,
+			ModelConfigID: chat.LastModelConfigID,
+			Script:        "def main(args):\n    print(args)\n",
+			Args:          []byte(`{"path":"main.go"}`),
+			Status:        "running",
+		}))
+		require.NoError(t, fdb.SetWorkflowRunLogs(forkWorkflowSystemContext(t), forkdb.SetWorkflowRunLogsParams{
+			ID:    runID,
+			Lines: []byte(`["review started","reading main.go"]`),
+		}))
+
+		// A running run reads its logs from the journal column and its args
+		// from the row; it has no result yet.
+		detail, err := client.GetChatWorkflowRun(ctx, chat.ID, runID)
+		require.NoError(t, err)
+		assert.Equal(t, "running", detail.Status)
+		assert.Nil(t, detail.Result, "a live run has no result yet")
+		assert.Equal(t, []string{"review started", "reading main.go"}, detail.Logs)
+		assert.JSONEq(t, `{"path":"main.go"}`, string(detail.Args))
 	})
 
 	t.Run("MemberOwnChatOnly", func(t *testing.T) {

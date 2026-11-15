@@ -201,6 +201,9 @@ type Querier interface {
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// The resume of a terminal run replays every step of the stored snapshot, so
+	// the run detail reads the flag from the rows without the snapshot.
+	MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	// Marks the pending question of @chat_id answered by the user messages that
 	// the transaction inserts into the chat's history. @compressed is true when
@@ -218,6 +221,11 @@ type Querier interface {
 	// since the match runs on the stored JSON.
 	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
+	// The engine writes the log lines of a live run through to the journal, capped
+	// to the last workflowLiveLogs lines. lines replaces the retained lines, so
+	// the cap holds across restarts and the detail of a mid-run read matches the
+	// terminal snapshot.
+	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
