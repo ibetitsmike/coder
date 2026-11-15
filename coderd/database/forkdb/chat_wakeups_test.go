@@ -19,10 +19,10 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-func TestClaimDueChatWakeups(t *testing.T) {
+func TestListDueChatWakeups(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 	chat := wakeupTestChat(t, db)
@@ -31,65 +31,60 @@ func TestClaimDueChatWakeups(t *testing.T) {
 	older := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-2*time.Minute))
 	due := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
 	insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusPaused, now.Add(-time.Minute))
-	insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(time.Hour))
+	next := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(time.Hour))
+	insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(2*time.Hour))
 
-	claim := func(at time.Time) []uuid.UUID {
-		rows, err := fdb.ClaimDueChatWakeups(ctx, forkdb.ClaimDueChatWakeupsParams{
-			Now:            at,
-			LeaseExpiresAt: at.Add(time.Minute),
-			LimitCount:     10,
-		})
+	busy := wakeupTestChat(t, db)
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chats SET status = 'running' WHERE id = $1", busy.ID)
+	require.NoError(t, err)
+	insertDelayWakeup(ctx, t, fdb, busy, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
+
+	archived := wakeupTestChat(t, db)
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chats SET status = 'running', archived = true WHERE id = $1", archived.ID)
+	require.NoError(t, err)
+	archivedDue := insertDelayWakeup(ctx, t, fdb, archived, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
+
+	list := func(arg forkdb.ListDueChatWakeupsParams) (dueIDs []uuid.UUID, upcoming []uuid.UUID) {
+		t.Helper()
+		if arg.LimitCount == 0 {
+			arg.LimitCount = 10
+		}
+		arg.Now = now
+		rows, err := fdb.ListDueChatWakeups(ctx, arg)
 		require.NoError(t, err)
-		return wakeupIDs(rows)
+		for _, row := range rows {
+			if row.Due {
+				dueIDs = append(dueIDs, row.ChatWakeup.ID)
+			} else {
+				upcoming = append(upcoming, row.ChatWakeup.ID)
+			}
+		}
+		return dueIDs, upcoming
 	}
 
-	require.ElementsMatch(t, []uuid.UUID{older.ID, due.ID}, claim(now), "only due active wake-ups are claimed")
-	require.Empty(t, claim(now), "a held lease is not claimed again")
-	require.ElementsMatch(t, []uuid.UUID{older.ID, due.ID}, claim(now.Add(2*time.Minute)), "an expired lease is claimable again")
+	dueIDs, upcoming := list(forkdb.ListDueChatWakeupsParams{})
+	require.ElementsMatch(t, []uuid.UUID{older.ID, due.ID, archivedDue.ID}, dueIDs,
+		"due active wake-ups of idle and archived chats are due, those of busy chats are not")
+	require.Equal(t, []uuid.UUID{next.ID}, upcoming, "only the earliest wake-up that is not due comes back")
+
+	dueIDs, upcoming = list(forkdb.ListDueChatWakeupsParams{ChatID: uuid.NullUUID{UUID: archived.ID, Valid: true}})
+	require.Equal(t, []uuid.UUID{archivedDue.ID}, dueIDs, "chat_id limits the list to one chat")
+	require.Empty(t, upcoming)
+
+	// Listing reads only: the same rows are due again.
+	dueIDs, _ = list(forkdb.ListDueChatWakeupsParams{ChatID: uuid.NullUUID{UUID: chat.ID, Valid: true}, LimitCount: 1})
+	require.Equal(t, []uuid.UUID{older.ID}, dueIDs, "the due rows come in run time order")
+	dueIDs, upcoming = list(forkdb.ListDueChatWakeupsParams{
+		ChatID:     uuid.NullUUID{UUID: chat.ID, Valid: true},
+		AfterRunAt: older.NextRunAt.Time,
+		AfterID:    older.ID,
+		LimitCount: 1,
+	})
+	require.Equal(t, []uuid.UUID{due.ID}, dueIDs, "the next page starts after the cursor")
+	require.Equal(t, []uuid.UUID{next.ID}, upcoming)
 }
 
-func TestClaimDueChatWakeupsSkipsLockedRows(t *testing.T) {
-	t.Parallel()
-
-	db, _ := dbtestutil.NewDB(t)
-	fdb := mustFrom(t, db)
-	ctx := testutil.Context(t, testutil.WaitShort)
-	chat := wakeupTestChat(t, db)
-	now := dbtime.Now()
-	for range 4 {
-		insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
-	}
-	arg := forkdb.ClaimDueChatWakeupsParams{Now: now, LeaseExpiresAt: now.Add(time.Minute), LimitCount: 2}
-
-	// The first claim keeps its transaction open, so its rows stay locked and
-	// unclaimed to everyone else until the second claim returns.
-	firstClaimed := make(chan []uuid.UUID, 1)
-	release := make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- forkdb.InTx(db, func(_ database.Store, ftx forkdb.Store) error {
-			rows, err := ftx.ClaimDueChatWakeups(ctx, arg)
-			firstClaimed <- wakeupIDs(rows)
-			<-release
-			return err
-		}, nil)
-	}()
-	first := testutil.RequireReceive(ctx, t, firstClaimed)
-
-	arg.LimitCount = 10
-	second, err := fdb.ClaimDueChatWakeups(ctx, arg)
-	close(release)
-	require.NoError(t, err, "the second claim must not wait for the first")
-	require.NoError(t, testutil.RequireReceive(ctx, t, firstDone))
-
-	require.Len(t, first, 2)
-	require.Len(t, second, 2)
-	for _, id := range wakeupIDs(second) {
-		require.NotContains(t, first, id, "two claims returned the same wake-up")
-	}
-}
-
-func TestFinishChatWakeupClaim(t *testing.T) {
+func TestLockActiveChatWakeupSkipsLockedRows(t *testing.T) {
 	t.Parallel()
 
 	db, _ := dbtestutil.NewDB(t)
@@ -98,39 +93,70 @@ func TestFinishChatWakeupClaim(t *testing.T) {
 	chat := wakeupTestChat(t, db)
 	now := dbtime.Now()
 	wakeup := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
+	paused := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusPaused, now.Add(-time.Minute))
 
-	claimOne := func(at time.Time) time.Time {
-		rows, err := fdb.ClaimDueChatWakeups(ctx, forkdb.ClaimDueChatWakeupsParams{
-			Now:            at,
-			LeaseExpiresAt: at.Add(time.Minute),
-			LimitCount:     1,
-		})
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		return rows[0].LeaseExpiresAt.Time
-	}
-	staleLease := claimOne(now)
-	// A second worker takes over after the first lease expired.
-	currentLease := claimOne(now.Add(2 * time.Minute))
+	_, err := fdb.LockActiveChatWakeup(ctx, paused.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows, "only active wake-ups are delivered")
 
-	finish := func(lease time.Time) (forkdb.ChatWakeup, error) {
-		return fdb.FinishChatWakeupClaim(ctx, forkdb.FinishChatWakeupClaimParams{
-			ID:             wakeup.ID,
-			LeaseExpiresAt: lease,
-			Status:         forkdb.ChatWakeupStatusCompleted,
-			RunCountDelta:  1,
-			LastRunAt:      sql.NullTime{Time: now, Valid: true},
-			UpdatedAt:      now,
-		})
-	}
-	_, err := finish(staleLease)
-	require.ErrorIs(t, err, sql.ErrNoRows, "a worker that lost its lease cannot finish the claim")
+	// The first delivery keeps its transaction open, so its row stays locked
+	// until the second one returns.
+	locked := make(chan error, 1)
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- forkdb.InTx(db, func(_ database.Store, ftx forkdb.Store) error {
+			_, err := ftx.LockActiveChatWakeup(ctx, wakeup.ID)
+			locked <- err
+			<-release
+			return err
+		}, nil)
+	}()
+	require.NoError(t, testutil.RequireReceive(ctx, t, locked))
 
-	finished, err := finish(currentLease)
+	_, err = fdb.LockActiveChatWakeup(ctx, wakeup.ID)
+	close(release)
+	require.ErrorIs(t, err, sql.ErrNoRows, "a second delivery skips the locked wake-up without waiting")
+	require.NoError(t, testutil.RequireReceive(ctx, t, firstDone))
+
+	_, err = fdb.LockActiveChatWakeup(ctx, wakeup.ID)
+	require.NoError(t, err, "the wake-up is free again after the first delivery")
+}
+
+func TestUpdateChatWakeupRun(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	chat := wakeupTestChat(t, db)
+	now := dbtime.Now()
+	wakeup := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
+	// A replica of an older version claimed the wake-up.
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET lease_expires_at = $2 WHERE id = $1", wakeup.ID, now.Add(time.Minute))
+	require.NoError(t, err)
+
+	finished, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
+		ID:            wakeup.ID,
+		Status:        forkdb.ChatWakeupStatusCompleted,
+		RunCountDelta: 1,
+		LastRunAt:     sql.NullTime{Time: now, Valid: true},
+		UpdatedAt:     now,
+	})
 	require.NoError(t, err)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, finished.Status)
 	require.EqualValues(t, 1, finished.RunCount)
-	require.False(t, finished.LeaseExpiresAt.Valid, "finishing ends the claim")
+	require.False(t, finished.NextRunAt.Valid)
+	require.True(t, finished.LastRunAt.Valid)
+	require.False(t, finished.LeaseExpiresAt.Valid, "the run clears the older claim, so its finish writes nothing")
+
+	again, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
+		ID:        wakeup.ID,
+		Status:    forkdb.ChatWakeupStatusCompleted,
+		UpdatedAt: now.Add(time.Second),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, again.RunCount, "a zero delta keeps the run count")
+	require.True(t, again.LastRunAt.Valid, "a NULL last_run_at keeps the last run")
 }
 
 func TestChatWakeupRuns(t *testing.T) {
@@ -312,12 +338,4 @@ func insertDelayWakeup(ctx context.Context, t *testing.T, fdb forkdb.Store, chat
 	require.NoError(t, err)
 	require.Equal(t, chat.OrganizationID, wakeup.OrganizationID, "the wake-up takes the chat's organization")
 	return wakeup
-}
-
-func wakeupIDs(rows []forkdb.ChatWakeup) []uuid.UUID {
-	ids := make([]uuid.UUID, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-	}
-	return ids
 }

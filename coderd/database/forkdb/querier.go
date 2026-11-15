@@ -16,13 +16,6 @@ type Querier interface {
 	// concurrent replicas from blocking on, or double leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
-	// Claims due wake-ups until lease_expires_at. SKIP LOCKED keeps concurrent
-	// workers from blocking on, or claiming, the same rows. Rows of chats that
-	// would queue a new message stay unclaimed, so they cannot fill the batch and
-	// starve the rows of idle chats. Those are the busy and paused chats, and the
-	// errored chats with a non-empty queue (chatstate's R, I, A, P and E1 states).
-	// Archived chats are always claimed so the worker cancels their wake-ups.
-	ClaimDueChatWakeups(ctx context.Context, arg ClaimDueChatWakeupsParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
 	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
@@ -74,10 +67,6 @@ type Querier interface {
 	// stop_workflow fails the open steps of a run that it stops. err_text, not
 	// error: it becomes a mock parameter name.
 	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
-	// Records a run of a claimed wake-up and ends the claim. Pass the
-	// lease_expires_at that ClaimDueChatWakeups returned: no row means another
-	// worker took over the expired lease.
-	FinishChatWakeupClaim(ctx context.Context, arg FinishChatWakeupClaimParams) (ChatWakeup, error)
 	// Reports whether no worker with a fresh heartbeat owns the chat, with the
 	// heartbeat predicate of GetChatQueuedForCapacity.
 	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
@@ -103,8 +92,8 @@ type Querier interface {
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
 	GetChatWakeupByID(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
-	// Locks the wake-up until the transaction ends, so a worker that finishes its
-	// claim in between waits and then finds its lease gone.
+	// Locks the wake-up until the transaction ends, so a delivery that starts in
+	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	// Returns the unarchived running subagent chats under @root_chat_id that no
@@ -198,6 +187,16 @@ type Querier interface {
 	// they have an open watch on an active wake-up. ListReadyChatWakeupWatches
 	// uses the same rule.
 	ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
+	// Lists, in one statement, the due wake-ups and the earliest active wake-up
+	// that is not due, which sets the timer of the waker. It reads and locks
+	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
+	// is due when its run time has come and its chat would not queue a new
+	// message. Those are the busy and paused chats, and the errored chats with a
+	// non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
+	// archived chats are always due, so the waker cancels them. chat_id limits
+	// the list to one chat. The due rows page by (next_run_at, id) after
+	// after_run_at and after_id.
+	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
 	// delivered, so a new watch can leave out what an earlier one still watches.
 	ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ListOpenChatWakeupWatchesByChatIDRow, error)
@@ -217,6 +216,9 @@ type Querier interface {
 	ListReadyChatWakeupWatches(ctx context.Context, arg ListReadyChatWakeupWatchesParams) ([]ChatWakeupWatch, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
 	ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUserSavedWorkflowMetadataParams) ([]ListUserSavedWorkflowMetadataRow, error)
+	// Locks an active wake-up for its delivery. SKIP LOCKED returns no row while
+	// another transaction holds the wake-up, which then decides it.
+	LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
@@ -269,6 +271,10 @@ type Querier interface {
 	// chats that only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
+	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
+	// It clears a lease that a replica of an older version took with its claim,
+	// so that replica's FinishChatWakeupClaim writes nothing over this result.
+	UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
 	// next_run_at. Any claim on the row ends.
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)
