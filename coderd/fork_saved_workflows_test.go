@@ -75,6 +75,16 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		}())
 		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "largest"))
 
+		// jsonb rejects an unpaired surrogate escape; the API stores U+FFFD.
+		surrogate, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:       "surrogate",
+			Script:     savedWorkflowScript,
+			ArgsSchema: json.RawMessage(`{"type":"object","title":"a\uD800b"}`),
+		})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"type":"object","title":"a\uFFFDb"}`, string(surrogate.ArgsSchema))
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "surrogate"))
+
 		for name, req := range map[string]codersdk.CreateForkSavedWorkflowRequest{
 			"BadName":        {Name: "Triage", Script: savedWorkflowScript},
 			"NoMain":         {Name: "no-main", Script: "x = 1\n"},
