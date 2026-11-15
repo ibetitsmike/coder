@@ -304,7 +304,34 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	if err := chatd.ValidateWorkflowArgsSchema(argsSchema); err != nil {
 		return pqtype.NullRawMessage{}, err
 	}
-	return pqtype.NullRawMessage{RawMessage: argsSchema, Valid: true}, nil
+	normalized, err := reencodeJSON(argsSchema)
+	if err != nil {
+		return pqtype.NullRawMessage{}, xerrors.Errorf("args schema: %w", err)
+	}
+	// Invalid UTF-8 bytes come back as \ufffd escapes, so the size can grow.
+	if len(normalized) > maxForkSavedWorkflowArgsSchemaBytes {
+		return pqtype.NullRawMessage{}, xerrors.Errorf("the args schema is larger than %d bytes", maxForkSavedWorkflowArgsSchemaBytes)
+	}
+	return pqtype.NullRawMessage{RawMessage: normalized, Valid: true}, nil
+}
+
+// reencodeJSON decodes raw and encodes it again. The decoder turns unpaired
+// surrogate escapes and invalid UTF-8 into U+FFFD, so the result is text
+// that jsonb accepts, while raw itself could fail the insert.
+func reencodeJSON(raw json.RawMessage) (json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // jsonHasNUL reports whether a string or key of raw holds a NUL character.
