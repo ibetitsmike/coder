@@ -433,11 +433,11 @@ func (p *Server) subagentCanSpawn(ctx context.Context, chat database.Chat) (bool
 	if err != nil {
 		return false, xerrors.Errorf("fork queries: %w", err)
 	}
-	depth, err := subagentDepth(ctx, fdb, chat)
+	depth, err := stepSubagentDepth(ctx, fdb, chat)
 	if err != nil {
 		return false, err
 	}
-	limits, err := p.subagentLimits(ctx, fdb, chat.OrganizationID)
+	limits, err := p.stepSubagentLimits(ctx, fdb, chat.OrganizationID)
 	if err != nil {
 		return false, err
 	}
@@ -558,7 +558,7 @@ func (p *Server) forkSpawnAgentDescription(ctx context.Context, chat database.Ch
 	fdb, err := forkdb.From(p.db)
 	if err == nil {
 		var limits forkSubagentLimits
-		limits, err = p.subagentLimits(ctx, fdb, chat.OrganizationID)
+		limits, err = p.stepSubagentLimits(ctx, fdb, chat.OrganizationID)
 		maxDepth = limits.maxDepth
 	}
 	if err != nil {

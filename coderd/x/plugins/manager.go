@@ -2,6 +2,14 @@
 // plugin runs in its own plugin-host child process. The Manager holds a
 // lease for each plugin it runs, so one replica runs each plugin.
 //
+// The Manager renews its leases every lease interval while it runs a plugin.
+// A replica that runs none reads GetPluginLeaseSummary instead, which takes
+// no lock and writes nothing, and calls AcquirePluginLeases only when a
+// plugin is free to lease. It keeps checking every lease interval while
+// another replica holds an enabled plugin, so it can take over an expired
+// lease. With no enabled plugin it waits for a plugins:changed message and
+// checks once every idle interval in case a message was lost.
+//
 // Each runner keeps a delivery cursor per bound chat. A runner binds every
 // chat of its linked users when it subscribes to a new user, after a link
 // is created, and once every bind interval as a fallback. A created chat
@@ -39,7 +47,11 @@ const ChangedChannel = "plugins:changed"
 const (
 	defaultLeaseInterval = 10 * time.Second
 	defaultLeaseDuration = 30 * time.Second
-	defaultMaxPlugins    = 50
+	// defaultIdleInterval is how often a replica checks for plugins while
+	// none is enabled. A plugins:changed message wakes it at once; the check
+	// only finds a change whose message was lost.
+	defaultIdleInterval = 5 * time.Minute
+	defaultMaxPlugins   = 50
 )
 
 // StartHostFunc starts one plugin-host process.
@@ -75,6 +87,7 @@ type Options struct {
 
 	LeaseInterval time.Duration
 	LeaseDuration time.Duration
+	IdleInterval  time.Duration
 	MaxPlugins    int32
 }
 
@@ -106,6 +119,9 @@ func New(opts Options) *Manager {
 	}
 	if opts.LeaseDuration == 0 {
 		opts.LeaseDuration = defaultLeaseDuration
+	}
+	if opts.IdleInterval == 0 {
+		opts.IdleInterval = defaultIdleInterval
 	}
 	if opts.MaxPlugins == 0 {
 		opts.MaxPlugins = defaultMaxPlugins
@@ -173,19 +189,30 @@ func (m *Manager) loop() {
 	//nolint:gocritic // The manager leases plugins across every organization.
 	ctx := dbauthz.AsSystemRestricted(m.ctx)
 
-	cancelSub, err := m.opts.Pubsub.Subscribe(ChangedChannel, func(context.Context, []byte) { m.Wake() })
+	// A drop report may have lost a change, so it wakes the loop too.
+	cancelSub, err := m.opts.Pubsub.SubscribeWithErr(ChangedChannel, func(context.Context, []byte, error) { m.Wake() })
+	subscribed := err == nil
 	if err != nil {
 		m.logger.Error(ctx, "subscribe to plugin changes", slog.Error(err))
 	} else {
 		defer cancelSub()
 	}
 
-	ticker := m.clock.NewTicker(m.opts.LeaseInterval, "plugins", "lease")
-	defer ticker.Stop()
 	for {
-		m.reconcile(ctx)
+		start := m.clock.Now()
+		idle := m.reconcile(ctx)
+		// Count the time reconcile took, so a slow renewal does not push
+		// the next one past the lease expiry.
+		next := max(m.opts.LeaseInterval-m.clock.Since(start), 0)
+		// Without the subscription no message reports a change, so an idle
+		// replica keeps the short interval.
+		if idle && subscribed {
+			next = m.opts.IdleInterval
+		}
+		timer := m.clock.NewTimer(next, "plugins", "lease")
 		select {
 		case <-m.ctx.Done():
+			timer.Stop()
 			m.stopAll()
 			// Use a fresh context: the Manager context is done.
 			//nolint:gocritic // Releasing this replica's leases needs the same system access.
@@ -198,15 +225,33 @@ func (m *Manager) loop() {
 			}
 			cancel()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		case <-m.wake:
+			timer.Stop()
 		}
 	}
 }
 
 // reconcile renews the leases of this replica, takes free leases, and makes
-// the set of runners match the leases.
-func (m *Manager) reconcile(ctx context.Context) {
+// the set of runners match the leases. It reports whether the replica is
+// idle: it runs nothing and no plugin is enabled.
+func (m *Manager) reconcile(ctx context.Context) bool {
+	m.mu.Lock()
+	running := len(m.runners) > 0
+	m.mu.Unlock()
+	if !running {
+		// No lease to renew, so write only when a plugin is free to take.
+		summary, err := m.fdb.GetPluginLeaseSummary(ctx, m.opts.ReplicaID)
+		if err != nil {
+			if ctx.Err() == nil {
+				m.logger.Error(ctx, "get plugin lease summary", slog.Error(err))
+			}
+			return false
+		}
+		if summary.Acquirable == 0 {
+			return summary.Enabled == 0
+		}
+	}
 	held, err := m.fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
 		RunnerID:     m.opts.ReplicaID,
 		LeaseSeconds: int32(m.opts.LeaseDuration.Seconds()),
@@ -216,13 +261,13 @@ func (m *Manager) reconcile(ctx context.Context) {
 		if ctx.Err() == nil {
 			m.logger.Error(ctx, "acquire plugin leases", slog.Error(err))
 		}
-		return
+		return false
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return
+		return false
 	}
 	keep := make(map[uuid.UUID]struct{}, len(held))
 	for _, p := range held {
@@ -244,6 +289,7 @@ func (m *Manager) reconcile(ctx context.Context) {
 			delete(m.runners, id)
 		}
 	}
+	return false
 }
 
 func (m *Manager) stopAll() {
