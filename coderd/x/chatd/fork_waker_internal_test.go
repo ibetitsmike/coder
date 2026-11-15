@@ -164,6 +164,36 @@ func TestWakerDeliversWhenTurnEnds(t *testing.T) {
 	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
 }
 
+// A wait_for_events wake-up of an idle parent is delivered by the commit
+// that ends the turn of the child it watches, with no clock advance.
+func TestWakerDeliversWhenChildFinishes(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	parent := f.createWakeupChat(t)
+	child := f.createChildAgent(t, parent, "child", database.ChatStatusRunning)
+	expiresAt := wakeupTestSlot.Add(24 * time.Hour)
+	wakeup := f.insertWakeup(t, parent, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+	}, childDoneEvents(child)...)
+	h := f.startWaker(t, nil)
+	start := h.clock.Now()
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		return expiresAt.Equal(f.wakeup(t, wakeup.ID).NextRunAt.Time)
+	}, testutil.IntervalFast, "the first pass must move the run time to the expiry")
+	require.Empty(t, f.wakeMessages(t, parent, wakeup.Prompt), "the child is running")
+
+	finishTurnThrough(t, f, h.server.pubsub, child.ID)
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		return len(f.wakeMessages(t, parent, wakeup.Prompt)) == 1
+	}, testutil.IntervalFast, "the end of the child's turn must deliver the wake-up")
+	require.Equal(t, []string{child.ID.String()}, f.deliveredWatches(t, wakeup.ID))
+	require.True(t, start.Equal(h.clock.Now()), "no clock advance")
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+}
+
 // A wake-up that turns due later is delivered by the timer at its run time.
 func TestWakerTimerDeliversAtRunTime(t *testing.T) {
 	t.Parallel()
