@@ -7,6 +7,7 @@ package chatd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -162,12 +163,14 @@ func (p *Server) deliverWakeup(ctx context.Context, fdb forkdb.Store, wakeup for
 		finish: func(admittedAt time.Time) wakeupFinish { return nextWakeupRun(wakeup, admittedAt, 1) },
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, delivery.runKey, err)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, delivery, err)
 }
 
 // finishWakeupSend ends the claim of wakeup after sendWakeupPrompt returned
-// err for the occurrence runKey, and records a failed send as a run.
-func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, runKey string, err error) error {
+// err for delivery, and records a failed send as a run. The failed sends of a
+// watch share one run, which only the first one records, and leave the run
+// key of the delivery free for a retry.
+func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, delivery wakeupDelivery, err error) error {
 	switch {
 	case err == nil, errors.Is(err, errWakeupClaimLost):
 		return nil
@@ -180,12 +183,27 @@ func (p *Server) finishWakeupSend(ctx context.Context, fdb forkdb.Store, chat da
 
 	sendErr := err
 	runStatus, finish := p.wakeupFailure(ctx, wakeup, now, sendErr)
+	runKey := delivery.runKey
+	if delivery.watch != nil {
+		runKey = failedRunKey(runKey)
+	}
 	err = forkdb.InTx(p.db, func(_ database.Store, ftx forkdb.Store) error {
 		// End the claim first: a worker whose lease ran out during the send
 		// must not record a run for an occurrence that another worker now
 		// owns.
 		if _, err := ftx.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, now, finish)); err != nil {
 			return err
+		}
+		// A failed message that would end the watch keeps the final poll
+		// after the expiry from leaving its event out.
+		if delivery.watch != nil && delivery.done {
+			if err := ftx.MarkChatWakeupWatchFailed(ctx, forkdb.MarkChatWakeupWatchFailedParams{
+				ID:       delivery.watch.ID,
+				WakeupID: wakeup.ID,
+				Now:      now,
+			}); err != nil {
+				return err
+			}
 		}
 		_, err := ftx.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
 			ID:        uuid.New(),
@@ -232,17 +250,25 @@ func wakeupRunKey(wakeup forkdb.ChatWakeup) string {
 
 // wakeupDelivery is one occurrence of a wake-up: the message text, the run
 // key that keeps it from being delivered twice, and how a delivery admitted
-// at a given time ends the claim.
+// at a given time ends the claim. A delivery of an events wake-up also sets
+// watch, the watch it delivers for, done when the message ends the watch,
+// and specPatch, which merges into the spec of the watch. Its run only
+// counts against the caps: the watch row keeps it from being delivered
+// twice.
 type wakeupDelivery struct {
-	text   string
-	runKey string
-	finish func(admittedAt time.Time) wakeupFinish
+	text      string
+	runKey    string
+	finish    func(admittedAt time.Time) wakeupFinish
+	watch     *forkdb.ChatWakeupWatch
+	done      bool
+	specPatch json.RawMessage
 }
 
 // sendWakeupPrompt sends the text of delivery as the chat owner. The delivered
-// run and the end of the claim commit in the send's transaction, under the chat
-// lock: a chat that turned busy, an occurrence that already ran, or a claim
-// that was canceled or taken over rolls the message back.
+// run, the delivered watch and the end of the claim commit in the send's
+// transaction, under the chat lock: a chat that turned busy, an occurrence
+// that already ran, or a claim that was canceled or taken over rolls the
+// message back.
 func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time, delivery wakeupDelivery) error {
 	owner, err := p.chatOwnerSubject(ctx, chat.OwnerID)
 	if err != nil {
@@ -276,35 +302,76 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			admittedAt := now.Add(p.clock.Since(sendStart, "chatd", "wakeups"))
 			//nolint:gocritic // The wake-up worker records its own bookkeeping.
 			ctx = dbauthz.AsChatd(ctx)
-			_, err = txdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
-				ID:        uuid.New(),
-				WakeupID:  wakeup.ID,
-				RunKey:    delivery.runKey,
-				Status:    forkdb.ChatWakeupRunStatusDelivered,
-				CreatedAt: admittedAt,
-				UpdatedAt: admittedAt,
-			})
-			if errors.Is(err, sql.ErrNoRows) {
-				return errWakeupOccurrenceRan
-			}
-			if err != nil {
-				return xerrors.Errorf("insert wake-up run: %w", err)
-			}
-			finish = delivery.finish(admittedAt)
-			_, err = txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, admittedAt, finish))
-			if errors.Is(err, sql.ErrNoRows) {
-				return errWakeupClaimLost
-			}
-			if err != nil {
-				return xerrors.Errorf("finish wake-up claim: %w", err)
-			}
-			return nil
+			finish, err = admitWakeupDelivery(ctx, txdb, wakeup, delivery, admittedAt)
+			return err
 		},
 	})
 	if err == nil && finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish)
 	}
 	return err
+}
+
+// admitWakeupDelivery records delivery, admitted at admittedAt, in the
+// transaction of its message and returns how the claim ended. A delivery of a
+// watch ends the claim first, which locks the wake-up row, so the watch is
+// marked under that lock.
+func admitWakeupDelivery(ctx context.Context, txdb forkdb.Store, wakeup forkdb.ChatWakeup, delivery wakeupDelivery, admittedAt time.Time) (wakeupFinish, error) {
+	insertRun := func() error {
+		_, err := txdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeup.ID,
+			RunKey:    delivery.runKey,
+			Status:    forkdb.ChatWakeupRunStatusDelivered,
+			CreatedAt: admittedAt,
+			UpdatedAt: admittedAt,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return errWakeupOccurrenceRan
+		}
+		if err != nil {
+			return xerrors.Errorf("insert wake-up run: %w", err)
+		}
+		return nil
+	}
+	if delivery.watch == nil {
+		if err := insertRun(); err != nil {
+			return wakeupFinish{}, err
+		}
+	}
+	finish := delivery.finish(admittedAt)
+	_, err := txdb.FinishChatWakeupClaim(ctx, finishWakeupClaimParams(wakeup, admittedAt, finish))
+	if errors.Is(err, sql.ErrNoRows) {
+		return wakeupFinish{}, errWakeupClaimLost
+	}
+	if err != nil {
+		return wakeupFinish{}, xerrors.Errorf("finish wake-up claim: %w", err)
+	}
+	if delivery.watch == nil {
+		return finish, nil
+	}
+	patch := delivery.specPatch
+	if len(patch) == 0 {
+		patch = json.RawMessage(`{}`)
+	}
+	_, err = txdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{
+		Done:       delivery.done,
+		Now:        admittedAt,
+		SpecPatch:  patch,
+		ID:         delivery.watch.ID,
+		WakeupID:   wakeup.ID,
+		Deliveries: delivery.watch.Deliveries,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return wakeupFinish{}, errWakeupOccurrenceRan
+	}
+	if err != nil {
+		return wakeupFinish{}, xerrors.Errorf("mark wake-up watch delivered: %w", err)
+	}
+	if err := insertRun(); err != nil {
+		return wakeupFinish{}, err
+	}
+	return finish, nil
 }
 
 // wakeupFailure maps a failed send to the status of its run and to how the

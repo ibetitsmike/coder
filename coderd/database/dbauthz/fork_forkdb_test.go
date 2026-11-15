@@ -326,13 +326,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().ListChatWakeupsByChatID(gomock.Any(), chat.ID).Return(wakeups, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(wakeups)
 		},
-		"ListChildChatIDsWithActiveEventsWakeups": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			parent := testutil.Fake(t, faker, database.Chat{})
-			ids := []uuid.UUID{uuid.New()}
-			db.EXPECT().GetChatByID(gomock.Any(), parent.ID).Return(parent, nil).AnyTimes()
-			fdb.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), parent.ID).Return(ids, nil).AnyTimes()
-			check.Args(parent.ID).Asserts(parent, policy.ActionRead).Returns(ids)
-		},
 		"UpdateChatWakeupStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
@@ -375,14 +368,70 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
 		},
-		"ListChatWakeupRunKeys": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		"InsertChatWakeupWatch": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
-			keys := []string{"child_done:" + uuid.NewString()}
+			arg := testutil.Fake(t, faker, forkdb.InsertChatWakeupWatchParams{WakeupID: wakeup.ID})
+			watch := testutil.Fake(t, faker, forkdb.ChatWakeupWatch{WakeupID: wakeup.ID, ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			fdb.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(keys, nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(keys)
+			fdb.EXPECT().InsertChatWakeupWatch(gomock.Any(), arg).Return(watch, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(watch)
+		},
+		"ListChatWakeupWatchesByWakeupID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			watches := []forkdb.ChatWakeupWatch{testutil.Fake(t, faker, forkdb.ChatWakeupWatch{WakeupID: wakeup.ID, ChatID: chat.ID})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().ListChatWakeupWatchesByWakeupID(gomock.Any(), wakeup.ID).Return(watches, nil).AnyTimes()
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(watches)
+		},
+		"ListChatWakeupWatchesByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			watches := []forkdb.ChatWakeupWatch{testutil.Fake(t, faker, forkdb.ChatWakeupWatch{ChatID: chat.ID})}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().ListChatWakeupWatchesByChatID(gomock.Any(), chat.ID).Return(watches, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(watches)
+		},
+		"ListOpenChatWakeupWatchesByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			rows := []forkdb.ListOpenChatWakeupWatchesByChatIDRow{{ChatWakeupWatch: testutil.Fake(t, faker, forkdb.ChatWakeupWatch{ChatID: chat.ID})}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().ListOpenChatWakeupWatchesByChatID(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
+			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
+		"ListChildChatIDsWithOpenWakeupWatches": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			parent := testutil.Fake(t, faker, database.Chat{})
+			ids := []uuid.UUID{uuid.New()}
+			db.EXPECT().GetChatByID(gomock.Any(), parent.ID).Return(parent, nil).AnyTimes()
+			fdb.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), parent.ID).Return(ids, nil).AnyTimes()
+			check.Args(parent.ID).Asserts(parent, policy.ActionRead).Returns(ids)
+		},
+		"ListReadyChatWakeupWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := forkdb.ListReadyChatWakeupWatchesParams{LimitCount: 10}
+			watches := []forkdb.ChatWakeupWatch{testutil.Fake(t, faker, forkdb.ChatWakeupWatch{})}
+			fdb.EXPECT().ListReadyChatWakeupWatches(gomock.Any(), arg).Return(watches, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(watches)
+		},
+		"MarkChatWakeupWatchDelivered": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.MarkChatWakeupWatchDeliveredParams{WakeupID: wakeup.ID})
+			watch := testutil.Fake(t, faker, forkdb.ChatWakeupWatch{WakeupID: wakeup.ID, ChatID: chat.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), arg).Return(watch, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(watch)
+		},
+		"MarkChatWakeupWatchFailed": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.MarkChatWakeupWatchFailedParams{WakeupID: wakeup.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().MarkChatWakeupWatchFailed(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
 		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -890,6 +939,99 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteProjectAgentDefinitionByName(gomock.Any(), arg).Return(def, nil).AnyTimes()
 			check.Args(arg).Asserts(project, policy.ActionUpdate).Returns(def)
 		},
+		"InsertUserSavedWorkflow": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := userSavedWorkflow(uuid.New(), uuid.New(), "triage")
+			arg := forkdb.InsertUserSavedWorkflowParams{OrganizationID: wf.OrganizationID, UserID: wf.UserID.UUID, Name: wf.Name, Script: wf.Script}
+			fdb.EXPECT().InsertUserSavedWorkflow(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(wf.UserID.UUID.String()), policy.ActionCreate,
+			).Returns(wf)
+		},
+		"GetUserSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := userSavedWorkflow(uuid.New(), uuid.New(), "triage")
+			arg := forkdb.GetUserSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, UserID: wf.UserID.UUID, Name: wf.Name}
+			fdb.EXPECT().GetUserSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(wf.UserID.UUID.String()), policy.ActionRead,
+			).Returns(wf)
+		},
+		"ListUserSavedWorkflowMetadata": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := userSavedWorkflow(uuid.New(), uuid.New(), "triage")
+			arg := forkdb.ListUserSavedWorkflowMetadataParams{OrganizationID: wf.OrganizationID, UserID: wf.UserID.UUID}
+			rows := []forkdb.ListUserSavedWorkflowMetadataRow{{ID: wf.ID, OrganizationID: wf.OrganizationID, UserID: wf.UserID, Name: wf.Name}}
+			fdb.EXPECT().ListUserSavedWorkflowMetadata(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(arg.OrganizationID).InOrg(arg.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(arg.UserID.String()), policy.ActionRead,
+			).Returns(rows)
+		},
+		"UpdateUserSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := userSavedWorkflow(uuid.New(), uuid.New(), "triage")
+			arg := forkdb.UpdateUserSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, UserID: wf.UserID.UUID, Name: wf.Name, Script: sql.NullString{String: wf.Script, Valid: true}}
+			fdb.EXPECT().UpdateUserSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(wf.UserID.UUID.String()), policy.ActionUpdate,
+			).Returns(wf)
+		},
+		"DeleteUserSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := userSavedWorkflow(uuid.New(), uuid.New(), "triage")
+			arg := forkdb.DeleteUserSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, UserID: wf.UserID.UUID, Name: wf.Name}
+			fdb.EXPECT().DeleteUserSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(wf.UserID.UUID.String()), policy.ActionDelete,
+			).Returns(wf)
+		},
+		"InsertOrganizationSavedWorkflow": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.InsertOrganizationSavedWorkflowParams{OrganizationID: wf.OrganizationID, CreatedBy: uuid.New(), Name: wf.Name, Script: wf.Script, GroupAcl: wf.GroupAcl, UserAcl: wf.UserAcl}
+			fdb.EXPECT().InsertOrganizationSavedWorkflow(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceOrganizationSkill.InOrg(wf.OrganizationID), policy.ActionCreate).Returns(wf)
+		},
+		"GetOrganizationSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}
+			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionRead).Returns(wf)
+		},
+		"GetOrganizationSavedWorkflowByNameForUpdate": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.GetOrganizationSavedWorkflowByNameForUpdateParams{OrganizationID: wf.OrganizationID, Name: wf.Name}
+			fdb.EXPECT().GetOrganizationSavedWorkflowByNameForUpdate(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionRead).Returns(wf)
+		},
+		// The NotAuthorized subtest gets no rows back: the post-filter drops
+		// every row that the actor cannot read.
+		"ListOrganizationSavedWorkflowMetadata": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			row := forkdb.ListOrganizationSavedWorkflowMetadataRow{ID: wf.ID, OrganizationID: wf.OrganizationID, Name: wf.Name, GroupAcl: wf.GroupAcl, UserAcl: wf.UserAcl}
+			fdb.EXPECT().ListOrganizationSavedWorkflowMetadata(gomock.Any(), wf.OrganizationID).Return([]forkdb.ListOrganizationSavedWorkflowMetadataRow{row}, nil).AnyTimes()
+			check.Args(wf.OrganizationID).Asserts(organizationSavedWorkflowObject(wf), policy.ActionRead).Returns([]forkdb.ListOrganizationSavedWorkflowMetadataRow{row})
+		},
+		"UpdateOrganizationSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.UpdateOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name, Script: sql.NullString{String: wf.Script, Valid: true}}
+			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}).Return(wf, nil).AnyTimes()
+			fdb.EXPECT().UpdateOrganizationSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionUpdate).Returns(wf)
+		},
+		"UpdateOrganizationSavedWorkflowACLByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.UpdateOrganizationSavedWorkflowACLByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name, GroupAcl: database.ChatACL{}, UserAcl: wf.UserAcl}
+			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}).Return(wf, nil).AnyTimes()
+			fdb.EXPECT().UpdateOrganizationSavedWorkflowACLByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionShare).Returns(wf)
+		},
+		"DeleteOrganizationSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			arg := forkdb.DeleteOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}
+			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), forkdb.GetOrganizationSavedWorkflowByNameParams(arg)).Return(wf, nil).AnyTimes()
+			fdb.EXPECT().DeleteOrganizationSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionDelete).Returns(wf)
+		},
 		// Workflow journal queries authorize through the chat that owns the
 		// run, fetched by ID on the fork store.
 		"GetWorkflowRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
@@ -1131,6 +1273,32 @@ func organizationAgentDefinitionObject(def forkdb.AgentDefinition) rbac.Object {
 		WithACLUserList(def.UserAcl.RBACACL())
 }
 
+func userSavedWorkflow(organizationID, userID uuid.UUID, name string) forkdb.SavedWorkflow {
+	wf := organizationSavedWorkflow(organizationID, name)
+	wf.UserID = uuid.NullUUID{UUID: userID, Valid: true}
+	wf.GroupAcl = database.ChatACL{}
+	wf.UserAcl = database.ChatACL{}
+	return wf
+}
+
+func organizationSavedWorkflow(organizationID uuid.UUID, name string) forkdb.SavedWorkflow {
+	return forkdb.SavedWorkflow{
+		ID:             uuid.New(),
+		OrganizationID: organizationID,
+		Name:           name,
+		Script:         "def main(args):\n    return args\n",
+		Phases:         []string{},
+		GroupAcl:       database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead}}},
+		UserAcl:        database.ChatACL{uuid.NewString(): {Permissions: []policy.Action{policy.ActionRead, policy.ActionUpdate}}},
+	}
+}
+
+func organizationSavedWorkflowObject(wf forkdb.SavedWorkflow) rbac.Object {
+	return rbac.ResourceOrganizationSkill.WithID(wf.ID).InOrg(wf.OrganizationID).
+		WithGroupACL(wf.GroupAcl.RBACACL()).
+		WithACLUserList(wf.UserAcl.RBACACL())
+}
+
 // TestUserAgentDefinitionOrganizationMembership runs the user-tier queries
 // against the real authorizer. Their RBAC object has no organization, so
 // only the organization check of dbauthz keeps out users who are not members.
@@ -1284,6 +1452,88 @@ func TestOrganizationAgentDefinitionOrganizationMembership(t *testing.T) {
 	}
 }
 
+// TestSavedWorkflowRBAC runs the saved workflow queries against the real
+// authorizer. A member manages their own user-tier workflows and cannot touch
+// another member's. Organization-tier workflows are read through their ACL,
+// and only an organization admin creates, edits, shares or deletes them.
+func TestSavedWorkflowRBAC(t *testing.T) {
+	t.Parallel()
+
+	setupCtx := testutil.Context(t, testutil.WaitLong)
+	store, _ := dbtestutil.NewDB(t)
+	db := dbauthz.New(store, rbac.NewAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, &slogtest.Options{
+		IgnoreErrors: true,
+	}), coderdtest.AccessControlStorePointer())
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+
+	org := dbgen.Organization(t, store, database.Organization{})
+	subject := func(userID uuid.UUID, roles ...rbac.RoleIdentifier) rbac.Subject {
+		return rbac.Subject{
+			ID:     userID.String(),
+			Roles:  must(rolestore.Expand(setupCtx, store, roles)),
+			Groups: []string{org.ID.String()},
+			Scope:  rbac.ExpandableScope(rbac.ScopeAll),
+		}
+	}
+	adminUser := dbgen.User(t, store, database.User{})
+	memberUser := dbgen.User(t, store, database.User{})
+	otherUser := dbgen.User(t, store, database.User{})
+	admin := dbauthz.As(setupCtx, subject(adminUser.ID, rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID), rbac.ScopedRoleOrgAdmin(org.ID)))
+	member := dbauthz.As(setupCtx, subject(memberUser.ID, rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID)))
+	other := dbauthz.As(setupCtx, subject(otherUser.ID, rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID)))
+	read := database.ChatACLEntry{Permissions: []policy.Action{policy.ActionRead}}
+
+	// User tier: the owner has full access, another member has none.
+	_, err = fdb.InsertUserSavedWorkflow(member, forkdb.InsertUserSavedWorkflowParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine", Script: "def main(args):\n    return 1\n"})
+	require.NoError(t, err)
+	_, err = fdb.GetUserSavedWorkflowByName(member, forkdb.GetUserSavedWorkflowByNameParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine"})
+	require.NoError(t, err)
+	_, err = fdb.InsertUserSavedWorkflow(other, forkdb.InsertUserSavedWorkflowParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "planted", Script: ""})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "create for another user: %v", err)
+	_, err = fdb.GetUserSavedWorkflowByName(other, forkdb.GetUserSavedWorkflowByNameParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine"})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "read another user's: %v", err)
+	_, err = fdb.ListUserSavedWorkflowMetadata(other, forkdb.ListUserSavedWorkflowMetadataParams{OrganizationID: org.ID, UserID: memberUser.ID})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "list another user's: %v", err)
+	_, err = fdb.UpdateUserSavedWorkflowByName(other, forkdb.UpdateUserSavedWorkflowByNameParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine", Script: sql.NullString{String: "", Valid: true}})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "edit another user's: %v", err)
+	_, err = fdb.DeleteUserSavedWorkflowByName(other, forkdb.DeleteUserSavedWorkflowByNameParams{OrganizationID: org.ID, UserID: memberUser.ID, Name: "mine"})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "delete another user's: %v", err)
+
+	// Organization tier: a member cannot publish, the admin can.
+	_, err = fdb.InsertOrganizationSavedWorkflow(member, forkdb.InsertOrganizationSavedWorkflowParams{OrganizationID: org.ID, CreatedBy: memberUser.ID, Name: "shared", Script: ""})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "member publishes: %v", err)
+	_, err = fdb.InsertOrganizationSavedWorkflow(admin, forkdb.InsertOrganizationSavedWorkflowParams{OrganizationID: org.ID, CreatedBy: adminUser.ID, Name: "shared", Script: "", GroupAcl: database.ChatACL{org.ID.String(): read}})
+	require.NoError(t, err)
+	_, err = fdb.InsertOrganizationSavedWorkflow(admin, forkdb.InsertOrganizationSavedWorkflowParams{OrganizationID: org.ID, CreatedBy: adminUser.ID, Name: "private", Script: ""})
+	require.NoError(t, err)
+
+	// The Everyone grant lets a member read and list, but not change, the shared row.
+	_, err = fdb.GetOrganizationSavedWorkflowByName(member, forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared"})
+	require.NoError(t, err)
+	_, err = fdb.GetOrganizationSavedWorkflowByName(member, forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "private"})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "read an unshared row: %v", err)
+	rows, err := fdb.ListOrganizationSavedWorkflowMetadata(member, org.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the list drops rows the member cannot read")
+	require.Equal(t, "shared", rows[0].Name)
+	_, err = fdb.UpdateOrganizationSavedWorkflowByName(member, forkdb.UpdateOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared", Script: sql.NullString{String: "", Valid: true}})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "member edits: %v", err)
+	_, err = fdb.UpdateOrganizationSavedWorkflowACLByName(member, forkdb.UpdateOrganizationSavedWorkflowACLByNameParams{OrganizationID: org.ID, Name: "private", UserAcl: database.ChatACL{memberUser.ID.String(): read}})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "member shares: %v", err)
+	_, err = fdb.DeleteOrganizationSavedWorkflowByName(member, forkdb.DeleteOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared"})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "member deletes: %v", err)
+
+	_, err = fdb.UpdateOrganizationSavedWorkflowByName(admin, forkdb.UpdateOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared", Description: sql.NullString{String: "Shared.", Valid: true}})
+	require.NoError(t, err)
+	_, err = fdb.UpdateOrganizationSavedWorkflowACLByName(admin, forkdb.UpdateOrganizationSavedWorkflowACLByNameParams{OrganizationID: org.ID, Name: "private", UserAcl: database.ChatACL{memberUser.ID.String(): read}})
+	require.NoError(t, err)
+	_, err = fdb.GetOrganizationSavedWorkflowByName(member, forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "private"})
+	require.NoError(t, err, "a direct grant")
+	_, err = fdb.DeleteOrganizationSavedWorkflowByName(admin, forkdb.DeleteOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared"})
+	require.NoError(t, err)
+}
+
 func pluginPackObject(pack forkdb.PluginPack) rbac.Object {
 	return rbac.ResourceOrganizationSkill.WithID(pack.ID).InOrg(pack.OrganizationID)
 }
@@ -1325,10 +1575,6 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			_, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
 			return err
 		}},
-		{name: "ListChildChatIDsWithActiveEventsWakeups", run: func(ctx context.Context, fdb forkdb.Store) error {
-			_, err := fdb.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
-			return err
-		}},
 		{name: "ListPendingChatDescendantQuestionsByRoot", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, chat.ID)
 			return err
@@ -1337,16 +1583,20 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			_, err := fdb.GetChatWakeupByID(ctx, wakeup.ID)
 			return err
 		}},
-		{name: "ListChatWakeupRunKeys", run: func(ctx context.Context, fdb forkdb.Store) error {
-			_, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
-			return err
-		}},
 		{name: "FinishChatWakeupClaim", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.FinishChatWakeupClaim(ctx, forkdb.FinishChatWakeupClaimParams{ID: wakeup.ID})
 			return err
 		}},
 		{name: "InsertChatWakeupRun", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{WakeupID: wakeup.ID})
+			return err
+		}},
+		{name: "MarkChatWakeupWatchDelivered", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{WakeupID: wakeup.ID})
+			return err
+		}},
+		{name: "ListChildChatIDsWithOpenWakeupWatches", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.ListChildChatIDsWithOpenWakeupWatches(ctx, chat.ID)
 			return err
 		}},
 		{name: "GetWorkflowRun", run: func(ctx context.Context, fdb forkdb.Store) error {
@@ -1449,13 +1699,14 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 				switch tc.name {
 				case "InsertChatSubagent", "GetChatTodosByChatID",
 					"GetChatPinnedSkillsByChatID", "GetChatSubagentByChatID",
-					"ListChildChatIDsWithActiveEventsWakeups",
+					"ListChildChatIDsWithOpenWakeupWatches",
 					"ListPendingChatDescendantQuestionsByRoot":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
-				case "GetChatWakeupByID", "ListChatWakeupRunKeys",
-					"FinishChatWakeupClaim", "InsertChatWakeupRun":
+				case "GetChatWakeupByID",
+					"FinishChatWakeupClaim", "InsertChatWakeupRun",
+					"MarkChatWakeupWatchDelivered":
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
@@ -1525,11 +1776,11 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().GetChatTodosByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatTodo{}, nil).AnyTimes()
 	fdbMock.EXPECT().GetChatPinnedSkillsByChatID(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatSubagent{}, nil).AnyTimes()
-	fdbMock.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
-	fdbMock.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().FinishChatWakeupClaim(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
 	fdbMock.EXPECT().InsertChatWakeupRun(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupRun{}, nil).AnyTimes()
+	fdbMock.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupWatch{}, nil).AnyTimes()
+	fdbMock.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().InsertWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()

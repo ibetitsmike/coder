@@ -164,13 +164,6 @@ func TestChatWakeupRuns(t *testing.T) {
 	require.NoError(t, err)
 	_, err = insertRun("2026-01-03T00:00:00Z:failed", forkdb.ChatWakeupRunStatusFailed)
 	require.NoError(t, err)
-	other := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now)
-	keys, err := fdb.ListChatWakeupRunKeys(ctx, other.ID)
-	require.NoError(t, err)
-	require.Empty(t, keys, "run keys belong to their wake-up")
-	keys, err = fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z:failed"}, keys)
 
 	_, err = insertRun("2026-01-04T00:00:00Z", forkdb.ChatWakeupRunStatusDelivered)
 	require.NoError(t, err)
@@ -311,7 +304,6 @@ func insertDelayWakeup(ctx context.Context, t *testing.T, fdb forkdb.Store, chat
 		Kind:      forkdb.ChatWakeupKindDelay,
 		Prompt:    "check the build",
 		Timezone:  "UTC",
-		Events:    json.RawMessage(`[]`),
 		Status:    status,
 		NextRunAt: sql.NullTime{Time: nextRunAt, Valid: true},
 		CreatedAt: now,

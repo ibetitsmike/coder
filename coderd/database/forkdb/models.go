@@ -208,6 +208,67 @@ func AllChatWakeupStatusValues() []ChatWakeupStatus {
 	}
 }
 
+type ChatWakeupWatchKind string
+
+const (
+	ChatWakeupWatchKindChildDone   ChatWakeupWatchKind = "child_done"
+	ChatWakeupWatchKindProcess     ChatWakeupWatchKind = "process"
+	ChatWakeupWatchKindPullRequest ChatWakeupWatchKind = "pull_request"
+)
+
+func (e *ChatWakeupWatchKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChatWakeupWatchKind(s)
+	case string:
+		*e = ChatWakeupWatchKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChatWakeupWatchKind: %T", src)
+	}
+	return nil
+}
+
+type NullChatWakeupWatchKind struct {
+	ChatWakeupWatchKind ChatWakeupWatchKind `json:"chat_wakeup_watch_kind"`
+	Valid               bool                `json:"valid"` // Valid is true if ChatWakeupWatchKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChatWakeupWatchKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChatWakeupWatchKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChatWakeupWatchKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChatWakeupWatchKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChatWakeupWatchKind), nil
+}
+
+func (e ChatWakeupWatchKind) Valid() bool {
+	switch e {
+	case ChatWakeupWatchKindChildDone,
+		ChatWakeupWatchKindProcess,
+		ChatWakeupWatchKindPullRequest:
+		return true
+	}
+	return false
+}
+
+func AllChatWakeupWatchKindValues() []ChatWakeupWatchKind {
+	return []ChatWakeupWatchKind{
+		ChatWakeupWatchKindChildDone,
+		ChatWakeupWatchKindProcess,
+		ChatWakeupWatchKindPullRequest,
+	}
+}
+
 // Stored custom agent definitions. A row is in the organization tier when user_id and project_id are NULL, in the user tier when user_id is set, and in the project tier when project_id is set.
 type AgentDefinition struct {
 	ID             uuid.UUID `db:"id" json:"id"`
@@ -353,7 +414,6 @@ type ChatWakeup struct {
 	IntervalSeconds sql.NullInt32    `db:"interval_seconds" json:"interval_seconds"`
 	Cron            sql.NullString   `db:"cron" json:"cron"`
 	Timezone        string           `db:"timezone" json:"timezone"`
-	Events          json.RawMessage  `db:"events" json:"events"`
 	Status          ChatWakeupStatus `db:"status" json:"status"`
 	StatusReason    sql.NullString   `db:"status_reason" json:"status_reason"`
 	NextRunAt       sql.NullTime     `db:"next_run_at" json:"next_run_at"`
@@ -376,6 +436,26 @@ type ChatWakeupRun struct {
 	Error          sql.NullString      `db:"error" json:"error"`
 	CreatedAt      time.Time           `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time           `db:"updated_at" json:"updated_at"`
+}
+
+type ChatWakeupWatch struct {
+	ID             uuid.UUID             `db:"id" json:"id"`
+	WakeupID       uuid.UUID             `db:"wakeup_id" json:"wakeup_id"`
+	ChatID         uuid.UUID             `db:"chat_id" json:"chat_id"`
+	OrganizationID uuid.UUID             `db:"organization_id" json:"organization_id"`
+	Kind           ChatWakeupWatchKind   `db:"kind" json:"kind"`
+	Ordinal        int32                 `db:"ordinal" json:"ordinal"`
+	ChildChatID    uuid.NullUUID         `db:"child_chat_id" json:"child_chat_id"`
+	AgentID        uuid.NullUUID         `db:"agent_id" json:"agent_id"`
+	ProcessID      sql.NullString        `db:"process_id" json:"process_id"`
+	PullRequestUrl sql.NullString        `db:"pull_request_url" json:"pull_request_url"`
+	Spec           json.RawMessage       `db:"spec" json:"spec"`
+	FiredAt        sql.NullTime          `db:"fired_at" json:"fired_at"`
+	FiredPayload   pqtype.NullRawMessage `db:"fired_payload" json:"fired_payload"`
+	DeliveredAt    sql.NullTime          `db:"delivered_at" json:"delivered_at"`
+	Deliveries     int32                 `db:"deliveries" json:"deliveries"`
+	FailedAt       sql.NullTime          `db:"failed_at" json:"failed_at"`
+	CreatedAt      time.Time             `db:"created_at" json:"created_at"`
 }
 
 type Plugin struct {
@@ -459,6 +539,30 @@ type PluginUserLink struct {
 	// Chat that last spoke to the external identity. Replies go to this chat.
 	ActiveChatID uuid.NullUUID `db:"active_chat_id" json:"active_chat_id"`
 	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
+}
+
+// Saved Starlark workflows of the fork-workflows experiment. A row is in the organization tier when user_id is NULL and in the user tier when user_id is set. Only users save workflows; agents run them by name.
+type SavedWorkflow struct {
+	ID             uuid.UUID `db:"id" json:"id"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	// The owner of a user-tier row. A user-tier row also belongs to one organization of the user.
+	UserID uuid.NullUUID `db:"user_id" json:"user_id"`
+	// The user who saved the workflow. NULL when that user was deleted.
+	CreatedBy   uuid.NullUUID `db:"created_by" json:"created_by"`
+	Name        string        `db:"name" json:"name"`
+	Description string        `db:"description" json:"description"`
+	// The Starlark source. It defines main(args), as a run_workflow script does.
+	Script string `db:"script" json:"script"`
+	// An optional JSON Schema object for the args of a run.
+	ArgsSchema pqtype.NullRawMessage `db:"args_schema" json:"args_schema"`
+	// The declared phase names of the workflow, in order. Empty when it declares none.
+	Phases []string `db:"phases" json:"phases"`
+	// Group permissions on an organization-tier row. Empty on the user tier.
+	GroupAcl database.ChatACL `db:"group_acl" json:"group_acl"`
+	// User permissions on an organization-tier row. Empty on the user tier.
+	UserAcl   database.ChatACL `db:"user_acl" json:"user_acl"`
+	CreatedAt time.Time        `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
 }
 
 // Workflow runs of the fork-workflows experiment. chatd journals run state here so a restart resumes a run.

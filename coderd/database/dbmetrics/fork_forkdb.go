@@ -527,6 +527,46 @@ func (f forkQueryMetricsStore) InsertChatWakeupRun(ctx context.Context, arg fork
 	return f.s.InsertChatWakeupRun(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) InsertChatWakeupWatch(ctx context.Context, arg forkdb.InsertChatWakeupWatchParams) (forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "InsertChatWakeupWatch", time.Now())
+	return f.s.InsertChatWakeupWatch(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListChatWakeupWatchesByChatID", time.Now())
+	return f.s.ListChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListChatWakeupWatchesByWakeupID", time.Now())
+	return f.s.ListChatWakeupWatchesByWakeupID(ctx, wakeupID)
+}
+
+func (f forkQueryMetricsStore) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "ListChildChatIDsWithOpenWakeupWatches", time.Now())
+	return f.s.ListChildChatIDsWithOpenWakeupWatches(ctx, parentChatID)
+}
+
+func (f forkQueryMetricsStore) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
+	defer f.observe(ctx, "ListOpenChatWakeupWatchesByChatID", time.Now())
+	return f.s.ListOpenChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) ListReadyChatWakeupWatches(ctx context.Context, arg forkdb.ListReadyChatWakeupWatchesParams) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListReadyChatWakeupWatches", time.Now())
+	return f.s.ListReadyChatWakeupWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkChatWakeupWatchDelivered(ctx context.Context, arg forkdb.MarkChatWakeupWatchDeliveredParams) (forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "MarkChatWakeupWatchDelivered", time.Now())
+	return f.s.MarkChatWakeupWatchDelivered(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.MarkChatWakeupWatchFailedParams) error {
+	defer f.observe(ctx, "MarkChatWakeupWatchFailed", time.Now())
+	return f.s.MarkChatWakeupWatchFailed(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertOrganizationAgentDefinition", time.Now())
 	return f.s.InsertOrganizationAgentDefinition(ctx, arg)
@@ -562,19 +602,9 @@ func (f forkQueryMetricsStore) ListChatFamilyMembers(ctx context.Context, arg fo
 	return f.s.ListChatFamilyMembers(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
-	defer f.observe(ctx, "ListChatWakeupRunKeys", time.Now())
-	return f.s.ListChatWakeupRunKeys(ctx, wakeupID)
-}
-
 func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "ListChatWakeupsByChatID", time.Now())
 	return f.s.ListChatWakeupsByChatID(ctx, chatID)
-}
-
-func (f forkQueryMetricsStore) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
-	defer f.observe(ctx, "ListChildChatIDsWithActiveEventsWakeups", time.Now())
-	return f.s.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
 }
 
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
@@ -720,4 +750,64 @@ func (f forkQueryMetricsStore) UpsertChatTodos(ctx context.Context, arg forkdb.U
 func (f forkQueryMetricsStore) UpsertPluginUserLink(ctx context.Context, arg forkdb.UpsertPluginUserLinkParams) (forkdb.PluginUserLink, error) {
 	defer f.observe(ctx, "UpsertPluginUserLink", time.Now())
 	return f.s.UpsertPluginUserLink(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "DeleteOrganizationSavedWorkflowByName", time.Now())
+	return f.s.DeleteOrganizationSavedWorkflowByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteUserSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "DeleteUserSavedWorkflowByName", time.Now())
+	return f.s.DeleteUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "GetOrganizationSavedWorkflowByName", time.Now())
+	return f.s.GetOrganizationSavedWorkflowByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetOrganizationSavedWorkflowByNameForUpdate(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameForUpdateParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "GetOrganizationSavedWorkflowByNameForUpdate", time.Now())
+	return f.s.GetOrganizationSavedWorkflowByNameForUpdate(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetUserSavedWorkflowByName(ctx context.Context, arg forkdb.GetUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "GetUserSavedWorkflowByName", time.Now())
+	return f.s.GetUserSavedWorkflowByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertOrganizationSavedWorkflow(ctx context.Context, arg forkdb.InsertOrganizationSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "InsertOrganizationSavedWorkflow", time.Now())
+	return f.s.InsertOrganizationSavedWorkflow(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) InsertUserSavedWorkflow(ctx context.Context, arg forkdb.InsertUserSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "InsertUserSavedWorkflow", time.Now())
+	return f.s.InsertUserSavedWorkflow(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationSavedWorkflowMetadataRow, error) {
+	defer f.observe(ctx, "ListOrganizationSavedWorkflowMetadata", time.Now())
+	return f.s.ListOrganizationSavedWorkflowMetadata(ctx, organizationID)
+}
+
+func (f forkQueryMetricsStore) ListUserSavedWorkflowMetadata(ctx context.Context, arg forkdb.ListUserSavedWorkflowMetadataParams) ([]forkdb.ListUserSavedWorkflowMetadataRow, error) {
+	defer f.observe(ctx, "ListUserSavedWorkflowMetadata", time.Now())
+	return f.s.ListUserSavedWorkflowMetadata(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowACLByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "UpdateOrganizationSavedWorkflowACLByName", time.Now())
+	return f.s.UpdateOrganizationSavedWorkflowACLByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "UpdateOrganizationSavedWorkflowByName", time.Now())
+	return f.s.UpdateOrganizationSavedWorkflowByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateUserSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "UpdateUserSavedWorkflowByName", time.Now())
+	return f.s.UpdateUserSavedWorkflowByName(ctx, arg)
 }
