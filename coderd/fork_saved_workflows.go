@@ -32,7 +32,8 @@ import (
 const (
 	maxForkSavedWorkflowNameBytes        = 128
 	maxForkSavedWorkflowDescriptionBytes = 4096
-	// Below the 16 KiB row limit, which counts the spaced jsonb text.
+	// Below the 16 KiB row limit, which counts the spaced jsonb text, so
+	// one list_workflows result holds it.
 	maxForkSavedWorkflowArgsSchemaBytes = 12 << 10
 	maxForkSavedWorkflowPhases          = 32
 	maxForkSavedWorkflowPhaseBytes      = 128

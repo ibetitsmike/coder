@@ -52,6 +52,7 @@ func (f *forkWorkflowFixture) saveUserWorkflow(t *testing.T, name, script, schem
 	params := forkdb.InsertUserSavedWorkflowParams{
 		OrganizationID: f.org.ID,
 		UserID:         f.user.ID,
+		CreatedBy:      f.user.ID,
 		Name:           name,
 		Description:    "Personal " + name + ".",
 		Script:         script,
@@ -169,6 +170,7 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 		_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
 			OrganizationID: f.org.ID,
 			UserID:         f.user.ID,
+			CreatedBy:      f.user.ID,
 			Name:           "long",
 			Description:    long,
 			Script:         greetWorkflowScript,
@@ -206,6 +208,7 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 			_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
 				OrganizationID: f.org.ID,
 				UserID:         f.user.ID,
+				CreatedBy:      f.user.ID,
 				Name:           fmt.Sprintf("w%02d", i),
 				Description:    strings.Repeat("\x01", maxListedWorkflowDescription),
 				Script:         greetWorkflowScript,
@@ -265,6 +268,7 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 			_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
 				OrganizationID: f.org.ID,
 				UserID:         f.user.ID,
+				CreatedBy:      f.user.ID,
 				Name:           name,
 				Description:    strings.Repeat("\x01", 4096),
 				Script:         greetWorkflowScript,
@@ -411,7 +415,7 @@ func TestForkSavedWorkflowsAuthz(t *testing.T) {
 	}
 	for name, user := range map[string]database.User{"member-wf": member, "other-wf": other, "outsider-wf": outsider} {
 		_, err := fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
-			OrganizationID: org.ID, UserID: user.ID, Name: name, Script: titleWorkflowScript(name),
+			OrganizationID: org.ID, UserID: user.ID, CreatedBy: user.ID, Name: name, Script: titleWorkflowScript(name),
 		})
 		require.NoError(t, err)
 	}
