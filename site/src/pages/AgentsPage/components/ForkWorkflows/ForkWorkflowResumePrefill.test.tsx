@@ -20,22 +20,20 @@ import { ForkWorkflowResumePrefill } from "../ForkWorkflowResumePrefill";
 import { forkWorkflowResumePrompt } from "./forkWorkflowResume";
 
 // A composer double: records what the prefill wrote, like the real input.
-// The editor-state pair mirrors the real handle: getEditorState serializes
-// the draft (chips included), restoreEditorState rebuilds it with the
-// appended text, so the double tracks both paths.
+// The editor-state pair mirrors the real handle: getEditorState always
+// serializes a JSON tree once mounted, even when the composer has no text,
+// and restoreEditorState rebuilds that state with the appended text, so
+// the double tracks both paths.
 const composer = () => {
 	let value = "";
-	let restored = "";
 	let focused = false;
 	return {
 		setValue: (text: string) => {
 			value = text;
-			restored = "";
 		},
 		insertText: () => {},
 		clear: () => {
 			value = "";
-			restored = "";
 		},
 		focus: () => {
 			focused = true;
@@ -44,11 +42,9 @@ const composer = () => {
 		addFileReference: () => {},
 		insertSkill: () => {},
 		removeSkills: () => {},
-		getEditorState: () =>
-			value || restored ? `state:${value || restored}` : "",
+		getEditorState: () => JSON.stringify({ root: { text: value } }),
 		restoreEditorState: (state: string, appendText = "") => {
-			restored = state;
-			value = `${state.replace(/^state:/, "")}${appendText}`;
+			value = `${JSON.parse(state).root.text}${appendText}`;
 		},
 		getContentParts: () => [],
 		isFocused: () => focused,
