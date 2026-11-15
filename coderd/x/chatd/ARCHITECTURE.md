@@ -940,7 +940,7 @@ An events wake-up is due at its `next_run_at` like any other, and also, before i
 - A pull request watch polls GitHub once a minute, with the retries described above.
 - A failed send keeps its watch out of the due query and retries at the run time the failure set, 15 seconds later, so a failing send cannot spin the waker.
 
-A delivery that the readiness rule started, before the run time, reads no process or pull request; it delivers the ready child and keeps the run time. The `lease_expires_at` column of `chat_wakeups` is gone: no row is claimed, and the migration that dropped it changed no wake-up's status or run time.
+A delivery that the readiness rule started, before the run time, reads no process or pull request; it delivers the ready child and keeps the run time. The lease column of `chat_wakeups` is gone: no row is claimed, and the migration that dropped it changed no wake-up's status or run time.
 
 ## Organization-local model selection and fallback
 
