@@ -1,4 +1,4 @@
-package chatd_test
+package chatd
 
 // This file is fork code: it pins the prompt-history loads of one generation
 // step. Issue #298: a step with fork context loads
@@ -10,8 +10,9 @@ package chatd_test
 
 import (
 	"context"
-	"slices"
+	"encoding/json"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -19,10 +20,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
-	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
 	"github.com/coder/coder/v2/codersdk"
@@ -58,13 +60,6 @@ var promptLoadExperiments = codersdk.Experiments{
 	codersdk.ExperimentForkPinnedSkills,
 }
 
-// The preset argument of promptLoadTurn, as named values so a call site reads
-// as what the chat gets.
-const (
-	promptLoadPreset = true
-	promptLoadSeed   = false
-)
-
 // promptLoadTurn creates one chat with a pinned personal skill named deploy and
 // a stored todo list, and, when withPresetRows is true, inserts the snapshot and
 // pins rows the current list versions produce into its prompt before the turn, so
@@ -83,59 +78,61 @@ func promptLoadTurn(
 	answers func(t *testing.T, n int32, text string) chattest.AnthropicResponse,
 ) promptLoadTurnResult {
 	t.Helper()
-	ctx := testutil.Context(t, testutil.WaitLong)
+	ctx := chatdTestContext(t)
 	db, ps := dbtestutil.NewDB(t)
 	counting := &promptLoadCountingStore{Store: db}
 
-	recorder := newAnthropicRequestRecorder()
+	recorder := newPromptLoadRequestRecorder()
 	var streamCount atomic.Int32
 	anthropicURL := chattest.NewAnthropic(t, func(req *chattest.AnthropicRequest) chattest.AnthropicResponse {
 		recorder.record(req)
 		if !req.Stream {
 			return chattest.AnthropicNonStreamingResponse("title")
 		}
-		return answers(t, streamCount.Add(1), anthropicRequestText(t, *req))
+		return answers(t, streamCount.Add(1), promptLoadRequestText(t, *req))
 	})
-	user, org, model := seedAnthropicChatDependencies(t, db, anthropicURL)
+	user, org, model := promptLoadSeedDeps(t, db, anthropicURL)
 	const skillBody = "Run make deploy before you push."
-	insertUserSkillByName(ctx, t, db, user.ID, "deploy", skillBody)
+	promptLoadInsertUserSkill(ctx, t, db, user.ID, "deploy", skillBody)
 
-	server := newActiveTestServer(t, counting, ps, func(cfg *chatd.Config) {
-		cfg.AIBridgeTransportFactory = chatAIGatewayTransportFactoryPointer(chattest.NewMockAIBridgeTransport(t, anthropicURL, chattest.WithPreservePath()))
-		cfg.Experiments = experiments
-	})
+	server := newInternalTestServer(t, counting, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerWorker(),
+		withInternalTestServerTransportFactory(chattest.NewMockAIBridgeTransport(t, anthropicURL, chattest.WithPreservePath())),
+		withInternalTestServerExperiments(experiments),
+	)
 	// The chat is created without initial content, so it stays waiting and no
 	// worker picks it up: the turn starts only at the SendMessage below, after
 	// every seed row is in.
-	chat, err := server.CreateChat(ctx, chatd.CreateOptions{
+	chat, err := server.CreateChat(ctx, CreateOptions{
 		OrganizationID: org.ID,
 		OwnerID:        user.ID,
 		Title:          "prompt rows once",
 		ModelConfigID:  model.ID,
 	})
 	require.NoError(t, err)
-	pinChatSkills(ctx, t, db, chat.ID)
-	require.NoError(t, server.WriteChatTodosForTest(ctx, chat.ID, []codersdk.ChatTodo{
+	promptLoadPinSkills(ctx, t, db, chat.ID)
+	_, err = server.writeChatTodos(ctx, chat.ID, []codersdk.ChatTodo{
 		{ID: "plan", Content: "Plan the change", Status: codersdk.ChatTodoStatusInProgress},
-	}))
+	})
+	require.NoError(t, err)
 	if withPresetRows {
 		presetForkContextRows(ctx, t, db, server, chat, model.ID, user.ID)
 	}
 
-	_, err = server.SendMessage(ctx, chatd.SendMessageOptions{
+	_, err = server.SendMessage(ctx, SendMessageOptions{
 		ChatID: chat.ID,
 		Content: []codersdk.ChatMessagePart{
 			codersdk.ChatMessageText("hello"),
 		},
-		BusyBehavior: chatd.SendMessageBusyBehaviorQueue,
+		BusyBehavior: SendMessageBusyBehaviorQueue,
 	})
 	require.NoError(t, err)
 
-	chat = waitForTerminalChat(ctx, t, db, chat.ID)
+	chat = promptLoadWaitForTerminalChat(ctx, t, db, chat.ID)
 	require.Equal(t, database.ChatStatusWaiting, chat.Status)
-	require.NoError(t, chatd.WaitUntilIdleForTest(ctx, server))
+	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
-	streams := filterAnthropicStreamingRequests(recorder.all())
+	streams := promptLoadStreamingRequests(recorder.all())
 	require.NotEmpty(t, streams)
 	return promptLoadTurnResult{ctx, db, counting, chat, streams}
 }
@@ -150,9 +147,33 @@ type promptLoadTurnResult struct {
 	Streams  []chattest.AnthropicRequest
 }
 
-// pinChatSkills replaces the pins of a chat with the personal deploy skill,
-// the way the pinned skills route does.
-func pinChatSkills(ctx context.Context, t *testing.T, db database.Store, chatID uuid.UUID) {
+// promptLoadSeedDeps inserts the user, organization, Anthropic provider with
+// the mock server's base URL, its key and the chat's model config.
+func promptLoadSeedDeps(
+	t *testing.T,
+	db database.Store,
+	baseURL string,
+) (database.User, database.Organization, database.ChatModelConfig) {
+	t.Helper()
+	user := dbgen.User(t, db, database.User{})
+	org := dbgen.Organization(t, db, database.Organization{})
+	dbgen.OrganizationMember(t, db, database.OrganizationMember{UserID: user.ID, OrganizationID: org.ID})
+	provider := dbgen.AIProvider(t, db, database.AIProvider{Type: database.AIProviderTypeAnthropic}, func(params *database.InsertAIProviderParams) {
+		params.BaseUrl = baseURL
+	})
+	dbgen.AIProviderKey(t, db, database.AIProviderKey{ProviderID: provider.ID})
+	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{
+		Model:          "claude-sonnet-4-20250514",
+		IsDefault:      true,
+		AIProviderID:   uuid.NullUUID{UUID: provider.ID, Valid: true},
+		OrganizationID: org.ID,
+	})
+	return user, org, model
+}
+
+// promptLoadPinSkills replaces the pins of a chat with the personal deploy
+// skill, the way the pinned skills route does.
+func promptLoadPinSkills(ctx context.Context, t *testing.T, db database.Store, chatID uuid.UUID) {
 	t.Helper()
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
@@ -169,7 +190,7 @@ func presetForkContextRows(
 	ctx context.Context,
 	t *testing.T,
 	db database.Store,
-	server *chatd.Server,
+	server *Server,
 	chat database.Chat,
 	modelID uuid.UUID,
 	createdBy uuid.UUID,
@@ -177,16 +198,16 @@ func presetForkContextRows(
 	t.Helper()
 	loaded, err := db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
 	require.NoError(t, err)
-	snapshot, snapshotDue, err := server.TodoSnapshotMessageForTest(ctx, chat, loaded)
+	snapshot, snapshotDue, err := server.todoSnapshotMessage(ctx, chat, loaded)
 	require.NoError(t, err)
 	if snapshotDue {
 		loaded = append(loaded, promptLoadRowForTest(t, snapshot))
 	}
-	pins, pinsDue, err := server.PinnedSkillsMessageForTest(ctx, chat, loaded)
+	pins, pinsDue, err := server.pinnedSkillsMessage(ctx, chat, loaded)
 	require.NoError(t, err)
 	require.True(t, snapshotDue, "a fresh todo list must be due")
 	require.True(t, pinsDue, "fresh pins must be due")
-	insertModelOnlyRows(ctx, t, db, chat.ID, modelID, createdBy, snapshot, pins)
+	promptLoadInsertRows(ctx, t, db, chat.ID, modelID, createdBy, snapshot, pins)
 }
 
 // promptLoadRowForTest returns one fork context message as the chat message
@@ -202,9 +223,9 @@ func promptLoadRowForTest(t *testing.T, message chatstate.Message) database.Chat
 	}
 }
 
-// insertModelOnlyRows appends fork context messages as model-only user rows,
+// promptLoadInsertRows appends fork context messages as model-only user rows,
 // the way commitForkContextMessage stores them.
-func insertModelOnlyRows(
+func promptLoadInsertRows(
 	ctx context.Context,
 	t *testing.T,
 	db database.Store,
@@ -237,8 +258,8 @@ func insertModelOnlyRows(
 	require.NoError(t, err)
 }
 
-// insertUserSkillByName stores one personal skill the user can invoke.
-func insertUserSkillByName(ctx context.Context, t *testing.T, db database.Store, userID uuid.UUID, name, body string) {
+// promptLoadInsertUserSkill stores one personal skill the user can invoke.
+func promptLoadInsertUserSkill(ctx context.Context, t *testing.T, db database.Store, userID uuid.UUID, name, body string) {
 	t.Helper()
 	_, err := db.InsertUserSkill(ctx, database.InsertUserSkillParams{
 		ID:          uuid.New(),
@@ -248,6 +269,92 @@ func insertUserSkillByName(ctx context.Context, t *testing.T, db database.Store,
 		Content:     "---\nname: " + name + "\ndescription: " + name + "\n---\n\n" + body + "\n",
 	})
 	require.NoError(t, err)
+}
+
+// promptLoadWaitForTerminalChat waits until the chat leaves the statuses the
+// worker drives.
+func promptLoadWaitForTerminalChat(
+	ctx context.Context,
+	t *testing.T,
+	db database.Store,
+	chatID uuid.UUID,
+) database.Chat {
+	t.Helper()
+
+	var chatResult database.Chat
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		got, err := db.GetChatByID(ctx, chatID)
+		if err != nil {
+			return false
+		}
+		chatResult = got
+		return got.Status == database.ChatStatusWaiting || got.Status == database.ChatStatusError
+	}, testutil.IntervalFast)
+
+	return chatResult
+}
+
+// promptLoadRequestText returns every string of the request's messages,
+// decoded, one per line, so the test can look for text that JSON escapes.
+func promptLoadRequestText(t *testing.T, req chattest.AnthropicRequest) string {
+	t.Helper()
+	var sb strings.Builder
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case string:
+			_, _ = sb.WriteString(v)
+			_, _ = sb.WriteString("\n")
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+		case map[string]any:
+			for _, item := range v {
+				walk(item)
+			}
+		}
+	}
+	for _, msg := range req.Messages {
+		var content any
+		require.NoError(t, json.Unmarshal(msg.Content, &content))
+		walk(content)
+	}
+	return sb.String()
+}
+
+// newPromptLoadRequestRecorder and its methods record every model request the
+// mock provider sees.
+type promptLoadRequestRecorder struct {
+	mu       sync.Mutex
+	requests []chattest.AnthropicRequest
+}
+
+func newPromptLoadRequestRecorder() *promptLoadRequestRecorder {
+	return &promptLoadRequestRecorder{}
+}
+
+func (r *promptLoadRequestRecorder) record(req *chattest.AnthropicRequest) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, *req)
+}
+
+func (r *promptLoadRequestRecorder) all() []chattest.AnthropicRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]chattest.AnthropicRequest(nil), r.requests...)
+}
+
+// promptLoadStreamingRequests keeps the streaming requests only.
+func promptLoadStreamingRequests(requests []chattest.AnthropicRequest) []chattest.AnthropicRequest {
+	out := make([]chattest.AnthropicRequest, 0, len(requests))
+	for _, req := range requests {
+		if req.Stream {
+			out = append(out, req)
+		}
+	}
+	return out
 }
 
 // TestGenerationStepLoadsPromptRowsOnce drives a full turn of a chat whose
@@ -274,9 +381,9 @@ func TestGenerationStepLoadsPromptRowsOnce(t *testing.T) {
 	// background chat summary. Five in total, all named here.
 	require.Equal(t, int64(5), turn.Counting.loads.Load(), "got %d loads", turn.Counting.loads.Load())
 	// The step's model request holds the pre-inserted fork context rows.
-	text := anthropicRequestText(t, turn.Streams[0])
-	require.Contains(t, text, todoSnapshotHeaderForTest)
-	require.Contains(t, text, pinnedSkillsHeaderForTest)
+	text := promptLoadRequestText(t, turn.Streams[0])
+	require.Contains(t, text, todoSnapshotHeader)
+	require.Contains(t, text, pinnedSkillsHeader)
 }
 
 // TestGenerationStepExperimentsOffKeepsUpstreamLoads runs the same chat with
@@ -287,9 +394,7 @@ func TestGenerationStepLoadsPromptRowsOnce(t *testing.T) {
 func TestGenerationStepExperimentsOffKeepsUpstreamLoads(t *testing.T) {
 	t.Parallel()
 
-	upstream := slices.DeleteFunc(slices.Clone(codersdk.ExperimentsKnown), func(e codersdk.Experiment) bool {
-		return slices.Contains(codersdk.ForkExperiments, e)
-	})
+	upstream := upstreamExperimentsKnown()
 	turn := promptLoadTurn(t, upstream, promptLoadSeed,
 		func(t *testing.T, n int32, text string) chattest.AnthropicResponse {
 			require.Equal(t, int32(1), n, "unexpected extra model step")
@@ -303,9 +408,9 @@ func TestGenerationStepExperimentsOffKeepsUpstreamLoads(t *testing.T) {
 
 	// The pins and todos were seeded but no fork check ran, so the model
 	// request shows none of them.
-	text := anthropicRequestText(t, turn.Streams[0])
-	require.NotContains(t, text, todoSnapshotHeaderForTest)
-	require.NotContains(t, text, pinnedSkillsHeaderForTest)
+	text := promptLoadRequestText(t, turn.Streams[0])
+	require.NotContains(t, text, todoSnapshotHeader)
+	require.NotContains(t, text, pinnedSkillsHeader)
 }
 
 // TestGenerationStepNoPinsNoTodosLoadsOnce drives a chat with no pins and no
@@ -315,11 +420,11 @@ func TestGenerationStepExperimentsOffKeepsUpstreamLoads(t *testing.T) {
 func TestGenerationStepNoPinsNoTodosLoadsOnce(t *testing.T) {
 	t.Parallel()
 
-	ctx := testutil.Context(t, testutil.WaitLong)
+	ctx := chatdTestContext(t)
 	db, ps := dbtestutil.NewDB(t)
 	counting := &promptLoadCountingStore{Store: db}
 
-	recorder := newAnthropicRequestRecorder()
+	recorder := newPromptLoadRequestRecorder()
 	var streamCount atomic.Int32
 	anthropicURL := chattest.NewAnthropic(t, func(req *chattest.AnthropicRequest) chattest.AnthropicResponse {
 		recorder.record(req)
@@ -329,13 +434,14 @@ func TestGenerationStepNoPinsNoTodosLoadsOnce(t *testing.T) {
 		require.Equal(t, int32(1), streamCount.Add(1), "unexpected extra model step")
 		return chattest.AnthropicStreamingResponse(chattest.AnthropicTextChunks("nothing due here")...)
 	})
-	user, org, model := seedAnthropicChatDependencies(t, db, anthropicURL)
+	user, org, model := promptLoadSeedDeps(t, db, anthropicURL)
 
-	server := newActiveTestServer(t, counting, ps, func(cfg *chatd.Config) {
-		cfg.AIBridgeTransportFactory = chatAIGatewayTransportFactoryPointer(chattest.NewMockAIBridgeTransport(t, anthropicURL, chattest.WithPreservePath()))
-		cfg.Experiments = promptLoadExperiments
-	})
-	chat, err := server.CreateChat(ctx, chatd.CreateOptions{
+	server := newInternalTestServer(t, counting, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerWorker(),
+		withInternalTestServerTransportFactory(chattest.NewMockAIBridgeTransport(t, anthropicURL, chattest.WithPreservePath())),
+		withInternalTestServerExperiments(promptLoadExperiments),
+	)
+	chat, err := server.CreateChat(ctx, CreateOptions{
 		OrganizationID:     org.ID,
 		OwnerID:            user.ID,
 		Title:              "no pins no todos",
@@ -344,16 +450,16 @@ func TestGenerationStepNoPinsNoTodosLoadsOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	finished := waitForTerminalChat(ctx, t, db, chat.ID)
+	finished := promptLoadWaitForTerminalChat(ctx, t, db, chat.ID)
 	require.Equal(t, database.ChatStatusWaiting, finished.Status)
-	require.NoError(t, chatd.WaitUntilIdleForTest(ctx, server))
+	require.NoError(t, WaitUntilIdleForTest(ctx, server))
 
 	// With no pins and no todo list, fork context is due to insert nothing,
 	// so each pass loads once in syncForkContext and hands the rows to the
 	// turn environment. The five loads are the memory index pre-read, the two
 	// step loads, the end-of-turn status label and the background summary.
 	require.Equal(t, int64(5), counting.loads.Load(), "got %d loads", counting.loads.Load())
-	streams := filterAnthropicStreamingRequests(recorder.all())
+	streams := promptLoadStreamingRequests(recorder.all())
 	require.Len(t, streams, 1)
 }
 
@@ -387,10 +493,10 @@ func TestForkContextInsertRestartsStepWithRows(t *testing.T) {
 			if part.Type != codersdk.ChatMessagePartTypeText {
 				continue
 			}
-			if strings.HasPrefix(part.Text, todoSnapshotHeaderForTest) {
+			if strings.HasPrefix(part.Text, todoSnapshotHeader) {
 				sawSnapshot = true
 			}
-			if strings.HasPrefix(part.Text, pinnedSkillsHeaderForTest) {
+			if strings.HasPrefix(part.Text, pinnedSkillsHeader) {
 				sawPins = true
 			}
 		}
@@ -400,15 +506,15 @@ func TestForkContextInsertRestartsStepWithRows(t *testing.T) {
 
 	// The model request, built after the restart reloaded, carries them and
 	// the pinned skill body.
-	text := anthropicRequestText(t, turn.Streams[0])
-	require.Contains(t, text, todoSnapshotHeaderForTest)
-	require.Contains(t, text, pinnedSkillsHeaderForTest)
+	text := promptLoadRequestText(t, turn.Streams[0])
+	require.Contains(t, text, todoSnapshotHeader)
+	require.Contains(t, text, pinnedSkillsHeader)
 	require.Contains(t, text, skillBody)
 }
 
+// The preset argument of promptLoadTurn, as named values so a call site reads
+// as what the chat gets.
 const (
-	// The headers the chatd package holds, repeated here because the test
-	// package cannot reach the unexported constants.
-	todoSnapshotHeaderForTest = "Your todo list for this chat, read from the store. It may differ from what this conversation shows, so treat this as current."
-	pinnedSkillsHeaderForTest = "The user pinned these skills to this chat. Follow their instructions on every turn until they are unpinned. This list replaces any earlier list of pinned skills."
+	promptLoadPreset = true
+	promptLoadSeed   = false
 )
