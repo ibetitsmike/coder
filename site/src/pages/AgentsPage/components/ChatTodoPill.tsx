@@ -36,7 +36,7 @@ const statusDisplay: Record<
 		label: "Done",
 		iconClassName: "text-content-success",
 	},
-	cancelled: {
+	canceled: {
 		icon: CircleXIcon,
 		label: "Cancelled",
 		iconClassName: "text-content-disabled",
@@ -107,9 +107,9 @@ export const ChatTodoPillView: React.FC<ChatTodoPillViewProps> = ({
 	) : null;
 };
 
-/** Formats done items over the items that count, which excludes cancelled. */
+/** Formats done items over the items that count, which excludes canceled items. */
 export const formatChatTodoProgress = (todos: readonly ChatTodo[]): string => {
-	const counted = todos.filter((todo) => todo.status !== "cancelled");
+	const counted = todos.filter((todo) => todo.status !== "canceled");
 	const done = counted.filter((todo) => todo.status === "done").length;
 	return `${done}/${counted.length}`;
 };
@@ -178,7 +178,7 @@ const ChatTodoItem: React.FC<ChatTodoItemProps> = ({ todo }) => {
 				className={cn(
 					"min-w-0 wrap-break-word leading-5",
 					todo.status === "done" && "text-content-secondary",
-					todo.status === "cancelled" && "text-content-secondary line-through",
+					todo.status === "canceled" && "text-content-secondary line-through",
 				)}
 			>
 				{todo.content}
