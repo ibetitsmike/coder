@@ -7,12 +7,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
@@ -48,6 +50,26 @@ func queryCounts(t *testing.T, reg *prometheus.Registry) map[string]int {
 	return counts
 }
 
+// failChatReadStore fails the next read of the chat that failNext names.
+type failChatReadStore struct {
+	database.Store
+
+	failID atomic.Pointer[uuid.UUID]
+}
+
+func (s *failChatReadStore) failNext(id uuid.UUID) { s.failID.Store(&id) }
+
+func (s *failChatReadStore) GetChatByID(ctx context.Context, id uuid.UUID) (database.Chat, error) {
+	if fail := s.failID.Load(); fail != nil && *fail == id && s.failID.CompareAndSwap(fail, nil) {
+		return database.Chat{}, xerrors.New("injected chat read failure")
+	}
+	return s.Store.GetChatByID(ctx, id)
+}
+
+func (s *failChatReadStore) ForkUnwrap() database.Store { return s.Store }
+
+func (*failChatReadStore) ForkWrap(inner forkdb.Store) forkdb.Store { return inner }
+
 // stepFactsFixture is a depth-2 shared subagent under a child spawned with
 // isolation worktree, with a tool policy and two plugin packs enabled on
 // the root chat. Every chat is bound to one workspace agent whose pinned
@@ -55,6 +77,7 @@ func queryCounts(t *testing.T, reg *prometheus.Registry) map[string]int {
 type stepFactsFixture struct {
 	server     *Server
 	db         database.Store
+	reads      *failChatReadStore
 	fdb        forkdb.Store
 	reg        *prometheus.Registry
 	org        database.Organization
@@ -67,8 +90,8 @@ func newStepFactsFixture(t *testing.T) stepFactsFixture {
 	t.Helper()
 	raw, ps := dbtestutil.NewDB(t)
 	reg := prometheus.NewRegistry()
-	db := dbmetrics.NewQueryMetrics(raw, slogtest.Make(t, nil), reg)
-	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+	reads := &failChatReadStore{Store: dbmetrics.NewQueryMetrics(raw, slogtest.Make(t, nil), reg)}
+	server := newInternalTestServer(t, reads, ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{
 			codersdk.ExperimentForkNestedSubagents,
 			codersdk.ExperimentForkSubagentIsolation,
@@ -161,7 +184,7 @@ func newStepFactsFixture(t *testing.T) stepFactsFixture {
 		ChatID: grandchild.ID, Depth: 2, Isolation: subagentIsolationShared,
 		ToolPolicy: pqtype.NullRawMessage{RawMessage: policy, Valid: true},
 	})
-	return stepFactsFixture{server: server, db: raw, fdb: fdb, reg: reg, org: org, packs: packs, root: root, grandchild: grandchild}
+	return stepFactsFixture{server: server, db: raw, reads: reads, fdb: fdb, reg: reg, org: org, packs: packs, root: root, grandchild: grandchild}
 }
 
 // step runs one generation step of chat and returns its tool names.
@@ -264,8 +287,7 @@ func TestForkStepFactsFailedLookupNotKept(t *testing.T) {
 	seal := f.server.withForkStepFacts(&ctx, f.grandchild)
 	defer seal()
 
-	// A canceled context fails the ancestor walk and the pack lookups,
-	// which log their failures instead of returning them.
+	// A canceled context fails the ancestor walk and the pack lookups.
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	require.Empty(t, f.server.enabledPacks(canceled, f.grandchild))
@@ -275,4 +297,52 @@ func TestForkStepFactsFailedLookupNotKept(t *testing.T) {
 		names = append(names, pack.Name)
 	}
 	require.ElementsMatch(t, []string{"alpha", "beta"}, names)
+}
+
+// TestForkStepFactsFailedProjectOrAncestorLookupNotKept checks that a pack
+// enablement is not kept when only the lookup of the chat's project or of
+// an ancestor failed and every pack lookup succeeded.
+func TestForkStepFactsFailedProjectOrAncestorLookupNotKept(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		failID func(stepFactsFixture) uuid.UUID
+	}{
+		// The project lookup of a subagent reads its root chat first.
+		{name: "Project", failID: func(f stepFactsFixture) uuid.UUID { return f.root.ID }},
+		// The ancestor walk then reads the parent. The root's packs are
+		// still read through the chat's root ID, so only the read count
+		// shows whether the result was kept.
+		{name: "Ancestor", failID: func(f stepFactsFixture) uuid.UUID { return f.grandchild.ParentChatID.UUID }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newStepFactsFixture(t)
+			ctx := chatdTestContext(t)
+			seal := f.server.withForkStepFacts(&ctx, f.grandchild)
+			defer seal()
+			packReads := func() int { return queryCounts(t, f.reg)["GetPluginPacksByChatID"] }
+			packNames := func() []string {
+				var names []string
+				for _, pack := range f.server.enabledPacks(ctx, f.grandchild) {
+					names = append(names, pack.Name)
+				}
+				return names
+			}
+
+			f.reads.failNext(tc.failID(f))
+			before := packReads()
+			packNames()
+			require.Nil(t, f.reads.failID.Load(), "the lookup failed")
+			require.Positive(t, packReads()-before, "the pack lookups ran")
+
+			before = packReads()
+			require.ElementsMatch(t, []string{"alpha", "beta"}, packNames())
+			require.Positive(t, packReads()-before, "the step reads again after a failed lookup")
+
+			before = packReads()
+			require.ElementsMatch(t, []string{"alpha", "beta"}, packNames())
+			require.Equal(t, before, packReads(), "the step keeps a complete read")
+		})
+	}
 }

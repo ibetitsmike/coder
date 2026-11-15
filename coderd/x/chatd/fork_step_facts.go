@@ -23,7 +23,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
@@ -202,17 +201,3 @@ func stepEnabledPacks(ctx context.Context, chat database.Chat, load func() ([]en
 	}
 	return slices.Clone(facts.packs.get(load))
 }
-
-// failedLookupSink records whether a lookup logged a warning or worse. The
-// project and ancestor helpers that pack enablement calls report a failed
-// lookup only by logging it. It sees what the logger's level lets through,
-// which includes warnings unless the server logs only errors.
-type failedLookupSink struct{ failed atomic.Bool }
-
-func (s *failedLookupSink) LogEntry(_ context.Context, e slog.SinkEntry) {
-	if e.Level >= slog.LevelWarn {
-		s.failed.Store(true)
-	}
-}
-
-func (*failedLookupSink) Sync() {}

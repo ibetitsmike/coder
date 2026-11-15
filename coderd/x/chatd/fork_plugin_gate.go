@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	agentproto "github.com/coder/coder/v2/agent/proto"
@@ -282,31 +283,36 @@ type enabledPack struct {
 // generation step resolves the packs of its chat once.
 func (p *Server) enabledPacks(ctx context.Context, chat database.Chat) []enabledPack {
 	return stepEnabledPacks(ctx, chat, func() ([]enabledPack, bool) {
-		failed := &failedLookupSink{}
-		packs := p.loadEnabledPacks(ctx, p.logger.With(slog.F("chat_id", chat.ID)).AppendSinks(failed), chat)
-		return packs, !failed.failed.Load()
+		return p.loadEnabledPacks(ctx, chat)
 	})
 }
 
-// loadEnabledPacks reads the packs that enabledPacks returns and logs every
-// failed lookup to logger, including those of the project and ancestor
-// helpers it calls.
-func (p *Server) loadEnabledPacks(ctx context.Context, logger slog.Logger, chat database.Chat) []enabledPack {
-	var enabled []enabledPack
+// loadEnabledPacks reads the packs that enabledPacks returns. complete is
+// false when a lookup failed, including the lookups of the chat's project
+// and ancestors.
+func (p *Server) loadEnabledPacks(ctx context.Context, chat database.Chat) (enabled []enabledPack, complete bool) {
+	complete = true
+	logger := p.logger.With(slog.F("chat_id", chat.ID))
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		logger.Warn(ctx, "fork queries unavailable for plugin pack enablement", slog.Error(err))
-		return enabled
+		return enabled, false
 	}
 	// Like project skills, enablement and the usable-project check run as
 	// chatd and answer for the chat owner, so the gate does not depend on
 	// the caller.
 	//nolint:gocritic // Pack enablement applies to the chat owner, not the caller.
 	chatdCtx := dbauthz.AsChatd(ctx)
-	if projectID := p.resolveUsableChatProjectID(chatdCtx, logger, chat); projectID.Valid {
+	projectID, err := p.packProjectID(chatdCtx, chat)
+	if err != nil {
+		logger.Warn(ctx, "failed to resolve chat project for plugin packs", slog.Error(err))
+		complete = false
+	}
+	if projectID.Valid {
 		rows, err := fdb.GetPluginPacksByProjectID(chatdCtx, projectID.UUID)
 		if err != nil {
 			logger.Warn(ctx, "failed to list project plugin packs", slog.F("project_id", projectID.UUID), slog.Error(err))
+			complete = false
 		}
 		for _, row := range rows {
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
@@ -315,7 +321,12 @@ func (p *Server) loadEnabledPacks(ctx context.Context, logger slog.Logger, chat 
 	// A subagent inherits the packs of every ancestor: its root and, with
 	// nested subagents, the chats in between.
 	chatIDs := []uuid.UUID{chat.ID}
-	for _, id := range AncestorChatIDs(chatdCtx, p.db, logger, p.nestedSubagentsEnabled(), chat) {
+	ancestorIDs, err := walkAncestorChatIDs(chatdCtx, p.db, p.nestedSubagentsEnabled(), chat)
+	if err != nil {
+		logger.Warn(ctx, "resolve ancestor chat", slog.Error(err))
+		complete = false
+	}
+	for _, id := range ancestorIDs {
 		if ancestorID, err := uuid.Parse(id); err == nil {
 			chatIDs = append(chatIDs, ancestorID)
 		}
@@ -329,6 +340,7 @@ func (p *Server) loadEnabledPacks(ctx context.Context, logger slog.Logger, chat 
 		// The agent type catalog passes a chat that does not exist yet.
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn(ctx, "failed to list chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
+			complete = false
 		}
 		for _, row := range rows {
 			enabled = append(enabled, enabledPack{ID: row.ID, Name: row.Name, CommitSHA: row.CommitSha})
@@ -336,11 +348,48 @@ func (p *Server) loadEnabledPacks(ctx context.Context, logger slog.Logger, chat 
 		excludedRows, err := fdb.GetExcludedPluginPacksByChatID(chatdCtx, chatID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn(ctx, "failed to list excluded chat plugin packs", slog.F("pack_chat_id", chatID), slog.Error(err))
-			return nil
+			return nil, false
 		}
 		for _, row := range excludedRows {
 			excluded[row.ID] = true
 		}
 	}
-	return slices.DeleteFunc(enabled, func(pack enabledPack) bool { return excluded[pack.ID] })
+	return slices.DeleteFunc(enabled, func(pack enabledPack) bool { return excluded[pack.ID] }), complete
+}
+
+// packProjectID returns the project that resolveUsableChatProjectID returns,
+// the chat's or its root's when the chat owner can use it, and returns a
+// failed lookup instead of logging it, so pack enablement does not keep packs
+// read without the project. A missing root chat or project is no project, as
+// there.
+func (p *Server) packProjectID(ctx context.Context, chat database.Chat) (uuid.NullUUID, error) {
+	projectID := chat.ProjectID
+	if !projectID.Valid && chat.RootChatID.Valid && chat.RootChatID.UUID != chat.ID {
+		root, err := p.db.GetChatByID(ctx, chat.RootChatID.UUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.NullUUID{}, nil
+		}
+		if err != nil {
+			return uuid.NullUUID{}, xerrors.Errorf("get root chat %s: %w", chat.RootChatID.UUID, err)
+		}
+		projectID = root.ProjectID
+	}
+	if !projectID.Valid {
+		return uuid.NullUUID{}, nil
+	}
+	project, err := p.db.GetChatProjectByID(ctx, projectID.UUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return uuid.NullUUID{}, nil
+	}
+	if err != nil {
+		return uuid.NullUUID{}, xerrors.Errorf("get chat project %s: %w", projectID.UUID, err)
+	}
+	usable, err := ChatProjectUsableBy(ctx, p.db, project, chat.OwnerID)
+	if err != nil {
+		return uuid.NullUUID{}, xerrors.Errorf("check access to chat project %s: %w", projectID.UUID, err)
+	}
+	if !usable {
+		return uuid.NullUUID{}, nil
+	}
+	return projectID, nil
 }

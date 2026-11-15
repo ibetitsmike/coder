@@ -7,6 +7,8 @@ package chatd
 import (
 	"context"
 
+	"golang.org/x/xerrors"
+
 	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -21,29 +23,34 @@ const maxAncestorWalk = 64
 // upstream: the parent alone, with no database reads. A failed lookup keeps
 // the ancestors found so far.
 func AncestorChatIDs(ctx context.Context, db database.Store, log slog.Logger, nested bool, chat database.Chat) []string {
+	ids, err := walkAncestorChatIDs(ctx, db, nested, chat)
+	if err != nil {
+		log.Warn(ctx, "resolve ancestor chat", slog.F("chat_id", chat.ID), slog.Error(err))
+	}
+	return ids
+}
+
+// walkAncestorChatIDs is AncestorChatIDs that returns a failed lookup, with the
+// ancestors found before it.
+func walkAncestorChatIDs(ctx context.Context, db database.Store, nested bool, chat database.Chat) ([]string, error) { //nolint:revive // nested is the fork-nested-subagents experiment, as in AncestorChatIDs.
 	if !chat.ParentChatID.Valid {
-		return nil
+		return nil, nil
 	}
 	ids := []string{chat.ParentChatID.UUID.String()}
 	if !nested {
-		return ids
+		return ids, nil
 	}
 	current := chat.ParentChatID.UUID
 	for range maxAncestorWalk {
 		parent, err := db.GetChatByID(ctx, current)
 		if err != nil {
-			log.Warn(ctx, "resolve ancestor chat",
-				slog.F("chat_id", chat.ID),
-				slog.F("ancestor_chat_id", current),
-				slog.Error(err),
-			)
-			return ids
+			return ids, xerrors.Errorf("get ancestor chat %s: %w", current, err)
 		}
 		if !parent.ParentChatID.Valid {
-			return ids
+			return ids, nil
 		}
 		current = parent.ParentChatID.UUID
 		ids = append(ids, current.String())
 	}
-	return ids
+	return ids, nil
 }
