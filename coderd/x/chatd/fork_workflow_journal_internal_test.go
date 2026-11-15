@@ -409,10 +409,12 @@ def main(args):
 			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
 		require.NoError(t, err)
 
-		// The replay echoes past the tail and keeps appending: the first
-		// lines the tail dropped come back as the replay output, and the
-		// later ones extend it.
+		// While the replay runs, the journal keeps the tail: the replayed
+		// prefix never replaces it.
 		step := f.steps(ctx, t, resumed, 1)[0]
+		assert.Equal(t, "line 30", journalLogs()[0],
+			"the replay does not move the journal backward")
+		assert.Len(t, journalLogs(), maxWorkflowLogs)
 		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
 		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
 		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)

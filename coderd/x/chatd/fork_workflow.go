@@ -368,11 +368,16 @@ type workflowRun struct {
 	// logEchoBase holds the journal lines a replay restored: the replayed
 	// script prints them again, and appendLogLocked suppresses each line
 	// that still matches the baseline, so the view and the journal keep one
-	// copy of the pre-restart history. A line that breaks the match drops
-	// the baseline, because the new attempt replaces the old output. mu
-	// guards both fields.
-	logEchoBase []string
-	logEcho     int
+	// copy of the pre-restart history. The baseline may start mid-stream,
+	// when the journal kept only the last lines of a long run, so a line
+	// the baseline does not name is a re-emission the journal already
+	// decided about: appendLogLocked skips it while the match can still
+	// continue. Once the replay has echoed the whole baseline, or printed
+	// more unmatched lines than the baseline holds, the replay output is
+	// live again. mu guards the three fields.
+	logEchoBase   []string
+	logEcho       int
+	logEchoMisses int
 	// The write-through of the logs paces itself: lastLogFlush is when the
 	// journal last accepted a snapshot, logFlushTimer holds the pending
 	// flush of a burst, and logFlushInFlight marks the goroutine that
@@ -750,27 +755,24 @@ func (r *workflowRun) appendLogLocked(msg string) {
 	// The replay of a restored run echoes the retained lines: suppress the
 	// matching prefix so the view and the journal do not duplicate the
 	// pre-restart history. The baseline may start mid-stream, when the
-	// journal kept only the last lines of a long run, so an unmatched
-	// baseline prefix never breaks the match. A line that breaks the match
-	// drops the baseline, because the new attempt replaces the old output.
+	// journal kept only the last lines of a long run, so a line the
+	// baseline does not name is a re-emission the journal already decided
+	// about, and the match may still continue at the next line. Once the
+	// replay prints more unmatched lines than the baseline holds, the
+	// replay output is live again and the baseline stops suppressing.
 	if r.logEchoBase != nil {
 		if r.logEcho < len(r.logEchoBase) {
 			if msg == r.logEchoBase[r.logEcho] {
 				r.logEcho++
-				return
-			}
-			if r.logEcho == 0 {
-				// The baseline still holds a line the replay has not
-				// echoed: the match may start later in the baseline.
-				r.logEchoBase = r.logEchoBase[1:]
-				if len(r.logEchoBase) == 0 {
+				if r.logEcho == len(r.logEchoBase) {
 					r.logEchoBase = nil
 				}
 				return
 			}
-			r.logs = nil
-			r.logBytes = 0
-			r.logSeq = 0
+			r.logEchoMisses++
+			if r.logEchoMisses <= len(r.logEchoBase) {
+				return
+			}
 		}
 		r.logEchoBase = nil
 	}
@@ -795,6 +797,16 @@ const workflowLogFlushInterval = 2 * time.Second
 // flight counts as pending, so the first burst cannot launch one goroutine
 // per line.
 func (r *workflowRun) scheduleLogFlush() {
+	r.mu.Lock()
+	echoing := r.logEchoBase != nil
+	r.mu.Unlock()
+	if echoing {
+		// The replay is echoing the journal lines: the column already holds
+		// them, and a write of the replay prefix would move it backward.
+		// The flushes resume when the replay has echoed the baseline, and
+		// the terminal snapshot always writes the final lines.
+		return
+	}
 	r.journalMu.Lock()
 	defer r.journalMu.Unlock()
 	if r.logFlushTimer != nil || r.logFlushInFlight {
