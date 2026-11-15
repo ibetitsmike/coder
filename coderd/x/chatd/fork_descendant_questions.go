@@ -22,13 +22,13 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
 )
 
 const (
-	askUserQuestionToolName        = "ask_user_question"
-	descendantQuestionPollInterval = 2 * time.Second
-	descendantQuestionNote         = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
+	askUserQuestionToolName = "ask_user_question"
+	descendantQuestionNote  = "The child asked the user a question and waits for the answer, which the user gives in the root chat. " +
 		"Call wait_agent again to wait until the child resumes and finishes, or answer it yourself with message_agent."
 	// descendantSecretQuestionNote leaves out message_agent, which would
 	// answer the question without the secret value, and forbids asking for
@@ -262,16 +262,8 @@ func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID,
 	}, nil)
 }
 
-// pendingDescendantQuestion returns the unanswered question of chatID, or
+// pendingDescendantQuestionRow returns the unanswered question of chatID, or
 // nil when there is none.
-func (p *Server) pendingDescendantQuestion(ctx context.Context, chatID uuid.UUID) (json.RawMessage, error) {
-	question, err := p.pendingDescendantQuestionRow(ctx, chatID)
-	if err != nil || question == nil {
-		return nil, err
-	}
-	return question.Questions, nil
-}
-
 func (p *Server) pendingDescendantQuestionRow(ctx context.Context, chatID uuid.UUID) (*forkdb.ChatDescendantQuestion, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -332,28 +324,24 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	}
 	deadline := t.server.clock.Now().Add(timeout)
 
-	pending, err := t.server.pendingDescendantQuestionRow(ctx, childID)
-	var questions json.RawMessage
-	if err == nil && pending != nil {
-		questions, err = t.server.awaitDescendantAnswer(ctx, childID, pending.ToolCallID, timeout)
-		if err == nil {
-			// An unanswered child gets a short wait that collects its status
-			// and report; an answered one is waited on for the rest of the
-			// timeout, rounded up to whole seconds.
-			remaining := 1
-			if questions == nil {
-				remaining = max(1, int((deadline.Sub(t.server.clock.Now())+time.Second-1)/time.Second))
-			}
-			input["timeout_seconds"] = remaining
-			data, err := json.Marshal(input)
-			if err != nil {
-				return fantasy.NewTextErrorResponse("encode wait parameters: " + err.Error()), nil
-			}
-			call.Input = string(data)
-		}
-	}
+	asked, pending, err := t.server.awaitDescendantAnswer(ctx, childID, timeout)
 	if err != nil {
 		return fantasy.NewTextErrorResponse("read the child's question: " + err.Error()), nil
+	}
+	if asked {
+		// An unanswered child gets a short wait that collects its status
+		// and report; an answered one is waited on for the rest of the
+		// timeout, rounded up to whole seconds.
+		remaining := 1
+		if pending == nil {
+			remaining = max(1, int((deadline.Sub(t.server.clock.Now())+time.Second-1)/time.Second))
+		}
+		input["timeout_seconds"] = remaining
+		data, err := json.Marshal(input)
+		if err != nil {
+			return fantasy.NewTextErrorResponse("encode wait parameters: " + err.Error()), nil
+		}
+		call.Input = string(data)
 	}
 
 	resp, err := t.AgentTool.Run(ctx, call)
@@ -380,28 +368,65 @@ func (t descendantQuestionWaitTool) Run(ctx context.Context, call fantasy.ToolCa
 	return toolJSONResponse(result), nil
 }
 
-// awaitDescendantAnswer polls until the question toolCallID of childID is
-// answered or replaced. It returns the pending question, if any, when it
-// stops.
-func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, toolCallID string, timeout time.Duration) (json.RawMessage, error) {
+// awaitDescendantAnswer waits until the question of childID is answered or
+// replaced, or until timeout passes. asked reports whether a question was
+// pending at the start, and pending is the question that is pending when it
+// stops. Every retiring event commits through the child's state machine,
+// which publishes on the child's state channel, so the wait wakes on that
+// channel and reads the row again. The fallback tick of
+// awaitSubagentCompletion covers a lost notification.
+func (p *Server) awaitDescendantAnswer(ctx context.Context, childID uuid.UUID, timeout time.Duration) (asked bool, pending *forkdb.ChatDescendantQuestion, err error) {
+	// Subscribe before the first read, so no answer can land unseen
+	// between the read and the subscription.
+	pollInterval := subagentAwaitFallbackPoll
+	ch := make(chan struct{}, 1)
+	notifyCh := (<-chan struct{})(ch)
+	cancel, subErr := p.pubsub.SubscribeWithErr(
+		coderdpubsub.ChatStateUpdateChannel(childID),
+		func(context.Context, []byte, error) {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		},
+	)
+	if subErr == nil {
+		defer cancel()
+	} else {
+		pollInterval = subagentAwaitPollInterval
+		notifyCh = nil
+	}
+
+	pending, err = p.pendingDescendantQuestionRow(ctx, childID)
+	if err != nil || pending == nil {
+		return false, nil, err
+	}
+	toolCallID := pending.ToolCallID
+	deadline := p.clock.Now().Add(timeout)
 	timer := p.clock.NewTimer(timeout, "chatd", "descendant_question_await")
 	defer timer.Stop()
-	ticker := p.clock.NewTicker(descendantQuestionPollInterval, "chatd", "descendant_question_poll")
+	ticker := p.clock.NewTicker(pollInterval, "chatd", "descendant_question_poll")
 	defer ticker.Stop()
 	for {
 		select {
+		case <-notifyCh:
 		case <-ticker.C:
+			// A tick at the deadline reads nothing: the caller reads
+			// the row again after its short wait for the child.
+			if !p.clock.Now().Before(deadline) {
+				return true, pending, nil
+			}
 		case <-timer.C:
-			return p.pendingDescendantQuestion(ctx, childID)
+			return true, pending, nil
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return true, nil, ctx.Err()
 		}
 		question, err := p.pendingDescendantQuestionRow(ctx, childID)
-		if err != nil || question == nil {
-			return nil, err
+		if err != nil {
+			return true, nil, err
 		}
-		if question.ToolCallID != toolCallID {
-			return question.Questions, nil
+		if question == nil || question.ToolCallID != toolCallID {
+			return true, question, nil
 		}
 	}
 }
