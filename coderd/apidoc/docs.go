@@ -25449,20 +25449,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -27529,7 +27529,7 @@ const docTemplate = `{
                 "pending",
                 "in_progress",
                 "done",
-                "canceled"
+                "cancelled"
             ],
             "x-enum-varnames": [
                 "ChatTodoStatusPending",
