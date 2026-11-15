@@ -38,6 +38,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1db0e-3208-7130-8ea1-b956b53f0f6f_saved_workflows.up.sql"
       - "../migrations/chatdmig/nodes/01a1df49-3a7d-79d0-ba16-5537b0bacfbe_chat_wakeup_watches.up.sql"
       - "../migrations/chatdmig/nodes/01a1df59-b98e-720a-869b-586a3dcd3799_chat_wakeup_watches_backfill.up.sql"
+      - "../migrations/chatdmig/nodes/01a1e008-494e-723d-8aaf-f0e13a811456_chat_wakeup_ready_watches.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
