@@ -94,6 +94,9 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"StringSchema":   {Name: "string-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"string"}`)},
 			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
 			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
+			"SpacedPhase":    {Name: "phases", Script: savedWorkflowScript, Phases: []string{" a"}},
+			"LongPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{strings.Repeat("p", 129)}},
+			"ManyPhases":     {Name: "phases", Script: savedWorkflowScript, Phases: strings.Split(strings.Repeat("p,", 32)+"p", ",")},
 			// Below the limit compact, above it as jsonb text.
 			"SpacedSchema":   {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(6000)},
 			"DeepSchema":     {Name: "deep", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","x":` + strings.Repeat("[", 2000) + strings.Repeat("]", 2000) + `}`)},
@@ -105,6 +108,32 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, req)
 			_ = requireSDKErrorStatus(t, err, http.StatusBadRequest, name)
 		}
+
+		// A NULL element would break every pq.Array scan of the row. JSON
+		// null decodes as an empty phase, which the routes reject.
+		script, err := json.Marshal(savedWorkflowScript)
+		require.NoError(t, err)
+		for method, path := range map[string]string{
+			http.MethodPost:  fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows", orgID),
+			http.MethodPatch: fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows/triage", orgID),
+		} {
+			res, err := member.Request(ctx, method, path, json.RawMessage(`{"name":"null-phase","script":`+string(script)+`,"phases":["a",null]}`))
+			require.NoError(t, err)
+			_ = res.Body.Close()
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, method)
+		}
+
+		// The creator comes from the actor, never from the body.
+		res, err := member.Request(ctx, http.MethodPost, fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows", orgID),
+			json.RawMessage(`{"name":"spoofed","script":`+string(script)+`,"created_by":"`+owner.UserID.String()+`","user_id":"`+owner.UserID.String()+`"}`))
+		require.NoError(t, err)
+		var spoofed codersdk.ForkSavedWorkflow
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&spoofed))
+		_ = res.Body.Close()
+		require.Equal(t, http.StatusCreated, res.StatusCode)
+		require.Equal(t, &memberUser.ID, spoofed.CreatedBy)
+		require.Equal(t, &memberUser.ID, spoofed.UserID)
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "spoofed"))
 
 		list, err := member.ForkUserSavedWorkflows(ctx, orgID, memberUser.Username)
 		require.NoError(t, err)
