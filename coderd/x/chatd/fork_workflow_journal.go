@@ -272,6 +272,12 @@ func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, seq int64
 	}
 }
 
+// RestoreWorkflowRunLogs decodes the retained lines of a live run for
+// readers outside chatd, for example the run detail route.
+func RestoreWorkflowRunLogs(raw json.RawMessage) ([]string, int64, int) {
+	return restoreWorkflowLogs(raw)
+}
+
 // restoreWorkflowLogs decodes the retained lines of a live run with their
 // journal sequence. It returns nil for a column that holds no payload, for
 // example on a row written before the live-logs node.
@@ -283,7 +289,20 @@ func restoreWorkflowLogs(raw json.RawMessage) ([]string, int64, int) {
 		ForkSeq int64    `json:"fork_seq"`
 		Lines   []string `json:"lines"`
 	}
-	if err := json.Unmarshal(raw, &stored); err != nil || stored.Lines == nil {
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		// A plain array holds the backfill of the node that introduced the
+		// column, before the envelope carried the sequence.
+		var legacy []string
+		if err := json.Unmarshal(raw, &legacy); err == nil && legacy != nil {
+			bytes := 0
+			for _, line := range legacy {
+				bytes += len(line)
+			}
+			return legacy, 0, bytes
+		}
+		return nil, 0, 0
+	}
+	if stored.Lines == nil {
 		return nil, 0, 0
 	}
 	bytes := 0

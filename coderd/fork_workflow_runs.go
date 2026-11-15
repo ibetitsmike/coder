@@ -352,9 +352,11 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 			detail.Logs = []string{}
 		}
 	} else if len(row.Logs) > 0 {
-		if err := json.Unmarshal(row.Logs, &detail.Logs); err != nil {
-			return codersdk.WorkflowRunDetail{}, err
-		}
+		// The column holds an envelope with the lines and their journal
+		// sequence, and restore keeps the plain array of the backfill node
+		// readable.
+		logs, _, _ := chatd.RestoreWorkflowRunLogs(row.Logs)
+		detail.Logs = logs
 		if detail.Logs == nil {
 			detail.Logs = []string{}
 		}

@@ -175,8 +175,9 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 			Status:        "running",
 		}))
 		require.NoError(t, fdb.SetWorkflowRunLogs(forkWorkflowSystemContext(t), forkdb.SetWorkflowRunLogsParams{
-			ID:    runID,
-			Lines: []byte(`["review started","reading main.go"]`),
+			ID:      runID,
+			Lines:   []byte(`{"fork_seq":2,"lines":["review started","reading main.go"]}`),
+			ForkSeq: 2,
 		}))
 
 		// A running run reads its logs from the journal column and its args
@@ -187,6 +188,17 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		assert.Nil(t, detail.Result, "a live run has no result yet")
 		assert.Equal(t, []string{"review started", "reading main.go"}, detail.Logs)
 		assert.JSONEq(t, `{"path":"main.go"}`, string(detail.Args))
+
+		// The plain array of the backfill node stays readable too. The
+		// query keeps the write because its sequence is not behind.
+		require.NoError(t, fdb.SetWorkflowRunLogs(forkWorkflowSystemContext(t), forkdb.SetWorkflowRunLogsParams{
+			ID:      runID,
+			Lines:   []byte(`["review started"]`),
+			ForkSeq: 3,
+		}))
+		detail, err = client.GetChatWorkflowRun(ctx, chat.ID, runID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"review started"}, detail.Logs)
 	})
 
 	t.Run("MemberOwnChatOnly", func(t *testing.T) {
