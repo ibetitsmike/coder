@@ -262,12 +262,16 @@ def main(args):
 		require.NoError(t, err)
 		assert.Equal(t, before.UpdatedAt, row.UpdatedAt, "a line inside the interval does not write yet")
 
-		// A restart keeps the live lines: the sweep only flips the status.
+		// The paced flush of the third line lands within the interval, and
+		// a restart keeps the live lines: the sweep only flips the status.
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 3
+		}, testutil.IntervalFast)
 		f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
 		}, testutil.IntervalFast)
-		assert.Equal(t, []string{"first line", "second line"}, journalLogs(),
+		assert.Equal(t, []string{"first line", "second line", "third line"}, journalLogs(),
 			"a restart keeps the live lines")
 
 		// The run resumes and completes; the terminal snapshot carries the
