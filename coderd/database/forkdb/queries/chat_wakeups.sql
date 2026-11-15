@@ -11,7 +11,6 @@ INSERT INTO chat_wakeups (
     interval_seconds,
     cron,
     timezone,
-    events,
     status,
     status_reason,
     next_run_at,
@@ -31,7 +30,6 @@ SELECT
     @interval_seconds,
     @cron,
     @timezone,
-    @events,
     @status,
     @status_reason,
     @next_run_at,
@@ -53,16 +51,6 @@ SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
 
 -- name: ListChatWakeupsByChatID :many
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
-
--- name: ListChildChatIDsWithActiveEventsWakeups :many
--- Lists the children of @parent_chat_id that wait for events of their own,
--- so a caller checks every child in one read.
-SELECT DISTINCT w.chat_id
-FROM chat_wakeups w
-JOIN chats c ON c.id = w.chat_id
-WHERE c.parent_chat_id = @parent_chat_id::uuid
-    AND w.kind = 'events'
-    AND w.status = 'active';
 
 -- Pauses, resumes, cancels or completes a wake-up. The caller computes
 -- next_run_at. Any claim on the row ends.
@@ -171,11 +159,6 @@ FROM chat_wakeups w
 WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
-
--- name: ListChatWakeupRunKeys :many
--- A failed send of an events entry records its run under a key of its own,
--- so it never blocks a later run of the entry.
-SELECT run_key FROM chat_wakeup_runs WHERE wakeup_id = @wakeup_id::uuid ORDER BY created_at, id;
 
 -- name: CountChatWakeupRunsSince :one
 SELECT COUNT(*)

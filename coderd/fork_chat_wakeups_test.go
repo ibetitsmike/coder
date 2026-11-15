@@ -60,7 +60,6 @@ func insertForkChatWakeup(t *testing.T, db database.Store, chat database.Chat, m
 		Prompt:          "check in",
 		IntervalSeconds: sql.NullInt32{Int32: 3600, Valid: true},
 		Timezone:        "UTC",
-		Events:          json.RawMessage(`[]`),
 		Status:          forkdb.ChatWakeupStatusActive,
 		NextRunAt:       sql.NullTime{Time: now.Add(time.Hour), Valid: true},
 		CreatedAt:       now,
@@ -112,15 +111,25 @@ func TestForkChatWakeups(t *testing.T) {
 	require.Empty(t, empty)
 
 	interval := insertForkChatWakeup(t, db, chat, nil)
-	child := uuid.New()
+	child := newForkChatTodosChat(t, db, user).ID
 	events := insertForkChatWakeup(t, db, chat, func(p *forkdb.InsertChatWakeupParams) {
 		p.Source = "wait_for_events"
 		p.Kind = forkdb.ChatWakeupKindEvents
 		p.IntervalSeconds = sql.NullInt32{}
-		p.Events = json.RawMessage(`[{"type":"child_done","chat_id":"` + child.String() + `"},` +
-			`{"type":"pull_request","url":"https://github.com/coder/coder/pull/1","on":["review"],"head_sha":"abc"}]`)
 		p.CreatedAt = p.CreatedAt.Add(time.Second)
 	})
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	// The watches come back in ordinal order, not in insert order.
+	for _, watch := range []forkdb.InsertChatWakeupWatchParams{
+		{Ordinal: 2, Kind: forkdb.ChatWakeupWatchKindProcess, ProcessID: sql.NullString{String: "proc-1", Valid: true}, Spec: json.RawMessage(`{"command":"make test","output_cursor":12}`)},
+		{Ordinal: 0, Kind: forkdb.ChatWakeupWatchKindChildDone, ChildChatID: uuid.NullUUID{UUID: child, Valid: true}, Spec: json.RawMessage(`{}`)},
+		{Ordinal: 1, Kind: forkdb.ChatWakeupWatchKindPullRequest, PullRequestUrl: sql.NullString{String: "https://github.com/coder/coder/pull/1", Valid: true}, Spec: json.RawMessage(`{"on":["review"],"head_sha":"abc"}`)},
+	} {
+		watch.ID, watch.WakeupID, watch.CreatedAt = uuid.New(), events.ID, events.CreatedAt
+		_, err := fdb.InsertChatWakeupWatch(ctx, watch)
+		require.NoError(t, err)
+	}
 	// A wake-up of another chat stays out of the list.
 	insertForkChatWakeup(t, db, newForkChatTodosChat(t, db, user), nil)
 
@@ -144,6 +153,7 @@ func TestForkChatWakeups(t *testing.T) {
 	require.Equal(t, []codersdk.ChatWakeupEvent{
 		{Type: "child_done", ChatID: &child},
 		{Type: "pull_request", URL: "https://github.com/coder/coder/pull/1", On: []string{"review"}},
+		{Type: "process_exit", ProcessID: "proc-1", Command: "make test"},
 	}, got[1].Events)
 }
 

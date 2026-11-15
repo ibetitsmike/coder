@@ -638,6 +638,13 @@ func (f *forkQuerier) InsertChatWakeupRun(ctx context.Context, arg forkdb.Insert
 	return f.db.InsertChatWakeupRun(ctx, arg)
 }
 
+func (f *forkQuerier) InsertChatWakeupWatch(ctx context.Context, arg forkdb.InsertChatWakeupWatchParams) (forkdb.ChatWakeupWatch, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return forkdb.ChatWakeupWatch{}, err
+	}
+	return f.db.InsertChatWakeupWatch(ctx, arg)
+}
+
 // InsertWorkflowRun authorizes as an update of the owning chat, like
 // InsertChatSubagent.
 func (f *forkQuerier) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWorkflowRunParams) error {
@@ -746,11 +753,18 @@ func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]fo
 	return f.db.ListChatNotes(ctx, chatID)
 }
 
-func (f *forkQuerier) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
+func (f *forkQuerier) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+func (f *forkQuerier) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
 	if err := f.authorizeChatWakeupID(ctx, policy.ActionRead, wakeupID); err != nil {
 		return nil, err
 	}
-	return f.db.ListChatWakeupRunKeys(ctx, wakeupID)
+	return f.db.ListChatWakeupWatchesByWakeupID(ctx, wakeupID)
 }
 
 func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
@@ -760,11 +774,36 @@ func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.U
 	return f.db.ListChatWakeupsByChatID(ctx, chatID)
 }
 
-func (f *forkQuerier) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+func (f *forkQuerier) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, parentChatID); err != nil {
 		return nil, err
 	}
-	return f.db.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
+	return f.db.ListChildChatIDsWithOpenWakeupWatches(ctx, parentChatID)
+}
+
+func (f *forkQuerier) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+		return nil, err
+	}
+	return f.db.ListOpenChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+// ListReadyChatWakeupWatches spans chats unless it names a chat or a
+// wake-up, so it then needs site-wide chat access, like chatd's.
+func (f *forkQuerier) ListReadyChatWakeupWatches(ctx context.Context, arg forkdb.ListReadyChatWakeupWatchesParams) ([]forkdb.ChatWakeupWatch, error) {
+	var err error
+	switch {
+	case arg.ChatID.Valid:
+		err = f.authorizeChat(ctx, policy.ActionRead, arg.ChatID.UUID)
+	case arg.WakeupID.Valid:
+		err = f.authorizeChatWakeupID(ctx, policy.ActionRead, arg.WakeupID.UUID)
+	default:
+		err = f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f.db.ListReadyChatWakeupWatches(ctx, arg)
 }
 
 func (f *forkQuerier) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
@@ -792,6 +831,20 @@ func (f *forkQuerier) ListUserAgentDefinitionMetadata(ctx context.Context, arg f
 		return nil, err
 	}
 	return f.db.ListUserAgentDefinitionMetadata(ctx, arg)
+}
+
+func (f *forkQuerier) MarkChatWakeupWatchDelivered(ctx context.Context, arg forkdb.MarkChatWakeupWatchDeliveredParams) (forkdb.ChatWakeupWatch, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return forkdb.ChatWakeupWatch{}, err
+	}
+	return f.db.MarkChatWakeupWatchDelivered(ctx, arg)
+}
+
+func (f *forkQuerier) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.MarkChatWakeupWatchFailedParams) error {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return err
+	}
+	return f.db.MarkChatWakeupWatchFailed(ctx, arg)
 }
 
 // MarkOpenWorkflowRunsInterrupted runs once at chatd startup, as the system.

@@ -48,9 +48,21 @@ func (api *API) getChatWakeups(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, chat.ID)
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to list chat wake-up watches.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+	watches := make(map[uuid.UUID][]forkdb.ChatWakeupWatch)
+	for _, watch := range watchRows {
+		watches[watch.WakeupID] = append(watches[watch.WakeupID], watch)
+	}
 	wakeups := make([]codersdk.ChatWakeup, 0, len(rows))
 	for _, row := range rows {
-		wakeup, err := convertChatWakeup(row)
+		wakeup, err := convertChatWakeup(row, watches[row.ID])
 		if err != nil {
 			httpapi.InternalServerError(rw, err)
 			return
@@ -158,7 +170,17 @@ func (api *API) patchChatWakeup(rw http.ResponseWriter, r *http.Request) {
 	auditFields.OldStatus = codersdk.ChatWakeupStatus(before.Status)
 	auditFields.NewStatus = codersdk.ChatWakeupStatus(after.Status)
 
-	wakeup, err := convertChatWakeup(after)
+	fdb, err := forkdb.From(api.Database)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, after.ID)
+	if err != nil {
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	wakeup, err := convertChatWakeup(after, watches)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
@@ -166,16 +188,34 @@ func (api *API) patchChatWakeup(rw http.ResponseWriter, r *http.Request) {
 	httpapi.Write(ctx, rw, http.StatusOK, wakeup)
 }
 
-// convertChatWakeup converts a stored wake-up to its API form.
-func convertChatWakeup(row forkdb.ChatWakeup) (codersdk.ChatWakeup, error) {
-	events := []codersdk.ChatWakeupEvent{}
-	if len(row.Events) > 0 {
-		if err := json.Unmarshal(row.Events, &events); err != nil {
-			return codersdk.ChatWakeup{}, xerrors.Errorf("decode events of wake-up %s: %w", row.ID, err)
+// convertChatWakeup converts a stored wake-up and its watches, in ordinal
+// order, to its API form.
+func convertChatWakeup(row forkdb.ChatWakeup, watches []forkdb.ChatWakeupWatch) (codersdk.ChatWakeup, error) {
+	events := make([]codersdk.ChatWakeupEvent, 0, len(watches))
+	for _, watch := range watches {
+		var spec struct {
+			On      []string `json:"on"`
+			Command string   `json:"command"`
 		}
-		if events == nil {
-			events = []codersdk.ChatWakeupEvent{}
+		if err := json.Unmarshal(watch.Spec, &spec); err != nil {
+			return codersdk.ChatWakeup{}, xerrors.Errorf("decode watch %s of wake-up %s: %w", watch.ID, row.ID, err)
 		}
+		event := codersdk.ChatWakeupEvent{On: spec.On, Command: spec.Command}
+		switch watch.Kind {
+		case forkdb.ChatWakeupWatchKindChildDone:
+			event.Type = "child_done"
+			child := watch.ChildChatID.UUID
+			event.ChatID = &child
+		case forkdb.ChatWakeupWatchKindProcess:
+			event.Type = "process_exit"
+			event.ProcessID = watch.ProcessID.String
+		case forkdb.ChatWakeupWatchKindPullRequest:
+			event.Type = "pull_request"
+			event.URL = watch.PullRequestUrl.String
+		default:
+			return codersdk.ChatWakeup{}, xerrors.Errorf("watch %s of wake-up %s has unknown kind %q", watch.ID, row.ID, watch.Kind)
+		}
+		events = append(events, event)
 	}
 	wakeup := codersdk.ChatWakeup{
 		ID:             row.ID,

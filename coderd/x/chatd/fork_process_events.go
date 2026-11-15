@@ -8,12 +8,12 @@ package chatd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,9 +29,6 @@ import (
 
 const (
 	wakeupEventProcessExit = "process_exit"
-	// processOutputRunKeyPrefix starts the run keys of the messages for
-	// matching output lines.
-	processOutputRunKeyPrefix = "process_output"
 
 	maxWaitForEventsProcesses = 10
 	// processReadTimeout bounds the agent reads of one tick, dial included,
@@ -125,13 +122,13 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 	}
 	// A process that an active wake-up still watches would otherwise wake
 	// the chat once per wake-up.
-	watching, err := p.watchedRunKeys(ctx, chat)
+	watching, err := p.openWatches(ctx, chat)
 	if err != nil {
 		return nil, err
 	}
 	var watchedBy []string
 	requested = slices.DeleteFunc(requested, func(id string) bool {
-		wakeupID, ok := watching[processExitRunKey(id)]
+		wakeupID, ok := watching.processes[id]
 		if ok && !slices.Contains(watchedBy, wakeupID.String()) {
 			watchedBy = append(watchedBy, wakeupID.String())
 		}
@@ -165,12 +162,6 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 		events = append(events, event)
 	}
 	return events, nil
-}
-
-// processExitRunKey names the run of a process_exit event, so each process
-// wakes the chat once, whether it exited or its watch was lost.
-func processExitRunKey(processID string) string {
-	return wakeupEventProcessExit + ":" + processID
 }
 
 // processAgentConn dials the workspace agent agentID for the processes of
@@ -284,56 +275,70 @@ func (c *processConns) conn(ctx context.Context, p *Server, chatID, agentID uuid
 	return conn, err
 }
 
+// processMessage is the message that a poll of a process watch sends: for
+// its exit or a lost watch, which ends the watch, or for matching output
+// lines, with the spec patch that moves the watch's cursor past them.
+type processMessage struct {
+	text      string
+	exited    bool
+	specPatch json.RawMessage
+}
+
 // processWakeupText reads the process of event on the workspace agent of
-// chat and returns the message for its exit or for a lost watch, with
-// processExitRunKey, or "" while it runs. With lines set, a running process
-// that printed matching lines returns the message for them and its
-// processOutputRunKey instead. With endedBy set, it also returns "" unless
-// the process provably ended by endedBy: the agent lists it as exited by
-// then, or its workspace stopped or was rebuilt by then. An error is
-// transient: the entry polls again later.
-func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, lines *processLines, conns *processConns) (string, string, error) {
-	exitKey := processExitRunKey(event.ProcessID)
+// chat and returns the message for its exit or for a lost watch, or no text
+// while it runs. With lines set, a running process that printed matching
+// lines returns the message for them instead. With endedBy set, it also
+// returns no text unless the process provably ended by endedBy: the agent
+// lists it as exited by then, or its workspace stopped or was rebuilt by
+// then. An error is transient: the watch polls again later.
+func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, lines *processLines, conns *processConns) (processMessage, error) {
 	ctx = conns.readContext(ctx)
 	runs, err := conns.agentRuns(ctx, p.db, chat, event.AgentID)
 	if err != nil {
-		return "", "", err
+		return processMessage{}, err
 	}
 	if !runs {
 		if !endedBy.IsZero() && conns.builtAt.After(endedBy) {
-			return "", "", nil
+			return processMessage{}, nil
 		}
-		return processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), exitKey, nil
+		return processMessage{text: processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), exited: true}, nil
 	}
 	conn, err := conns.conn(ctx, p, chat.ID, event.AgentID)
 	if err != nil {
-		return "", "", err
+		return processMessage{}, err
 	}
 	output, err := conn.ProcessOutput(ctx, event.ProcessID, nil)
 	if processNotFound(err) {
 		// The agent does not tell when it forgot the process.
 		if !endedBy.IsZero() {
-			return "", "", nil
+			return processMessage{}, nil
 		}
-		return processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), exitKey, nil
+		return processMessage{text: processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), exited: true}, nil
 	}
 	if err != nil {
-		return "", "", xerrors.Errorf("read process %q: %w", event.ProcessID, err)
+		return processMessage{}, xerrors.Errorf("read process %q: %w", event.ProcessID, err)
 	}
 	if output.Running {
 		if lines == nil {
-			return "", "", nil
+			return processMessage{}, nil
 		}
-		text, runKey := processLinesText(event, output, *lines)
-		return text, runKey, nil
+		text, end := processLinesText(event, output, *lines)
+		if text == "" {
+			return processMessage{}, nil
+		}
+		patch, err := json.Marshal(map[string]int{"output_cursor": end})
+		if err != nil {
+			return processMessage{}, xerrors.Errorf("encode output cursor: %w", err)
+		}
+		return processMessage{text: text, specPatch: patch}, nil
 	}
 	if !endedBy.IsZero() {
 		exited, err := processExitedBy(ctx, conn, event.ProcessID, endedBy)
 		if err != nil || !exited {
-			return "", "", err
+			return processMessage{}, err
 		}
 	}
-	return processExitText(event, output), exitKey, nil
+	return processMessage{text: processExitText(event, output), exited: true}, nil
 }
 
 // processLines is where the output pattern of a process watch continues:
@@ -348,26 +353,13 @@ type processLines struct {
 // false when this poll of wakeup at now reports no lines: event has no
 // pattern, its line messages are used up, the wake-up is in its cool-down
 // after its last message, or this is the final poll, which reports exits
-// only.
-func processLinesDue(event wakeupEvent, keys []string, wakeup forkdb.ChatWakeup, now time.Time) (processLines, bool) {
+// only. deliveries counts the messages of the watch, which are all line
+// messages while it is open.
+func processLinesDue(event wakeupEvent, deliveries int32, wakeup forkdb.ChatWakeup, now time.Time) (processLines, bool) {
 	if event.OutputPattern == "" || eventsFinalPoll(wakeup, now) {
 		return processLines{}, false
 	}
-	var lines processLines
-	prefix := processOutputRunKeyPrefix + ":" + event.ProcessID + ":"
-	for _, key := range keys {
-		rest, ok := strings.CutPrefix(key, prefix)
-		if !ok {
-			continue
-		}
-		// The keys of failed sends end in ":failed" and do not count.
-		cursor, err := strconv.Atoi(rest)
-		if err != nil {
-			continue
-		}
-		lines.sent++
-		lines.cursor = max(lines.cursor, cursor)
-	}
+	lines := processLines{cursor: event.OutputCursor, sent: int(deliveries)}
 	if lines.sent >= event.OutputMaxEvents {
 		return processLines{}, false
 	}
@@ -378,25 +370,19 @@ func processLinesDue(event wakeupEvent, keys []string, wakeup forkdb.ChatWakeup,
 	return lines, true
 }
 
-// processOutputRunKey names the run of the message for the output lines of
-// processID up to position end.
-func processOutputRunKey(processID string, end int) string {
-	return processOutputRunKeyPrefix + ":" + processID + ":" + strconv.Itoa(end)
-}
-
 // processLinesText returns the message for the lines of output after
-// lines.cursor that match the pattern of event, with its run key, or "" when
-// none match.
-func processLinesText(event wakeupEvent, output workspacesdk.ProcessOutputResponse, lines processLines) (string, string) {
+// lines.cursor that match the pattern of event, with the output position
+// after them, or "" when none match.
+func processLinesText(event wakeupEvent, output workspacesdk.ProcessOutputResponse, lines processLines) (string, int) {
 	pattern, err := regexp.Compile(event.OutputPattern)
 	if err != nil {
 		// processOutputArgs checked the pattern.
-		return "", ""
+		return "", lines.cursor
 	}
 	newLines, end := processNewLines(output, lines.cursor)
 	matched := slices.DeleteFunc(newLines, func(line string) bool { return !pattern.MatchString(line) })
 	if len(matched) == 0 {
-		return "", ""
+		return "", lines.cursor
 	}
 	noun := "lines"
 	if len(matched) == 1 {
@@ -413,7 +399,7 @@ func processLinesText(event wakeupEvent, output workspacesdk.ProcessOutputRespon
 	if lines.sent+1 >= event.OutputMaxEvents {
 		text += "\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
 	}
-	return text, processOutputRunKey(event.ProcessID, end)
+	return text, end
 }
 
 // processNewLines returns the complete lines of output that end after
