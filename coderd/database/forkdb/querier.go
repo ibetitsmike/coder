@@ -112,6 +112,11 @@ type Querier interface {
 	// A binding is due when its chat is idle and has undelivered user-visible
 	// assistant messages or a status that was not delivered yet.
 	GetPluginChatBindingsDue(ctx context.Context, arg GetPluginChatBindingsDueParams) ([]GetPluginChatBindingsDueRow, error)
+	// Tells a replica that holds no plugin whether it has work: enabled counts
+	// the enabled plugins, acquirable the ones it could lease now. It takes no
+	// lock and writes nothing, so an idle replica checks it instead of
+	// AcquirePluginLeases.
+	GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (GetPluginLeaseSummaryRow, error)
 	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
 	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
 	GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error)
