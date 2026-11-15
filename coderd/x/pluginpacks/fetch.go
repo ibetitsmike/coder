@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"slices"
@@ -24,6 +25,8 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"golang.org/x/xerrors"
+
+	"github.com/coder/safedial"
 )
 
 // Limits of one fetch. The fetch fails when the repository exceeds one.
@@ -63,12 +66,18 @@ type Snapshot struct {
 	Files     []File
 }
 
-// Fetcher fetches packs over smart HTTP.
+// Fetcher fetches packs over smart HTTP. Every connection, redirects
+// included, goes through safedial, so loopback, link-local, private and
+// other special-use addresses are refused unless AllowedPrefixes holds them.
 type Fetcher struct {
 	// AllowedHosts are the host names that every request, redirects
 	// included, must go to.
 	AllowedHosts []string
-	// Transport sends the requests. Nil means http.DefaultTransport.
+	// AllowedPrefixes exempts IP ranges from the address guard.
+	AllowedPrefixes []netip.Prefix
+	// Transport is the base transport. Nil means http.DefaultTransport.
+	// Fetch dials through a guarded clone of it, so it must be nil or an
+	// *http.Transport. Its TLS settings still apply.
 	Transport http.RoundTripper
 }
 
@@ -87,13 +96,17 @@ func (f Fetcher) Fetch(ctx context.Context, src Source) (Snapshot, error) {
 		return Snapshot{}, xerrors.Errorf("parse source url: %w", err)
 	}
 
-	next := f.Transport
-	if next == nil {
-		next = http.DefaultTransport
+	if _, ok := f.Transport.(*http.Transport); f.Transport != nil && !ok {
+		return Snapshot{}, xerrors.Errorf("transport %T cannot be guarded: only nil or *http.Transport is supported", f.Transport)
 	}
-	rt := &guardedTransport{fetcher: f, next: next}
+	guarded := safedial.NewHTTPClient(&http.Client{Transport: f.Transport}, safedial.WithAllowedPrefixes(f.AllowedPrefixes...))
+	if tr, ok := guarded.Transport.(*http.Transport); ok {
+		defer tr.CloseIdleConnections()
+	}
+	rt := &guardedTransport{fetcher: f, next: guarded.Transport}
 	rt.remaining.Store(maxTransferBytes)
-	sess, err := githttp.NewClient(&http.Client{Transport: rt}).NewUploadPackSession(ep, nil)
+	client := &http.Client{Transport: rt, CheckRedirect: guarded.CheckRedirect}
+	sess, err := githttp.NewClient(client).NewUploadPackSession(ep, nil)
 	if err != nil {
 		return Snapshot{}, xerrors.Errorf("open upload-pack session: %w", err)
 	}
@@ -320,7 +333,8 @@ func readBlob(file *object.File) ([]byte, error) {
 }
 
 // guardedTransport checks the URL of every request, redirects included,
-// and caps the bytes read from all response bodies of one fetch.
+// and caps the bytes read from all response bodies of one fetch. next is
+// the safedial transport that checks the address it dials.
 type guardedTransport struct {
 	fetcher   Fetcher
 	next      http.RoundTripper
