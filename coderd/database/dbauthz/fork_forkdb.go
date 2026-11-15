@@ -48,14 +48,6 @@ func (f *forkQuerier) CancelChatWakeupsByChatID(ctx context.Context, arg forkdb.
 	return f.db.CancelChatWakeupsByChatID(ctx, arg)
 }
 
-// ClaimDueChatWakeups spans chats, so it needs site-wide chat access, like chatd's.
-func (f *forkQuerier) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimDueChatWakeupsParams) ([]forkdb.ChatWakeup, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
-		return nil, err
-	}
-	return f.db.ClaimDueChatWakeups(ctx, arg)
-}
-
 func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return forkdb.PluginLinkCode{}, err
@@ -226,13 +218,6 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 		return err
 	}
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
-}
-
-func (f *forkQuerier) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
-	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
-		return forkdb.ChatWakeup{}, err
-	}
-	return f.db.FinishChatWakeupClaim(ctx, arg)
 }
 
 func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
@@ -781,6 +766,21 @@ func (f *forkQuerier) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context,
 	return f.db.ListChildChatIDsWithOpenWakeupWatches(ctx, parentChatID)
 }
 
+// ListDueChatWakeups spans chats unless it names a chat, so it then needs
+// site-wide chat access, like chatd's.
+func (f *forkQuerier) ListDueChatWakeups(ctx context.Context, arg forkdb.ListDueChatWakeupsParams) ([]forkdb.ListDueChatWakeupsRow, error) {
+	var err error
+	if arg.ChatID.Valid {
+		err = f.authorizeChat(ctx, policy.ActionRead, arg.ChatID.UUID)
+	} else {
+		err = f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f.db.ListDueChatWakeups(ctx, arg)
+}
+
 func (f *forkQuerier) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
 		return nil, err
@@ -864,6 +864,13 @@ func (f *forkQuerier) LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) 
 	return f.db.LockChatForNoKeyUpdate(ctx, id)
 }
 
+func (f *forkQuerier) LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, id); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.LockActiveChatWakeup(ctx, id)
+}
+
 func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
 		return err
@@ -908,6 +915,13 @@ func (f *forkQuerier) UpdateChatSubagentWorkspaceID(ctx context.Context, arg for
 		return err
 	}
 	return f.db.UpdateChatSubagentWorkspaceID(ctx, arg)
+}
+
+func (f *forkQuerier) UpdateChatWakeupRun(ctx context.Context, arg forkdb.UpdateChatWakeupRunParams) (forkdb.ChatWakeup, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.ID); err != nil {
+		return forkdb.ChatWakeup{}, err
+	}
+	return f.db.UpdateChatWakeupRun(ctx, arg)
 }
 
 func (f *forkQuerier) UpdateChatWakeupStatus(ctx context.Context, arg forkdb.UpdateChatWakeupStatusParams) (forkdb.ChatWakeup, error) {

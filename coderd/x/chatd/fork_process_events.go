@@ -31,9 +31,9 @@ const (
 	wakeupEventProcessExit = "process_exit"
 
 	maxWaitForEventsProcesses = 10
-	// processReadTimeout bounds the agent reads of one tick, dial included,
-	// well within wakeupLease, so a stalled agent cannot block the worker
-	// loop.
+	// processReadTimeout bounds the agent reads of one delivery, dial
+	// included, well within wakeupDeliveryTimeout, so a stalled agent holds
+	// one delivery slot of the waker for a bounded time.
 	processReadTimeout = 30 * time.Second
 	// processErrorRetry is the next poll after a failed read, when no other
 	// entry of the wake-up needs a sooner one.

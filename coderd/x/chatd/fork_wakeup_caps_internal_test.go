@@ -168,7 +168,6 @@ func TestWakeupCaps(t *testing.T) {
 			require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
 			require.Equal(t, tc.wantReason, got.StatusReason.String)
 			require.False(t, got.NextRunAt.Valid)
-			require.False(t, got.LeaseExpiresAt.Valid)
 			require.Zero(t, got.RunCount)
 			if tc.wantText == "" {
 				requireWakeupPausedNotification(t, sent, chat, tc.wantReason)
@@ -179,12 +178,12 @@ func TestWakeupCaps(t *testing.T) {
 		})
 	}
 
-	// The claim skips busy chats, so the chat turns busy after the claim to
-	// reach the busy check of the delivery, which comes before the caps.
-	t.Run("ChatBusyAfterClaimAtCapStaysDue", func(t *testing.T) {
+	// The due list skips busy chats, so the chat turns busy after the list
+	// to reach the busy check of the delivery, which comes before the caps.
+	t.Run("ChatBusyAfterListAtCapStaysDue", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
-		//nolint:gocritic // The test claims like the wake-up worker.
+		//nolint:gocritic // The test lists like the waker.
 		ctx := dbauthz.AsChatd(testutil.Context(t, testutil.WaitLong))
 		chat := f.createWakeupChat(t)
 		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
@@ -196,20 +195,19 @@ func TestWakeupCaps(t *testing.T) {
 		enqueuer := useFakeEnqueuer(worker)
 		fdb, err := forkdb.From(f.db)
 		require.NoError(t, err)
-		claimed, err := fdb.ClaimDueChatWakeups(ctx, forkdb.ClaimDueChatWakeupsParams{
-			Now:            now,
-			LeaseExpiresAt: now.Add(wakeupLease),
-			LimitCount:     1,
+		listed, err := fdb.ListDueChatWakeups(ctx, forkdb.ListDueChatWakeupsParams{
+			Now:        now,
+			LimitCount: 1,
 		})
 		require.NoError(t, err)
-		require.Len(t, claimed, 1)
+		require.Len(t, listed, 1)
+		require.True(t, listed[0].Due)
 		forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
 
-		require.NoError(t, worker.deliverWakeupSafely(ctx, fdb, claimed[0], now))
+		require.ErrorIs(t, worker.server.deliverWakeupSafely(ctx, fdb, listed[0].ChatWakeup, now), errWakeupChatBusy)
 		got := f.wakeup(t, wakeup.ID)
 		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-		require.False(t, got.LeaseExpiresAt.Valid)
 		require.Empty(t, enqueuer.Sent())
 	})
 

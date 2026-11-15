@@ -586,12 +586,12 @@ func TestWakeupPullRequestReadDeadline(t *testing.T) {
 	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 	require.True(t, hasDeadline, "the read has a deadline")
 	require.False(t, deadline.After(start.Add(pullRequestReadTimeout).Add(testutil.WaitShort)), "deadline %s", deadline)
-	require.Less(t, pullRequestReadTimeout, wakeupLease)
+	require.LessOrEqual(t, 2*pullRequestReadTimeout, wakeupDeliveryTimeout, "a delivery fits a pull request read")
 }
 
-// A pull request read that could take the rest of the claim's lease waits
-// for the next tick, so stalled reads cannot hold back the rest of a batch.
-func TestWakeupPullRequestReadNearLeaseEnd(t *testing.T) {
+// A pull request read that could take the rest of the delivery's time waits
+// for the next pass, so a stalled read cannot outlive its delivery.
+func TestWakeupPullRequestReadNearDeliveryDeadline(t *testing.T) {
 	t.Parallel()
 	f := newWorkerTestFixture(t)
 	ctx := testutil.Context(t, testutil.WaitLong)
@@ -609,20 +609,21 @@ func TestWakeupPullRequestReadNearLeaseEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	now := wakeupTestSlot.Add(time.Second)
-	rows, err := fdb.ClaimDueChatWakeups(dbauthz.AsChatd(ctx), forkdb.ClaimDueChatWakeupsParams{
-		Now:            now,
-		LeaseExpiresAt: now.Add(wakeupLease),
-		LimitCount:     1,
+	rows, err := fdb.ListDueChatWakeups(dbauthz.AsChatd(ctx), forkdb.ListDueChatWakeupsParams{
+		Now:        now,
+		LimitCount: 1,
 	})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	late := rows[0].LeaseExpiresAt.Time.Add(-2*pullRequestReadTimeout + time.Second)
-	require.NoError(t, worker.server.deliverWakeup(dbauthz.AsChatd(ctx), fdb, rows[0], late))
+	require.True(t, rows[0].Due)
+	// The delivery has less time left than the read and its message need.
+	late := withWakeupDeadline(dbauthz.AsChatd(ctx), time.Now().Add(2*pullRequestReadTimeout-time.Second))
+	require.NoError(t, worker.server.deliverWakeup(late, fdb, rows[0].ChatWakeup, now))
 	require.Zero(t, fake.callCount())
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 	require.True(t, wakeup.NextRunAt.Time.Equal(got.NextRunAt.Time), "stays due: %s", got.NextRunAt.Time)
-	require.False(t, got.LeaseExpiresAt.Valid, "the claim ends")
+	require.True(t, wakeup.UpdatedAt.Equal(got.UpdatedAt), "nothing is written")
 
 	worker.wakeupOnce(ctx, now.Add(time.Second))
 	require.Equal(t, 1, fake.callCount())
