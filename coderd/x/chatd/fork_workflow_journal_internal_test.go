@@ -184,7 +184,7 @@ func TestForkWorkflowJournal(t *testing.T) {
 		}, testutil.IntervalFast)
 
 		tools := restarted.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
-		require.Len(t, tools, 2)
+		require.Len(t, tools, 3)
 		resp, err := tools[1].Run(ctx, fantasy.ToolCall{Input: fmt.Sprintf(`{"run_id":%q}`, run.id)})
 		require.NoError(t, err)
 		assert.False(t, resp.IsError, resp.Content)
