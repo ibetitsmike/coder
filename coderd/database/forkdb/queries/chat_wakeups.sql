@@ -119,9 +119,13 @@ upcoming AS (
     ORDER BY cw.next_run_at, cw.id
     LIMIT 1
 )
-SELECT sqlc.embed(w), (w.id IN (SELECT id FROM due))::boolean AS due
-FROM chat_wakeups w
-WHERE w.id IN (SELECT id FROM due) OR w.id IN (SELECT id FROM upcoming)
+SELECT sqlc.embed(w), l.due::boolean AS due
+FROM (
+    SELECT id, true AS due FROM due
+    UNION ALL
+    SELECT id, false AS due FROM upcoming
+) l
+JOIN chat_wakeups w ON w.id = l.id
 ORDER BY w.next_run_at, w.id;
 
 -- Locks an active wake-up for its delivery. SKIP LOCKED returns no row while

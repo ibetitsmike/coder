@@ -469,9 +469,13 @@ upcoming AS (
     ORDER BY cw.next_run_at, cw.id
     LIMIT 1
 )
-SELECT w.id, w.chat_id, w.organization_id, w.created_by, w.source, w.kind, w.prompt, w.interval_seconds, w.cron, w.timezone, w.status, w.status_reason, w.next_run_at, w.lease_expires_at, w.expires_at, w.max_runs, w.run_count, w.last_run_at, w.created_at, w.updated_at, (w.id IN (SELECT id FROM due))::boolean AS due
-FROM chat_wakeups w
-WHERE w.id IN (SELECT id FROM due) OR w.id IN (SELECT id FROM upcoming)
+SELECT w.id, w.chat_id, w.organization_id, w.created_by, w.source, w.kind, w.prompt, w.interval_seconds, w.cron, w.timezone, w.status, w.status_reason, w.next_run_at, w.lease_expires_at, w.expires_at, w.max_runs, w.run_count, w.last_run_at, w.created_at, w.updated_at, l.due::boolean AS due
+FROM (
+    SELECT id, true AS due FROM due
+    UNION ALL
+    SELECT id, false AS due FROM upcoming
+) l
+JOIN chat_wakeups w ON w.id = l.id
 ORDER BY w.next_run_at, w.id
 `
 
