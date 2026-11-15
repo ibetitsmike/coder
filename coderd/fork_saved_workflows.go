@@ -31,9 +31,10 @@ import (
 const (
 	maxForkSavedWorkflowNameBytes        = 128
 	maxForkSavedWorkflowDescriptionBytes = 4096
-	maxForkSavedWorkflowArgsSchemaBytes  = 16384
-	maxForkSavedWorkflowPhases           = 32
-	maxForkSavedWorkflowPhaseBytes       = 128
+	// Below the 16 KiB row limit so one list_workflows result holds it.
+	maxForkSavedWorkflowArgsSchemaBytes = 12 << 10
+	maxForkSavedWorkflowPhases          = 32
+	maxForkSavedWorkflowPhaseBytes      = 128
 	// Each phase also takes two quotes and a comma.
 	maxForkSavedWorkflowRequestBytes = (65536+maxForkSavedWorkflowDescriptionBytes+maxForkSavedWorkflowNameBytes)*skillJSONEscapeExpansion +
 		maxForkSavedWorkflowPhases*(maxForkSavedWorkflowPhaseBytes*skillJSONEscapeExpansion+3) +
@@ -131,6 +132,10 @@ func (api *API) postForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reques
 func (api *API) forkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
@@ -138,7 +143,7 @@ func (api *API) forkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
-		Name:           chi.URLParam(r, "workflow"),
+		Name:           name,
 	})
 	if err != nil {
 		writeForkAgentDefinitionReadError(rw, err)
@@ -194,6 +199,10 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
@@ -201,13 +210,25 @@ func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Requ
 	_, err := fdb.DeleteUserSavedWorkflowByName(ctx, forkdb.DeleteUserSavedWorkflowByNameParams{
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
-		Name:           chi.URLParam(r, "workflow"),
+		Name:           name,
 	})
 	if err != nil {
 		writeForkSavedWorkflowWriteError(ctx, rw, err)
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// forkSavedWorkflowPathName reads the workflow path parameter. A name that
+// no saved workflow can have, such as one with a NUL byte, is not found and
+// never reaches PostgreSQL.
+func forkSavedWorkflowPathName(rw http.ResponseWriter, r *http.Request) (string, bool) {
+	name := chi.URLParam(r, "workflow")
+	if len(name) > maxForkSavedWorkflowNameBytes || !forkSavedWorkflowNameRegex.MatchString(name) {
+		httpapi.ResourceNotFound(rw)
+		return "", false
+	}
+	return name, true
 }
 
 // readForkSavedWorkflowCreate reads and checks a create request.
