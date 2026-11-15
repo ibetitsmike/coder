@@ -38,6 +38,18 @@ func (r ListOrganizationAgentDefinitionMetadataRow) RBACObject() rbac.Object {
 	return organizationAgentDefinitionObject(r.ID, r.OrganizationID, r.GroupAcl, r.UserAcl)
 }
 
+// RBACObject reuses the skill objects, like AgentDefinition.RBACObject.
+func (w SavedWorkflow) RBACObject() rbac.Object {
+	if w.UserID.Valid {
+		return rbac.ResourceUserSkill.WithID(w.ID).WithOwner(w.UserID.UUID.String())
+	}
+	return organizationAgentDefinitionObject(w.ID, w.OrganizationID, w.GroupAcl, w.UserAcl)
+}
+
+func (r ListOrganizationSavedWorkflowMetadataRow) RBACObject() rbac.Object {
+	return organizationAgentDefinitionObject(r.ID, r.OrganizationID, r.GroupAcl, r.UserAcl)
+}
+
 func organizationAgentDefinitionObject(id, organizationID uuid.UUID, groupACL, userACL database.ChatACL) rbac.Object {
 	return rbac.ResourceOrganizationSkill.
 		WithID(id).
