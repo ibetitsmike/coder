@@ -578,7 +578,7 @@ type WorkflowRun struct {
 	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time             `db:"updated_at" json:"updated_at"`
 	FinishedAt    sql.NullTime          `db:"finished_at" json:"finished_at"`
-	// The last log lines of a live run, written through as the script logs. The terminal snapshot of result replaces them.
+	// The last log lines of a live run with their journal sequence under fork_seq, written through as the script logs. The terminal snapshot of result replaces them.
 	Logs json.RawMessage `db:"logs" json:"logs"`
 }
 
