@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, spyOn, userEvent } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowNow,
@@ -64,6 +67,30 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	args: { run: MockChatWorkflowRunDetail, error: null, onBack: fn() },
 	parameters: {
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
+		// The stories spy on Date.now. Storybook's actions addon logs every
+		// mock call, and its log line calls Date.now, so the spy recurses.
+		actions: { disable: true },
+		queries: [
+			{
+				key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
+				data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
+			},
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canUpdateChat: {
+							object: {
+								resource_type: "chat",
+								owner_id: MockChat.owner_id,
+								organization_id: MockChat.organization_id,
+							},
+							action: "update",
+						},
+					},
+				}),
+				data: { canUpdateChat: true },
+			},
+		],
 	},
 	beforeEach: () => {
 		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
@@ -119,6 +146,39 @@ export const Failed: Story = {
 
 export const Interrupted: Story = {
 	args: { run: mockInterruptedRunDetail },
+};
+
+/** Overrides the meta's granted update check, e.g. to hide the controls. */
+const writeAccessQueryParameters = (canUpdateChat: boolean) => ({
+	queries: [
+		{
+			key: getAuthorizationKey({
+				checks: {
+					canUpdateChat: {
+						object: {
+							resource_type: "chat",
+							owner_id: MockChat.owner_id,
+							organization_id: MockChat.organization_id,
+						},
+						action: "update",
+					},
+				},
+			}),
+			data: { canUpdateChat },
+		},
+	],
+});
+
+/** An interrupted run with Resume next to the heading. */
+export const InterruptedWithResume: Story = {
+	args: { run: mockInterruptedRunDetail },
+	parameters: writeAccessQueryParameters(true),
+};
+
+/** An interrupted run shown to a viewer who may not update the chat. */
+export const InterruptedNoWriteAccess: Story = {
+	args: { run: mockInterruptedRunDetail },
+	parameters: writeAccessQueryParameters(false),
 };
 
 export const Loading: Story = {

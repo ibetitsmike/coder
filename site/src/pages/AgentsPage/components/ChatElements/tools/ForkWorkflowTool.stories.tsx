@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { spyOn, userEvent, within } from "storybook/test";
+import { expect, spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowArgs,
@@ -145,6 +148,43 @@ export const StartedThenCompleted: Story = {
 	},
 };
 
+/**
+ * Seeds the cache the live card's controls read: the chat's cached copy and
+ * its update check. The withQuery decorator's staleTime is Infinity, so the
+ * seeds are served without a fetch.
+ */
+const liveCardQueryParameters = (canUpdateChat: boolean) => ({
+	queries: [
+		{
+			key: chatEntityKey(MockForkWorkflowChatId),
+			data: { ...MockChat, id: MockForkWorkflowChatId },
+		},
+		{
+			key: getAuthorizationKey({
+				checks: {
+					canUpdateChat: {
+						object: {
+							resource_type: "chat",
+							owner_id: MockChat.owner_id,
+							organization_id: MockChat.organization_id,
+						},
+						action: "update",
+					},
+				},
+			}),
+			data: { canUpdateChat },
+		},
+	],
+});
+
+const liveCardParameters = (canUpdateChat: boolean) => ({
+	...liveCardQueryParameters(canUpdateChat),
+	reactRouter: reactRouterParameters({
+		location: { pathParams: { agentId: MockForkWorkflowChatId } },
+		routing: { path: "/agents/:agentId" },
+	}),
+});
+
 const mockRunningLiveDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "running",
@@ -186,6 +226,90 @@ export const StillRunningLive: Story = {
 		// The live detail has one step still running.
 		await within(context.canvasElement).findByText(/2 of 3 steps reported/);
 		await expand(context);
+	},
+};
+
+/** A running live card offers Stop to a viewer who may update the chat. */
+export const StillRunningWithStop: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowCompletedResult,
+			status: "running",
+			result: undefined,
+		},
+	},
+	parameters: liveCardParameters(true),
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: mockRunningLiveDetail,
+		});
+	},
+	play: async (context) => {
+		await expand(context);
+		await within(context.canvasElement).findByRole("button", {
+			name: "Stop",
+		});
+	},
+};
+
+/**
+ * An interrupted live card offers Resume. The run was still running when the
+ * tool returned, so the card takes the live path and learns the interruption
+ * from the polled detail, like "offers Resume on the live card" in the tests.
+ */
+export const InterruptedWithResume: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowCompletedResult,
+			status: "running",
+			result: undefined,
+		},
+	},
+	parameters: liveCardParameters(true),
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: { ...mockRunningLiveDetail, status: "interrupted" },
+		});
+	},
+	play: async (context) => {
+		await expand(context);
+		await within(context.canvasElement).findByRole("button", {
+			name: "Resume run",
+		});
+	},
+};
+
+/**
+ * A viewer who may not update the chat sees the expanded live card without
+ * Stop or Resume, even though the run is still running.
+ */
+export const NoWriteAccess: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowCompletedResult,
+			status: "running",
+			result: undefined,
+		},
+	},
+	parameters: liveCardParameters(false),
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: mockRunningLiveDetail,
+		});
+	},
+	play: async (context) => {
+		await expand(context);
+		await within(context.canvasElement).findByText(
+			`Run ${MockForkWorkflowRunId}`,
+		);
+		expect(
+			within(context.canvasElement).queryByRole("button", { name: "Stop" }),
+		).toBeNull();
+		expect(
+			within(context.canvasElement).queryByRole("button", {
+				name: "Resume run",
+			}),
+		).toBeNull();
 	},
 };
 

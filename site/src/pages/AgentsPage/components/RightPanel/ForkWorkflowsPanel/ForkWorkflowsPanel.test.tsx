@@ -4,8 +4,11 @@ import { QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
+import { MockChat } from "#/testHelpers/chatEntities";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
@@ -31,8 +34,35 @@ const renderPanel = (chatId: string) => {
 		],
 		{ initialEntries: [chatPath] },
 	);
+	const queryClient = createTestQueryClient();
+	// The seeds stand in for the chat page's cache. The test client's gcTime
+	// is 0, so they must also opt out of cache eviction: the run detail only
+	// observes them once the user opens a run.
+	const seed = (key: readonly unknown[], data: unknown) => {
+		queryClient.setQueryDefaults(key, {
+			staleTime: Number.POSITIVE_INFINITY,
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		queryClient.setQueryData(key, data);
+	};
+	seed(chatEntityKey(chatId), { ...MockChat, id: chatId });
+	seed(
+		getAuthorizationKey({
+			checks: {
+				canUpdateChat: {
+					object: {
+						resource_type: "chat",
+						owner_id: MockChat.owner_id,
+						organization_id: MockChat.organization_id,
+					},
+					action: "update",
+				},
+			},
+		}),
+		{ canUpdateChat: true },
+	);
 	renderComponent(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={queryClient}>
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);

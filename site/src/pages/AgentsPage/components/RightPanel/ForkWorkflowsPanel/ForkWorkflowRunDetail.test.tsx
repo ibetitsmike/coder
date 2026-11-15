@@ -4,7 +4,10 @@ import { QueryClientProvider } from "react-query";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { MockChat } from "#/testHelpers/chatEntities";
 import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
@@ -19,9 +22,42 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 	finished_at: undefined,
 };
 
-// Each rerender stands in for a poll that returns the run.
-const renderDetail = (run: WorkflowRunDetail) => {
+// Each rerender stands in for a poll that returns the run. The chat and its
+// update check are seeded, so the viewer may stop or resume.
+const renderDetail = (
+	run: WorkflowRunDetail,
+	options: { canUpdateChat?: boolean } = {},
+) => {
 	const queryClient = createTestQueryClient();
+	// The seeds stand in for the chat page's cache. The test client's gcTime
+	// is 0, so they must also opt out of cache eviction before the view's
+	// queries observe them.
+	const seed = (key: readonly unknown[], data: unknown) => {
+		queryClient.setQueryDefaults(key, {
+			staleTime: Number.POSITIVE_INFINITY,
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		queryClient.setQueryData(key, data);
+	};
+	seed(chatEntityKey(run.chat_id), {
+		...MockChat,
+		id: run.chat_id,
+	});
+	seed(
+		getAuthorizationKey({
+			checks: {
+				canUpdateChat: {
+					object: {
+						resource_type: "chat",
+						owner_id: MockChat.owner_id,
+						organization_id: MockChat.organization_id,
+					},
+					action: "update",
+				},
+			},
+		}),
+		{ canUpdateChat: options.canUpdateChat ?? true },
+	);
 	const view = (current: WorkflowRunDetail) => (
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -77,5 +113,46 @@ describe("ForkWorkflowRunDetail", () => {
 		resolveStop(mockStoppedRunDetail);
 
 		await waitFor(() => expect(runHeading()).toHaveFocus());
+	});
+
+	it("offers Resume for an interrupted run", async () => {
+		renderDetail({
+			...mockRunningRunDetail,
+			status: "interrupted",
+		});
+
+		const dispatched: CustomEvent[] = [];
+		const dispatchSpy = vi
+			.spyOn(window, "dispatchEvent")
+			.mockImplementation((event: Event) => {
+				dispatched.push(event as CustomEvent);
+				return true;
+			});
+		const user = userEvent.setup();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Resume run" }),
+			);
+		} finally {
+			dispatchSpy.mockRestore();
+		}
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].type).toBe("fork-workflow-resume");
+		expect(dispatched[0].detail).toEqual({
+			chatId: MockChatWorkflowRunDetail.chat_id,
+			prompt: `Resume workflow run ${MockChatWorkflowRunDetail.id}`,
+		});
+	});
+
+	it("hides the controls without update access to the chat", async () => {
+		renderDetail(mockRunningRunDetail, { canUpdateChat: false });
+
+		await screen.findByRole("heading", { name: /review changed files/i });
+		expect(
+			screen.queryByRole("button", { name: "Stop" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
 	});
 });

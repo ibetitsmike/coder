@@ -6,14 +6,17 @@ import { useState } from "react";
 import { useQuery } from "react-query";
 import { useParams } from "react-router";
 import { getErrorStatus } from "#/api/errors";
+import { chat } from "#/api/queries/chats";
 import {
 	chatWorkflowRun,
 	workflowRunRefetchInterval,
 } from "#/api/queries/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
+import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
+import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
 import {
 	type ForkWorkflowRunSnapshot,
 	forkWorkflowRunStatusMeta,
@@ -22,6 +25,7 @@ import {
 	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "../../ForkWorkflows/forkWorkflows";
+import { useCanWriteChat } from "../../ForkWorkflows/useCanWriteChat";
 import type { ForkToolRendererProps } from "./forkToolRenderers";
 import { forkToolErrorMessage } from "./forkToolUtils";
 import { ToolCall } from "./ToolCall";
@@ -82,6 +86,9 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 
 type ForkWorkflowToolProps = Omit<ForkToolRendererProps, "fallback"> & {
 	snapshot: ForkWorkflowRunSnapshot | null;
+	/** Present on the live card only, which owns the run controls. */
+	chatId?: string;
+	detail?: WorkflowRunDetail;
 };
 
 type LiveForkWorkflowToolProps = Omit<ForkWorkflowToolProps, "snapshot"> & {
@@ -122,6 +129,8 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 	return (
 		<ForkWorkflowTool
 			{...props}
+			chatId={chatId}
+			detail={detail}
 			snapshot={
 				detail
 					? mergeForkWorkflowRunDetail(resultSnapshot, detail)
@@ -133,6 +142,8 @@ const LiveForkWorkflowTool: React.FC<LiveForkWorkflowToolProps> = ({
 
 const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 	snapshot,
+	chatId,
+	detail,
 	...props
 }) => {
 	const { name, status, isError } = props;
@@ -180,6 +191,13 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 					<ToolCall.ErrorDetail>{errorMessage}</ToolCall.ErrorDetail>
 				)}
 				{snapshot && (
+					<ForkWorkflowRunControls
+						chatId={chatId}
+						detail={detail}
+						snapshot={snapshot}
+					/>
+				)}
+				{snapshot && (
 					<div className="mt-1.5 font-mono text-xs text-content-secondary">
 						{`Run ${snapshot.runId}`}
 					</div>
@@ -216,5 +234,38 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 				)}
 			</ToolCall.Content>
 		</ToolCall.Root>
+	);
+};
+
+/**
+ * Stop and Resume on the live card. A tool result alone does not know the
+ * chat's owner or organization, so the controls wait for the cached chat and
+ * its update check; a viewer without write access sees neither.
+ */
+const ForkWorkflowRunControls: React.FC<{
+	chatId: string | undefined;
+	detail: WorkflowRunDetail | undefined;
+	snapshot: ForkWorkflowRunSnapshot;
+}> = ({ chatId, detail, snapshot }) => {
+	// The chat page already loads this chat, so this reads the cached copy.
+	const chatQuery = useQuery({ ...chat(chatId ?? ""), enabled: !!chatId });
+	const canWriteChat = useCanWriteChat(chatQuery.data);
+	const run: WorkflowRunDetail | undefined =
+		detail &&
+		detail.chat_id === chatId &&
+		detail.id === snapshot.runId &&
+		detail.status === snapshot.status
+			? detail
+			: undefined;
+	if (!chatId || !run || canWriteChat !== true) {
+		return null;
+	}
+	return (
+		<div className="flex items-center gap-1.5">
+			<ForkWorkflowStopButton run={run} fallbackFocusRef={{ current: null }} />
+			{run.status === "interrupted" && (
+				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+			)}
+		</div>
 	);
 };
