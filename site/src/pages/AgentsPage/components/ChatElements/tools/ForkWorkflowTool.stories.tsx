@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, spyOn, userEvent, within } from "storybook/test";
+import { spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { getAuthorizationKey } from "#/api/queries/authCheck";
@@ -299,17 +299,11 @@ export const NoWriteAccess: Story = {
 	},
 	play: async (context) => {
 		await expand(context);
+		// The controls are absent; the screenshot captures that. The absence
+		// assertions live in ForkWorkflowTool.test.tsx.
 		await within(context.canvasElement).findByText(
 			`Run ${MockForkWorkflowRunId}`,
 		);
-		expect(
-			within(context.canvasElement).queryByRole("button", { name: "Stop" }),
-		).toBeNull();
-		expect(
-			within(context.canvasElement).queryByRole("button", {
-				name: "Resume run",
-			}),
-		).toBeNull();
 	},
 };
 

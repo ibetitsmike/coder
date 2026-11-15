@@ -2,7 +2,7 @@
 // tools of the fork-workflows experiment.
 
 import type React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "react-query";
 import { useParams } from "react-router";
 import { getErrorStatus } from "#/api/errors";
@@ -156,6 +156,9 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 	const label = toolLabel(props, snapshot);
 	const errorMessage = isError ? forkToolErrorMessage(props.result).trim() : "";
 	const runError = snapshot?.error ?? "";
+	// Receives focus when a stop closes the dialog after the Stop button
+	// unmounted.
+	const runRowRef = useRef<HTMLDivElement>(null);
 
 	return (
 		<ToolCall.Root
@@ -195,10 +198,15 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 						chatId={chatId}
 						detail={detail}
 						snapshot={snapshot}
+						fallbackFocusRef={runRowRef}
 					/>
 				)}
 				{snapshot && (
-					<div className="mt-1.5 font-mono text-xs text-content-secondary">
+					<div
+						ref={runRowRef}
+						tabIndex={-1}
+						className="mt-1.5 font-mono text-xs text-content-secondary focus:outline-hidden"
+					>
 						{`Run ${snapshot.runId}`}
 					</div>
 				)}
@@ -246,7 +254,8 @@ const ForkWorkflowRunControls: React.FC<{
 	chatId: string | undefined;
 	detail: WorkflowRunDetail | undefined;
 	snapshot: ForkWorkflowRunSnapshot;
-}> = ({ chatId, detail, snapshot }) => {
+	fallbackFocusRef: React.RefObject<HTMLElement | null>;
+}> = ({ chatId, detail, snapshot, fallbackFocusRef }) => {
 	// The chat page already loads this chat, so this reads the cached copy.
 	const chatQuery = useQuery({ ...chat(chatId ?? ""), enabled: !!chatId });
 	const canWriteChat = useCanWriteChat(chatQuery.data);
@@ -262,7 +271,7 @@ const ForkWorkflowRunControls: React.FC<{
 	}
 	return (
 		<div className="flex items-center gap-1.5">
-			<ForkWorkflowStopButton run={run} fallbackFocusRef={{ current: null }} />
+			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
 			{run.status === "interrupted" && (
 				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
 			)}

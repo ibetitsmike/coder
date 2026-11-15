@@ -53,8 +53,16 @@ const ForkWorkflowResumePrefillListener: React.FC<{
 		if (!input) {
 			return;
 		}
-		const current = input.getValue();
-		input.setValue(current.trim() ? `${current}\n\n${prompt}` : prompt);
+		// restoreEditorState keeps the draft's chips (file references and
+		// skill invocations), which a plain-text append would drop. An empty
+		// editor state restores nothing, so a fresh composer gets the prompt
+		// through setValue.
+		const editorState = input.getEditorState();
+		if (editorState && editorState !== "null") {
+			input.restoreEditorState(editorState, `\n\n${prompt}`);
+		} else {
+			input.setValue(prompt);
+		}
 		input.focus();
 	});
 

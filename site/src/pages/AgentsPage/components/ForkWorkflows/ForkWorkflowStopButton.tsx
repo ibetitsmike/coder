@@ -1,7 +1,7 @@
 // This file is fork code: the Stop control of a workflow run
-// (fork-workflows experiment). Moved from the Workflows panel run detail so
-// the live tool card and the panel stop runs through the same confirm
-// dialog, mutation and cache updates.
+// (fork-workflows experiment). The live tool card and the Workflows panel
+// run detail stop runs through this confirm dialog, mutation and cache
+// updates.
 
 import { SquareIcon } from "lucide-react";
 import type React from "react";

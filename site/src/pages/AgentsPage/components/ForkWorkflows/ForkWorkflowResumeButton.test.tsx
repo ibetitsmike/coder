@@ -26,6 +26,7 @@ describe("ForkWorkflowResumeButton", () => {
 	});
 
 	it("uses the custom label as the accessible name", async () => {
+		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
 		renderComponent(
 			<ForkWorkflowResumeButton
 				runId="run-1"
@@ -37,6 +38,6 @@ describe("ForkWorkflowResumeButton", () => {
 
 		await user.click(screen.getByRole("button", { name: "Resume workflow" }));
 
-		expect(vi.spyOn(window, "dispatchEvent")).toHaveBeenCalled();
+		expect(dispatchEvent).toHaveBeenCalledTimes(1);
 	});
 });

@@ -25,11 +25,20 @@ export const requestForkWorkflowResume = (
 	);
 };
 
-/** Reports whether a resume event targets this chat. */
+/**
+ * Reports the resume prompt a resume event carries when it targets this
+ * chat. The event comes from this page's own buttons, but any other event
+ * on the same name returns undefined instead of crashing.
+ */
 export const forkWorkflowResumeEventForChat = (
 	event: Event,
 	chatId: string,
 ): string | undefined => {
-	const detail = (event as CustomEvent<ForkWorkflowResumeEventDetail>).detail;
-	return detail?.chatId === chatId ? detail.prompt : undefined;
+	if (!(event instanceof CustomEvent)) {
+		return undefined;
+	}
+	const { chatId: eventChatId, prompt } = event.detail ?? {};
+	return eventChatId === chatId && typeof prompt === "string"
+		? prompt
+		: undefined;
 };

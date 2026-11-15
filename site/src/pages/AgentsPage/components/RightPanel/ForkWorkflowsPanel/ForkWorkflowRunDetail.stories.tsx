@@ -148,9 +148,17 @@ export const Interrupted: Story = {
 	args: { run: mockInterruptedRunDetail },
 };
 
-/** Overrides the meta's granted update check, e.g. to hide the controls. */
+/**
+ * Overrides the meta's granted update check, e.g. to hide the controls.
+ * Story-level queries replace the meta-level array, so the chat seed the
+ * update check reads comes along.
+ */
 const writeAccessQueryParameters = (canUpdateChat: boolean) => ({
 	queries: [
+		{
+			key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
+			data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
+		},
 		{
 			key: getAuthorizationKey({
 				checks: {
