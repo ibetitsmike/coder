@@ -222,7 +222,8 @@ type Querier interface {
 	// inserts the message, after the wake-up row is locked. @deliveries is the
 	// count the caller read: no row means another delivery of the watch won,
 	// or the watch is done. @done marks the watch delivered, and @spec_patch
-	// merges into its spec.
+	// merges into its spec. A delivery consumes the fired event, so an open
+	// watch is not ready again until a new event fires.
 	MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChatWakeupWatchDeliveredParams) (ChatWakeupWatch, error)
 	// Records that a send of the watch failed. The first failure since the last
 	// delivery keeps its time.

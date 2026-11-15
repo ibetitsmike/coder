@@ -68,6 +68,13 @@ func TestListReadyChatWakeupWatches(t *testing.T) {
 
 	setStatus(parent, database.ChatStatusRunning)
 	require.Empty(t, ready(), "nothing is ready while the chat to wake is running")
+	setStatus(parent, database.ChatStatusError)
+	require.Equal(t, []uuid.UUID{watches[0].ID}, ready(), "a chat in error without queued messages can be woken")
+	_, err := sqlDB.ExecContext(ctx, "INSERT INTO chat_queued_messages (chat_id, content, created_by) VALUES ($1, '[]', $2)", parent.ID, parent.OwnerID)
+	require.NoError(t, err)
+	require.Empty(t, ready(), "a delivery to a chat in error with queued messages would queue")
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chat_queued_messages WHERE chat_id = $1", parent.ID)
+	require.NoError(t, err)
 	setStatus(parent, database.ChatStatusWaiting)
 
 	// The finished child waits for a process of its own.
@@ -87,8 +94,19 @@ func TestListReadyChatWakeupWatches(t *testing.T) {
 	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeup_watches SET fired_at = now() WHERE id = $1", ownWatch.ID)
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{ownWatch.ID}, ready(), "a fired watch is ready, and its chat still waits")
+	// A delivery that keeps the watch open consumes the event.
+	line, err := fdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{
+		ID: ownWatch.ID, WakeupID: own.ID, Done: false, Now: dbtime.Now(), SpecPatch: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
+	require.False(t, line.FiredAt.Valid)
+	require.False(t, line.FiredPayload.Valid)
+	require.Empty(t, ready(), "a delivered event is not ready again")
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeup_watches SET fired_at = now() WHERE id = $1", ownWatch.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{ownWatch.ID}, ready(), "a new event is ready")
 	_, err = fdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{
-		ID: ownWatch.ID, WakeupID: own.ID, Done: true, Now: dbtime.Now(), SpecPatch: json.RawMessage(`{}`),
+		ID: ownWatch.ID, WakeupID: own.ID, Done: true, Deliveries: 1, Now: dbtime.Now(), SpecPatch: json.RawMessage(`{}`),
 	})
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{watches[0].ID}, ready(), "a delivered watch no longer keeps its chat waiting")
