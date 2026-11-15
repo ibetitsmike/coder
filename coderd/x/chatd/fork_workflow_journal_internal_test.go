@@ -280,7 +280,8 @@ def main(args):
 		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
 		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
 		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
-		assert.Equal(t, []string{"first line", "second line", "third line"}, res.Logs)
+		assert.Equal(t, []string{"first line", "second line", "third line"}, res.Logs,
+			"the replayed lines echo the baseline instead of duplicating it")
 		row, err = fdb.GetWorkflowRun(ctx, run.id)
 		require.NoError(t, err)
 		require.True(t, row.Result.Valid)
@@ -289,6 +290,87 @@ def main(args):
 		}
 		require.NoError(t, json.Unmarshal(row.Result.RawMessage, &snapshot))
 		assert.Equal(t, []string{"first line", "second line", "third line"}, snapshot.Logs)
+		logs, _ := restoreWorkflowLogs(row.Logs)
+		assert.Equal(t, []string{"first line", "second line", "third line"}, logs,
+			"the journal column holds one copy of the replayed history")
+	})
+
+	// A line that lands while a flush is in flight drops its own request:
+	// the completed flush re-arms one for it, so the line reaches the
+	// journal without another log call and without waiting for the end.
+	t.Run("RearmsAfterAnInFlightFlush", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    log("second line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		journalLogs := func() []string {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			require.NoError(t, err)
+			var logs []string
+			require.NoError(t, json.Unmarshal(row.Logs, &logs))
+			return logs
+		}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 2
+		}, testutil.IntervalFast)
+
+		run.journalMu.Lock()
+		run.logFlushInFlight = true
+		run.journalMu.Unlock()
+		run.log("dropped line")
+		run.journalMu.Lock()
+		run.logFlushInFlight = false
+		run.journalMu.Unlock()
+		run.rearmLogFlush()
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 3
+		}, testutil.IntervalFast)
+		assert.Equal(t, []string{"first line", "second line", "dropped line"}, journalLogs())
+	})
+
+	// await_workflow for an interrupted run this replica does not hold
+	// reads the journaled live lines, the way a held run reports them.
+	t.Run("AwaitReadsTheJournalLogs", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    log("second line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			if err != nil {
+				return false
+			}
+			logs, _ := restoreWorkflowLogs(row.Logs)
+			return len(logs) == 2
+		}, testutil.IntervalFast)
+
+		restarted := f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		tools := restarted.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		require.Len(t, tools, 2)
+		resp, err := tools[1].Run(ctx, fantasy.ToolCall{Input: fmt.Sprintf(`{"run_id":%q}`, run.id)})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+		var out runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &out))
+		assert.Equal(t, workflowStatusInterrupted, out.Status)
+		assert.Equal(t, []string{"first line", "second line"}, out.Logs)
 	})
 
 	// A script that logs in a loop keeps a single write in flight, so its

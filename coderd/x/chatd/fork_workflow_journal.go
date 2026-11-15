@@ -386,11 +386,12 @@ func (p *Server) rehydrateWorkflowRun(
 		seen:          map[string]int{},
 		done:          make(chan struct{}),
 	}
-	// The replay keeps the retained pre-restart lines as its journal
-	// baseline: replayed log() lines and the snapshot that finish writes
-	// carry them, so the first replayed line does not shorten the column.
+	// The replay keeps the retained pre-restart lines as its baseline: the
+	// view and the journal start from them, and appendLogLocked suppresses
+	// the replayed lines that echo them, so the history holds one copy.
 	run.logs, run.logBytes = restoreWorkflowLogs(row.Logs)
 	run.logSeq = len(run.logs)
+	run.logEchoBase = append([]string(nil), run.logs...)
 	for _, srow := range stepRows {
 		step := &workflowStep{
 			id:         srow.ID,
@@ -470,11 +471,15 @@ func (p *Server) workflowResultFromJournal(
 	if err != nil {
 		return runWorkflowResult{}, false, xerrors.Errorf("load the workflow steps of run %s: %w", row.ID, err)
 	}
+	// The journal holds the live lines of an open run, so await_workflow
+	// reports them the way a run this replica holds does.
+	logs, _ := restoreWorkflowLogs(row.Logs)
 	res = runWorkflowResult{
 		RunID:  row.ID.String(),
 		Status: row.Status,
 		Error:  row.Error,
 		Steps:  make([]stepSummary, 0, len(stepRows)),
+		Logs:   logs,
 	}
 	for _, srow := range stepRows {
 		res.Steps = append(res.Steps, stepSummary{

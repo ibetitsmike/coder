@@ -344,6 +344,14 @@ type workflowRun struct {
 	logSeq          int
 	journalMu       sync.Mutex
 	journaledLogSeq int
+	// logEchoBase holds the journal lines a replay restored: the replayed
+	// script prints them again, and appendLogLocked suppresses each line
+	// that still matches the baseline, so the view and the journal keep one
+	// copy of the pre-restart history. A line that diverges from the
+	// baseline drops it, because the new attempt replaces the old output.
+	// mu guards both fields.
+	logEchoBase []string
+	logEcho     int
 	// The write-through of the logs paces itself: lastLogFlush is when the
 	// journal last accepted a snapshot, logFlushTimer holds the pending
 	// flush of a burst, and logFlushInFlight marks the goroutine that
@@ -703,6 +711,22 @@ func (r *workflowRun) log(msg string) {
 
 func (r *workflowRun) appendLogLocked(msg string) {
 	msg = truncateLogLine(msg, maxWorkflowLogLine)
+	// The replay of a restored run echoes the baseline lines: suppress the
+	// matching prefix so the view and the journal do not duplicate the
+	// pre-restart history. A line that breaks the match drops the baseline,
+	// because the new attempt replaces the old output.
+	if r.logEchoBase != nil {
+		if r.logEcho < len(r.logEchoBase) {
+			if msg == r.logEchoBase[r.logEcho] {
+				r.logEcho++
+				return
+			}
+			r.logs = nil
+			r.logBytes = 0
+			r.logSeq = 0
+		}
+		r.logEchoBase = nil
+	}
 	r.logs = append(r.logs, msg)
 	r.logBytes += len(msg)
 	r.logSeq++
@@ -738,6 +762,10 @@ func (r *workflowRun) scheduleLogFlush() {
 			r.journalMu.Lock()
 			r.logFlushInFlight = false
 			r.journalMu.Unlock()
+			// Lines that landed while the write was in flight dropped
+			// their own request, so the completed flush re-arms one for
+			// them.
+			r.rearmLogFlush()
 		}()
 		return
 	}
@@ -760,6 +788,26 @@ func (r *workflowRun) cancelLogFlush() {
 		r.logFlushTimer = nil
 	}
 	r.journalMu.Unlock()
+}
+
+// rearmLogFlush schedules one more flush when lines landed while a flush
+// was in flight. scheduleLogFlush drops the request of such a line, so the
+// completed flush must recover it, or the line would stay unjournaled until
+// the next log call or the end of the run.
+func (r *workflowRun) rearmLogFlush() {
+	r.mu.Lock()
+	seq := r.logSeq
+	r.mu.Unlock()
+	if seq == 0 {
+		return
+	}
+	r.journalMu.Lock()
+	pending := seq > r.journaledLogSeq
+	r.journalMu.Unlock()
+	if !pending {
+		return
+	}
+	r.scheduleLogFlush()
 }
 
 // flushLogs writes the retained log lines of a live run through to the
