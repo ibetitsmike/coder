@@ -10,7 +10,7 @@ export const MockChatTodoList: ChatTodoList = {
 			content: "Cover the watch socket in Vitest",
 			status: "pending",
 		},
-		{ id: "docs", content: "Rewrite the docs page", status: "canceled" },
+		{ id: "docs", content: "Rewrite the docs page", status: "cancelled" },
 	],
 };
 
