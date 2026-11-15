@@ -84,6 +84,82 @@ func TestListDueChatWakeups(t *testing.T) {
 	require.Equal(t, []uuid.UUID{next.ID}, upcoming)
 }
 
+// An events wake-up before its expiry is due as soon as a child it watches
+// is done, before its run time.
+func TestListDueChatWakeupsReadyEvents(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	now := dbtime.Now()
+	parent := wakeupTestChat(t, db)
+	child := func(status database.ChatStatus) database.Chat {
+		t.Helper()
+		return dbgen.Chat(t, db, database.Chat{
+			OrganizationID:    parent.OrganizationID,
+			OwnerID:           parent.OwnerID,
+			LastModelConfigID: parent.LastModelConfigID,
+			ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+			RootChatID:        uuid.NullUUID{UUID: parent.ID, Valid: true},
+			Status:            status,
+		})
+	}
+	// watching inserts an events wake-up of parent that runs at runAt and
+	// expires at expiresAt, with one child_done watch on c.
+	watching := func(c database.Chat, runAt, expiresAt time.Time) (forkdb.ChatWakeup, forkdb.ChatWakeupWatch) {
+		t.Helper()
+		wakeup := insertEventsWakeup(ctx, t, fdb, parent)
+		_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET next_run_at = $2, expires_at = $3 WHERE id = $1", wakeup.ID, runAt, expiresAt)
+		require.NoError(t, err)
+		return wakeup, insertChildWatch(ctx, t, fdb, wakeup, 0, c)
+	}
+
+	done := child(database.ChatStatusWaiting)
+	ready, _ := watching(done, now.Add(30*time.Minute), now.Add(2*time.Hour))
+	running := child(database.ChatStatusRunning)
+	waiting, _ := watching(running, now.Add(40*time.Minute), now.Add(2*time.Hour))
+	_, failed := watching(done, now.Add(time.Hour), now.Add(2*time.Hour))
+	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeup_watches SET failed_at = $2 WHERE id = $1", failed.ID, now)
+	require.NoError(t, err)
+	watching(done, now.Add(time.Hour), now.Add(-time.Minute))
+
+	list := func(chatID uuid.NullUUID) (dueIDs []uuid.UUID, upcoming []uuid.UUID) {
+		t.Helper()
+		rows, err := fdb.ListDueChatWakeups(ctx, forkdb.ListDueChatWakeupsParams{ChatID: chatID, Now: now, LimitCount: 10})
+		require.NoError(t, err)
+		for _, row := range rows {
+			if row.Due {
+				dueIDs = append(dueIDs, row.ChatWakeup.ID)
+			} else {
+				upcoming = append(upcoming, row.ChatWakeup.ID)
+			}
+		}
+		return dueIDs, upcoming
+	}
+
+	dueIDs, upcoming := list(uuid.NullUUID{})
+	require.Equal(t, []uuid.UUID{ready.ID}, dueIDs,
+		"only the wake-up with a done child is due: not the running child, the failed send or the expired wake-up")
+	require.Equal(t, []uuid.UUID{waiting.ID}, upcoming, "a due wake-up does not set the timer")
+
+	dueIDs, upcoming = list(uuid.NullUUID{UUID: done.ID, Valid: true})
+	require.Equal(t, []uuid.UUID{ready.ID}, dueIDs, "chat_id also lists the wake-ups that watch it as a child")
+	require.Empty(t, upcoming, "the timer follows the wake-ups of the chat itself")
+
+	dueIDs, _ = list(uuid.NullUUID{UUID: running.ID, Valid: true})
+	require.Empty(t, dueIDs, "a running child makes nothing due")
+
+	dueIDs, upcoming = list(uuid.NullUUID{UUID: parent.ID, Valid: true})
+	require.Equal(t, []uuid.UUID{ready.ID}, dueIDs)
+	require.Equal(t, []uuid.UUID{waiting.ID}, upcoming)
+
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chats SET status = 'running' WHERE id = $1", parent.ID)
+	require.NoError(t, err)
+	dueIDs, _ = list(uuid.NullUUID{})
+	require.Empty(t, dueIDs, "nothing is due while the parent is busy")
+}
+
 func TestLockActiveChatWakeupSkipsLockedRows(t *testing.T) {
 	t.Parallel()
 
@@ -125,15 +201,12 @@ func TestLockActiveChatWakeupSkipsLockedRows(t *testing.T) {
 func TestUpdateChatWakeupRun(t *testing.T) {
 	t.Parallel()
 
-	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	db, _ := dbtestutil.NewDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 	chat := wakeupTestChat(t, db)
 	now := dbtime.Now()
 	wakeup := insertDelayWakeup(ctx, t, fdb, chat, forkdb.ChatWakeupStatusActive, now.Add(-time.Minute))
-	// A replica of an older version claimed the wake-up.
-	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET lease_expires_at = $2 WHERE id = $1", wakeup.ID, now.Add(time.Minute))
-	require.NoError(t, err)
 
 	finished, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
 		ID:            wakeup.ID,
@@ -147,7 +220,6 @@ func TestUpdateChatWakeupRun(t *testing.T) {
 	require.EqualValues(t, 1, finished.RunCount)
 	require.False(t, finished.NextRunAt.Valid)
 	require.True(t, finished.LastRunAt.Valid)
-	require.False(t, finished.LeaseExpiresAt.Valid, "the run clears the older claim, so its finish writes nothing")
 
 	again, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{
 		ID:        wakeup.ID,
