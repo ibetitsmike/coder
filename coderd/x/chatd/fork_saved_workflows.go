@@ -196,8 +196,9 @@ func truncateWorkflowDescription(s string) string {
 
 // validateSavedWorkflowArgs checks args against the workflow's args
 // schema, with the rules a workflow_report value meets. Missing args
-// validate as an empty object, which main(args) receives.
-func validateSavedWorkflowArgs(saved listedWorkflow, args any) error {
+// validate as an empty object, which main(args) receives. rawArgs, when
+// set, is args before decoding, so no number is rounded before the check.
+func validateSavedWorkflowArgs(saved listedWorkflow, args any, rawArgs json.RawMessage) error {
 	if !saved.HasArgsSchema {
 		return nil
 	}
@@ -210,6 +211,11 @@ func validateSavedWorkflowArgs(saved listedWorkflow, args any) error {
 		raw, err = json.Marshal(args)
 		if err != nil {
 			return xerrors.Errorf("marshal args: %w", err)
+		}
+	}
+	if len(rawArgs) > 0 {
+		if err := rejectOutOfRangeNumbers(string(rawArgs)); err != nil {
+			return xerrors.Errorf("args: %w", err)
 		}
 	}
 	if err := rejectOutOfRangeNumbers(string(raw)); err != nil {

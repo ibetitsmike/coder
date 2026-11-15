@@ -211,6 +211,8 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 			`{"name":"nope","args":{"topic":"x"}}`:                `no saved workflow is named "nope"`,
 			`{"name":"greet","script":"def main(args): pass"}`:    "not more than one",
 			`{"name":"greet","script_path":"/home/coder/w.star"}`: "not more than one",
+			// Above 2^53, so the typed decode would round it.
+			`{"name":"greet","args":{"topic":"x","n":9007199254740993}}`: "exceeds the exact validation range",
 		} {
 			resp := runTool(ctx, t, tools[0], input)
 			assert.True(t, resp.IsError, "%s: %s", input, resp.Content)

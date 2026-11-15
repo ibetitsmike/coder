@@ -112,6 +112,8 @@ type runWorkflowArgs struct {
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
+	// rawArgs is args as the model sent them, before Args rounded its numbers.
+	rawArgs json.RawMessage
 }
 
 type awaitWorkflowArgs struct {
@@ -173,7 +175,7 @@ func (p *Server) forkWorkflowTools(
 		serialWorkflowTool{fantasy.NewAgentTool(
 			runWorkflowToolName,
 			runWorkflowDescription,
-			func(ctx context.Context, args runWorkflowArgs, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			func(ctx context.Context, args runWorkflowArgs, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 				// chatd sets this ID for each call. It is stable on every retry.
 				callID, ok := workspacesdk.ToolCallIDFromContext(ctx)
 				if !ok {
@@ -181,6 +183,12 @@ func (p *Server) forkWorkflowTools(
 				}
 				if strings.TrimSpace(args.Name) != "" && (args.Script != "" || strings.TrimSpace(args.ScriptPath) != "") {
 					return fantasy.NewTextErrorResponse("send name, script or script_path, not more than one"), nil
+				}
+				var input struct {
+					Args json.RawMessage `json:"args"`
+				}
+				if json.Unmarshal([]byte(call.Input), &input) == nil {
+					args.rawArgs = input.Args
 				}
 				script, err := workflowScript(ctx, args, getConn)
 				if err != nil {
@@ -408,7 +416,7 @@ func (p *Server) startWorkflowRun(
 		if err != nil {
 			return nil, err
 		}
-		if err := validateSavedWorkflowArgs(saved, args.Args); err != nil {
+		if err := validateSavedWorkflowArgs(saved, args.Args, args.rawArgs); err != nil {
 			return nil, err
 		}
 		args.Script = script
