@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -119,6 +121,8 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"SpacedPhase":    {Name: "phases", Script: savedWorkflowScript, Phases: []string{" a"}},
 			"ControlPhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\x01b"}},
 			"NewlinePhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\nb"}},
+			"BidiPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u202eb"}},
+			"ZeroWidthPhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u200bb"}},
 			"LongPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{strings.Repeat("p", 129)}},
 			"ManyPhases":     {Name: "phases", Script: savedWorkflowScript, Phases: strings.Split(strings.Repeat("p,", 32)+"p", ",")},
 			// Below the limit compact, above it as jsonb text.
@@ -132,6 +136,21 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, req)
 			_ = requireSDKErrorStatus(t, err, http.StatusBadRequest, name)
 		}
+
+		// The size limit applies before the schema check, which would
+		// otherwise report that a string schema is not an object.
+		_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:       "huge-schema",
+			Script:     savedWorkflowScript,
+			ArgsSchema: json.RawMessage(`{"type":"string","title":"` + strings.Repeat("t", 12<<10) + `"}`),
+		})
+		require.Contains(t, requireSDKError(t, err, http.StatusBadRequest).Detail, "larger than")
+		_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:       "string-schema",
+			Script:     savedWorkflowScript,
+			ArgsSchema: json.RawMessage(`{"type":"string","title":"t"}`),
+		})
+		require.NotContains(t, requireSDKError(t, err, http.StatusBadRequest).Detail, "larger than")
 
 		// A NULL element would break every pq.Array scan of the row. JSON
 		// null decodes as an empty phase, which the routes reject.
@@ -417,6 +436,134 @@ func TestForkOrganizationSavedWorkflows(t *testing.T) {
 			UserRoles: map[string]codersdk.OrganizationSkillRole{"not-a-uuid": codersdk.OrganizationSkillRoleRead},
 		})
 		_ = requireSDKError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("CrossOrganization", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		otherOrg := dbgen.Organization(t, db, database.Organization{})
+		outsider, outsiderUser := coderdtest.CreateAnotherUser(t, client, otherOrg.ID)
+		// A member here who administers another organization.
+		otherAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(otherOrg.ID))
+		otherGroup := dbgen.Group(t, db, database.Group{OrganizationID: otherOrg.ID})
+
+		_, err := client.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "release", Script: savedWorkflowScript})
+		require.NoError(t, err)
+
+		// A user outside the organization cannot learn that it or its
+		// workflows exist.
+		_, err = outsider.ForkOrganizationSavedWorkflows(ctx, orgID)
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = outsider.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = outsider.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "planted", Script: savedWorkflowScript})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = outsider.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("x")})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_ = requireSDKError(t, outsider.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release"), http.StatusNotFound)
+		_, err = outsider.ForkOrganizationSavedWorkflowACL(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = outsider.ForkOrganizationSavedWorkflowACLAvailable(ctx, orgID, "release", codersdk.UsersRequest{})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = outsider.UpdateForkOrganizationSavedWorkflowACL(ctx, orgID, "release", codersdk.UpdateOrganizationSkillACLRequest{
+			GroupRoles: map[string]codersdk.OrganizationSkillRole{orgID.String(): codersdk.OrganizationSkillRoleRead},
+		})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		// Administering another organization grants nothing here.
+		_, err = otherAdmin.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "planted", Script: savedWorkflowScript})
+		_ = requireSDKError(t, err, http.StatusForbidden)
+		_, err = otherAdmin.CreateForkOrganizationSavedWorkflow(ctx, otherOrg.ID, codersdk.CreateForkSavedWorkflowRequest{Name: "release", Script: savedWorkflowScript})
+		require.NoError(t, err, "the admin creates in the organization it administers")
+
+		// Grants name only users and groups of the workflow's organization.
+		for name, req := range map[string]codersdk.UpdateOrganizationSkillACLRequest{
+			"User":  {UserRoles: map[string]codersdk.OrganizationSkillRole{outsiderUser.ID.String(): codersdk.OrganizationSkillRoleRead}},
+			"Group": {GroupRoles: map[string]codersdk.OrganizationSkillRole{otherGroup.ID.String(): codersdk.OrganizationSkillRoleRead}},
+		} {
+			err = client.UpdateForkOrganizationSavedWorkflowACL(ctx, orgID, "release", req)
+			_ = requireSDKErrorStatus(t, err, http.StatusBadRequest, name)
+		}
+		_, err = outsider.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	t.Run("Auditor", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := coderdtest.New(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		auditor, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAuditor(orgID))
+
+		_, err := client.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "release", Script: savedWorkflowScript})
+		require.NoError(t, err)
+		// Without the Everyone grant only the auditor role can read it.
+		err = client.UpdateForkOrganizationSavedWorkflowACL(ctx, orgID, "release", codersdk.UpdateOrganizationSkillACLRequest{
+			GroupRoles: map[string]codersdk.OrganizationSkillRole{orgID.String(): codersdk.OrganizationSkillRoleDeleted},
+		})
+		require.NoError(t, err)
+
+		list, err := auditor.ForkOrganizationSavedWorkflows(ctx, orgID)
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		_, err = auditor.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		require.NoError(t, err)
+		_, err = auditor.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("x")})
+		_ = requireSDKError(t, err, http.StatusForbidden)
+	})
+
+	t.Run("ScopedAPIKeys", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		scopedClient := func(scope database.APIKeyScope) *codersdk.Client {
+			_, token := dbgen.APIKey(t, db, database.APIKey{
+				UserID: owner.UserID,
+				Scopes: database.APIKeyScopes{"organization:read", scope},
+			})
+			scoped := codersdk.New(client.URL)
+			scoped.SetSessionToken(token)
+			return scoped
+		}
+		_, err := client.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "release", Script: savedWorkflowScript})
+		require.NoError(t, err)
+
+		_, err = scopedClient("organization_skill:share").ForkOrganizationSavedWorkflowACL(ctx, orgID, "release")
+		require.NoError(t, err)
+
+		// A key that can neither read nor delete must not learn that the
+		// workflow exists.
+		err = scopedClient("organization_skill:update").DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		deleter := scopedClient("organization_skill:delete")
+		_, err = deleter.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		err = deleter.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		require.NoError(t, err)
+		_, err = client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+		_ = requireSDKError(t, err, http.StatusNotFound)
 	})
 
 	t.Run("ExperimentOff", func(t *testing.T) {
