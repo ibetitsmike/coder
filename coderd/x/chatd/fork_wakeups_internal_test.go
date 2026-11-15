@@ -1,7 +1,6 @@
 package chatd
 
 import (
-	"context"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +45,6 @@ func TestWakeupDeliversIntervalWithoutReplay(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 	require.EqualValues(t, 1, got.RunCount)
 	require.True(t, wakeupTestSlot.Add(time.Minute).Equal(got.NextRunAt.Time), "on schedule: %s", got.NextRunAt.Time)
-	require.False(t, got.LeaseExpiresAt.Valid)
 	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
 
 	// The turn ends, then the server is down for three and a half slots.
@@ -88,7 +86,6 @@ func TestWakeupSkipsBusyChat(t *testing.T) {
 			got := f.wakeup(t, wakeup.ID)
 			require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 			require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-			require.False(t, got.LeaseExpiresAt.Valid, "the next tick can claim it")
 			require.Zero(t, got.RunCount)
 
 			forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
@@ -397,10 +394,9 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		got := f.wakeup(t, wakeup.ID)
 		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-		require.False(t, got.LeaseExpiresAt.Valid)
 	})
 
-	t.Run("ClaimCanceled", func(t *testing.T) {
+	t.Run("PausedDuringSend", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
 		ctx := testutil.Context(t, testutil.WaitLong)
@@ -412,13 +408,13 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		worker := f.newArchiveWorker(t, nil, nil, nil)
 		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
 			// What UpdateChatWakeupStatus does when the user pauses it.
-			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'paused', next_run_at = NULL, lease_expires_at = NULL WHERE id = $1", wakeup.ID)
+			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'paused', next_run_at = NULL, updated_at = NOW() WHERE id = $1", wakeup.ID)
 			assert.NoError(t, err)
 			_, _ = rw.Write([]byte(`{}`))
 		})
 
 		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
-		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt), "a canceled claim delivers nothing")
+		require.Zero(t, f.countPromptMessages(t, chat, wakeup.Prompt), "a paused wake-up delivers nothing")
 		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
 		got := f.wakeup(t, wakeup.ID)
 		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
@@ -479,7 +475,6 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		got := f.wakeup(t, wakeup.ID)
 		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-		require.False(t, got.LeaseExpiresAt.Valid)
 	})
 
 	t.Run("AdmittedAfterNextSlot", func(t *testing.T) {
@@ -507,7 +502,7 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		require.WithinDuration(t, start.Add(3*time.Minute), got.NextRunAt.Time, time.Second, "one interval after admission")
 	})
 
-	t.Run("LeaseTakenOverThenFailed", func(t *testing.T) {
+	t.Run("ChangedDuringSendThenFailed", func(t *testing.T) {
 		t.Parallel()
 		f := newWorkerTestFixture(t)
 		ctx := testutil.Context(t, testutil.WaitLong)
@@ -517,19 +512,22 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
 		})
 		worker := f.newArchiveWorker(t, nil, nil, nil)
-		otherLease := wakeupTestSlot.Add(10 * time.Minute)
+		otherNext := wakeupTestSlot.Add(time.Minute)
+		otherUpdated := wakeupTestSlot.Add(2 * time.Second)
 		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
-			// Another replica claims the row after this worker's lease ran out.
-			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET lease_expires_at = $2 WHERE id = $1", wakeup.ID, otherLease)
+			// Another replica delivers the occurrence during this send.
+			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET next_run_at = $2, run_count = run_count + 1, updated_at = $3 WHERE id = $1", wakeup.ID, otherNext, otherUpdated)
 			assert.NoError(t, err)
 			rw.WriteHeader(http.StatusInternalServerError)
 		})
 
 		worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
-		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID), "the stale worker records no run for the new owner's occurrence")
+		require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID), "the stale delivery records no run for the other replica's occurrence")
 		got := f.wakeup(t, wakeup.ID)
-		require.True(t, otherLease.Equal(got.LeaseExpiresAt.Time), "the new owner keeps its lease: %s", got.LeaseExpiresAt.Time)
-		require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
+		require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+		require.EqualValues(t, 1, got.RunCount)
+		require.True(t, otherNext.Equal(got.NextRunAt.Time), "the other replica's schedule stays: %s", got.NextRunAt.Time)
+		require.True(t, otherUpdated.Equal(got.UpdatedAt), "the other replica's write stays: %s", got.UpdatedAt)
 	})
 }
 
@@ -562,8 +560,8 @@ func TestWakeupResumeCountsAgainstFamilyLiveLimit(t *testing.T) {
 	require.Equal(t, 1, f.countPromptMessages(t, child, wakeup.Prompt), "a free slot lets the next occurrence resume the child")
 }
 
-// Chats that would queue a new message are not claimed, so a full batch of
-// them cannot starve a due wake-up of an idle chat.
+// The wake-ups of chats that would queue a new message are not due, so a
+// full batch of them cannot starve a due wake-up of an idle chat.
 func TestWakeupBusyChatsDoNotStarveIdleChats(t *testing.T) {
 	t.Parallel()
 	for _, status := range []database.ChatStatus{
@@ -576,7 +574,7 @@ func TestWakeupBusyChatsDoNotStarveIdleChats(t *testing.T) {
 			t.Parallel()
 			f := newWorkerTestFixture(t)
 			ctx := testutil.Context(t, testutil.WaitLong)
-			for range wakeupClaimBatch {
+			for range forkWakerBatch {
 				busy := f.createWakeupChat(t)
 				forceExecutionState(t, f, busy.ID, status, false)
 				if status == database.ChatStatusError {
@@ -601,40 +599,6 @@ func TestWakeupBusyChatsDoNotStarveIdleChats(t *testing.T) {
 			require.Equal(t, 1, f.countPromptMessages(t, idle, wakeup.Prompt))
 		})
 	}
-}
-
-// The started worker runs the wake-up loop when the experiment is enabled:
-// once at start, then on every poll tick.
-func TestWakeupLoopRunsInStartedWorker(t *testing.T) {
-	t.Parallel()
-	f := newWorkerTestFixture(t)
-	ctx := testutil.Context(t, testutil.WaitLong)
-	mClock := quartz.NewMock(t)
-	mClock.Set(wakeupTestSlot.Add(time.Second))
-	first := f.createWakeupChat(t)
-	firstWakeup := f.insertWakeup(t, first, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
-
-	opts := testOptions(t, f, nil)
-	opts.Clock = mClock
-	server := newUnstartedServer(t, f.pubsub, f.db)
-	server.experiments = codersdk.Experiments{codersdk.ExperimentForkChatWakeups}
-	worker, err := newChatWorker(server, opts)
-	require.NoError(t, err)
-	tickerTrap := mClock.Trap().NewTicker("chatworker", "wakeups")
-	defer tickerTrap.Close()
-	require.NoError(t, worker.Start(context.Background()))
-	t.Cleanup(func() { require.NoError(t, worker.Close()) })
-
-	// The loop runs the first pass before it creates its ticker.
-	tickerTrap.MustWait(ctx).MustRelease(ctx)
-	require.Equal(t, 1, f.countPromptMessages(t, first, firstWakeup.Prompt))
-
-	second := f.createWakeupChat(t)
-	secondWakeup := f.insertWakeup(t, second, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
-	mClock.Advance(wakeupPollInterval).MustWait(ctx)
-	testutil.Eventually(ctx, t, func(context.Context) bool {
-		return f.countPromptMessages(t, second, secondWakeup.Prompt) == 1
-	}, testutil.IntervalFast, "the poll tick must deliver the second wake-up")
 }
 
 func TestNextWakeupRun(t *testing.T) {

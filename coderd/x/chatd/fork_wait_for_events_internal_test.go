@@ -273,7 +273,6 @@ func TestWakeupEventsWaitsForBusyChat(t *testing.T) {
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 	require.True(t, wakeupTestSlot.Equal(got.NextRunAt.Time), "still due: %s", got.NextRunAt.Time)
-	require.False(t, got.LeaseExpiresAt.Valid)
 
 	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
 	worker.wakeupOnce(ctx, wakeupTestSlot.Add(20*time.Second))
@@ -413,7 +412,6 @@ func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 	got = f.wakeup(t, invalid.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
 	require.Equal(t, "invalid_events", got.StatusReason.String)
-	require.False(t, got.LeaseExpiresAt.Valid)
 	// Only the pause notifies; the completed wake-up does not.
 	requireWakeupPausedNotification(t, enqueuer.Sent(), invalidChat, "invalid_events")
 }
