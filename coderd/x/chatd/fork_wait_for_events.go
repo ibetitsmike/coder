@@ -438,7 +438,13 @@ func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.
 // is done, process exited or is gone, or pull request has new activity, and
 // completes the wake-up once every watch is delivered or gone. deliverWakeup
 // calls it only for an idle chat, so the next watch is delivered on a later
-// tick, after the turn this one starts.
+// pass, after the turn this one starts.
+//
+// The waker lists an events wake-up as due at its run time, which polls the
+// processes and the pull request it watches, and before its expiry also when
+// a watch is ready (chat_wakeup_ready_watches), such as a child that is done.
+// A delivery before the run time reads nothing: it delivers a ready watch and
+// keeps the run time.
 func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) error {
 	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
 	if err != nil {
@@ -454,14 +460,19 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		return xerrors.Errorf("list ready wake-up watches: %w", err)
 	}
 
-	// The watch this tick delivers.
+	// The watch this pass delivers.
 	var next *wakeupDelivery
 	// Open watches, other than next, that still need a delivery.
 	pending := 0
 	// Whether one of them is a pull request, which is polled less often.
 	pullRequestPending := false
+	// Whether one of them is a process, which is polled.
+	processPending := false
 	// How many of them are processes whose read failed.
 	processErrors := 0
+	// Whether the run time has come, so the processes and the pull request
+	// are read.
+	polled := !now.Before(wakeup.NextRunAt.Time)
 	var conns processConns
 	defer conns.release()
 	// A final poll that runs well after the expiry leaves out the watches
@@ -472,7 +483,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// or whose workspace stopped or was rebuilt, after the expiry. A watch
 	// whose send failed happened before the cutoff, so a retry still
 	// delivers it.
-	lateFinalPoll := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
+	lateFinalPoll := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(eventsPollInterval))
 	for _, watch := range watches {
 		if watch.DeliveredAt.Valid {
 			continue
@@ -488,7 +499,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		switch watch.Kind {
 		case forkdb.ChatWakeupWatchKindChildDone:
 			done := slices.ContainsFunc(ready, func(r forkdb.ChatWakeupWatch) bool { return r.ID == watch.ID })
-			if next == nil && done {
+			// Before the run time, a watch whose send failed waits for
+			// it, like the waker does.
+			if next == nil && done && (polled || !watch.FailedAt.Valid) {
 				child, err := p.db.GetChatByID(ctx, event.ChatID)
 				if errors.Is(err, sql.ErrNoRows) {
 					// A child that is gone has nothing to report.
@@ -509,9 +522,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			}
 			pending++
 		case forkdb.ChatWakeupWatchKindPullRequest:
-			// At most one read per tick: a later watch waits until next is
+			// At most one read per pass: a later watch waits until next is
 			// delivered.
-			if next == nil {
+			if next == nil && polled {
 				// A read that may stall starts only while the delivery
 				// has time left for it and its message. Otherwise the
 				// wake-up stays due for the next pass.
@@ -534,7 +547,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			pending++
 			pullRequestPending = true
 		case forkdb.ChatWakeupWatchKindProcess:
-			if next == nil {
+			if next == nil && polled {
 				if !wakeupReadFits(ctx, processReadTimeout) {
 					return nil
 				}
@@ -571,14 +584,28 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				}
 			}
 			pending++
+			processPending = true
 		}
 	}
-	interval := wakeupPollInterval
-	switch {
-	case pullRequestPending:
-		interval = pullRequestPollInterval
-	case processErrors > 0 && processErrors == pending:
-		interval = processErrorRetry
+	// nextPoll is the run time after a delivery at the given time.
+	nextPoll := func(at time.Time) time.Time {
+		switch {
+		case !polled:
+			return wakeup.NextRunAt.Time
+		case pullRequestPending:
+			return at.Add(pullRequestPollInterval)
+		case processErrors > 0 && processErrors == pending:
+			return at.Add(processErrorRetry)
+		case processPending:
+			return at.Add(eventsPollInterval)
+		case wakeup.ExpiresAt.Valid && at.Before(wakeup.ExpiresAt.Time):
+			// Only children are left. The commit that makes one done
+			// pokes the waker, so the next run is the final poll at the
+			// expiry.
+			return wakeup.ExpiresAt.Time
+		default:
+			return at.Add(eventsPollInterval)
+		}
 	}
 	if next == nil {
 		// A failed read on the final poll could miss an exit by the expiry.
@@ -587,7 +614,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				return p.finishWakeup(ctx, chat, wakeup, now, retry)
 			}
 		}
-		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, interval))
+		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, nextPoll(now)))
 	}
 	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
 		return err
@@ -595,21 +622,20 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	delivery := *next
 	delivery.runKey = watchRunKey(*delivery.watch)
 	delivery.finish = func(admittedAt time.Time) wakeupFinish {
-		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, interval)
+		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, nextPoll(admittedAt))
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	return p.finishWakeupSend(ctx, chat, wakeup, now, delivery, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched entry still
-// needs a run, and otherwise polls again after interval. One tick delivers at
-// most one entry, so a final poll that delivers one polls the others once
-// more after that turn.
-func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, pending int, interval time.Duration) wakeupFinish {
+// needs a run, and otherwise runs it again at next. One pass delivers at most
+// one entry, so a final poll that delivers one polls the others once more
+// after that turn.
+func eventsWakeupFinish(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32, pending int, next time.Time) wakeupFinish {
 	if pending == 0 {
 		return wakeupFinish{status: forkdb.ChatWakeupStatusCompleted, reason: "done", runDelta: runDelta}
 	}
-	next := now.Add(interval)
 	finish := eventsWakeupRunAt(wakeup, now, runDelta, next)
 	if runDelta > 0 && finish.reason == "expired" {
 		if retry, ok := eventsFinalRetry(wakeup, now, next); ok {
