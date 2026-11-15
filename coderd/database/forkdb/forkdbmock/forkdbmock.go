@@ -72,21 +72,6 @@ func (mr *MockStoreMockRecorder) CancelChatWakeupsByChatID(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).CancelChatWakeupsByChatID), ctx, arg)
 }
 
-// ClaimDueChatWakeups mocks base method.
-func (m *MockStore) ClaimDueChatWakeups(ctx context.Context, arg forkdb.ClaimDueChatWakeupsParams) ([]forkdb.ChatWakeup, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ClaimDueChatWakeups", ctx, arg)
-	ret0, _ := ret[0].([]forkdb.ChatWakeup)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ClaimDueChatWakeups indicates an expected call of ClaimDueChatWakeups.
-func (mr *MockStoreMockRecorder) ClaimDueChatWakeups(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimDueChatWakeups", reflect.TypeOf((*MockStore)(nil).ClaimDueChatWakeups), ctx, arg)
-}
-
 // ConsumePluginLinkCode mocks base method.
 func (m *MockStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	m.ctrl.T.Helper()
@@ -492,21 +477,6 @@ func (m *MockStore) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.F
 func (mr *MockStoreMockRecorder) FailOpenWorkflowStepsOfRun(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOpenWorkflowStepsOfRun", reflect.TypeOf((*MockStore)(nil).FailOpenWorkflowStepsOfRun), ctx, arg)
-}
-
-// FinishChatWakeupClaim mocks base method.
-func (m *MockStore) FinishChatWakeupClaim(ctx context.Context, arg forkdb.FinishChatWakeupClaimParams) (forkdb.ChatWakeup, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FinishChatWakeupClaim", ctx, arg)
-	ret0, _ := ret[0].(forkdb.ChatWakeup)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// FinishChatWakeupClaim indicates an expected call of FinishChatWakeupClaim.
-func (mr *MockStoreMockRecorder) FinishChatWakeupClaim(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FinishChatWakeupClaim", reflect.TypeOf((*MockStore)(nil).FinishChatWakeupClaim), ctx, arg)
 }
 
 // GetChatAwaitingWorker mocks base method.
@@ -1611,6 +1581,21 @@ func (mr *MockStoreMockRecorder) ListChildChatIDsWithOpenWakeupWatches(ctx, pare
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChildChatIDsWithOpenWakeupWatches", reflect.TypeOf((*MockStore)(nil).ListChildChatIDsWithOpenWakeupWatches), ctx, parentChatID)
 }
 
+// ListDueChatWakeups mocks base method.
+func (m *MockStore) ListDueChatWakeups(ctx context.Context, arg forkdb.ListDueChatWakeupsParams) ([]forkdb.ListDueChatWakeupsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListDueChatWakeups", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.ListDueChatWakeupsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListDueChatWakeups indicates an expected call of ListDueChatWakeups.
+func (mr *MockStoreMockRecorder) ListDueChatWakeups(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDueChatWakeups", reflect.TypeOf((*MockStore)(nil).ListDueChatWakeups), ctx, arg)
+}
+
 // ListOpenChatWakeupWatchesByChatID mocks base method.
 func (m *MockStore) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
 	m.ctrl.T.Helper()
@@ -1729,6 +1714,21 @@ func (m *MockStore) ListUserSavedWorkflowMetadata(ctx context.Context, arg forkd
 func (mr *MockStoreMockRecorder) ListUserSavedWorkflowMetadata(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserSavedWorkflowMetadata", reflect.TypeOf((*MockStore)(nil).ListUserSavedWorkflowMetadata), ctx, arg)
+}
+
+// LockActiveChatWakeup mocks base method.
+func (m *MockStore) LockActiveChatWakeup(ctx context.Context, id uuid.UUID) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockActiveChatWakeup", ctx, id)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockActiveChatWakeup indicates an expected call of LockActiveChatWakeup.
+func (mr *MockStoreMockRecorder) LockActiveChatWakeup(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockActiveChatWakeup", reflect.TypeOf((*MockStore)(nil).LockActiveChatWakeup), ctx, id)
 }
 
 // LockChatForNoKeyUpdate mocks base method.
@@ -1890,6 +1890,21 @@ func (m *MockStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkd
 func (mr *MockStoreMockRecorder) UpdateChatSubagentWorkspaceID(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatSubagentWorkspaceID", reflect.TypeOf((*MockStore)(nil).UpdateChatSubagentWorkspaceID), ctx, arg)
+}
+
+// UpdateChatWakeupRun mocks base method.
+func (m *MockStore) UpdateChatWakeupRun(ctx context.Context, arg forkdb.UpdateChatWakeupRunParams) (forkdb.ChatWakeup, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateChatWakeupRun", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatWakeup)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateChatWakeupRun indicates an expected call of UpdateChatWakeupRun.
+func (mr *MockStoreMockRecorder) UpdateChatWakeupRun(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatWakeupRun", reflect.TypeOf((*MockStore)(nil).UpdateChatWakeupRun), ctx, arg)
 }
 
 // UpdateChatWakeupStatus mocks base method.

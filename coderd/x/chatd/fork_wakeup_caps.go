@@ -162,7 +162,7 @@ func (p *Server) pauseCappedWakeup(ctx context.Context, fdb forkdb.Store, chat d
 	if err != nil || reason == "" {
 		return false, err
 	}
-	return true, p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: reason, pauseText: caps.pauseText(reason)})
+	return true, p.finishWakeup(ctx, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: reason, pauseText: caps.pauseText(reason)})
 }
 
 // notifyWakeupPaused tells the chat owner that a wake-up of chat paused for

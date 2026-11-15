@@ -343,19 +343,27 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CancelChatWakeupsByChatID(gomock.Any(), arg).Return(wakeups, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeups)
 		},
-		"ClaimDueChatWakeups": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.ClaimDueChatWakeupsParams{})
-			wakeups := []forkdb.ChatWakeup{testutil.Fake(t, faker, forkdb.ChatWakeup{})}
-			fdb.EXPECT().ClaimDueChatWakeups(gomock.Any(), arg).Return(wakeups, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(wakeups)
+		"ListDueChatWakeups": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := forkdb.ListDueChatWakeupsParams{LimitCount: 10}
+			rows := []forkdb.ListDueChatWakeupsRow{{ChatWakeup: testutil.Fake(t, faker, forkdb.ChatWakeup{}), Due: true}}
+			fdb.EXPECT().ListDueChatWakeups(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
 		},
-		"FinishChatWakeupClaim": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		"LockActiveChatWakeup": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
-			arg := testutil.Fake(t, faker, forkdb.FinishChatWakeupClaimParams{ID: wakeup.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			fdb.EXPECT().FinishChatWakeupClaim(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().LockActiveChatWakeup(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			check.Args(wakeup.ID).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
+		},
+		"UpdateChatWakeupRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.UpdateChatWakeupRunParams{ID: wakeup.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().UpdateChatWakeupRun(gomock.Any(), arg).Return(wakeup, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(wakeup)
 		},
 		"InsertChatWakeupRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
@@ -1556,8 +1564,8 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			_, err := fdb.GetChatWakeupByID(ctx, wakeup.ID)
 			return err
 		}},
-		{name: "FinishChatWakeupClaim", run: func(ctx context.Context, fdb forkdb.Store) error {
-			_, err := fdb.FinishChatWakeupClaim(ctx, forkdb.FinishChatWakeupClaimParams{ID: wakeup.ID})
+		{name: "UpdateChatWakeupRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.UpdateChatWakeupRun(ctx, forkdb.UpdateChatWakeupRunParams{ID: wakeup.ID})
 			return err
 		}},
 		{name: "InsertChatWakeupRun", run: func(ctx context.Context, fdb forkdb.Store) error {
@@ -1678,7 +1686,7 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
 				case "GetChatWakeupByID",
-					"FinishChatWakeupClaim", "InsertChatWakeupRun",
+					"UpdateChatWakeupRun", "InsertChatWakeupRun",
 					"MarkChatWakeupWatchDelivered":
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
@@ -1750,7 +1758,7 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().GetChatPinnedSkillsByChatID(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatSubagent{}, nil).AnyTimes()
 	fdbMock.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
-	fdbMock.EXPECT().FinishChatWakeupClaim(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
+	fdbMock.EXPECT().UpdateChatWakeupRun(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
 	fdbMock.EXPECT().InsertChatWakeupRun(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupRun{}, nil).AnyTimes()
 	fdbMock.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupWatch{}, nil).AnyTimes()
 	fdbMock.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
