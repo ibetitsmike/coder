@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +76,9 @@ type runner struct {
 	// delivery has not bound yet.
 	newChatsMu sync.Mutex
 	newChats   map[uuid.UUID]struct{}
+	// bindFailed is set while the last full bind failed, so the next scan
+	// tries again.
+	bindFailed atomic.Bool
 }
 
 func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
@@ -306,7 +310,7 @@ func (r *runner) syncSubscriptions(ctx context.Context) {
 	for _, l := range links {
 		users[l.UserID] = struct{}{}
 	}
-	if r.subscribeUsers(ctx, users) {
+	if r.subscribeUsers(ctx, users) || r.bindFailed.Load() {
 		// Bind after the subscription starts, so a chat the new user
 		// creates meanwhile is bound by this pass or by its event.
 		r.bindAll(ctx)

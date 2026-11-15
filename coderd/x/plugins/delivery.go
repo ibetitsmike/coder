@@ -75,14 +75,17 @@ func (r *runner) onChatEvent(_ context.Context, message []byte) {
 }
 
 // bindAll binds every top-level chat of the plugin's linked users. It runs
-// when the runner follows a new user and every bind interval.
+// when the runner follows a new user, every bind interval, and on the next
+// scan after a full bind failed.
 func (r *runner) bindAll(ctx context.Context) {
 	if !r.delivers() {
 		return
 	}
-	if err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
+	err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID)
+	if err != nil {
 		r.logger.Warn(ctx, "bind chats to plugin", slog.Error(err))
 	}
+	r.bindFailed.Store(err != nil)
 }
 
 // bindNewChats binds the chats that created events named. A chat whose

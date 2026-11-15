@@ -196,6 +196,8 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 		full   int
 		one    []uuid.UUID
 		failed = map[uuid.UUID]bool{}
+		// fullFails makes the next full bind fail.
+		fullFails bool
 	)
 	fdb.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), r.plugin.ID).DoAndReturn(
 		func(context.Context, uuid.UUID) ([]forkdb.PluginUserLink, error) {
@@ -208,6 +210,10 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			full++
+			if fullFails {
+				fullFails = false
+				return xerrors.New("bind failed")
+			}
 			return nil
 		}).AnyTimes()
 	fdb.EXPECT().EnsurePluginChatBinding(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -285,6 +291,17 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 	r.scan(ctx)
 	fullBinds, _ = binds()
 	require.Equal(t, 2, fullBinds)
+
+	// A full bind that failed runs again on the next scan only.
+	mu.Lock()
+	links = append(links, forkdb.PluginUserLink{UserID: uuid.New()})
+	fullFails = true
+	mu.Unlock()
+	r.scan(ctx)
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 4, fullBinds)
 }
 
 // newDeliveryRunner returns a runner with the bridge plugin loaded
