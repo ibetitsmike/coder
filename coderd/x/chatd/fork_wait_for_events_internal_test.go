@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -83,7 +84,7 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusActive, row.Status)
 	require.Equal(t, defaultWaitForEventsPrompt, row.Prompt)
 	require.Equal(t, coordinator.OwnerID, row.CreatedBy)
-	require.JSONEq(t, fmt.Sprintf(`[{"type":"child_done","chat_id":%q},{"type":"child_done","chat_id":%q}]`, running.ID, paused.ID), string(row.Events))
+	require.JSONEq(t, fmt.Sprintf(`[{"type":"child_done","chat_id":%q},{"type":"child_done","chat_id":%q}]`, running.ID, paused.ID), string(f.wakeupEvents(t, row.ID)))
 	require.True(t, wakeupTestSlot.Equal(row.NextRunAt.Time), "the first poll is now: %s", row.NextRunAt.Time)
 	require.True(t, wakeupTestSlot.Add(24*time.Hour).Equal(row.ExpiresAt.Time), "expires %s", row.ExpiresAt.Time)
 	require.True(t, row.ExpiresAt.Time.Equal(def.ExpiresAt))
@@ -123,14 +124,7 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.Empty(t, wakeups(fresh))
 
 	// A child that its wake-up delivered can be watched again.
-	_, err = fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
-		ID:        uuid.New(),
-		WakeupID:  def.ID,
-		RunKey:    childDoneRunKey(running.ID),
-		Status:    forkdb.ChatWakeupRunStatusDelivered,
-		CreatedAt: wakeupTestSlot,
-		UpdatedAt: wakeupTestSlot,
-	})
+	_, err = f.sqlDB.ExecContext(ctx, "UPDATE chat_wakeup_watches SET delivered_at = $1, deliveries = 1 WHERE wakeup_id = $2 AND child_chat_id = $3", wakeupTestSlot, def.ID, running.ID)
 	require.NoError(t, err)
 	again, _ := wait(coordinator, waitForEventsArgs{ChildChatIDs: []string{running.ID.String(), paused.ID.String()}}, false)
 	require.Equal(t, []uuid.UUID{running.ID}, childIDs(again))
@@ -141,9 +135,8 @@ func TestWaitForEventsTool(t *testing.T) {
 	lapsedChild := f.createChildAgent(t, lapsed, "lapsed", database.ChatStatusRunning)
 	f.insertWakeup(t, lapsed, forkdb.InsertChatWakeupParams{
 		Kind:      forkdb.ChatWakeupKindEvents,
-		Events:    childDoneEvents(lapsedChild),
 		ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
-	})
+	}, childDoneEvents(lapsedChild)...)
 	renewed, _ := wait(lapsed, waitForEventsArgs{}, false)
 	require.Equal(t, []uuid.UUID{lapsedChild.ID}, childIDs(renewed))
 
@@ -165,9 +158,8 @@ func TestWaitForEventsTool(t *testing.T) {
 	family := f.createWakeupChat(t)
 	nested := f.createChildAgent(t, family, "nested", database.ChatStatusWaiting)
 	f.insertWakeup(t, nested, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(f.createChildAgent(t, nested, "grandchild", database.ChatStatusRunning)),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(f.createChildAgent(t, nested, "grandchild", database.ChatStatusRunning))...)
 	asking := f.createChildAgent(t, family, "asking", database.ChatStatusWaiting)
 	_, err = fdb.UpsertChatDescendantQuestion(ctx, forkdb.UpsertChatDescendantQuestionParams{
 		ChatID:     asking.ID,
@@ -200,9 +192,8 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	two := f.createChildAgent(t, coordinator, "two", database.ChatStatusRunning)
 	three := f.createChildAgent(t, coordinator, "three", database.ChatStatusRunning)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(one, two, three),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(one, two, three)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	now := wakeupTestSlot
 	tick := func() {
@@ -218,7 +209,7 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 
 	tick()
 	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt), "no child is done")
-	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
+	require.Empty(t, f.deliveredWatches(t, wakeup.ID))
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 	require.WithinDuration(t, now.Add(wakeupPollInterval), got.NextRunAt.Time, time.Second, "polls again")
@@ -227,7 +218,7 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	forceExecutionState(t, f, one.ID, database.ChatStatusWaiting, false)
 	tick()
 	require.Equal(t, []string{doneText(one)}, f.wakeMessages(t, coordinator, wakeup.Prompt))
-	require.Equal(t, []string{childDoneRunKey(one.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{one.ID.String()}, f.deliveredWatches(t, wakeup.ID))
 	require.Equal(t, []string{"delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
 	got = f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
@@ -250,7 +241,7 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
 	tick()
 	require.Equal(t, []string{doneText(one), doneText(two), doneText(three)}, f.wakeMessages(t, coordinator, wakeup.Prompt))
-	require.Equal(t, []string{childDoneRunKey(one.ID), childDoneRunKey(two.ID), childDoneRunKey(three.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{one.ID.String(), two.ID.String(), three.ID.String()}, f.deliveredWatches(t, wakeup.ID))
 	got = f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
@@ -266,9 +257,8 @@ func TestWakeupEventsWaitsForBusyChat(t *testing.T) {
 	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
 	forceExecutionState(t, f, coordinator.ID, database.ChatStatusRunning, false)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(child),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(child)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	var prompts atomic.Int32
 	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
@@ -301,9 +291,8 @@ func TestWakeupEventsRetriesFailedSend(t *testing.T) {
 	coordinator := f.createWakeupChat(t)
 	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(child),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(child)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	var prompts atomic.Int32
 	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
@@ -326,7 +315,7 @@ func TestWakeupEventsRetriesFailedSend(t *testing.T) {
 
 	worker.wakeupOnce(ctx, now)
 	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
-	require.Contains(t, f.wakeupRunKeys(t, wakeup.ID), childDoneRunKey(child.ID))
+	require.Contains(t, f.deliveredWatches(t, wakeup.ID), child.ID.String())
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }
 
@@ -339,17 +328,19 @@ func TestWakeupEventsArchivedAndMissingChildren(t *testing.T) {
 	coordinator := f.createWakeupChat(t)
 	archived := f.createChildAgent(t, coordinator, "archived", database.ChatStatusRunning)
 	forceExecutionState(t, f, archived.ID, database.ChatStatusRunning, true)
-	missing := database.Chat{ID: uuid.New()}
+	missing := f.createChildAgent(t, coordinator, "missing", database.ChatStatusRunning)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(missing, archived),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(missing, archived)...)
+	// Deleting a child deletes its watch.
+	_, err := f.sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", missing.ID)
+	require.NoError(t, err)
 
 	f.newArchiveWorker(t, nil, nil, nil).wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 	require.Equal(t, []string{
 		fmt.Sprintf("%s\n\nChild agent \"archived\" (%s) is done with status running.", wakeup.Prompt, archived.ID),
 	}, f.wakeMessages(t, coordinator, wakeup.Prompt))
-	require.Equal(t, []string{childDoneRunKey(archived.ID)}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{archived.ID.String()}, f.deliveredWatches(t, wakeup.ID))
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
@@ -364,13 +355,11 @@ func TestWakeupEventsWaitsForNestedCoordinator(t *testing.T) {
 	child := f.createChildAgent(t, coordinator, "child", database.ChatStatusWaiting)
 	grandchild := f.createChildAgent(t, child, "grandchild", database.ChatStatusRunning)
 	nested := f.insertWakeup(t, child, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(grandchild),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(grandchild)...)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(child),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(child)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 
 	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
@@ -391,30 +380,31 @@ func TestWakeupEventsWaitsForNestedCoordinator(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }
 
-// Events of a type this worker does not know wake nothing and hold nothing
-// open, and events that are not a JSON array pause the wake-up.
+// An events wake-up without watches, such as one whose entries the
+// migration to watch rows left out, completes, and a watch whose spec does
+// not decode pauses its wake-up.
 func TestWakeupEventsUnknownAndInvalidEvents(t *testing.T) {
 	t.Parallel()
 	f := newWorkerTestFixture(t)
 	ctx := testutil.Context(t, testutil.WaitLong)
 	unknownChat := f.createWakeupChat(t)
-	child := f.createChildAgent(t, unknownChat, "child", database.ChatStatusWaiting)
 	unknown := f.insertWakeup(t, unknownChat, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: json.RawMessage(fmt.Sprintf(`[{"type":"pr_merged","chat_id":%q}]`, child.ID)),
+		Kind: forkdb.ChatWakeupKindEvents,
 	})
 	invalidChat := f.createWakeupChat(t)
+	child := f.createChildAgent(t, invalidChat, "child", database.ChatStatusWaiting)
 	invalid := f.insertWakeup(t, invalidChat, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: json.RawMessage(`{"type":"child_done"}`),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(child)...)
+	_, err := f.sqlDB.ExecContext(ctx, `UPDATE chat_wakeup_watches SET spec = '"child_done"' WHERE wakeup_id = $1`, invalid.ID)
+	require.NoError(t, err)
 
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	enqueuer := useFakeEnqueuer(worker)
 	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 
 	require.Empty(t, f.wakeMessages(t, unknownChat, unknown.Prompt))
-	require.Empty(t, f.wakeupRunKeys(t, unknown.ID))
+	require.Empty(t, f.deliveredWatches(t, unknown.ID))
 	got := f.wakeup(t, unknown.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
@@ -446,16 +436,15 @@ func TestWakeupEventsCap(t *testing.T) {
 			coordinator := f.createWakeupChat(t)
 			child := f.createChildAgent(t, coordinator, "child", tc.childStatus)
 			wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-				Kind:   forkdb.ChatWakeupKindEvents,
-				Events: childDoneEvents(child),
-			})
+				Kind: forkdb.ChatWakeupKindEvents,
+			}, childDoneEvents(child)...)
 			f.seedDeliveredRuns(t, wakeup, maxChatWakeupRunsPerDay, wakeupTestSlot.Add(-time.Hour))
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			enqueuer := useFakeEnqueuer(worker)
 
 			worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 			require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
-			require.NotContains(t, f.wakeupRunKeys(t, wakeup.ID), childDoneRunKey(child.ID))
+			require.NotContains(t, f.deliveredWatches(t, wakeup.ID), child.ID.String())
 			got := f.wakeup(t, wakeup.ID)
 			require.Equal(t, tc.wantStatus, got.Status)
 			if tc.wantStatus == forkdb.ChatWakeupStatusPaused {
@@ -478,21 +467,62 @@ func (f *workerTestFixture) createChildAgent(t *testing.T, parent database.Chat,
 	return forceExecutionState(t, f, child.ID, status, false)
 }
 
-func childDoneEvents(children ...database.Chat) json.RawMessage {
-	events := make([]string, 0, len(children))
+func childDoneEvents(children ...database.Chat) []wakeupEvent {
+	events := make([]wakeupEvent, 0, len(children))
 	for _, child := range children {
-		events = append(events, fmt.Sprintf(`{"type":"child_done","chat_id":%q}`, child.ID))
+		events = append(events, wakeupEvent{Type: wakeupEventChildDone, ChatID: child.ID})
 	}
-	return json.RawMessage("[" + strings.Join(events, ",") + "]")
+	return events
 }
 
-func (f *workerTestFixture) wakeupRunKeys(t *testing.T, wakeupID uuid.UUID) []string {
+// deliveredWatches returns the targets of the delivered watches of the
+// wake-up, in the order they were delivered: a child chat ID, a process ID
+// or a pull request URL.
+func (f *workerTestFixture) deliveredWatches(t *testing.T, wakeupID uuid.UUID) []string {
 	t.Helper()
 	fdb, err := forkdb.From(f.db)
 	require.NoError(t, err)
-	keys, err := fdb.ListChatWakeupRunKeys(testutil.Context(t, testutil.WaitShort), wakeupID)
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(testutil.Context(t, testutil.WaitShort), wakeupID)
 	require.NoError(t, err)
-	return keys
+	watches = slices.DeleteFunc(watches, func(w forkdb.ChatWakeupWatch) bool { return !w.DeliveredAt.Valid })
+	slices.SortStableFunc(watches, func(a, b forkdb.ChatWakeupWatch) int { return a.DeliveredAt.Time.Compare(b.DeliveredAt.Time) })
+	targets := []string{}
+	for _, watch := range watches {
+		targets = append(targets, watchTarget(watch))
+	}
+	return targets
+}
+
+// wakeupEvents returns the watches of the wake-up as the JSON array of the
+// events they wait for, in ordinal order.
+func (f *workerTestFixture) wakeupEvents(t *testing.T, wakeupID uuid.UUID) json.RawMessage {
+	t.Helper()
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(testutil.Context(t, testutil.WaitShort), wakeupID)
+	require.NoError(t, err)
+	events := make([]wakeupEvent, 0, len(watches))
+	for _, watch := range watches {
+		event, err := watchEvent(watch)
+		require.NoError(t, err)
+		events = append(events, event)
+	}
+	raw, err := json.Marshal(events)
+	require.NoError(t, err)
+	return raw
+}
+
+// watchTarget returns the child chat ID, process ID or pull request URL
+// that watch waits for.
+func watchTarget(watch forkdb.ChatWakeupWatch) string {
+	switch watch.Kind {
+	case forkdb.ChatWakeupWatchKindChildDone:
+		return watch.ChildChatID.UUID.String()
+	case forkdb.ChatWakeupWatchKindProcess:
+		return watch.ProcessID.String
+	default:
+		return watch.PullRequestUrl.String
+	}
 }
 
 // wakeMessages returns, in order, the texts of the user messages from the
@@ -536,13 +566,12 @@ func TestWakeupEventsChildWithPendingQuestion(t *testing.T) {
 	})
 	require.NoError(t, err)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: childDoneEvents(child),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, childDoneEvents(child)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 
 	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second))
 	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
-	require.Empty(t, f.wakeupRunKeys(t, wakeup.ID))
+	require.Empty(t, f.deliveredWatches(t, wakeup.ID))
 	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
 }

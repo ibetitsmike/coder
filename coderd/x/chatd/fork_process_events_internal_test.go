@@ -68,7 +68,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	require.Empty(t, watch.Children)
 	row := f.wakeup(t, watchID)
 	require.Equal(t, defaultPullRequestWaitPrompt, row.Prompt)
-	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-1","command":"sleep 60","agent_id":%q}]`, agent.ID), string(row.Events))
+	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-1","command":"sleep 60","agent_id":%q}]`, agent.ID), string(f.wakeupEvents(t, row.ID)))
 
 	// A replayed call does not read the process again.
 	replayed, _ := waitCall(chat, watchID, waitForEventsArgs{ProcessIDs: []string{"proc-1"}}, false)
@@ -78,7 +78,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	patternID := uuid.New()
 	patterned, _ := waitCall(chat, patternID, waitForEventsArgs{ProcessIDs: []string{"proc-3"}, ProcessOutputPattern: "ERROR"}, false)
 	require.Equal(t, []waitForEventsProcess{{ProcessID: "proc-3", Command: "tail -f log", OutputPattern: "ERROR"}}, patterned.Processes)
-	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-3","command":"tail -f log","agent_id":%q,"output_pattern":"ERROR","output_cooldown_seconds":60,"output_max_events":10}]`, agent.ID), string(f.wakeup(t, patternID).Events))
+	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-3","command":"tail -f log","agent_id":%q,"output_pattern":"ERROR","output_cooldown_seconds":60,"output_max_events":10}]`, agent.ID), string(f.wakeupEvents(t, patternID)))
 
 	tooMany := make([]string, 0, maxWaitForEventsProcesses+1)
 	for i := range maxWaitForEventsProcesses + 1 {
@@ -107,9 +107,8 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	// An expired watch that has not had its final poll still watches.
 	expired := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 		Kind:      forkdb.ChatWakeupKindEvents,
-		Events:    processExitEvents(t, agent.ID, "proc-2"),
 		ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(-time.Minute), Valid: true},
-	})
+	}, processExitEvents(t, agent.ID, "proc-2")...)
 	_, content := waitCall(chat, uuid.New(), waitForEventsArgs{ProcessIDs: []string{"proc-2"}}, true)
 	require.Contains(t, content, "already watched by wake-up "+expired.ID.String())
 	// Parallel calls in one step would all pass the guard before either
@@ -140,9 +139,8 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	chat := f.createWakeupChat(t)
 	_, _, agent := f.bindProcessWorkspace(t, chat)
 	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
-		Kind:   forkdb.ChatWakeupKindEvents,
-		Events: processExitEvents(t, agent.ID, "proc-1"),
-	})
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, processExitEvents(t, agent.ID, "proc-1")...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	conn := processTestConn(t, worker.server, chat, agent)
 	gomock.InOrder(
@@ -168,7 +166,7 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	require.Equal(t, []string{
 		wakeup.Prompt + "\n\nBackground process proc-1 (`sleep 600`) exited with code 0.\n\nLast 2 lines of output:\n```\nok\nDONE\n```",
 	}, f.wakeMessages(t, chat, wakeup.Prompt))
-	require.Equal(t, []string{processExitRunKey("proc-1")}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{"proc-1"}, f.deliveredWatches(t, wakeup.ID))
 	got = f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
@@ -187,12 +185,11 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	ctx := testutil.Context(t, testutil.WaitLong)
 	chat := f.createWakeupChat(t)
 	_, _, agent := f.bindProcessWorkspace(t, chat)
-	events, err := json.Marshal([]wakeupEvent{{
+	events := []wakeupEvent{{
 		Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "sleep 600", AgentID: agent.ID,
 		OutputPattern: "ERROR", OutputCooldownSeconds: 60, OutputMaxEvents: 2,
-	}})
-	require.NoError(t, err)
-	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindEvents, Events: events})
+	}}
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindEvents}, events...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	conn := processTestConn(t, worker.server, chat, agent)
 	first := "ok\nERROR one\n"
@@ -239,11 +236,16 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	messages := f.wakeMessages(t, chat, wakeup.Prompt)
 	require.Len(t, messages, 3)
 	require.True(t, strings.HasPrefix(messages[2], prefix+"exited with code 1."), messages[2])
-	require.Equal(t, []string{
-		processOutputRunKey("proc-1", len(first)),
-		processOutputRunKey("proc-1", len(second)),
-		processExitRunKey("proc-1"),
-	}, f.wakeupRunKeys(t, wakeup.ID))
+	require.Equal(t, []string{"proc-1"}, f.deliveredWatches(t, wakeup.ID))
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
+	require.NoError(t, err)
+	require.Len(t, watches, 1)
+	require.EqualValues(t, 3, watches[0].Deliveries, "two line messages and the exit")
+	event, err := watchEvent(watches[0])
+	require.NoError(t, err)
+	require.Equal(t, len(second), event.OutputCursor, "the second line message covered the output up to its last line")
 	got = f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 	require.Equal(t, "done", got.StatusReason.String)
@@ -344,9 +346,8 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 				f.stopProcessWorkspace(t, workspace, build, time.Time{})
 			}
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
-				Kind:   forkdb.ChatWakeupKindEvents,
-				Events: processExitEvents(t, agent.ID, "proc-1"),
-			})
+				Kind: forkdb.ChatWakeupKindEvents,
+			}, processExitEvents(t, agent.ID, "proc-1")...)
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			conn := processTestConn(t, worker.server, chat, agent)
 			if !tc.stopped {
@@ -364,7 +365,7 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 				return
 			}
 			require.Equal(t, []string{wakeup.Prompt + "\n\n" + tc.wantText}, f.wakeMessages(t, chat, wakeup.Prompt))
-			require.Equal(t, []string{processExitRunKey("proc-1")}, f.wakeupRunKeys(t, wakeup.ID))
+			require.Equal(t, []string{"proc-1"}, f.deliveredWatches(t, wakeup.ID))
 			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 		})
 	}
@@ -414,9 +415,8 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			// final poll.
 			wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
 				Kind:      forkdb.ChatWakeupKindEvents,
-				Events:    processExitEvents(t, agent.ID, "proc-1"),
 				ExpiresAt: sql.NullTime{Time: wakeupTestSlot, Valid: true},
-			})
+			}, processExitEvents(t, agent.ID, "proc-1")...)
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			conn := processTestConn(t, worker.server, chat, agent)
 			conn.EXPECT().ProcessOutput(gomock.Any(), "proc-1", nil).
@@ -527,13 +527,11 @@ func processTestConn(t *testing.T, server *Server, chat database.Chat, agent dat
 	return conn
 }
 
-func processExitEvents(t *testing.T, agentID uuid.UUID, processIDs ...string) json.RawMessage {
+func processExitEvents(t *testing.T, agentID uuid.UUID, processIDs ...string) []wakeupEvent {
 	t.Helper()
 	events := make([]wakeupEvent, 0, len(processIDs))
 	for _, id := range processIDs {
 		events = append(events, wakeupEvent{Type: wakeupEventProcessExit, ProcessID: id, Command: "sleep 600", AgentID: agentID})
 	}
-	raw, err := json.Marshal(events)
-	require.NoError(t, err)
-	return raw
+	return events
 }

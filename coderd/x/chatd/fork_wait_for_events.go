@@ -61,13 +61,14 @@ type waitForEventsResult struct {
 	Processes   []waitForEventsProcess    `json:"processes,omitempty"`
 }
 
-// wakeupEvent is one entry of the events of an events wake-up. Type names
-// what the worker waits for; entries of other types are ignored. A child_done
+// wakeupEvent is what one watch of an events wake-up waits for, decoded from
+// its row by watchEvent. Type names what the worker waits for. A child_done
 // entry sets ChatID, and a process_exit entry sets ProcessID, Command and
 // AgentID, the workspace agent that runs the process, and with an output
 // pattern also the Output fields. A pull_request entry
 // sets the other fields: Since is when the watch started, and HeadSHA and
-// ChecksState are the baseline at that time.
+// ChecksState are the baseline at that time. The fields without a column of
+// their own are the spec of the row.
 type wakeupEvent struct {
 	Type        string    `json:"type"`
 	ChatID      uuid.UUID `json:"chat_id,omitzero"`
@@ -89,6 +90,73 @@ type wakeupEvent struct {
 	OutputPattern         string `json:"output_pattern,omitempty"`
 	OutputCooldownSeconds int    `json:"output_cooldown_seconds,omitempty"`
 	OutputMaxEvents       int    `json:"output_max_events,omitempty"`
+	// OutputCursor is the output position after the lines that earlier
+	// messages of the watch covered.
+	OutputCursor int `json:"output_cursor,omitempty"`
+}
+
+// watchKinds maps the type of a wakeupEvent to the kind of its watch row.
+var watchKinds = map[string]forkdb.ChatWakeupWatchKind{
+	wakeupEventChildDone:   forkdb.ChatWakeupWatchKindChildDone,
+	wakeupEventProcessExit: forkdb.ChatWakeupWatchKindProcess,
+	wakeupEventPullRequest: forkdb.ChatWakeupWatchKindPullRequest,
+}
+
+// insertWakeupWatches inserts one watch row of wakeup per event, in order.
+func insertWakeupWatches(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, events []wakeupEvent) error {
+	for i, event := range events {
+		kind, ok := watchKinds[event.Type]
+		if !ok {
+			return xerrors.Errorf("unknown event type %q", event.Type)
+		}
+		params := forkdb.InsertChatWakeupWatchParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeup.ID,
+			Kind:      kind,
+			Ordinal:   int32(i), //nolint:gosec // A wake-up watches at most 61 entries.
+			CreatedAt: wakeup.CreatedAt,
+		}
+		switch kind {
+		case forkdb.ChatWakeupWatchKindChildDone:
+			params.ChildChatID = uuid.NullUUID{UUID: event.ChatID, Valid: true}
+		case forkdb.ChatWakeupWatchKindProcess:
+			params.ProcessID = sql.NullString{String: event.ProcessID, Valid: true}
+			params.AgentID = uuid.NullUUID{UUID: event.AgentID, Valid: event.AgentID != uuid.Nil}
+		case forkdb.ChatWakeupWatchKindPullRequest:
+			params.PullRequestUrl = sql.NullString{String: event.URL, Valid: true}
+		}
+		// The targets have columns of their own.
+		spec := event
+		spec.Type, spec.ChatID, spec.ProcessID, spec.AgentID, spec.URL = "", uuid.Nil, "", uuid.Nil, ""
+		raw, err := json.Marshal(spec)
+		if err != nil {
+			return xerrors.Errorf("encode watch spec: %w", err)
+		}
+		params.Spec = raw
+		if _, err := fdb.InsertChatWakeupWatch(ctx, params); err != nil {
+			return xerrors.Errorf("insert wake-up watch: %w", err)
+		}
+	}
+	return nil
+}
+
+// watchEvent decodes what watch waits for.
+func watchEvent(watch forkdb.ChatWakeupWatch) (wakeupEvent, error) {
+	var event wakeupEvent
+	if err := json.Unmarshal(watch.Spec, &event); err != nil {
+		return wakeupEvent{}, xerrors.Errorf("decode spec of watch %s: %w", watch.ID, err)
+	}
+	switch watch.Kind {
+	case forkdb.ChatWakeupWatchKindChildDone:
+		event.Type, event.ChatID = wakeupEventChildDone, watch.ChildChatID.UUID
+	case forkdb.ChatWakeupWatchKindProcess:
+		event.Type, event.ProcessID, event.AgentID = wakeupEventProcessExit, watch.ProcessID.String, watch.AgentID.UUID
+	case forkdb.ChatWakeupWatchKindPullRequest:
+		event.Type, event.URL = wakeupEventPullRequest, watch.PullRequestUrl.String
+	default:
+		return wakeupEvent{}, xerrors.Errorf("watch %s has unknown kind %q", watch.ID, watch.Kind)
+	}
+	return event, nil
 }
 
 // waitForEventsTool returns the wait_for_events tool, which creates an events
@@ -209,15 +277,27 @@ func (p *Server) newWaitForEventsSpec(ctx context.Context, chat database.Chat, a
 		}
 		pullRequest = &event
 	}
-	return waitForEventsSpec(args.Prompt, expiresInSeconds, children, processes, pullRequest)
+	return waitForEventsSpec(args.Prompt, expiresInSeconds, children, processes, pullRequest), nil
 }
 
 // waitForEventsResponse describes wakeup with the current state of the
-// children its events watch and the baseline of its pull request.
+// children it watches and the baseline of its pull request.
 func (p *Server) waitForEventsResponse(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup) (waitForEventsResult, error) {
-	var events []wakeupEvent
-	if err := json.Unmarshal(wakeup.Events, &events); err != nil {
-		return waitForEventsResult{}, xerrors.Errorf("decode events: %w", err)
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return waitForEventsResult{}, xerrors.Errorf("fork queries: %w", err)
+	}
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
+	if err != nil {
+		return waitForEventsResult{}, xerrors.Errorf("list wake-up watches: %w", err)
+	}
+	events := make([]wakeupEvent, 0, len(watches))
+	for _, watch := range watches {
+		event, err := watchEvent(watch)
+		if err != nil {
+			return waitForEventsResult{}, err
+		}
+		events = append(events, event)
 	}
 	rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
 		ParentIds: []uuid.UUID{chat.ID},
@@ -288,13 +368,13 @@ func (p *Server) waitForEventsChildren(ctx context.Context, chat database.Chat, 
 	}
 	// A child that an active wake-up still watches would otherwise wake
 	// the chat once per wake-up.
-	watching, err := p.watchedRunKeys(ctx, chat)
+	watching, err := p.openWatches(ctx, chat)
 	if err != nil {
 		return nil, err
 	}
 	var watchedBy []string
 	watched = slices.DeleteFunc(watched, func(child database.Chat) bool {
-		wakeupID, ok := watching[childDoneRunKey(child.ID)]
+		wakeupID, ok := watching.children[child.ID]
 		if ok && !slices.Contains(watchedBy, wakeupID.String()) {
 			watchedBy = append(watchedBy, wakeupID.String())
 		}
@@ -327,9 +407,9 @@ func waitForEventsExpiry(args waitForEventsArgs) (int, error) {
 }
 
 // waitForEventsSpec maps a wait_for_events call to the spec of an events
-// wake-up with one child_done event per child, then processes, then
+// wake-up with one child_done watch per child, then processes, then
 // pullRequest if set.
-func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.Chat, processes []wakeupEvent, pullRequest *wakeupEvent) (wakeupSpec, error) {
+func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.Chat, processes []wakeupEvent, pullRequest *wakeupEvent) wakeupSpec {
 	spec := wakeupSpec{
 		source:           wakeupSourceEvents,
 		kind:             forkdb.ChatWakeupKindEvents,
@@ -350,40 +430,33 @@ func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.
 	if pullRequest != nil {
 		events = append(events, *pullRequest)
 	}
-	raw, err := json.Marshal(events)
-	if err != nil {
-		return wakeupSpec{}, xerrors.Errorf("encode events: %w", err)
-	}
-	spec.events = raw
-	return spec, nil
+	spec.events = events
+	return spec
 }
 
-// deliverEventsWakeup sends one message for the first watched child that is
-// done, process that exited or is gone, or pull request with new activity,
-// that has no run yet, and completes the wake-up once every watched entry has
-// a run or is gone. deliverWakeup calls it only for an idle chat, so the next
-// entry is delivered on a later tick, after the turn this one starts.
+// deliverEventsWakeup sends one message for the first open watch whose child
+// is done, process exited or is gone, or pull request has new activity, and
+// completes the wake-up once every watch is delivered or gone. deliverWakeup
+// calls it only for an idle chat, so the next watch is delivered on a later
+// tick, after the turn this one starts.
 func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) error {
-	var events []wakeupEvent
-	if err := json.Unmarshal(wakeup.Events, &events); err != nil {
-		p.logger.Warn(ctx, "chat wake-up has invalid events",
-			slog.F("wakeup_id", wakeup.ID),
-			slog.Error(err),
-		)
-		return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
-	}
-	rows, waiting, err := p.childrenSnapshot(ctx, chat)
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
 	if err != nil {
-		return err
+		return xerrors.Errorf("list wake-up watches: %w", err)
 	}
-	keys, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
+	// The child_done watches whose child is done, read in one statement, so
+	// a child that resumes or starts waiting meanwhile cannot pass for done.
+	ready, err := fdb.ListReadyChatWakeupWatches(ctx, forkdb.ListReadyChatWakeupWatchesParams{
+		WakeupID:   uuid.NullUUID{UUID: wakeup.ID, Valid: true},
+		LimitCount: int32(len(watches)), //nolint:gosec // A wake-up watches at most 61 entries.
+	})
 	if err != nil {
-		return xerrors.Errorf("list wake-up runs: %w", err)
+		return xerrors.Errorf("list ready wake-up watches: %w", err)
 	}
 
-	// The entry this tick delivers.
+	// The watch this tick delivers.
 	var next *wakeupDelivery
-	// Watched entries, other than next, that still need a run.
+	// Open watches, other than next, that still need a delivery.
 	pending := 0
 	// Whether one of them is a pull request, which is polled less often.
 	pullRequestPending := false
@@ -391,43 +464,53 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	processErrors := 0
 	var conns processConns
 	defer conns.release()
-	// A final poll that runs well after the expiry leaves out the entries
-	// that may have happened after it. A child's status has no time it
-	// became done, so it leaves out the children updated after the expiry:
-	// a status change updates the chat, so a child last updated by the
-	// expiry was done by then. It leaves out the processes that exited, or
-	// whose workspace stopped or was rebuilt, after the expiry. An entry
+	// A final poll that runs well after the expiry leaves out the watches
+	// whose event may have happened after it. A child's status has no time
+	// it became done, so it leaves out the children updated after the
+	// expiry: a status change updates the chat, so a child last updated by
+	// the expiry was done by then. It leaves out the processes that exited,
+	// or whose workspace stopped or was rebuilt, after the expiry. A watch
 	// whose send failed happened before the cutoff, so a retry still
 	// delivers it.
 	lateFinalPoll := eventsFinalPoll(wakeup, now) && now.After(wakeup.ExpiresAt.Time.Add(wakeupPollInterval))
-	for _, event := range events {
-		switch event.Type {
-		case wakeupEventChildDone:
-			if slices.Contains(keys, childDoneRunKey(event.ChatID)) {
-				continue
-			}
-			index := slices.IndexFunc(rows, func(row database.GetChildChatsByParentIDsRow) bool { return row.Chat.ID == event.ChatID })
-			if index < 0 {
-				// A child that is gone has nothing to report.
-				continue
-			}
-			child := rows[index].Chat
-			cutOff := lateFinalPoll && child.UpdatedAt.After(wakeup.ExpiresAt.Time) &&
-				!slices.Contains(keys, failedRunKey(childDoneRunKey(child.ID)))
-			if next == nil && !cutOff && childDone(child, waiting) {
-				next = &wakeupDelivery{
-					text:   fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, child.Title, child.ID, child.Status),
-					runKey: childDoneRunKey(child.ID),
+	for _, watch := range watches {
+		if watch.DeliveredAt.Valid {
+			continue
+		}
+		event, err := watchEvent(watch)
+		if err != nil {
+			p.logger.Warn(ctx, "chat wake-up has an invalid watch",
+				slog.F("wakeup_id", wakeup.ID),
+				slog.Error(err),
+			)
+			return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusPaused, reason: "invalid_events"})
+		}
+		switch watch.Kind {
+		case forkdb.ChatWakeupWatchKindChildDone:
+			done := slices.ContainsFunc(ready, func(r forkdb.ChatWakeupWatch) bool { return r.ID == watch.ID })
+			if next == nil && done {
+				child, err := p.db.GetChatByID(ctx, event.ChatID)
+				if errors.Is(err, sql.ErrNoRows) {
+					// A child that is gone has nothing to report.
+					continue
 				}
-				continue
+				if err != nil {
+					return xerrors.Errorf("get child agent: %w", err)
+				}
+				cutOff := lateFinalPoll && child.UpdatedAt.After(wakeup.ExpiresAt.Time) && !watch.FailedAt.Valid
+				if !cutOff {
+					next = &wakeupDelivery{
+						text:  fmt.Sprintf("%s\n\nChild agent %q (%s) is done with status %s.", wakeup.Prompt, child.Title, child.ID, child.Status),
+						watch: &watch,
+						done:  true,
+					}
+					continue
+				}
 			}
 			pending++
-		case wakeupEventPullRequest:
-			if slices.Contains(keys, pullRequestRunKey(event.URL)) {
-				continue
-			}
-			// At most one read per tick: a later entry waits until next
-			// is delivered.
+		case forkdb.ChatWakeupWatchKindPullRequest:
+			// At most one read per tick: a later watch waits until next is
+			// delivered.
 			if next == nil {
 				// The worker delivers its claimed batch one by one under
 				// one lease, so a read that may stall starts only while
@@ -442,31 +525,29 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				}
 				if summary != "" {
 					next = &wakeupDelivery{
-						text:   wakeup.Prompt + "\n\n" + summary,
-						runKey: pullRequestRunKey(event.URL),
+						text:  wakeup.Prompt + "\n\n" + summary,
+						watch: &watch,
+						done:  true,
 					}
 					continue
 				}
 			}
 			pending++
 			pullRequestPending = true
-		case wakeupEventProcessExit:
-			if slices.Contains(keys, processExitRunKey(event.ProcessID)) {
-				continue
-			}
+		case forkdb.ChatWakeupWatchKindProcess:
 			if next == nil {
 				if wakeup.LeaseExpiresAt.Valid && now.Add(2*processReadTimeout).After(wakeup.LeaseExpiresAt.Time) {
 					return p.finishWakeupClaim(ctx, fdb, chat, wakeup, now, wakeupStaysDue(wakeup))
 				}
 				var endedBy time.Time
-				if lateFinalPoll && !slices.Contains(keys, failedRunKey(processExitRunKey(event.ProcessID))) {
+				if lateFinalPoll && !watch.FailedAt.Valid {
 					endedBy = wakeup.ExpiresAt.Time
 				}
 				var lines *processLines
-				if due, ok := processLinesDue(event, keys, wakeup, now); ok {
+				if due, ok := processLinesDue(event, watch.Deliveries, wakeup, now); ok {
 					lines = &due
 				}
-				text, runKey, err := p.processWakeupText(ctx, chat, event, endedBy, lines, &conns)
+				message, err := p.processWakeupText(ctx, chat, event, endedBy, lines, &conns)
 				if err != nil {
 					p.logger.Warn(ctx, "chat wake-up could not read its background process",
 						slog.F("wakeup_id", wakeup.ID),
@@ -476,14 +557,16 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 					)
 					processErrors++
 				}
-				if text != "" {
+				if message.text != "" {
 					next = &wakeupDelivery{
-						text:   wakeup.Prompt + "\n\n" + text,
-						runKey: runKey,
+						text:      wakeup.Prompt + "\n\n" + message.text,
+						watch:     &watch,
+						done:      message.exited,
+						specPatch: message.specPatch,
 					}
 					// A process that printed matching lines still runs, so
 					// it stays pending.
-					if runKey == processExitRunKey(event.ProcessID) {
+					if message.exited {
 						continue
 					}
 				}
@@ -511,13 +594,12 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		return err
 	}
 	delivery := *next
+	delivery.runKey = watchRunKey(*delivery.watch)
 	delivery.finish = func(admittedAt time.Time) wakeupFinish {
 		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, interval)
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
-	// A failed send keeps the entry's own key free, so a later poll retries
-	// it. Its failures share one run, which only the first one records.
-	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, failedRunKey(delivery.runKey), err)
+	return p.finishWakeupSend(ctx, fdb, chat, wakeup, now, delivery, err)
 }
 
 // eventsWakeupFinish completes an events wake-up when no watched entry still
@@ -574,22 +656,23 @@ func eventsFinalRetry(wakeup forkdb.ChatWakeup, now, next time.Time) (wakeupFini
 	return wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: next, Valid: true}}, true
 }
 
-// failedRunKey names the run that the failed sends of the entry with runKey
-// share, so they leave runKey free for a retry.
-func failedRunKey(runKey string) string {
-	return runKey + ":failed"
+// watchRunKey names the run that the next delivery of watch records, which
+// counts it against the wake-up caps. A watch delivers once per count.
+func watchRunKey(watch forkdb.ChatWakeupWatch) string {
+	return fmt.Sprintf("watch:%s:%d", watch.ID, watch.Deliveries)
 }
 
-// childDoneRunKey names the run of a child_done event, so each child wakes
-// the chat once.
-func childDoneRunKey(childID uuid.UUID) string {
-	return wakeupEventChildDone + ":" + childID.String()
+// failedRunKey names the run that the failed sends of the delivery with
+// runKey share, so they leave runKey free for a retry.
+func failedRunKey(runKey string) string {
+	return runKey + ":failed"
 }
 
 // childDone reports whether a child agent finished its work: it is archived,
 // or it settled in a status other than running, interrupting or paused (the
 // rule of checkSubagentCompletion) and is not in waiting, the children that
 // wait for events of their own children or for an answer.
+// ListReadyChatWakeupWatches applies the same rule.
 func childDone(child database.Chat, waiting map[uuid.UUID]bool) bool {
 	if child.Archived {
 		return true
@@ -618,7 +701,7 @@ func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]da
 		if err != nil {
 			return xerrors.Errorf("list child agents: %w", err)
 		}
-		ids, err := ftx.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
+		ids, err := ftx.ListChildChatIDsWithOpenWakeupWatches(ctx, chat.ID)
 		if err != nil {
 			return xerrors.Errorf("list wake-ups of child agents: %w", err)
 		}
@@ -647,53 +730,40 @@ func (p *Server) childrenSnapshot(ctx context.Context, chat database.Chat) ([]da
 	return rows, waiting, nil
 }
 
-// watchedRunKeys maps the run key of each entry that an active events
-// wake-up of chat watches and has not delivered yet to the ID of that
-// wake-up. An expired wake-up stays active while its chat is busy, and its
-// final poll still delivers what happened by the expiry. A new watch leaves
-// out the children that are done, so the expired wake-up gives up its
-// children, but a new watch takes an exited process too, so the expired
-// wake-up keeps its processes.
-func (p *Server) watchedRunKeys(ctx context.Context, chat database.Chat) (map[string]uuid.UUID, error) {
+// openWatches maps the children and the processes that an open watch of an
+// active wake-up of chat waits for to the ID of that wake-up.
+type openWatches struct {
+	children  map[uuid.UUID]uuid.UUID
+	processes map[string]uuid.UUID
+}
+
+// openWatches lists what the active wake-ups of chat still watch. An expired
+// wake-up stays active while its chat is busy, and its final poll still
+// delivers what happened by the expiry. A new watch leaves out the children
+// that are done, so the expired wake-up gives up its children, but a new
+// watch takes an exited process too, so the expired wake-up keeps its
+// processes.
+func (p *Server) openWatches(ctx context.Context, chat database.Chat) (openWatches, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
-		return nil, xerrors.Errorf("fork queries: %w", err)
+		return openWatches{}, xerrors.Errorf("fork queries: %w", err)
 	}
-	wakeups, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
+	rows, err := fdb.ListOpenChatWakeupWatchesByChatID(ctx, chat.ID)
 	if err != nil {
-		return nil, xerrors.Errorf("list chat wake-ups: %w", err)
+		return openWatches{}, xerrors.Errorf("list open wake-up watches: %w", err)
 	}
 	now := p.clock.Now()
-	watching := make(map[string]uuid.UUID)
-	for _, wakeup := range wakeups {
-		if wakeup.Kind != forkdb.ChatWakeupKindEvents || wakeup.Status != forkdb.ChatWakeupStatusActive {
-			continue
-		}
-		expired := wakeup.ExpiresAt.Valid && !wakeup.ExpiresAt.Time.After(now)
-		var events []wakeupEvent
-		if err := json.Unmarshal(wakeup.Events, &events); err != nil {
-			continue
-		}
-		keys, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
-		if err != nil {
-			return nil, xerrors.Errorf("list wake-up runs: %w", err)
-		}
-		for _, event := range events {
-			var key string
-			switch event.Type {
-			case wakeupEventChildDone:
-				if expired {
-					continue
-				}
-				key = childDoneRunKey(event.ChatID)
-			case wakeupEventProcessExit:
-				key = processExitRunKey(event.ProcessID)
-			default:
+	watching := openWatches{children: map[uuid.UUID]uuid.UUID{}, processes: map[string]uuid.UUID{}}
+	for _, row := range rows {
+		watch := row.ChatWakeupWatch
+		switch watch.Kind {
+		case forkdb.ChatWakeupWatchKindChildDone:
+			if row.WakeupExpiresAt.Valid && !row.WakeupExpiresAt.Time.After(now) {
 				continue
 			}
-			if !slices.Contains(keys, key) {
-				watching[key] = wakeup.ID
-			}
+			watching.children[watch.ChildChatID.UUID] = watch.WakeupID
+		case forkdb.ChatWakeupWatchKindProcess:
+			watching.processes[watch.ProcessID.String] = watch.WakeupID
 		}
 	}
 	return watching, nil

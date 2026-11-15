@@ -165,6 +165,9 @@ type Querier interface {
 	// organization come from the wake-up, so a run always counts against the
 	// chat that owns it.
 	InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupRunParams) (ChatWakeupRun, error)
+	// The chat and organization come from the wake-up. Returns no row when the
+	// wake-up is gone.
+	InsertChatWakeupWatch(ctx context.Context, arg InsertChatWakeupWatchParams) (ChatWakeupWatch, error)
 	InsertOrganizationAgentDefinition(ctx context.Context, arg InsertOrganizationAgentDefinitionParams) (AgentDefinition, error)
 	InsertOrganizationSavedWorkflow(ctx context.Context, arg InsertOrganizationSavedWorkflowParams) (SavedWorkflow, error)
 	InsertPlugin(ctx context.Context, arg InsertPluginParams) (Plugin, error)
@@ -188,25 +191,46 @@ type Querier interface {
 	// left out, because the history tool skips them.
 	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
-	// A failed send of an events entry records its run under a key of its own,
-	// so it never blocks a later run of the entry.
-	ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error)
+	ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeupWatch, error)
+	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
-	// Lists the children of @parent_chat_id that wait for events of their own,
-	// so a caller checks every child in one read.
-	ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
+	// Lists the children of @parent_chat_id that wait for events of their own:
+	// they have an open watch on an active wake-up. ListReadyChatWakeupWatches
+	// uses the same rule.
+	ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
+	// Lists the watches of the active wake-ups of @chat_id that are not
+	// delivered, so a new watch can leave out what an earlier one still watches.
+	ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ListOpenChatWakeupWatchesByChatIDRow, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	ListOrganizationSavedWorkflowMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationSavedWorkflowMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
 	// @root_chat_id, oldest first.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
+	// Lists the open watches of active wake-ups that have something to deliver
+	// to an idle chat: an event that someone observed, or a child agent that is
+	// done. A child is done when it is archived, or when it settled in a status
+	// other than running, interrupting or paused and waits neither for events of
+	// its own (an open watch on an active wake-up) nor for an answer to its
+	// question. A deleted child deletes its watch, so it never shows up here.
+	// @chat_id and @wakeup_id narrow the list when set.
+	ListReadyChatWakeupWatches(ctx context.Context, arg ListReadyChatWakeupWatchesParams) ([]ChatWakeupWatch, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
 	ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUserSavedWorkflowMetadataParams) ([]ListUserSavedWorkflowMetadataRow, error)
 	// Locks a chat row FOR NO KEY UPDATE. Unlike FOR UPDATE, the lock does not
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Records a message that the watch sent. Run it in the transaction that
+	// inserts the message, after the wake-up row is locked. @deliveries is the
+	// count the caller read: no row means another delivery of the watch won,
+	// or the watch is done. @done marks the watch delivered, and @spec_patch
+	// merges into its spec. A delivery consumes the fired event, so an open
+	// watch is not ready again until a new event fires.
+	MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChatWakeupWatchDeliveredParams) (ChatWakeupWatch, error)
+	// Records that a send of the watch failed. The first failure since the last
+	// delivery keeps its time.
+	MarkChatWakeupWatchFailed(ctx context.Context, arg MarkChatWakeupWatchFailedParams) error
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)

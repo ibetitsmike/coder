@@ -37,6 +37,15 @@ import (
 type generationPrepareInput struct {
 	Chat     database.Chat
 	Messages []database.ChatMessage
+	// PromptRows is the fork's shared per-step load of the prompt history
+	// (GetChatMessagesForPromptByChatID), returned by syncForkContext. It is
+	// nil unless a fork experiment that reads prompt rows is enabled. When
+	// set, buildTurnEnvironment uses it instead of loading its own, so a
+	// step with nothing to commit loads the history once. It is safe to use
+	// here because syncForkContext returned it only after committing no
+	// fork context message: nothing else inserts prompt rows between that
+	// return and this prepare in the same step.
+	PromptRows []database.ChatMessage
 	// RecordMCPConnectSummaries receives the preparation's per-server
 	// MCP connect outcomes as soon as the connect phase completes,
 	// with the debug context needed to create the run when no action
@@ -637,17 +646,20 @@ func (s *taskStarter) runGenerationStep(
 			return input, true, nil
 		}
 	}
-	if synced, err := s.syncForkContext(ctx, machine, input, chat, messages); err != nil {
-		return input, false, err
-	} else if synced.Chat.ID != uuid.Nil {
-		input.HistoryVersion = synced.Chat.HistoryVersion
-		return input, true, nil
-	}
 	prepareInput := generationPrepareInput{
 		Chat:                      chat,
 		Messages:                  messages,
 		RecordMCPConnectSummaries: input.DebugTurn.RecordMCPConnectSummaries,
 	}
+	synced, promptRows, err := s.syncForkContext(ctx, machine, input, chat, messages)
+	if err != nil {
+		return input, false, err
+	}
+	if synced.Chat.ID != uuid.Nil {
+		input.HistoryVersion = synced.Chat.HistoryVersion
+		return input, true, nil
+	}
+	prepareInput.PromptRows = promptRows
 	prepareCtx, prepareSpan := s.server.stages.Start(ctx, chatloop.StagePrepare)
 	prepared, err := retryGenerationPhase(prepareCtx, s, "prepare", func() (turnEnvironment, error) {
 		return s.server.buildTurnEnvironment(prepareCtx, prepareInput)
