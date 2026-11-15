@@ -58,12 +58,32 @@ const mockStoppedRunDetail: WorkflowRunDetail = {
 	),
 };
 
+const mockPhasedRunDetail: WorkflowRunDetail = {
+	...MockChatWorkflowRunDetail,
+	status: "running",
+	result: undefined,
+	logs: [],
+	finished_at: undefined,
+	phases: ["review", "summarize", "publish"],
+	current_phase: "summarize",
+	steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
+		...step,
+		reused: false,
+		status: index === 2 ? "running" : "reported",
+		phase: index === 2 ? "summarize" : "review",
+		finished_at: index === 2 ? undefined : step.finished_at,
+	})),
+};
+
 const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunDetail",
 	component: ForkWorkflowRunDetailView,
 	args: { run: MockChatWorkflowRunDetail, error: null, onBack: fn() },
 	parameters: {
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
+		// The stories spy on Date.now. Storybook's actions addon logs every
+		// mock call, and its log line calls Date.now, so the spy recurses.
+		actions: { disable: true },
 	},
 	beforeEach: () => {
 		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
@@ -119,6 +139,26 @@ export const Failed: Story = {
 
 export const Interrupted: Story = {
 	args: { run: mockInterruptedRunDetail },
+};
+
+/** The rail shows declared phases the run has not reached yet. */
+export const RunningWithPhases: Story = {
+	args: { run: mockPhasedRunDetail },
+};
+
+/** A run without phases renders as before, with no rail. */
+export const CompletedWithoutPhases: Story = {
+	args: {
+		run: {
+			...MockChatWorkflowRunDetail,
+			phases: [],
+			current_phase: "",
+			steps: MockChatWorkflowRunDetail.steps.map((step) => ({
+				...step,
+				phase: "",
+			})),
+		},
+	},
 };
 
 export const Loading: Story = {

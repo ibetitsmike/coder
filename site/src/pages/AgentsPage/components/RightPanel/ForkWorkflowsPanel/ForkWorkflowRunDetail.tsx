@@ -17,6 +17,7 @@ import { toast } from "#/components/Toaster/toast";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
+import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
@@ -148,7 +149,20 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			{run.error !== "" && (
 				<ForkWorkflowLongText label="Error" text={run.error} isError />
 			)}
-			{steps.length > 0 && <ForkWorkflowSteps steps={steps} />}
+			{steps.length > 0 && (
+				<ForkWorkflowSteps
+					steps={steps}
+					phases={run.phases}
+					currentPhase={run.current_phase}
+				/>
+			)}
+			{steps.length === 0 && run.phases.length > 0 && (
+				<ForkWorkflowPhaseRail
+					phases={run.phases}
+					currentPhase={run.current_phase}
+					steps={steps}
+				/>
+			)}
 			{run.result !== undefined && (
 				<ForkWorkflowLongText
 					label="Result"

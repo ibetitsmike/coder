@@ -7,8 +7,10 @@ import {
 	MockForkWorkflowRunId,
 } from "#/testHelpers/forkWorkflows";
 import {
+	forkWorkflowPhaseState,
 	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
+	forkWorkflowStepPhases,
 	forkWorkflowStepProgress,
 	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
@@ -24,12 +26,15 @@ describe("parseForkWorkflowRunSnapshot", () => {
 			status: "completed",
 			result: MockForkWorkflowCompletedResult.result,
 			error: "",
+			phases: ["review", "summarize"],
+			currentPhase: "summarize",
 			steps: MockForkWorkflowCompletedResult.steps.map((step) => ({
 				chatId: step.chat_id,
 				title: step.title,
 				status: step.status,
 				reused: step.reused === true,
 				error: "",
+				phase: step.phase,
 			})),
 			logs: ["2 reviews"],
 		});
@@ -57,6 +62,58 @@ describe("forkWorkflowStepProgress", () => {
 		expect(forkWorkflowStepProgress(snapshot?.steps ?? [])).toBe(
 			"1 of 2 steps reported",
 		);
+	});
+});
+
+describe("phases", () => {
+	it("defaults to no phases when the tool result omits them", () => {
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			steps: [{ chat_id: "a", status: "running" }],
+		});
+		expect(snapshot?.phases).toEqual([]);
+		expect(snapshot?.currentPhase).toBe("");
+		expect(snapshot?.steps[0]?.phase).toBe("");
+	});
+
+	it("drops non-string and empty names from a phase list", () => {
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["review", "", 42, "summarize"],
+			steps: [],
+		});
+		expect(snapshot?.phases).toEqual(["review", "summarize"]);
+	});
+
+	it("groups steps by phase in step order", () => {
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["review", "summarize", "publish"],
+			steps: [
+				{ chat_id: "a", status: "reported" },
+				{ chat_id: "b", status: "running", phase: "review" },
+				{ chat_id: "c", status: "reported", phase: "summarize" },
+			],
+		});
+		const steps = snapshot?.steps ?? [];
+		expect(forkWorkflowStepPhases(steps).map((group) => group.phase)).toEqual([
+			"",
+			"review",
+			"summarize",
+		]);
+		expect(forkWorkflowPhaseState(steps.filter((s) => s.phase === ""))).toBe(
+			"done",
+		);
+		expect(
+			forkWorkflowPhaseState(steps.filter((s) => s.phase === "review")),
+		).toBe("running");
+		expect(
+			forkWorkflowPhaseState(steps.filter((s) => s.phase === "summarize")),
+		).toBe("done");
+		expect(forkWorkflowPhaseState([])).toBe("pending");
 	});
 });
 

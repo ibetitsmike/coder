@@ -12,6 +12,7 @@ import {
 } from "#/api/queries/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
+import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import {
@@ -188,8 +189,21 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 					<ForkWorkflowLongText label="Error" text={runError} isError />
 				)}
 				{snapshot && snapshot.steps.length > 0 && (
-					<ForkWorkflowSteps steps={snapshot.steps} />
+					<ForkWorkflowSteps
+						steps={snapshot.steps}
+						phases={snapshot.phases}
+						currentPhase={snapshot.currentPhase}
+					/>
 				)}
+				{snapshot &&
+					snapshot.steps.length === 0 &&
+					snapshot.phases.length > 0 && (
+						<ForkWorkflowPhaseRail
+							phases={snapshot.phases}
+							currentPhase={snapshot.currentPhase}
+							steps={snapshot.steps}
+						/>
+					)}
 				{isResume && snapshot?.steps.length === 0 && (
 					<div className="mt-1.5 text-xs text-content-secondary">
 						This run resumed. Reused steps show when the run is awaited.

@@ -102,6 +102,38 @@ export const Resumed: Story = {
 	play: expand,
 };
 
+/**
+ * A phase the script has not set yet stays pending, and a declared phase
+ * that no step reached shows as pending too.
+ */
+export const RunningWithPendingPhases: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowRunningResult,
+			phases: ["review", "summarize", "publish"],
+		},
+	},
+	play: expand,
+};
+
+/** A run without phases renders as before, with no rail. */
+export const RunningWithoutPhases: Story = {
+	args: {
+		result: {
+			run_id: MockForkWorkflowRunId,
+			status: "running",
+			steps: [
+				{
+					chat_id: "aa111111-1111-4111-8111-111111111111",
+					title: "coderd/chats.go",
+					status: "reported",
+				},
+			],
+		},
+	},
+	play: expand,
+};
+
 export const StillRunning: Story = {
 	args: { result: MockForkWorkflowRunningResult },
 	play: expand,

@@ -12,6 +12,7 @@ export type ForkWorkflowStep = {
 	status: string;
 	reused: boolean;
 	error: string;
+	phase: string;
 };
 
 /** A run as run_workflow and await_workflow report it. */
@@ -21,6 +22,12 @@ export type ForkWorkflowRunSnapshot = {
 	/** What main(args) returned; undefined until the run completes. */
 	result: unknown;
 	error: string;
+	/**
+	 * Phases in display order, and the phase the script set last. Both are
+	 * empty for a run whose script uses no phases.
+	 */
+	phases: readonly string[];
+	currentPhase: string;
 	steps: readonly ForkWorkflowStep[];
 	logs: readonly string[];
 };
@@ -75,6 +82,7 @@ const parseStep = (value: unknown): ForkWorkflowStep | null => {
 		status: asString(record.status),
 		reused: record.reused === true,
 		error: asString(record.error),
+		phase: asString(record.phase),
 	};
 };
 
@@ -92,11 +100,24 @@ export const parseForkWorkflowRunSnapshot = (
 	const logs = parseArray(record.logs ?? [], (line) =>
 		typeof line === "string" ? line : null,
 	);
+	// A phase name a newer server adds still renders, so a malformed entry
+	// drops from the list instead of rejecting the run.
+	const phases: string[] = [];
+	if (Array.isArray(record?.phases)) {
+		for (const name of record.phases) {
+			const trimmed = typeof name === "string" ? name.trim() : "";
+			if (trimmed !== "" && !phases.includes(trimmed)) {
+				phases.push(trimmed);
+			}
+		}
+	}
 	return {
 		runId,
 		status,
 		result: record.result,
 		error: asString(record.error),
+		phases,
+		currentPhase: asString(record.current_phase),
 		steps,
 		logs: logs ?? [],
 	};
@@ -114,6 +135,7 @@ export const forkWorkflowRunDetailSteps = (
 			status: step.status,
 			reused: step.reused,
 			error: step.error,
+			phase: step.phase,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */
@@ -124,6 +146,8 @@ const forkWorkflowRunDetailSnapshot = (
 	status: run.status,
 	result: run.result,
 	error: run.error,
+	phases: run.phases,
+	currentPhase: run.current_phase,
 	steps: forkWorkflowRunDetailSteps(run),
 	logs: run.logs,
 });
@@ -147,6 +171,38 @@ export const mergeForkWorkflowRunDetail = (
 		),
 		logs: detail.logs.length > 0 ? detail.logs : snapshot.logs,
 	};
+};
+
+/** Sums up how far a phase got, from its steps. */
+export type ForkWorkflowPhaseState = "pending" | "running" | "done";
+
+export const forkWorkflowPhaseState = (
+	steps: readonly ForkWorkflowStep[],
+): ForkWorkflowPhaseState => {
+	if (steps.length === 0) {
+		return "pending";
+	}
+	return steps.every((step) => step.status === "reported") ? "done" : "running";
+};
+
+/**
+ * Groups a run's steps by phase, in the run's display order. Steps started
+ * before the first phase() call land in the leading "" group, which is part
+ * of the list only when such steps exist.
+ */
+export const forkWorkflowStepPhases = (
+	steps: readonly ForkWorkflowStep[],
+): readonly { phase: string; steps: readonly ForkWorkflowStep[] }[] => {
+	const groups: { phase: string; steps: ForkWorkflowStep[] }[] = [];
+	for (const step of steps) {
+		const group = groups.find((entry) => entry.phase === step.phase);
+		if (group) {
+			group.steps.push(step);
+		} else {
+			groups.push({ phase: step.phase, steps: [step] });
+		}
+	}
+	return groups;
 };
 
 /** Summarizes step progress, for example "2 of 3 steps reported". */

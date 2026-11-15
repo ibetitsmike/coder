@@ -25,16 +25,20 @@ export const MockForkWorkflowStartedResult = {
 export const MockForkWorkflowRunningResult = {
 	run_id: MockForkWorkflowRunId,
 	status: "running",
+	phases: ["review", "summarize"],
+	current_phase: "summarize",
 	steps: [
 		{
 			chat_id: "aa111111-1111-4111-8111-111111111111",
 			title: "coderd/chats.go",
 			status: "reported",
+			phase: "review",
 		},
 		{
 			chat_id: "bb222222-2222-4222-8222-222222222222",
 			title: "coderd/users.go",
 			status: "reminded",
+			phase: "review",
 		},
 	],
 };
@@ -42,6 +46,8 @@ export const MockForkWorkflowRunningResult = {
 export const MockForkWorkflowCompletedResult = {
 	run_id: MockForkWorkflowRunId,
 	status: "completed",
+	phases: ["review", "summarize"],
+	current_phase: "summarize",
 	result: {
 		text: Array.from(
 			{ length: 30 },
@@ -55,16 +61,19 @@ export const MockForkWorkflowCompletedResult = {
 			title: "coderd/chats.go",
 			status: "reported",
 			reused: true,
+			phase: "review",
 		},
 		{
 			chat_id: "bb222222-2222-4222-8222-222222222222",
 			title: "coderd/users.go",
 			status: "reported",
+			phase: "review",
 		},
 		{
 			chat_id: "cc333333-3333-4333-8333-333333333333",
 			title: "Summary",
 			status: "reported",
+			phase: "summarize",
 		},
 	],
 	logs: ["2 reviews"],
@@ -73,6 +82,8 @@ export const MockForkWorkflowCompletedResult = {
 export const MockForkWorkflowFailedResult = {
 	run_id: MockForkWorkflowRunId,
 	status: "failed",
+	phases: ["review"],
+	current_phase: "review",
 	error:
 		'step "coderd/users.go" failed: the step ended its turn twice without calling workflow_report',
 	steps: [
@@ -80,12 +91,14 @@ export const MockForkWorkflowFailedResult = {
 			chat_id: "aa111111-1111-4111-8111-111111111111",
 			title: "coderd/chats.go",
 			status: "reported",
+			phase: "review",
 		},
 		{
 			chat_id: "bb222222-2222-4222-8222-222222222222",
 			title: "coderd/users.go",
 			status: "failed",
 			error: "the step ended its turn twice without calling workflow_report",
+			phase: "review",
 		},
 	],
 };
@@ -107,6 +120,8 @@ export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
 	finished_at: "2026-11-12T10:03:20Z",
 	script: MockForkWorkflowScript,
 	logs: ["2 reviews"],
+	phases: ["review", "summarize"],
+	current_phase: "summarize",
 	steps: MockForkWorkflowCompletedResult.steps.map((step, ordinal) => ({
 		id: step.chat_id,
 		run_id: MockForkWorkflowRunId,
@@ -115,6 +130,7 @@ export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
 		reused: step.reused === true,
 		error: "",
 		ordinal,
+		phase: step.phase,
 		started_at: "2026-11-12T10:00:05Z",
 		finished_at: "2026-11-12T10:03:00Z",
 	})),
@@ -130,5 +146,7 @@ export const MockChatWorkflowRun: WorkflowRun = {
 	updated_at: MockChatWorkflowRunDetail.updated_at,
 	finished_at: MockChatWorkflowRunDetail.finished_at,
 	script_preview: MockForkWorkflowScript.slice(0, 200),
+	phases: MockChatWorkflowRunDetail.phases,
+	current_phase: MockChatWorkflowRunDetail.current_phase,
 	step_counts: { total: 3, running: 0, done: 3, failed: 0 },
 };
