@@ -296,6 +296,36 @@ func (q *Queries) GetPluginChatBindingsDue(ctx context.Context, arg GetPluginCha
 	return items, nil
 }
 
+const getPluginLeaseSummary = `-- name: GetPluginLeaseSummary :one
+SELECT
+    count(*) FILTER (WHERE enabled)::int AS enabled,
+    count(*) FILTER (
+        WHERE enabled
+            AND (
+                runner_id = $1::uuid
+                OR lease_expires_at IS NULL
+                OR lease_expires_at < now()
+            )
+    )::int AS acquirable
+FROM plugins
+`
+
+type GetPluginLeaseSummaryRow struct {
+	Enabled    int32 `db:"enabled" json:"enabled"`
+	Acquirable int32 `db:"acquirable" json:"acquirable"`
+}
+
+// Tells a replica that holds no plugin whether it has work: enabled counts
+// the enabled plugins, acquirable the ones it could lease now. It takes no
+// lock and writes nothing, so an idle replica checks it instead of
+// AcquirePluginLeases.
+func (q *Queries) GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (GetPluginLeaseSummaryRow, error) {
+	row := q.db.QueryRowContext(ctx, getPluginLeaseSummary, runnerID)
+	var i GetPluginLeaseSummaryRow
+	err := row.Scan(&i.Enabled, &i.Acquirable)
+	return i, err
+}
+
 const getPluginUserLink = `-- name: GetPluginUserLink :one
 SELECT plugin_id, external_id, user_id, active_chat_id, created_at FROM plugin_user_links WHERE plugin_id = $1 AND external_id = $2
 `
