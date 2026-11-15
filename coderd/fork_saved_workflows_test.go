@@ -95,7 +95,9 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
 			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
 			// Below the limit compact, above it as jsonb text.
-			"SpacedSchema":   {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(588)},
+			"SpacedSchema":   {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(6000)},
+			"DeepSchema":     {Name: "deep", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","x":` + strings.Repeat("[", 2000) + strings.Repeat("]", 2000) + `}`)},
+			"HugeNumber":     {Name: "huge", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","x":1e1000000}`)},
 			"NULDescription": {Name: "nul", Script: savedWorkflowScript, Description: "bad\x00description"},
 			"NULScript":      {Name: "nul", Script: savedWorkflowScript + "# \x00\n"},
 			"NULSchema":      {Name: "nul", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","title":"a\u0000b"}`)},
@@ -128,6 +130,11 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		got, err := member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
 		require.NoError(t, err)
 		require.Equal(t, updated, got)
+
+		// PostgreSQL text cannot hold a NUL; such a name is simply not found.
+		_, err = member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "tri\x00age")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_ = requireSDKError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "tri\x00age"), http.StatusNotFound)
 
 		for _, req := range []codersdk.UpdateForkSavedWorkflowRequest{
 			{},
@@ -176,11 +183,7 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 }
 
 func spacedArgsSchema(n int) json.RawMessage {
-	props := make([]string, n)
-	for i := range props {
-		props[i] = fmt.Sprintf(`"p%03d":{"type":"string"}`, i)
-	}
-	return json.RawMessage(`{"type":"object","properties":{` + strings.Join(props, ",") + `}}`)
+	return json.RawMessage(`{"type":"object","x":[` + strings.TrimSuffix(strings.Repeat("0,", n), ",") + `]}`)
 }
 
 // requireSavedWorkflowMetadata compares metadata whose args schemas the API
