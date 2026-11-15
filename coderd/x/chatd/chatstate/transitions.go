@@ -278,6 +278,9 @@ func (tx *Tx) insertMessages(messages []Message) ([]database.ChatMessage, error)
 	if err != nil {
 		return nil, xerrors.Errorf("insert messages: %w", err)
 	}
+	if err := tx.forkRetireDescendantQuestion(messages); err != nil {
+		return nil, err
+	}
 	return fromInsertedRows(inserted), nil
 }
 

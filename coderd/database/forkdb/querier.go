@@ -190,8 +190,7 @@ type Querier interface {
 	ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
 	ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]ListOrganizationAgentDefinitionMetadataRow, error)
 	// Lists the unanswered questions of the unarchived descendants of
-	// @root_chat_id, oldest first, with the pending rule of
-	// GetPendingChatDescendantQuestion.
+	// @root_chat_id, oldest first.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
@@ -203,6 +202,16 @@ type Querier interface {
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// Marks the pending question of @chat_id answered by the user messages that
+	// the transaction inserts into the chat's history. @compressed is true when
+	// one of them is a context boundary, a clear or a compaction, which retires
+	// any question. @visible is true when one is user-visible, which answers a
+	// question that is not secret; it fails closed like
+	// ChatDescendantQuestion.Secret. @answers holds the text of the visible
+	// messages' text parts after chatstate.QuestionAnswerPrefix. Only an answer
+	// that names the question's tool call answers a secret question, and
+	// answered_by is secret_answer only for a secret question.
+	RetireChatDescendantQuestion(ctx context.Context, arg RetireChatDescendantQuestionParams) (int64, error)
 	// SearchChatHistory returns the newest messages between after_id and
 	// before_id, with before_id 0 for no upper bound, whose content holds
 	// needle. The caller lowercases needle and escapes it as JSON string text,
@@ -240,6 +249,8 @@ type Querier interface {
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
 	// and applies the NullRawMessage override.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
+	// A new question of the chat replaces the old one and is pending. The root
+	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)
 	UpsertChatOrganizationSubagentLimits(ctx context.Context, arg UpsertChatOrganizationSubagentLimitsParams) (ChatOrganizationSubagentLimit, error)
 	UpsertChatOrganizationTokenBudget(ctx context.Context, arg UpsertChatOrganizationTokenBudgetParams) (ChatOrganizationTokenBudget, error)
