@@ -7,7 +7,6 @@ package chatd
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"math"
 	"strings"
 	"time"
@@ -45,7 +44,7 @@ type wakeupSpec struct {
 	delaySeconds     int
 	intervalSeconds  int
 	cron             string
-	events           json.RawMessage
+	events           []wakeupEvent
 	timezone         string
 	maxRuns          int
 	expiresInSeconds int
@@ -185,9 +184,8 @@ func (spec wakeupSpec) validate() (wakeupSpec, error) {
 			return wakeupSpec{}, xerrors.Errorf("cron must have 5 fields (minute hour day-of-month month day-of-week), got %q", spec.cron)
 		}
 	case forkdb.ChatWakeupKindEvents:
-		var events []json.RawMessage
-		if err := json.Unmarshal(spec.events, &events); err != nil || len(events) == 0 {
-			return wakeupSpec{}, xerrors.New("events must be a non-empty JSON array")
+		if len(spec.events) == 0 {
+			return wakeupSpec{}, xerrors.New("an events wake-up needs at least one event")
 		}
 	default:
 		return wakeupSpec{}, xerrors.Errorf("unsupported wake-up kind %q", spec.kind)
@@ -249,31 +247,39 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 	if err != nil {
 		return forkdb.ChatWakeup{}, err
 	}
-	events := json.RawMessage(`[]`)
-	if spec.kind == forkdb.ChatWakeupKindEvents {
-		events = spec.events
-	}
 
-	wakeup, err := fdb.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
-		ID:              id,
-		ChatID:          chat.ID,
-		CreatedBy:       createdBy,
-		Source:          spec.source,
-		Kind:            spec.kind,
-		Prompt:          spec.prompt,
-		IntervalSeconds: draft.IntervalSeconds,
-		Cron:            draft.Cron,
-		Timezone:        spec.timezone,
-		Events:          events,
-		Status:          forkdb.ChatWakeupStatusActive,
-		NextRunAt:       sql.NullTime{Time: next, Valid: true},
-		ExpiresAt:       draft.ExpiresAt,
-		MaxRuns:         draft.MaxRuns,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	})
+	// The wake-up and its watches commit together. A nested InTx reuses the
+	// transaction of store.
+	var wakeup forkdb.ChatWakeup
+	err = forkdb.InTx(store, func(_ database.Store, ftx forkdb.Store) error {
+		var err error
+		wakeup, err = ftx.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
+			ID:              id,
+			ChatID:          chat.ID,
+			CreatedBy:       createdBy,
+			Source:          spec.source,
+			Kind:            spec.kind,
+			Prompt:          spec.prompt,
+			IntervalSeconds: draft.IntervalSeconds,
+			Cron:            draft.Cron,
+			Timezone:        spec.timezone,
+			Status:          forkdb.ChatWakeupStatusActive,
+			NextRunAt:       sql.NullTime{Time: next, Valid: true},
+			ExpiresAt:       draft.ExpiresAt,
+			MaxRuns:         draft.MaxRuns,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+		if err != nil {
+			return xerrors.Errorf("create chat wake-up: %w", err)
+		}
+		if spec.kind == forkdb.ChatWakeupKindEvents {
+			return insertWakeupWatches(ctx, ftx, wakeup, spec.events)
+		}
+		return nil
+	}, nil)
 	if err != nil {
-		return forkdb.ChatWakeup{}, xerrors.Errorf("create chat wake-up: %w", err)
+		return forkdb.ChatWakeup{}, err
 	}
 	return wakeup, nil
 }

@@ -512,6 +512,46 @@ func (f forkQueryMetricsStore) InsertChatWakeupRun(ctx context.Context, arg fork
 	return f.s.InsertChatWakeupRun(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) InsertChatWakeupWatch(ctx context.Context, arg forkdb.InsertChatWakeupWatchParams) (forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "InsertChatWakeupWatch", time.Now())
+	return f.s.InsertChatWakeupWatch(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListChatWakeupWatchesByChatID", time.Now())
+	return f.s.ListChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListChatWakeupWatchesByWakeupID", time.Now())
+	return f.s.ListChatWakeupWatchesByWakeupID(ctx, wakeupID)
+}
+
+func (f forkQueryMetricsStore) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "ListChildChatIDsWithOpenWakeupWatches", time.Now())
+	return f.s.ListChildChatIDsWithOpenWakeupWatches(ctx, parentChatID)
+}
+
+func (f forkQueryMetricsStore) ListOpenChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ListOpenChatWakeupWatchesByChatIDRow, error) {
+	defer f.observe(ctx, "ListOpenChatWakeupWatchesByChatID", time.Now())
+	return f.s.ListOpenChatWakeupWatchesByChatID(ctx, chatID)
+}
+
+func (f forkQueryMetricsStore) ListReadyChatWakeupWatches(ctx context.Context, arg forkdb.ListReadyChatWakeupWatchesParams) ([]forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "ListReadyChatWakeupWatches", time.Now())
+	return f.s.ListReadyChatWakeupWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkChatWakeupWatchDelivered(ctx context.Context, arg forkdb.MarkChatWakeupWatchDeliveredParams) (forkdb.ChatWakeupWatch, error) {
+	defer f.observe(ctx, "MarkChatWakeupWatchDelivered", time.Now())
+	return f.s.MarkChatWakeupWatchDelivered(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.MarkChatWakeupWatchFailedParams) error {
+	defer f.observe(ctx, "MarkChatWakeupWatchFailed", time.Now())
+	return f.s.MarkChatWakeupWatchFailed(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertOrganizationAgentDefinition", time.Now())
 	return f.s.InsertOrganizationAgentDefinition(ctx, arg)
@@ -547,19 +587,9 @@ func (f forkQueryMetricsStore) ListChatFamilyMembers(ctx context.Context, arg fo
 	return f.s.ListChatFamilyMembers(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) ListChatWakeupRunKeys(ctx context.Context, wakeupID uuid.UUID) ([]string, error) {
-	defer f.observe(ctx, "ListChatWakeupRunKeys", time.Now())
-	return f.s.ListChatWakeupRunKeys(ctx, wakeupID)
-}
-
 func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "ListChatWakeupsByChatID", time.Now())
 	return f.s.ListChatWakeupsByChatID(ctx, chatID)
-}
-
-func (f forkQueryMetricsStore) ListChildChatIDsWithActiveEventsWakeups(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
-	defer f.observe(ctx, "ListChildChatIDsWithActiveEventsWakeups", time.Now())
-	return f.s.ListChildChatIDsWithActiveEventsWakeups(ctx, parentChatID)
 }
 
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {
