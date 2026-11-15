@@ -254,3 +254,25 @@ func TestForkStepFactsFirstReadWins(t *testing.T) {
 	require.Equal(t, 1, maxDepth(), "a sealed step reads live")
 	require.Empty(t, packNames(f.grandchild), "a sealed step reads live")
 }
+
+// TestForkStepFactsFailedLookupNotKept checks that a pack enablement whose
+// lookups failed is not kept, so a later hook of the step reads again.
+func TestForkStepFactsFailedLookupNotKept(t *testing.T) {
+	t.Parallel()
+	f := newStepFactsFixture(t)
+	ctx := chatdTestContext(t)
+	seal := f.server.withForkStepFacts(&ctx, f.grandchild)
+	defer seal()
+
+	// A canceled context fails the ancestor walk and the pack lookups,
+	// which log their failures instead of returning them.
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Empty(t, f.server.enabledPacks(canceled, f.grandchild))
+
+	var names []string
+	for _, pack := range f.server.enabledPacks(ctx, f.grandchild) {
+		names = append(names, pack.Name)
+	}
+	require.ElementsMatch(t, []string{"alpha", "beta"}, names)
+}
