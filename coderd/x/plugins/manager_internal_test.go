@@ -250,6 +250,52 @@ func (failingSubscribe) Subscribe(string, pubsub.Listener) (func(), error) {
 	return nil, xerrors.New("subscribe failed")
 }
 
+func (failingSubscribe) SubscribeWithErr(string, pubsub.ListenerWithErr) (func(), error) {
+	return nil, xerrors.New("subscribe failed")
+}
+
+// captureSubscribe hands out each listener as pubsub calls it: a Listener
+// never sees an error, a ListenerWithErr does.
+type captureSubscribe struct {
+	pubsub.Pubsub
+	listeners chan pubsub.ListenerWithErr
+}
+
+func (c captureSubscribe) Subscribe(event string, l pubsub.Listener) (func(), error) {
+	c.listeners <- func(ctx context.Context, msg []byte, err error) {
+		if err == nil {
+			l(ctx, msg)
+		}
+	}
+	return c.Pubsub.Subscribe(event, l)
+}
+
+func (c captureSubscribe) SubscribeWithErr(event string, l pubsub.ListenerWithErr) (func(), error) {
+	c.listeners <- l
+	return c.Pubsub.SubscribeWithErr(event, l)
+}
+
+// TestManagerIdleWakesOnDroppedMessages verifies an idle replica checks at
+// once when pubsub reports dropped plugins:changed messages, instead of
+// waiting for the idle interval.
+func TestManagerIdleWakesOnDroppedMessages(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	ps := captureSubscribe{Pubsub: pubsub.NewInMemory(), listeners: make(chan pubsub.ListenerWithErr, 1)}
+	h := startLeaseHarness(t, ps)
+	listener := testutil.TryReceive(ctx, t, ps.listeners)
+	h.next(ctx, t, defaultIdleInterval)
+
+	h.leases.set(forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, brokenPlugin())
+	listener(ctx, nil, pubsub.ErrDroppedMessages)
+	// The mock clock does not move, so only the wake starts this check.
+	shortCtx := testutil.Context(t, testutil.WaitShort)
+	h.next(shortCtx, t, defaultLeaseInterval)
+	h.waitRunners(ctx, t)
+	_, acquires := h.leases.calls()
+	require.Equal(t, 1, acquires)
+}
+
 // TestManagerIdleWithoutSubscription verifies a replica that could not
 // subscribe to plugins:changed keeps checking every lease interval, since
 // no message would report a change.

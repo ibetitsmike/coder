@@ -182,7 +182,8 @@ func (m *Manager) loop() {
 	//nolint:gocritic // The manager leases plugins across every organization.
 	ctx := dbauthz.AsSystemRestricted(m.ctx)
 
-	cancelSub, err := m.opts.Pubsub.Subscribe(ChangedChannel, func(context.Context, []byte) { m.Wake() })
+	// A drop report may have lost a change, so it wakes the loop too.
+	cancelSub, err := m.opts.Pubsub.SubscribeWithErr(ChangedChannel, func(context.Context, []byte, error) { m.Wake() })
 	subscribed := err == nil
 	if err != nil {
 		m.logger.Error(ctx, "subscribe to plugin changes", slog.Error(err))
