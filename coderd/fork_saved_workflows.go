@@ -316,8 +316,8 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	seen := make(map[string]bool, len(phases))
 	for _, phase := range phases {
 		if phase == "" || strings.TrimSpace(phase) != phase || len(phase) > maxForkSavedWorkflowPhaseBytes ||
-			strings.ContainsFunc(phase, unicode.IsControl) {
-			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q must be non-empty text without surrounding spaces or control characters, at most %d bytes", phase, maxForkSavedWorkflowPhaseBytes)
+			strings.ContainsFunc(phase, isForkSavedWorkflowPhaseHidden) {
+			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q must be non-empty text without surrounding spaces, control or format characters, at most %d bytes", phase, maxForkSavedWorkflowPhaseBytes)
 		}
 		if seen[phase] {
 			return pqtype.NullRawMessage{}, xerrors.Errorf("phase %q is declared twice", phase)
@@ -326,6 +326,12 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	}
 	if len(argsSchema) == 0 || bytes.Equal(bytes.TrimSpace(argsSchema), []byte("null")) {
 		return pqtype.NullRawMessage{}, nil
+	}
+	// Bound the size before the schema check resolves the schema. Invalid
+	// JSON fails to compact here and the schema check reports it.
+	var compact bytes.Buffer
+	if json.Compact(&compact, argsSchema) == nil && compact.Len() > maxForkSavedWorkflowArgsSchemaBytes {
+		return pqtype.NullRawMessage{}, xerrors.Errorf("the args schema is larger than %d bytes", maxForkSavedWorkflowArgsSchemaBytes)
 	}
 	if err := chatd.ValidateWorkflowArgsSchema(argsSchema); err != nil {
 		return pqtype.NullRawMessage{}, err
@@ -340,6 +346,13 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 		return pqtype.NullRawMessage{}, xerrors.Errorf("the args schema is larger than %d bytes", maxForkSavedWorkflowArgsSchemaBytes)
 	}
 	return pqtype.NullRawMessage{RawMessage: normalized, Valid: true}, nil
+}
+
+// isForkSavedWorkflowPhaseHidden reports characters that a phase name must
+// not hold: control characters, and format characters such as bidi
+// overrides and zero-width spaces, which hide or reorder text.
+func isForkSavedWorkflowPhaseHidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
 
 // reencodeJSON decodes raw and encodes it again. The decoder turns unpaired
