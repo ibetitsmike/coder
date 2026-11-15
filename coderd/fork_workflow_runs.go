@@ -273,6 +273,8 @@ func workflowRunItem(row forkdb.WorkflowRun, counts codersdk.WorkflowRunStepCoun
 		UpdatedAt:     row.UpdatedAt,
 		Title:         "",
 		ScriptPreview: workflowScriptPreview(row.Script),
+		Phases:        append([]string(nil), row.Phases...),
+		CurrentPhase:  row.CurrentPhase,
 		StepCounts:    counts,
 	}
 	if row.FinishedAt.Valid {
@@ -316,16 +318,18 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 	}
 
 	detail := codersdk.WorkflowRunDetail{
-		ID:        row.ID.String(),
-		ChatID:    row.ChatID.String(),
-		Status:    row.Status,
-		Error:     row.Error,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		Title:     "",
-		Script:    row.Script,
-		Logs:      []string{},
-		Steps:     make([]codersdk.WorkflowRunStep, 0, len(steps)),
+		ID:           row.ID.String(),
+		ChatID:       row.ChatID.String(),
+		Status:       row.Status,
+		Error:        row.Error,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		Title:        "",
+		Script:       row.Script,
+		Logs:         []string{},
+		Phases:       append([]string(nil), row.Phases...),
+		CurrentPhase: row.CurrentPhase,
+		Steps:        make([]codersdk.WorkflowRunStep, 0, len(steps)),
 	}
 	if row.FinishedAt.Valid {
 		finishedAt := row.FinishedAt.Time
@@ -354,6 +358,7 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 			Title:     step.Title,
 			Status:    step.Status,
 			Reused:    false,
+			Phase:     step.Phase,
 			Error:     step.Error,
 			Ordinal:   int(step.Ordinal),
 			StartedAt: step.StartedAt,

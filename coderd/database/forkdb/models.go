@@ -554,6 +554,8 @@ type WorkflowRun struct {
 	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time             `db:"updated_at" json:"updated_at"`
 	FinishedAt    sql.NullTime          `db:"finished_at" json:"finished_at"`
+	Phases        []string              `db:"phases" json:"phases"`
+	CurrentPhase  string                `db:"current_phase" json:"current_phase"`
 }
 
 // Workflow steps (child chats) of a fork-workflows run. Finished steps replay from this table without running again.
@@ -569,4 +571,5 @@ type WorkflowStep struct {
 	Error      string                `db:"error" json:"error"`
 	StartedAt  time.Time             `db:"started_at" json:"started_at"`
 	FinishedAt sql.NullTime          `db:"finished_at" json:"finished_at"`
+	Phase      string                `db:"phase" json:"phase"`
 }

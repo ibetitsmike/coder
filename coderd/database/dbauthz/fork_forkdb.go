@@ -993,6 +993,21 @@ func (f *forkQuerier) UpdateUserAgentDefinitionByName(ctx context.Context, arg f
 	return f.db.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
+// UpdateWorkflowRunPhases authorizes as an update of the run's chat, like
+// UpdateWorkflowRunStatus.
+func (f *forkQuerier) UpdateWorkflowRunPhases(ctx context.Context, arg forkdb.UpdateWorkflowRunPhasesParams) error {
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
+	}
+	return f.db.UpdateWorkflowRunPhases(ctx, arg)
+}
+
 // UpdateWorkflowRunStatus authorizes as an update of the run's chat. A caller
 // with site-wide chat permission skips the read, which no longer contributes
 // to the decision (fork issue #292).

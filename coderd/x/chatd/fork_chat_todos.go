@@ -38,7 +38,7 @@ type todoWriteArgs struct {
 type todoWriteItem struct {
 	ID      string `json:"id" description:"A short identifier, unique in the list, that stays the same while the item exists."`
 	Content string `json:"content" description:"What the item is about, in one line."`
-	Status  string `json:"status" enum:"pending,in_progress,done,cancelled"`
+	Status  string `json:"status" enum:"pending,in_progress,done,canceled"`
 }
 
 type chatTodosResult struct {

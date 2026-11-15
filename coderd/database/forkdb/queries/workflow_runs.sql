@@ -1,12 +1,26 @@
 -- name: InsertWorkflowRun :exec
-INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status)
-VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status);
+-- phases holds the declared phases of the script plus every undeclared name
+-- that phase() reached, in display order. Empty when the script declares no
+-- phases. COALESCE(@phases, '{}'::text[]) keeps a nil Go slice out of the
+-- NOT NULL column: pq encodes a nil []string as NULL, and the '{}' literal
+-- alone leaves the parameter typed as text.
+INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
+VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status, COALESCE(@phases, '{}'::text[]), @current_phase);
 
 -- name: GetWorkflowRun :one
 SELECT * FROM workflow_runs WHERE id = @id;
 
 -- name: GetWorkflowStepsByRun :many
 SELECT * FROM workflow_steps WHERE run_id = @run_id ORDER BY ordinal;
+
+-- name: UpdateWorkflowRunPhases :exec
+-- phase() journals the phase state of a live run as it changes: the display
+-- list and the current name. The write does not touch status, error or
+-- result, which updateRunStatus owns, so the two best-effort writers never
+-- overwrite each other's columns.
+UPDATE workflow_runs
+SET phases = COALESCE(@phases, '{}'::text[]), current_phase = @current_phase, updated_at = now()
+WHERE id = @id;
 
 -- name: UpdateWorkflowRunStatus :exec
 -- result is the full terminal snapshot of the run, or NULL for interrupted.
@@ -17,6 +31,7 @@ SELECT * FROM workflow_steps WHERE run_id = @run_id ORDER BY ordinal;
 -- rejects on jsonb.
 UPDATE workflow_runs
 SET status = @status, error = @error, result = @result,
+    phases = COALESCE(@phases, '{}'::text[]), current_phase = @current_phase,
     updated_at = now(),
     finished_at = CASE WHEN @status::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
 WHERE id = @id;
@@ -28,8 +43,10 @@ UPDATE workflow_runs SET status = 'interrupted', error = @err_text, updated_at =
 WHERE status = 'running';
 
 -- name: InsertWorkflowStep :exec
-INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value)
-VALUES (@id, @run_id, @spec_key, @occurrence, @ordinal, @title, @status, @value);
+-- phase is the name that was current when the step started, or '' when the
+-- script called no phase() before it.
+INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, phase)
+VALUES (@id, @run_id, @spec_key, @occurrence, @ordinal, @title, @status, @value, @phase);
 
 -- name: GetWorkflowStep :one
 -- The authorizer of UpdateWorkflowStep reads the step to find its run.

@@ -13177,6 +13177,14 @@ export interface WorkflowRun {
 	 */
 	readonly title: string;
 	readonly script_preview?: string;
+	/**
+	 * Phases lists the run's phases in display order: the script's declared
+	 * PHASES list first, then every undeclared name that phase() reached.
+	 * CurrentPhase is the one the script set last. Both are empty for a run
+	 * whose script uses no phases.
+	 */
+	readonly phases: readonly string[];
+	readonly current_phase: string;
 	readonly step_counts: WorkflowRunStepCounts;
 }
 
@@ -13205,6 +13213,12 @@ export interface WorkflowRunDetail {
 	 * Logs are the last log lines of a terminal run, from its snapshot.
 	 */
 	readonly logs: readonly string[];
+	/**
+	 * Phases and CurrentPhase carry the run's phase rail, as on the list
+	 * item.
+	 */
+	readonly phases: readonly string[];
+	readonly current_phase: string;
 	readonly steps: readonly WorkflowRunStep[];
 } // WorkflowRunListOptions is the pagination of a chat's workflow run list.
 
@@ -13244,6 +13258,11 @@ export interface WorkflowRunStep {
 	 * until the step reported.
 	 */
 	readonly value?: Record<string, string>;
+	/**
+	 * Phase is the phase that was current when the step started, empty
+	 * before the script's first phase() call.
+	 */
+	readonly phase: string;
 	/**
 	 * StartedAt is when the step's child chat was created (or reused).
 	 */

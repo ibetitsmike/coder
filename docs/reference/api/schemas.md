@@ -3180,7 +3180,8 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
           "label": "string"
         }
       ],
-      "question": "string"
+      "question": "string",
+      "secret": true
     }
   ],
   "tool_call_id": "string"
@@ -5426,17 +5427,19 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "label": "string"
     }
   ],
-  "question": "string"
+  "question": "string",
+  "secret": true
 }
 ```
 
 ### Properties
 
-| Name       | Type                                                                | Required | Restrictions | Description |
-|------------|---------------------------------------------------------------------|----------|--------------|-------------|
-| `header`   | string                                                              | false    |              |             |
-| `options`  | array of [codersdk.ChatQuestionOption](#codersdkchatquestionoption) | false    |              |             |
-| `question` | string                                                              | false    |              |             |
+| Name       | Type                                                                | Required | Restrictions | Description                                                                                                         |
+|------------|---------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------|
+| `header`   | string                                                              | false    |              |                                                                                                                     |
+| `options`  | array of [codersdk.ChatQuestionOption](#codersdkchatquestionoption) | false    |              |                                                                                                                     |
+| `question` | string                                                              | false    |              |                                                                                                                     |
+| `secret`   | boolean                                                             | false    |              | Secret questions take a free-text answer through AnswerChatSecretQuestion, which never writes it to a chat message. |
 
 ## codersdk.ChatQuestionOption
 
@@ -5566,6 +5569,24 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Value(s)   |
 |------------|
 | ``, `read` |
+
+## codersdk.ChatSecretAnswerRequest
+
+```json
+{
+  "declined": true,
+  "tool_call_id": "string",
+  "value": "string"
+}
+```
+
+### Properties
+
+| Name           | Type    | Required | Restrictions | Description                                                                                                                                     |
+|----------------|---------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `declined`     | boolean | false    |              | Declined answers without a value, for a value the user cannot or will not give as a secret, such as one too short to hide. Value must be empty. |
+| `tool_call_id` | string  | false    |              |                                                                                                                                                 |
+| `value`        | string  | false    |              |                                                                                                                                                 |
 
 ## codersdk.ChatSkillSource
 
@@ -7550,6 +7571,26 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | Name      | Type   | Required | Restrictions | Description                                                                                                                       |
 |-----------|--------|----------|--------------|-----------------------------------------------------------------------------------------------------------------------------------|
 | `content` | string | false    |              | Content is a Claude Code or Cursor agent markdown file. Its front-matter must include name and must be followed by a prompt body. |
+
+## codersdk.CreateForkPluginPackRequest
+
+```json
+{
+  "name": "string",
+  "ref": "string",
+  "source_path": "string",
+  "source_url": "string"
+}
+```
+
+### Properties
+
+| Name          | Type   | Required | Restrictions | Description                                                             |
+|---------------|--------|----------|--------------|-------------------------------------------------------------------------|
+| `name`        | string | false    |              |                                                                         |
+| `ref`         | string | false    |              | Ref is a tag, a branch or a full commit SHA.                            |
+| `source_path` | string | false    |              | Source path is the pack directory in the repository. Empty is the root. |
+| `source_url`  | string | false    |              |                                                                         |
 
 ## codersdk.CreateGroupRequest
 
@@ -10734,6 +10775,32 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `organization_id` | string  | false    |              |                                                                           |
 | `updated_at`      | string  | false    |              |                                                                           |
 
+## codersdk.ForkAgentType
+
+```json
+{
+  "base_type": "string",
+  "description": "string",
+  "model": "string",
+  "name": "string",
+  "root_available": true,
+  "root_unavailable_reason": "string",
+  "source": "string"
+}
+```
+
+### Properties
+
+| Name                      | Type    | Required | Restrictions | Description                                                                                                                                                                             |
+|---------------------------|---------|----------|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `base_type`               | string  | false    |              | Base type is general, explore or computer_use.                                                                                                                                          |
+| `description`             | string  | false    |              |                                                                                                                                                                                         |
+| `model`                   | string  | false    |              | Model is the definition's model, or empty when the type runs on the chat's model.                                                                                                       |
+| `name`                    | string  | false    |              | Name is the type that spawn_agent and CreateChatRequest.AgentType accept: the bare name, or the source-qualified name, such as personal/reviewer, when several sources define the name. |
+| `root_available`          | boolean | false    |              | Root available reports whether a new root chat can start as the type.                                                                                                                   |
+| `root_unavailable_reason` | string  | false    |              | Root unavailable reason says why a new root chat cannot start as the type.                                                                                                              |
+| `source`                  | string  | false    |              | Source is builtin, personal, org, project or workspace.                                                                                                                                 |
+
 ## codersdk.ForkChatConfig
 
 ```json
@@ -10773,6 +10840,24 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
 | `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
 | `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
+
+## codersdk.ForkEnabledPluginPack
+
+```json
+{
+  "commit_sha": "string",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string"
+}
+```
+
+### Properties
+
+| Name         | Type   | Required | Restrictions | Description |
+|--------------|--------|----------|--------------|-------------|
+| `commit_sha` | string | false    |              |             |
+| `id`         | string | false    |              |             |
+| `name`       | string | false    |              |             |
 
 ## codersdk.ForkOrganizationSubagentLimits
 
@@ -10902,6 +10987,80 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | `default`      | [codersdk.ForkWakeupCapValues](#codersdkforkwakeupcapvalues)               | false    |              | Default holds the built-in caps.                                     |
 | `effective`    | [codersdk.ForkWakeupCapValues](#codersdkforkwakeupcapvalues)               | false    |              | Effective holds the caps in force in the organization.               |
 | `organization` | [codersdk.ForkOrganizationWakeupCaps](#codersdkforkorganizationwakeupcaps) | false    |              | Organization holds the stored organization caps. A nil cap is unset. |
+
+## codersdk.ForkPluginPack
+
+```json
+{
+  "commit_sha": "string",
+  "created_at": "2019-08-24T14:15:22Z",
+  "created_by": "ee824cad-d7a6-4f48-87dc-e8461a9201c4",
+  "files": [
+    {
+      "content_hash": "string",
+      "path": "string",
+      "size_bytes": 0
+    }
+  ],
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "name": "string",
+  "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "ref": "string",
+  "source_path": "string",
+  "source_url": "string",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name              | Type                                                                | Required | Restrictions | Description                                       |
+|-------------------|---------------------------------------------------------------------|----------|--------------|---------------------------------------------------|
+| `commit_sha`      | string                                                              | false    |              |                                                   |
+| `created_at`      | string                                                              | false    |              |                                                   |
+| `created_by`      | string                                                              | false    |              |                                                   |
+| `files`           | array of [codersdk.ForkPluginPackFile](#codersdkforkpluginpackfile) | false    |              | Files is set only when a single pack is returned. |
+| `id`              | string                                                              | false    |              |                                                   |
+| `name`            | string                                                              | false    |              |                                                   |
+| `organization_id` | string                                                              | false    |              |                                                   |
+| `ref`             | string                                                              | false    |              |                                                   |
+| `source_path`     | string                                                              | false    |              |                                                   |
+| `source_url`      | string                                                              | false    |              |                                                   |
+| `updated_at`      | string                                                              | false    |              |                                                   |
+
+## codersdk.ForkPluginPackFile
+
+```json
+{
+  "content_hash": "string",
+  "path": "string",
+  "size_bytes": 0
+}
+```
+
+### Properties
+
+| Name           | Type    | Required | Restrictions | Description |
+|----------------|---------|----------|--------------|-------------|
+| `content_hash` | string  | false    |              |             |
+| `path`         | string  | false    |              |             |
+| `size_bytes`   | integer | false    |              |             |
+
+## codersdk.ForkPluginPackSources
+
+```json
+{
+  "hosts": [
+    "string"
+  ]
+}
+```
+
+### Properties
+
+| Name    | Type            | Required | Restrictions | Description |
+|---------|-----------------|----------|--------------|-------------|
+| `hosts` | array of string | false    |              |             |
 
 ## codersdk.ForkSubagentLimitValues
 
@@ -18297,6 +18456,20 @@ The cursor is owner-scoped, so only the chat owner may set this. Opening a chat'
 | `content` | string  | false    |              |             |
 | `enabled` | boolean | false    |              |             |
 
+## codersdk.UpdateForkPluginPackRequest
+
+```json
+{
+  "ref": "string"
+}
+```
+
+### Properties
+
+| Name  | Type   | Required | Restrictions | Description                                                            |
+|-------|--------|----------|--------------|------------------------------------------------------------------------|
+| `ref` | string | false    |              | Ref replaces the ref of the pack. Empty fetches the current ref again. |
+
 ## codersdk.UpdateMCPServerConfigACLRequest
 
 ```json
@@ -19825,6 +19998,161 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 | `auth_key`   | string | false    |              |             |
 | `endpoint`   | string | false    |              |             |
 | `p256dh_key` | string | false    |              |             |
+
+## codersdk.WorkflowRun
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "created_at": "2019-08-24T14:15:22Z",
+  "current_phase": "string",
+  "error": "string",
+  "finished_at": "2019-08-24T14:15:22Z",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "phases": [
+    "string"
+  ],
+  "script_preview": "string",
+  "status": "string",
+  "step_counts": {
+    "done": 0,
+    "failed": 0,
+    "running": 0,
+    "total": 0
+  },
+  "title": "string",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name             | Type                                                             | Required | Restrictions | Description                                                                                                                                                                                                                                  |
+|------------------|------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `chat_id`        | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `created_at`     | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `current_phase`  | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `error`          | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `finished_at`    | string                                                           | false    |              | Finished at is the end of a terminal run. An interrupted run is open, so it has none until a resume ends it.                                                                                                                                 |
+| `id`             | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `phases`         | array of string                                                  | false    |              | Phases lists the run's phases in display order: the script's declared PHASES list first, then every undeclared name that phase() reached. CurrentPhase is the one the script set last. Both are empty for a run whose script uses no phases. |
+| `script_preview` | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `status`         | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `step_counts`    | [codersdk.WorkflowRunStepCounts](#codersdkworkflowrunstepcounts) | false    |              |                                                                                                                                                                                                                                              |
+| `title`          | string                                                           | false    |              | Title is a display name for the run. Runs have no title yet, so it is empty and the UI shows the script preview.                                                                                                                             |
+| `updated_at`     | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+
+## codersdk.WorkflowRunDetail
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "created_at": "2019-08-24T14:15:22Z",
+  "current_phase": "string",
+  "error": "string",
+  "finished_at": "2019-08-24T14:15:22Z",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "logs": [
+    "string"
+  ],
+  "phases": [
+    "string"
+  ],
+  "result": {},
+  "script": "string",
+  "status": "string",
+  "steps": [
+    {
+      "error": "string",
+      "finished_at": "2019-08-24T14:15:22Z",
+      "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+      "ordinal": 0,
+      "phase": "string",
+      "reused": true,
+      "run_id": "dded282c-8ebd-44cf-8ba5-9a234973d1ec",
+      "started_at": "2019-08-24T14:15:22Z",
+      "status": "string",
+      "title": "string",
+      "value": {}
+    }
+  ],
+  "title": "string",
+  "updated_at": "2019-08-24T14:15:22Z"
+}
+```
+
+### Properties
+
+| Name            | Type                                                          | Required | Restrictions | Description                                                              |
+|-----------------|---------------------------------------------------------------|----------|--------------|--------------------------------------------------------------------------|
+| `chat_id`       | string                                                        | false    |              |                                                                          |
+| `created_at`    | string                                                        | false    |              |                                                                          |
+| `current_phase` | string                                                        | false    |              |                                                                          |
+| `error`         | string                                                        | false    |              |                                                                          |
+| `finished_at`   | string                                                        | false    |              |                                                                          |
+| `id`            | string                                                        | false    |              |                                                                          |
+| `logs`          | array of string                                               | false    |              | Logs are the last log lines of a terminal run, from its snapshot.        |
+| `phases`        | array of string                                               | false    |              | Phases and CurrentPhase carry the run's phase rail, as on the list item. |
+| `result`        | object                                                        | false    |              | Result is the value that main returned, for a terminal run.              |
+| `script`        | string                                                        | false    |              |                                                                          |
+| `status`        | string                                                        | false    |              |                                                                          |
+| `steps`         | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                          |
+| `title`         | string                                                        | false    |              |                                                                          |
+| `updated_at`    | string                                                        | false    |              |                                                                          |
+
+## codersdk.WorkflowRunStep
+
+```json
+{
+  "error": "string",
+  "finished_at": "2019-08-24T14:15:22Z",
+  "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "ordinal": 0,
+  "phase": "string",
+  "reused": true,
+  "run_id": "dded282c-8ebd-44cf-8ba5-9a234973d1ec",
+  "started_at": "2019-08-24T14:15:22Z",
+  "status": "string",
+  "title": "string",
+  "value": {}
+}
+```
+
+### Properties
+
+| Name          | Type    | Required | Restrictions | Description                                                                                              |
+|---------------|---------|----------|--------------|----------------------------------------------------------------------------------------------------------|
+| `error`       | string  | false    |              |                                                                                                          |
+| `finished_at` | string  | false    |              | Finished at is when the step reported or failed. An open step has none.                                  |
+| `id`          | string  | false    |              |                                                                                                          |
+| `ordinal`     | integer | false    |              |                                                                                                          |
+| `phase`       | string  | false    |              | Phase is the phase that was current when the step started, empty before the script's first phase() call. |
+| `reused`      | boolean | false    |              |                                                                                                          |
+| `run_id`      | string  | false    |              |                                                                                                          |
+| `started_at`  | string  | false    |              | Started at is when the step's child chat was created (or reused).                                        |
+| `status`      | string  | false    |              |                                                                                                          |
+| `title`       | string  | false    |              |                                                                                                          |
+| `value`       | object  | false    |              | Value is the report the step sent, matching its schema. It is empty until the step reported.             |
+
+## codersdk.WorkflowRunStepCounts
+
+```json
+{
+  "done": 0,
+  "failed": 0,
+  "running": 0,
+  "total": 0
+}
+```
+
+### Properties
+
+| Name      | Type    | Required | Restrictions | Description |
+|-----------|---------|----------|--------------|-------------|
+| `done`    | integer | false    |              |             |
+| `failed`  | integer | false    |              |             |
+| `running` | integer | false    |              |             |
+| `total`   | integer | false    |              |             |
 
 ## codersdk.Workspace
 

@@ -79,6 +79,11 @@ Built-ins:
 - wait(handles) waits for one handle or a list of handles. It returns the value, or a list of values in input order. A failed step gives None.
 - log(message) adds a line to the run log. print() does the same.
 - json.encode(value) and json.decode(text).
+- phase(name) sets the current phase of the run. Steps started after the call are tagged with that phase, and the run card shows a phase rail. ` +
+	`A name not in PHASES is accepted and shown as an observed phase.
+
+A top-level PHASES = ["plan", "build", "review"] list is optional. chatd reads it before main runs and shows its names on the card before the first step, as pending. ` +
+	`Names already declared stay in declared order; names first set by phase() are appended.
 
 type is "general" or "explore". schema is a JSON Schema dict with "type": "object" at the top level. ` +
 	`The step must call its workflow_report tool with a value that matches the schema. That value is the step value. Without a schema the value is {"text": "..."}.
@@ -127,8 +132,13 @@ type runWorkflowResult struct {
 	Status string          `json:"status"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  string          `json:"error,omitempty"`
-	Steps  []stepSummary   `json:"steps"`
-	Logs   []string        `json:"logs,omitempty"`
+	// Phases lists the phases of the run in display order and CurrentPhase
+	// names the one the script set last. Both are empty for a run whose
+	// script uses no phases.
+	Phases       []string      `json:"phases,omitempty"`
+	CurrentPhase string        `json:"current_phase,omitempty"`
+	Steps        []stepSummary `json:"steps"`
+	Logs         []string      `json:"logs,omitempty"`
 }
 
 type stepSummary struct {
@@ -136,7 +146,10 @@ type stepSummary struct {
 	Title  string `json:"title"`
 	Status string `json:"status"`
 	Reused bool   `json:"reused,omitempty"`
-	Error  string `json:"error,omitempty"`
+	// Phase is the phase that was current when the step started, '' before
+	// the first phase() call.
+	Phase string `json:"phase,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // forkWorkflowTools returns run_workflow and await_workflow for a root chat
@@ -307,6 +320,9 @@ type workflowStep struct {
 	title   string
 	reused  bool
 	specKey string
+	// phase is the phase that was current when the step started, '' before
+	// the first phase() call. It journals with the step.
+	phase string
 	// occurrence is the number of earlier calls of the same spec in the
 	// script, the way the first process numbered the step. ordinal is the
 	// creation order of the step inside the run. Both journal the step.
@@ -333,6 +349,15 @@ type workflowRun struct {
 
 	// seen is owned by the script goroutine.
 	seen map[string]int
+
+	// phases is the display order of the phases: the declared order of the
+	// script's PHASES list first, then every undeclared name that phase()
+	// reached, in first-reach order. currentPhase is the phase that the
+	// script set last, and it tags the steps that start after the call.
+	// Both are owned by the script goroutine, so a step reads them without
+	// the run lock.
+	phases       []string
+	currentPhase string
 
 	mu        sync.Mutex
 	steps     []*workflowStep
@@ -442,7 +467,7 @@ func (p *Server) startWorkflowRun(
 	if err != nil {
 		stop()
 		p.workflows.remove(runID)
-		p.workflowJournal().updateRunStatus(ctx, runID, workflowStatusFailed, "start the run: "+err.Error(), nil)
+		p.workflowJournal().updateRunStatus(ctx, runID, workflowStatusFailed, "start the run: "+err.Error(), nil, nil)
 		return nil, xerrors.Errorf("start workflow run: %w", err)
 	}
 	return run, nil
@@ -544,7 +569,9 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 		defer stop()
 		jctx = fresh
 	}
-	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res)
+	// finish runs on the script goroutine, so it snapshots the phase state
+	// before the write: phase() cannot change it meanwhile.
+	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
 
 	r.mu.Lock()
 	r.result = &res
@@ -660,10 +687,12 @@ func (r *workflowRun) snapshot() runWorkflowResult {
 
 func (r *workflowRun) snapshotLocked() runWorkflowResult {
 	res := runWorkflowResult{
-		RunID:  r.id.String(),
-		Status: workflowStatusRunning,
-		Steps:  make([]stepSummary, 0, len(r.steps)),
-		Logs:   append([]string(nil), r.logs...),
+		RunID:        r.id.String(),
+		Status:       workflowStatusRunning,
+		Phases:       append([]string(nil), r.phases...),
+		CurrentPhase: r.currentPhase,
+		Steps:        make([]stepSummary, 0, len(r.steps)),
+		Logs:         append([]string(nil), r.logs...),
 	}
 	for _, s := range r.steps {
 		res.Steps = append(res.Steps, stepSummary{
@@ -671,6 +700,7 @@ func (r *workflowRun) snapshotLocked() runWorkflowResult {
 			Title:  s.title,
 			Status: s.status,
 			Reused: s.reused,
+			Phase:  s.phase,
 			Error:  s.err,
 		})
 	}
@@ -767,6 +797,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		title:      child.Title,
 		reused:     reused,
 		specKey:    key,
+		phase:      r.currentPhase,
 		occurrence: occurrence,
 		ordinal:    count,
 		status:     stepStatusRunning,

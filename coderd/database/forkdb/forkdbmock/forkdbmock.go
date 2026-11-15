@@ -1919,6 +1919,20 @@ func (mr *MockStoreMockRecorder) UpdateUserAgentDefinitionByName(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).UpdateUserAgentDefinitionByName), ctx, arg)
 }
 
+// UpdateWorkflowRunPhases mocks base method.
+func (m *MockStore) UpdateWorkflowRunPhases(ctx context.Context, arg forkdb.UpdateWorkflowRunPhasesParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkflowRunPhases", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateWorkflowRunPhases indicates an expected call of UpdateWorkflowRunPhases.
+func (mr *MockStoreMockRecorder) UpdateWorkflowRunPhases(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowRunPhases", reflect.TypeOf((*MockStore)(nil).UpdateWorkflowRunPhases), ctx, arg)
+}
+
 // UpdateWorkflowRunStatus mocks base method.
 func (m *MockStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
 	m.ctrl.T.Helper()

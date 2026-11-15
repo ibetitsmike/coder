@@ -38473,6 +38473,9 @@ const docTemplate = `{
                     "type": "string",
                     "format": "date-time"
                 },
+                "current_phase": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
                 },
@@ -38484,6 +38487,13 @@ const docTemplate = `{
                 "id": {
                     "type": "string",
                     "format": "uuid"
+                },
+                "phases": {
+                    "description": "Phases lists the run's phases in display order: the script's declared\nPHASES list first, then every undeclared name that phase() reached.\nCurrentPhase is the one the script set last. Both are empty for a run\nwhose script uses no phases.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "script_preview": {
                     "type": "string"
@@ -38515,6 +38525,9 @@ const docTemplate = `{
                     "type": "string",
                     "format": "date-time"
                 },
+                "current_phase": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
                 },
@@ -38528,6 +38541,13 @@ const docTemplate = `{
                 },
                 "logs": {
                     "description": "Logs are the last log lines of a terminal run, from its snapshot.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "phases": {
+                    "description": "Phases and CurrentPhase carry the run's phase rail, as on the list\nitem.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -38575,6 +38595,10 @@ const docTemplate = `{
                 },
                 "ordinal": {
                     "type": "integer"
+                },
+                "phase": {
+                    "description": "Phase is the phase that was current when the step started, empty\nbefore the script's first phase() call.",
+                    "type": "string"
                 },
                 "reused": {
                     "type": "boolean"

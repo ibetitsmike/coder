@@ -37,6 +37,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1da95-80da-7dd4-a368-4b8bf0e1f65f_chat_descendant_questions_answered.up.sql"
       - "../migrations/chatdmig/nodes/01a1df49-3a7d-79d0-ba16-5537b0bacfbe_chat_wakeup_watches.up.sql"
       - "../migrations/chatdmig/nodes/01a1df59-b98e-720a-869b-586a3dcd3799_chat_wakeup_watches_backfill.up.sql"
+      - "../migrations/chatdmig/nodes/01a1df66-ebee-7c93-aa87-3edc1f2d8fb0_workflow_phases.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
@@ -88,3 +89,7 @@ sql:
             go_type:
               import: "github.com/sqlc-dev/pqtype"
               type: "NullRawMessage"
+          # text[] params: sqlc emits a plain []string, which pq refuses to
+          # encode ("unsupported type []string"). The fork queries hand-wrap
+          # the emitted code with pq.Array. The COALESCE(..., '{}') in the
+          # queries keeps a nil slice out of the NOT NULL columns.

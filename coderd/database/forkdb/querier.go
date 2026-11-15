@@ -173,7 +173,14 @@ type Querier interface {
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
+	// phases holds the declared phases of the script plus every undeclared name
+	// that phase() reached, in display order. Empty when the script declares no
+	// phases. COALESCE(@phases, '{}'::text[]) keeps a nil Go slice out of the
+	// NOT NULL column: pq encodes a nil []string as NULL, and the '{}' literal
+	// alone leaves the parameter typed as text.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
+	// phase is the name that was current when the step started, or '' when the
+	// script called no phase() before it.
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
@@ -262,6 +269,11 @@ type Querier interface {
 	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	// phase() journals the phase state of a live run as it changes: the display
+	// list and the current name. The write does not touch status, error or
+	// result, which updateRunStatus owns, so the two best-effort writers never
+	// overwrite each other's columns.
+	UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflowRunPhasesParams) error
 	// result is the full terminal snapshot of the run, or NULL for interrupted.
 	// A terminal status stamps finished_at; interrupted keeps the run open, so
 	// a resume can end it later. The param stays uncast so sqlc ties it to the
