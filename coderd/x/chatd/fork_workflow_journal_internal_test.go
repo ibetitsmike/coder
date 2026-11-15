@@ -361,7 +361,7 @@ def main(args):
 			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
 		}, testutil.IntervalFast)
 		tools := restarted.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
-		require.Len(t, tools, 2)
+		require.Len(t, tools, 3, "run_workflow, await_workflow and list_workflows")
 		resp, err := tools[1].Run(ctx, fantasy.ToolCall{Input: fmt.Sprintf(`{"run_id":%q}`, run.id)})
 		require.NoError(t, err)
 		assert.False(t, resp.IsError, resp.Content)
