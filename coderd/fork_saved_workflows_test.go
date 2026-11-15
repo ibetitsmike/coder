@@ -57,7 +57,7 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		// Every field at its limit, in characters JSON escapes as \u00XX.
 		phases := make([]string, 32)
 		for i := range phases {
-			phases[i] = fmt.Sprintf("%02d", i) + strings.Repeat("\x01", 126)
+			phases[i] = fmt.Sprintf("%02d", i) + strings.Repeat("<", 126)
 		}
 		largest, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
 			Name:        "largest",
@@ -85,6 +85,27 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		require.JSONEq(t, `{"type":"object","title":"a\uFFFDb"}`, string(surrogate.ArgsSchema))
 		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "surrogate"))
 
+		// The size limit applies to the compact schema, not to whitespace.
+		padded, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:       "padded",
+			Script:     savedWorkflowScript,
+			ArgsSchema: json.RawMessage(`{"type":"object",` + strings.Repeat(" ", 16<<10) + `"title":"a"}`),
+		})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"type":"object","title":"a"}`, string(padded.ArgsSchema))
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "padded"))
+
+		// Only the member saves a personal workflow: an owner may read and
+		// delete it but not create one, so created_by is always the actor.
+		_, err = client.CreateForkUserSavedWorkflow(ctx, orgID, memberUser.Username, codersdk.CreateForkSavedWorkflowRequest{Name: "for-member", Script: savedWorkflowScript})
+		_ = requireSDKError(t, err, http.StatusForbidden)
+
+		// A name no workflow can have is not found, as on GET and DELETE.
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "Triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("x")})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "tri\x00age", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("x")})
+		_ = requireSDKError(t, err, http.StatusNotFound)
+
 		for name, req := range map[string]codersdk.CreateForkSavedWorkflowRequest{
 			"BadName":        {Name: "Triage", Script: savedWorkflowScript},
 			"NoMain":         {Name: "no-main", Script: "x = 1\n"},
@@ -96,6 +117,8 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
 			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
 			"SpacedPhase":    {Name: "phases", Script: savedWorkflowScript, Phases: []string{" a"}},
+			"ControlPhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\x01b"}},
+			"NewlinePhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\nb"}},
 			"LongPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{strings.Repeat("p", 129)}},
 			"ManyPhases":     {Name: "phases", Script: savedWorkflowScript, Phases: strings.Split(strings.Repeat("p,", 32)+"p", ",")},
 			// Below the limit compact, above it as jsonb text.

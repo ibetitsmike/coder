@@ -34,6 +34,7 @@ func TestSavedWorkflows(t *testing.T) {
 		return fdb.InsertUserSavedWorkflow(testutil.Context(t, testutil.WaitShort), forkdb.InsertUserSavedWorkflowParams{
 			OrganizationID: orgID,
 			UserID:         userID,
+			CreatedBy:      userID,
 			Name:           name,
 			Script:         savedWorkflowScript,
 		})
@@ -55,7 +56,7 @@ func TestSavedWorkflows(t *testing.T) {
 		got, err := insertUser(t, org.ID, user.ID, "defaults")
 		require.NoError(t, err)
 		require.Equal(t, uuid.NullUUID{UUID: user.ID, Valid: true}, got.UserID)
-		require.Equal(t, uuid.NullUUID{UUID: user.ID, Valid: true}, got.CreatedBy, "the saver of a user-tier row is its owner")
+		require.Equal(t, uuid.NullUUID{UUID: user.ID, Valid: true}, got.CreatedBy)
 		require.Empty(t, got.Description)
 		require.NotNil(t, got.Phases, "phases default to an empty list")
 		require.Empty(t, got.Phases)
@@ -100,12 +101,12 @@ func TestSavedWorkflows(t *testing.T) {
 		require.True(t, database.IsCheckViolation(err, "saved_workflows_name_format"), "name format: %v", err)
 
 		_, err = fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
-			OrganizationID: org.ID, UserID: user.ID, Name: "big", Script: strings.Repeat("x", 65537),
+			OrganizationID: org.ID, UserID: user.ID, CreatedBy: user.ID, Name: "big", Script: strings.Repeat("x", 65537),
 		})
 		require.True(t, database.IsCheckViolation(err, "saved_workflows_script_size"), "script size: %v", err)
 
 		_, err = fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
-			OrganizationID: org.ID, UserID: user.ID, Name: "array-schema", Script: savedWorkflowScript,
+			OrganizationID: org.ID, UserID: user.ID, CreatedBy: user.ID, Name: "array-schema", Script: savedWorkflowScript,
 			ArgsSchema: pqtype.NullRawMessage{RawMessage: json.RawMessage(`[]`), Valid: true},
 		})
 		require.True(t, database.IsCheckViolation(err, "saved_workflows_args_schema_is_object"), "args schema type: %v", err)
@@ -115,7 +116,7 @@ func TestSavedWorkflows(t *testing.T) {
 			phases[i] = fmt.Sprintf("phase-%d", i)
 		}
 		_, err = fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
-			OrganizationID: org.ID, UserID: user.ID, Name: "many-phases", Script: savedWorkflowScript, Phases: phases,
+			OrganizationID: org.ID, UserID: user.ID, CreatedBy: user.ID, Name: "many-phases", Script: savedWorkflowScript, Phases: phases,
 		})
 		require.True(t, database.IsCheckViolation(err, "saved_workflows_phases_size"), "phase count: %v", err)
 
@@ -176,6 +177,7 @@ func TestSavedWorkflows(t *testing.T) {
 		inserted, err := fdb.InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
 			OrganizationID: listOrg.ID,
 			UserID:         user.ID,
+			CreatedBy:      user.ID,
 			Name:           "deploy",
 			Description:    "Deploy the service.",
 			Script:         savedWorkflowScript,
