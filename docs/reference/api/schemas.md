@@ -2388,7 +2388,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2535,7 +2535,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3002,7 +3002,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "subagent",
+      "kind": "instruction_file",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
@@ -3036,7 +3036,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "subagent",
+  "kind": "instruction_file",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
@@ -3073,7 +3073,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatContextResourceKind
 
 ```json
-"subagent"
+"instruction_file"
 ```
 
 ### Properties
@@ -6324,7 +6324,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -10407,7 +10407,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"fork-chat-todos"
+"example"
 ```
 
 ### Properties
@@ -20189,21 +20189,21 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ### Properties
 
-| Name          | Type                                                          | Required | Restrictions | Description                                                       |
-|---------------|---------------------------------------------------------------|----------|--------------|-------------------------------------------------------------------|
-| `args`        | object                                                        | false    |              | Args is the JSON object that main(args) received.                 |
-| `chat_id`     | string                                                        | false    |              |                                                                   |
-| `created_at`  | string                                                        | false    |              |                                                                   |
-| `error`       | string                                                        | false    |              |                                                                   |
-| `finished_at` | string                                                        | false    |              |                                                                   |
-| `id`          | string                                                        | false    |              |                                                                   |
-| `logs`        | array of string                                               | false    |              | Logs are the last log lines of a terminal run, from its snapshot. |
-| `result`      | object                                                        | false    |              | Result is the value that main returned, for a terminal run.       |
-| `script`      | string                                                        | false    |              |                                                                   |
-| `status`      | string                                                        | false    |              |                                                                   |
-| `steps`       | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                   |
-| `title`       | string                                                        | false    |              |                                                                   |
-| `updated_at`  | string                                                        | false    |              |                                                                   |
+| Name          | Type                                                          | Required | Restrictions | Description                                                                                                                           |
+|---------------|---------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `args`        | object                                                        | false    |              | Args is the JSON object that main(args) received.                                                                                     |
+| `chat_id`     | string                                                        | false    |              |                                                                                                                                       |
+| `created_at`  | string                                                        | false    |              |                                                                                                                                       |
+| `error`       | string                                                        | false    |              |                                                                                                                                       |
+| `finished_at` | string                                                        | false    |              |                                                                                                                                       |
+| `id`          | string                                                        | false    |              |                                                                                                                                       |
+| `logs`        | array of string                                               | false    |              | Logs are the last log lines the script printed: from the snapshot of a terminal run, or written through to the journal while it runs. |
+| `result`      | object                                                        | false    |              | Result is the value that main returned, for a terminal run.                                                                           |
+| `script`      | string                                                        | false    |              |                                                                                                                                       |
+| `status`      | string                                                        | false    |              |                                                                                                                                       |
+| `steps`       | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                                                                                       |
+| `title`       | string                                                        | false    |              |                                                                                                                                       |
+| `updated_at`  | string                                                        | false    |              |                                                                                                                                       |
 
 ## codersdk.WorkflowRunStep
 

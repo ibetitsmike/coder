@@ -108,7 +108,8 @@ type WorkflowRunDetail struct {
 	Args json.RawMessage `json:"args,omitempty"`
 	// Result is the value that main returned, for a terminal run.
 	Result json.RawMessage `json:"result,omitempty"`
-	// Logs are the last log lines of a terminal run, from its snapshot.
+	// Logs are the last log lines the script printed: from the snapshot of
+	// a terminal run, or written through to the journal while it runs.
 	Logs  []string          `json:"logs"`
 	Steps []WorkflowRunStep `json:"steps"`
 } // WorkflowRunListOptions is the pagination of a chat's workflow run list.

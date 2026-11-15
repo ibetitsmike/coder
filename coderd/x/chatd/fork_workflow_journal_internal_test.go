@@ -397,13 +397,15 @@ def main(args):
 		}, testutil.IntervalFast)
 
 		// The restart interrupts the run, and the resume replays it from
-		// the first line, which the capped tail no longer contains.
-		f.restartWorkflowServer(t)
+		// the first line, which the capped tail no longer contains. The
+		// resume must go through the new server: the old one still holds the
+		// run in its registry and would return it without a replay.
+		restarted := f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
 		}, testutil.IntervalFast)
 		assert.Equal(t, "line 30", journalLogs()[0], "the restart keeps the tail")
-		resumed, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
 			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
 		require.NoError(t, err)
 

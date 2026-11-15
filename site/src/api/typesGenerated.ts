@@ -13280,7 +13280,8 @@ export interface WorkflowRunDetail {
 	 */
 	readonly result?: Record<string, string>;
 	/**
-	 * Logs are the last log lines of a terminal run, from its snapshot.
+	 * Logs are the last log lines the script printed: from the snapshot of
+	 * a terminal run, or written through to the journal while it runs.
 	 */
 	readonly logs: readonly string[];
 	readonly steps: readonly WorkflowRunStep[];
