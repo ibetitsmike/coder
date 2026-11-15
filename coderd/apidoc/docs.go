@@ -5390,6 +5390,262 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/organizations/{organization}/members/{user}/workflows": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "List user saved workflows",
+                "operationId": "list-user-saved-workflows",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID, username, or me",
+                        "name": "user",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/codersdk.ForkSavedWorkflowMetadata"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Create a user saved workflow",
+                "operationId": "create-a-user-saved-workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID, username, or me",
+                        "name": "user",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.CreateForkSavedWorkflowRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/organizations/{organization}/members/{user}/workflows/{workflow}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Get a user saved workflow",
+                "operationId": "get-a-user-saved-workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID, username, or me",
+                        "name": "user",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workflow name",
+                        "name": "workflow",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Delete a user saved workflow",
+                "operationId": "delete-a-user-saved-workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID, username, or me",
+                        "name": "user",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workflow name",
+                        "name": "workflow",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Update a user saved workflow",
+                "operationId": "update-a-user-saved-workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization ID or name",
+                        "name": "organization",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID, username, or me",
+                        "name": "user",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workflow name",
+                        "name": "workflow",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.UpdateForkSavedWorkflowRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/organizations/{organization}/plugin-pack-sources": {
             "get": {
                 "produces": [
@@ -28118,6 +28374,31 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.CreateForkSavedWorkflowRequest": {
+            "type": "object",
+            "properties": {
+                "args_schema": {
+                    "type": "object"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is lowercase letters and digits in dash-separated words.",
+                    "type": "string"
+                },
+                "phases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "script": {
+                    "description": "Script is Starlark that defines main(args), as a run_workflow script.",
+                    "type": "string"
+                }
+            }
+        },
         "codersdk.CreateGroupRequest": {
             "type": "object",
             "required": [
@@ -30551,6 +30832,107 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "codersdk.ForkSavedWorkflow": {
+            "type": "object",
+            "properties": {
+                "args_schema": {
+                    "description": "ArgsSchema is an optional JSON Schema object for the args of a run.",
+                    "type": "object"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "created_by": {
+                    "description": "CreatedBy is the user who saved the workflow. It is empty when that\nuser was deleted.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "description": "Name is what run_workflow takes to run the workflow.",
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "phases": {
+                    "description": "Phases are the declared phase names of the workflow, in order.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "script": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "user_id": {
+                    "description": "UserID is the owner of a personal workflow. It is empty on an\norganization workflow.",
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
+        "codersdk.ForkSavedWorkflowMetadata": {
+            "type": "object",
+            "properties": {
+                "args_schema": {
+                    "description": "ArgsSchema is an optional JSON Schema object for the args of a run.",
+                    "type": "object"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "created_by": {
+                    "description": "CreatedBy is the user who saved the workflow. It is empty when that\nuser was deleted.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "description": "Name is what run_workflow takes to run the workflow.",
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "phases": {
+                    "description": "Phases are the declared phase names of the workflow, in order.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "user_id": {
+                    "description": "UserID is the owner of a personal workflow. It is empty on an\norganization workflow.",
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
@@ -37104,6 +37486,26 @@ const docTemplate = `{
             "properties": {
                 "ref": {
                     "description": "Ref replaces the ref of the pack. Empty fetches the current ref again.",
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.UpdateForkSavedWorkflowRequest": {
+            "type": "object",
+            "properties": {
+                "args_schema": {
+                    "type": "object"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "phases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "script": {
                     "type": "string"
                 }
             }
