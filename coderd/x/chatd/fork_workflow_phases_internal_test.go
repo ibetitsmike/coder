@@ -164,8 +164,8 @@ def main(args):
 
 	t.Run("PhaseBuiltinsRejectBadNames", func(t *testing.T) {
 		t.Parallel()
-		f := newForkWorkflowFixture(t)
-		ctx := chatdTestContext(t)
+		// Each subtest builds its own fixture: parallel subtests that share
+		// one context can exhaust its deadline on a slow CI box.
 		tooLong := "def main(args):\n    phase(\"x\" * " + strconv.Itoa(maxWorkflowPhaseName+1) + ")\n"
 		for name, tc := range map[string]struct {
 			script string
@@ -177,6 +177,8 @@ def main(args):
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
+				f := newForkWorkflowFixture(t)
+				ctx := chatdTestContext(t)
 				parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
 				run := f.start(ctx, t, parent, runWorkflowArgs{Script: tc.script})
 				res := run.await(ctx, testutil.WaitShort)
