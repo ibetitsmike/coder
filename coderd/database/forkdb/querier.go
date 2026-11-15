@@ -184,17 +184,22 @@ type Querier interface {
 	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
 	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
 	// Lists the children of @parent_chat_id that wait for events of their own:
-	// they have an open watch on an active wake-up. ListReadyChatWakeupWatches
+	// they have an open watch on an active wake-up. chat_wakeup_ready_watches
 	// uses the same rule.
 	ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error)
 	// Lists, in one statement, the due wake-ups and the earliest active wake-up
 	// that is not due, which sets the timer of the waker. It reads and locks
 	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
-	// is due when its run time has come and its chat would not queue a new
-	// message. Those are the busy and paused chats, and the errored chats with a
-	// non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
-	// archived chats are always due, so the waker cancels them. chat_id limits
-	// the list to one chat. The due rows page by (next_run_at, id) after
+	// is due when its chat would not queue a new message and either its run time
+	// has come or, for an events wake-up before its expiry, it has a child_done
+	// watch in chat_wakeup_ready_watches whose last send did not fail. A failed
+	// send waits for the run time that the failure set, so it does not repeat at
+	// once, and the other watches wait for their run time, which reads them. The
+	// chats that would queue are the busy and paused chats, and the errored chats
+	// with a non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups
+	// of archived chats are always due by their run time, so the waker cancels
+	// them. chat_id limits the list to the wake-ups of one chat and to those that
+	// watch it as a child. The due rows page by (next_run_at, id) after
 	// after_run_at and after_id.
 	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
@@ -206,13 +211,9 @@ type Querier interface {
 	// @root_chat_id, oldest first.
 	ListPendingChatDescendantQuestionsByRoot(ctx context.Context, rootChatID uuid.UUID) ([]ListPendingChatDescendantQuestionsByRootRow, error)
 	ListProjectAgentDefinitionMetadata(ctx context.Context, projectID uuid.UUID) ([]ListProjectAgentDefinitionMetadataRow, error)
-	// Lists the open watches of active wake-ups that have something to deliver
-	// to an idle chat: an event that someone observed, or a child agent that is
-	// done. A child is done when it is archived, or when it settled in a status
-	// other than running, interrupting or paused and waits neither for events of
-	// its own (an open watch on an active wake-up) nor for an answer to its
-	// question. A deleted child deletes its watch, so it never shows up here.
-	// @chat_id and @wakeup_id narrow the list when set.
+	// Lists the watches in chat_wakeup_ready_watches: open watches of active
+	// wake-ups that have something to deliver to an idle chat. @chat_id and
+	// @wakeup_id narrow the list when set.
 	ListReadyChatWakeupWatches(ctx context.Context, arg ListReadyChatWakeupWatchesParams) ([]ChatWakeupWatch, error)
 	ListUserAgentDefinitionMetadata(ctx context.Context, arg ListUserAgentDefinitionMetadataParams) ([]ListUserAgentDefinitionMetadataRow, error)
 	ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUserSavedWorkflowMetadataParams) ([]ListUserSavedWorkflowMetadataRow, error)
@@ -263,7 +264,7 @@ type Querier interface {
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
 	UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error)
 	// Pauses, resumes, cancels or completes a wake-up. The caller computes
-	// next_run_at. Any claim on the row ends.
+	// next_run_at.
 	UpdateChatWakeupStatus(ctx context.Context, arg UpdateChatWakeupStatusParams) (ChatWakeup, error)
 	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)

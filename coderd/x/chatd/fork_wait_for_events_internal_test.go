@@ -191,16 +191,16 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	one := f.createChildAgent(t, coordinator, "one", database.ChatStatusRunning)
 	two := f.createChildAgent(t, coordinator, "two", database.ChatStatusRunning)
 	three := f.createChildAgent(t, coordinator, "three", database.ChatStatusRunning)
+	expiresAt := wakeupTestSlot.Add(24 * time.Hour)
 	wakeup := f.insertWakeup(t, coordinator, forkdb.InsertChatWakeupParams{
-		Kind: forkdb.ChatWakeupKindEvents,
+		Kind:      forkdb.ChatWakeupKindEvents,
+		ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
 	}, childDoneEvents(one, two, three)...)
 	worker := f.newArchiveWorker(t, nil, nil, nil)
 	now := wakeupTestSlot
 	tick := func() {
 		t.Helper()
-		// The worker adds the time it spent since the claim to the next poll,
-		// so a tick of exactly the poll interval can come before it is due.
-		now = now.Add(wakeupPollInterval + time.Second)
+		now = now.Add(time.Second)
 		worker.wakeupOnce(ctx, now)
 	}
 	doneText := func(child database.Chat) string {
@@ -212,8 +212,9 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	require.Empty(t, f.deliveredWatches(t, wakeup.ID))
 	got := f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
-	require.WithinDuration(t, now.Add(wakeupPollInterval), got.NextRunAt.Time, time.Second, "polls again")
-	require.False(t, got.NextRunAt.Time.Before(now.Add(wakeupPollInterval)))
+	// Children are not polled: a child that is done makes the wake-up due,
+	// and the next run is the final poll at the expiry.
+	require.True(t, expiresAt.Equal(got.NextRunAt.Time), "next run at the expiry: %s", got.NextRunAt.Time)
 
 	forceExecutionState(t, f, one.ID, database.ChatStatusWaiting, false)
 	tick()
@@ -223,6 +224,7 @@ func TestWakeupEventsDeliversOncePerChild(t *testing.T) {
 	got = f.wakeup(t, wakeup.ID)
 	require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 	require.EqualValues(t, 1, got.RunCount)
+	require.True(t, expiresAt.Equal(got.NextRunAt.Time), "a delivery keeps the run time: %s", got.NextRunAt.Time)
 
 	// The coordinator's turn ends; the same child does not wake it again.
 	forceExecutionState(t, f, coordinator.ID, database.ChatStatusWaiting, false)
@@ -305,7 +307,7 @@ func TestWakeupEventsRetriesFailedSend(t *testing.T) {
 	now := wakeupTestSlot.Add(time.Second)
 	for range 2 {
 		worker.wakeupOnce(ctx, now)
-		now = now.Add(wakeupPollInterval + time.Second)
+		now = now.Add(eventsPollInterval + time.Second)
 	}
 	require.EqualValues(t, 2, prompts.Load())
 	require.Empty(t, f.wakeMessages(t, coordinator, wakeup.Prompt))
@@ -374,7 +376,7 @@ func TestWakeupEventsWaitsForNestedCoordinator(t *testing.T) {
 		UpdatedAt:    wakeupTestSlot.Add(2 * time.Second),
 	})
 	require.NoError(t, err)
-	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second+wakeupPollInterval+time.Second))
+	worker.wakeupOnce(ctx, wakeupTestSlot.Add(time.Second+eventsPollInterval+time.Second))
 	require.Len(t, f.wakeMessages(t, coordinator, wakeup.Prompt), 1)
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }

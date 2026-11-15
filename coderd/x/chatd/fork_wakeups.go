@@ -25,7 +25,10 @@ import (
 )
 
 const (
-	wakeupPollInterval = 15 * time.Second
+	// eventsPollInterval is how often an events wake-up reads the background
+	// processes it watches, which cannot poke the waker, and how soon it runs
+	// again after a failed send.
+	eventsPollInterval = 15 * time.Second
 
 	wakeupReasonArchived = "archived"
 )
@@ -346,7 +349,7 @@ func nextWakeupRun(wakeup forkdb.ChatWakeup, now time.Time, runDelta int32) wake
 		}
 		next = schedule.Next(now)
 	case forkdb.ChatWakeupKindEvents:
-		return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(wakeupPollInterval))
+		return eventsWakeupRunAt(wakeup, now, runDelta, now.Add(eventsPollInterval))
 	default:
 		finish.status, finish.reason = forkdb.ChatWakeupStatusCompleted, "done"
 		return finish

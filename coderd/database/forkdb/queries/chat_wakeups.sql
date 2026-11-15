@@ -53,14 +53,13 @@ SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
 SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
 
 -- Pauses, resumes, cancels or completes a wake-up. The caller computes
--- next_run_at. Any claim on the row ends.
+-- next_run_at.
 -- name: UpdateChatWakeupStatus :one
 UPDATE chat_wakeups
 SET
     status = @status,
     status_reason = @status_reason,
     next_run_at = @next_run_at,
-    lease_expires_at = NULL,
     updated_at = @updated_at
 WHERE id = @id
 RETURNING *;
@@ -71,7 +70,6 @@ SET
     status = 'canceled',
     status_reason = @reason::text,
     next_run_at = NULL,
-    lease_expires_at = NULL,
     updated_at = @updated_at
 WHERE chat_id = @chat_id
     AND status IN ('active', 'paused')
@@ -80,19 +78,43 @@ RETURNING *;
 -- Lists, in one statement, the due wake-ups and the earliest active wake-up
 -- that is not due, which sets the timer of the waker. It reads and locks
 -- nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
--- is due when its run time has come and its chat would not queue a new
--- message. Those are the busy and paused chats, and the errored chats with a
--- non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups of
--- archived chats are always due, so the waker cancels them. chat_id limits
--- the list to one chat. The due rows page by (next_run_at, id) after
+-- is due when its chat would not queue a new message and either its run time
+-- has come or, for an events wake-up before its expiry, it has a child_done
+-- watch in chat_wakeup_ready_watches whose last send did not fail. A failed
+-- send waits for the run time that the failure set, so it does not repeat at
+-- once, and the other watches wait for their run time, which reads them. The
+-- chats that would queue are the busy and paused chats, and the errored chats
+-- with a non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups
+-- of archived chats are always due by their run time, so the waker cancels
+-- them. chat_id limits the list to the wake-ups of one chat and to those that
+-- watch it as a child. The due rows page by (next_run_at, id) after
 -- after_run_at and after_id.
 -- name: ListDueChatWakeups :many
-WITH due AS (
+WITH candidates AS (
     SELECT cw.id
     FROM chat_wakeups cw
     WHERE cw.status = 'active'
         AND (sqlc.narg('chat_id')::uuid IS NULL OR cw.chat_id = sqlc.narg('chat_id')::uuid)
         AND cw.next_run_at <= @now::timestamptz
+    UNION
+    SELECT r.wakeup_id
+    FROM chat_wakeup_ready_watches r
+    JOIN chat_wakeups cw ON cw.id = r.wakeup_id
+    WHERE cw.kind = 'events'
+        AND (cw.expires_at IS NULL OR cw.expires_at > @now::timestamptz)
+        AND r.kind = 'child_done'
+        AND r.failed_at IS NULL
+        AND (
+            sqlc.narg('chat_id')::uuid IS NULL
+            OR r.chat_id = sqlc.narg('chat_id')::uuid
+            OR r.child_chat_id = sqlc.narg('chat_id')::uuid
+        )
+),
+due AS (
+    SELECT cw.id
+    FROM candidates d
+    JOIN chat_wakeups cw ON cw.id = d.id
+    WHERE cw.status = 'active'
         AND (cw.next_run_at, cw.id) > (@after_run_at::timestamptz, @after_id::uuid)
         AND NOT EXISTS (
             SELECT 1
@@ -116,12 +138,17 @@ upcoming AS (
     WHERE cw.status = 'active'
         AND (sqlc.narg('chat_id')::uuid IS NULL OR cw.chat_id = sqlc.narg('chat_id')::uuid)
         AND cw.next_run_at > @now::timestamptz
+        AND cw.id NOT IN (SELECT id FROM due)
     ORDER BY cw.next_run_at, cw.id
     LIMIT 1
 )
-SELECT sqlc.embed(w), (w.id IN (SELECT id FROM due))::boolean AS due
-FROM chat_wakeups w
-WHERE w.id IN (SELECT id FROM due) OR w.id IN (SELECT id FROM upcoming)
+SELECT sqlc.embed(w), l.due::boolean AS due
+FROM (
+    SELECT id, true AS due FROM due
+    UNION ALL
+    SELECT id, false AS due FROM upcoming
+) l
+JOIN chat_wakeups w ON w.id = l.id
 ORDER BY w.next_run_at, w.id;
 
 -- Locks an active wake-up for its delivery. SKIP LOCKED returns no row while

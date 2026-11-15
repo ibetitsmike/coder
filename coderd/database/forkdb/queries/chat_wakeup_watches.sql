@@ -50,7 +50,7 @@ WHERE x.chat_id = @chat_id::uuid
 ORDER BY w.created_at, w.id, x.ordinal;
 
 -- Lists the children of @parent_chat_id that wait for events of their own:
--- they have an open watch on an active wake-up. ListReadyChatWakeupWatches
+-- they have an open watch on an active wake-up. chat_wakeup_ready_watches
 -- uses the same rule.
 -- name: ListChildChatIDsWithOpenWakeupWatches :many
 SELECT DISTINCT x.chat_id
@@ -61,44 +61,17 @@ WHERE c.parent_chat_id = @parent_chat_id::uuid
     AND x.delivered_at IS NULL
     AND w.status = 'active';
 
--- Lists the open watches of active wake-ups that have something to deliver
--- to an idle chat: an event that someone observed, or a child agent that is
--- done. A child is done when it is archived, or when it settled in a status
--- other than running, interrupting or paused and waits neither for events of
--- its own (an open watch on an active wake-up) nor for an answer to its
--- question. A deleted child deletes its watch, so it never shows up here.
--- @chat_id and @wakeup_id narrow the list when set.
+-- Lists the watches in chat_wakeup_ready_watches: open watches of active
+-- wake-ups that have something to deliver to an idle chat. @chat_id and
+-- @wakeup_id narrow the list when set.
 -- name: ListReadyChatWakeupWatches :many
 SELECT x.*
 FROM chat_wakeup_watches x
-JOIN chat_wakeups w ON w.id = x.wakeup_id AND w.status = 'active'
-JOIN chats c ON c.id = x.chat_id
-LEFT JOIN chats k ON k.id = x.child_chat_id
-WHERE x.delivered_at IS NULL
-    AND NOT c.archived
-    AND c.status NOT IN ('running', 'interrupting', 'requires_action', 'paused')
-    AND NOT (c.status = 'error' AND EXISTS (SELECT 1 FROM chat_queued_messages qm WHERE qm.chat_id = c.id))
-    AND (sqlc.narg('chat_id')::uuid IS NULL OR x.chat_id = sqlc.narg('chat_id')::uuid)
-    AND (sqlc.narg('wakeup_id')::uuid IS NULL OR x.wakeup_id = sqlc.narg('wakeup_id')::uuid)
-    AND (
-        x.fired_at IS NOT NULL
-        OR (x.kind = 'child_done' AND (
-            k.archived
-            OR (k.status NOT IN ('running', 'interrupting', 'paused')
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM chat_wakeup_watches y
-                    JOIN chat_wakeups yw ON yw.id = y.wakeup_id AND yw.status = 'active'
-                    WHERE y.chat_id = k.id
-                        AND y.delivered_at IS NULL
-                )
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM chat_descendant_questions q
-                    WHERE q.chat_id = k.id
-                        AND q.answered_at IS NULL
-                ))
-        ))
+WHERE x.id IN (
+        SELECT r.id
+        FROM chat_wakeup_ready_watches r
+        WHERE (sqlc.narg('chat_id')::uuid IS NULL OR r.chat_id = sqlc.narg('chat_id')::uuid)
+            AND (sqlc.narg('wakeup_id')::uuid IS NULL OR r.wakeup_id = sqlc.narg('wakeup_id')::uuid)
     )
 ORDER BY x.wakeup_id, x.ordinal
 LIMIT @limit_count::int;

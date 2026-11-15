@@ -689,7 +689,7 @@ func TestNextWakeupRun(t *testing.T) {
 			},
 			now:        slot.Add(10 * time.Second),
 			wantStatus: forkdb.ChatWakeupStatusActive,
-			wantNext:   slot.Add(10*time.Second + wakeupPollInterval),
+			wantNext:   slot.Add(10*time.Second + eventsPollInterval),
 		},
 		{
 			name: "EventsLastPollAtExpiry",

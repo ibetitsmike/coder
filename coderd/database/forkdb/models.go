@@ -417,7 +417,6 @@ type ChatWakeup struct {
 	Status          ChatWakeupStatus `db:"status" json:"status"`
 	StatusReason    sql.NullString   `db:"status_reason" json:"status_reason"`
 	NextRunAt       sql.NullTime     `db:"next_run_at" json:"next_run_at"`
-	LeaseExpiresAt  sql.NullTime     `db:"lease_expires_at" json:"lease_expires_at"`
 	ExpiresAt       sql.NullTime     `db:"expires_at" json:"expires_at"`
 	MaxRuns         sql.NullInt32    `db:"max_runs" json:"max_runs"`
 	RunCount        int32            `db:"run_count" json:"run_count"`
