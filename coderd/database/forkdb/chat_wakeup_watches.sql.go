@@ -292,6 +292,7 @@ LEFT JOIN chats k ON k.id = x.child_chat_id
 WHERE x.delivered_at IS NULL
     AND NOT c.archived
     AND c.status NOT IN ('running', 'interrupting', 'requires_action', 'paused')
+    AND NOT (c.status = 'error' AND EXISTS (SELECT 1 FROM chat_queued_messages qm WHERE qm.chat_id = c.id))
     AND ($1::uuid IS NULL OR x.chat_id = $1::uuid)
     AND ($2::uuid IS NULL OR x.wakeup_id = $2::uuid)
     AND (
@@ -378,6 +379,8 @@ SET
     deliveries = deliveries + 1,
     delivered_at = CASE WHEN $1::boolean THEN $2::timestamptz ELSE NULL END,
     spec = spec || $3::jsonb,
+    fired_at = NULL,
+    fired_payload = NULL,
     failed_at = NULL
 WHERE id = $4::uuid
     AND wakeup_id = $5::uuid
@@ -399,7 +402,8 @@ type MarkChatWakeupWatchDeliveredParams struct {
 // inserts the message, after the wake-up row is locked. @deliveries is the
 // count the caller read: no row means another delivery of the watch won,
 // or the watch is done. @done marks the watch delivered, and @spec_patch
-// merges into its spec.
+// merges into its spec. A delivery consumes the fired event, so an open
+// watch is not ready again until a new event fires.
 func (q *Queries) MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChatWakeupWatchDeliveredParams) (ChatWakeupWatch, error) {
 	row := q.db.QueryRowContext(ctx, markChatWakeupWatchDelivered,
 		arg.Done,

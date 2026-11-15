@@ -77,6 +77,7 @@ LEFT JOIN chats k ON k.id = x.child_chat_id
 WHERE x.delivered_at IS NULL
     AND NOT c.archived
     AND c.status NOT IN ('running', 'interrupting', 'requires_action', 'paused')
+    AND NOT (c.status = 'error' AND EXISTS (SELECT 1 FROM chat_queued_messages qm WHERE qm.chat_id = c.id))
     AND (sqlc.narg('chat_id')::uuid IS NULL OR x.chat_id = sqlc.narg('chat_id')::uuid)
     AND (sqlc.narg('wakeup_id')::uuid IS NULL OR x.wakeup_id = sqlc.narg('wakeup_id')::uuid)
     AND (
@@ -106,13 +107,16 @@ LIMIT @limit_count::int;
 -- inserts the message, after the wake-up row is locked. @deliveries is the
 -- count the caller read: no row means another delivery of the watch won,
 -- or the watch is done. @done marks the watch delivered, and @spec_patch
--- merges into its spec.
+-- merges into its spec. A delivery consumes the fired event, so an open
+-- watch is not ready again until a new event fires.
 -- name: MarkChatWakeupWatchDelivered :one
 UPDATE chat_wakeup_watches
 SET
     deliveries = deliveries + 1,
     delivered_at = CASE WHEN @done::boolean THEN @now::timestamptz ELSE NULL END,
     spec = spec || @spec_patch::jsonb,
+    fired_at = NULL,
+    fired_payload = NULL,
     failed_at = NULL
 WHERE id = @id::uuid
     AND wakeup_id = @wakeup_id::uuid
