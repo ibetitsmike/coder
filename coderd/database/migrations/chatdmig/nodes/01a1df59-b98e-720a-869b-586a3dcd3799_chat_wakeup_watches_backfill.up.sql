@@ -1,13 +1,13 @@
 -- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema
 -- requires: 01a1df49-3a7d-79d0-ba16-5537b0bacfbe_chat_wakeup_watches
 
--- Moves the events of the live events wake-ups, active or paused, into
--- watch rows: one row per entry, in entry order. The run keys that recorded
--- what an entry already sent become delivered_at, deliveries, the output
--- cursor of a process and failed_at. Completed and canceled wake-ups keep
--- no watches: nothing reads them again. An entry that names no target, an
--- unknown type or a child chat that no longer exists has nothing to wait for
--- and is left out.
+-- Moves the events of every events wake-up into watch rows: one row per
+-- entry, in entry order. The run keys that recorded what an entry already
+-- sent become delivered_at, deliveries, the output cursor of a process and
+-- failed_at. Completed and canceled wake-ups get their watches too, so the
+-- wake-up list still shows what they watched; the watch queries read only
+-- active wake-ups. An entry that names no target, an unknown type or a
+-- child chat that no longer exists has nothing to wait for and is left out.
 INSERT INTO chat_wakeup_watches (
     id,
     wakeup_id,
@@ -70,7 +70,6 @@ FROM (
         CASE WHEN jsonb_typeof(w.events) = 'array' THEN w.events ELSE '[]'::jsonb END
     ) WITH ORDINALITY AS x(entry, n)
     WHERE w.kind = 'events'
-        AND w.status IN ('active', 'paused')
         AND jsonb_typeof(x.entry) = 'object'
 ) e
 -- The key of the run that delivered the entry, and of its failed sends.

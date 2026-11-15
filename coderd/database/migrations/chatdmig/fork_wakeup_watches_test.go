@@ -98,6 +98,7 @@ func TestWakeupWatchesBackfill(t *testing.T) {
 	paused := insertWakeup("paused", fmt.Sprintf(`[{"type": "pull_request", "url": %q, "on": ["closed"]}]`, prURL))
 	insertRun(paused, "pull_request:"+prURL, "delivered", deliveredAt)
 	completed := insertWakeup("completed", fmt.Sprintf(`[{"type": "child_done", "chat_id": %q}]`, waiting.ID))
+	insertRun(completed, "child_done:"+waiting.ID.String(), "delivered", deliveredAt)
 	canceled := insertWakeup("canceled", fmt.Sprintf(`[{"type": "child_done", "chat_id": %q}]`, waiting.ID))
 	notArray := insertWakeup("active", `{"type": "child_done"}`)
 
@@ -205,7 +206,20 @@ func TestWakeupWatchesBackfill(t *testing.T) {
 	require.Len(t, pausedWatches, 1, "a paused wake-up can resume, so it keeps its watches")
 	require.True(t, pausedWatches[0].DeliveredAt.Valid)
 
-	require.Empty(t, watches(completed))
-	require.Empty(t, watches(canceled))
+	// Finished wake-ups keep their watches, so the wake-up list still shows
+	// what they watched. Every watch query reads active wake-ups only.
+	completedWatches := watches(completed)
+	require.Len(t, completedWatches, 1)
+	require.Equal(t, waiting.ID, completedWatches[0].Child.UUID)
+	require.True(t, completedWatches[0].DeliveredAt.Valid)
+	canceledWatches := watches(canceled)
+	require.Len(t, canceledWatches, 1)
+	require.Equal(t, waiting.ID, canceledWatches[0].Child.UUID)
+	require.False(t, canceledWatches[0].DeliveredAt.Valid)
 	require.Empty(t, watches(notArray))
+
+	var open int
+	require.NoError(t, sqlDB.QueryRow(`SELECT count(*) FROM chat_wakeup_watches x JOIN chat_wakeups w ON w.id = x.wakeup_id
+		WHERE x.child_chat_id = $1 AND x.delivered_at IS NULL AND w.status = 'active'`, waiting.ID).Scan(&open))
+	require.Equal(t, 1, open, "only the active wake-up still waits for the child")
 }
