@@ -82,6 +82,23 @@ WHERE id IN (
 )
 RETURNING *;
 
+-- Tells a replica that holds no plugin whether it has work: enabled counts
+-- the enabled plugins, acquirable the ones it could lease now. It takes no
+-- lock and writes nothing, so an idle replica checks it instead of
+-- AcquirePluginLeases.
+-- name: GetPluginLeaseSummary :one
+SELECT
+    count(*) FILTER (WHERE enabled)::int AS enabled,
+    count(*) FILTER (
+        WHERE enabled
+            AND (
+                runner_id = @runner_id::uuid
+                OR lease_expires_at IS NULL
+                OR lease_expires_at < now()
+            )
+    )::int AS acquirable
+FROM plugins;
+
 -- name: ReleasePluginLeases :exec
 UPDATE plugins
 SET

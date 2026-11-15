@@ -442,6 +442,11 @@ func (f forkQueryMetricsStore) GetPluginChatBindingsDue(ctx context.Context, arg
 	return f.s.GetPluginChatBindingsDue(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (forkdb.GetPluginLeaseSummaryRow, error) {
+	defer f.observe(ctx, "GetPluginLeaseSummary", time.Now())
+	return f.s.GetPluginLeaseSummary(ctx, runnerID)
+}
+
 func (f forkQueryMetricsStore) GetPluginUserLink(ctx context.Context, arg forkdb.GetPluginUserLinkParams) (forkdb.PluginUserLink, error) {
 	defer f.observe(ctx, "GetPluginUserLink", time.Now())
 	return f.s.GetPluginUserLink(ctx, arg)

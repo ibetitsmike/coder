@@ -445,6 +445,13 @@ func (f *forkQuerier) GetPluginChatBindingsDue(ctx context.Context, arg forkdb.G
 	return f.db.GetPluginChatBindingsDue(ctx, arg)
 }
 
+func (f *forkQuerier) GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (forkdb.GetPluginLeaseSummaryRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
+		return forkdb.GetPluginLeaseSummaryRow{}, err
+	}
+	return f.db.GetPluginLeaseSummary(ctx, runnerID)
+}
+
 func (f *forkQuerier) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginPackByID)(ctx, id)
 }

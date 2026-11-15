@@ -262,6 +262,11 @@ func TestPluginLeases(t *testing.T) {
 	dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: false})
 
 	runnerA, runnerB := uuid.New(), uuid.New()
+	summary := func(runner uuid.UUID) forkdb.GetPluginLeaseSummaryRow {
+		row, err := fdb.GetPluginLeaseSummary(ctx, runner)
+		require.NoError(t, err)
+		return row
+	}
 	acquire := func(runner uuid.UUID) []forkdb.Plugin {
 		plugins, err := fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
 			RunnerID:     runner,
@@ -272,18 +277,26 @@ func TestPluginLeases(t *testing.T) {
 		return plugins
 	}
 
+	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerA), "a free enabled plugin is acquirable")
 	leased := acquire(runnerA)
 	require.Len(t, leased, 1, "only enabled plugins are leased")
 	require.Equal(t, enabled.ID, leased[0].ID)
 	require.Equal(t, runnerA, leased[0].RunnerID.UUID)
 
+	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 0}, summary(runnerB), "another replica's live lease is not acquirable")
+	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerA), "the holder can renew")
 	require.Empty(t, acquire(runnerB), "a live lease is not stolen")
 	require.Len(t, acquire(runnerA), 1, "the holder renews its lease")
 
 	require.NoError(t, fdb.ReleasePluginLeases(ctx, runnerA))
+	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerB), "a released lease is acquirable")
 	leased = acquire(runnerB)
 	require.Len(t, leased, 1)
 	require.Equal(t, runnerB, leased[0].RunnerID.UUID)
+
+	_, err := fdb.UpdatePluginEnabled(ctx, forkdb.UpdatePluginEnabledParams{ID: enabled.ID, Enabled: false, UpdatedAt: dbtime.Now()})
+	require.NoError(t, err)
+	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{}, summary(runnerA), "no enabled plugin leaves nothing to do")
 }
 
 func mustFrom(t *testing.T, db database.Store) forkdb.Store {
