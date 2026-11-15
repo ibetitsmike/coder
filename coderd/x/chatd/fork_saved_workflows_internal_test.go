@@ -152,7 +152,7 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
 		listed := listWorkflows(ctx, t, tools, `{}`)
 		require.Len(t, listed, 2)
-		assert.Equal(t, listedWorkflow{Name: "dup", Tier: "personal", Description: "Personal dup.", Phases: []string{"plan", "work"}}, listed[0])
+		assert.Equal(t, listedWorkflow{Name: "dup", Tier: "personal", Description: "Personal dup."}, listed[0], "the list leaves phases out")
 		assert.Equal(t, listedWorkflow{Name: "team", Tier: "organization", Description: "Team team."}, listed[1])
 
 		run := f.startByName(ctx, t, f.server, parent, `{"name":"dup"}`)
@@ -195,6 +195,60 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 		resp = runTool(ctx, t, tools[2], `{"name":"missing"}`)
 		assert.True(t, resp.IsError)
 		assert.Contains(t, resp.Content, `no saved workflow is named "missing"`)
+	})
+
+	t.Run("Pages", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		// JSON escapes each \x01 as six bytes, so a page holds a few.
+		for i := range 40 {
+			_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
+				OrganizationID: f.org.ID,
+				UserID:         f.user.ID,
+				Name:           fmt.Sprintf("w%02d", i),
+				Description:    strings.Repeat("\x01", maxListedWorkflowDescription),
+				Script:         greetWorkflowScript,
+				Phases:         []string{strings.Repeat("p", 128)},
+			})
+			require.NoError(t, err)
+		}
+		tools := f.server.forkWorkflowTools(ctx, f.parent(ctx, t), f.model.ID, nil)
+
+		var names []string
+		pages := 0
+		input := `{}`
+		for {
+			resp := runTool(ctx, t, tools[2], input)
+			require.False(t, resp.IsError, resp.Content)
+			require.LessOrEqual(t, len(resp.Content), 16<<10, "a page fits the smallest tool result budget")
+			var page struct {
+				Workflows  []listedWorkflow `json:"workflows"`
+				NextOffset int              `json:"next_offset"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(resp.Content), &page))
+			require.NotEmpty(t, page.Workflows)
+			for _, w := range page.Workflows {
+				names = append(names, w.Name)
+			}
+			pages++
+			if page.NextOffset == 0 {
+				break
+			}
+			require.Equal(t, len(names), page.NextOffset)
+			input = fmt.Sprintf(`{"offset":%d}`, page.NextOffset)
+		}
+		assert.Greater(t, pages, 1)
+		require.Len(t, names, 40)
+		for i, name := range names {
+			assert.Equal(t, fmt.Sprintf("w%02d", i), name)
+		}
+
+		resp := runTool(ctx, t, tools[2], `{"offset":40}`)
+		require.False(t, resp.IsError, resp.Content)
+		assert.JSONEq(t, `{"workflows":[]}`, resp.Content)
+		resp = runTool(ctx, t, tools[2], `{"offset":-1}`)
+		assert.True(t, resp.IsError)
 	})
 
 	t.Run("RejectsBadInput", func(t *testing.T) {

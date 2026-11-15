@@ -30,11 +30,15 @@ const (
 	// maxListedWorkflowDescription bounds the description of one entry in
 	// the list. list_workflows with a name returns the full text.
 	maxListedWorkflowDescription = 300
+
+	// listWorkflowsPageBytes bounds one page of the list below the smallest
+	// tool result budget (16 KiB), so chatloop never cuts the JSON.
+	listWorkflowsPageBytes = 12 << 10
 )
 
 const listWorkflowsDescription = `List the saved workflows that run_workflow can run by name. ` +
 	`They are your personal workflows and the organization workflows shared with you. ` +
-	`Without "name", it returns each workflow's name, tier (personal or organization), a short description, its phases and whether it has an args schema. ` +
+	`Without "name", it returns a page of workflows, each with its name, tier (personal or organization), a short description and whether it has an args schema, and "next_offset" when more remain: send it as "offset" for the next page. ` +
 	`With "name", it returns that workflow's full description, args schema and phases. ` +
 	`This tool only reads. Users save and edit workflows in Coder; agents cannot.`
 
@@ -59,7 +63,8 @@ func ValidateWorkflowArgsSchema(raw json.RawMessage) error {
 }
 
 type listWorkflowsArgs struct {
-	Name string `json:"name,omitempty" description:"Return the details of this saved workflow."`
+	Name   string `json:"name,omitempty" description:"Return the details of this saved workflow."`
+	Offset int    `json:"offset,omitempty" description:"Skip this many workflows of the list. Send the next_offset of the previous page."`
 }
 
 type listedWorkflow struct {
@@ -164,7 +169,6 @@ func (p *Server) listSavedWorkflows(ctx context.Context, chat database.Chat) ([]
 			Name:          row.Name,
 			Tier:          savedWorkflowTierPersonal,
 			Description:   truncateWorkflowDescription(row.Description),
-			Phases:        row.Phases,
 			HasArgsSchema: hasArgsSchema(row.ArgsSchema.Valid, row.ArgsSchema.RawMessage),
 		})
 	}
@@ -176,11 +180,34 @@ func (p *Server) listSavedWorkflows(ctx context.Context, chat database.Chat) ([]
 			Name:          row.Name,
 			Tier:          savedWorkflowTierOrganization,
 			Description:   truncateWorkflowDescription(row.Description),
-			Phases:        row.Phases,
 			HasArgsSchema: hasArgsSchema(row.ArgsSchema.Valid, row.ArgsSchema.RawMessage),
 		})
 	}
 	return out, nil
+}
+
+// pageListedWorkflows returns the entries from offset on that fit in
+// listWorkflowsPageBytes, at least one, and the offset of the next page,
+// or 0 when the page is the last.
+func pageListedWorkflows(entries []listedWorkflow, offset int) ([]listedWorkflow, int, error) {
+	if offset < 0 {
+		return nil, 0, xerrors.New("offset must not be negative")
+	}
+	if offset >= len(entries) {
+		return []listedWorkflow{}, 0, nil
+	}
+	size := 0
+	for i := offset; i < len(entries); i++ {
+		data, err := json.Marshal(entries[i])
+		if err != nil {
+			return nil, 0, xerrors.Errorf("marshal saved workflow: %w", err)
+		}
+		size += len(data) + 1
+		if size > listWorkflowsPageBytes && i > offset {
+			return entries[offset:i], i, nil
+		}
+	}
+	return entries[offset:], 0, nil
 }
 
 func truncateWorkflowDescription(s string) string {
@@ -248,7 +275,15 @@ func (p *Server) listWorkflowsTool(chat database.Chat) fantasy.AgentTool {
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
-				out = map[string]any{"workflows": entries}
+				page, next, err := pageListedWorkflows(entries, args.Offset)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				list := map[string]any{"workflows": page}
+				if next > 0 {
+					list["next_offset"] = next
+				}
+				out = list
 			}
 			data, err := json.Marshal(out)
 			if err != nil {
