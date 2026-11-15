@@ -414,7 +414,6 @@ type ChatWakeup struct {
 	IntervalSeconds sql.NullInt32    `db:"interval_seconds" json:"interval_seconds"`
 	Cron            sql.NullString   `db:"cron" json:"cron"`
 	Timezone        string           `db:"timezone" json:"timezone"`
-	Events          json.RawMessage  `db:"events" json:"events"`
 	Status          ChatWakeupStatus `db:"status" json:"status"`
 	StatusReason    sql.NullString   `db:"status_reason" json:"status_reason"`
 	NextRunAt       sql.NullTime     `db:"next_run_at" json:"next_run_at"`

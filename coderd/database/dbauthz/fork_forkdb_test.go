@@ -326,13 +326,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().ListChatWakeupsByChatID(gomock.Any(), chat.ID).Return(wakeups, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(wakeups)
 		},
-		"ListChildChatIDsWithActiveEventsWakeups": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			parent := testutil.Fake(t, faker, database.Chat{})
-			ids := []uuid.UUID{uuid.New()}
-			db.EXPECT().GetChatByID(gomock.Any(), parent.ID).Return(parent, nil).AnyTimes()
-			fdb.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), parent.ID).Return(ids, nil).AnyTimes()
-			check.Args(parent.ID).Asserts(parent, policy.ActionRead).Returns(ids)
-		},
 		"UpdateChatWakeupStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
@@ -374,15 +367,6 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
-		},
-		"ListChatWakeupRunKeys": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
-			keys := []string{"child_done:" + uuid.NewString()}
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
-			fdb.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(keys, nil).AnyTimes()
-			check.Args(wakeup.ID).Asserts(chat, policy.ActionRead).Returns(keys)
 		},
 		"InsertChatWakeupWatch": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1564,20 +1548,12 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			_, err := fdb.GetChatSubagentByChatID(ctx, chat.ID)
 			return err
 		}},
-		{name: "ListChildChatIDsWithActiveEventsWakeups", run: func(ctx context.Context, fdb forkdb.Store) error {
-			_, err := fdb.ListChildChatIDsWithActiveEventsWakeups(ctx, chat.ID)
-			return err
-		}},
 		{name: "ListPendingChatDescendantQuestionsByRoot", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.ListPendingChatDescendantQuestionsByRoot(ctx, chat.ID)
 			return err
 		}},
 		{name: "GetChatWakeupByID", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.GetChatWakeupByID(ctx, wakeup.ID)
-			return err
-		}},
-		{name: "ListChatWakeupRunKeys", run: func(ctx context.Context, fdb forkdb.Store) error {
-			_, err := fdb.ListChatWakeupRunKeys(ctx, wakeup.ID)
 			return err
 		}},
 		{name: "FinishChatWakeupClaim", run: func(ctx context.Context, fdb forkdb.Store) error {
@@ -1696,13 +1672,12 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 				switch tc.name {
 				case "InsertChatSubagent", "GetChatTodosByChatID",
 					"GetChatPinnedSkillsByChatID", "GetChatSubagentByChatID",
-					"ListChildChatIDsWithActiveEventsWakeups",
 					"ListChildChatIDsWithOpenWakeupWatches",
 					"ListPendingChatDescendantQuestionsByRoot":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
-				case "GetChatWakeupByID", "ListChatWakeupRunKeys",
+				case "GetChatWakeupByID",
 					"FinishChatWakeupClaim", "InsertChatWakeupRun",
 					"MarkChatWakeupWatchDelivered":
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
@@ -1774,9 +1749,7 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().GetChatTodosByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatTodo{}, nil).AnyTimes()
 	fdbMock.EXPECT().GetChatPinnedSkillsByChatID(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetChatSubagentByChatID(gomock.Any(), chat.ID).Return(forkdb.ChatSubagent{}, nil).AnyTimes()
-	fdbMock.EXPECT().ListChildChatIDsWithActiveEventsWakeups(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
-	fdbMock.EXPECT().ListChatWakeupRunKeys(gomock.Any(), wakeup.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().FinishChatWakeupClaim(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
 	fdbMock.EXPECT().InsertChatWakeupRun(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupRun{}, nil).AnyTimes()
 	fdbMock.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupWatch{}, nil).AnyTimes()
