@@ -351,6 +351,56 @@ def main(args):
 		assert.Equal(t, []string{"first line", "second line", "dropped line"}, journalLogs())
 	})
 
+	// A paced attempt that cannot take the write token must still leave a
+	// flush behind: it arms a paced timer, so a line cannot stay unjournaled
+	// until the next log() or the end of the run. The attempt never sets
+	// logFlushInFlight, so nothing else re-arms for it.
+	t.Run("DroppedAttemptLeavesATimer", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		journalLogs := func() []string {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			require.NoError(t, err)
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
+			return logs
+		}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 1
+		}, testutil.IntervalFast)
+
+		// A stale stamp makes the attempt go immediate, and the held token
+		// makes it drop. The fallback timer must carry the held line once
+		// the holder releases it, without any further log() call.
+		<-run.journalLogWrite
+		run.journalMu.Lock()
+		run.lastLogFlush = time.Now().Add(-workflowLogFlushInterval)
+		run.journalMu.Unlock()
+		run.log("held line")
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			run.journalMu.Lock()
+			armed := run.logFlushTimer != nil
+			run.journalMu.Unlock()
+			return armed
+		}, testutil.IntervalFast)
+		run.journalLogWrite <- struct{}{}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 2
+		}, testutil.IntervalSlow)
+		assert.Equal(t, []string{"first line", "held line"}, journalLogs())
+		run.journalMu.Lock()
+		armed := run.logFlushTimer != nil
+		run.journalMu.Unlock()
+		assert.False(t, armed, "the fallback timer must have fired once")
+	})
+
 	// A paced attempt that finds the write token taken must not spin:
 	// the attempt stamps lastLogFlush, so the next attempt waits out the
 	// interval instead of rescheduling immediately until the holder
@@ -376,10 +426,19 @@ def main(args):
 		// A plain token holder stands in for a slow write: the paced
 		// attempts during the hold must pace themselves, not spin.
 		<-run.journalLogWrite
+		// The last attempt stamp must be stale, or the first paced
+		// attempt after the held line arms a timer and never reaches
+		// the path under test: the immediate attempt that hits the
+		// taken token.
+		run.journalMu.Lock()
+		run.lastLogFlush = time.Now().Add(-workflowLogFlushInterval)
+		run.journalMu.Unlock()
 		run.log("held line")
 		spins := 0
 		stop := make(chan struct{})
+		exited := make(chan struct{})
 		go func() {
+			defer close(exited)
 			for {
 				select {
 				case <-stop:
@@ -396,6 +455,7 @@ def main(args):
 		}()
 		time.Sleep(200 * time.Millisecond)
 		close(stop)
+		<-exited
 		run.journalLogWrite <- struct{}{}
 		t.Logf("paced attempts during the hold: %d", spins)
 		// The interval is 2s, so a spin loop would see hundreds of

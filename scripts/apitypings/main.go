@@ -81,7 +81,6 @@ func TSMutations(ts *guts.Typescript) {
 		DiscriminatedChatMessagePart,
 		AgentHookRawMessages,
 		WorkflowRunRawJSON,
-
 		// Prefer enums as types
 		config.EnumAsTypes,
 		// Enum list generator

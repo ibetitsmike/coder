@@ -405,10 +405,10 @@ type workflowRun struct {
 	// The replay of a journaled failed step re-emits its failure line
 	// (failJournaledStep), so the count holds. mu guards the field.
 	logEchoLeft int
-	// The write-through of the logs paces itself: lastLogFlush is when the
-	// journal last accepted a snapshot, logFlushTimer holds the pending
-	// flush of a burst, and logFlushInFlight marks the goroutine that
-	// flushes now. journalMu guards all three.
+	// The write-through of the logs paces itself: lastLogFlush is the last
+	// attempt the journal made, accepted or not, logFlushTimer holds the
+	// pending flush of a burst, and logFlushInFlight marks the goroutine
+	// that flushes now. journalMu guards all three.
 	lastLogFlush     time.Time
 	logFlushTimer    *time.Timer
 	logFlushInFlight bool
@@ -897,13 +897,21 @@ func (r *workflowRun) scheduleLogFlush() {
 			r.journalMu.Lock()
 			r.logFlushInFlight = false
 			pending := r.logFlushTimer == nil
+			if !wrote {
+				// The attempt could not write (the token was taken, or
+				// the sequence did not move). Lines may still be
+				// pending, and nothing else re-arms: a holder that does
+				// not set logFlushInFlight never does, and the next
+				// log() or the end of the run may be far off. Arm one
+				// paced timer instead of re-arming immediately, which
+				// would spin on the holder.
+				r.armLogFlushTimerLocked()
+				pending = false
+			}
 			r.journalMu.Unlock()
 			// Lines that landed while the write was in flight dropped
 			// their own request, so a flush that actually wrote re-arms
-			// one for them. A flush that could not write (the token was
-			// taken, or the sequence did not move) leaves the pacing to
-			// the failed attempt's stamp: re-arming here would spin until
-			// the holder finishes. A run that finished while the write
+			// one for them. A run that finished while the write
 			// was in flight already landed its terminal flush, so it must
 			// not re-arm. A timer armed meanwhile holds the re-arm instead.
 			if wrote && pending && !r.isDone() {
@@ -921,6 +929,29 @@ func (r *workflowRun) scheduleLogFlush() {
 		// their own request, so a flush that wrote re-arms one for
 		// them. rearmLogFlush compares the sequence, so a re-arm for
 		// lines this write already carried returns without work.
+		if wrote {
+			r.rearmLogFlush()
+		}
+	})
+}
+
+// armLogFlushTimerLocked arms one paced flush at the end of the interval.
+// journalMu must be held. It is the fallback of an attempt that could not
+// write: the timer flushes when the holder is gone, so a line cannot stay
+// unjournaled until the next log() or the end of the run.
+func (r *workflowRun) armLogFlushTimerLocked() {
+	if r.logFlushTimer != nil || r.logFlushInFlight {
+		return
+	}
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(time.Now())
+	if wait <= 0 {
+		wait = time.Nanosecond
+	}
+	r.logFlushTimer = time.AfterFunc(wait, func() {
+		r.journalMu.Lock()
+		r.logFlushTimer = nil
+		r.journalMu.Unlock()
+		wrote := r.flushLogs(false)
 		if wrote {
 			r.rearmLogFlush()
 		}
