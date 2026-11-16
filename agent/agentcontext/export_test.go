@@ -23,7 +23,8 @@ func ManagerWatching(m *Manager) bool {
 	m.mu.Lock()
 	w := m.watcher
 	m.mu.Unlock()
-	return w.reportsAllChanges()
+	_, ok := w.coverage()
+	return ok
 }
 
 // ResetResolveMemo empties the file memo, so the next pass reads every body.

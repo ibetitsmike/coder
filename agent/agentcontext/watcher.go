@@ -57,6 +57,8 @@ type Watcher struct {
 	// pack holds the pack paths whose writes are relevant (guarded by
 	// mu, see packWatchPaths).
 	pack packWatchPaths
+
+	cover watchCoverage // fork: fork_resolve_cache.go
 }
 
 // NewWatcher constructs a recursive watcher. The watcher does
@@ -182,13 +184,13 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	}
 	// Track whether every Add in this pass succeeded so a
 	// recovered ENOSPC clears the degraded marker.
-	addedAll := true
+	addedAll := w.cover.beginSync() // fork: fork_resolve_cache.go
 	// Add directories that are new.
 	for path := range desired {
 		if _, ok := w.watched[path]; ok {
 			continue
 		}
-		if err := w.watcher.Add(path); err != nil {
+		if err := w.addWatch(path); err != nil { // fork: fork_resolve_cache.go
 			// ENOSPC means the kernel's per-user inotify
 			// watch budget is exhausted. Mark the watcher
 			// degraded; subsequent Sync calls still fire
@@ -262,6 +264,7 @@ func (w *Watcher) run() {
 			if !ok {
 				return
 			}
+			w.forgetRemovedWatch(fsw, ev) // fork: fork_resolve_cache.go
 			if !w.eventRelevant(ev) {
 				continue
 			}

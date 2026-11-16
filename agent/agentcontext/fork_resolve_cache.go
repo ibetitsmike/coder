@@ -6,21 +6,36 @@ package agentcontext
 // depends on the scan roots, the advertised capabilities and the files under
 // the roots; every change to those files reaches the Manager through the
 // watcher's signal, which bumps the change sequence and so invalidates every
-// cached result. While the watcher cannot report every change (degraded,
-// closed, or not started) nothing is cached, and neither is a pass that read
-// through a symlink whose target directory has no watch: an edit to such a
-// target fires no event.
+// cached result.
+//
+// A result is cached only while the watcher can report every change to what
+// the pass read:
+//   - the watcher runs, is not degraded, has no debounced event pending, and
+//     its latest Sync added every directory it wanted;
+//   - no watch was added since the pass started, because a change in a newly
+//     watched directory before its watch existed fired no event;
+//   - every symlink the pass followed ends in a watched directory, under a
+//     name whose writes the watcher reports.
+//
+// The pass reads the capabilities once, at its start, so a capability flip
+// during the pass cannot mix two capability states into one snapshot.
 //
 // A cache hit still runs the MCP reconnect, so servers that failed to
 // connect are retried on every new coderd connection as before.
+//
+// The tradeoff: a change the watcher misses for a reason not listed above
+// used to show up on the next reconnect, which resolved again. With the
+// cache it shows up on the next watcher event instead.
 
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -48,10 +63,19 @@ func (m *Manager) resolveCaps() resolveCaps {
 	}
 }
 
+// pin makes the resolver read caps instead of the live capability flags.
+func (c resolveCaps) pin(r *Resolver) {
+	r.PackRowsAdvertised = func() bool { return c.packRows }
+	r.PackAgentDefinitionsAdvertised = func() bool { return c.packAgents }
+	r.GlobRulesAdvertised = func() bool { return c.globRules }
+}
+
 type resolveCacheEntry struct {
 	caps  resolveCaps
 	roots []ScanRoot
 	seq   uint64
+	// watchGen is the watcher's watch generation when the pass started.
+	watchGen uint64
 	// snap is the resolver's output before the Manager stamped a version
 	// or a negotiation marker on it.
 	snap Snapshot
@@ -77,13 +101,15 @@ func (c *resolveCache) changed() {
 func (c *resolveCache) store(e resolveCacheEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if slices.ContainsFunc(c.entries, func(old resolveCacheEntry) bool { return old.seq > e.seq }) {
+	if slices.ContainsFunc(c.entries, func(old resolveCacheEntry) bool {
+		return old.seq > e.seq || old.watchGen > e.watchGen
+	}) {
 		// A pass that started after a later change already stored.
 		return
 	}
-	// A result with an older sequence can never match again.
+	// A result with an older sequence or generation can never match again.
 	c.entries = slices.DeleteFunc(c.entries, func(old resolveCacheEntry) bool {
-		return old.seq < e.seq || (old.caps == e.caps && slices.Equal(old.roots, e.roots))
+		return old.seq < e.seq || old.watchGen < e.watchGen || (old.caps == e.caps && slices.Equal(old.roots, e.roots))
 	})
 	if len(c.entries) >= maxResolveCacheEntries {
 		c.entries = c.entries[1:]
@@ -91,11 +117,11 @@ func (c *resolveCache) store(e resolveCacheEntry) {
 	c.entries = append(c.entries, e)
 }
 
-func (c *resolveCache) lookup(caps resolveCaps, roots []ScanRoot, seq uint64) (resolveCacheEntry, bool) {
+func (c *resolveCache) lookup(caps resolveCaps, roots []ScanRoot, seq, watchGen uint64) (resolveCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, e := range c.entries {
-		if e.seq == seq && e.caps == caps && slices.Equal(e.roots, roots) {
+		if e.seq == seq && e.watchGen == watchGen && e.caps == caps && slices.Equal(e.roots, roots) {
 			return e, true
 		}
 	}
@@ -109,10 +135,11 @@ func (c *resolveCache) reset() {
 }
 
 // resolvePass runs one resolver pass over roots and caches its result when
-// the watcher reports every change and no change signal or capability flip
-// raced the pass. The returned pack pass feeds the pack MCP publisher.
+// the watcher covers everything the pass read and no change signal raced
+// the pass. The returned pack pass feeds the pack MCP publisher.
 func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []ScanRoot, watcher *Watcher) (Snapshot, *packPass) {
 	start := time.Now()
+	watchGen, _ := watcher.coverage()
 	seq := m.resolveCache.seq.Load()
 	caps := m.resolveCaps()
 	m.resolveCache.resolves.Add(1)
@@ -120,22 +147,37 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	pass := &packPass{}
 	r := *resolver
 	r.packPass = pass
+	caps.pin(&r)
+	// The Manager's MCP provider gates pack servers on the live pack-rows
+	// flag. A flip around that read would mix capability states.
+	mixed := false
+	if mcp := r.MCPResources; mcp != nil {
+		r.MCPResources = func() []Resource {
+			before := m.packRowsAdvertised.Load()
+			resources := mcp()
+			if before != caps.packRows || m.packRowsAdvertised.Load() != caps.packRows {
+				mixed = true
+			}
+			return resources
+		}
+	}
 	followed := trackSymlinkTargets(roots)
 	snap := r.ResolveContext(ctx, roots)
-	targetDirs := followed.stop()
+	targets := followed.stop()
 	resolveMemo.sweep(start)
 
-	if !watcher.reportsAllChanges() {
+	genAfter, covered := watcher.coverage()
+	if !covered {
 		m.resolveCache.reset()
 		return snap, pass
 	}
-	if ctx.Err() != nil || m.resolveCaps() != caps || m.resolveCache.seq.Load() != seq {
+	if ctx.Err() != nil || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq {
 		return snap, pass
 	}
-	if !watcher.watchesAll(targetDirs) {
+	if !watcher.reportsWritesTo(targets) {
 		return snap, pass
 	}
-	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), seq: seq, snap: snap, pass: pass})
+	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), seq: seq, watchGen: watchGen, snap: snap, pass: pass})
 	return snap, pass
 }
 
@@ -143,7 +185,9 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 // when nothing changed since it was resolved, and resolves otherwise. Before
 // a hit it runs the MCP reconnect that Resync runs, so failed servers are
 // retried; a reconnect that changes the catalog signals the Manager, the
-// hit turns into a miss, and Resync resolves the new catalog.
+// hit turns into a miss, and Resync resolves the new catalog. That miss
+// reconnects a second time, which is cheap: the reconnect only connects
+// servers that are not connected.
 func (m *Manager) resyncCached(ctx context.Context) (Snapshot, error) {
 	if !m.hasCached() {
 		return m.Resync(ctx)
@@ -166,10 +210,14 @@ func (m *Manager) hasCached() bool {
 	usable := m.ready && !m.closed
 	roots := m.scanRootsLocked()
 	m.mu.Unlock()
-	if !usable || !watcher.reportsAllChanges() {
+	if !usable {
 		return false
 	}
-	_, ok := m.resolveCache.lookup(m.resolveCaps(), roots, m.resolveCache.seq.Load())
+	watchGen, covered := watcher.coverage()
+	if !covered {
+		return false
+	}
+	_, ok := m.resolveCache.lookup(m.resolveCaps(), roots, m.resolveCache.seq.Load(), watchGen)
 	return ok
 }
 
@@ -182,7 +230,8 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 	m.mu.Lock()
 	watcher := m.watcher
 	m.mu.Unlock()
-	if !watcher.reportsAllChanges() {
+	watchGen, covered := watcher.coverage()
+	if !covered {
 		return Snapshot{}, false
 	}
 	seq := m.resolveCache.seq.Load()
@@ -193,7 +242,7 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
-	entry, ok := m.resolveCache.lookup(caps, m.scanRootsLocked(), seq)
+	entry, ok := m.resolveCache.lookup(caps, m.scanRootsLocked(), seq, watchGen)
 	if !ok {
 		m.mu.Unlock()
 		return Snapshot{}, false
@@ -222,24 +271,75 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 	return snap, true
 }
 
-// reportsAllChanges reports whether the watcher is running with every watch
-// in place and no debounced event pending, so every change to a resolved
-// file has reached the Manager as a signal.
-func (w *Watcher) reportsAllChanges() bool {
-	if w == nil {
-		return false
+// watchCoverage is the Watcher state the resolve cache reads, guarded by
+// Watcher.mu.
+type watchCoverage struct {
+	// gen counts the watches added. A pass that started before a watch
+	// was added can have read a change that fired no event.
+	gen uint64
+	// addFailed is set when the latest Sync could not add a directory for
+	// a reason other than ENOSPC (which degrades the watcher) or the
+	// directory being gone (which its parent's watch reports), such as
+	// EMFILE from kqueue on darwin.
+	addFailed bool
+}
+
+// beginSync starts a Sync's add loop and returns true, the initial value
+// of its addedAll.
+func (c *watchCoverage) beginSync() bool {
+	c.addFailed = false
+	return true
+}
+
+// addWatch adds one directory watch for Sync, with w.mu held.
+func (w *Watcher) addWatch(path string) error {
+	err := w.watcher.Add(path)
+	switch {
+	case err == nil:
+		w.cover.gen++
+	case !errors.Is(err, syscall.ENOSPC) && !errors.Is(err, os.ErrNotExist):
+		w.cover.addFailed = true
+	}
+	return err
+}
+
+// forgetRemovedWatch drops a watched directory that was removed or renamed.
+// fsnotify drops its watch then, so the directory must leave w.watched for
+// the next Sync to add a watch on whatever takes its place. The event
+// itself is relevant and schedules that re-resolve and Sync.
+func (w *Watcher) forgetRemovedWatch(fsw *fsnotify.Watcher, ev fsnotify.Event) {
+	if !ev.Has(fsnotify.Remove) && !ev.Has(fsnotify.Rename) {
+		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return !w.closed && w.watcher != nil && w.degraded == "" && w.timer == nil
+	if _, ok := w.watched[ev.Name]; !ok || w.closed {
+		return
+	}
+	delete(w.watched, ev.Name)
+	_ = fsw.Remove(ev.Name)
 }
 
-// watchesAll reports whether every directory in dirs has a watch, compared
-// by canonical path: symlink targets come from filepath.EvalSymlinks, and a
-// watched path may pass through a symlinked directory. The empty string
-// stands for a target that did not resolve and is never watched.
-func (w *Watcher) watchesAll(dirs map[string]struct{}) bool {
-	if len(dirs) == 0 {
+// coverage reports the watch generation and whether the watcher is running
+// with every watch in place and no debounced event pending, so every change
+// to a resolved file has reached the Manager as a signal.
+func (w *Watcher) coverage() (gen uint64, ok bool) {
+	if w == nil {
+		return 0, false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.cover.gen, !w.closed && w.watcher != nil && w.degraded == "" && w.timer == nil && !w.cover.addFailed
+}
+
+// reportsWritesTo reports whether the watcher reports a write to each
+// symlink target: the target's directory has a watch, compared by
+// canonical path because targets come from filepath.EvalSymlinks and a
+// watched path may pass through a symlinked directory, and the watcher
+// does not filter the write out by its name. The empty string stands for a
+// target that is unknown and never reported.
+func (w *Watcher) reportsWritesTo(targets map[string]struct{}) bool {
+	if len(targets) == 0 {
 		return true
 	}
 	if w == nil {
@@ -247,49 +347,53 @@ func (w *Watcher) watchesAll(dirs map[string]struct{}) bool {
 	}
 	w.mu.Lock()
 	watched := make([]string, 0, len(w.watched))
-	missing := false
-	for dir := range dirs {
-		if _, ok := w.watched[dir]; !ok {
-			missing = true
-		}
-	}
-	if missing {
-		for dir := range w.watched {
-			watched = append(watched, dir)
-		}
+	for dir := range w.watched {
+		watched = append(watched, dir)
 	}
 	w.mu.Unlock()
-	if !missing {
-		return true
-	}
 
-	canonical := make(map[string]struct{}, len(watched))
-	for _, dir := range watched {
-		canonical[dir] = struct{}{}
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			canonical[resolved] = struct{}{}
+	var canonical map[string][]string
+	for target := range targets {
+		if target == "" {
+			return false
 		}
-	}
-	for dir := range dirs {
-		if _, ok := canonical[dir]; !ok || dir == "" {
+		dir, base := filepath.Dir(target), filepath.Base(target)
+		var aliases []string
+		if slices.Contains(watched, dir) {
+			aliases = append(aliases, dir)
+		} else {
+			if canonical == nil {
+				canonical = make(map[string][]string, len(watched))
+				for _, d := range watched {
+					if resolved, err := filepath.EvalSymlinks(d); err == nil && resolved != d {
+						canonical[resolved] = append(canonical[resolved], d)
+					}
+				}
+			}
+			aliases = canonical[dir]
+		}
+		// fsnotify names an event after the watched path it came through.
+		if !slices.ContainsFunc(aliases, func(alias string) bool {
+			return w.eventRelevant(fsnotify.Event{Name: filepath.Join(alias, base), Op: fsnotify.Write})
+		}) {
 			return false
 		}
 	}
 	return true
 }
 
-// symlinkTargets collects the directories of the symlink targets that the
-// running resolve passes read through. A target goes to the passes whose
-// scan roots hold the link, and to every running pass when none does, so a
-// concurrent pass can only make another pass more cautious.
+// symlinkTargets collects the symlink targets that the running resolve
+// passes read through. A target goes to the passes whose scan roots hold
+// the link, and to every running pass when none does, so a concurrent pass
+// can only make another pass more cautious.
 var symlinkTargets struct {
 	mu     sync.Mutex
 	active map[*symlinkTargetSet]struct{}
 }
 
 type symlinkTargetSet struct {
-	roots []string
-	dirs  map[string]struct{}
+	roots   []string
+	targets map[string]struct{}
 }
 
 func trackSymlinkTargets(roots []ScanRoot) *symlinkTargetSet {
@@ -312,35 +416,36 @@ func (s *symlinkTargetSet) stop() map[string]struct{} {
 	symlinkTargets.mu.Lock()
 	defer symlinkTargets.mu.Unlock()
 	delete(symlinkTargets.active, s)
-	return s.dirs
+	return s.targets
 }
 
 func (s *symlinkTargetSet) holds(link string) bool {
 	return slices.ContainsFunc(s.roots, func(root string) bool { return pathHasPrefix(link, root) })
 }
 
-func (s *symlinkTargetSet) add(dir string) {
-	if s.dirs == nil {
-		s.dirs = make(map[string]struct{})
+func (s *symlinkTargetSet) add(target string) {
+	if s.targets == nil {
+		s.targets = make(map[string]struct{})
 	}
-	s.dirs[dir] = struct{}{}
+	s.targets[target] = struct{}{}
 }
 
 // noteSymlinkTarget records the target of the symlink link that a resolve
 // pass follows, as filepath.EvalSymlinks returned it. A target that did not
-// resolve is recorded as unwatched: creating it later fires no event either.
+// resolve is recorded as unknown: creating it later fires no event either.
+// So is the target of a chain of links, because retargeting a link in the
+// middle of the chain fires an event only where that link lives.
 func noteSymlinkTarget(link, target string, err error) {
-	dir := ""
-	if err == nil {
-		dir = filepath.Dir(target)
-	}
 	link = filepath.Clean(link)
+	if err != nil || isSymlinkChain(link) {
+		target = ""
+	}
 	symlinkTargets.mu.Lock()
 	defer symlinkTargets.mu.Unlock()
 	owned := false
 	for set := range symlinkTargets.active {
 		if set.holds(link) {
-			set.add(dir)
+			set.add(target)
 			owned = true
 		}
 	}
@@ -348,8 +453,22 @@ func noteSymlinkTarget(link, target string, err error) {
 		return
 	}
 	for set := range symlinkTargets.active {
-		set.add(dir)
+		set.add(target)
 	}
+}
+
+// isSymlinkChain reports whether the symlink link points at another symlink,
+// or cannot be read.
+func isSymlinkChain(link string) bool {
+	next, err := os.Readlink(link)
+	if err != nil {
+		return true
+	}
+	if !filepath.IsAbs(next) {
+		next = filepath.Join(filepath.Dir(link), next)
+	}
+	info, err := os.Lstat(next)
+	return err != nil || info.Mode()&os.ModeSymlink != 0
 }
 
 // scheduleOnOverflow re-resolves after the kernel dropped events: any of

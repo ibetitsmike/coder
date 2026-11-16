@@ -431,3 +431,76 @@ func TestRunPush_CacheHitReconnectsMCP(t *testing.T) {
 	require.Equal(t, resolves, agentcontext.ResolveCount(m), "the reconnect is a cache hit")
 	require.Greater(t, reconnects.Load(), before, "a cache hit still reconnects MCP servers")
 }
+
+func skillDescription(t *testing.T, req *agentcontext.PushRequest, name string) string {
+	t.Helper()
+	for _, res := range req.Resources {
+		if res.Kind == agentcontext.KindSkill && res.Name == name {
+			return res.Description
+		}
+	}
+	t.Fatalf("no skill %q in the push", name)
+	return ""
+}
+
+// A symlink to a file in a watched directory whose name the watcher ignores,
+// such as AGENTS.md pointing at README.md next to it, gets no event when the
+// target changes, so such a pass is not cached.
+func TestRunPush_IgnoredSymlinkTargetIsReresolved(t *testing.T) {
+	t.Parallel()
+	t.Run("Instruction", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		target := filepath.Join(dir, "README.md")
+		mustWriteFile(t, target, "v1")
+		require.NoError(t, os.Symlink(target, filepath.Join(dir, "AGENTS.md")))
+
+		m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+		require.Equal(t, "v1", instructionPayload(t, connectOnce(t, m, "push1")[0]))
+
+		mustWriteFile(t, target, "v2 is longer")
+		require.Equal(t, "v2 is longer", instructionPayload(t, connectOnce(t, m, "push2")[0]))
+	})
+	t.Run("Skill", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		skill := filepath.Join(dir, ".claude", "skills", "x")
+		target := filepath.Join(skill, "body.md")
+		mustWriteFile(t, target, "---\nname: x\ndescription: v1\n---\nbody")
+		require.NoError(t, os.Symlink(target, filepath.Join(skill, "SKILL.md")))
+
+		m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+		require.Equal(t, "v1", skillDescription(t, connectOnce(t, m, "push1")[0], "x"))
+
+		mustWriteFile(t, target, "---\nname: x\ndescription: v2 is longer\n---\nbody")
+		require.Equal(t, "v2 is longer", skillDescription(t, connectOnce(t, m, "push2")[0], "x"))
+	})
+}
+
+// A watched skill directory that is removed and created again inside one
+// debounce window gets a new watch, so a later edit in it still reaches the
+// cache.
+func TestRunPush_RecreatedSkillDirIsWatched(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	skills := filepath.Join(dir, ".claude", "skills")
+	mustWriteSkill(t, skills, "foo", "v1")
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	require.Equal(t, "v1", skillDescription(t, connectOnce(t, m, "push1")[0], "foo"))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(skills, "foo")))
+	mustWriteSkill(t, skills, "foo", "v2")
+	require.Eventually(t, func() bool {
+		for _, res := range m.Snapshot().Resources {
+			if res.Kind == agentcontext.KindSkill && res.Description == "v2" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast)
+	require.Equal(t, "v2", skillDescription(t, connectOnce(t, m, "push2")[0], "foo"))
+
+	mustWriteSkill(t, skills, "foo", "v3 is longer")
+	require.Equal(t, "v3 is longer", skillDescription(t, connectOnce(t, m, "push3")[0], "foo"))
+}
