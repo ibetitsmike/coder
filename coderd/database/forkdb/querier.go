@@ -17,6 +17,15 @@ type Querier interface {
 	// leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
+	// Claims the open pull_request watches that the pull request poller of a
+	// replica reads next: those of active wake-ups of unarchived chats whose
+	// spec next_poll_at has come by @now, or that have none, and that no read
+	// covered through the expiry of their wake-up yet. A watch that fired waits
+	// for its delivery. The claim moves next_poll_at to @lease_until, so the
+	// poller of another replica skips the watch until the claimer records its
+	// read or the lease runs out. The rows are sorted by pull request and chat
+	// owner, the key of one shared read.
+	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	// Counts the subagent chats that hold a capacity slot: owned by a worker with
 	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
@@ -202,15 +211,16 @@ type Querier interface {
 	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
 	// is due when its chat would not queue a new message and either its run time
 	// has come or, for an events wake-up before its expiry, it has a child_done
-	// watch in chat_wakeup_ready_watches whose last send did not fail. A failed
-	// send waits for the run time that the failure set, so it does not repeat at
-	// once, and the other watches wait for their run time, which reads them. The
-	// chats that would queue are the busy and paused chats, and the errored chats
-	// with a non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups
-	// of archived chats are always due by their run time, so the waker cancels
-	// them. chat_id limits the list to the wake-ups of one chat and to those that
-	// watch it as a child. The due rows page by (next_run_at, id) after
-	// after_run_at and after_id.
+	// watch or a fired pull_request watch in chat_wakeup_ready_watches whose
+	// last send did not fail. A failed send waits for the run time that the
+	// failure set, so it does not repeat at once, and the other watches wait for
+	// their run time, which reads them. The chats that would queue are the busy
+	// and paused chats, and the errored chats with a non-empty queue
+	// (chatstate's R, I, A, P and E1 states). The wake-ups of archived chats are
+	// always due by their run time, so the waker cancels them. chat_id limits
+	// the list to the wake-ups of one chat and to those that watch it as a
+	// child. The due rows page by (next_run_at, id) after after_run_at and
+	// after_id.
 	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
 	// delivered, so a new watch can leave out what an earlier one still watches.
@@ -247,6 +257,11 @@ type Querier interface {
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// Records a read of the poller: merges @spec_patch into the spec of the
+	// open pull_request watch, and with @fired_at also fires it with
+	// @fired_payload, which makes it ready (chat_wakeup_ready_watches). No row
+	// changes when the watch is delivered or fired already.
+	RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	// Renews the leases a replica holds on enabled plugins. It returns only the
 	// id and updated_at, so a renewal reads and decrypts no config: the replica

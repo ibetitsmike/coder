@@ -12,7 +12,94 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
+
+const claimDuePullRequestWatches = `-- name: ClaimDuePullRequestWatches :many
+WITH due AS (
+    SELECT x.id, c.owner_id, w.expires_at
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    JOIN chats c ON c.id = x.chat_id
+    WHERE x.kind = 'pull_request'
+        AND x.delivered_at IS NULL
+        AND x.fired_at IS NULL
+        AND w.status = 'active'
+        AND NOT c.archived
+        AND COALESCE((x.spec->>'next_poll_at')::timestamptz, '-infinity') <= $1::timestamptz
+        AND (w.expires_at IS NULL OR COALESCE((x.spec->>'polled_at')::timestamptz, '-infinity') < w.expires_at)
+    ORDER BY x.pull_request_url, c.owner_id, x.id
+    LIMIT $2::int
+    FOR UPDATE OF x SKIP LOCKED
+),
+claimed AS (
+    UPDATE chat_wakeup_watches x
+    SET spec = x.spec || jsonb_build_object('next_poll_at', $3::timestamptz)
+    FROM due
+    WHERE x.id = due.id
+    RETURNING x.id, x.wakeup_id, x.chat_id, x.pull_request_url, x.spec
+)
+SELECT claimed.id, claimed.wakeup_id, claimed.chat_id, claimed.pull_request_url, claimed.spec,
+    due.owner_id, due.expires_at AS wakeup_expires_at
+FROM claimed
+JOIN due ON due.id = claimed.id
+ORDER BY claimed.pull_request_url, due.owner_id, claimed.id
+`
+
+type ClaimDuePullRequestWatchesParams struct {
+	Now        time.Time `db:"now" json:"now"`
+	LimitCount int32     `db:"limit_count" json:"limit_count"`
+	LeaseUntil time.Time `db:"lease_until" json:"lease_until"`
+}
+
+type ClaimDuePullRequestWatchesRow struct {
+	ID              uuid.UUID       `db:"id" json:"id"`
+	WakeupID        uuid.UUID       `db:"wakeup_id" json:"wakeup_id"`
+	ChatID          uuid.UUID       `db:"chat_id" json:"chat_id"`
+	PullRequestUrl  sql.NullString  `db:"pull_request_url" json:"pull_request_url"`
+	Spec            json.RawMessage `db:"spec" json:"spec"`
+	OwnerID         uuid.UUID       `db:"owner_id" json:"owner_id"`
+	WakeupExpiresAt sql.NullTime    `db:"wakeup_expires_at" json:"wakeup_expires_at"`
+}
+
+// Claims the open pull_request watches that the pull request poller of a
+// replica reads next: those of active wake-ups of unarchived chats whose
+// spec next_poll_at has come by @now, or that have none, and that no read
+// covered through the expiry of their wake-up yet. A watch that fired waits
+// for its delivery. The claim moves next_poll_at to @lease_until, so the
+// poller of another replica skips the watch until the claimer records its
+// read or the lease runs out. The rows are sorted by pull request and chat
+// owner, the key of one shared read.
+func (q *Queries) ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, claimDuePullRequestWatches, arg.Now, arg.LimitCount, arg.LeaseUntil)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimDuePullRequestWatchesRow
+	for rows.Next() {
+		var i ClaimDuePullRequestWatchesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WakeupID,
+			&i.ChatID,
+			&i.PullRequestUrl,
+			&i.Spec,
+			&i.OwnerID,
+			&i.WakeupExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const insertChatWakeupWatch = `-- name: InsertChatWakeupWatch :one
 INSERT INTO chat_wakeup_watches (
@@ -428,4 +515,43 @@ type MarkChatWakeupWatchFailedParams struct {
 func (q *Queries) MarkChatWakeupWatchFailed(ctx context.Context, arg MarkChatWakeupWatchFailedParams) error {
 	_, err := q.db.ExecContext(ctx, markChatWakeupWatchFailed, arg.Now, arg.ID, arg.WakeupID)
 	return err
+}
+
+const recordPullRequestWatchPoll = `-- name: RecordPullRequestWatchPoll :execrows
+UPDATE chat_wakeup_watches
+SET
+    spec = spec || $1::jsonb,
+    fired_at = $2::timestamptz,
+    fired_payload = $3::jsonb
+WHERE id = $4::uuid
+    AND wakeup_id = $5::uuid
+    AND kind = 'pull_request'
+    AND delivered_at IS NULL
+    AND fired_at IS NULL
+`
+
+type RecordPullRequestWatchPollParams struct {
+	SpecPatch    json.RawMessage       `db:"spec_patch" json:"spec_patch"`
+	FiredAt      sql.NullTime          `db:"fired_at" json:"fired_at"`
+	FiredPayload pqtype.NullRawMessage `db:"fired_payload" json:"fired_payload"`
+	ID           uuid.UUID             `db:"id" json:"id"`
+	WakeupID     uuid.UUID             `db:"wakeup_id" json:"wakeup_id"`
+}
+
+// Records a read of the poller: merges @spec_patch into the spec of the
+// open pull_request watch, and with @fired_at also fires it with
+// @fired_payload, which makes it ready (chat_wakeup_ready_watches). No row
+// changes when the watch is delivered or fired already.
+func (q *Queries) RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, recordPullRequestWatchPoll,
+		arg.SpecPatch,
+		arg.FiredAt,
+		arg.FiredPayload,
+		arg.ID,
+		arg.WakeupID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -1,8 +1,9 @@
 package chatd
 
 // This file is fork code: it delivers the due chat wake-ups of the
-// fork-chat-wakeups experiment. startForkLoops starts the waker of the Server
-// in its chat worker, so every replica delivers wake-ups.
+// fork-chat-wakeups experiment. startForkLoops starts the waker and the pull
+// request poller of the Server in its chat worker, so every replica delivers
+// wake-ups.
 
 import (
 	"context"
@@ -46,6 +47,9 @@ func (w *chatWorker) startForkLoops(ctx context.Context) {
 	}
 	w.wg.Go(func() {
 		waker.run(ctx, w.server, w.opts.Store, w.opts.Clock, w.opts.Logger)
+	})
+	w.wg.Go(func() {
+		w.server.runPullRequestPoller(ctx, w.opts.Store, w.opts.Clock)
 	})
 }
 

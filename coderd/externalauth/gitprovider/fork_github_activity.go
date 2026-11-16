@@ -35,6 +35,8 @@ type PullRequestActivity struct {
 	// Checks summarizes the CI of HeadSHA. It is CheckStateNone when the
 	// checks were not read.
 	Checks CheckSummary
+	// ViewerLogin is the login of the token's own user.
+	ViewerLogin string
 }
 
 // PullRequestEvent is one review or comment on a pull request.
@@ -88,7 +90,8 @@ var ErrPullRequestActivityUnsupported = xerrors.New("pull request activity is on
 // since. Reviews and comments by the token's own user are left out, so an
 // agent that acts with the user's token does not see its own activity. CI is
 // only read when includeChecks is true, because reading it needs the Checks
-// permission. Only GitHub is supported. Rate limit errors are
+// permission. A viewerLogin from an earlier read skips the read of the
+// token's user. Only GitHub is supported. Rate limit errors are
 // *RateLimitError.
 func FetchPullRequestActivity(
 	ctx context.Context,
@@ -97,6 +100,7 @@ func FetchPullRequestActivity(
 	ref PRRef,
 	since time.Time,
 	includeChecks bool,
+	viewerLogin string,
 ) (*PullRequestActivity, error) {
 	g, ok := p.(*githubProvider)
 	if !ok {
@@ -106,11 +110,13 @@ func FetchPullRequestActivity(
 	// as since counts as at or after it.
 	since = since.UTC().Truncate(time.Second)
 
-	var viewer struct {
+	viewer := struct {
 		Login string `json:"login"`
-	}
-	if err := g.decodeJSON(ctx, g.apiBaseURL+"/user", token, &viewer); err != nil {
-		return nil, xerrors.Errorf("fetch github viewer: %w", err)
+	}{Login: viewerLogin}
+	if viewer.Login == "" {
+		if err := g.decodeJSON(ctx, g.apiBaseURL+"/user", token, &viewer); err != nil {
+			return nil, xerrors.Errorf("fetch github viewer: %w", err)
+		}
 	}
 
 	repoEndpoint := fmt.Sprintf(
@@ -146,9 +152,10 @@ func FetchPullRequestActivity(
 		return nil, xerrors.Errorf("fetch pull request reviews: %w", err)
 	}
 	activity := &PullRequestActivity{
-		State:   state,
-		HeadSHA: pull.Head.SHA,
-		Checks:  CheckSummary{State: CheckStateNone},
+		State:       state,
+		HeadSHA:     pull.Head.SHA,
+		Checks:      CheckSummary{State: CheckStateNone},
+		ViewerLogin: viewer.Login,
 	}
 	if pull.ClosedAt != nil && state != PRStateOpen {
 		activity.ClosedAt = *pull.ClosedAt

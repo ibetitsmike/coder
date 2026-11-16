@@ -552,6 +552,16 @@ func (f forkQueryMetricsStore) MarkChatWakeupWatchFailed(ctx context.Context, ar
 	return f.s.MarkChatWakeupWatchFailed(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
+	defer f.observe(ctx, "ClaimDuePullRequestWatches", time.Now())
+	return f.s.ClaimDuePullRequestWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
+	defer f.observe(ctx, "RecordPullRequestWatchPoll", time.Now())
+	return f.s.RecordPullRequestWatchPoll(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertOrganizationAgentDefinition", time.Now())
 	return f.s.InsertOrganizationAgentDefinition(ctx, arg)
