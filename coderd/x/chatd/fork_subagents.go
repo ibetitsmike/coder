@@ -242,6 +242,12 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 		if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(rootChatID)); err != nil {
 			return xerrors.Errorf("acquire chat family admission lock: %w", err)
 		}
+		// The timeout is transaction local. Clear it so the rest of the
+		// send, such as EditMessage and the later admission, waits as
+		// before.
+		if err := store.SetTransactionLockTimeout(ctx, 0); err != nil {
+			return xerrors.Errorf("reset lock timeout: %w", err)
+		}
 	}
 	err = validateFamilyLiveSubagents(ctx, fdb, rootChatID, limits.maxLivePerFamily, "resume the child agent")
 	if err != nil && !inTx {
@@ -258,8 +264,7 @@ func (p *Server) forkValidateSubagentResume(ctx context.Context, store database.
 
 // chatFamilyAdmissionLockID is the transaction lock that serializes the
 // spawns and resumes of one chat family, so two of them cannot both pass the
-// live subagent count. Admission takes it too when only the family
-// concurrency limit applies.
+// live subagent count.
 func chatFamilyAdmissionLockID(rootChatID uuid.UUID) int64 {
 	return database.GenLockID("fork_chat_family_admission:" + rootChatID.String())
 }

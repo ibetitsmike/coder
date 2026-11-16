@@ -497,9 +497,10 @@ func advisoryLockWaiters(ctx context.Context, sqlDB *sql.DB, lockID int64) (int,
 	return waiting, err
 }
 
-// With only the family concurrency limit, admission locks the family, so
-// families admit in parallel while one family serializes. A deployment limit
-// still serializes every admission.
+// With only the family concurrency limit, admission takes a per-family
+// capacity lock, so families admit in parallel while one family serializes.
+// It never waits for the family lock of spawns and resumes. A deployment
+// limit still serializes every admission.
 func TestForkCapacityAdmissionLockScope(t *testing.T) {
 	t.Parallel()
 	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
@@ -572,15 +573,40 @@ func TestForkCapacityAdmissionLockScope(t *testing.T) {
 	}
 
 	familyOnly := testForkCapacityLimiter(nested, ForkLimits{})
+	// Admission does not wait for the family lock that spawns and resumes
+	// hold. A resume holds it while it waits for a sender row that a lease
+	// takeover locks, and the takeover waits for the deployment lock that
+	// this admission holds in shared mode, so waiting here could deadlock.
+	familyHeld := make(chan struct{})
+	releaseFamily := make(chan struct{})
+	releaseFamilyOnce := sync.OnceFunc(func() { close(releaseFamily) })
+	t.Cleanup(releaseFamilyOnce)
+	familyHolder := inBackground(func() error {
+		return f.db.InTx(func(tx database.Store) error {
+			if err := tx.AcquireLock(ctx, chatFamilyAdmissionLockID(rootA.ID)); err != nil {
+				return err
+			}
+			close(familyHeld)
+			<-releaseFamily
+			return nil
+		}, nil)
+	})
+	testutil.TryReceive(ctx, t, familyHeld)
+	start := time.Now()
+	require.NoError(t, admitInTx(familyOnly, candidateA))
+	require.Less(t, time.Since(start), admissionLockTimeout)
+	releaseFamilyOnce()
+	require.NoError(t, testutil.TryReceive(ctx, t, familyHolder))
+
 	release := holdAdmission(familyOnly, candidateA)
 	// Another family does not wait for the held family. Before the lock was
 	// narrowed, this admission failed with the 5 s admission lock timeout.
-	start := time.Now()
+	start = time.Now()
 	require.NoError(t, admitInTx(familyOnly, candidateB))
 	require.Less(t, time.Since(start), admissionLockTimeout)
 	// The same family waits for it.
 	sameFamily := inBackground(func() error { return admitInTx(familyOnly, siblingA) })
-	requireWaiters(chatFamilyAdmissionLockID(rootA.ID), "the same family waits for the family admission lock")
+	requireWaiters(chatFamilyCapacityLockID(rootA.ID), "the same family waits for the family capacity lock")
 	// Heartbeat renewal, which takes the deployment lock exclusively, still
 	// waits for a family admission.
 	renewal := inBackground(func() error {

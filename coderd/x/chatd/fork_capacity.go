@@ -120,10 +120,14 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 // limit maxConcurrent and the organization's limits. A deployment or
 // organization limit counts chats of every family, so it takes the
 // deployment admission lock exclusively. A family limit alone counts only the
-// family of chat, so it takes the family admission lock exclusively and the
+// family of chat, so it takes the family capacity lock exclusively and the
 // deployment lock in shared mode: admissions in different families run in
 // parallel, and heartbeat renewal, which takes the deployment lock
-// exclusively, still cannot extend a lease that the count read as stale. A
+// exclusively, still cannot extend a lease that the count read as stale. The
+// family capacity lock is not the family admission lock that spawns and
+// resumes hold: those never change the active count, and an Admit that waited
+// for them while it held the shared deployment lock could deadlock with a
+// resume and a lease takeover, or delay heartbeat renewal. A
 // takeover of a stale lease always takes the deployment lock exclusively,
 // because the lease recheck after Admit takes it exclusively too, and two
 // transactions that upgrade a shared lock to exclusive deadlock.
@@ -140,10 +144,17 @@ func (*forkCapacityLimiter) acquireAdmissionLocks(ctx context.Context, store dat
 	if err := fdb.AcquireSharedLock(ctx, database.LockIDChatCapacityAdmission); err != nil {
 		return xerrors.Errorf("acquire shared capacity admission lock: %w", err)
 	}
-	if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(subagentRootChatID(chat))); err != nil {
-		return xerrors.Errorf("acquire family admission lock: %w", err)
+	if err := store.AcquireLock(ctx, chatFamilyCapacityLockID(subagentRootChatID(chat))); err != nil {
+		return xerrors.Errorf("acquire family capacity lock: %w", err)
 	}
 	return nil
+}
+
+// chatFamilyCapacityLockID is the transaction lock that serializes the
+// admissions of one chat family when only the family concurrency limit
+// applies.
+func chatFamilyCapacityLockID(rootChatID uuid.UUID) int64 {
+	return database.GenLockID("fork_chat_family_capacity:" + rootChatID.String())
 }
 
 // subagentPoolLimit returns the deployment limit of running subagents: the
