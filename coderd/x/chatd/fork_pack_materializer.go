@@ -304,6 +304,20 @@ func (p *Server) packResources(ctx context.Context, packID uuid.UUID) ([]forkdb.
 	return resources, nil
 }
 
+// packCommit returns the commit the pack is at now.
+func (p *Server) packCommit(ctx context.Context, packID uuid.UUID) (string, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return "", xerrors.Errorf("fork queries unavailable: %w", err)
+	}
+	//nolint:gocritic // chatd reads the commit of a pack enabled for this chat.
+	pack, err := fdb.GetPluginPackByID(dbauthz.AsSystemRestricted(ctx), packID)
+	if err != nil {
+		return "", xerrors.Errorf("get pack: %w", err)
+	}
+	return pack.CommitSha, nil
+}
+
 // readPackMarker returns the commit recorded in a pack directory's marker.
 func readPackMarker(ctx context.Context, conn workspacesdk.AgentConn, marker string) (string, error) {
 	reader, _, err := conn.ReadFile(ctx, marker, 0, 128)

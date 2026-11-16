@@ -251,7 +251,8 @@ type packPathsEntry struct {
 // packPaths returns the paths of the pack's files at its current commit. A
 // commit's files never change, so they are read once per commit. The cache
 // holds one entry per pack, with the commits read in the last packPathsIdle.
-// A failed read is logged and returns no paths, so the gate fails closed.
+// A failed read, or a read of a commit the pack moved past, is logged and
+// returns no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	cached, _ := p.forkPacks.paths.LoadOrStore(pack.ID, &packPathsEntry{})
 	entry, ok := cached.(*packPathsEntry)
@@ -270,6 +271,21 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	resources, err := p.packResources(ctx, pack.ID)
 	if err != nil {
 		p.logger.Warn(ctx, "failed to read plugin pack files", slog.F("pack_id", pack.ID), slog.Error(err))
+		return packPathSet{}
+	}
+	// The resource table holds only the files of the pack's current commit,
+	// and an update replaces them and the commit in one transaction. Read the
+	// commit after the files: while it is still the pinned one, the files are
+	// that commit's. Once the pack moved on, the pinned commit's files are
+	// gone, so the gate fails closed for this step and caches nothing.
+	current, err := p.packCommit(ctx, pack.ID)
+	if err != nil {
+		p.logger.Warn(ctx, "failed to read plugin pack commit", slog.F("pack_id", pack.ID), slog.Error(err))
+		return packPathSet{}
+	}
+	if current != pack.CommitSHA {
+		p.logger.Info(ctx, "plugin pack moved past the commit of the step",
+			slog.F("pack_id", pack.ID), slog.F("step_commit", pack.CommitSHA), slog.F("current_commit", current))
 		return packPathSet{}
 	}
 	paths := packPathSet{}
