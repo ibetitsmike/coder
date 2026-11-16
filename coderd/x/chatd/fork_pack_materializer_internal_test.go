@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -424,8 +425,8 @@ func TestMaterializePluginPacks(t *testing.T) {
 }
 
 // TestPackPathsCacheOnePerPack checks that the path cache of the plugin gate
-// keeps one entry per pack: a pack that moves through several commits
-// keeps its two latest commits instead of adding one per commit.
+// keeps one entry per pack, and that the entry keeps a commit while steps
+// read it and drops it once no step read it for packPathsIdle.
 func TestPackPathsCacheOnePerPack(t *testing.T) {
 	t.Parallel()
 
@@ -460,33 +461,63 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 		})
 		return n
 	}
+	entryOf := func(pack forkdb.PluginPack) *packPathsEntry {
+		v, ok := server.forkPacks.paths.Load(pack.ID)
+		require.True(t, ok)
+		entry, ok := v.(*packPathsEntry)
+		require.True(t, ok)
+		return entry
+	}
+	commits := func(pack forkdb.PluginPack) []string {
+		entry := entryOf(pack)
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		got := make([]string, 0, len(entry.commits))
+		for commit := range entry.commits {
+			got = append(got, commit)
+		}
+		slices.Sort(got)
+		return got
+	}
+	// age moves the last read of every cached commit of the pack back by d.
+	age := func(pack forkdb.PluginPack, d time.Duration) {
+		entry := entryOf(pack)
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		for _, c := range entry.commits {
+			c.lastRead = c.lastRead.Add(-d)
+		}
+	}
+	read := func(pack forkdb.PluginPack, commit string) packPathSet {
+		return server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: commit})
+	}
 
 	pack := insertPack("alpha")
 	for i, commit := range []string{"c1", "c2", "c3"} {
 		path := "skills/" + commit + ".md"
 		setFiles(pack, path)
-		got := server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: commit})
-		require.Equal(t, packPathSet{path: true}, got, "commit %d reads its own files", i)
+		require.Equal(t, packPathSet{path: true}, read(pack, commit), "commit %d reads its own files", i)
 		require.Equal(t, 1, cached(), "after commit %s", commit)
 	}
 
-	// The same commit is served from the cache, without a read.
+	// A step still pinned to the first commit keeps its paths while newer
+	// steps read two newer commits, and a cached commit is not read again.
 	setFiles(pack, "skills/changed.md")
-	require.Equal(t, packPathSet{"skills/c3.md": true},
-		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c3"}))
-	// A step still pinned to the previous commit keeps its paths while a
-	// newer step reads the new commit.
-	require.Equal(t, packPathSet{"skills/c2.md": true},
-		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c2"}),
-		"the previous commit stays cached")
-	// An older commit is evicted and read again.
-	require.Equal(t, packPathSet{"skills/changed.md": true},
-		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c1"}),
-		"only two commits stay cached")
+	require.Equal(t, packPathSet{"skills/c1.md": true}, read(pack, "c1"), "the pinned commit stays cached")
+	require.Equal(t, packPathSet{"skills/c3.md": true}, read(pack, "c3"))
+	require.Equal(t, []string{"c1", "c2", "c3"}, commits(pack))
+
+	// A commit that no step read for packPathsIdle is dropped on the next
+	// read of a new commit. c3 stays because a step read it within the hour.
+	age(pack, packPathsIdle+time.Minute)
+	require.Equal(t, packPathSet{"skills/c3.md": true}, read(pack, "c3"))
+	require.Equal(t, packPathSet{"skills/changed.md": true}, read(pack, "c4"))
+	require.Equal(t, []string{"c3", "c4"}, commits(pack))
+	require.Equal(t, packPathSet{"skills/changed.md": true}, read(pack, "c1"), "a dropped commit is read again")
 	require.Equal(t, 1, cached())
 
 	other := insertPack("beta")
 	setFiles(other, "skills/beta.md")
-	server.packPaths(ctx, enabledPack{ID: other.ID, Name: other.Name, CommitSHA: "c1"})
+	read(other, "c1")
 	require.Equal(t, 2, cached())
 }
