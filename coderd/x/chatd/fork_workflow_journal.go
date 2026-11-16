@@ -16,9 +16,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"github.com/sqlc-dev/pqtype"
-
 	"cdr.dev/slog/v3"
+	"github.com/sqlc-dev/pqtype"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -419,20 +418,23 @@ func (p *Server) rehydrateWorkflowRun(
 	}
 	// The replay keeps the retained pre-restart lines as its baseline: the
 	// view and the journal start from them, and appendLogLocked suppresses
-	// the replayed lines that echo them, so the history holds one copy.
+	// the first logEchoLeft replayed lines by count, not by content, so
+	// the history holds one copy. The count covers every line the journal
+	// already accepted, past the cap when fork_seq is above it, so a
+	// capped baseline does not turn the replayed prefix live.
 	// The counters start at the sequence the payload carries, which is past
 	// the retained lines when the run already logged more than the cap: a
 	// new line must write past the stored sequence, not behind it.
 	var seq int64
 	run.logs, seq, run.logBytes = restoreWorkflowLogs(row.Logs)
 	run.logSeq = max(len(run.logs), int(seq))
-	run.logEchoBase = append([]string(nil), run.logs...)
+	run.logEchoLeft = max(int(seq), len(run.logs))
 	// The journal holds the lines at the sequence its payload carries, so a
 	// replayed line that matches the baseline does not write again.
 	run.journalLogWrite = make(chan struct{}, 1)
+	// The write token starts in the channel, so the first flush of the
+	// resumed run takes it at once.
 	run.journalLogWrite <- struct{}{}
-	run.journalWriteDone = make(chan struct{})
-	close(run.journalWriteDone)
 	run.journaledLogSeq = max(len(run.logs), int(seq))
 	for _, srow := range stepRows {
 		step := &workflowStep{
@@ -467,6 +469,11 @@ func terminalWorkflowRun(p *Server, chat database.Chat, row forkdb.WorkflowRun) 
 		if err := json.Unmarshal(row.Result.RawMessage, &res); err != nil {
 			return nil, xerrors.Errorf("unmarshal the journal result of run %s: %w", row.ID, err)
 		}
+	}
+	// A journal-only stop wrote no result snapshot, so the row's live lines
+	// are the only history the run has.
+	if !row.Result.Valid {
+		res.Logs, _, _ = restoreWorkflowLogs(row.Logs)
 	}
 	// A run reaches this constructor only after the registry lost it, so
 	// every step in the stored result is replayed, never re-executed.

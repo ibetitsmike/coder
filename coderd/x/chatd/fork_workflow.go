@@ -141,7 +141,7 @@ type runWorkflowResult struct {
 	// the way to a stopped result. finish logs their failure lines; the
 	// lines of steps failed earlier already sit in the logs, so a resume
 	// does not log them twice. The field is not serialized.
-	interruptedSteps []*workflowStep `json:"-"` //nolint:revive // the tag documents that the field never serializes
+	interruptedSteps []*workflowStep
 }
 
 type stepSummary struct {
@@ -365,23 +365,21 @@ type workflowRun struct {
 	// seq the journal last accepted, and journalLogWrite, which serializes the
 	// journal writes so the write of an older snapshot cannot replace newer
 	// lines after a stalled one.
-	logSeq           int
-	journalMu        sync.Mutex
-	journaledLogSeq  int
-	journalLogWrite  chan struct{}
-	journalWriteDone chan struct{}
-	// logEchoBase holds the journal lines a replay restored: the replayed
-	// script prints them again, and appendLogLocked suppresses each line
-	// that still matches the baseline, so the view and the journal keep one
-	// copy of the pre-restart history. The baseline may start mid-stream,
-	// when the journal kept only the last lines of a long run, so a line
-	// the baseline does not name can be a replayed line the journal
-	// already decided about: the match then resumes at the next baseline
-	// line instead of the replay turning live early. Once the replay has
-	// consumed the whole baseline, the replay output is live again.
-	// mu guards both fields.
-	logEchoBase []string
-	logEcho     int
+	logSeq          int
+	journalMu       sync.Mutex
+	journaledLogSeq int
+	journalLogWrite chan struct{}
+	// logEchoLeft is the number of replayed lines the echo still
+	// suppresses, rehydrated as max(fork_seq, len(baseline)): the replayed
+	// script prints the live lines again, and appendLogLocked suppresses
+	// one replayed line per pre-restart line, by count and not by content,
+	// so the view and the journal keep one copy of the pre-restart
+	// history. The count, not the content, decides: a capped baseline
+	// starts mid-stream, so the replayed prefix does not match it line for
+	// line, and a repeated line would otherwise consume the wrong entry.
+	// The replay of a journaled failed step re-emits its failure line
+	// (failJournaledStep), so the count holds. mu guards the field.
+	logEchoLeft int
 	// The write-through of the logs paces itself: lastLogFlush is when the
 	// journal last accepted a snapshot, logFlushTimer holds the pending
 	// flush of a burst, and logFlushInFlight marks the goroutine that
@@ -488,6 +486,8 @@ func (p *Server) startWorkflowRun(
 	if !added {
 		return run, nil
 	}
+	// The write token starts in the channel, so the first flush takes
+	// it at once.
 	run.journalLogWrite <- struct{}{}
 	if err := p.workflowJournal().insertRun(ctx, run); err != nil {
 		p.workflows.remove(runID)
@@ -643,15 +643,15 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 
 	r.mu.Lock()
 	r.result = &res
-	close(r.done)
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
-	// The end lands the last log burst: the scheduled flush of the final
-	// lines must not outlive the run, and a terminal flush waits for an
-	// in-flight writer instead of dropping the write.
+	// The end lands the last log burst before the run closes: the terminal
+	// flush waits for an in-flight writer, and a flush scheduled after
+	// close would read the result instead of the live logs.
 	r.cancelLogFlush()
 	r.flushLogs(true)
+	close(r.done)
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -786,29 +786,18 @@ func (r *workflowRun) log(msg string) {
 
 func (r *workflowRun) appendLogLocked(msg string) {
 	msg = truncateLogLine(msg, maxWorkflowLogLine)
-	// The replay of a restored run echoes the retained lines: suppress the
-	// matching prefix so the view and the journal do not duplicate the
-	// pre-restart history. The baseline may start mid-stream, when the
-	// journal kept only the last lines of a long run, so a line the
-	// baseline does not name can be a replayed line the journal already
-	// decided about: the match then resumes at the next baseline line
-	// instead of the replay turning live early. A failed step of the
-	// baseline, for example, logs its failure line before the replay
-	// reaches the lines the baseline holds after it, so a strict match
-	// would treat that line as live. Once the replay has consumed the
-	// whole baseline, the replay output is live again.
-	if r.logEchoBase != nil {
-		for r.logEcho < len(r.logEchoBase) && msg != r.logEchoBase[r.logEcho] {
-			r.logEcho++
-		}
-		if r.logEcho < len(r.logEchoBase) {
-			r.logEcho++
-			if r.logEcho == len(r.logEchoBase) {
-				r.logEchoBase = nil
-			}
-			return
-		}
-		r.logEchoBase = nil
+	// The replay of a restored run suppresses the first logEchoLeft
+	// replayed lines, one per pre-restart line, no matter their content:
+	// the baseline is the pre-restart history, and the replay prints a
+	// live copy of it. A capped baseline starts mid-stream, so the
+	// replayed prefix is longer than the baseline and lines do not match
+	// one for one; a repeated line would otherwise consume the wrong
+	// entry and duplicate or drop lines. The replay of a journaled failed
+	// step re-emits its failure line (failJournaledStep), so the count
+	// holds. Once the count is used up, the replay output is live again.
+	if r.logEchoLeft > 0 {
+		r.logEchoLeft--
+		return
 	}
 	r.logs = append(r.logs, msg)
 	r.logBytes += len(msg)
@@ -836,8 +825,11 @@ const workflowLogFlushTimeout = 5 * time.Second
 // flight counts as pending, so the first burst cannot launch one goroutine
 // per line.
 func (r *workflowRun) scheduleLogFlush() {
+	if r.journalLogWrite == nil {
+		return
+	}
 	r.mu.Lock()
-	echoing := r.logEchoBase != nil
+	echoing := r.logEchoLeft > 0
 	r.mu.Unlock()
 	if echoing {
 		// The replay is echoing the journal lines: the column already holds
@@ -950,8 +942,6 @@ func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush pa
 		r.journalMu.Unlock()
 		return
 	}
-	r.journaledLogSeq = seq
-	r.lastLogFlush = time.Now()
 	r.journalMu.Unlock()
 	// The write is best effort and must not outlive the run or the server
 	// close, so a bounded context stands in for the caller's.
@@ -959,6 +949,12 @@ func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush pa
 		workflowLogFlushTimeout)
 	defer cancel()
 	r.p.workflowJournal().setLogs(ctx, r.id, int64(seq), logs)
+	// The counters advance only after the write landed: a failed write
+	// leaves the run pending, so the next flush retries the same lines.
+	r.journalMu.Lock()
+	r.journaledLogSeq = seq
+	r.lastLogFlush = time.Now()
+	r.journalMu.Unlock()
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the
@@ -1028,6 +1024,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		journaled.reused = true
 		r.mu.Unlock()
 		r.p.workflowJournal().markStepReused(ctx, journaled.id)
+		r.failJournaledStep(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -1124,6 +1121,21 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 	r.mu.Unlock()
 	r.flushLogs(true)
 	r.p.workflowJournal().updateStep(ctx, step)
+}
+
+// failJournaledStep re-emits the failure line of a journaled failed step
+// during a replay. The baseline already holds the line, so the echo counter
+// suppresses this copy: the re-emit keeps the line count aligned with the
+// baseline, which a plain replay that never prints the failure line would
+// break. A step failed after the baseline was taken logs its line live, the
+// way failStep does.
+func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
+	if step.status != stepStatusFailed || step.err == "" {
+		return
+	}
+	r.mu.Lock()
+	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, step.err))
+	r.mu.Unlock()
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left

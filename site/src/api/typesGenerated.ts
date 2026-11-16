@@ -13274,11 +13274,11 @@ export interface WorkflowRunDetail {
 	/**
 	 * Args is the JSON object that main(args) received.
 	 */
-	readonly args?: Record<string, string>;
+	readonly args?: unknown;
 	/**
 	 * Result is the value that main returned, for a terminal run.
 	 */
-	readonly result?: Record<string, string>;
+	readonly result?: unknown;
 	/**
 	 * Logs are the last log lines the script printed: from the snapshot of
 	 * a terminal run, or written through to the journal while it runs.
@@ -13324,7 +13324,7 @@ export interface WorkflowRunStep {
 	 * Value is the report the step sent, matching its schema. It is empty
 	 * until the step reported.
 	 */
-	readonly value?: Record<string, string>;
+	readonly value?: unknown;
 	/**
 	 * StartedAt is when the step's child chat was created (or reused).
 	 */

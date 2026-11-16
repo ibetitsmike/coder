@@ -14,10 +14,9 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/sqlc-dev/pqtype"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -477,6 +476,10 @@ def main(args):
 		run.logFlushInFlight = true
 		run.journalMu.Unlock()
 		<-run.journalLogWrite
+		// The step row must exist before the stop lands: the stop fails
+		// the open steps it finds, and a stop that races the insert would
+		// leave the step to fail on its own context instead.
+		f.steps(ctx, t, run, 1)
 		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
 		run.journalMu.Lock()
 		run.logFlushInFlight = false
@@ -503,8 +506,9 @@ def main(args):
 	})
 
 	// A capped run whose baseline holds a failure line the replay never
-	// prints again: the replay skips the unmatched baseline lines instead of
-	// treating the later new lines as misses, so none of them drops.
+	// prints again: the echo suppresses by count, so the re-emitted failure
+	// line of the journaled step keeps the count aligned and every line
+	// lands once.
 	t.Run("ReplaySkipsAnUnmatchedBaselineLine", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
@@ -543,11 +547,10 @@ def main(args):
 		f.steps(ctx, t, run, 2)
 
 		// The restart interrupts the run, and the resume replays the script
-		// from its first line. The replay never prints the failure line, so
-		// the baseline does not match from the second line on: the skip must
-		// advance to the next baseline line instead of the replay turning
-		// live early. The replay then blocks in the trailing agent, whose
-		// open step the stop fails.
+		// from its first line. The replay re-emits the failure line of the
+		// journaled step, so the echo count covers every pre-restart line
+		// without matching content. The replay then blocks in the trailing
+		// agent, whose open step the stop fails.
 		restarted := f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
@@ -555,6 +558,11 @@ def main(args):
 		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
 			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
 		require.NoError(t, err)
+		// The stop must land after the replay has consumed the echo count:
+		// a stop that races the replay would suppress the failure line of
+		// the open step as a replayed line. Reaching the trailing agent
+		// means every baseline line already echoed.
+		f.steps(ctx, t, resumed, 2)
 		stopLine := `step "Never reports." failed: ` + workflowStopError
 		wantStopped := append(append([]string(nil), want...), stopLine)
 		require.NoError(t, restarted.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
@@ -578,6 +586,99 @@ def main(args):
 		assert.Equal(t, wantStopped, out.Logs,
 			"the terminal replay must not duplicate the failure lines")
 		assert.Equal(t, wantStopped, journalRunLogs(ctx, t, fdb, run.id))
+	})
+
+	// A capped run whose dropped prefix repeats the first retained line: the
+	// echo suppresses by count, so the repeated line cannot consume the
+	// wrong entries and the replay keeps one copy of every line.
+	t.Run("ReplayKeepsARepeatedPrefix", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// The journal caps at maxWorkflowLogs lines: lines 0..29 drop, the
+		// retained tail starts at "line 30", and the dropped prefix holds
+		// earlier copies of that line.
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    for i in range(80):
+        log("line %d" % i)
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			logs := journalRunLogs(ctx, t, fdb, run.id)
+			return len(logs) == maxWorkflowLogs
+		}, testutil.IntervalFast)
+		assert.Equal(t, "line 30", journalRunLogs(ctx, t, fdb, run.id)[0],
+			"the retained lines are the last ones")
+
+		restarted := f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		step := f.steps(ctx, t, resumed, 1)[0]
+		assert.Equal(t, "line 30", journalRunLogs(ctx, t, fdb, run.id)[0],
+			"the replay does not move the journal backward")
+		assert.Len(t, journalRunLogs(ctx, t, fdb, run.id), maxWorkflowLogs)
+		f.report(ctx, t, step.ChatID, `{"text":"hi"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, resumed))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		require.Len(t, res.Logs, maxWorkflowLogs)
+		assert.Equal(t, "line 30", res.Logs[0],
+			"the repeated prefix did not consume the baseline early")
+		assert.Equal(t, "line 79", res.Logs[maxWorkflowLogs-1],
+			"the last replayed line is live once")
+	})
+
+	// Identical failure lines across a resume: the replay re-emits the
+	// journaled failure line, the echo suppresses it once, and the stop
+	// appends exactly one more line.
+	t.Run("ReplayReEmitsAFailureLineOnce", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    step = spawn("Fail.")
+    wait([step])
+    agent("Never reports.")
+`})
+		f.steps(ctx, t, run, 1)
+		step := run.snapshot().Steps[0]
+		childID := uuid.MustParse(step.ChatID)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return strings.Contains(strings.Join(f.userTexts(ctx, t, childID), "\n"), workflowReminder)
+		}, testutil.IntervalFast)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+
+		failLine := `step "Fail." failed: the step stopped without a workflow_report call`
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			logs := journalRunLogs(ctx, t, fdb, run.id)
+			return len(logs) == 1 && logs[0] == failLine
+		}, testutil.IntervalFast)
+
+		restarted := f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		f.steps(ctx, t, resumed, 2)
+		stopLine := `step "Never reports." failed: ` + workflowStopError
+		require.NoError(t, restarted.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		res := resumed.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		assert.Equal(t, []string{failLine, stopLine}, res.Logs,
+			"the identical failure line lands once per failure")
+		assert.Equal(t, []string{failLine, stopLine}, journalRunLogs(ctx, t, fdb, run.id))
 	})
 
 	// A script that logs in a loop keeps a single write in flight, so its
@@ -780,6 +881,57 @@ func TestForkWorkflowStop(t *testing.T) {
 		// chat's run.
 		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, uuid.New()), ErrForkWorkflowRunNotFound)
 		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, uuid.New(), run.id), ErrForkWorkflowRunNotFound)
+	})
+
+	// A stop of an interrupted run this replica does not hold journals a
+	// snapshot with the retained lines, so await and a terminal replay read
+	// the same history a stop of a held run produces.
+	t.Run("JournalOnlyStopCarriesTheLogs", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    log("second line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			logs := journalRunLogs(ctx, t, fdb, run.id)
+			return len(logs) == 2
+		}, testutil.IntervalFast)
+
+		// The registry drop makes the stop go through stopJournaledRun on a
+		// row that still says running: the journal-only path of a live run.
+		f.server.workflows.remove(run.id)
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		require.Equal(t, workflowStatusStopped, row.Status)
+		require.True(t, row.Result.Valid, "a journal-only stop keeps a snapshot")
+		var snapshot runWorkflowResult
+		require.NoError(t, json.Unmarshal(row.Result.RawMessage, &snapshot))
+		assert.Equal(t, workflowStatusStopped, snapshot.Status)
+		assert.Equal(t, []string{"first line", "second line"}, snapshot.Logs,
+			"the stop snapshot carries the retained live lines")
+
+		// await_workflow on the terminal row and a terminal replay read the
+		// same logs.
+		res, found, err := f.server.workflowResultFromJournal(ctx, parent.ID, run.id)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, []string{"first line", "second line"}, res.Logs,
+			"await on a journal-only stop reads the logs")
+		terminal, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		out := terminal.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, out.Status, out.Error)
+		assert.Equal(t, []string{"first line", "second line"}, out.Logs,
+			"a terminal replay reads the logs of a journal-only stop")
 	})
 
 	// A stop whose run already failed a step keeps one copy of the failure

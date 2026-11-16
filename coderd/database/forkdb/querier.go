@@ -277,7 +277,7 @@ type Querier interface {
 	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
 	// The engine writes the log lines of a live run through to the journal, capped
-	// to the last workflowLiveLogs lines. lines replaces the retained lines when
+	// to the last maxWorkflowLogs lines. lines replaces the retained lines when
 	// it is at least as new as the stored sequence, so a stalled write of an
 	// older snapshot cannot replace newer lines. The caller keeps the sequence in
 	// the lines payload under the fork_seq key.
