@@ -267,6 +267,11 @@ func (f forkQueryMetricsStore) DeleteOldChatSecretAnswers(ctx context.Context, l
 	return f.s.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
+func (f forkQueryMetricsStore) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
+	defer f.observe(ctx, "DeleteOldChatWakeupRunCounts", time.Now())
+	return f.s.DeleteOldChatWakeupRunCounts(ctx)
+}
+
 func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "DeleteOrganizationAgentDefinitionByName", time.Now())
 	return f.s.DeleteOrganizationAgentDefinitionByName(ctx, arg)

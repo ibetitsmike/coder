@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, spyOn, userEvent } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowNow,
@@ -64,9 +67,32 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	args: { run: MockChatWorkflowRunDetail, error: null, onBack: fn() },
 	parameters: {
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
+		queries: [
+			{
+				key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
+				data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
+			},
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canUpdateChat: {
+							object: {
+								resource_type: "chat",
+								owner_id: MockChat.owner_id,
+								organization_id: MockChat.organization_id,
+							},
+							action: "update",
+						},
+					},
+				}),
+				data: { canUpdateChat: true },
+			},
+		],
 	},
 	beforeEach: () => {
-		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
+		// Named "spy" so Storybook's actions addon skips logging it: its log
+		// line calls Date.now, which would recurse into the mock.
+		spyOn(Date, "now").mockName("spy").mockReturnValue(MockForkWorkflowNow);
 	},
 	decorators: [
 		(Story) => (
@@ -89,7 +115,9 @@ export const Running: Story = {
 export const RunningStopConfirm: Story = {
 	args: { run: mockRunningRunDetail },
 	play: async ({ canvas }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Stop workflow run" }),
+		);
 		await screen.findByRole("dialog", { name: "Stop workflow run" });
 	},
 };
@@ -102,7 +130,9 @@ export const RunningStopPending: Story = {
 		);
 	},
 	play: async ({ canvas }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Stop workflow run" }),
+		);
 		await userEvent.click(
 			await screen.findByRole("button", { name: "Stop run" }),
 		);
@@ -119,6 +149,47 @@ export const Failed: Story = {
 
 export const Interrupted: Story = {
 	args: { run: mockInterruptedRunDetail },
+};
+
+/**
+ * Each story lists its own cache seeds so the state the story depends on is
+ * visible in the story: the chat's cached copy and its update check. The
+ * update check reads the chat seed, so both entries come along.
+ */
+const writeAccessQueryParameters = (canUpdateChat: boolean) => ({
+	queries: [
+		{
+			key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
+			data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
+		},
+		{
+			key: getAuthorizationKey({
+				checks: {
+					canUpdateChat: {
+						object: {
+							resource_type: "chat",
+							owner_id: MockChat.owner_id,
+							organization_id: MockChat.organization_id,
+						},
+						action: "update",
+					},
+				},
+			}),
+			data: { canUpdateChat },
+		},
+	],
+});
+
+/** An interrupted run with Resume next to the heading. */
+export const InterruptedWithResume: Story = {
+	args: { run: mockInterruptedRunDetail },
+	parameters: writeAccessQueryParameters(true),
+};
+
+/** An interrupted run shown to a viewer who may not update the chat. */
+export const InterruptedNoWriteAccess: Story = {
+	args: { run: mockInterruptedRunDetail },
+	parameters: writeAccessQueryParameters(false),
 };
 
 export const Loading: Story = {

@@ -1,6 +1,7 @@
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	getErrorMessage,
+	getErrorStatus,
 	getValidationErrorMessage,
 	isApiError,
 	isWorkspaceNotFound,
@@ -100,6 +101,16 @@ describe("getValidationErrorMessage", () => {
 				"Something went wrong.",
 			),
 		).toBe("Something went wrong.");
+	});
+});
+
+describe("getErrorStatus", () => {
+	it("returns the response status of an API error", () => {
+		expect(getErrorStatus(mockApiError({ status: 409 }))).toBe(409);
+	});
+
+	it("returns undefined for a non-API error", () => {
+		expect(getErrorStatus(new Error("boom"))).toBeUndefined();
 	});
 });
 

@@ -80,3 +80,44 @@ func TestDeleteOldChatSecretAnswers(t *testing.T) {
 		"record_type": "chat_secret_answers",
 	}))
 }
+
+func TestDeleteOldChatWakeupRunCounts(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t, dbtestutil.WithDumpOnFailure())
+	logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
+	clk := quartz.NewMock(t)
+	// The purge age runs on the database clock, not on the purge's clock.
+	now := time.Now().UTC().Truncate(time.Hour)
+
+	org := dbgen.Organization(t, db, database.Organization{})
+	owner := dbgen.User(t, db, database.User{})
+	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: org.ID})
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: org.ID, OwnerID: owner.ID, LastModelConfigID: model.ID})
+	oldHour := now.Add(-8 * 24 * time.Hour)
+	recentHour := now.Add(-6 * 24 * time.Hour)
+	for _, hour := range []time.Time{oldHour, recentHour} {
+		_, err := sqlDB.ExecContext(ctx,
+			`INSERT INTO chat_wakeup_run_counts (chat_id, hour, organization_id, runs) VALUES ($1, $2, $3, 3)`,
+			chat.ID, hour, org.ID)
+		require.NoError(t, err)
+	}
+
+	done := awaitDoTick(ctx, t, clk)
+	closer := dbpurge.New(ctx, logger, db, &codersdk.DeploymentValues{}, prometheus.NewRegistry(), dbpurge.WithClock(clk))
+	defer closer.Close()
+	<-done
+
+	var hours []time.Time
+	rows, err := sqlDB.QueryContext(ctx, `SELECT hour FROM chat_wakeup_run_counts WHERE chat_id = $1`, chat.ID)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var hour time.Time
+		require.NoError(t, rows.Scan(&hour))
+		hours = append(hours, hour.UTC())
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []time.Time{recentHour}, hours, "the purge deletes only the counts older than 7 days")
+}

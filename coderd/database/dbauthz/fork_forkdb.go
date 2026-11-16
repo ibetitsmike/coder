@@ -144,6 +144,13 @@ func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, limitCount
 	return f.db.DeleteOldChatSecretAnswers(ctx, limitCount)
 }
 
+func (f *forkQuerier) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldChatWakeupRunCounts(ctx)
+}
+
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams(arg))
