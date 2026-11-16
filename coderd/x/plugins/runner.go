@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,7 +34,28 @@ const (
 	bindInterval = 10 * time.Minute
 	// maxWebhookBodyBytes caps the body of one webhook request.
 	maxWebhookBodyBytes = 1 << 20
+
+	// A plugin that stops with an error is started again after
+	// restartBaseDelay, doubled for each failure in a row, up to
+	// restartMaxDelay. A runner that stayed up for restartResetAfter counts
+	// as a first failure again.
+	restartBaseDelay  = 10 * time.Second
+	restartMaxDelay   = 10 * time.Minute
+	restartResetAfter = 5 * time.Minute
 )
+
+// restartDelay is how long the manager waits to start a plugin again after
+// failures earlier runners in a row stopped with an error.
+func restartDelay(failures int) time.Duration {
+	d := restartBaseDelay
+	for range failures {
+		d *= 2
+		if d >= restartMaxDelay {
+			return restartMaxDelay
+		}
+	}
+	return d
+}
 
 // WebhookResponse is what on_http returned.
 type WebhookResponse struct {
@@ -79,9 +101,20 @@ type runner struct {
 	// bindAgain is set when the last full bind failed or pubsub dropped
 	// chat events, so the next scan runs a full bind.
 	bindAgain atomic.Bool
+
+	// failures counts the runners of this plugin before this one that
+	// stopped with an error in a row.
+	failures int
+	// restartAt is when the manager may start the plugin again. The runner
+	// sets it before done closes, only when it stopped with an error.
+	restartAt time.Time
+	// upAt is when the module loaded and the runner became ready. It stays
+	// zero when the runner failed before that. Only the run goroutine uses
+	// it.
+	upAt time.Time
 }
 
-func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
+func (m *Manager) startRunner(p forkdb.Plugin, prev *runner, failures int) *runner {
 	ctx, cancel := context.WithCancel(m.ctx)
 	r := &runner{
 		m:           m,
@@ -97,6 +130,7 @@ func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
 		keys:        map[uuid.UUID]userClient{},
 		subs:        map[uuid.UUID]func(){},
 		newChats:    map[uuid.UUID]struct{}{},
+		failures:    failures,
 	}
 	// Decode before the goroutine starts: webhook calls read these fields
 	// from other goroutines.
@@ -112,14 +146,29 @@ func (m *Manager) startRunner(p forkdb.Plugin, prev *runner) *runner {
 			err = r.run(ctx)
 		}
 		if err != nil && ctx.Err() == nil {
-			r.logger.Error(ctx, "plugin process stopped", slog.Error(err))
-			r.setLastError(err.Error())
+			delay := r.failed()
+			r.logger.Error(ctx, "plugin process stopped", slog.F("restart_in", delay), slog.Error(err))
+			// The delay comes first, so truncating a long error keeps it.
+			r.setLastError(fmt.Sprintf("restarting in %s after: %s", delay, err))
 		}
 	}()
 	return r
 }
 
 func (r *runner) stop() { r.cancel() }
+
+// failed sets when the plugin may start again after this runner stopped with
+// an error, and returns the delay. Only a runner that stayed up for
+// restartResetAfter after it became ready resets the count: a slow load
+// that fails is still a failure in a row.
+func (r *runner) failed() time.Duration {
+	if !r.upAt.IsZero() && r.m.clock.Since(r.upAt) >= restartResetAfter {
+		r.failures = 0
+	}
+	delay := restartDelay(r.failures)
+	r.restartAt = r.m.clock.Now().Add(delay)
+	return delay
+}
 
 func (r *runner) exited() bool {
 	select {
@@ -196,6 +245,7 @@ func (r *runner) run(ctx context.Context) error {
 		return xerrors.Errorf("module manifest changed: %w", err)
 	}
 	r.client = client
+	r.upAt = r.m.clock.Now()
 	close(r.ready)
 	r.setLastError("")
 	r.logger.Info(ctx, "plugin process started")
