@@ -401,6 +401,84 @@ def main(args):
 		assert.False(t, armed, "the fallback timer must have fired once")
 	})
 
+	// The fallback timer can fire while the write token is still held: it
+	// stamps its attempt and arms one more paced timer, so the line cannot
+	// wait for the next log() or the end of the run. The timer must not
+	// outlive the run either: the terminal flush of the end cancels it.
+	t.Run("FallbackRearmsWhileTheTokenIsHeld", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		journalLogs := func() []string {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			require.NoError(t, err)
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
+			return logs
+		}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 1
+		}, testutil.IntervalFast)
+
+		// The held token turns the attempt of the held line into a dropped
+		// one, and the stale stamp turns it into the paced fallback.
+		<-run.journalLogWrite
+		run.journalMu.Lock()
+		run.lastLogFlush = time.Now().Add(-workflowLogFlushInterval)
+		base := run.flushAttempts
+		run.journalMu.Unlock()
+		run.log("held line")
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			run.journalMu.Lock()
+			armed := run.logFlushTimer != nil
+			run.journalMu.Unlock()
+			return armed
+		}, testutil.IntervalFast)
+
+		// The fallback of the first round fires into the still held token
+		// and must arm a second one, not leave the line stranded. The
+		// counter of the flush path counts each attempt, so the wait sees
+		// the second round even if its timer fired and re-armed again. The
+		// token stays held for the whole sub-test, so every attempt here is
+		// a dropped one: the attempts must reach base plus three (the held
+		// line, and two fallback rounds).
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			run.journalMu.Lock()
+			attempts := run.flushAttempts
+			run.journalMu.Unlock()
+			if attempts >= base+3 {
+				break
+			}
+			if !time.Now().Before(deadline) {
+				run.journalMu.Lock()
+				armed := run.logFlushTimer != nil
+				run.journalMu.Unlock()
+				t.Fatalf("the flush made only %d attempts while the token was held (timer armed: %v); the fallback did not re-arm", attempts, armed)
+			}
+			time.Sleep(testutil.IntervalFast)
+		}
+		run.journalMu.Lock()
+		attempts := run.flushAttempts
+		armed := run.logFlushTimer != nil
+		run.journalMu.Unlock()
+		assert.GreaterOrEqual(t, attempts, base+3, "the dropped fallback must arm a second paced round")
+		assert.True(t, armed, "the second round must still be armed while the token is held")
+
+		// Release the token: the pending round writes the held line.
+		run.journalLogWrite <- struct{}{}
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalLogs()) == 2
+		}, testutil.IntervalSlow)
+		assert.Equal(t, []string{"first line", "held line"}, journalLogs())
+	})
+
 	// A paced attempt that finds the write token taken must not spin:
 	// the attempt stamps lastLogFlush, so the next attempt waits out the
 	// interval instead of rescheduling immediately until the holder
@@ -424,7 +502,9 @@ def main(args):
 		}, testutil.IntervalFast)
 
 		// A plain token holder stands in for a slow write: the paced
-		// attempts during the hold must pace themselves, not spin.
+		// attempts during the hold must pace themselves, not spin. The
+		// count reads flushFlushAttempts, the counter the flush path
+		// itself advances, so no poll can miss one.
 		<-run.journalLogWrite
 		// The last attempt stamp must be stale, or the first paced
 		// attempt after the held line arms a timer and never reaches
@@ -432,35 +512,19 @@ def main(args):
 		// taken token.
 		run.journalMu.Lock()
 		run.lastLogFlush = time.Now().Add(-workflowLogFlushInterval)
+		base := run.flushAttempts
 		run.journalMu.Unlock()
 		run.log("held line")
-		spins := 0
-		stop := make(chan struct{})
-		exited := make(chan struct{})
-		go func() {
-			defer close(exited)
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				run.journalMu.Lock()
-				if run.logFlushInFlight {
-					spins++
-				}
-				run.journalMu.Unlock()
-				time.Sleep(time.Millisecond)
-			}
-		}()
+		// The interval is 2s, so a spin loop would attempt thousands of
+		// flushes in 200ms; pacing allows at most a handful.
 		time.Sleep(200 * time.Millisecond)
-		close(stop)
-		<-exited
+		run.journalMu.Lock()
+		attempts := run.flushAttempts - base
+		run.journalMu.Unlock()
 		run.journalLogWrite <- struct{}{}
-		t.Logf("paced attempts during the hold: %d", spins)
-		// The interval is 2s, so a spin loop would see hundreds of
-		// attempts in 200ms; pacing allows at most a handful.
-		assert.LessOrEqual(t, spins, 3, "the flush attempts must pace while the write token is held")
+		t.Logf("paced attempts during the hold: %d", attempts)
+		assert.LessOrEqual(t, attempts, 3, "the flush attempts must pace while the write token is held")
+		assert.Greater(t, attempts, 0, "the held line must have reached the flush path")
 	})
 
 	// await_workflow for an interrupted run this replica does not hold
@@ -756,6 +820,50 @@ def main(args):
 			"the repeated prefix did not consume the baseline early")
 		assert.Equal(t, "line 79", res.Logs[maxWorkflowLogs-1],
 			"the last replayed line is live once")
+	})
+
+	// A stop that lands while the replay still holds echo credit must not
+	// lose the stop-generated failure lines: only the script's own log
+	// lines consume the echo count, so a stop failure line lands even
+	// though the replay has lines left to echo.
+	t.Run("StopLinesBypassTheEchoSuppression", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    log("second line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return len(journalRunLogs(ctx, t, fdb, run.id)) == 2
+		}, testutil.IntervalFast)
+
+		restarted := f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		// The replay re-emits the two baseline lines, so the echo count is
+		// still positive when the stop lands. The stop must not lose its
+		// own failure line to the suppression.
+		f.steps(ctx, t, resumed, 1)
+		require.NoError(t, restarted.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		res := resumed.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		stopLine := `step "Never reports." failed: ` + workflowStopError
+		assert.Equal(t, []string{"first line", "second line", stopLine}, res.Logs,
+			"the stop failure line must land while the replay holds echo credit")
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return assert.ObjectsAreEqual(
+				[]string{"first line", "second line", stopLine},
+				journalRunLogs(ctx, t, fdb, run.id))
+		}, testutil.IntervalFast)
 	})
 
 	// Identical failure lines across a resume: the replay re-emits the
