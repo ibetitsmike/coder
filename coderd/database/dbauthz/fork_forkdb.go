@@ -850,6 +850,22 @@ func (f *forkQuerier) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.
 	return f.db.MarkChatWakeupWatchFailed(ctx, arg)
 }
 
+// ClaimDuePullRequestWatches spans chats, so it needs site-wide chat access,
+// like chatd's.
+func (f *forkQuerier) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.ClaimDuePullRequestWatches(ctx, arg)
+}
+
+func (f *forkQuerier) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return 0, err
+	}
+	return f.db.RecordPullRequestWatchPoll(ctx, arg)
+}
+
 // MarkOpenWorkflowRunsInterrupted runs once at chatd startup, as the system.
 func (f *forkQuerier) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
