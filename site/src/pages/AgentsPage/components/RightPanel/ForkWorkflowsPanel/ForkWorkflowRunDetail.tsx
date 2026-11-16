@@ -177,6 +177,12 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			{run.error !== "" && (
 				<ForkWorkflowLongText label="Error" text={run.error} isError />
 			)}
+			{run.args !== undefined && (
+				<ForkWorkflowLongText
+					label="Args"
+					text={formatForkWorkflowValue(run.args)}
+				/>
+			)}
 			{steps.length > 0 && (
 				<ForkWorkflowSteps
 					steps={steps}
@@ -199,14 +205,13 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 					text={formatForkWorkflowValue(run.result)}
 				/>
 			)}
-			{isRunning ? (
+			{run.logs.length > 0 && (
+				<ForkWorkflowLongText label="Logs" text={run.logs.join("\n")} />
+			)}
+			{run.logs.length === 0 && isRunning && (
 				<p className="m-0 mt-1.5 text-xs text-content-secondary">
-					Logs appear when the run ends.
+					Logs appear as the script prints them.
 				</p>
-			) : (
-				run.logs.length > 0 && (
-					<ForkWorkflowLongText label="Logs" text={run.logs.join("\n")} />
-				)
 			)}
 			<ForkWorkflowLongText label="Script" text={run.script} />
 		</section>

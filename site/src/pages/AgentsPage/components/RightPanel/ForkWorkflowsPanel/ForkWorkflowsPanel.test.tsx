@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -127,6 +127,35 @@ describe("ForkWorkflowsPanel", () => {
 		);
 		// The run may have ended on its own, so the list refreshes anyway.
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+	});
+
+	it("shows Load older runs and loads the older page", async () => {
+		const chatId = generateUUID();
+		// A full page promises older runs; the cursor page holds one.
+		const firstPage = Array.from({ length: 50 }, () => MockChatWorkflowRun);
+		const getRuns = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
+			.mockImplementation((_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+			);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+
+		const loadButton = await screen.findByRole("button", {
+			name: "Load older runs",
+		});
+		await userEvent.setup().click(loadButton);
+		await waitFor(() =>
+			expect(getRuns).toHaveBeenCalledWith(
+				chatId,
+				expect.stringContaining("/"),
+				expect.anything(),
+			),
+		);
+		const runList = screen.getByRole("list", { name: "Workflow runs" });
+		expect(within(runList).getAllByRole("button")).toHaveLength(51);
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {

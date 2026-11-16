@@ -5,12 +5,14 @@ import type React from "react";
 import { useId } from "react";
 import { Badge } from "#/components/Badge/Badge";
 import { ForkChatLink } from "../ChatElements/tools/ForkChatLink";
+import { ForkWorkflowLongText } from "./ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "./ForkWorkflowPhaseRail";
 import { ForkWorkflowStatusBadge } from "./ForkWorkflowStatusBadge";
 import {
 	type ForkWorkflowStep,
 	forkWorkflowStepPhases,
 	forkWorkflowStepStatusMeta,
+	formatForkWorkflowValue,
 } from "./forkWorkflows";
 
 type ForkWorkflowStepsProps = {
@@ -92,6 +94,12 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 									<div className="pl-1 font-mono text-xs text-content-destructive wrap-anywhere">
 										{step.error}
 									</div>
+								)}
+								{step.value !== undefined && (
+									<ForkWorkflowLongText
+										label="Value"
+										text={formatForkWorkflowValue(step.value)}
+									/>
 								)}
 							</li>
 						);

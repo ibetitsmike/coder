@@ -24,6 +24,17 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 	),
 };
 
+// A running run shows its args, the log lines so far and each step's
+// report, before the result exists.
+const mockRunningRunDetailWithProgress: WorkflowRunDetail = {
+	...mockRunningRunDetail,
+	steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
+		...step,
+		status: index === 2 ? "running" : "reported",
+		finished_at: index === 2 ? undefined : step.finished_at,
+	})),
+};
+
 const mockFailedRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "failed",
@@ -130,6 +141,22 @@ export const Completed: Story = {};
 
 export const Running: Story = {
 	args: { run: mockRunningRunDetail },
+};
+
+/**
+ * A running run shows its args, the log lines so far and the value of each
+ * step that has reported, while the result is still absent.
+ */
+export const RunningWithProgress: Story = {
+	args: { run: mockRunningRunDetailWithProgress },
+};
+
+/**
+ * A running run whose script prints nothing yet: the detail says where the
+ * logs will appear instead of an empty block.
+ */
+export const RunningWithoutLogs: Story = {
+	args: { run: { ...mockRunningRunDetail, logs: [], steps: [] } },
 };
 
 export const RunningStopConfirm: Story = {

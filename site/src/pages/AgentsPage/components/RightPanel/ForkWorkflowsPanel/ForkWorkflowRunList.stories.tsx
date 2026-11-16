@@ -78,6 +78,23 @@ type Story = StoryObj<typeof ForkWorkflowRunList>;
 
 export const Runs: Story = {};
 
+/** The list offers a Load older runs control when more pages exist. */
+export const WithOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
+/** The Load older runs control shows a spinner while its page loads. */
+export const LoadingOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		isLoadingOlderRuns: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
 export const Loading: Story = {
 	args: { runs: undefined },
 };

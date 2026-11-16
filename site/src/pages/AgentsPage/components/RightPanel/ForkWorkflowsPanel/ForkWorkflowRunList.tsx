@@ -6,6 +6,7 @@ import { getErrorMessage } from "#/api/errors";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
+import { Button } from "#/components/Button/Button";
 import { Spinner } from "#/components/Spinner/Spinner";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
@@ -20,12 +21,20 @@ type ForkWorkflowRunListProps = {
 	runs: readonly WorkflowRun[] | undefined;
 	error: unknown;
 	onSelectRun: (runId: string) => void;
+	/** Whether the chat has runs older than the loaded pages. */
+	hasOlderRuns?: boolean;
+	isLoadingOlderRuns?: boolean;
+	/** Absent while the first page has not loaded. */
+	onLoadOlderRuns?: () => void;
 };
 
 export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	runs,
 	error,
 	onSelectRun,
+	hasOlderRuns = false,
+	isLoadingOlderRuns = false,
+	onLoadOlderRuns,
 }) => {
 	const hasRunning = runs?.some((run) => run.status === "running") ?? false;
 	const now = useTime(() => Date.now(), {
@@ -93,6 +102,24 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					</li>
 				))}
 			</ul>
+			{hasOlderRuns && onLoadOlderRuns && (
+				<Button
+					variant="subtle"
+					size="sm"
+					className="w-full"
+					disabled={isLoadingOlderRuns}
+					onClick={onLoadOlderRuns}
+				>
+					{isLoadingOlderRuns ? (
+						<>
+							<Spinner size="sm" loading />
+							Loading older runs...
+						</>
+					) : (
+						"Load older runs"
+					)}
+				</Button>
+			)}
 		</div>
 	);
 };

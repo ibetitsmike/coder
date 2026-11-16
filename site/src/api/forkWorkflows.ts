@@ -7,11 +7,12 @@ import type { WorkflowRun, WorkflowRunDetail } from "./typesGenerated";
 /** Fetches the chat's workflow runs, newest first. */
 export const getChatWorkflowRuns = async (
 	chatId: string,
+	after?: string,
 	signal?: AbortSignal,
 ): Promise<WorkflowRun[]> => {
 	const response = await API.getAxiosInstance().get<WorkflowRun[]>(
 		`/api/v2/chats/fork/${chatId}/workflow-runs`,
-		{ signal },
+		{ signal, params: after ? { after } : undefined },
 	);
 	return response.data;
 };

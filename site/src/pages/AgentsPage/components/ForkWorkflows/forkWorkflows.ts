@@ -13,6 +13,8 @@ export type ForkWorkflowStep = {
 	reused: boolean;
 	error: string;
 	phase: string;
+	/** The report the step sent, undefined until it reported. */
+	value?: unknown;
 };
 
 /** A run as run_workflow and await_workflow report it. */
@@ -136,6 +138,7 @@ export const forkWorkflowRunDetailSteps = (
 			reused: step.reused,
 			error: step.error,
 			phase: step.phase,
+			value: step.value,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */

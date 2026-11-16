@@ -6,7 +6,10 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
-import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
+import {
+	MockChatWorkflowRunDetail,
+	MockForkWorkflowStepValue,
+} from "#/testHelpers/forkWorkflows";
 import { render } from "#/testHelpers/renderHelpers";
 import { ForkWorkflowSteps } from "./ForkWorkflowSteps";
 import type { ForkWorkflowStep } from "./forkWorkflows";
@@ -32,6 +35,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 			status: step.status,
 			reused: step.reused === true,
 			error: step.error ?? "",
+			value: step.status === "reported" ? MockForkWorkflowStepValue : undefined,
 			ordinal,
 			phase: step.phase,
 			started_at: "2026-11-12T10:00:05Z",
@@ -45,6 +49,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 		reused: step.reused === true,
 		error: step.error ?? "",
 		phase: step.phase,
+		value: run.steps.find((runStep) => runStep.id === step.id)?.value,
 	}));
 	render(
 		<ForkWorkflowSteps
@@ -59,6 +64,32 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 };
 
 describe("ForkWorkflowSteps", () => {
+	it("shows the value a step reported under the step", () => {
+		const { stepList } = renderSteps([
+			{
+				chatId: "aa111111-1111-4111-8111-111111111111",
+				title: "Plan the change",
+				status: "reported",
+				phase: "plan",
+			},
+			{
+				chatId: "bb222222-2222-4222-8222-222222222222",
+				title: "Build the change",
+				status: "running",
+				phase: "build",
+			},
+		]);
+
+		const [reportedStep, runningStep] = stepList.getAllByRole("listitem");
+		const reportedValue = within(reportedStep).getByRole("region", {
+			name: "Value",
+		});
+		expect(reportedValue).toHaveTextContent("the handler writes to a nil map");
+		expect(
+			within(runningStep).queryByRole("region", { name: "Value" }),
+		).not.toBeInTheDocument();
+	});
+
 	it("describes the first step of each phase group with that phase heading", () => {
 		const { stepList } = renderSteps([
 			{

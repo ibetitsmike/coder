@@ -45,7 +45,7 @@ describe("useForkWorkflowsTab", () => {
 		});
 
 		await waitFor(() => expect(result.current).toBe(true));
-		expect(getRuns).toHaveBeenCalledWith(chat.id, expect.anything());
+		expect(getRuns).toHaveBeenCalledWith(chat.id, "", expect.anything());
 	});
 
 	it("never asks for runs on a child chat", () => {

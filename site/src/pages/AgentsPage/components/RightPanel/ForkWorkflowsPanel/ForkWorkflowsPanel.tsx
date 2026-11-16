@@ -3,7 +3,7 @@
 
 import type React from "react";
 import { useState } from "react";
-import { useQuery } from "react-query";
+import { useInfiniteQuery } from "react-query";
 import { chatWorkflowRuns } from "#/api/queries/forkWorkflows";
 import { ScrollArea } from "#/components/ScrollArea/ScrollArea";
 import { useTabPanelState } from "../../ChatsSidebar/tabs/SidebarTabView";
@@ -34,7 +34,7 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 		}
 		setSelectedRunId(runId);
 	};
-	const runsQuery = useQuery(chatWorkflowRuns(chatId));
+	const runsQuery = useInfiniteQuery(chatWorkflowRuns(chatId));
 
 	return (
 		<ScrollArea
@@ -52,9 +52,16 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 					/>
 				) : (
 					<ForkWorkflowRunList
-						runs={runsQuery.data}
+						runs={runsQuery.data?.pages.flat()}
 						error={runsQuery.error}
 						onSelectRun={selectRun}
+						hasOlderRuns={runsQuery.hasNextPage}
+						isLoadingOlderRuns={runsQuery.isFetchingNextPage}
+						onLoadOlderRuns={
+							runsQuery.hasNextPage
+								? () => void runsQuery.fetchNextPage()
+								: undefined
+						}
 					/>
 				)}
 			</div>

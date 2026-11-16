@@ -1,4 +1,9 @@
-import { mutationOptions, type QueryClient, queryOptions } from "react-query";
+import {
+	infiniteQueryOptions,
+	mutationOptions,
+	type QueryClient,
+	queryOptions,
+} from "react-query";
 import {
 	getChatWorkflowRun,
 	getChatWorkflowRuns,
@@ -10,14 +15,33 @@ import type { WorkflowRunDetail } from "#/api/typesGenerated";
 export const chatWorkflowRunsKey = (chatId: string) =>
 	["chats", "fork-workflow-runs", chatId] as const;
 
+/** The page size of the run list. It matches the server default. */
+const workflowRunsPageSize = 50;
+
+/**
+ * Lists the chat's workflow runs, newest first, as pages that "Load older
+ * runs" extends with the keyset cursor of the last loaded run.
+ */
 export const chatWorkflowRuns = (chatId: string) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
-		queryFn: ({ signal }) => getChatWorkflowRuns(chatId, signal),
+		queryFn: ({ signal, pageParam }) =>
+			getChatWorkflowRuns(chatId, pageParam.after, signal),
+		initialPageParam: { after: "" },
+		getNextPageParam: (lastPage) => {
+			const last = lastPage[lastPage.length - 1];
+			// A short page has no older runs behind it.
+			if (!last || lastPage.length < workflowRunsPageSize) {
+				return undefined;
+			}
+			return { after: `${last.created_at}/${last.id}` };
+		},
 		// Runs have no watch socket: poll faster while one is running, and
 		// slowly otherwise so a run the agent starts shows up.
 		refetchInterval: ({ state }) =>
-			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
+			state.data?.pages[0]?.some((run) => run.status === "running")
+				? 5_000
+				: 30_000,
 	});
 
 /** Keys one run's detail under its chat's runs. */
