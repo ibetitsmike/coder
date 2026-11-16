@@ -9,7 +9,6 @@ package chatd
 import (
 	"context"
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,19 +90,16 @@ func (p *Server) forkArchiveActiveFamily(ctx context.Context, root database.Chat
 	if err != nil {
 		return xerrors.Errorf("get chat family: %w", err)
 	}
-	// The family comes root first in creation order. A child is created
-	// after its parent, so the reverse order lists every chat before its
-	// parent, as the cascade interrupts them.
-	slices.Reverse(ids)
 	return p.settleChatsForArchive(ctx, root, ids)
 }
 
 // settleChatsForArchive interrupts top, which cascades to its descendants,
-// and waits up to familyArchiveSettleTimeout until no chat in ids is active.
-// ids holds top and its descendants, every chat before its parent. Each wake reads the statuses of all of
-// them in one statement and interrupts again only the members that can still
-// transition. It returns nil on timeout, so that the archive transition
-// refuses the members that are still active.
+// and waits up to familyArchiveSettleTimeout until top and its subtree have
+// no active chat. ids holds top and its descendants when the archive
+// starts. Each wake reads the current subtree and its chats with a fixed
+// number of statements and interrupts again only the members that can
+// still transition. It returns nil on timeout, so that the archive
+// transition refuses the members that are still active.
 func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, ids []uuid.UUID) error {
 	active, err := p.activeFamilyChats(ctx, ids)
 	if err != nil || len(active) == 0 {
@@ -139,7 +135,7 @@ func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, i
 	}
 	cascadeCtx := context.WithValue(ctx, interruptCascadeKey{}, true)
 	for {
-		stillActive, err := p.settleArchivePass(cascadeCtx, ids)
+		stillActive, err := p.settleArchivePass(cascadeCtx, top.ID)
 		if err != nil || !stillActive {
 			return err
 		}
@@ -154,20 +150,39 @@ func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, i
 	}
 }
 
-// settleArchivePass reads the statuses of ids in one statement and
-// interrupts again the members that can still transition. It reports whether
-// any member is still active. ctx must carry interruptCascadeKey, since the
-// first interrupt of the settle already walked the subtree.
-func (p *Server) settleArchivePass(ctx context.Context, ids []uuid.UUID) (bool, error) {
+// settleArchivePass reads the current subtree of top, so that a child
+// spawned during the settle is covered, and the chats of top and that
+// subtree, in two statements. It interrupts again every active member
+// except an interrupting one that its worker still owns, and reports
+// whether any member is still active. ctx must carry interruptCascadeKey,
+// since the pass already covers the whole subtree.
+func (p *Server) settleArchivePass(ctx context.Context, topID uuid.UUID) (bool, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return false, xerrors.Errorf("fork queries: %w", err)
+	}
+	rows, err := fdb.GetChatSubtreeIDs(ctx, topID)
+	if err != nil {
+		return false, xerrors.Errorf("get subtree: %w", err)
+	}
+	// The subtree comes leaves first, so every chat is interrupted
+	// before its parent, as the cascade does.
+	ids := make([]uuid.UUID, 0, len(rows)+1)
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	ids = append(ids, topID)
 	active, err := p.activeFamilyChats(ctx, ids)
 	if err != nil || len(active) == 0 {
 		return false, err
 	}
 	// A requires_action member returns to running when interrupted, and a
 	// running member may have started after the cascade, so those are
-	// interrupted again. An interrupting member only waits for its worker.
+	// interrupted again. An interrupting member only waits for its
+	// worker, unless no worker owns it, in which case the interrupt
+	// finishes it inline.
 	for _, chat := range active {
-		if chat.Status == database.ChatStatusInterrupting {
+		if chat.Status == database.ChatStatusInterrupting && chat.WorkerID.Valid {
 			continue
 		}
 		if _, _, err := p.InterruptChat(ctx, chat); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {

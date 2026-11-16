@@ -144,41 +144,57 @@ func TestForkInterruptCascadeStatements(t *testing.T) {
 	})
 }
 
-// One settle pass over a 20 member family reads every status in one
-// statement and interrupts no member that only waits for its worker.
+// One settle pass over a root with 20 descendants reads the subtree and every
+// status in two statements and interrupts no member that only waits for
+// its worker.
 func TestForkArchiveSettlePassStatements(t *testing.T) {
 	t.Parallel()
 	f := newCountedFamily(t)
 	ctx := chatdTestContext(t)
-	descendants := f.threeLevels(t)[:19]
+	descendants := f.threeLevels(t)
 	owned := uuid.NullUUID{UUID: uuid.New(), Valid: true}
 	busy := descendants[3]
 	f.setStatus(t, busy, database.ChatStatusInterrupting, owned)
-	ids := []uuid.UUID{f.root.ID}
-	for _, chat := range descendants {
-		ids = append(ids, chat.ID)
-	}
-	require.Len(t, ids, 20)
 
 	cascadeCtx := context.WithValue(ctx, interruptCascadeKey{}, true)
 	var active bool
 	counts := f.counted(t, func() {
 		var err error
-		active, err = f.server.settleArchivePass(cascadeCtx, ids)
+		active, err = f.server.settleArchivePass(cascadeCtx, f.root.ID)
 		require.NoError(t, err)
 	})
 	require.True(t, active)
-	require.Equal(t, map[string]int{"GetChatsByIDs": 1}, counts)
+	require.Equal(t, map[string]int{"GetChatSubtreeIDs": 1, "GetChatsByIDs": 1}, counts)
+	f.requireStatus(t, database.ChatStatusInterrupting, busy)
 
 	// Once the worker finishes, the next pass reports the family settled.
 	f.setStatus(t, busy, database.ChatStatusWaiting, uuid.NullUUID{})
 	counts = f.counted(t, func() {
 		var err error
-		active, err = f.server.settleArchivePass(cascadeCtx, ids)
+		active, err = f.server.settleArchivePass(cascadeCtx, f.root.ID)
 		require.NoError(t, err)
 	})
 	require.False(t, active)
-	require.Equal(t, map[string]int{"GetChatsByIDs": 1}, counts)
+	require.Equal(t, map[string]int{"GetChatSubtreeIDs": 1, "GetChatsByIDs": 1}, counts)
+}
+
+// A settle pass interrupts a child spawned after the settle began, and
+// finishes an interrupting member that no worker owns.
+func TestForkArchiveSettlePassCoversLateAndUnownedMembers(t *testing.T) {
+	t.Parallel()
+	f := newCountedFamily(t)
+	ctx := chatdTestContext(t)
+	child := f.descendant(t, f.root, database.ChatStatusWaiting)
+	late := f.descendant(t, child, database.ChatStatusWaiting)
+	f.setStatus(t, late, database.ChatStatusRunning, uuid.NullUUID{UUID: uuid.New(), Valid: true})
+	f.setStatus(t, child, database.ChatStatusInterrupting, uuid.NullUUID{})
+
+	cascadeCtx := context.WithValue(ctx, interruptCascadeKey{}, true)
+	active, err := f.server.settleArchivePass(cascadeCtx, f.root.ID)
+	require.NoError(t, err)
+	require.True(t, active)
+	f.requireStatus(t, database.ChatStatusInterrupting, late)
+	f.requireStatus(t, database.ChatStatusWaiting, child)
 }
 
 // spawnReadCounts counts the limit, depth and live count reads that the
