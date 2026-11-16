@@ -131,6 +131,8 @@ func (api *API) postOrganizationPlugin(rw http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	org := httpmw.OrganizationParam(r)
 	apiKey := httpmw.APIKey(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin", forkAuditCreate)
+	defer commitAudit()
 	if api.pluginsUnavailable(rw) {
 		return
 	}
@@ -218,6 +220,11 @@ func (api *API) postOrganizationPlugin(rw http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
+	}
+	fa.target(org, plugin.ID, plugin.Name)
+	fa.diff(nil, forkAuditPlugin(plugin))
+	if config != "" {
+		fa.secret("config")
 	}
 	api.publishPluginsChanged()
 	writePlugin(ctx, rw, http.StatusCreated, plugin)
@@ -356,10 +363,14 @@ func (api *API) getPlugin(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin", forkAuditUpdate)
+	defer commitAudit()
 	p, ok := api.ownedPlugin(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, p.OrganizationID), p.ID, p.Name)
+	old := p
 	var req codersdk.UpdatePluginRequest
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
@@ -402,6 +413,10 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
+	fa.diff(forkAuditPlugin(old), forkAuditPlugin(p))
+	if req.Config != nil && p.Config != old.Config {
+		fa.secret("config")
+	}
 	api.publishPluginsChanged()
 	writePlugin(ctx, rw, http.StatusOK, p)
 }
@@ -416,14 +431,18 @@ func (api *API) patchPlugin(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) deletePlugin(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "plugin", forkAuditDelete)
+	defer commitAudit()
 	p, ok := api.ownedPlugin(rw, r, policy.ActionDelete)
 	if !ok {
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, p.OrganizationID), p.ID, p.Name)
 	if err := api.pluginDB.DeletePluginByID(ctx, p.ID); err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
+	fa.diff(forkAuditPlugin(p), nil)
 	api.publishPluginsChanged()
 	rw.WriteHeader(http.StatusNoContent)
 }
@@ -749,6 +768,24 @@ func convertPlugin(p forkdb.Plugin) (codersdk.Plugin, error) {
 		out.RunnerID = &id
 	}
 	return out, nil
+}
+
+// forkAuditPlugin is the audit view of a plugin. It names the configuration
+// keys that are set but never their values, which are secrets.
+func forkAuditPlugin(p forkdb.Plugin) any {
+	configKeys := []string{}
+	var config map[string]string
+	if p.Config != "" && json.Unmarshal([]byte(p.Config), &config) == nil {
+		configKeys = slices.Sorted(maps.Keys(config))
+	}
+	return struct {
+		Name       string          `json:"name"`
+		Version    string          `json:"version"`
+		FileID     uuid.UUID       `json:"file_id"`
+		Grants     json.RawMessage `json:"grants"`
+		ConfigKeys []string        `json:"config_keys"`
+		Enabled    bool            `json:"enabled"`
+	}{p.Name, p.Version, p.FileID, p.Grants, configKeys, p.Enabled}
 }
 
 func convertPluginLinks(links []forkdb.PluginUserLink) []codersdk.PluginUserLink {
