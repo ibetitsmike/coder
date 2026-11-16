@@ -209,9 +209,6 @@ func (p *Server) loadSubagentSpawnParentChat(
 	currentChat func() database.Chat,
 ) (database.Chat, error) {
 	parent := currentChat()
-	if err := p.forkValidateSpawnParent(ctx, parent); err != nil {
-		return database.Chat{}, err
-	}
 	reloadedParent, err := p.db.GetChatByID(ctx, parent.ID)
 	if err != nil {
 		p.logger.Warn(ctx, "failed to load parent chat for spawn_agent",
