@@ -7,7 +7,7 @@ import { SquareIcon } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage } from "#/api/errors";
+import { getErrorDetail, getErrorMessage, getErrorStatus } from "#/api/errors";
 import { stopWorkflowRun } from "#/api/queries/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { Button } from "#/components/Button/Button";
@@ -39,10 +39,18 @@ export const ForkWorkflowStopButton: React.FC<ForkWorkflowStopButtonProps> = ({
 	const handleStop = () => {
 		stopMutation.mutate(undefined, {
 			onError: (error) => {
-				toast.error(
-					getErrorMessage(error, "Failed to stop the workflow run."),
-					{ description: getErrorDetail(error) },
-				);
+				// A 409 means the run ended between the confirm and the
+				// request, which is the outcome the user asked for, not a
+				// failure. The refetch in the mutation brings the card and
+				// the panel to the ended state.
+				if (getErrorStatus(error) === 409) {
+					toast.info("The workflow run already ended.");
+				} else {
+					toast.error(
+						getErrorMessage(error, "Failed to stop the workflow run."),
+						{ description: getErrorDetail(error) },
+					);
+				}
 			},
 			onSettled: () => setIsConfirmOpen(false),
 		});
@@ -55,6 +63,7 @@ export const ForkWorkflowStopButton: React.FC<ForkWorkflowStopButtonProps> = ({
 					ref={stopButtonRef}
 					variant="outline"
 					size="sm"
+					aria-label="Stop workflow run"
 					onClick={() => setIsConfirmOpen(true)}
 				>
 					<SquareIcon />

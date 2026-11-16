@@ -132,3 +132,43 @@ export const MockChatWorkflowRun: WorkflowRun = {
 	script_preview: MockForkWorkflowScript.slice(0, 200),
 	step_counts: { total: 3, running: 0, done: 3, failed: 0 },
 };
+
+import type { QueryClient } from "react-query";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
+import { chatEntityKey } from "#/api/queries/chats";
+import { MockChat } from "./chatEntities";
+
+/**
+ * Seeds the chat and its update check into the cache, the way the chat page
+ * holds them. The seeds opt out of cache eviction, because the test client's
+ * gcTime is 0 and the view's queries must still observe them.
+ */
+export const seedChatWriteAccess = (
+	queryClient: QueryClient,
+	chatId: string,
+	canUpdateChat: boolean,
+): void => {
+	const seed = (key: readonly unknown[], data: unknown) => {
+		queryClient.setQueryDefaults(key, {
+			staleTime: Number.POSITIVE_INFINITY,
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+		queryClient.setQueryData(key, data);
+	};
+	seed(chatEntityKey(chatId), { ...MockChat, id: chatId });
+	seed(
+		getAuthorizationKey({
+			checks: {
+				canUpdateChat: {
+					object: {
+						resource_type: "chat",
+						owner_id: MockChat.owner_id,
+						organization_id: MockChat.organization_id,
+					},
+					action: "update",
+				},
+			},
+		}),
+		{ canUpdateChat },
+	);
+};

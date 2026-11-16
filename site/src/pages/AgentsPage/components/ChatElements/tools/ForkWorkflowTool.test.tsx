@@ -4,7 +4,6 @@ import { type QueryClient, QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
-import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatEntityKey } from "#/api/queries/chats";
 import { chatWorkflowRunKey } from "#/api/queries/forkWorkflows";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
@@ -22,6 +21,7 @@ import {
 	MockForkWorkflowCompletedResult,
 	MockForkWorkflowRunningResult,
 	MockForkWorkflowStartedResult,
+	seedChatWriteAccess,
 } from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
@@ -94,40 +94,14 @@ const mockRunningDetail: typeof MockChatWorkflowRunDetail = {
 	finished_at: undefined,
 };
 
-/**
- * Seeds the cache the live card's controls read: the chat's cached copy and
- * its update check. The test client's gcTime is 0, so both opt out of cache
- * eviction until the card observes them.
- */
-const seedChatWriteAccess = (
-	queryClient: QueryClient,
-	chatId: string,
-	canUpdateChat: boolean,
-) => {
-	const seed = (key: readonly unknown[], data: unknown) => {
-		queryClient.setQueryDefaults(key, {
-			staleTime: Number.POSITIVE_INFINITY,
-			gcTime: Number.POSITIVE_INFINITY,
-		});
-		queryClient.setQueryData(key, data);
-	};
-	seed(chatEntityKey(chatId), { ...MockChat, id: chatId });
-	seed(
-		getAuthorizationKey({
-			checks: {
-				canUpdateChat: {
-					object: {
-						resource_type: "chat",
-						owner_id: MockChat.owner_id,
-						organization_id: MockChat.organization_id,
-					},
-					action: "update",
-				},
-			},
-		}),
-		{ canUpdateChat },
-	);
-};
+/** The settled run the stop mutation recorded, which the panel's cache holds. */
+const stopMutationData = (queryClient: QueryClient) =>
+	queryClient
+		.getMutationCache()
+		.getAll()
+		.find((mutation) => mutation.state.status === "success")?.state.data as
+		| typeof MockChatWorkflowRunDetail
+		| undefined;
 
 describe("ForkWorkflowTool", () => {
 	afterEach(() => {
@@ -236,7 +210,9 @@ describe("ForkWorkflowTool", () => {
 			await screen.findByRole("button", { name: /^started workflow/i }),
 		);
 
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		expect(stopRun).not.toHaveBeenCalled();
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
@@ -244,9 +220,16 @@ describe("ForkWorkflowTool", () => {
 			MockForkWorkflowChatId,
 			MockForkWorkflowRunningResult.run_id,
 		);
-		// The stop writes the settled run into the cache the panel reads,
-		// then the settled invalidation refetches the run. The refetched
-		// run reports the stopped state the API returned.
+		// The stop writes the settled run through the mutation, then the
+		// settled invalidation refetches it. The refetch here still reports
+		// running, so the settled mutation data is what proves the stopped
+		// state was recorded and reached the cache the panel reads.
+		await waitFor(() =>
+			expect(stopMutationData(queryClient)?.status).toBe("stopped"),
+		);
+		expect(stopMutationData(queryClient)).toMatchObject({
+			error: "stopped by user",
+		});
 		await waitFor(() =>
 			expect(
 				queryClient.getQueryState(
@@ -289,7 +272,7 @@ describe("ForkWorkflowTool", () => {
 
 		await screen.findByText(`Run ${MockForkWorkflowRunningResult.run_id}`);
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
+			screen.queryByRole("button", { name: "Stop workflow run" }),
 		).not.toBeInTheDocument();
 	});
 
@@ -311,7 +294,7 @@ describe("ForkWorkflowTool", () => {
 
 		await screen.findByText(`Run ${MockForkWorkflowRunningResult.run_id}`);
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
+			screen.queryByRole("button", { name: "Stop workflow run" }),
 		).not.toBeInTheDocument();
 	});
 
@@ -378,7 +361,9 @@ describe("ForkWorkflowTool", () => {
 			await screen.findByRole("button", { name: /^started workflow/i }),
 		);
 
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		// The confirm dialog closes once the request settles.

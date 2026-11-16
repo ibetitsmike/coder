@@ -21,36 +21,11 @@ const mockRunningRun: WorkflowRunDetail = {
 	finished_at: undefined,
 };
 
-/** A focus target the dialog falls back to when the button unmounts. */
-const FocusTarget = ({
-	fallbackFocusRef,
-}: {
-	fallbackFocusRef: React.RefObject<HTMLElement | null>;
-}) => {
-	return (
-		<h3
-			ref={(el) => {
-				fallbackFocusRef.current = el;
-			}}
-			tabIndex={-1}
-		>
-			Run heading
-		</h3>
-	);
-};
-
 const renderStopButton = (run: WorkflowRunDetail) => {
-	let currentRun = run;
 	const FallbackRefProbe = () => {
 		const fallbackFocusRef = useRef<HTMLElement | null>(null);
 		return (
-			<>
-				<FocusTarget fallbackFocusRef={fallbackFocusRef} />
-				<ForkWorkflowStopButton
-					run={currentRun}
-					fallbackFocusRef={fallbackFocusRef}
-				/>
-			</>
+			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
 		);
 	};
 	renderComponent(
@@ -58,9 +33,6 @@ const renderStopButton = (run: WorkflowRunDetail) => {
 			<FallbackRefProbe />
 		</QueryClientProvider>,
 	);
-	return (next: WorkflowRunDetail) => {
-		currentRun = next;
-	};
 };
 
 describe("ForkWorkflowStopButton", () => {
@@ -71,7 +43,7 @@ describe("ForkWorkflowStopButton", () => {
 		renderStopButton(mockRunningRun);
 		const user = userEvent.setup();
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		expect(stopRun).not.toHaveBeenCalled();
 
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
@@ -79,15 +51,34 @@ describe("ForkWorkflowStopButton", () => {
 		await waitFor(() => expect(stopRun).toHaveBeenCalledTimes(1));
 	});
 
+	it("reports a conflict as the run having already ended", async () => {
+		vi.spyOn(forkWorkflowsApi, "stopChatWorkflowRun").mockRejectedValue(
+			mockApiError({ message: "The workflow run already ended.", status: 409 }),
+		);
+		const toastError = vi.spyOn(toast, "error");
+		const toastInfo = vi.spyOn(toast, "info");
+		renderStopButton(mockRunningRun);
+		const user = userEvent.setup();
+
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
+		await user.click(screen.getByRole("button", { name: "Stop run" }));
+
+		await waitFor(() =>
+			expect(toastInfo).toHaveBeenCalledWith("The workflow run already ended."),
+		);
+		expect(toastError).not.toHaveBeenCalled();
+	});
+
 	it("reports a failed stop and keeps the run running", async () => {
 		vi.spyOn(forkWorkflowsApi, "stopChatWorkflowRun").mockRejectedValue(
 			mockApiError({ message: "The workflow run already ended." }),
 		);
 		const toastError = vi.spyOn(toast, "error");
+		const toastInfo = vi.spyOn(toast, "info");
 		renderStopButton(mockRunningRun);
 		const user = userEvent.setup();
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		await waitFor(() =>
@@ -96,14 +87,17 @@ describe("ForkWorkflowStopButton", () => {
 				expect.anything(),
 			),
 		);
+		expect(toastInfo).not.toHaveBeenCalled();
 		// The run is still running, so the button stays.
-		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Stop workflow run" }),
+		).toBeDefined();
 	});
 
 	it("renders nothing for a run that is not running", () => {
 		renderStopButton({ ...mockRunningRun, status: "completed" });
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
-		).not.toBeInTheDocument();
+			screen.queryByRole("button", { name: "Stop workflow run" }),
+		).toBeNull();
 	});
 });

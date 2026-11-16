@@ -97,14 +97,16 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		expect(stopRun).not.toHaveBeenCalled();
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		expect(stopRun).toHaveBeenCalledWith(chatId, MockChatWorkflowRunDetail.id);
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
+			screen.queryByRole("button", { name: "Stop workflow run" }),
 		).not.toBeInTheDocument();
 		expect(
 			screen.getByRole("heading", { name: /review changed files/i }),
@@ -136,7 +138,9 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		await waitFor(() =>

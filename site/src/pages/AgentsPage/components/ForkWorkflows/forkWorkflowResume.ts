@@ -17,10 +17,19 @@ type ForkWorkflowResumeEventDetail = {
 export const requestForkWorkflowResume = (
 	chatId: string,
 	runId: string,
+	{ skipIfPrompted = false }: { skipIfPrompted?: boolean } = {},
 ): void => {
+	const prompt = forkWorkflowResumePrompt(runId);
+	if (
+		skipIfPrompted &&
+		document.body.dataset.forkWorkflowResumePrompted === prompt
+	) {
+		return;
+	}
+	document.body.dataset.forkWorkflowResumePrompted = prompt;
 	window.dispatchEvent(
 		new CustomEvent<ForkWorkflowResumeEventDetail>(FORK_WORKFLOW_RESUME_EVENT, {
-			detail: { chatId, prompt: forkWorkflowResumePrompt(runId) },
+			detail: { chatId, prompt },
 		}),
 	);
 };

@@ -67,9 +67,6 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	args: { run: MockChatWorkflowRunDetail, error: null, onBack: fn() },
 	parameters: {
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
-		// The stories spy on Date.now. Storybook's actions addon logs every
-		// mock call, and its log line calls Date.now, so the spy recurses.
-		actions: { disable: true },
 		queries: [
 			{
 				key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
@@ -93,7 +90,9 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 		],
 	},
 	beforeEach: () => {
-		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
+		// Named "spy" so Storybook's actions addon skips logging it: its log
+		// line calls Date.now, which would recurse into the mock.
+		spyOn(Date, "now").mockName("spy").mockReturnValue(MockForkWorkflowNow);
 	},
 	decorators: [
 		(Story) => (
@@ -116,7 +115,9 @@ export const Running: Story = {
 export const RunningStopConfirm: Story = {
 	args: { run: mockRunningRunDetail },
 	play: async ({ canvas }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Stop workflow run" }),
+		);
 		await screen.findByRole("dialog", { name: "Stop workflow run" });
 	},
 };
@@ -129,7 +130,9 @@ export const RunningStopPending: Story = {
 		);
 	},
 	play: async ({ canvas }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Stop" }));
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Stop workflow run" }),
+		);
 		await userEvent.click(
 			await screen.findByRole("button", { name: "Stop run" }),
 		);

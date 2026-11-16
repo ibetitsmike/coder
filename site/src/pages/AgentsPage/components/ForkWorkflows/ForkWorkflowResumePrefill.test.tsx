@@ -16,6 +16,10 @@ import {
 	createTestQueryClient,
 	renderComponent,
 } from "#/testHelpers/renderHelpers";
+import type {
+	EditorContentPart,
+	FileReferenceData,
+} from "../ChatMessageInput/ChatMessageInput";
 import { ForkWorkflowResumePrefill } from "../ForkWorkflowResumePrefill";
 import { forkWorkflowResumePrompt } from "./forkWorkflowResume";
 
@@ -23,30 +27,44 @@ import { forkWorkflowResumePrompt } from "./forkWorkflowResume";
 // The editor-state pair mirrors the real handle: getEditorState always
 // serializes a JSON tree once mounted, even when the composer has no text,
 // and restoreEditorState rebuilds that state with the appended text, so
-// the double tracks both paths.
+// the double tracks both paths. Chips are modeled as content parts, which
+// is how the real handle reports a draft that has no text.
 const composer = () => {
 	let value = "";
+	let chips = 0;
 	let focused = false;
 	return {
 		setValue: (text: string) => {
 			value = text;
+			chips = 0;
 		},
 		insertText: () => {},
 		clear: () => {
 			value = "";
+			chips = 0;
 		},
 		focus: () => {
 			focused = true;
 		},
 		getValue: () => value,
-		addFileReference: () => {},
-		insertSkill: () => {},
-		removeSkills: () => {},
-		getEditorState: () => JSON.stringify({ root: { text: value } }),
-		restoreEditorState: (state: string, appendText = "") => {
-			value = `${JSON.parse(state).root.text}${appendText}`;
+		addFileReference: (_ref: FileReferenceData) => {
+			chips += 1;
 		},
-		getContentParts: () => [],
+		insertSkill: () => {
+			chips += 1;
+		},
+		removeSkills: () => {},
+		getEditorState: () => JSON.stringify({ root: { text: value, chips } }),
+		restoreEditorState: (state: string, appendText = "") => {
+			const parsed = JSON.parse(state);
+			value = `${parsed.root.text}${appendText}`;
+			chips = parsed.root.chips;
+		},
+		getContentParts: () =>
+			[
+				...(chips > 0 ? [{ type: "file-reference" }] : []),
+				...(value ? [{ type: "text", text: value }] : []),
+			] as EditorContentPart[],
 		isFocused: () => focused,
 	};
 };
@@ -132,6 +150,32 @@ describe("ForkWorkflowResumePrefill", () => {
 		expect(input.getValue()).toBe(
 			`First check the diff\n\n${forkWorkflowResumePrompt(MockForkWorkflowRunId)}`,
 		);
+	});
+
+	it("keeps a chip-only draft and appends the request after it", async () => {
+		const queryClient = createTestQueryClient();
+		seedChat(queryClient, MockChat);
+		const input = renderPrefill(queryClient);
+		input.addFileReference({
+			fileName: "main.go",
+			startLine: 1,
+			endLine: 10,
+			content: "package main",
+		});
+
+		dispatchResume(
+			MockChat.id,
+			forkWorkflowResumePrompt(MockForkWorkflowRunId),
+		);
+
+		// The chips survive, and the request is not separated by the
+		// two blank lines a plain-text append would have added.
+		expect(input.getValue()).toBe(
+			`\n\n${forkWorkflowResumePrompt(MockForkWorkflowRunId)}`,
+		);
+		expect(input.getContentParts()[0]).toMatchObject({
+			type: "file-reference",
+		});
 	});
 
 	it("ignores a resume request for another open chat", async () => {

@@ -1,7 +1,8 @@
 // This file is fork code: the write-access gate of the workflow run controls
 // (fork-workflows experiment). The stop route authorizes as a chat update
 // (coderd/fork_workflow_runs.go), and a resume sends a chat message, so both
-// controls stay hidden until the viewer may update the chat.
+// controls stay hidden until the viewer may update the chat. Archived chats
+// accept no updates either, matching the composer gate in ChatPageContent.
 
 import { useQuery } from "react-query";
 import { checkAuthorization } from "#/api/queries/authCheck";
@@ -15,7 +16,9 @@ import type { Chat } from "#/api/typesGenerated";
  * one and surface the error like any other query failure.
  */
 export const useCanWriteChat = (
-	chat: Pick<Chat, "owner_id" | "organization_id"> | undefined,
+	chat:
+		| (Pick<Chat, "owner_id" | "organization_id"> & Pick<Chat, "archived">)
+		| undefined,
 ): boolean | undefined => {
 	const query = useQuery({
 		...checkAuthorization<{ canUpdateChat: boolean }>({
@@ -32,5 +35,7 @@ export const useCanWriteChat = (
 		}),
 		enabled: chat !== undefined,
 	});
-	return chat === undefined ? undefined : query.data?.canUpdateChat;
+	return chat === undefined || chat.archived
+		? undefined
+		: query.data?.canUpdateChat;
 };

@@ -247,7 +247,7 @@ export const StillRunningWithStop: Story = {
 	play: async (context) => {
 		await expand(context);
 		await within(context.canvasElement).findByRole("button", {
-			name: "Stop",
+			name: "Stop workflow run",
 		});
 	},
 };

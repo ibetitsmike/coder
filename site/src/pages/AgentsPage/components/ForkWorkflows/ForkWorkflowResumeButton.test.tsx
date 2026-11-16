@@ -25,11 +25,23 @@ describe("ForkWorkflowResumeButton", () => {
 		});
 	});
 
+	it("does not prefill twice for the same run", async () => {
+		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
+		renderComponent(<ForkWorkflowResumeButton runId="run-2" chatId="chat-1" />);
+		const user = userEvent.setup();
+		const button = screen.getByRole("button", { name: "Resume run" });
+
+		await user.click(button);
+		await user.click(button);
+
+		expect(dispatchEvent).toHaveBeenCalledTimes(1);
+	});
+
 	it("uses the custom label as the accessible name", async () => {
 		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
 		renderComponent(
 			<ForkWorkflowResumeButton
-				runId="run-1"
+				runId="run-3"
 				chatId="chat-1"
 				label="Resume workflow"
 			/>,

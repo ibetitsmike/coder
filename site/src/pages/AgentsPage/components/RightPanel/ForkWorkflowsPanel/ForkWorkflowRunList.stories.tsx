@@ -45,9 +45,6 @@ const mockStoppedRun: WorkflowRun = {
 const meta: Meta<typeof ForkWorkflowRunList> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunList",
 	component: ForkWorkflowRunList,
-	// The stories spy on Date.now. Storybook's actions addon logs every
-	// mock call, and its log line calls Date.now, so the spy recurses.
-	parameters: { actions: { disable: true } },
 	args: {
 		runs: [
 			mockRunningRun,
@@ -60,7 +57,9 @@ const meta: Meta<typeof ForkWorkflowRunList> = {
 		onSelectRun: fn(),
 	},
 	beforeEach: () => {
-		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
+		// Named "spy" so Storybook's actions addon skips logging it: its log
+		// line calls Date.now, which would recurse into the mock.
+		spyOn(Date, "now").mockName("spy").mockReturnValue(MockForkWorkflowNow);
 	},
 	decorators: [
 		(Story) => (

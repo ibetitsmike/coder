@@ -4,11 +4,11 @@ import { QueryClientProvider } from "react-query";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
-import { getAuthorizationKey } from "#/api/queries/authCheck";
-import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
-import { MockChat } from "#/testHelpers/chatEntities";
-import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
+import {
+	MockChatWorkflowRunDetail,
+	seedChatWriteAccess,
+} from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -29,35 +29,7 @@ const renderDetail = (
 	options: { canUpdateChat?: boolean } = {},
 ) => {
 	const queryClient = createTestQueryClient();
-	// The seeds stand in for the chat page's cache. The test client's gcTime
-	// is 0, so they must also opt out of cache eviction before the view's
-	// queries observe them.
-	const seed = (key: readonly unknown[], data: unknown) => {
-		queryClient.setQueryDefaults(key, {
-			staleTime: Number.POSITIVE_INFINITY,
-			gcTime: Number.POSITIVE_INFINITY,
-		});
-		queryClient.setQueryData(key, data);
-	};
-	seed(chatEntityKey(run.chat_id), {
-		...MockChat,
-		id: run.chat_id,
-	});
-	seed(
-		getAuthorizationKey({
-			checks: {
-				canUpdateChat: {
-					object: {
-						resource_type: "chat",
-						owner_id: MockChat.owner_id,
-						organization_id: MockChat.organization_id,
-					},
-					action: "update",
-				},
-			},
-		}),
-		{ canUpdateChat: options.canUpdateChat ?? true },
-	);
+	seedChatWriteAccess(queryClient, run.chat_id, options.canUpdateChat ?? true);
 	const view = (current: WorkflowRunDetail) => (
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -81,7 +53,7 @@ describe("ForkWorkflowRunDetail", () => {
 		const poll = renderDetail(mockRunningRunDetail);
 		const user = userEvent.setup();
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		poll({ ...mockRunningRunDetail, status: "completed" });
 
 		await waitFor(() => expect(runHeading()).toHaveFocus());
@@ -105,7 +77,7 @@ describe("ForkWorkflowRunDetail", () => {
 			error: "stopped by user",
 		};
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 		await user.keyboard("{Escape}");
 		// The stop response updates the run before the request settles.
@@ -149,7 +121,7 @@ describe("ForkWorkflowRunDetail", () => {
 
 		await screen.findByRole("heading", { name: /review changed files/i });
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
+			screen.queryByRole("button", { name: "Stop workflow run" }),
 		).not.toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "Resume run" }),

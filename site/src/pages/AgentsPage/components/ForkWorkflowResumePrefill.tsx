@@ -55,12 +55,11 @@ const ForkWorkflowResumePrefillListener: React.FC<{
 		}
 		// restoreEditorState keeps the draft's chips (file references and
 		// skill invocations), which a plain-text append would drop. It is also
-		// the path for a non-empty composer, where the request joins the draft
-		// on a new line. An empty composer takes setValue, so the prompt does
-		// not land after two blank lines. The branch is on the text content,
-		// not the serialized state: a mounted editor always serializes to a
-		// non-empty JSON tree even when it has no text.
-		if (input.getValue().trim() === "") {
+		// the path for any non-empty draft, where the request joins it on a new
+		// line. A truly empty composer takes setValue, so the prompt does not
+		// land after two blank lines. The branch is on content parts, not text:
+		// a draft can hold chips alone, and both chip nodes report empty text.
+		if (input.getContentParts().length === 0) {
 			input.setValue(prompt);
 		} else {
 			input.restoreEditorState(input.getEditorState(), `\n\n${prompt}`);
