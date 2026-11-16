@@ -64,9 +64,13 @@ func (api *API) getChatWakeups(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	wakeupIDs := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		wakeupIDs = append(wakeupIDs, row.ID)
+	}
 	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
-		ChatID:   chat.ID,
-		Statuses: statuses,
+		ChatID:    chat.ID,
+		WakeupIds: wakeupIDs,
 	})
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{

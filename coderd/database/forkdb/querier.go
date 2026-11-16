@@ -222,8 +222,9 @@ type Querier interface {
 	// left out, because the history tool skips them.
 	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
-	// Lists the watches of the wake-ups of the chat whose status is in statuses,
-	// or of every wake-up when statuses is empty.
+	// Lists the watches of the wake-ups of the chat whose ID is in @wakeup_ids.
+	// The caller passes the wake-ups it listed, so a wake-up that changes status
+	// between the two reads keeps its watches.
 	ListChatWakeupWatchesByChatID(ctx context.Context, arg ListChatWakeupWatchesByChatIDParams) ([]ChatWakeupWatch, error)
 	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
 	// Lists the wake-ups of the chat whose status is in statuses, or every

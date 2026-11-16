@@ -191,21 +191,21 @@ func (q *Queries) InsertChatWakeupWatch(ctx context.Context, arg InsertChatWakeu
 const listChatWakeupWatchesByChatID = `-- name: ListChatWakeupWatchesByChatID :many
 SELECT x.id, x.wakeup_id, x.chat_id, x.organization_id, x.kind, x.ordinal, x.child_chat_id, x.agent_id, x.process_id, x.pull_request_url, x.spec, x.fired_at, x.fired_payload, x.delivered_at, x.deliveries, x.failed_at, x.created_at
 FROM chat_wakeup_watches x
-JOIN chat_wakeups w ON w.id = x.wakeup_id
 WHERE x.chat_id = $1::uuid
-    AND (COALESCE(cardinality($2::chat_wakeup_status[]), 0) = 0 OR w.status = ANY($2::chat_wakeup_status[]))
+    AND x.wakeup_id = ANY($2::uuid[])
 ORDER BY x.wakeup_id, x.ordinal
 `
 
 type ListChatWakeupWatchesByChatIDParams struct {
-	ChatID   uuid.UUID          `db:"chat_id" json:"chat_id"`
-	Statuses []ChatWakeupStatus `db:"statuses" json:"statuses"`
+	ChatID    uuid.UUID   `db:"chat_id" json:"chat_id"`
+	WakeupIds []uuid.UUID `db:"wakeup_ids" json:"wakeup_ids"`
 }
 
-// Lists the watches of the wake-ups of the chat whose status is in statuses,
-// or of every wake-up when statuses is empty.
+// Lists the watches of the wake-ups of the chat whose ID is in @wakeup_ids.
+// The caller passes the wake-ups it listed, so a wake-up that changes status
+// between the two reads keeps its watches.
 func (q *Queries) ListChatWakeupWatchesByChatID(ctx context.Context, arg ListChatWakeupWatchesByChatIDParams) ([]ChatWakeupWatch, error) {
-	rows, err := q.db.QueryContext(ctx, listChatWakeupWatchesByChatID, arg.ChatID, pq.Array(arg.Statuses))
+	rows, err := q.db.QueryContext(ctx, listChatWakeupWatchesByChatID, arg.ChatID, pq.Array(arg.WakeupIds))
 	if err != nil {
 		return nil, err
 	}
