@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -37,10 +38,7 @@ func (r *runner) deliver(ctx context.Context) {
 	if !r.delivers() {
 		return
 	}
-	if err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
-		r.logger.Warn(ctx, "bind chats to plugin", slog.Error(err))
-		return
-	}
+	r.bindNewChats(ctx)
 	due, err := r.m.fdb.GetPluginChatBindingsDue(sys(ctx), forkdb.GetPluginChatBindingsDueParams{
 		PluginID:   r.plugin.ID,
 		LimitCount: deliveryBatch,
@@ -57,6 +55,66 @@ func (r *runner) deliver(ctx context.Context) {
 	}
 	if len(due) == deliveryBatch {
 		r.wakeDelivery()
+	}
+}
+
+// onChatEvent handles a chat watch event of a linked user. A created event
+// names a chat that may need a binding: a new chat, or one that was
+// unarchived. Every event wakes delivery. When pubsub dropped events, the
+// next scan binds every chat, so a lost created event costs one scan
+// interval.
+func (r *runner) onChatEvent(_ context.Context, message []byte, err error) {
+	if err != nil {
+		r.bindAgain.Store(true)
+		r.wakeDelivery()
+		return
+	}
+	var event codersdk.ChatWatchEvent
+	if err := json.Unmarshal(message, &event); err == nil &&
+		event.Kind == codersdk.ChatWatchEventKindCreated &&
+		event.Chat.ParentChatID == nil &&
+		event.Chat.OrganizationID == r.plugin.OrganizationID {
+		r.newChatsMu.Lock()
+		r.newChats[event.Chat.ID] = struct{}{}
+		r.newChatsMu.Unlock()
+	}
+	r.wakeDelivery()
+}
+
+// bindAll binds every top-level chat of the plugin's linked users. It runs
+// when the runner follows a new user, every bind interval, and on the next
+// scan after a full bind failed or pubsub dropped chat events.
+func (r *runner) bindAll(ctx context.Context) {
+	if !r.delivers() {
+		return
+	}
+	// Clear the flag first, so events dropped during the query bind again.
+	r.bindAgain.Store(false)
+	err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID)
+	if err != nil {
+		r.logger.Warn(ctx, "bind chats to plugin", slog.Error(err))
+		r.bindAgain.Store(true)
+	}
+}
+
+// bindNewChats binds the chats that created events named. A chat whose
+// binding fails stays queued for the next delivery.
+func (r *runner) bindNewChats(ctx context.Context) {
+	r.newChatsMu.Lock()
+	chats := r.newChats
+	r.newChats = map[uuid.UUID]struct{}{}
+	r.newChatsMu.Unlock()
+	for chatID := range chats {
+		err := r.m.fdb.EnsurePluginChatBinding(sys(ctx), forkdb.EnsurePluginChatBindingParams{
+			PluginID: r.plugin.ID,
+			ChatID:   chatID,
+		})
+		if err != nil {
+			r.logger.Warn(ctx, "bind chat to plugin", slog.F("chat_id", chatID), slog.Error(err))
+			r.newChatsMu.Lock()
+			r.newChats[chatID] = struct{}{}
+			r.newChatsMu.Unlock()
+		}
 	}
 }
 
