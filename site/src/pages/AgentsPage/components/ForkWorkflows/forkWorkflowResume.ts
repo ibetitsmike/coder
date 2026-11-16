@@ -26,6 +26,9 @@ export const requestForkWorkflowResume = (
 	) {
 		return;
 	}
+	// The marker only deduplicates the immediate double click: the listener
+	// clears it when it lands the prompt, so a draft the user cleared can be
+	// prefilled again with a later click.
 	document.body.dataset.forkWorkflowResumePrompted = prompt;
 	window.dispatchEvent(
 		new CustomEvent<ForkWorkflowResumeEventDetail>(FORK_WORKFLOW_RESUME_EVENT, {
@@ -37,7 +40,9 @@ export const requestForkWorkflowResume = (
 /**
  * Reports the resume prompt a resume event carries when it targets this
  * chat. The event comes from this page's own buttons, but any other event
- * on the same name returns undefined instead of crashing.
+ * on the same name returns undefined instead of crashing. The prompt is
+ * accepted once: the marker set by requestForkWorkflowResume is cleared so
+ * a later click for the same run can prefill again.
  */
 export const forkWorkflowResumeEventForChat = (
 	event: Event,
@@ -47,7 +52,9 @@ export const forkWorkflowResumeEventForChat = (
 		return undefined;
 	}
 	const { chatId: eventChatId, prompt } = event.detail ?? {};
-	return eventChatId === chatId && typeof prompt === "string"
-		? prompt
-		: undefined;
+	if (eventChatId === chatId && typeof prompt === "string") {
+		delete document.body.dataset.forkWorkflowResumePrompted;
+		return prompt;
+	}
+	return undefined;
 };

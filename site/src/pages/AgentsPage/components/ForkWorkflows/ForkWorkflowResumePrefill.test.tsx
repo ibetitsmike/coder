@@ -178,6 +178,28 @@ describe("ForkWorkflowResumePrefill", () => {
 		});
 	});
 
+	it("prefills again for the same run after the first request is consumed", async () => {
+		const queryClient = createTestQueryClient();
+		seedChat(queryClient, MockChat);
+		const input = renderPrefill(queryClient);
+
+		dispatchResume(
+			MockChat.id,
+			forkWorkflowResumePrompt(MockForkWorkflowRunId),
+		);
+		// The user sends or clears the prefilled request, then a later
+		// resume arrives for the same run: it must prefill again.
+		input.setValue("");
+		dispatchResume(
+			MockChat.id,
+			forkWorkflowResumePrompt(MockForkWorkflowRunId),
+		);
+
+		expect(input.getValue()).toBe(
+			forkWorkflowResumePrompt(MockForkWorkflowRunId),
+		);
+	});
+
 	it("ignores a resume request for another open chat", async () => {
 		const queryClient = createTestQueryClient();
 		seedChat(queryClient, MockChat);

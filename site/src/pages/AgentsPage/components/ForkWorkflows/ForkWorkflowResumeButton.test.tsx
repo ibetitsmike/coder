@@ -28,15 +28,18 @@ describe("ForkWorkflowResumeButton", () => {
 		});
 	});
 
-	it("prefills once per run and ignores a double click", async () => {
+	it("prefills again for the same run after the prompt is consumed", async () => {
 		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
 		renderComponent(<ForkWorkflowResumeButton runId="run-2" chatId="chat-1" />);
 		const user = userEvent.setup();
 		const button = screen.getByRole("button", { name: "Resume run" });
 
 		await user.click(button);
+		// The composer listener consumed the first dispatch and cleared the
+		// dedup marker, so a later click for the same run prefills again.
+		delete document.body.dataset.forkWorkflowResumePrompted;
 		await user.click(button);
 
-		expect(dispatchEvent).toHaveBeenCalledTimes(1);
+		expect(dispatchEvent).toHaveBeenCalledTimes(2);
 	});
 });
