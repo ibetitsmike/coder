@@ -451,6 +451,11 @@ def main(args):
 			return len(logs) == 1
 		}, testutil.IntervalFast)
 
+		// Waiting for the first journal line can take most of the
+		// sub-test budget on a slow CI runner, so the stop and the
+		// post-stop checks run on a fresh context.
+		ctx = chatdTestContext(t)
+
 		// A held write token stands in for a flush that is in flight when
 		// the stop lands. The terminal flush must wait for the token and
 		// then write, instead of dropping the final lines.
