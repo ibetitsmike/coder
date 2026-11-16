@@ -217,6 +217,7 @@ type Server struct {
 
 	forkPullRequestActivity ForkPullRequestActivityFunc
 	forkPacks               forkPackState
+	forkWakeupSpend         wakeupSpendCache
 
 	// workflows holds the workflow runs that this replica runs (fork-workflows).
 	// forkInitWorkflowJournal journals their state, so a restart resumes a run.
