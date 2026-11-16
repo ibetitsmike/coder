@@ -26,6 +26,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/codersdk"
@@ -207,6 +208,7 @@ func (p *Server) forkListAgents(ctx context.Context, parent database.Chat, child
 	for _, child := range children {
 		childrenByID[child.ID.String()] = child
 	}
+	waiting := p.listAgentsWaitingForCapacity(ctx, parent, childrenByID, result.Agents)
 	agents := make([]forkListAgentsEntry, 0, len(result.Agents))
 	for _, entry := range result.Agents {
 		forkEntry := forkListAgentsEntry{subagentListEntry: entry}
@@ -221,14 +223,52 @@ func (p *Server) forkListAgents(ctx context.Context, parent database.Chat, child
 			}
 		}
 		if child, ok := childrenByID[entry.ChatID]; ok {
-			waiting, _, err := p.forkChatQueuedForCapacity(ctx, child)
-			if err != nil {
-				p.logger.Warn(ctx, "check subagent capacity wait for list_agents",
-					slog.F("chat_id", parent.ID), slog.F("child_chat_id", entry.ChatID), slog.Error(err))
-			}
-			forkEntry.WaitingForCapacity = waiting
+			forkEntry.WaitingForCapacity = waiting[child.ID]
 		}
 		agents = append(agents, forkEntry)
 	}
 	return forkListAgentsResult{subagentListResult: result, Agents: agents}
+}
+
+// listAgentsWaitingForCapacity returns the listed children that wait for a
+// fork concurrency slot. It reads the limits of each organization once and
+// counts the children of each organization in one statement, so the cost
+// does not grow with the number of listed children.
+func (p *Server) listAgentsWaitingForCapacity(ctx context.Context, parent database.Chat, childrenByID map[string]database.Chat, entries []subagentListEntry) map[uuid.UUID]bool {
+	waiting := map[uuid.UUID]bool{}
+	if !p.nestedSubagentsEnabled() {
+		return waiting
+	}
+	candidatesByOrganization := map[uuid.UUID][]uuid.UUID{}
+	for _, entry := range entries {
+		child, ok := childrenByID[entry.ChatID]
+		if !ok || !child.ParentChatID.Valid || child.Archived || child.Status != database.ChatStatusRunning {
+			continue
+		}
+		candidatesByOrganization[child.OrganizationID] = append(candidatesByOrganization[child.OrganizationID], child.ID)
+	}
+	if len(candidatesByOrganization) == 0 {
+		return waiting
+	}
+	//nolint:gocritic // Capacity accounting is chatd-internal state.
+	ctx = dbauthz.AsChatd(ctx)
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		p.logger.Warn(ctx, "check subagent capacity wait for list_agents",
+			slog.F("chat_id", parent.ID), slog.Error(err))
+		return waiting
+	}
+	for organizationID, candidateIDs := range candidatesByOrganization {
+		limits, err := p.subagentLimits(ctx, fdb, organizationID)
+		if err == nil {
+			var organizationWaiting map[uuid.UUID]bool
+			organizationWaiting, err = p.subagentsWaitingForCapacity(ctx, fdb, limits, candidateIDs)
+			maps.Copy(waiting, organizationWaiting)
+		}
+		if err != nil {
+			p.logger.Warn(ctx, "check subagent capacity wait for list_agents",
+				slog.F("chat_id", parent.ID), slog.F("organization_id", organizationID), slog.Error(err))
+		}
+	}
+	return waiting
 }

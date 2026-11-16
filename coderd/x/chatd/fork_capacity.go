@@ -91,21 +91,20 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
 		return true, nil
 	}
-	if err := store.SetTransactionLockTimeout(ctx, admissionLockTimeout.Milliseconds()); err != nil {
-		return false, xerrors.Errorf("set lock timeout: %w", err)
+	if err := l.acquireAdmissionLocks(ctx, store, fdb, chat, maxConcurrent, limits); err != nil {
+		return false, err
 	}
-	if err := store.AcquireLock(ctx, database.LockIDChatCapacityAdmission); err != nil {
-		return false, xerrors.Errorf("acquire capacity admission lock: %w", err)
-	}
-	counts, err := fdb.CountActiveSubagentsForCapacity(ctx, forkdb.CountActiveSubagentsForCapacityParams{
-		ChatID:         chat.ID,
-		OrganizationID: chat.OrganizationID,
-		RootChatID:     subagentRootChatID(chat),
-		StaleSeconds:   int32(l.server.inFlightChatStaleAfter.Seconds()),
+	rows, err := fdb.GetSubagentCapacityCounts(ctx, forkdb.GetSubagentCapacityCountsParams{
+		CandidateIds: []uuid.UUID{chat.ID},
+		StaleSeconds: int32(l.server.inFlightChatStaleAfter.Seconds()),
 	})
 	if err != nil {
 		return false, xerrors.Errorf("count active subagents: %w", err)
 	}
+	if len(rows) != 1 {
+		return false, xerrors.Errorf("count active subagents: got %d rows for chat %s, want 1", len(rows), chat.ID)
+	}
+	counts := rows[0]
 	if subagentCapacityFull(counts, maxConcurrent, limits) {
 		// A plain refusal makes the worker skip every other subagent in its
 		// batch as if the whole subagent pool were full, but each count
@@ -114,6 +113,37 @@ func (l *forkCapacityLimiter) Admit(ctx context.Context, store database.Store, c
 		return false, errSkipAcquire
 	}
 	return true, nil
+}
+
+// acquireAdmissionLocks takes the locks that serialize the capacity count of
+// chat with every other admission that the same limits cover: the deployment
+// limit maxConcurrent and the organization's limits. A deployment or
+// organization limit counts chats of every family, so it takes the
+// deployment admission lock exclusively. A family limit alone counts only the
+// family of chat, so it takes the family admission lock exclusively and the
+// deployment lock in shared mode: admissions in different families run in
+// parallel, and heartbeat renewal, which takes the deployment lock
+// exclusively, still cannot extend a lease that the count read as stale. A
+// takeover of a stale lease always takes the deployment lock exclusively,
+// because the lease recheck after Admit takes it exclusively too, and two
+// transactions that upgrade a shared lock to exclusive deadlock.
+func (*forkCapacityLimiter) acquireAdmissionLocks(ctx context.Context, store database.Store, fdb forkdb.Store, chat database.Chat, maxConcurrent int, limits forkSubagentLimits) error {
+	if err := store.SetTransactionLockTimeout(ctx, admissionLockTimeout.Milliseconds()); err != nil {
+		return xerrors.Errorf("set lock timeout: %w", err)
+	}
+	if maxConcurrent > 0 || limits.maxConcurrent > 0 || (chat.WorkerID.Valid && chat.RunnerID.Valid) {
+		if err := store.AcquireLock(ctx, database.LockIDChatCapacityAdmission); err != nil {
+			return xerrors.Errorf("acquire capacity admission lock: %w", err)
+		}
+		return nil
+	}
+	if err := fdb.AcquireSharedLock(ctx, database.LockIDChatCapacityAdmission); err != nil {
+		return xerrors.Errorf("acquire shared capacity admission lock: %w", err)
+	}
+	if err := store.AcquireLock(ctx, chatFamilyAdmissionLockID(subagentRootChatID(chat))); err != nil {
+		return xerrors.Errorf("acquire family admission lock: %w", err)
+	}
+	return nil
 }
 
 // subagentPoolLimit returns the deployment limit of running subagents: the
@@ -133,7 +163,7 @@ func (p *Server) subagentPoolLimit(pool AgentCapacityLimiter) int {
 // subagentCapacityFull reports whether the active subagents leave no slot
 // under the deployment limit maxConcurrent or the organization or family
 // concurrency limit.
-func subagentCapacityFull(counts forkdb.CountActiveSubagentsForCapacityRow, maxConcurrent int, limits forkSubagentLimits) bool {
+func subagentCapacityFull(counts forkdb.GetSubagentCapacityCountsRow, maxConcurrent int, limits forkSubagentLimits) bool {
 	return overCapacityLimit(counts.ActiveCount, maxConcurrent) ||
 		overCapacityLimit(counts.ActiveOrganizationCount, limits.maxConcurrent) ||
 		overCapacityLimit(counts.ActiveFamilyCount, limits.maxConcurrentPerFamily)
@@ -164,29 +194,41 @@ func (p *Server) forkChatQueuedForCapacity(ctx context.Context, chat database.Ch
 	if err != nil {
 		return false, true, err
 	}
+	waiting, err := p.subagentsWaitingForCapacity(ctx, fdb, limits, []uuid.UUID{chat.ID})
+	if err != nil {
+		return false, true, err
+	}
+	return waiting[chat.ID], true, nil
+}
+
+// subagentConcurrencyLimited reports whether any concurrency limit applies
+// to subagents of an organization with limits.
+func (p *Server) subagentConcurrencyLimited(limits forkSubagentLimits) bool {
+	return p.subagentPoolLimit(p.agentCapacityLimiter) > 0 || limits.maxConcurrent > 0 || limits.maxConcurrentPerFamily > 0
+}
+
+// subagentsWaitingForCapacity returns the chats among candidateIDs, subagent
+// chats of the organization whose limits are given, that are running with no
+// worker while a concurrency limit is full. It counts every candidate in one
+// statement. Like forkChatQueuedForCapacity it takes no lock.
+func (p *Server) subagentsWaitingForCapacity(ctx context.Context, fdb forkdb.Store, limits forkSubagentLimits, candidateIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	waiting := make(map[uuid.UUID]bool, len(candidateIDs))
+	if len(candidateIDs) == 0 || !p.subagentConcurrencyLimited(limits) {
+		return waiting, nil
+	}
+	rows, err := fdb.GetSubagentCapacityCounts(ctx, forkdb.GetSubagentCapacityCountsParams{
+		CandidateIds: candidateIDs,
+		AwaitingOnly: true,
+		StaleSeconds: int32(p.inFlightChatStaleAfter.Seconds()),
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("count active subagents: %w", err)
+	}
 	maxConcurrent := p.subagentPoolLimit(p.agentCapacityLimiter)
-	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
-		return false, true, nil
+	for _, row := range rows {
+		if subagentCapacityFull(row, maxConcurrent, limits) {
+			waiting[row.ChatID] = true
+		}
 	}
-	staleSeconds := int32(p.inFlightChatStaleAfter.Seconds())
-	awaiting, err := fdb.GetChatAwaitingWorker(ctx, forkdb.GetChatAwaitingWorkerParams{
-		ChatID:       chat.ID,
-		StaleSeconds: staleSeconds,
-	})
-	if err != nil {
-		return false, true, xerrors.Errorf("check chat owner: %w", err)
-	}
-	if !awaiting {
-		return false, true, nil
-	}
-	counts, err := fdb.CountActiveSubagentsForCapacity(ctx, forkdb.CountActiveSubagentsForCapacityParams{
-		ChatID:         chat.ID,
-		OrganizationID: chat.OrganizationID,
-		RootChatID:     subagentRootChatID(chat),
-		StaleSeconds:   staleSeconds,
-	})
-	if err != nil {
-		return false, true, xerrors.Errorf("count active subagents: %w", err)
-	}
-	return subagentCapacityFull(counts, maxConcurrent, limits), true, nil
+	return waiting, nil
 }

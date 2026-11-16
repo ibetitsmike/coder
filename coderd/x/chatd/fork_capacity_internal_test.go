@@ -8,15 +8,23 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/xerrors"
 
+	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbmetrics"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
@@ -476,4 +484,182 @@ func TestForkListAgentsWaitingForCapacity(t *testing.T) {
 		}
 		require.Equal(t, want, waiting, name)
 	}
+}
+
+// advisoryLockWaiters returns the number of transactions that wait for the
+// advisory transaction lock lockID.
+func advisoryLockWaiters(ctx context.Context, sqlDB *sql.DB, lockID int64) (int, error) {
+	var waiting int
+	err := sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
+		AND classid::bigint = $1 AND objid::bigint = $2`,
+		(lockID>>32)&0xffffffff, lockID&0xffffffff).Scan(&waiting)
+	return waiting, err
+}
+
+// With only the family concurrency limit, admission locks the family, so
+// families admit in parallel while one family serializes. A deployment limit
+// still serializes every admission.
+func TestForkCapacityAdmissionLockScope(t *testing.T) {
+	t.Parallel()
+	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	f := admissionFixture{
+		db:          db,
+		ps:          ps,
+		owner:       dbgen.User(t, db, database.User{}),
+		org:         dbgen.Organization(t, db, database.Organization{}),
+		modelConfig: dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}),
+	}
+	ctx := testutil.Context(t, testutil.WaitLong)
+	setOrgSubagentCapacity(t, f.db, f.org.ID, 0, 1)
+	nested := codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}
+	subagent := func(root database.Chat) database.Chat {
+		return f.chat(t, database.Chat{
+			ParentChatID: uuid.NullUUID{UUID: root.ID, Valid: true},
+			RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
+		})
+	}
+	rootA, rootB := f.chat(t, database.Chat{}), f.chat(t, database.Chat{})
+	candidateA, siblingA, candidateB := subagent(rootA), subagent(rootA), subagent(rootB)
+
+	admitInTx := func(limiter AgentCapacityLimiter, chat database.Chat) error {
+		return f.db.InTx(func(tx database.Store) error {
+			admitted, err := limiter.Admit(ctx, tx, chat)
+			if err == nil && !admitted {
+				err = xerrors.Errorf("chat %s was not admitted", chat.ID)
+			}
+			return err
+		}, nil)
+	}
+	inBackground := func(fn func() error) <-chan error {
+		done := make(chan error, 1)
+		go func() { done <- fn() }()
+		return done
+	}
+	// holdAdmission admits chat in a transaction that keeps its locks until
+	// the returned function runs.
+	holdAdmission := func(limiter AgentCapacityLimiter, chat database.Chat) func() {
+		holding := make(chan struct{})
+		release := make(chan struct{})
+		releaseOnce := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(releaseOnce)
+		done := inBackground(func() error {
+			return f.db.InTx(func(tx database.Store) error {
+				if _, err := limiter.Admit(ctx, tx, chat); err != nil {
+					return err
+				}
+				close(holding)
+				<-release
+				return nil
+			}, nil)
+		})
+		select {
+		case <-holding:
+		case err := <-done:
+			require.NoError(t, err)
+			require.FailNow(t, "the holder returned before it held the admission locks")
+		}
+		return func() {
+			releaseOnce()
+			require.NoError(t, testutil.TryReceive(ctx, t, done))
+		}
+	}
+	requireWaiters := func(lockID int64, msg string) {
+		testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+			waiting, err := advisoryLockWaiters(ctx, sqlDB, lockID)
+			return err == nil && waiting == 1
+		}, testutil.IntervalFast, msg)
+	}
+
+	familyOnly := testForkCapacityLimiter(nested, ForkLimits{})
+	release := holdAdmission(familyOnly, candidateA)
+	// Another family does not wait for the held family. Before the lock was
+	// narrowed, this admission failed with the 5 s admission lock timeout.
+	start := time.Now()
+	require.NoError(t, admitInTx(familyOnly, candidateB))
+	require.Less(t, time.Since(start), admissionLockTimeout)
+	// The same family waits for it.
+	sameFamily := inBackground(func() error { return admitInTx(familyOnly, siblingA) })
+	requireWaiters(chatFamilyAdmissionLockID(rootA.ID), "the same family waits for the family admission lock")
+	// Heartbeat renewal, which takes the deployment lock exclusively, still
+	// waits for a family admission.
+	renewal := inBackground(func() error {
+		return f.db.InTx(func(tx database.Store) error {
+			return tx.AcquireLock(ctx, database.LockIDChatCapacityAdmission)
+		}, nil)
+	})
+	requireWaiters(database.LockIDChatCapacityAdmission, "renewal waits for the shared deployment lock")
+	release()
+	require.NoError(t, testutil.TryReceive(ctx, t, sameFamily))
+	require.NoError(t, testutil.TryReceive(ctx, t, renewal))
+
+	// A deployment limit counts every family, so another family waits.
+	deploymentLimited := testForkCapacityLimiter(nested, ForkLimits{MaxConcurrentSubagents: 10})
+	release = holdAdmission(deploymentLimited, candidateA)
+	otherFamily := inBackground(func() error { return admitInTx(deploymentLimited, candidateB) })
+	requireWaiters(database.LockIDChatCapacityAdmission, "another family waits for the deployment admission lock")
+	release()
+	require.NoError(t, testutil.TryReceive(ctx, t, otherFamily))
+}
+
+// list_agents reads the organization limits once and counts every listed
+// child in one statement, instead of up to three statements per child.
+func TestForkListAgentsCapacityStatements(t *testing.T) {
+	t.Parallel()
+	raw, ps := dbtestutil.NewDB(t)
+	reg := prometheus.NewRegistry()
+	db := dbmetrics.NewQueryMetrics(raw, slogtest.Make(t, nil), reg)
+	f := admissionFixture{
+		db:          db,
+		ps:          ps,
+		owner:       dbgen.User(t, raw, database.User{}),
+		org:         dbgen.Organization(t, raw, database.Organization{}),
+		modelConfig: dbgen.ChatModelConfig(t, raw, database.ChatModelConfig{}),
+	}
+	ctx := chatdTestContext(t)
+	setOrgSubagentCapacity(t, raw, f.org.ID, 0, 1)
+	root := f.chat(t, database.Chat{})
+	// The occupant holds the family's only slot, so the other 49 running
+	// children wait for one.
+	occupant := f.occupiedSubagent(t, root)
+	want := map[string]bool{occupant.ID.String(): false}
+	for range 49 {
+		child := f.chat(t, database.Chat{
+			ParentChatID: uuid.NullUUID{UUID: root.ID, Valid: true},
+			RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
+		})
+		want[child.ID.String()] = true
+	}
+
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}))
+	tools, err := server.subagentTools(ctx, func() database.Chat { return root }, root.LastModelConfigID)
+	require.NoError(t, err)
+	listTool := findToolByName(tools, "list_agents")
+	require.NotNil(t, listTool)
+	input, err := json.Marshal(listAgentsArgs{Limit: ptr.Ref(50)})
+	require.NoError(t, err)
+
+	capacityStatements := func() int {
+		counts := queryCounts(t, reg)
+		return counts["GetChatOrganizationSubagentLimits"] + counts["GetSubagentCapacityCounts"]
+	}
+	before := capacityStatements()
+	resp, err := listTool.Run(ctx, fantasy.ToolCall{ID: uuid.NewString(), Name: "list_agents", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.LessOrEqual(t, capacityStatements()-before, 2)
+
+	var got struct {
+		Agents []struct {
+			ChatID             string `json:"chat_id"`
+			WaitingForCapacity bool   `json:"waiting_for_capacity"`
+		} `json:"agents"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &got))
+	waiting := map[string]bool{}
+	for _, agent := range got.Agents {
+		waiting[agent.ChatID] = agent.WaitingForCapacity
+	}
+	require.Equal(t, want, waiting)
 }

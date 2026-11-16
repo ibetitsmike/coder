@@ -9,61 +9,20 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
-const countActiveSubagentsForCapacity = `-- name: CountActiveSubagentsForCapacity :one
-WITH RECURSIVE lineage(id, parent_chat_id, depth) AS (
-	SELECT chats.id, chats.parent_chat_id, 0
-	FROM chats
-	WHERE chats.id = $4::uuid
-	UNION ALL
-	SELECT chats.id, chats.parent_chat_id, lineage.depth + 1
-	FROM chats
-	JOIN lineage ON chats.id = lineage.parent_chat_id
-	WHERE lineage.depth < 64
-)
-SELECT
-	COUNT(*)::bigint AS active_count,
-	(COUNT(*) FILTER (WHERE c.organization_id = $1::uuid))::bigint AS active_organization_count,
-	(COUNT(*) FILTER (WHERE c.root_chat_id = $2::uuid))::bigint AS active_family_count
-FROM chat_heartbeats hb
-JOIN chats c
-	ON c.id = hb.chat_id
-	AND c.runner_id = hb.runner_id
-WHERE c.worker_id IS NOT NULL
-	AND c.parent_chat_id IS NOT NULL
-	AND c.id NOT IN (SELECT lineage.id FROM lineage)
-	AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+const acquireSharedLock = `-- name: AcquireSharedLock :exec
+SELECT pg_advisory_xact_lock_shared($1::bigint)
 `
 
-type CountActiveSubagentsForCapacityParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	RootChatID     uuid.UUID `db:"root_chat_id" json:"root_chat_id"`
-	StaleSeconds   int32     `db:"stale_seconds" json:"stale_seconds"`
-	ChatID         uuid.UUID `db:"chat_id" json:"chat_id"`
-}
-
-type CountActiveSubagentsForCapacityRow struct {
-	ActiveCount             int64 `db:"active_count" json:"active_count"`
-	ActiveOrganizationCount int64 `db:"active_organization_count" json:"active_organization_count"`
-	ActiveFamilyCount       int64 `db:"active_family_count" json:"active_family_count"`
-}
-
-// Counts the subagent chats that hold a capacity slot: owned by a worker with
-// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
-// ancestors never count: a coordinator blocked in wait_agent holds a slot, so
-// its own descendants must never wait for it. The depth guard stops the walk
-// if a cycle ever appears in the hierarchy.
-func (q *Queries) CountActiveSubagentsForCapacity(ctx context.Context, arg CountActiveSubagentsForCapacityParams) (CountActiveSubagentsForCapacityRow, error) {
-	row := q.db.QueryRowContext(ctx, countActiveSubagentsForCapacity,
-		arg.OrganizationID,
-		arg.RootChatID,
-		arg.StaleSeconds,
-		arg.ChatID,
-	)
-	var i CountActiveSubagentsForCapacityRow
-	err := row.Scan(&i.ActiveCount, &i.ActiveOrganizationCount, &i.ActiveFamilyCount)
-	return i, err
+// Takes the advisory lock @lock_id in shared mode until the transaction
+// ends. It blocks while another transaction holds the lock with AcquireLock,
+// and AcquireLock blocks while it is held, but shared holders do not block
+// each other.
+func (q *Queries) AcquireSharedLock(ctx context.Context, lockID int64) error {
+	_, err := q.db.ExecContext(ctx, acquireSharedLock, lockID)
+	return err
 }
 
 const countLiveSubagentsInFamily = `-- name: CountLiveSubagentsInFamily :one
@@ -83,58 +42,38 @@ func (q *Queries) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uui
 	return live_count, err
 }
 
-const getChatAwaitingWorker = `-- name: GetChatAwaitingWorker :one
-SELECT (
-	c.worker_id IS NULL
-	OR c.runner_id IS NULL
-	OR NOT EXISTS (
-		SELECT 1
-		FROM chat_heartbeats hb
-		WHERE hb.chat_id = c.id
-			AND hb.runner_id = c.runner_id
-			AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $1::int)
-	)
-)::boolean AS awaiting_worker
-FROM chats c
-WHERE c.id = $2::uuid
-`
-
-type GetChatAwaitingWorkerParams struct {
-	StaleSeconds int32     `db:"stale_seconds" json:"stale_seconds"`
-	ChatID       uuid.UUID `db:"chat_id" json:"chat_id"`
-}
-
-// Reports whether no worker with a fresh heartbeat owns the chat, with the
-// heartbeat predicate of GetChatQueuedForCapacity.
-func (q *Queries) GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, getChatAwaitingWorker, arg.StaleSeconds, arg.ChatID)
-	var awaiting_worker bool
-	err := row.Scan(&awaiting_worker)
-	return awaiting_worker, err
-}
-
-const getFamilySubagentsAwaitingWorker = `-- name: GetFamilySubagentsAwaitingWorker :many
-WITH RECURSIVE awaiting AS (
-	SELECT c.id, c.parent_chat_id
+const getSubagentCapacityCounts = `-- name: GetSubagentCapacityCounts :many
+WITH RECURSIVE candidates AS (
+	SELECT
+		c.id,
+		c.parent_chat_id,
+		c.organization_id,
+		COALESCE(c.root_chat_id, c.parent_chat_id) AS family_root_id
 	FROM chats c
-	WHERE c.root_chat_id = $2::uuid
-		AND c.archived = false
-		AND c.status = 'running'::chat_status
+	WHERE c.id = ANY($1::uuid[])
+		AND c.parent_chat_id IS NOT NULL
 		AND (
-			c.worker_id IS NULL
-			OR c.runner_id IS NULL
-			OR NOT EXISTS (
-				SELECT 1
-				FROM chat_heartbeats hb
-				WHERE hb.chat_id = c.id
-					AND hb.runner_id = c.runner_id
-					AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+			NOT $2::boolean
+			OR (
+				c.archived = false
+				AND c.status = 'running'::chat_status
+				AND (
+					c.worker_id IS NULL
+					OR c.runner_id IS NULL
+					OR NOT EXISTS (
+						SELECT 1
+						FROM chat_heartbeats hb
+						WHERE hb.chat_id = c.id
+							AND hb.runner_id = c.runner_id
+							AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+					)
+				)
 			)
 		)
 ),
 lineage(candidate_id, id, parent_chat_id, depth) AS (
-	SELECT awaiting.id, awaiting.id, awaiting.parent_chat_id, 0
-	FROM awaiting
+	SELECT candidates.id, candidates.id, candidates.parent_chat_id, 0
+	FROM candidates
 	UNION ALL
 	SELECT lineage.candidate_id, chats.id, chats.parent_chat_id, lineage.depth + 1
 	FROM chats
@@ -151,58 +90,77 @@ active AS (
 		AND c.parent_chat_id IS NOT NULL
 		AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
 ),
-totals AS (
-	SELECT
-		COUNT(*)::bigint AS active_count,
-		(COUNT(*) FILTER (WHERE active.organization_id = $1::uuid))::bigint AS active_organization_count,
-		(COUNT(*) FILTER (WHERE active.root_chat_id = $2::uuid))::bigint AS active_family_count
+organization_totals AS (
+	SELECT active.organization_id, COUNT(*) AS active_count
 	FROM active
+	GROUP BY active.organization_id
+),
+family_totals AS (
+	SELECT active.root_chat_id, COUNT(*) AS active_count
+	FROM active
+	GROUP BY active.root_chat_id
 ),
 excluded AS (
 	SELECT DISTINCT lineage.candidate_id, active.id, active.organization_id, active.root_chat_id
 	FROM lineage
 	JOIN active ON active.id = lineage.id
+),
+excluded_counts AS (
+	SELECT
+		excluded.candidate_id,
+		COUNT(*) AS active_count,
+		COUNT(*) FILTER (WHERE excluded.organization_id = candidates.organization_id) AS active_organization_count,
+		COUNT(*) FILTER (WHERE excluded.root_chat_id = candidates.family_root_id) AS active_family_count
+	FROM excluded
+	JOIN candidates ON candidates.id = excluded.candidate_id
+	GROUP BY excluded.candidate_id
 )
 SELECT
-	awaiting.id AS chat_id,
-	(totals.active_count - COUNT(excluded.id))::bigint AS active_count,
-	(totals.active_organization_count - COUNT(excluded.id) FILTER (WHERE excluded.organization_id = $1::uuid))::bigint AS active_organization_count,
-	(totals.active_family_count - COUNT(excluded.id) FILTER (WHERE excluded.root_chat_id = $2::uuid))::bigint AS active_family_count
-FROM awaiting
-CROSS JOIN totals
-LEFT JOIN excluded ON excluded.candidate_id = awaiting.id
-GROUP BY awaiting.id, totals.active_count, totals.active_organization_count, totals.active_family_count
-ORDER BY awaiting.id
+	candidates.id AS chat_id,
+	((SELECT COUNT(*) FROM active) - COALESCE(excluded_counts.active_count, 0))::bigint AS active_count,
+	(COALESCE(organization_totals.active_count, 0) - COALESCE(excluded_counts.active_organization_count, 0))::bigint AS active_organization_count,
+	(COALESCE(family_totals.active_count, 0) - COALESCE(excluded_counts.active_family_count, 0))::bigint AS active_family_count
+FROM candidates
+LEFT JOIN organization_totals ON organization_totals.organization_id = candidates.organization_id
+LEFT JOIN family_totals ON family_totals.root_chat_id = candidates.family_root_id
+LEFT JOIN excluded_counts ON excluded_counts.candidate_id = candidates.id
+ORDER BY candidates.id
 `
 
-type GetFamilySubagentsAwaitingWorkerParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	RootChatID     uuid.UUID `db:"root_chat_id" json:"root_chat_id"`
-	StaleSeconds   int32     `db:"stale_seconds" json:"stale_seconds"`
+type GetSubagentCapacityCountsParams struct {
+	CandidateIds []uuid.UUID `db:"candidate_ids" json:"candidate_ids"`
+	AwaitingOnly bool        `db:"awaiting_only" json:"awaiting_only"`
+	StaleSeconds int32       `db:"stale_seconds" json:"stale_seconds"`
 }
 
-type GetFamilySubagentsAwaitingWorkerRow struct {
+type GetSubagentCapacityCountsRow struct {
 	ChatID                  uuid.UUID `db:"chat_id" json:"chat_id"`
 	ActiveCount             int64     `db:"active_count" json:"active_count"`
 	ActiveOrganizationCount int64     `db:"active_organization_count" json:"active_organization_count"`
 	ActiveFamilyCount       int64     `db:"active_family_count" json:"active_family_count"`
 }
 
-// Returns the unarchived running subagent chats under @root_chat_id that no
-// worker with a fresh heartbeat owns, with the predicate of
-// GetChatAwaitingWorker. Each row carries the counts of
-// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
-// own active lineage, so one query answers for the whole family without
-// pairing each chat with every active subagent.
-func (q *Queries) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error) {
-	rows, err := q.db.QueryContext(ctx, getFamilySubagentsAwaitingWorker, arg.OrganizationID, arg.RootChatID, arg.StaleSeconds)
+// Returns, for each subagent chat in @candidate_ids, the subagent chats that
+// hold a capacity slot: owned by a worker with a fresh heartbeat, like
+// CountChatCapacityActiveByPool. active_count spans the deployment,
+// active_organization_count the candidate's organization and
+// active_family_count the candidate's family. The candidate and its
+// ancestors never count: a coordinator blocked in wait_agent holds a slot, so
+// its own descendants must never wait for it. With @awaiting_only, only the
+// unarchived running candidates that no worker with a fresh heartbeat owns
+// get a row. The counts are the totals minus each candidate's own active
+// lineage, so one statement answers for every candidate without pairing each
+// candidate with every active subagent. The depth guard stops the walk if a
+// cycle ever appears in the hierarchy.
+func (q *Queries) GetSubagentCapacityCounts(ctx context.Context, arg GetSubagentCapacityCountsParams) ([]GetSubagentCapacityCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSubagentCapacityCounts, pq.Array(arg.CandidateIds), arg.AwaitingOnly, arg.StaleSeconds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetFamilySubagentsAwaitingWorkerRow
+	var items []GetSubagentCapacityCountsRow
 	for rows.Next() {
-		var i GetFamilySubagentsAwaitingWorkerRow
+		var i GetSubagentCapacityCountsRow
 		if err := rows.Scan(
 			&i.ChatID,
 			&i.ActiveCount,

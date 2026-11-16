@@ -56,11 +56,9 @@ func TestForkQuerier(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]forkMethodCase{
-		"CountActiveSubagentsForCapacity": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.CountActiveSubagentsForCapacityParams{})
-			row := testutil.Fake(t, faker, forkdb.CountActiveSubagentsForCapacityRow{})
-			fdb.EXPECT().CountActiveSubagentsForCapacity(gomock.Any(), arg).Return(row, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(row)
+		"AcquireSharedLock": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			fdb.EXPECT().AcquireSharedLock(gomock.Any(), int64(database.LockIDChatCapacityAdmission)).Return(nil).AnyTimes()
+			check.Args(int64(database.LockIDChatCapacityAdmission)).Asserts(rbac.ResourceChat, policy.ActionRead).Returns()
 		},
 		"CountLiveSubagentsInFamily": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -68,18 +66,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountLiveSubagentsInFamily(gomock.Any(), chat.ID).Return(int64(3), nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(int64(3))
 		},
-		"GetFamilySubagentsAwaitingWorker": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := forkdb.GetFamilySubagentsAwaitingWorkerParams{RootChatID: chat.ID, OrganizationID: chat.OrganizationID, StaleSeconds: 30}
-			rows := []forkdb.GetFamilySubagentsAwaitingWorkerRow{{ChatID: uuid.New(), ActiveFamilyCount: 1}}
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().GetFamilySubagentsAwaitingWorker(gomock.Any(), arg).Return(rows, nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
-		},
-		"GetChatAwaitingWorker": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.GetChatAwaitingWorkerParams{})
-			fdb.EXPECT().GetChatAwaitingWorker(gomock.Any(), arg).Return(true, nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(true)
+		"GetSubagentCapacityCounts": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := forkdb.GetSubagentCapacityCountsParams{CandidateIds: []uuid.UUID{uuid.New(), uuid.New()}, AwaitingOnly: true, StaleSeconds: 30}
+			rows := []forkdb.GetSubagentCapacityCountsRow{{ChatID: arg.CandidateIds[0], ActiveFamilyCount: 1}}
+			fdb.EXPECT().GetSubagentCapacityCounts(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(rows)
 		},
 		"GetChatOrganizationSubagentLimits": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			limits := testutil.Fake(t, faker, forkdb.ChatOrganizationSubagentLimit{})

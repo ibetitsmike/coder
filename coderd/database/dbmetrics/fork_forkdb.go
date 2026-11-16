@@ -212,6 +212,11 @@ func (f forkQueryMetricsStore) observe(ctx context.Context, query string, start 
 	f.m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), query).Inc()
 }
 
+func (f forkQueryMetricsStore) AcquireSharedLock(ctx context.Context, lockID int64) error {
+	defer f.observe(ctx, "AcquireSharedLock", time.Now())
+	return f.s.AcquireSharedLock(ctx, lockID)
+}
+
 func (f forkQueryMetricsStore) AcquirePluginLeases(ctx context.Context, arg forkdb.AcquirePluginLeasesParams) ([]forkdb.Plugin, error) {
 	defer f.observe(ctx, "AcquirePluginLeases", time.Now())
 	return f.s.AcquirePluginLeases(ctx, arg)
@@ -225,11 +230,6 @@ func (f forkQueryMetricsStore) CancelChatWakeupsByChatID(ctx context.Context, ar
 func (f forkQueryMetricsStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	defer f.observe(ctx, "ConsumePluginLinkCode", time.Now())
 	return f.s.ConsumePluginLinkCode(ctx, arg)
-}
-
-func (f forkQueryMetricsStore) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
-	defer f.observe(ctx, "CountActiveSubagentsForCapacity", time.Now())
-	return f.s.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) CountChatFamilyMessagesSince(ctx context.Context, arg forkdb.CountChatFamilyMessagesSinceParams) (int64, error) {
@@ -310,11 +310,6 @@ func (f forkQueryMetricsStore) DeleteUserAgentDefinitionByName(ctx context.Conte
 func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
 	defer f.observe(ctx, "EnsurePluginChatBindings", time.Now())
 	return f.s.EnsurePluginChatBindings(ctx, pluginID)
-}
-
-func (f forkQueryMetricsStore) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
-	defer f.observe(ctx, "GetChatAwaitingWorker", time.Now())
-	return f.s.GetChatAwaitingWorker(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationTokenBudget, error) {
@@ -422,9 +417,9 @@ func (f forkQueryMetricsStore) GetChatWakeupByIDForUpdate(ctx context.Context, i
 	return f.s.GetChatWakeupByIDForUpdate(ctx, id)
 }
 
-func (f forkQueryMetricsStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
-	defer f.observe(ctx, "GetFamilySubagentsAwaitingWorker", time.Now())
-	return f.s.GetFamilySubagentsAwaitingWorker(ctx, arg)
+func (f forkQueryMetricsStore) GetSubagentCapacityCounts(ctx context.Context, arg forkdb.GetSubagentCapacityCountsParams) ([]forkdb.GetSubagentCapacityCountsRow, error) {
+	defer f.observe(ctx, "GetSubagentCapacityCounts", time.Now())
+	return f.s.GetSubagentCapacityCounts(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
