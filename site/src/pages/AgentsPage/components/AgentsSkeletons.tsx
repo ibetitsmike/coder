@@ -41,7 +41,7 @@ export const AgentsPageLayoutSkeleton: React.FC = () => {
 				}}
 				className="order-2 sm:order-0 flex-1 min-h-0 border-t sm:flex-none sm:border-t-0 sm:h-full sm:w-(--agents-left-sidebar-width) sm:min-w-60 sm:max-w-[min(520px,50vw)] sm:min-h-0 sm:border-b-0"
 			>
-				<div className="relative flex size-full min-h-0 border-r overflow-hidden">
+				<div className="relative flex size-full min-h-0 overflow-hidden sm:border-r">
 					<div className="absolute inset-0 flex flex-col">
 						<div className="hidden border-b px-2 pb-3 pt-1.5 sm:block">
 							<div className="mb-2.5 flex items-center justify-between">
