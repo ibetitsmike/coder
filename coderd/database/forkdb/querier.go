@@ -193,7 +193,14 @@ type Querier interface {
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSavedWorkflowParams) (SavedWorkflow, error)
+	// phases holds the declared phases of the script plus every undeclared name
+	// that phase() reached, in display order. Empty when the script declares no
+	// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+	// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+	// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
+	// phase is the name that was current when the step started, or '' when the
+	// script called no phase() before it.
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
@@ -318,6 +325,11 @@ type Querier interface {
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error)
+	// phase() journals the phase state of a live run as it changes: the display
+	// list and the current name. The write does not touch status, error or
+	// result, which updateRunStatus owns, so the two best-effort writers never
+	// overwrite each other's columns.
+	UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflowRunPhasesParams) error
 	// result is the full terminal snapshot of the run, or NULL for interrupted.
 	// A terminal status stamps finished_at; interrupted keeps the run open, so
 	// a resume can end it later. The param stays uncast so sqlc ties it to the
