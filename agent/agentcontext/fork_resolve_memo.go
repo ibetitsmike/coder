@@ -28,10 +28,20 @@ const (
 	memoIdleTTL = 10 * time.Minute
 	// memoSweepInterval bounds how often a pass sweeps the memo.
 	memoSweepInterval = time.Minute
-	// memoMaxBytes bounds the bodies the memo retains. A body that would
-	// exceed it is read but not stored.
+	// memoMaxBytes bounds the memory the memo retains, counted by
+	// memoEntryCost. A body that would exceed it is read but not stored.
 	memoMaxBytes = 64 << 20
+	// memoEntryOverhead is what memoEntryCost charges for an entry beyond
+	// its path and body, so many small or empty files still fill the
+	// budget.
+	memoEntryOverhead = 256
 )
+
+// memoEntryCost is what an entry for path with body data counts against
+// memoMaxBytes.
+func memoEntryCost(path string, data []byte) int64 {
+	return int64(len(path) + len(data) + memoEntryOverhead)
+}
 
 // fileStamp identifies one version of a regular file. A rewrite changes the
 // mtime or size, a replacement (rename over, symlink retarget) changes the
@@ -119,14 +129,15 @@ func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, fs.F
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if old, ok := m.entries[path]; ok {
-		m.bytes -= int64(len(old.data))
+		m.bytes -= memoEntryCost(path, old.data)
 		delete(m.entries, path)
 	}
-	if m.bytes+int64(len(data)) > memoMaxBytes {
+	cost := memoEntryCost(path, data)
+	if m.bytes+cost > memoMaxBytes {
 		return data, nil
 	}
 	m.entries[path] = &memoEntry{stamp: stamp, data: data, lastUsed: now}
-	m.bytes += int64(len(data))
+	m.bytes += cost
 	return data, nil
 }
 
@@ -134,7 +145,7 @@ func (m *fileMemo) forget(path string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if old, ok := m.entries[path]; ok {
-		m.bytes -= int64(len(old.data))
+		m.bytes -= memoEntryCost(path, old.data)
 		delete(m.entries, path)
 	}
 }
@@ -152,7 +163,7 @@ func (m *fileMemo) sweep(passStart time.Time) {
 	cutoff := passStart.Add(-memoIdleTTL)
 	for path, e := range m.entries {
 		if e.lastUsed.Before(cutoff) {
-			m.bytes -= int64(len(e.data))
+			m.bytes -= memoEntryCost(path, e.data)
 			delete(m.entries, path)
 		}
 	}

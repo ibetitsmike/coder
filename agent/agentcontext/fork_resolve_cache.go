@@ -345,28 +345,64 @@ type watchCoverage struct {
 	relayed atomic.Uint64
 }
 
+// collectSyncDirs is collectDirs for Sync, which calls it without w.mu. It
+// also stats every watched directory, so beginSync can compare their
+// identities without filesystem calls under w.mu.
+func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWatchPaths, map[string]os.FileInfo) {
+	desired, pack := w.collectDirs(roots)
+	w.mu.Lock()
+	paths := make([]string, 0, len(w.cover.dirs))
+	for path := range w.cover.dirs {
+		paths = append(paths, path)
+	}
+	w.mu.Unlock()
+	current := make(map[string]os.FileInfo, len(paths))
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			info = nil
+		}
+		current[path] = info
+	}
+	return desired, pack, current
+}
+
 // beginSync starts a Sync's add loop, with w.mu held, and returns true, the
-// initial value of its addedAll. It drops the watches whose path now names
-// another directory, such as a retargeted symlink, so the add loop watches
-// the directory the path names now. A watch that Sync removed, or that
-// beginSync drops, advances the watch generation.
-func (w *Watcher) beginSync() bool {
+// initial value of its addedAll. current holds the directories that
+// collectSyncDirs stated, nil for one it could not. beginSync drops the
+// watches whose path named another directory there, such as a retargeted
+// symlink, so the add loop watches the directory the path names now. It
+// records a new mode for a directory whose permissions changed, which
+// fsnotify reports as a chmod event the watcher does not act on. A watch
+// added after that stat, by a concurrent Sync, is kept as is. A watch that
+// Sync removed or that beginSync drops, and a recorded mode change, advance
+// the watch generation.
+func (w *Watcher) beginSync(current map[string]os.FileInfo) bool {
 	w.cover.addFailed = false
-	removed := false
+	changed := false
 	for path, was := range w.cover.dirs {
 		if _, ok := w.watched[path]; !ok {
 			delete(w.cover.dirs, path)
-			removed = true
+			changed = true
 			continue
 		}
-		if now, err := os.Stat(path); err != nil || was == nil || !os.SameFile(was, now) {
+		now, stated := current[path]
+		if !stated {
+			continue
+		}
+		if now == nil || was == nil || !os.SameFile(was, now) {
 			_ = w.watcher.Remove(path)
 			delete(w.watched, path)
 			delete(w.cover.dirs, path)
-			removed = true
+			changed = true
+			continue
+		}
+		if now.Mode() != was.Mode() {
+			w.cover.dirs[path] = now
+			changed = true
 		}
 	}
-	if removed {
+	if changed {
 		w.cover.gen++
 	}
 	return true
@@ -423,7 +459,9 @@ func linksUnchanged(links map[string]string) bool {
 }
 
 // watchedDirsUnchanged reports whether every watched path still names the
-// directory it named when its watch was added.
+// directory it named when its watch was added, with the same mode: a
+// permission change on a directory fires only a chmod event, which the
+// watcher does not act on.
 func (w *Watcher) watchedDirsUnchanged() bool {
 	if w == nil {
 		return false
@@ -436,11 +474,17 @@ func (w *Watcher) watchedDirsUnchanged() bool {
 	w.mu.Unlock()
 	for path, was := range dirs {
 		now, err := os.Stat(path)
-		if err != nil || was == nil || !os.SameFile(was, now) {
+		if err != nil || !sameDir(was, now) {
 			return false
 		}
 	}
 	return true
+}
+
+// sameDir reports whether was and now are the same directory with the same
+// mode.
+func sameDir(was, now os.FileInfo) bool {
+	return was != nil && now != nil && os.SameFile(was, now) && was.Mode() == now.Mode()
 }
 
 // statRootDirs returns each scan root's directory, following symlinks, or
@@ -455,14 +499,14 @@ func statRootDirs(roots []ScanRoot) []os.FileInfo {
 	return out
 }
 
-// sameDirs reports whether a and b name the same directories, nil standing
-// for a missing one.
+// sameDirs reports whether a and b name the same directories with the same
+// modes, nil standing for a missing one.
 func sameDirs(a, b []os.FileInfo) bool {
 	return slices.EqualFunc(a, b, func(x, y os.FileInfo) bool {
 		if x == nil || y == nil {
 			return x == nil && y == nil
 		}
-		return os.SameFile(x, y)
+		return sameDir(x, y)
 	})
 }
 

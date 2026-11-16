@@ -611,3 +611,86 @@ func TestFileMemo_RetargetBetweenStatAndOpenIsNotStored(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "body of a", string(data), "the stamp of a served the body of b")
 }
+
+// A permission change on a watched directory fires only a chmod event,
+// which the watcher does not act on, and can change what a pass reads. The
+// cache misses until a Sync records the new mode, and caches again after.
+func TestResolvePass_ChmodWatchedDirMissesCache(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions are not POSIX modes on Windows")
+	}
+	dir := t.TempDir()
+	writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1"})
+	roots := []ScanRoot{{Path: dir}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the pass is cached")
+	require.True(t, w.watchedDirsUnchanged())
+
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	mode := fs.FileMode(0o755)
+	if info.Mode().Perm() == mode {
+		mode = 0o700
+	}
+	require.NoError(t, os.Chmod(dir, mode))
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the chmod root misses the cache")
+	require.False(t, w.watchedDirsUnchanged(), "the chmod watched directory is a change")
+
+	genBefore, _ := w.coverage()
+	w.Sync(context.Background(), roots)
+	genAfter, _ := w.coverage()
+	require.Greater(t, genAfter, genBefore, "the recorded mode change advances the generation")
+	require.True(t, w.watchedDirsUnchanged(), "Sync records the new mode")
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	_, ok = cachedFor(m, w, roots)
+	require.True(t, ok, "the pass after Sync is cached again")
+}
+
+// beginSync compares only the directories that collectSyncDirs stated
+// before Sync took w.mu. A watch added after that, by a concurrent Sync, is
+// kept; one whose stat failed is dropped.
+func TestWatcher_BeginSyncKeepsWatchesItDidNotStat(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_, w := advertisedCacheManager(t, ManagerOptions{}, []ScanRoot{{Path: dir}})
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	require.Contains(t, w.cover.dirs, dir)
+
+	w.beginSync(map[string]os.FileInfo{})
+	require.Contains(t, w.watched, dir, "a watch beginSync did not stat is kept")
+	require.NotNil(t, w.cover.dirs[dir])
+
+	w.beginSync(map[string]os.FileInfo{dir: nil})
+	require.NotContains(t, w.watched, dir, "a watch whose stat failed is dropped")
+	require.NotContains(t, w.cover.dirs, dir)
+}
+
+// The memo budget charges each entry an overhead beyond its body, so many
+// empty files cannot grow the memo without bound.
+func TestFileMemo_EmptyFileCountsAgainstBudget(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "empty.md")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(path, old, old))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	if _, ok := stampOf(info); !ok {
+		t.Skip("no file identity on this platform, so the memo is off")
+	}
+	memo := &fileMemo{entries: make(map[string]*memoEntry)}
+	data, err := memo.read(path, info, func() ([]byte, fs.FileInfo, error) { return readOpenFile(path, 1<<10) })
+	require.NoError(t, err)
+	require.Empty(t, data)
+	require.Contains(t, memo.entries, path, "the empty file is memoized")
+	require.Equal(t, memoEntryCost(path, nil), memo.bytes)
+	require.Greater(t, memo.bytes, int64(memoEntryOverhead-1), "an empty body is not free")
+
+	memo.forget(path)
+	require.Zero(t, memo.bytes)
+}

@@ -165,7 +165,7 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	// scan root and skill container). Compute the desired set
 	// outside the mutex so it does not block the run goroutine,
 	// Close, or schedule.
-	desired, pack := w.collectDirs(roots)
+	desired, pack, current := w.collectSyncDirs(roots) // fork: fork_resolve_cache.go
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -184,7 +184,7 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	}
 	// Track whether every Add in this pass succeeded so a
 	// recovered ENOSPC clears the degraded marker.
-	addedAll := w.beginSync() // fork: fork_resolve_cache.go
+	addedAll := w.beginSync(current) // fork: fork_resolve_cache.go
 	// Add directories that are new.
 	for path := range desired {
 		if _, ok := w.watched[path]; ok {
