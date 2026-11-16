@@ -175,6 +175,32 @@ func TestPluginChatBindings(t *testing.T) {
 	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{ID: freshChat.ID, Status: database.ChatStatusWaiting})
 	require.NoError(t, err)
 	require.True(t, freshDelivered())
+
+	// An archived chat is never due, and its binding keeps its cursor and
+	// its delivered mark: the bindings of archived chats are kept, so an
+	// unarchived chat neither replays its history nor moves to another link.
+	sentReply := addMessage(freshChat.ID, database.ChatMessageRoleAssistant)
+	require.NoError(t, fdb.UpdatePluginChatBindingDelivered(ctx, forkdb.UpdatePluginChatBindingDeliveredParams{
+		PluginID:      plugin.ID,
+		ChatID:        freshChat.ID,
+		SentMessageID: sentReply.ID,
+		SentStatus:    database.NullChatStatus{ChatStatus: database.ChatStatusWaiting, Valid: true},
+		Delivered:     true,
+	}))
+	addMessage(freshChat.ID, database.ChatMessageRoleAssistant)
+	require.True(t, freshDelivered())
+	_, err = db.ArchiveChatByID(ctx, freshChat.ID)
+	require.NoError(t, err)
+	require.Empty(t, dueChatIDs(), "an archived chat is not delivered")
+	_, err = db.UnarchiveChatByID(ctx, freshChat.ID)
+	require.NoError(t, err)
+	require.NoError(t, fdb.EnsurePluginChatBinding(ctx, forkdb.EnsurePluginChatBindingParams{PluginID: plugin.ID, ChatID: freshChat.ID}))
+	require.True(t, freshDelivered(), "unarchiving keeps the delivered mark")
+	var cursor int64
+	require.NoError(t, sqlDB.QueryRowContext(ctx,
+		"SELECT sent_message_id FROM chatd.plugin_chat_bindings WHERE plugin_id = $1 AND chat_id = $2",
+		plugin.ID, freshChat.ID).Scan(&cursor))
+	require.Equal(t, sentReply.ID, cursor, "unarchiving keeps the cursor")
 }
 
 func TestPluginLinkCodes(t *testing.T) {
@@ -276,6 +302,14 @@ func TestPluginLeases(t *testing.T) {
 		require.NoError(t, err)
 		return plugins
 	}
+	renew := func(runner uuid.UUID, seconds int32) []forkdb.RenewPluginLeasesRow {
+		rows, err := fdb.RenewPluginLeases(ctx, forkdb.RenewPluginLeasesParams{
+			RunnerID:     runner,
+			LeaseSeconds: seconds,
+		})
+		require.NoError(t, err)
+		return rows
+	}
 
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerA), "a free enabled plugin is acquirable")
 	leased := acquire(runnerA)
@@ -286,7 +320,17 @@ func TestPluginLeases(t *testing.T) {
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 0}, summary(runnerB), "another replica's live lease is not acquirable")
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerA), "the holder can renew")
 	require.Empty(t, acquire(runnerB), "a live lease is not stolen")
-	require.Len(t, acquire(runnerA), 1, "the holder renews its lease")
+	require.Empty(t, acquire(runnerA), "acquire skips the holder's own lease")
+
+	before, err := fdb.GetPluginByID(ctx, enabled.ID)
+	require.NoError(t, err)
+	require.Empty(t, renew(runnerB, 60), "renewal touches only the replica's own leases")
+	renewed := renew(runnerA, 120)
+	require.Equal(t, []forkdb.RenewPluginLeasesRow{{ID: enabled.ID, UpdatedAt: before.UpdatedAt}}, renewed, "the holder renews its lease")
+	after, err := fdb.GetPluginByID(ctx, enabled.ID)
+	require.NoError(t, err)
+	require.True(t, after.LeaseExpiresAt.Time.After(before.LeaseExpiresAt.Time), "renewal extends the lease")
+	require.Equal(t, runnerA, after.RunnerID.UUID)
 
 	require.NoError(t, fdb.ReleasePluginLeases(ctx, runnerA))
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, summary(runnerB), "a released lease is acquirable")
@@ -294,8 +338,9 @@ func TestPluginLeases(t *testing.T) {
 	require.Len(t, leased, 1)
 	require.Equal(t, runnerB, leased[0].RunnerID.UUID)
 
-	_, err := fdb.UpdatePluginEnabled(ctx, forkdb.UpdatePluginEnabledParams{ID: enabled.ID, Enabled: false, UpdatedAt: dbtime.Now()})
+	_, err = fdb.UpdatePluginEnabled(ctx, forkdb.UpdatePluginEnabledParams{ID: enabled.ID, Enabled: false, UpdatedAt: dbtime.Now()})
 	require.NoError(t, err)
+	require.Empty(t, renew(runnerB, 60), "a disabled plugin's lease is not renewed")
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{}, summary(runnerA), "no enabled plugin leaves nothing to do")
 }
 

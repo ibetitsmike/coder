@@ -720,6 +720,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().AcquirePluginLeases(gomock.Any(), arg).Return([]forkdb.Plugin{plugin}, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns([]forkdb.Plugin{plugin})
 		},
+		"RenewPluginLeases": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.RenewPluginLeasesParams{RunnerID: uuid.New(), LeaseSeconds: 30}
+			rows := []forkdb.RenewPluginLeasesRow{{ID: uuid.New(), UpdatedAt: dbtime.Now()}}
+			fdb.EXPECT().RenewPluginLeases(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(rows)
+		},
 		"ReleasePluginLeases": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			runnerID := uuid.New()
 			fdb.EXPECT().ReleasePluginLeases(gomock.Any(), runnerID).Return(nil).AnyTimes()
