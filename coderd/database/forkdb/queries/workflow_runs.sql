@@ -38,9 +38,11 @@ SELECT * FROM workflow_steps WHERE id = @id;
 -- name: UpdateWorkflowStep :exec
 -- A reported or failed step stamps finished_at; started_at is set once, at
 -- the insert. The param stays uncast so sqlc ties it to the nullable column
--- and applies the NullRawMessage override.
+-- and applies the NullRawMessage override. reused only sets the flag: a
+-- report from a step that a resume reused must not clear it.
 UPDATE workflow_steps
-SET status = @status, value = @value, error = @error, reused = @reused,
+SET status = @status, value = @value, error = @error,
+    reused = reused OR @reused,
     finished_at = CASE WHEN @status::text IN ('reported', 'failed') THEN now() ELSE NULL END
 WHERE id = @id;
 

@@ -352,11 +352,13 @@ func (p *Server) resumeWorkflowRun(
 		}
 		// The replayed steps mark reused in the journal rows too, so the
 		// run detail reads the flag without the snapshot. The flush is
-		// best effort and leaves the terminal snapshot untouched.
-		p.workflowJournal().markStepsReused(ctx, row.ID)
+		// best effort and leaves the terminal snapshot untouched. The first
+		// caller alone journals it: a caller that lost the race replayed
+		// nothing, so it must not write.
 		if _, added := p.workflows.add(run); !added {
 			return p.workflows.get(row.ID), nil
 		}
+		p.workflowJournal().markStepsReused(ctx, row.ID)
 		return run, nil
 	}
 	run, err := p.rehydrateWorkflowRun(ctx, chat, row)

@@ -307,7 +307,8 @@ type Querier interface {
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
-	// and applies the NullRawMessage override.
+	// and applies the NullRawMessage override. reused only sets the flag: a
+	// report from a step that a resume reused must not clear it.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.

@@ -391,7 +391,8 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
 UPDATE workflow_steps
-SET status = $1, value = $2, error = $3, reused = $4,
+SET status = $1, value = $2, error = $3,
+    reused = reused OR $4,
     finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
 WHERE id = $5
 `
@@ -406,7 +407,8 @@ type UpdateWorkflowStepParams struct {
 
 // A reported or failed step stamps finished_at; started_at is set once, at
 // the insert. The param stays uncast so sqlc ties it to the nullable column
-// and applies the NullRawMessage override.
+// and applies the NullRawMessage override. reused only sets the flag: a
+// report from a step that a resume reused must not clear it.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,

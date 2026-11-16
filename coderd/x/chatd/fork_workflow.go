@@ -137,6 +137,11 @@ type runWorkflowResult struct {
 	Error  string          `json:"error,omitempty"`
 	Steps  []stepSummary   `json:"steps"`
 	Logs   []string        `json:"logs,omitempty"`
+	// interruptedSteps holds the steps that interruptOpenSteps failed on
+	// the way to a stopped result. finish logs their failure lines; the
+	// lines of steps failed earlier already sit in the logs, so a resume
+	// does not log them twice. The field is not serialized.
+	interruptedSteps []*workflowStep `json:"-"`
 }
 
 type stepSummary struct {
@@ -370,14 +375,13 @@ type workflowRun struct {
 	// that still matches the baseline, so the view and the journal keep one
 	// copy of the pre-restart history. The baseline may start mid-stream,
 	// when the journal kept only the last lines of a long run, so a line
-	// the baseline does not name is a re-emission the journal already
-	// decided about: appendLogLocked skips it while the match can still
-	// continue. Once the replay has echoed the whole baseline, or printed
-	// more unmatched lines than the baseline holds, the replay output is
-	// live again. mu guards the three fields.
-	logEchoBase   []string
-	logEcho       int
-	logEchoMisses int
+	// the baseline does not name can be a replayed line the journal
+	// already decided about: the match then resumes at the next baseline
+	// line instead of the replay turning live early. Once the replay has
+	// consumed the whole baseline, the replay output is live again.
+	// mu guards both fields.
+	logEchoBase []string
+	logEcho     int
 	// The write-through of the logs paces itself: lastLogFlush is when the
 	// journal last accepted a snapshot, logFlushTimer holds the pending
 	// flush of a burst, and logFlushInFlight marks the goroutine that
@@ -523,7 +527,7 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 	// fresh one.
 	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
 	defer stop()
-	r.interruptOpenSteps(ictx, r.stopReason())
+	interrupted := r.interruptOpenSteps(ictx, r.stopReason())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
@@ -531,6 +535,7 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 		if r.stopRequested && ctx.Err() != nil {
 			res.Status = workflowStatusStopped
 			res.Error = workflowStopError
+			res.interruptedSteps = interrupted
 			return res
 		}
 		res.Status = workflowStatusFailed
@@ -548,12 +553,13 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 func (r *workflowRun) stoppedResult() runWorkflowResult {
 	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
 	defer stop()
-	r.interruptOpenSteps(ictx, workflowStopError)
+	interrupted := r.interruptOpenSteps(ictx, workflowStopError)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
 	res.Status = workflowStatusStopped
 	res.Error = workflowStopError
+	res.interruptedSteps = interrupted
 	return res
 }
 
@@ -620,10 +626,12 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	}
 	// The result of a stopped run carries the failed steps but not the
 	// failure log lines, so the terminal flush of a stop would write no
-	// new lines. Append them under mu before the snapshot journals.
+	// new lines. Append the lines of the steps this stop failed under mu
+	// before the snapshot journals: a step that failed earlier already
+	// logged its line, and a resume must not log it twice.
 	if res.Status == workflowStatusStopped {
 		r.mu.Lock()
-		for _, s := range r.steps {
+		for _, s := range res.interruptedSteps {
 			if s.status == stepStatusFailed && s.err != "" {
 				r.appendLogLocked(fmt.Sprintf("step %q failed: %s", s.title, s.err))
 			}
@@ -782,23 +790,23 @@ func (r *workflowRun) appendLogLocked(msg string) {
 	// matching prefix so the view and the journal do not duplicate the
 	// pre-restart history. The baseline may start mid-stream, when the
 	// journal kept only the last lines of a long run, so a line the
-	// baseline does not name is a re-emission the journal already decided
-	// about, and the match may still continue at the next line. Once the
-	// replay prints more unmatched lines than the baseline holds, the
-	// replay output is live again and the baseline stops suppressing.
+	// baseline does not name can be a replayed line the journal already
+	// decided about: the match then resumes at the next baseline line
+	// instead of the replay turning live early. A failed step of the
+	// baseline, for example, logs its failure line before the replay
+	// reaches the lines the baseline holds after it, so a strict match
+	// would treat that line as live. Once the replay has consumed the
+	// whole baseline, the replay output is live again.
 	if r.logEchoBase != nil {
+		for r.logEcho < len(r.logEchoBase) && msg != r.logEchoBase[r.logEcho] {
+			r.logEcho++
+		}
 		if r.logEcho < len(r.logEchoBase) {
-			if msg == r.logEchoBase[r.logEcho] {
-				r.logEcho++
-				if r.logEcho == len(r.logEchoBase) {
-					r.logEchoBase = nil
-				}
-				return
+			r.logEcho++
+			if r.logEcho == len(r.logEchoBase) {
+				r.logEchoBase = nil
 			}
-			r.logEchoMisses++
-			if r.logEchoMisses <= len(r.logEchoBase) {
-				return
-			}
+			return
 		}
 		r.logEchoBase = nil
 	}
@@ -846,12 +854,14 @@ func (r *workflowRun) scheduleLogFlush() {
 			r.flushLogs(false)
 			r.journalMu.Lock()
 			r.logFlushInFlight = false
+			pending := r.logFlushTimer == nil
 			r.journalMu.Unlock()
 			// Lines that landed while the write was in flight dropped
 			// their own request, so the completed flush re-arms one for
 			// them. A run that finished while the write was in flight
 			// already landed its terminal flush, so it must not re-arm.
-			if !r.isDone() {
+			// A timer armed meanwhile holds the re-arm instead.
+			if pending && !r.isDone() {
 				r.rearmLogFlush()
 			}
 		}()
@@ -1110,8 +1120,9 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 // unreported: a failed, timed-out, stopped, or returning script never reads
 // their value, so they must not keep consuming model capacity until their
 // step timeout. waitStep has already returned when this runs, so the step
-// fields have no other writer.
-func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
+// fields have no other writer. It returns the steps it failed, which finish
+// logs: the failure lines of steps failed earlier already sit in the logs.
+func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*workflowStep {
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {
@@ -1125,6 +1136,7 @@ func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
 		r.interruptStepChild(ctx, step)
 		r.p.workflowJournal().updateStep(ctx, step)
 	}
+	return open
 }
 
 // interruptStepChild stops the child chat of a step the run no longer waits
