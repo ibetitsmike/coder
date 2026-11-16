@@ -666,13 +666,14 @@ def main(args):
 		// is possible: interruptOpenSteps runs before finish, and finish
 		// blocks on the held token in that flush, so waitStep, which
 		// would log the no-report failure, never runs while the run is
-		// stopping. A timeout prints the logs it last saw, since a
-		// loaded runner can leave the last write anywhere along the stop
-		// path and a bare eventually cannot show what it read.
+		// stopping. Every miss of the eventually above logs the logs it
+		// saw, so a loaded runner shows where the last write stopped.
 		stopLine := `step "Never reports." failed: ` + workflowStopError
 		release()
 		want := []string{"first line", "second line", stopLine, "late line"}
-		var lastSeen []string
+		// Eventually formats its message once, before the condition ever
+		// runs, so lastSeen read there would always print nil. Log the
+		// last logs from inside the condition on every miss instead.
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			row, err := fdb.GetWorkflowRun(context.Background(), run.id)
 			if err == nil {
@@ -680,11 +681,11 @@ def main(args):
 				if assert.ObjectsAreEqual(want, logs) {
 					return true
 				}
-				lastSeen = logs
+				t.Logf("terminal flush has not carried the stop lines yet; logs seen: %q", logs)
 			}
 			return false
 		}, testutil.IntervalFast,
-			"the terminal flush never carried the stop lines; last logs seen: %q", lastSeen)
+			"the terminal flush never carried the stop lines")
 
 		// Three full intervals after the end: a leaked fallback would
 		// have fired and re-armed in that window. The attempts must stay

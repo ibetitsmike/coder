@@ -408,23 +408,34 @@ def main(args):
 
 // TestForkWorkflowInlineArgsExact pins that the journal holds the args
 // bytes the caller sent: a number outside the float64 exact range must
-// not round when args.Args has decoded it into Go values first.
+// not round when args.Args has decoded it into Go values first. It
+// drives the run_workflow tool handler, so the rawArgs capture from
+// call.Input is under test too.
 func TestForkWorkflowInlineArgsExact(t *testing.T) {
 	t.Parallel()
 	f := newForkWorkflowFixture(t)
 	ctx := chatdTestContext(t)
 	parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
 	callInput := `{"script":"def main(args):\n    return {\"big\": args[\"big\"]}\n","args":{"big":9007199254740993}}`
-	var args runWorkflowArgs
-	require.NoError(t, json.Unmarshal([]byte(callInput), &args))
-	var raw struct {
-		Args json.RawMessage `json:"args"`
+	tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+	var runTool fantasy.AgentTool
+	for _, tool := range tools {
+		if tool.Info().Name == runWorkflowToolName {
+			runTool = tool
+			break
+		}
 	}
-	require.NoError(t, json.Unmarshal([]byte(callInput), &raw))
-	args.rawArgs = raw.Args
-	callID := uuid.New()
-	run, err := f.server.startWorkflowRun(ctx, parent, f.model.ID, args, callID)
+	require.NotNil(t, runTool, "run_workflow must be among the fork tools")
+	resp, err := runTool.Run(workspacesdk.WithToolCallID(ctx, uuid.New()),
+		fantasy.ToolCall{ID: uuid.NewString(), Name: runWorkflowToolName, Input: callInput})
 	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	var started runWorkflowResult
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+	runID, err := uuid.Parse(started.RunID)
+	require.NoError(t, err)
+	run := f.server.workflows.get(runID)
+	require.NotNil(t, run, "the run must be live while the test reads its journal row")
 	fdb := forkWorkflowDB(t, f.db)
 	row, err := fdb.GetWorkflowRun(ctx, run.id)
 	require.NoError(t, err)
@@ -440,6 +451,61 @@ func TestForkWorkflowInlineArgsExact(t *testing.T) {
 	assert.Contains(t, string(res.Result), "9007199254740993",
 		"main(args) must read the big integer exactly")
 	assert.NotContains(t, string(res.Result), "9007199254740992")
+}
+
+// TestForkWorkflowNullArgs pins that main(args) receives an empty dict,
+// never None: a literal null in the args field decodes to Args nil, so
+// startWorkflowRun journals the default empty object like a missing args
+// field.
+func TestForkWorkflowNullArgs(t *testing.T) {
+	t.Parallel()
+	t.Run("Inline", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		resp := runTool(ctx, t, tools[0], `{"script":"def main(args):\n    return {\"keys\": len(args)}\n","args":null}`)
+		require.False(t, resp.IsError, resp.Content)
+		var started runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+		run := f.server.workflows.get(uuid.MustParse(started.RunID))
+		require.NotNil(t, run)
+		fdb := forkWorkflowDB(t, f.db)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{}`, string(row.Args),
+			"a raw null must journal as the empty object, not null")
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.JSONEq(t, `{"keys":0}`, string(res.Result),
+			"main(args) must receive a dict, not None")
+	})
+
+	t.Run("Saved", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		f.saveUserWorkflow(t, "note", titleWorkflowScript("noted"), "")
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		resp := runTool(ctx, t, tools[0], `{"name":"note","args":null}`)
+		require.False(t, resp.IsError, resp.Content)
+		var started runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+		run := f.server.workflows.get(uuid.MustParse(started.RunID))
+		require.NotNil(t, run)
+		step := f.steps(ctx, t, run, 1)[0]
+		row, err := forkWorkflowDB(t, f.db).GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{}`, string(row.Args),
+			"a raw null must journal as the empty object, not null")
+		f.report(ctx, t, step.ChatID, `{"text":"hello"}`)
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.Equal(t, "noted", step.Title,
+			"main(args) must have received the empty dict, not None")
+	})
 }
 
 func TestForkWorkflowLimit(t *testing.T) {

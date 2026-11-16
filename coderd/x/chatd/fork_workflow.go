@@ -510,18 +510,22 @@ func (p *Server) startWorkflowRun(
 		return nil, err
 	}
 	argsJSON := "{}"
-	if len(args.rawArgs) > 0 {
-		// rawArgs is the args bytes as the caller sent them. Marshaling
-		// args.Args instead would re-encode the value the Go decode built, and
-		// a number outside the float64 exact range would round: the script
-		// and the journal would hold a value main(args) never received.
-		argsJSON = string(args.rawArgs)
-	} else if args.Args != nil {
-		raw, err := json.Marshal(args.Args)
-		if err != nil {
-			return nil, xerrors.Errorf("marshal args: %w", err)
+	if args.Args != nil {
+		if len(args.rawArgs) > 0 {
+			// rawArgs is the args bytes as the caller sent them. Marshaling
+			// args.Args instead would re-encode the value the Go decode built,
+			// and a number outside the float64 exact range would round: the
+			// script and the journal would hold a value main(args) never
+			// received. A raw null decodes to Args nil, so it falls through to
+			// the empty object like a missing args field.
+			argsJSON = string(args.rawArgs)
+		} else {
+			raw, err := json.Marshal(args.Args)
+			if err != nil {
+				return nil, xerrors.Errorf("marshal args: %w", err)
+			}
+			argsJSON = string(raw)
 		}
-		argsJSON = string(raw)
 	}
 	program, err := compileWorkflow(args.Script)
 	if err != nil {
@@ -918,7 +922,7 @@ func (r *workflowRun) scheduleLogFlush() {
 		// terminal flush already carried or will carry.
 		return
 	}
-	now := r.p.clock.Now("chatd", "workflow_log_flush")
+	now := r.p.clock.Now()
 	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
 	if wait <= 0 {
 		// The stamp moves with the attempt, not the write: a write held up
@@ -971,47 +975,49 @@ func (r *workflowRun) armLogFlushTimerLocked() {
 	if r.logFlushTimer != nil || r.logFlushInFlight || r.flushClosing {
 		return
 	}
-	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now("chatd", "workflow_log_flush"))
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now())
 	if wait <= 0 {
 		wait = time.Nanosecond
 	}
-	// The quartz Clock.AfterFunc signature puts the tags after fn, and the
-	// call must stay readable as a timer arm, so the tags sit on the Now
-	// reads inside instead of on the arm itself.
-	r.logFlushTimer = r.p.clock.AfterFunc(wait, func() {
-		now := r.p.clock.Now("chatd", "workflow_log_flush")
-		r.journalMu.Lock()
-		r.logFlushTimer = nil
-		// The attempt is the timer firing, not the write: the flush
-		// below may write (or drop) at once, so a line that lands
-		// right after the write must pace to the next interval and
-		// not start a second write back to back.
-		r.lastLogFlush = now
-		r.journalMu.Unlock()
-		outcome := r.flushLogs(false)
-		if outcome == flushWrote {
-			r.rearmLogFlush()
-			return
-		}
-		if outcome == flushNothingPending {
-			// The journal already holds every line: re-arming would
-			// keep a timer firing every interval until the end of the
-			// run for nothing.
-			return
-		}
-		// The holder may still own the token when this fires. Arm one
-		// more paced timer, or the pending lines would stay unjournaled
-		// until the next log() or the end of the run. The firing above
-		// already stamped the attempt, so each re-arm paces to the
-		// interval and this cannot spin on the holder. A closing run
-		// re-arms nothing: cancelLogFlush set the flag, and its
-		// terminal flush carries the lines.
-		r.journalMu.Lock()
-		if !r.flushClosing {
-			r.armLogFlushTimerLocked()
-		}
-		r.journalMu.Unlock()
-	})
+	r.logFlushTimer = r.p.clock.AfterFunc(
+		wait,
+		func() {
+			now := r.p.clock.Now()
+			r.journalMu.Lock()
+			r.logFlushTimer = nil
+			// The attempt is the timer firing, not the write: the flush
+			// below may write (or drop) at once, so a line that lands
+			// right after the write must pace to the next interval and
+			// not start a second write back to back.
+			r.lastLogFlush = now
+			r.journalMu.Unlock()
+			outcome := r.flushLogs(false)
+			if outcome == flushWrote {
+				r.rearmLogFlush()
+				return
+			}
+			if outcome == flushNothingPending {
+				// The journal already holds every line: re-arming would
+				// keep a timer firing every interval until the end of the
+				// run for nothing.
+				return
+			}
+			// The holder may still own the token when this fires. Arm one
+			// more paced timer, or the pending lines would stay unjournaled
+			// until the next log() or the end of the run. The firing above
+			// already stamped the attempt, so each re-arm paces to the
+			// interval and this cannot spin on the holder. A closing run
+			// re-arms nothing: cancelLogFlush set the flag, and its
+			// terminal flush carries the lines.
+			r.journalMu.Lock()
+			if !r.flushClosing {
+				r.armLogFlushTimerLocked()
+			}
+			r.journalMu.Unlock()
+		},
+		"chatd",
+		"workflow_log_flush",
+	)
 }
 
 // cancelLogFlush drops a pending paced flush and marks the log flushes of

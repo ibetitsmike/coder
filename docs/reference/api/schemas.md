@@ -20162,6 +20162,7 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ```json
 {
+  "args": null,
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
   "created_at": "2019-08-24T14:15:22Z",
   "current_phase": "string",
@@ -20174,7 +20175,7 @@ If the schedule is empty, the user will be updated to use the default schedule.|
   "phases": [
     "string"
   ],
-  "result": {},
+  "result": null,
   "script": "string",
   "status": "string",
   "steps": [
@@ -20199,22 +20200,23 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ### Properties
 
-| Name            | Type                                                          | Required | Restrictions | Description                                                              |
-|-----------------|---------------------------------------------------------------|----------|--------------|--------------------------------------------------------------------------|
-| `chat_id`       | string                                                        | false    |              |                                                                          |
-| `created_at`    | string                                                        | false    |              |                                                                          |
-| `current_phase` | string                                                        | false    |              |                                                                          |
-| `error`         | string                                                        | false    |              |                                                                          |
-| `finished_at`   | string                                                        | false    |              |                                                                          |
-| `id`            | string                                                        | false    |              |                                                                          |
-| `logs`          | array of string                                               | false    |              | Logs are the last log lines of a terminal run, from its snapshot.        |
-| `phases`        | array of string                                               | false    |              | Phases and CurrentPhase carry the run's phase rail, as on the list item. |
-| `result`        | object                                                        | false    |              | Result is the value that main returned, for a terminal run.              |
-| `script`        | string                                                        | false    |              |                                                                          |
-| `status`        | string                                                        | false    |              |                                                                          |
-| `steps`         | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                          |
-| `title`         | string                                                        | false    |              |                                                                          |
-| `updated_at`    | string                                                        | false    |              |                                                                          |
+| Name            | Type                                                          | Required | Restrictions | Description                                                                                                                                                                                                                                                |
+|-----------------|---------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `args`          | any                                                           | false    |              | Args is the JSON value that main(args) received. It is usually an object, but an inline script may be given any JSON value. The API returns the args bytes the run was started with, so a client that reads them through json.RawMessage keeps them exact. |
+| `chat_id`       | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `created_at`    | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `current_phase` | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `error`         | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `finished_at`   | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `id`            | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `logs`          | array of string                                               | false    |              | Logs are the last log lines the script printed: from the snapshot of a terminal run, or written through to the journal while it runs.                                                                                                                      |
+| `phases`        | array of string                                               | false    |              | Phases and CurrentPhase carry the run's phase rail, as on the list item.                                                                                                                                                                                   |
+| `result`        | any                                                           | false    |              | Result is the value that main returned, for a terminal run. The API returns the result bytes main encoded, so a client that reads them through json.RawMessage keeps them exact.                                                                           |
+| `script`        | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `status`        | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `steps`         | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                                                                                                                                                                                                            |
+| `title`         | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
+| `updated_at`    | string                                                        | false    |              |                                                                                                                                                                                                                                                            |
 
 ## codersdk.WorkflowRunStep
 
