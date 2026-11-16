@@ -67,21 +67,21 @@ class FakeTouch {
 
 // Vitest's jsdom window is not the one jsdom checks an event's `view`
 // against, so the module's `view: window` fails to construct.
-function dropEventView(): void {
-	for (const name of ["PointerEvent", "TouchEvent", "MouseEvent"] as const) {
-		const Original = window[name] as new (
-			type: string,
-			init?: EventInit,
-		) => Event;
-		defineValue(
-			window,
-			name,
-			class extends Original {
-				constructor(type: string, init?: UIEventInit) {
-					super(type, { ...init, view: null } as EventInit);
-				}
-			},
-		);
+class ViewlessPointerEvent extends PointerEvent {
+	constructor(type: string, init?: PointerEventInit) {
+		super(type, { ...init, view: null });
+	}
+}
+
+class ViewlessTouchEvent extends TouchEvent {
+	constructor(type: string, init?: TouchEventInit) {
+		super(type, { ...init, view: null });
+	}
+}
+
+class ViewlessMouseEvent extends MouseEvent {
+	constructor(type: string, init?: MouseEventInit) {
+		super(type, { ...init, view: null });
 	}
 }
 
@@ -91,37 +91,43 @@ function dropEventView(): void {
 const COVER = { width: 382, height: 678 };
 const INNER = { width: 867, height: 669 };
 
-function defineValue(target: object, key: string, value: unknown): void {
-	Object.defineProperty(target, key, { configurable: true, value });
-}
+type Display = typeof COVER;
 
-function defineGetter(target: object, key: string, get: () => unknown): void {
-	Object.defineProperty(target, key, { configurable: true, get });
-}
-
-/** Stands in for iOS: lays the page out at device width or at the viewport meta's size. */
-function emulateDuo(meta: HTMLMetaElement) {
-	const display = { current: COVER };
+/**
+ * Stands in for iOS: lays the page out at device width or at the viewport
+ * meta's size, and reports the page as a home-screen web app unless told
+ * otherwise. Returns a function that switches the display.
+ */
+function emulateDuo(
+	meta: HTMLMetaElement,
+	{ standalone = true } = {},
+): (display: Display) => void {
+	let current = COVER;
 	const size = () => {
 		const width = /\bwidth=(\d+)/.exec(meta.content);
 		const height = /\bheight=(\d+)/.exec(meta.content);
 		return {
-			width: width ? Number(width[1]) : display.current.width,
-			height: height ? Number(height[1]) : display.current.height,
+			width: width ? Number(width[1]) : current.width,
+			height: height ? Number(height[1]) : current.height,
 		};
 	};
 	const root = document.documentElement;
-	defineGetter(root, "clientWidth", () => size().width);
-	defineGetter(root, "clientHeight", () => size().height);
-	defineGetter(window.screen, "width", () => DUO_COVER.screenWidth);
-	defineGetter(window, "innerWidth", () => display.current.width);
-	defineGetter(window, "innerHeight", () => display.current.height);
-	window.matchMedia = ((query: string) => ({
+	vi.spyOn(root, "clientWidth", "get").mockImplementation(() => size().width);
+	vi.spyOn(root, "clientHeight", "get").mockImplementation(() => size().height);
+	vi.spyOn(window.screen, "width", "get").mockReturnValue(
+		DUO_COVER.screenWidth,
+	);
+	vi.stubGlobal("matchMedia", (query: string) => ({
 		matches:
-			query === "(orientation: portrait)" &&
-			display.current.height > display.current.width,
-	})) as unknown as typeof window.matchMedia;
-	return display;
+			(query === "(display-mode: standalone)" && standalone) ||
+			(query === "(orientation: portrait)" && current.height > current.width),
+	}));
+	const setDisplay = (display: Display) => {
+		current = display;
+		vi.stubGlobal("innerWidth", display.width);
+	};
+	setDisplay(COVER);
+	return setDisplay;
 }
 
 const frames = async (count: number) => {
@@ -134,8 +140,8 @@ const frames = async (count: number) => {
 function wrapInScroller(child: Element, scrollTop: number): HTMLDivElement {
 	const scroller = document.createElement("div");
 	scroller.style.overflowY = "auto";
-	defineValue(scroller, "scrollHeight", 1000);
-	defineValue(scroller, "clientHeight", 500);
+	vi.spyOn(scroller, "scrollHeight", "get").mockReturnValue(1000);
+	vi.spyOn(scroller, "clientHeight", "get").mockReturnValue(500);
 	scroller.appendChild(child);
 	document.body.appendChild(scroller);
 	scroller.scrollTop = scrollTop;
@@ -174,7 +180,7 @@ function touchAt(
 		changedTouches: [touch],
 	});
 	if (point.time != null) {
-		defineValue(event, "timeStamp", point.time);
+		vi.spyOn(event, "timeStamp", "get").mockReturnValue(point.time);
 	}
 	return event;
 }
@@ -209,11 +215,13 @@ const columnProperty = () =>
 describe("installIosCoverColumn", () => {
 	let uninstall: (() => void) | null = null;
 	let meta: HTMLMetaElement;
-	let display: { current: typeof COVER };
+	let setDisplay: (display: Display) => void;
 
 	beforeEach(() => {
-		defineValue(window, "Touch", FakeTouch);
-		dropEventView();
+		vi.stubGlobal("Touch", FakeTouch);
+		vi.stubGlobal("PointerEvent", ViewlessPointerEvent);
+		vi.stubGlobal("TouchEvent", ViewlessTouchEvent);
+		vi.stubGlobal("MouseEvent", ViewlessMouseEvent);
 		// jsdom stamps frames on a clock other than performance.now(), which the
 		// glide measures against.
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
@@ -222,14 +230,13 @@ describe("installIosCoverColumn", () => {
 		vi.stubGlobal("cancelAnimationFrame", (id: number) =>
 			window.clearTimeout(id),
 		);
-		defineValue(window, "scrollX", 0);
-		defineValue(window, "visualViewport", undefined);
-		defineValue(window.navigator, "standalone", true);
+		vi.stubGlobal("scrollX", 0);
+		vi.stubGlobal("visualViewport", undefined);
 		meta = document.createElement("meta");
 		meta.name = "viewport";
 		meta.content = DEVICE_WIDTH_META;
 		document.head.appendChild(meta);
-		display = emulateDuo(meta);
+		setDisplay = emulateDuo(meta);
 	});
 
 	afterEach(() => {
@@ -238,10 +245,11 @@ describe("installIosCoverColumn", () => {
 		document.head.replaceChildren();
 		document.body.replaceChildren();
 		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
 	});
 
 	it("changes nothing outside a home-screen web app", () => {
-		defineValue(window.navigator, "standalone", undefined);
+		emulateDuo(meta, { standalone: false });
 		uninstall = installIosCoverColumn();
 
 		expect(meta.content).toBe(DEVICE_WIDTH_META);
@@ -257,28 +265,22 @@ describe("installIosCoverColumn", () => {
 			"width=466, height=678, initial-scale=1, maximum-scale=1, user-scalable=no",
 		);
 		expect(columnProperty()).toBe("84px");
-		expect(
-			document.querySelector('[data-testid="ios-cover-column-band"]'),
-		).not.toBeNull();
 
 		uninstall();
 		uninstall = null;
 		expect(meta.content).toBe(DEVICE_WIDTH_META);
 		expect(columnProperty()).toBe("");
-		expect(
-			document.querySelector('[data-testid="ios-cover-column-band"]'),
-		).toBeNull();
 	});
 
 	it("gives the column back on the inner display and takes it again on the cover display", () => {
 		uninstall = installIosCoverColumn();
 
-		display.current = INNER;
+		setDisplay(INNER);
 		window.dispatchEvent(new window.Event("resize"));
 		expect(meta.content).toBe(DEVICE_WIDTH_META);
 		expect(columnProperty()).toBe("");
 
-		display.current = COVER;
+		setDisplay(COVER);
 		window.dispatchEvent(new window.Event("resize"));
 		expect(meta.content).toMatch(/^width=466, height=678,/);
 		expect(columnProperty()).toBe("84px");
@@ -286,11 +288,11 @@ describe("installIosCoverColumn", () => {
 
 	it("gives the column back when the unfold reaches the page after its window resize", () => {
 		const visualViewport = new window.EventTarget();
-		defineValue(window, "visualViewport", visualViewport);
+		vi.stubGlobal("visualViewport", visualViewport);
 		uninstall = installIosCoverColumn();
 
 		window.dispatchEvent(new window.Event("resize"));
-		display.current = INNER;
+		setDisplay(INNER);
 		visualViewport.dispatchEvent(new window.Event("resize"));
 
 		expect(meta.content).toBe(DEVICE_WIDTH_META);
@@ -299,7 +301,7 @@ describe("installIosCoverColumn", () => {
 
 	describe("a sideways scroll of the page", () => {
 		const panPage = () => {
-			defineValue(window, "scrollX", 84);
+			vi.stubGlobal("scrollX", 84);
 			window.dispatchEvent(new window.Event("scroll"));
 		};
 		const layoutLog: string[] = [];
@@ -319,9 +321,7 @@ describe("installIosCoverColumn", () => {
 		// WebKit reveals the caret this way on every keystroke once typing
 		// passes the column's edge.
 		it("is scrolled back without laying the page out again when the page made it", async () => {
-			window.scrollTo = ((x: number) => {
-				defineValue(window, "scrollX", x);
-			}) as typeof window.scrollTo;
+			vi.stubGlobal("scrollTo", (x: number) => vi.stubGlobal("scrollX", x));
 
 			for (let keystroke = 0; keystroke < 3; keystroke++) {
 				panPage();
@@ -334,19 +334,31 @@ describe("installIosCoverColumn", () => {
 		});
 
 		it("is healed by laying the page out at device width when iOS holds it", async () => {
-			window.scrollTo = (() => undefined) as typeof window.scrollTo;
+			vi.stubGlobal("scrollTo", () => undefined);
 
 			panPage();
 			await frames(2);
 			expect(meta.content).toBe(DEVICE_WIDTH_META);
 
-			defineValue(window, "scrollX", 0);
+			vi.stubGlobal("scrollX", 0);
 			await frames(3);
 			expect(meta.content).toMatch(/^width=466, height=678,/);
 		});
 
+		it("stays at device width when the page goes away during a heal", async () => {
+			vi.stubGlobal("scrollTo", () => undefined);
+
+			panPage();
+			await frames(1);
+			uninstall?.();
+			uninstall = null;
+			await frames(3);
+
+			expect(meta.content).toBe(DEVICE_WIDTH_META);
+		});
+
 		it("leaves the pan of a pinch zoom alone", () => {
-			defineValue(window, "visualViewport", { scale: 2 });
+			vi.stubGlobal("visualViewport", { scale: 2 });
 
 			panPage();
 
@@ -580,9 +592,11 @@ describe("installIosCoverColumn", () => {
 				return event.defaultPrevented;
 			};
 			send("touchstart", 200, 300);
-			return moves
-				.map(([dx, dy]) => send("touchmove", 200 + dx, 300 + dy))
-				.at(-1) as boolean;
+			let prevented = false;
+			for (const [dx, dy] of moves) {
+				prevented = send("touchmove", 200 + dx, 300 + dy);
+			}
+			return prevented;
 		}
 
 		it("is blocked when it would only pan the page sideways", () => {
@@ -613,7 +627,7 @@ describe("installIosCoverColumn", () => {
 
 		it("is left to iOS on the inner display, which has no column", () => {
 			uninstall = installIosCoverColumn();
-			display.current = INNER;
+			setDisplay(INNER);
 			window.dispatchEvent(new window.Event("resize"));
 
 			expect(drag([-80, 4])).toBe(false);

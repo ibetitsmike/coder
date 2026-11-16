@@ -1,3 +1,5 @@
+import { isStandaloneDisplayMode } from "#/utils/platform";
+
 /**
  * Takes back the status column of the folded iPhone Duo's cover display for
  * the Agents home-screen web app.
@@ -159,8 +161,9 @@ const VELOCITY_WINDOW_MS = 100;
 type ColumnScroll = {
 	element: Element;
 	horizontal: boolean;
-	/** The element's scroll position and the finger's position when the scroll began. */
+	/** The element's scroll position when the scroll began. */
 	origin: number;
+	/** The finger's position when the scroll began. */
 	start: number;
 	samples: Array<{ time: number; finger: number }>;
 };
@@ -227,8 +230,8 @@ type ColumnGesture = {
 	pointerId: number;
 	/** The last pointer event replayed, the source of the pointercancel a scroll sends. */
 	pointer: PointerEvent;
-	/** Not a tap any more: it moved past the tap slop, or the page or the browser cancelled it. */
-	ended: boolean;
+	/** It moved past the tap slop, or the page or the browser cancelled it. */
+	tapCancelled: boolean;
 	/** Set once the drag scrolls something; its pointer events then stop. */
 	scroll: ColumnScroll | null;
 };
@@ -387,7 +390,7 @@ class ColumnTouchBridge {
 			changedTouches: retargetTouches(event.changedTouches, gesture.target),
 		});
 		if (!this.dispatchCopy(copy, gesture.target)) {
-			gesture.ended = true;
+			gesture.tapCancelled = true;
 		}
 	}
 
@@ -427,7 +430,7 @@ class ColumnTouchBridge {
 			y: event.clientY,
 			pointerId: event.pointerId,
 			pointer: event,
-			ended: false,
+			tapCancelled: false,
 			scroll: null,
 		};
 		// Radix reads a root-targeted pointerdown as a press outside every open
@@ -446,7 +449,7 @@ class ColumnTouchBridge {
 			return;
 		}
 		if (event.type === "pointercancel") {
-			gesture.ended = true;
+			gesture.tapCancelled = true;
 		}
 		gesture.pointer = event;
 		this.replayPointer(event.type, event, gesture.target);
@@ -468,15 +471,14 @@ class ColumnTouchBridge {
 		// A native scroll cancels the touch's pointer, so the press does not
 		// turn into a drag.
 		this.replayPointer("pointercancel", gesture.pointer, gesture.target);
-		const start = scroller.horizontal ? touch.clientX : touch.clientY;
-		const scroll: ColumnScroll = {
+		return {
 			...scroller,
-			origin: 0,
-			start,
+			origin: scroller.horizontal
+				? scroller.element.scrollLeft
+				: scroller.element.scrollTop,
+			start: scroller.horizontal ? touch.clientX : touch.clientY,
 			samples: [],
 		};
-		scroll.origin = getScrollPosition(scroll);
-		return scroll;
 	}
 
 	private moveColumnGesture(
@@ -493,9 +495,9 @@ class ColumnTouchBridge {
 			Math.hypot(touch.clientX - gesture.x, touch.clientY - gesture.y) >
 			TAP_SLOP_PX
 		) {
-			gesture.ended = true;
+			gesture.tapCancelled = true;
 		}
-		if (gesture.ended && gesture.scroll == null) {
+		if (gesture.tapCancelled && gesture.scroll == null) {
 			gesture.scroll = this.startColumnScroll(gesture, touch);
 		}
 		if (gesture.scroll != null) {
@@ -595,7 +597,7 @@ class ColumnTouchBridge {
 			);
 			return;
 		}
-		if (gesture.ended || event.type === "touchcancel") {
+		if (gesture.tapCancelled || event.type === "touchcancel") {
 			return;
 		}
 		// Focus follows an unprevented mousedown, as it does for a native tap.
@@ -650,23 +652,12 @@ function afterTwoFrames(callback: () => void): void {
 function createStatusBandReserve(): HTMLElement {
 	const reserve = document.createElement("div");
 	reserve.setAttribute("aria-hidden", "true");
-	reserve.dataset.testid = "ios-cover-column-band";
-	Object.assign(reserve.style, {
-		position: "fixed",
-		top: "0",
-		right: "0",
-		height: `${IOS_STATUS_BAND_HEIGHT_PX}px`,
-		width: `var(${IOS_COVER_COLUMN_PROPERTY}, 0px)`,
-		backgroundColor: "hsl(var(--surface-primary))",
-		// Both fades stay clear of the glyphs, which start 16px into the column
-		// and end 20px above the band's bottom.
-		maskImage:
-			"linear-gradient(to right, transparent, #000 16px), linear-gradient(to top, transparent, #000 16px)",
-		maskComposite: "intersect",
-		pointerEvents: "none",
-		// Above the page, below popovers and dialogs (z-50).
-		zIndex: "40",
-	});
+	// Above the page, below popovers and dialogs (z-50). Both fades stay clear
+	// of the glyphs, which start 16px into the column and end 20px above the
+	// band's bottom.
+	reserve.className =
+		"pointer-events-none fixed top-0 right-0 z-40 w-[var(--ios-cover-column,0px)] bg-surface-primary [mask-composite:intersect] [mask-image:linear-gradient(to_right,transparent,#000_16px),linear-gradient(to_top,transparent,#000_16px)]";
+	reserve.style.height = `${IOS_STATUS_BAND_HEIGHT_PX}px`;
 	return reserve;
 }
 
@@ -721,13 +712,10 @@ class CoverColumnViewport {
 	}
 
 	// Typing past the column's left edge makes WebKit scroll the page sideways
-	// to reveal the caret, on every keystroke, since it treats the column as
-	// hidden. Re-laying the page out each time made the composer flicker between
-	// widths on every letter. That scroll comes from the page, so scrollTo
-	// undoes it for good. A pan from a gesture comes from iOS, which holds it
-	// against scrollTo: when the page is still panned two frames after the first
-	// undo, heal it. A scroll inside that window is only undone again, since key
-	// repeat can reveal the caret twice in it.
+	// to reveal the caret on every keystroke; scrollTo undoes that for good, and
+	// a re-layout there would flicker. A pan from a gesture comes from iOS,
+	// which holds it against scrollTo, so a page still panned two frames later
+	// is healed.
 	onScroll(): void {
 		if (this.size == null || this.healing || !isPagePannedSideways()) {
 			return;
@@ -761,6 +749,9 @@ class CoverColumnViewport {
 	}
 
 	dispose(): void {
+		// A heal still waiting for its frames then lays the page out at device
+		// width instead of taking the column back.
+		this.size = null;
 		setViewportSize(this.meta, null);
 		document.documentElement.style.removeProperty(IOS_COVER_COLUMN_PROPERTY);
 		this.reserve.remove();
@@ -773,9 +764,7 @@ class CoverColumnViewport {
  */
 export function installIosCoverColumn(): () => void {
 	const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-	const isStandalone =
-		(navigator as Navigator & { standalone?: unknown }).standalone === true;
-	if (!isStandalone || meta == null) {
+	if (!isStandaloneDisplayMode() || meta == null) {
 		return () => undefined;
 	}
 	const viewport = new CoverColumnViewport(meta);
