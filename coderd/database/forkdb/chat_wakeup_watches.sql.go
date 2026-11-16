@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -188,11 +189,23 @@ func (q *Queries) InsertChatWakeupWatch(ctx context.Context, arg InsertChatWakeu
 }
 
 const listChatWakeupWatchesByChatID = `-- name: ListChatWakeupWatchesByChatID :many
-SELECT id, wakeup_id, chat_id, organization_id, kind, ordinal, child_chat_id, agent_id, process_id, pull_request_url, spec, fired_at, fired_payload, delivered_at, deliveries, failed_at, created_at FROM chat_wakeup_watches WHERE chat_id = $1::uuid ORDER BY wakeup_id, ordinal
+SELECT x.id, x.wakeup_id, x.chat_id, x.organization_id, x.kind, x.ordinal, x.child_chat_id, x.agent_id, x.process_id, x.pull_request_url, x.spec, x.fired_at, x.fired_payload, x.delivered_at, x.deliveries, x.failed_at, x.created_at
+FROM chat_wakeup_watches x
+JOIN chat_wakeups w ON w.id = x.wakeup_id
+WHERE x.chat_id = $1::uuid
+    AND (COALESCE(cardinality($2::chat_wakeup_status[]), 0) = 0 OR w.status = ANY($2::chat_wakeup_status[]))
+ORDER BY x.wakeup_id, x.ordinal
 `
 
-func (q *Queries) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeupWatch, error) {
-	rows, err := q.db.QueryContext(ctx, listChatWakeupWatchesByChatID, chatID)
+type ListChatWakeupWatchesByChatIDParams struct {
+	ChatID   uuid.UUID          `db:"chat_id" json:"chat_id"`
+	Statuses []ChatWakeupStatus `db:"statuses" json:"statuses"`
+}
+
+// Lists the watches of the wake-ups of the chat whose status is in statuses,
+// or of every wake-up when statuses is empty.
+func (q *Queries) ListChatWakeupWatchesByChatID(ctx context.Context, arg ListChatWakeupWatchesByChatIDParams) ([]ChatWakeupWatch, error) {
+	rows, err := q.db.QueryContext(ctx, listChatWakeupWatchesByChatID, arg.ChatID, pq.Array(arg.Statuses))
 	if err != nil {
 		return nil, err
 	}

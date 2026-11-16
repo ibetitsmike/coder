@@ -64,7 +64,10 @@ func (api *API) getChatWakeups(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, chat.ID)
+	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID:   chat.ID,
+		Statuses: statuses,
+	})
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to list chat wake-up watches.",

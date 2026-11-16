@@ -527,9 +527,9 @@ func (f forkQueryMetricsStore) InsertChatWakeupWatch(ctx context.Context, arg fo
 	return f.s.InsertChatWakeupWatch(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+func (f forkQueryMetricsStore) ListChatWakeupWatchesByChatID(ctx context.Context, arg forkdb.ListChatWakeupWatchesByChatIDParams) ([]forkdb.ChatWakeupWatch, error) {
 	defer f.observe(ctx, "ListChatWakeupWatchesByChatID", time.Now())
-	return f.s.ListChatWakeupWatchesByChatID(ctx, chatID)
+	return f.s.ListChatWakeupWatchesByChatID(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {

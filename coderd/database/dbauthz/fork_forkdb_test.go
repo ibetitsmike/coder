@@ -407,8 +407,9 @@ func TestForkQuerier(t *testing.T) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			watches := []forkdb.ChatWakeupWatch{testutil.Fake(t, faker, forkdb.ChatWakeupWatch{ChatID: chat.ID})}
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().ListChatWakeupWatchesByChatID(gomock.Any(), chat.ID).Return(watches, nil).AnyTimes()
-			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(watches)
+			arg := forkdb.ListChatWakeupWatchesByChatIDParams{ChatID: chat.ID, Statuses: []forkdb.ChatWakeupStatus{forkdb.ChatWakeupStatusActive}}
+			fdb.EXPECT().ListChatWakeupWatchesByChatID(gomock.Any(), arg).Return(watches, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(watches)
 		},
 		"ListOpenChatWakeupWatchesByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})

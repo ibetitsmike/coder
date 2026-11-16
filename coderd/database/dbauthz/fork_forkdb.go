@@ -762,11 +762,11 @@ func (f *forkQuerier) ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]fo
 	return f.db.ListChatNotes(ctx, chatID)
 }
 
-func (f *forkQuerier) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
-	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+func (f *forkQuerier) ListChatWakeupWatchesByChatID(ctx context.Context, arg forkdb.ListChatWakeupWatchesByChatIDParams) ([]forkdb.ChatWakeupWatch, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return nil, err
 	}
-	return f.db.ListChatWakeupWatchesByChatID(ctx, chatID)
+	return f.db.ListChatWakeupWatchesByChatID(ctx, arg)
 }
 
 func (f *forkQuerier) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {

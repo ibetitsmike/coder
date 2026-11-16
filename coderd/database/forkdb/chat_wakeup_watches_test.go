@@ -250,9 +250,24 @@ func TestChatWakeupWatchRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 1)
 	require.Equal(t, process.ID, all[0].ID)
-	byChat, err := fdb.ListChatWakeupWatchesByChatID(ctx, parent.ID)
+	byChat, err := fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{ChatID: parent.ID})
 	require.NoError(t, err)
 	require.Equal(t, all, byChat)
+
+	// A status filter keeps only the watches of the wake-ups in those
+	// states, the way the wake-ups pill lists the open ones.
+	byChat, err = fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID:   parent.ID,
+		Statuses: []forkdb.ChatWakeupStatus{forkdb.ChatWakeupStatusActive},
+	})
+	require.NoError(t, err)
+	require.Equal(t, all, byChat)
+	byChat, err = fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID:   parent.ID,
+		Statuses: []forkdb.ChatWakeupStatus{forkdb.ChatWakeupStatusCompleted, forkdb.ChatWakeupStatusCanceled},
+	})
+	require.NoError(t, err)
+	require.Empty(t, byChat, "the watches of a wake-up outside the filter stay in the database")
 }
 
 // TestListReadyChatWakeupWatchesPlan checks that the poll of the whole

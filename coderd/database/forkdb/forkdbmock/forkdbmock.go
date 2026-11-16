@@ -1580,18 +1580,18 @@ func (mr *MockStoreMockRecorder) ListChatNotes(ctx, chatID any) *gomock.Call {
 }
 
 // ListChatWakeupWatchesByChatID mocks base method.
-func (m *MockStore) ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeupWatch, error) {
+func (m *MockStore) ListChatWakeupWatchesByChatID(ctx context.Context, arg forkdb.ListChatWakeupWatchesByChatIDParams) ([]forkdb.ChatWakeupWatch, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListChatWakeupWatchesByChatID", ctx, chatID)
+	ret := m.ctrl.Call(m, "ListChatWakeupWatchesByChatID", ctx, arg)
 	ret0, _ := ret[0].([]forkdb.ChatWakeupWatch)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListChatWakeupWatchesByChatID indicates an expected call of ListChatWakeupWatchesByChatID.
-func (mr *MockStoreMockRecorder) ListChatWakeupWatchesByChatID(ctx, chatID any) *gomock.Call {
+func (mr *MockStoreMockRecorder) ListChatWakeupWatchesByChatID(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatWakeupWatchesByChatID", reflect.TypeOf((*MockStore)(nil).ListChatWakeupWatchesByChatID), ctx, chatID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatWakeupWatchesByChatID", reflect.TypeOf((*MockStore)(nil).ListChatWakeupWatchesByChatID), ctx, arg)
 }
 
 // ListChatWakeupWatchesByWakeupID mocks base method.
