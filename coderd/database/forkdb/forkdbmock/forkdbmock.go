@@ -57,6 +57,20 @@ func (mr *MockStoreMockRecorder) AcquirePluginLeases(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquirePluginLeases", reflect.TypeOf((*MockStore)(nil).AcquirePluginLeases), ctx, arg)
 }
 
+// AcquireSharedLock mocks base method.
+func (m *MockStore) AcquireSharedLock(ctx context.Context, lockID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AcquireSharedLock", ctx, lockID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AcquireSharedLock indicates an expected call of AcquireSharedLock.
+func (mr *MockStoreMockRecorder) AcquireSharedLock(ctx, lockID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquireSharedLock", reflect.TypeOf((*MockStore)(nil).AcquireSharedLock), ctx, lockID)
+}
+
 // CancelChatWakeupsByChatID mocks base method.
 func (m *MockStore) CancelChatWakeupsByChatID(ctx context.Context, arg forkdb.CancelChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
 	m.ctrl.T.Helper()
@@ -85,21 +99,6 @@ func (m *MockStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.Consum
 func (mr *MockStoreMockRecorder) ConsumePluginLinkCode(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumePluginLinkCode", reflect.TypeOf((*MockStore)(nil).ConsumePluginLinkCode), ctx, arg)
-}
-
-// CountActiveSubagentsForCapacity mocks base method.
-func (m *MockStore) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CountActiveSubagentsForCapacity", ctx, arg)
-	ret0, _ := ret[0].(forkdb.CountActiveSubagentsForCapacityRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CountActiveSubagentsForCapacity indicates an expected call of CountActiveSubagentsForCapacity.
-func (mr *MockStoreMockRecorder) CountActiveSubagentsForCapacity(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountActiveSubagentsForCapacity", reflect.TypeOf((*MockStore)(nil).CountActiveSubagentsForCapacity), ctx, arg)
 }
 
 // CountChatFamilyMessagesSince mocks base method.
@@ -478,21 +477,6 @@ func (mr *MockStoreMockRecorder) FailOpenWorkflowStepsOfRun(ctx, arg any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOpenWorkflowStepsOfRun", reflect.TypeOf((*MockStore)(nil).FailOpenWorkflowStepsOfRun), ctx, arg)
 }
 
-// GetChatAwaitingWorker mocks base method.
-func (m *MockStore) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatAwaitingWorker", ctx, arg)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatAwaitingWorker indicates an expected call of GetChatAwaitingWorker.
-func (mr *MockStoreMockRecorder) GetChatAwaitingWorker(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetChatAwaitingWorker), ctx, arg)
-}
-
 // GetChatFamilyMessageRecipient mocks base method.
 func (m *MockStore) GetChatFamilyMessageRecipient(ctx context.Context, arg forkdb.GetChatFamilyMessageRecipientParams) (uuid.UUID, error) {
 	m.ctrl.T.Helper()
@@ -746,21 +730,6 @@ func (m *MockStore) GetExcludedPluginPacksByChatID(ctx context.Context, chatID u
 func (mr *MockStoreMockRecorder) GetExcludedPluginPacksByChatID(ctx, chatID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExcludedPluginPacksByChatID", reflect.TypeOf((*MockStore)(nil).GetExcludedPluginPacksByChatID), ctx, chatID)
-}
-
-// GetFamilySubagentsAwaitingWorker mocks base method.
-func (m *MockStore) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetFamilySubagentsAwaitingWorker", ctx, arg)
-	ret0, _ := ret[0].([]forkdb.GetFamilySubagentsAwaitingWorkerRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetFamilySubagentsAwaitingWorker indicates an expected call of GetFamilySubagentsAwaitingWorker.
-func (mr *MockStoreMockRecorder) GetFamilySubagentsAwaitingWorker(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFamilySubagentsAwaitingWorker", reflect.TypeOf((*MockStore)(nil).GetFamilySubagentsAwaitingWorker), ctx, arg)
 }
 
 // GetOrganizationAgentDefinitionByName mocks base method.
@@ -1061,6 +1030,21 @@ func (m *MockStore) GetProjectAgentDefinitionByName(ctx context.Context, arg for
 func (mr *MockStoreMockRecorder) GetProjectAgentDefinitionByName(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetProjectAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetProjectAgentDefinitionByName), ctx, arg)
+}
+
+// GetSubagentCapacityCounts mocks base method.
+func (m *MockStore) GetSubagentCapacityCounts(ctx context.Context, arg forkdb.GetSubagentCapacityCountsParams) ([]forkdb.GetSubagentCapacityCountsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSubagentCapacityCounts", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetSubagentCapacityCountsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSubagentCapacityCounts indicates an expected call of GetSubagentCapacityCounts.
+func (mr *MockStoreMockRecorder) GetSubagentCapacityCounts(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSubagentCapacityCounts", reflect.TypeOf((*MockStore)(nil).GetSubagentCapacityCounts), ctx, arg)
 }
 
 // GetUserAgentDefinitionByName mocks base method.

@@ -41,6 +41,16 @@ func (f *forkQuerier) AcquirePluginLeases(ctx context.Context, arg forkdb.Acquir
 	return f.db.AcquirePluginLeases(ctx, arg)
 }
 
+// AcquireSharedLock serializes chat capacity accounting, which reads chats
+// across every owner, so it needs site-wide chat read like
+// GetSubagentCapacityCounts.
+func (f *forkQuerier) AcquireSharedLock(ctx context.Context, lockID int64) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return err
+	}
+	return f.db.AcquireSharedLock(ctx, lockID)
+}
+
 func (f *forkQuerier) CancelChatWakeupsByChatID(ctx context.Context, arg forkdb.CancelChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
 		return nil, err
@@ -53,13 +63,6 @@ func (f *forkQuerier) ConsumePluginLinkCode(ctx context.Context, arg forkdb.Cons
 		return forkdb.PluginLinkCode{}, err
 	}
 	return f.db.ConsumePluginLinkCode(ctx, arg)
-}
-
-func (f *forkQuerier) CountActiveSubagentsForCapacity(ctx context.Context, arg forkdb.CountActiveSubagentsForCapacityParams) (forkdb.CountActiveSubagentsForCapacityRow, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return forkdb.CountActiveSubagentsForCapacityRow{}, err
-	}
-	return f.db.CountActiveSubagentsForCapacity(ctx, arg)
 }
 
 // CountChatFamilyMessagesSince authorizes as a read of the sender chat.
@@ -219,13 +222,6 @@ func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uui
 	return f.db.EnsurePluginChatBindings(ctx, pluginID)
 }
 
-func (f *forkQuerier) GetChatAwaitingWorker(ctx context.Context, arg forkdb.GetChatAwaitingWorkerParams) (bool, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return false, err
-	}
-	return f.db.GetChatAwaitingWorker(ctx, arg)
-}
-
 func (f *forkQuerier) GetChatOrganizationSubagentLimits(ctx context.Context, organizationID uuid.UUID) (forkdb.ChatOrganizationSubagentLimit, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChatModelConfig.InOrg(organizationID)); err != nil {
 		return forkdb.ChatOrganizationSubagentLimit{}, err
@@ -364,12 +360,13 @@ func (f *forkQuerier) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UU
 	return f.db.GetChatWakeupByIDForUpdate(ctx, id)
 }
 
-// GetFamilySubagentsAwaitingWorker authorizes through the family's root chat.
-func (f *forkQuerier) GetFamilySubagentsAwaitingWorker(ctx context.Context, arg forkdb.GetFamilySubagentsAwaitingWorkerParams) ([]forkdb.GetFamilySubagentsAwaitingWorkerRow, error) {
-	if err := f.authorizeChat(ctx, policy.ActionRead, arg.RootChatID); err != nil {
+// GetSubagentCapacityCounts counts chats across every owner, so it needs
+// site-wide chat read, like CountChatCapacityActiveByPool.
+func (f *forkQuerier) GetSubagentCapacityCounts(ctx context.Context, arg forkdb.GetSubagentCapacityCountsParams) ([]forkdb.GetSubagentCapacityCountsRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
 		return nil, err
 	}
-	return f.db.GetFamilySubagentsAwaitingWorker(ctx, arg)
+	return f.db.GetSubagentCapacityCounts(ctx, arg)
 }
 
 // GetWorkflowRun authorizes through the run's chat. A caller with site-wide
