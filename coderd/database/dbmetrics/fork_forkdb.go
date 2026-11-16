@@ -432,6 +432,11 @@ func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.
 	return f.s.GetOrganizationAgentDefinitionByName(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.GetLinkablePluginsByUserIDRow, error) {
+	defer f.observe(ctx, "GetLinkablePluginsByUserID", time.Now())
+	return f.s.GetLinkablePluginsByUserID(ctx, userID)
+}
+
 func (f forkQueryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	defer f.observe(ctx, "GetPluginByID", time.Now())
 	return f.s.GetPluginByID(ctx, id)

@@ -226,20 +226,20 @@ func packRowSourceFile(r database.ChatContextResource) string {
 	return r.Source
 }
 
-// packCommitKey identifies the files of a pack at one commit.
-type packCommitKey struct {
-	packID uuid.UUID
+// packCommitPaths is the cached file paths of a pack at one commit.
+type packCommitPaths struct {
 	commit string
+	paths  packPathSet
 }
 
 // packPaths returns the paths of the pack's files at its current commit. A
-// commit's files never change, so they are read once per commit. A failed
-// read is logged and returns no paths, so the gate fails closed.
+// commit's files never change, so they are read once per commit. The cache
+// holds one entry per pack, replaced when the commit changes. A failed read
+// is logged and returns no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
-	key := packCommitKey{pack.ID, pack.CommitSHA}
-	if cached, ok := p.forkPacks.paths.Load(key); ok {
-		if paths, ok := cached.(packPathSet); ok {
-			return paths
+	if cached, ok := p.forkPacks.paths.Load(pack.ID); ok {
+		if entry, ok := cached.(packCommitPaths); ok && entry.commit == pack.CommitSHA {
+			return entry.paths
 		}
 	}
 	resources, err := p.packResources(ctx, pack.ID)
@@ -251,7 +251,7 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	for _, resource := range resources {
 		paths[resource.Path] = true
 	}
-	p.forkPacks.paths.Store(key, paths)
+	p.forkPacks.paths.Store(pack.ID, packCommitPaths{commit: pack.CommitSHA, paths: paths})
 	return paths
 }
 

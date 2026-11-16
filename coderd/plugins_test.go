@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,6 +19,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/plugins"
 	"github.com/coder/coder/v2/coderd/x/plugins/plugintest"
@@ -317,4 +319,79 @@ func TestPluginsDisabled(t *testing.T) {
 	var sdkErr *codersdk.Error
 	require.ErrorAs(t, err, &sdkErr)
 	require.Equal(t, http.StatusForbidden, sdkErr.StatusCode(), fmt.Sprintf("%+v", sdkErr))
+}
+
+// TestLinkablePluginsOneQuery checks that listing the plugins a member can
+// link to reads them in one query, not one query per organization.
+func TestLinkablePluginsOneQuery(t *testing.T) {
+	t.Parallel()
+
+	db, ps := dbtestutil.NewDB(t)
+	counts := &linkableReadCounts{}
+	values := coderdtest.DeploymentValues(t)
+	values.Experiments = serpent.StringArray{string(codersdk.ExperimentPlugins)}
+	ownerClient := coderdtest.New(t, &coderdtest.Options{
+		DeploymentValues: values,
+		Database:         linkableCountingStore{Store: db, counts: counts},
+		Pubsub:           ps,
+	})
+	owner := coderdtest.CreateFirstUser(t, ownerClient)
+	memberRaw, member := coderdtest.CreateAnotherUser(t, ownerClient, owner.OrganizationID)
+	memberClient := codersdk.NewExperimentalClient(memberRaw)
+
+	orgIDs := map[uuid.UUID]bool{owner.OrganizationID: true}
+	for range 3 {
+		org := dbgen.Organization(t, db, database.Organization{})
+		dbgen.OrganizationMember(t, db, database.OrganizationMember{OrganizationID: org.ID, UserID: member.ID})
+		orgIDs[org.ID] = true
+	}
+	counts.orgIDs.Store(&orgIDs)
+	counts.userID.Store(&member.ID)
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	linkable, err := memberClient.LinkablePlugins(ctx)
+	require.NoError(t, err)
+	require.Empty(t, linkable)
+	require.EqualValues(t, 0, counts.perOrg.Load(), "no query per organization")
+	require.EqualValues(t, 1, counts.linkable.Load(), "one query for all organizations")
+}
+
+type linkableReadCounts struct {
+	orgIDs   atomic.Pointer[map[uuid.UUID]bool]
+	userID   atomic.Pointer[uuid.UUID]
+	linkable atomic.Int64
+	perOrg   atomic.Int64
+}
+
+// linkableCountingStore counts the plugin reads of the test member. It
+// counts by argument, so the plugin manager running in the background does
+// not change the counts.
+type linkableCountingStore struct {
+	database.Store
+	counts *linkableReadCounts
+}
+
+func (s linkableCountingStore) ForkUnwrap() database.Store { return s.Store }
+
+func (s linkableCountingStore) ForkWrap(inner forkdb.Store) forkdb.Store {
+	return linkableCountingForkStore{Store: inner, counts: s.counts}
+}
+
+type linkableCountingForkStore struct {
+	forkdb.Store
+	counts *linkableReadCounts
+}
+
+func (s linkableCountingForkStore) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.GetLinkablePluginsByUserIDRow, error) {
+	if id := s.counts.userID.Load(); id != nil && *id == userID {
+		s.counts.linkable.Add(1)
+	}
+	return s.Store.GetLinkablePluginsByUserID(ctx, userID)
+}
+
+func (s linkableCountingForkStore) GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]forkdb.Plugin, error) {
+	if ids := s.counts.orgIDs.Load(); ids != nil && (*ids)[organizationID] {
+		s.counts.perOrg.Add(1)
+	}
+	return s.Store.GetPluginsByOrganizationID(ctx, organizationID)
 }

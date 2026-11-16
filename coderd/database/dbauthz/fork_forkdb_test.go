@@ -774,6 +774,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), link.PluginID).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()
 			check.Args(link.PluginID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.PluginUserLink{link})
 		},
+		"GetLinkablePluginsByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			row := testutil.Fake(t, faker, forkdb.GetLinkablePluginsByUserIDRow{})
+			userID := uuid.New()
+			fdb.EXPECT().GetLinkablePluginsByUserID(gomock.Any(), userID).Return([]forkdb.GetLinkablePluginsByUserIDRow{row}, nil).AnyTimes()
+			check.Args(userID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.GetLinkablePluginsByUserIDRow{row})
+		},
 		"GetPluginUserLinksByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
 			fdb.EXPECT().GetPluginUserLinksByUserID(gomock.Any(), link.UserID).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()

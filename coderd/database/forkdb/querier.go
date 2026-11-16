@@ -108,6 +108,10 @@ type Querier interface {
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
+	// The enabled plugins of the live organizations a user is a member of, with
+	// the organization name, for the list of plugins the user can link to. It
+	// leaves out the config, so no caller decrypts it.
+	GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]GetLinkablePluginsByUserIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetOrganizationSavedWorkflowByName(ctx context.Context, arg GetOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)

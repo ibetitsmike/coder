@@ -422,3 +422,61 @@ func TestMaterializePluginPacks(t *testing.T) {
 		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 	})
 }
+
+// TestPackPathsCacheOnePerPack checks that the path cache of the plugin gate
+// keeps one entry per pack: a pack that moves through several commits
+// replaces its entry instead of adding one per commit.
+func TestPackPathsCacheOnePerPack(t *testing.T) {
+	t.Parallel()
+
+	db, ps := dbtestutil.NewDB(t)
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkPluginPacks}))
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	user, org, _ := seedInternalChatDeps(t, db)
+	ctx := chatdTestContext(t)
+
+	insertPack := func(name string) forkdb.PluginPack {
+		now := dbtime.Now()
+		pack, err := fdb.InsertPluginPack(ctx, forkdb.InsertPluginPackParams{
+			ID: uuid.New(), OrganizationID: org.ID, Name: name, SourceUrl: "https://example.com/packs.git",
+			Ref: "main", CommitSha: "c0", CreatedBy: user.ID, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		return pack
+	}
+	setFiles := func(pack forkdb.PluginPack, path string) {
+		require.NoError(t, fdb.DeletePluginPackResources(ctx, pack.ID))
+		require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
+			PackID: pack.ID, Paths: []string{path}, Contents: [][]byte{[]byte(path)}, ContentHashes: []string{"hash"},
+		}))
+	}
+	cached := func() int {
+		n := 0
+		server.forkPacks.paths.Range(func(any, any) bool {
+			n++
+			return true
+		})
+		return n
+	}
+
+	pack := insertPack("alpha")
+	for i, commit := range []string{"c1", "c2", "c3"} {
+		path := "skills/" + commit + ".md"
+		setFiles(pack, path)
+		got := server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: commit})
+		require.Equal(t, packPathSet{path: true}, got, "commit %d reads its own files", i)
+		require.Equal(t, 1, cached(), "after commit %s", commit)
+	}
+
+	// The same commit is served from the cache, without a read.
+	setFiles(pack, "skills/changed.md")
+	require.Equal(t, packPathSet{"skills/c3.md": true},
+		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c3"}))
+
+	other := insertPack("beta")
+	setFiles(other, "skills/beta.md")
+	server.packPaths(ctx, enabledPack{ID: other.ID, Name: other.Name, CommitSHA: "c1"})
+	require.Equal(t, 2, cached())
+}
