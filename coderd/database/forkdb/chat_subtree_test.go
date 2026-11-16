@@ -23,32 +23,32 @@ func TestGetChatSubtreeIDs(t *testing.T) {
 	orgID := dbgen.Organization(t, db, database.Organization{}).ID
 	ownerID := dbgen.User(t, db, database.User{}).ID
 	modelID := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}).ID
-	chat := func(parent *database.Chat) database.Chat {
-		seed := database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: modelID}
+	chat := func(parent *database.Chat, status database.ChatStatus) database.Chat {
+		seed := database.Chat{OrganizationID: orgID, OwnerID: ownerID, LastModelConfigID: modelID, Status: status}
 		if parent != nil {
 			seed.ParentChatID = uuid.NullUUID{UUID: parent.ID, Valid: true}
 		}
 		return dbgen.Chat(t, db, seed)
 	}
-	root := chat(nil)
-	child := chat(&root)
-	sibling := chat(&root)
-	grandchild := chat(&child)
+	root := chat(nil, database.ChatStatusWaiting)
+	child := chat(&root, database.ChatStatusWaiting)
+	sibling := chat(&root, database.ChatStatusRunning)
+	grandchild := chat(&child, database.ChatStatusRequiresAction)
 	// A chat outside the subtree must not appear.
-	_ = chat(nil)
+	_ = chat(nil, database.ChatStatusWaiting)
 
 	rows, err := fdb.GetChatSubtreeIDs(ctx, root.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
-	require.Equal(t, forkdb.GetChatSubtreeIDsRow{ID: grandchild.ID, Depth: 2}, rows[0], "leaves come first")
+	require.Equal(t, forkdb.GetChatSubtreeIDsRow{ID: grandchild.ID, Status: database.ChatStatusRequiresAction, Depth: 2}, rows[0], "leaves come first")
 	require.ElementsMatch(t, []forkdb.GetChatSubtreeIDsRow{
-		{ID: child.ID, Depth: 1},
-		{ID: sibling.ID, Depth: 1},
+		{ID: child.ID, Status: database.ChatStatusWaiting, Depth: 1},
+		{ID: sibling.ID, Status: database.ChatStatusRunning, Depth: 1},
 	}, rows[1:])
 
 	rows, err = fdb.GetChatSubtreeIDs(ctx, child.ID)
 	require.NoError(t, err)
-	require.Equal(t, []forkdb.GetChatSubtreeIDsRow{{ID: grandchild.ID, Depth: 1}}, rows)
+	require.Equal(t, []forkdb.GetChatSubtreeIDsRow{{ID: grandchild.ID, Status: database.ChatStatusRequiresAction, Depth: 1}}, rows)
 
 	rows, err = fdb.GetChatSubtreeIDs(ctx, grandchild.ID)
 	require.NoError(t, err)
