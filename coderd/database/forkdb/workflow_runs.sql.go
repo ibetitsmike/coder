@@ -102,7 +102,7 @@ func (q *Queries) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uui
 }
 
 const getWorkflowRunsByChat = `-- name: GetWorkflowRunsByChat :many
-SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at
+SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at, phases, current_phase
 FROM workflow_runs
 WHERE chat_id = $1
   AND ($2::timestamptz IS NULL
@@ -128,6 +128,8 @@ type GetWorkflowRunsByChatRow struct {
 	CreatedAt     time.Time    `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time    `db:"updated_at" json:"updated_at"`
 	FinishedAt    sql.NullTime `db:"finished_at" json:"finished_at"`
+	Phases        []string     `db:"phases" json:"phases"`
+	CurrentPhase  string       `db:"current_phase" json:"current_phase"`
 }
 
 // The run list of a chat, newest first, one keyset page. after_created_at
@@ -159,6 +161,8 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
+			pq.Array(&i.Phases),
+			&i.CurrentPhase,
 		); err != nil {
 			return nil, err
 		}

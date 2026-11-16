@@ -69,7 +69,7 @@ WHERE id = @id;
 -- client already has; both NULL reads the first page. The list needs no logs,
 -- args or result, so it does not read those columns: logs alone can hold the
 -- full retained tail of every run.
-SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at
+SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at, phases, current_phase
 FROM workflow_runs
 WHERE chat_id = @chat_id
   AND (sqlc.narg('after_created_at')::timestamptz IS NULL
