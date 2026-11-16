@@ -502,6 +502,16 @@ func TestRunPush_RecreatedSkillDirIsWatched(t *testing.T) {
 	require.Equal(t, "v2", skillDescription(t, connectOnce(t, m, "push2")[0], "foo"))
 
 	mustWriteSkill(t, skills, "foo", "v3 is longer")
+	// The edit reaches the cache through the new directory's watch. A
+	// connection before its event arrives may still serve v2.
+	require.Eventually(t, func() bool {
+		for _, res := range m.Snapshot().Resources {
+			if res.Kind == agentcontext.KindSkill && res.Description == "v3 is longer" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast, "an edit in the recreated directory fires an event")
 	require.Equal(t, "v3 is longer", skillDescription(t, connectOnce(t, m, "push3")[0], "foo"))
 }
 
