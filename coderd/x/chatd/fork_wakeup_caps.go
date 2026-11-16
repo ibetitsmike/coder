@@ -154,7 +154,7 @@ func (p *Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat da
 	if spend >= caps.MaxChatSpendMicrosPerDay {
 		return wakeupReasonDailySpendCap, caps, nil
 	}
-	spend, err = p.forkWakeupSpend.organizationSpend(ctx, fdb, chat.OrganizationID, now)
+	spend, err = p.forkWakeupSpend.organizationSpend(ctx, fdb, chat.OrganizationID, now, caps.MaxOrganizationSpendMicrosPerDay)
 	if err != nil {
 		return "", caps, err
 	}
@@ -179,12 +179,13 @@ type cachedWakeupSpend struct {
 // organizationSpend returns the spend over the cap window before now of the
 // chats of the organization that had a delivered wake-up run in that window.
 // It reads the database again when the cached value is wakeupSpendCacheTTL
-// old or was read after now.
-func (c *wakeupSpendCache) organizationSpend(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID, now time.Time) (int64, error) {
+// old, was read after now, or reached limit, so a pause never rests on a
+// cached value.
+func (c *wakeupSpendCache) organizationSpend(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID, now time.Time, limit int64) (int64, error) {
 	c.mu.Lock()
 	cached, ok := c.spend[organizationID]
 	c.mu.Unlock()
-	if ok && !now.Before(cached.readAt) && now.Sub(cached.readAt) < wakeupSpendCacheTTL {
+	if ok && cached.micros < limit && !now.Before(cached.readAt) && now.Sub(cached.readAt) < wakeupSpendCacheTTL {
 		return cached.micros, nil
 	}
 	since := now.Add(-wakeupCapWindow)

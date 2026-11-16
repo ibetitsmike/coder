@@ -125,7 +125,8 @@ func TestWakeupRunCounts(t *testing.T) {
 }
 
 // A delivery under the caps reads the caps row, the run sums and the chat
-// spend, and reads the organization spend at most once a minute.
+// spend, and reads the organization spend at most once a minute. A cached
+// spend at the cap is read again before it pauses a wake-up.
 func TestWakeupCapStatements(t *testing.T) {
 	t.Parallel()
 	ctx := testutil.Context(t, testutil.WaitShort)
@@ -135,8 +136,8 @@ func TestWakeupCapStatements(t *testing.T) {
 	fdb := forkdbmock.NewMockStore(gomock.NewController(t))
 	var server Server
 	// expectCheck expects the statements of one check at now, with the
-	// organization spend read when readSpend is set.
-	expectCheck := func(now time.Time, readSpend bool) {
+	// organization spend read as spend when readSpend is set.
+	expectCheck := func(now time.Time, readSpend bool, spend int64) {
 		since := now.Add(-wakeupCapWindow)
 		runsSince := since.Truncate(time.Hour)
 		fdb.EXPECT().GetChatOrganizationWakeupCaps(gomock.Any(), chat.OrganizationID).
@@ -149,27 +150,41 @@ func TestWakeupCapStatements(t *testing.T) {
 		if readSpend {
 			fdb.EXPECT().SumOrganizationWakeupChatCostMicrosSince(gomock.Any(), forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{
 				OrganizationID: chat.OrganizationID, RunsSince: runsSince, Since: since,
-			}).Return(int64(100), nil).Times(1)
+			}).Return(spend, nil).Times(1)
 		}
 	}
-	check := func(now time.Time) {
+	checkReason := func(now time.Time, want string) {
 		t.Helper()
 		reason, _, err := server.wakeupCapReached(ctx, fdb, chat, now)
 		require.NoError(t, err)
-		require.Empty(t, reason)
+		require.Equal(t, want, reason)
+	}
+	check := func(now time.Time) {
+		t.Helper()
+		checkReason(now, "")
 	}
 
-	expectCheck(now, true)
+	expectCheck(now, true, 100)
 	check(now)
 	// Cached: three statements.
-	expectCheck(now.Add(59*time.Second), false)
+	expectCheck(now.Add(59*time.Second), false, 100)
 	check(now.Add(59 * time.Second))
 	// Stale after a minute.
-	expectCheck(now.Add(time.Minute), true)
+	expectCheck(now.Add(time.Minute), true, 100)
 	check(now.Add(time.Minute))
 	// A clock that went back reads again.
-	expectCheck(now.Add(30*time.Second), true)
+	expectCheck(now.Add(30*time.Second), true, 100)
 	check(now.Add(30 * time.Second))
+
+	// A spend at the cap pauses, and the next check reads it again: the
+	// spend fell under the cap, so the wake-up runs and the value is cached.
+	later := now.Add(2 * time.Minute)
+	expectCheck(later, true, defaultWakeupCaps.MaxOrganizationSpendMicrosPerDay)
+	checkReason(later, wakeupReasonOrgDailySpendCap)
+	expectCheck(later.Add(10*time.Second), true, 100)
+	check(later.Add(10 * time.Second))
+	expectCheck(later.Add(20*time.Second), false, 100)
+	check(later.Add(20 * time.Second))
 }
 
 // wakeupRunCount sums the counted wake-up runs of chat over all hours.
