@@ -305,15 +305,22 @@ func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
 // FIFO or device never blocks or streams, and the read stays bounded even if
 // the file grows in between.
 func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
-	if link, err := os.Lstat(path); err == nil && link.Mode()&os.ModeSymlink != 0 {
-		target, err := filepath.EvalSymlinks(path)
-		noteSymlinkTarget(path, target, err)
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, false
 	}
 	return readCappedMemo(path, info, maxBytes)
+}
+
+// readClaudeFileFor is readCappedFollowingSymlink for a Claude Code file that
+// the scan root cacheDir reads. It records a symlink it follows for the
+// resolve passes over cacheDir, which the file can lie outside of.
+func readClaudeFileFor(cacheDir, path string, maxBytes int64) ([]byte, bool) {
+	if link, err := os.Lstat(path); err == nil && link.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(path)
+		noteOwnedSymlinkTarget(cacheDir, path, target, err)
+	}
+	return readCappedFollowingSymlink(path, maxBytes)
 }
 
 // packRootsFor returns the pack roots of a scan root: rootPath itself when it
@@ -472,7 +479,7 @@ func claudeEnabledPluginSettings(cacheDir string) map[string]bool {
 	if !ok {
 		return nil
 	}
-	data, ok := readCappedFollowingSymlink(path, maxSettingsBytes)
+	data, ok := readClaudeFileFor(cacheDir, path, maxSettingsBytes)
 	if !ok {
 		return nil
 	}
@@ -670,7 +677,7 @@ func claudeInstalledPaths(cacheDir string) map[string]claudeInstall {
 	if pluginsDir == "" {
 		return nil
 	}
-	data, ok := readCappedFollowingSymlink(filepath.Join(pluginsDir, claudeInstalledPluginsFile), maxSettingsBytes)
+	data, ok := readClaudeFileFor(cacheDir, filepath.Join(pluginsDir, claudeInstalledPluginsFile), maxSettingsBytes)
 	if !ok {
 		return nil
 	}
@@ -761,9 +768,9 @@ func (e claudeMarketplaceEntry) skipsDefaultSkills() bool {
 // most authoritative first: the installLocation recorded in
 // known_marketplaces.json, then the copy Claude Code fetches into
 // marketplaces/<name>/.
-func claudeMarketplaceFiles(pluginsDir, marketplace string) []string {
+func claudeMarketplaceFiles(cacheDir, pluginsDir, marketplace string) []string {
 	var out []string
-	if known, ok := claudeKnownMarketplaces(pluginsDir)[marketplace]; ok {
+	if known, ok := claudeKnownMarketplaces(cacheDir, pluginsDir)[marketplace]; ok {
 		if catalog := known.catalogPath(); catalog != "" {
 			out = append(out, catalog)
 		}
@@ -785,8 +792,8 @@ type claudeKnownMarketplace struct {
 // known_marketplaces.json keyed by marketplace name. A missing, oversized or
 // malformed file, and a record without an absolute installLocation, yield
 // nothing for that marketplace.
-func claudeKnownMarketplaces(pluginsDir string) map[string]claudeKnownMarketplace {
-	data, ok := readCappedFollowingSymlink(filepath.Join(pluginsDir, claudeKnownMarketplacesFile), maxSettingsBytes)
+func claudeKnownMarketplaces(cacheDir, pluginsDir string) map[string]claudeKnownMarketplace {
+	data, ok := readClaudeFileFor(cacheDir, filepath.Join(pluginsDir, claudeKnownMarketplacesFile), maxSettingsBytes)
 	if !ok {
 		return nil
 	}
@@ -858,7 +865,7 @@ func claudeInPlaceCandidates(cacheDir string, installed map[string]claudeInstall
 	if pluginsDir == "" {
 		return nil
 	}
-	known := claudeKnownMarketplaces(pluginsDir)
+	known := claudeKnownMarketplaces(cacheDir, pluginsDir)
 	var out []claudeCandidate
 	for _, marketplace := range slices.Sorted(maps.Keys(known)) {
 		record := known[marketplace]
@@ -866,7 +873,7 @@ func claudeInPlaceCandidates(cacheDir string, installed map[string]claudeInstall
 		if !ok {
 			continue
 		}
-		data, ok := readCappedFollowingSymlink(record.catalogPath(), maxMarketplaceBytes)
+		data, ok := readClaudeFileFor(cacheDir, record.catalogPath(), maxMarketplaceBytes)
 		if !ok {
 			continue
 		}
@@ -912,8 +919,8 @@ func claudeMarketplaceEntries(cacheDir, marketplace string) map[string]claudeMar
 	if pluginsDir == "" {
 		return nil
 	}
-	for _, path := range claudeMarketplaceFiles(pluginsDir, marketplace) {
-		if data, ok := readCappedFollowingSymlink(path, maxMarketplaceBytes); ok {
+	for _, path := range claudeMarketplaceFiles(cacheDir, pluginsDir, marketplace) {
+		if data, ok := readClaudeFileFor(cacheDir, path, maxMarketplaceBytes); ok {
 			return parseClaudeMarketplaceEntries(data)
 		}
 	}
@@ -1771,6 +1778,10 @@ func (p packWatchPaths) relevant(path string) bool {
 // declared path arms that event, and the watcher re-collects after every
 // re-resolve, so the watch walks down as the tree is built out.
 func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchPaths) {
+	// The symlinks followed here belong to rootPath. Without a set of
+	// their own they would go to every running pass over other roots,
+	// which could not cache its result then.
+	defer stopTracking(trackSymlinkTargets([]ScanRoot{{Path: rootPath}}))
 	for _, pack := range packRootsFor(rootPath) {
 		out[pack.Dir] = struct{}{}
 		// Nested manifests (.claude-plugin/plugin.json) live in their
@@ -1845,7 +1856,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 		// file lists its in-place plugins, which have no cache
 		// directory; the plugins themselves are packs above.
 		if pluginsDir != "" {
-			for _, known := range claudeKnownMarketplaces(pluginsDir) {
+			for _, known := range claudeKnownMarketplaces(rootPath, pluginsDir) {
 				if _, local := known.localRoot(); local {
 					if catalog := known.catalogPath(); catalog != "" {
 						dirs = append(dirs, filepath.Dir(catalog))
@@ -1862,7 +1873,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 		for _, marketplace := range childDirs(rootPath) {
 			out[marketplace] = struct{}{}
 			// A marketplace update can change an entry's components.
-			for _, catalog := range claudeMarketplaceFiles(pluginsDir, filepath.Base(marketplace)) {
+			for _, catalog := range claudeMarketplaceFiles(rootPath, pluginsDir, filepath.Base(marketplace)) {
 				dirs = append(dirs, filepath.Dir(catalog))
 			}
 			for _, plugin := range childDirs(marketplace) {

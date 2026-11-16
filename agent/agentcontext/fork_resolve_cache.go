@@ -282,8 +282,10 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 		hook()
 	}
 	// A change signal after the loads above leaves the old entry in place
-	// until a pass replaces it.
-	if !ok || entry.pass != found.pass || m.resolveCache.seq.Load() != seq {
+	// until a pass replaces it. A capability change bumps no sequence, so
+	// the capabilities are compared again right before the negotiation
+	// state is read.
+	if !ok || entry.pass != found.pass || m.resolveCache.seq.Load() != seq || m.resolveCaps() != caps {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
@@ -379,12 +381,8 @@ func (w *Watcher) addWatch(path string) error {
 // forgetRemovedWatch drops a watched directory that was removed or renamed.
 // fsnotify drops its watch then, so the directory must leave w.watched for
 // the next Sync to add a watch on whatever takes its place. The event
-// itself is relevant and schedules that re-resolve and Sync.
-//
-// It must not call into fsnotify. It runs on the goroutine that reads
-// Events and Errors, and fsnotify can block on those channels while it
-// serves a Remove: inotify sends an error with its lock held when it
-// drops a moved watch, and Windows serves Remove on its reader goroutine.
+// itself is relevant and schedules that re-resolve and Sync. fsnotify
+// already dropped the watch, so this calls no Remove.
 func (w *Watcher) forgetRemovedWatch(ev fsnotify.Event) {
 	if !ev.Has(fsnotify.Remove) && !ev.Has(fsnotify.Rename) {
 		return
@@ -518,8 +516,10 @@ func (w *Watcher) reportsWritesTo(links map[string]string) bool {
 
 // symlinkTargets collects the symlinks, and their targets, that the running
 // resolve passes read through. A link goes to the passes whose scan roots
-// hold it, and to every running pass when none does, so a concurrent pass
-// can only make another pass more cautious.
+// hold its owner: the link itself, or the scan root a Claude Code file was
+// read for. A link that no running pass owns goes to every running pass, so
+// a concurrent pass can only make another pass more cautious; every read
+// during a pass or a Sync has an owner, so this is a fallback.
 var symlinkTargets struct {
 	mu     sync.Mutex
 	active map[*symlinkTargetSet]struct{}
@@ -592,7 +592,15 @@ func (s *symlinkTargetSet) add(link, target string) {
 // So is the target of a chain of links, because retargeting a link in the
 // middle of the chain fires an event only where that link lives.
 func noteSymlinkTarget(link, target string, err error) {
+	noteOwnedSymlinkTarget(link, link, target, err)
+}
+
+// noteOwnedSymlinkTarget is noteSymlinkTarget for a link that a pass read
+// because of owner, a path under its scan roots, such as the user settings
+// file that a scan root in the Claude Code plugin cache reads.
+func noteOwnedSymlinkTarget(owner, link, target string, err error) {
 	link = filepath.Clean(link)
+	owner = filepath.Clean(owner)
 	if err != nil || isSymlinkChain(link) {
 		target = ""
 	}
@@ -600,7 +608,7 @@ func noteSymlinkTarget(link, target string, err error) {
 	defer symlinkTargets.mu.Unlock()
 	owned := false
 	for set := range symlinkTargets.active {
-		if set.holds(link) {
+		if set.holds(link) || set.holds(owner) {
 			set.add(link, target)
 			owned = true
 		}
@@ -633,4 +641,63 @@ func (w *Watcher) scheduleOnOverflow(err error) {
 	if errors.Is(err, fsnotify.ErrEventOverflow) {
 		w.schedule()
 	}
+}
+
+// relayFsnotify returns channels that carry the events and errors of fsw, in
+// the order fsnotify sent them, through a queue that takes every send at
+// once. fsnotify can wait on a send while it holds the lock that Add and
+// Remove take: inotify sends an error with its lock held when it drops a
+// moved watch, and Windows serves Add and Remove on the goroutine that
+// sends. The event loop takes w.mu, and Sync calls Add and Remove with w.mu
+// held, so a send that waited on the event loop could block Sync and the
+// event loop for good. The queue grows only while the event loop waits for
+// w.mu.
+func (w *Watcher) relayFsnotify(fsw *fsnotify.Watcher) (<-chan fsnotify.Event, <-chan error) {
+	type item struct {
+		ev    fsnotify.Event
+		err   error
+		isErr bool
+	}
+	events := make(chan fsnotify.Event)
+	errs := make(chan error)
+	go func() {
+		defer close(events)
+		defer close(errs)
+		inEvents, inErrs := fsw.Events, fsw.Errors
+		var queue []item
+		for inEvents != nil || inErrs != nil || len(queue) > 0 {
+			var outEvents chan<- fsnotify.Event
+			var outErrs chan<- error
+			var next item
+			if len(queue) > 0 {
+				next = queue[0]
+				if next.isErr {
+					outErrs = errs
+				} else {
+					outEvents = events
+				}
+			}
+			select {
+			case <-w.closedCh:
+				return
+			case ev, ok := <-inEvents:
+				if !ok {
+					inEvents = nil
+					continue
+				}
+				queue = append(queue, item{ev: ev})
+			case err, ok := <-inErrs:
+				if !ok {
+					inErrs = nil
+					continue
+				}
+				queue = append(queue, item{err: err, isErr: true})
+			case outEvents <- next.ev:
+				queue = queue[1:]
+			case outErrs <- next.err:
+				queue = queue[1:]
+			}
+		}
+	}()
+	return events, errs
 }

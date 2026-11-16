@@ -137,12 +137,8 @@ func TestCollectDirsWatchesClaudeUserSettings(t *testing.T) {
 	require.Empty(t, other.settingsFiles)
 }
 
-// Not parallel: the settings link lies under no scan root, so a cached
-// pass running beside it would record the link and not be cached
-// (noteSymlinkTarget in fork_resolve_cache.go).
-//
-//nolint:paralleltest,tparallel // See above.
 func TestCollectDirsWatchesSymlinkedClaudeUserSettings(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	cache := filepath.Join(home, ".claude", "plugins", "cache")
 	require.NoError(t, os.MkdirAll(filepath.Join(cache, "market", "pstack", "1.0.0"), 0o755))

@@ -251,6 +251,35 @@ func TestPublishCached_MissesAfterChangeSignal(t *testing.T) {
 	require.False(t, published.Load(), "a publish that raced a change signal")
 }
 
+// A capability change that lands after publishCached looked the entry up
+// stops the publish: it bumps no sequence, and the entry holds the old
+// capability state.
+func TestPublishCached_MissesAfterCapabilityChange(t *testing.T) {
+	t.Parallel()
+	m, w, roots := readyCacheManager(t, t.TempDir(), ManagerOptions{})
+	ctx := testutil.Context(t, testutil.WaitShort)
+	var flipped atomic.Bool
+	m.resolveCache.afterLockedLookup = func() {
+		// Flip only when the locked lookup found the entry, so the miss
+		// below comes from the flip.
+		if _, ok := cachedFor(m, w, roots); ok && flipped.CompareAndSwap(false, true) {
+			m.globRulesAdvertised.Store(!m.globRulesAdvertised.Load())
+		}
+	}
+	var published atomic.Bool
+	require.Eventually(t, func() bool {
+		if _, ok := m.publishCached(ctx); ok && flipped.Load() {
+			published.Store(true)
+		}
+		if !flipped.Load() {
+			// Events under the home directory can keep a pass from caching.
+			_, _ = m.Resync(ctx)
+		}
+		return flipped.Load()
+	}, testutil.WaitShort, testutil.IntervalFast)
+	require.False(t, published.Load(), "a publish that raced a capability change")
+}
+
 // A completed pass that cannot be cached read the files as they are now, so
 // an older entry for the same state goes: here AGENTS.md became a link
 // whose target the watcher drops writes to, and no change signal reached
@@ -326,12 +355,12 @@ func TestWatcher_SyncReplacesWatchWithoutIdentity(t *testing.T) {
 
 // The event loop keeps reading Events and Errors while watched directories
 // are moved away and deleted. inotify drops a moved watch while it holds
-// its lock, and sends the error for a watch the kernel already dropped on
-// the unbuffered Errors channel, so a Remove from the event loop would wait
-// for that lock forever. Holding w.mu while the directories move and go
-// queues their events, so the loop handles them back to back. Short holds
-// of w.mu after that, as Sync and passes take, delay the loop after each
-// event so inotify takes its lock first.
+// its lock, and sends the error for a watch the kernel already dropped
+// while it still holds it, so the event loop must take that send without
+// waiting on w.mu (relayFsnotify). Holding w.mu while the directories move
+// and go queues their events, so inotify handles them back to back. Short
+// holds of w.mu after that, as Sync and passes take, delay the loop after
+// each event so inotify takes its lock first.
 func TestWatcher_MovedWatchDirsDoNotBlockEventLoop(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "linux" {
@@ -389,6 +418,76 @@ func TestWatcher_MovedWatchDirsDoNotBlockEventLoop(t *testing.T) {
 	case <-time.After(testutil.WaitShort):
 		t.Fatal("Close is blocked")
 	}
+}
+
+// Sync calls Remove and Add with w.mu held, the event loop takes w.mu for
+// each event, and inotify holds its lock while it sends the error for a
+// moved watch that the kernel already dropped. So a Sync while those events
+// are queued finishes only when the event loop takes the send without
+// waiting on w.mu. Each round queues a batch of them while holding w.mu,
+// as TestWatcher_MovedWatchDirsDoNotBlockEventLoop does, and syncs right
+// away. The retargeted link makes every Sync replace its watch (beginSync)
+// as well as remove the others.
+func TestWatcher_SyncDuringMovedWatchDirsDoesNotDeadlock(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("the blocking send is in the inotify backend")
+	}
+	base := t.TempDir()
+	targets := []string{filepath.Join(base, "a"), filepath.Join(base, "b")}
+	for _, dir := range targets {
+		require.NoError(t, os.Mkdir(dir, 0o755))
+	}
+	link := filepath.Join(base, "link")
+	require.NoError(t, os.Symlink(targets[0], link))
+	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), OnChange: func() {}})
+	require.NoError(t, err)
+	ctx := testutil.Context(t, testutil.WaitMedium)
+	// A Sync that deadlocks fails the test instead of hanging it.
+	syncNow := func(roots []ScanRoot) {
+		synced := make(chan struct{})
+		go func() {
+			defer close(synced)
+			w.Sync(ctx, roots)
+		}()
+		testutil.TryReceive(ctx, t, synced)
+	}
+
+	for round := range 10 {
+		roots := []ScanRoot{{Path: link}}
+		for i := range 30 {
+			dir := filepath.Join(base, fmt.Sprintf("r%d-%d", round, i))
+			require.NoError(t, os.Mkdir(dir, 0o755))
+			roots = append(roots, ScanRoot{Path: dir})
+		}
+		syncNow(roots)
+
+		w.mu.Lock()
+		require.Len(t, w.watched, len(roots))
+		for _, root := range roots[1:] {
+			require.NoError(t, os.Rename(root.Path, root.Path+".old"))
+		}
+		for _, root := range roots[1:] {
+			require.NoError(t, os.RemoveAll(root.Path+".old"))
+		}
+		tmp := fmt.Sprintf("%s.%d", link, round)
+		require.NoError(t, os.Symlink(targets[(round+1)%2], tmp))
+		require.NoError(t, os.Rename(tmp, link))
+		w.mu.Unlock()
+
+		syncNow(roots[:1])
+		w.mu.Lock()
+		_, watched := w.watched[link]
+		w.mu.Unlock()
+		require.True(t, watched, "the link is watched after Sync")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		_ = w.Close()
+		close(closed)
+	}()
+	testutil.TryReceive(ctx, t, closed)
 }
 
 // A scan root that was missing when the pass ran and has no watch that

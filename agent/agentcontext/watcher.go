@@ -256,11 +256,12 @@ func (w *Watcher) run() {
 	if fsw == nil {
 		return
 	}
+	events, errs := w.relayFsnotify(fsw) // fork: fork_resolve_cache.go
 	for {
 		select {
 		case <-w.closedCh:
 			return
-		case ev, ok := <-fsw.Events:
+		case ev, ok := <-events: // fork: relayed
 			if !ok {
 				return
 			}
@@ -269,7 +270,7 @@ func (w *Watcher) run() {
 				continue
 			}
 			w.schedule()
-		case err, ok := <-fsw.Errors:
+		case err, ok := <-errs: // fork: relayed
 			if !ok {
 				return
 			}
