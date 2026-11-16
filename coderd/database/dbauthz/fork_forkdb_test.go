@@ -144,6 +144,14 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().GetChatSubtreeIDs(gomock.Any(), chat.ID).Return(rows, nil).AnyTimes()
 			check.Args(chat.ID).Asserts(chat, policy.ActionRead).Returns(rows)
 		},
+		"GetDescendantChatsByRootIDs": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			child := testutil.Fake(t, faker, forkdb.ChatsExpanded{})
+			grandchild := testutil.Fake(t, faker, forkdb.ChatsExpanded{ParentChatID: uuid.NullUUID{UUID: child.ID, Valid: true}})
+			arg := forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{uuid.New()}, Archived: sql.NullBool{Bool: false, Valid: true}, MaxDepth: 64}
+			rows := []forkdb.GetDescendantChatsByRootIDsRow{{ChatsExpanded: child}, {ChatsExpanded: grandchild, HasUnread: true}}
+			fdb.EXPECT().GetDescendantChatsByRootIDs(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(child.Chat(), policy.ActionRead, grandchild.Chat(), policy.ActionRead).Returns(rows)
+		},
 		"GetChatTodosByChatID": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			todos := testutil.Fake(t, faker, forkdb.ChatTodo{ChatID: chat.ID})

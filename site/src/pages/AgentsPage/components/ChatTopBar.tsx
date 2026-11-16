@@ -217,7 +217,7 @@ export const ChatTopBar: React.FC<ChatTopBarProps> = ({
 	const hasMultiplePRs = prStatuses.length > 1;
 
 	return (
-		<div className="flex shrink-0 items-center gap-2 px-4 py-1.5">
+		<div className="flex shrink-0 items-center gap-2 pl-4 pr-[calc(1rem+var(--ios-cover-column,0px))] py-1.5">
 			{/* Mobile back button */}
 			{!isEmbedded && (
 				<Button

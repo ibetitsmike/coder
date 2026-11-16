@@ -398,6 +398,11 @@
 		[data-radix-popper-content-wrapper]:has(> &) {
 			bottom: auto !important;
 			top: var(--mobile-dropdown-top, 3.5rem) !important;
+			/* Stays left of the iOS cover display's status column. */
+			width: calc(
+				var(--mobile-dropdown-width, calc(100vw - 2rem)) -
+				var(--ios-cover-column, 0px)
+			) !important;
 		}
 	}
 }
