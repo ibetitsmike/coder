@@ -123,7 +123,8 @@ type Querier interface {
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
-	// Returns, for each subagent chat in @candidate_ids, the subagent chats that
+	// Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is
+	// set, in the family of @root_chat_id, the subagent chats that
 	// hold a capacity slot: owned by a worker with a fresh heartbeat, like
 	// CountChatCapacityActiveByPool. active_count spans the deployment,
 	// active_organization_count the candidate's organization and

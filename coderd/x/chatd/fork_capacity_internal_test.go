@@ -492,9 +492,22 @@ func advisoryLockWaiters(ctx context.Context, sqlDB *sql.DB, lockID int64) (int,
 	var waiting int
 	err := sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
 		WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
 		AND classid::bigint = $1 AND objid::bigint = $2`,
 		(lockID>>32)&0xffffffff, lockID&0xffffffff).Scan(&waiting)
 	return waiting, err
+}
+
+// advisoryLockHolders returns the number of transactions that hold the
+// advisory transaction lock lockID.
+func advisoryLockHolders(ctx context.Context, sqlDB *sql.DB, lockID int64) (int, error) {
+	var holding int
+	err := sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND granted AND objsubid = 1
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		AND classid::bigint = $1 AND objid::bigint = $2`,
+		(lockID>>32)&0xffffffff, lockID&0xffffffff).Scan(&holding)
+	return holding, err
 }
 
 // With only the family concurrency limit, admission takes a per-family
@@ -607,6 +620,11 @@ func TestForkCapacityAdmissionLockScope(t *testing.T) {
 	// The same family waits for it.
 	sameFamily := inBackground(func() error { return admitInTx(familyOnly, siblingA) })
 	requireWaiters(chatFamilyCapacityLockID(rootA.ID), "the same family waits for the family capacity lock")
+	// The waiting sibling does not hold the shared deployment lock yet, so
+	// it cannot delay heartbeat renewal while it waits.
+	holders, err := advisoryLockHolders(ctx, sqlDB, database.LockIDChatCapacityAdmission)
+	require.NoError(t, err)
+	require.Equal(t, 1, holders, "only the held admission holds the deployment lock")
 	// Heartbeat renewal, which takes the deployment lock exclusively, still
 	// waits for a family admission.
 	renewal := inBackground(func() error {

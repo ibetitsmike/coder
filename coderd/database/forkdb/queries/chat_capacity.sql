@@ -8,7 +8,8 @@ WHERE chats.root_chat_id = @root_chat_id::uuid
 	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status);
 
 -- name: GetSubagentCapacityCounts :many
--- Returns, for each subagent chat in @candidate_ids, the subagent chats that
+-- Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is
+-- set, in the family of @root_chat_id, the subagent chats that
 -- hold a capacity slot: owned by a worker with a fresh heartbeat, like
 -- CountChatCapacityActiveByPool. active_count spans the deployment,
 -- active_organization_count the candidate's organization and
@@ -27,7 +28,7 @@ WITH RECURSIVE candidates AS (
 		c.organization_id,
 		COALESCE(c.root_chat_id, c.parent_chat_id) AS family_root_id
 	FROM chats c
-	WHERE c.id = ANY(@candidate_ids::uuid[])
+	WHERE (c.id = ANY(@candidate_ids::uuid[]) OR c.root_chat_id = sqlc.narg('root_chat_id')::uuid)
 		AND c.parent_chat_id IS NOT NULL
 		AND (
 			NOT @awaiting_only::boolean

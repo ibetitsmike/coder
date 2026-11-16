@@ -261,9 +261,11 @@ func (p *Server) listAgentsWaitingForCapacity(ctx context.Context, parent databa
 	for organizationID, candidateIDs := range candidatesByOrganization {
 		limits, err := p.subagentLimits(ctx, fdb, organizationID)
 		if err == nil {
-			var organizationWaiting map[uuid.UUID]bool
-			organizationWaiting, err = p.subagentsWaitingForCapacity(ctx, fdb, limits, candidateIDs)
-			maps.Copy(waiting, organizationWaiting)
+			var organizationWaiting []uuid.UUID
+			organizationWaiting, err = p.subagentsWaitingForCapacity(ctx, fdb, limits, candidateIDs, uuid.NullUUID{})
+			for _, id := range organizationWaiting {
+				waiting[id] = true
+			}
 		}
 		if err != nil {
 			p.logger.Warn(ctx, "check subagent capacity wait for list_agents",

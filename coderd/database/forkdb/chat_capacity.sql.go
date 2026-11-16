@@ -50,10 +50,10 @@ WITH RECURSIVE candidates AS (
 		c.organization_id,
 		COALESCE(c.root_chat_id, c.parent_chat_id) AS family_root_id
 	FROM chats c
-	WHERE c.id = ANY($1::uuid[])
+	WHERE (c.id = ANY($1::uuid[]) OR c.root_chat_id = $2::uuid)
 		AND c.parent_chat_id IS NOT NULL
 		AND (
-			NOT $2::boolean
+			NOT $3::boolean
 			OR (
 				c.archived = false
 				AND c.status = 'running'::chat_status
@@ -65,7 +65,7 @@ WITH RECURSIVE candidates AS (
 						FROM chat_heartbeats hb
 						WHERE hb.chat_id = c.id
 							AND hb.runner_id = c.runner_id
-							AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+							AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $4::int)
 					)
 				)
 			)
@@ -88,7 +88,7 @@ active AS (
 		AND c.runner_id = hb.runner_id
 	WHERE c.worker_id IS NOT NULL
 		AND c.parent_chat_id IS NOT NULL
-		AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $3::int)
+		AND hb.heartbeat_at > NOW() - (INTERVAL '1 second' * $4::int)
 ),
 organization_totals AS (
 	SELECT active.organization_id, COUNT(*) AS active_count
@@ -128,9 +128,10 @@ ORDER BY candidates.id
 `
 
 type GetSubagentCapacityCountsParams struct {
-	CandidateIds []uuid.UUID `db:"candidate_ids" json:"candidate_ids"`
-	AwaitingOnly bool        `db:"awaiting_only" json:"awaiting_only"`
-	StaleSeconds int32       `db:"stale_seconds" json:"stale_seconds"`
+	CandidateIds []uuid.UUID   `db:"candidate_ids" json:"candidate_ids"`
+	RootChatID   uuid.NullUUID `db:"root_chat_id" json:"root_chat_id"`
+	AwaitingOnly bool          `db:"awaiting_only" json:"awaiting_only"`
+	StaleSeconds int32         `db:"stale_seconds" json:"stale_seconds"`
 }
 
 type GetSubagentCapacityCountsRow struct {
@@ -140,7 +141,8 @@ type GetSubagentCapacityCountsRow struct {
 	ActiveFamilyCount       int64     `db:"active_family_count" json:"active_family_count"`
 }
 
-// Returns, for each subagent chat in @candidate_ids, the subagent chats that
+// Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is
+// set, in the family of @root_chat_id, the subagent chats that
 // hold a capacity slot: owned by a worker with a fresh heartbeat, like
 // CountChatCapacityActiveByPool. active_count spans the deployment,
 // active_organization_count the candidate's organization and
@@ -153,7 +155,12 @@ type GetSubagentCapacityCountsRow struct {
 // candidate with every active subagent. The depth guard stops the walk if a
 // cycle ever appears in the hierarchy.
 func (q *Queries) GetSubagentCapacityCounts(ctx context.Context, arg GetSubagentCapacityCountsParams) ([]GetSubagentCapacityCountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getSubagentCapacityCounts, pq.Array(arg.CandidateIds), arg.AwaitingOnly, arg.StaleSeconds)
+	rows, err := q.db.QueryContext(ctx, getSubagentCapacityCounts,
+		pq.Array(arg.CandidateIds),
+		arg.RootChatID,
+		arg.AwaitingOnly,
+		arg.StaleSeconds,
+	)
 	if err != nil {
 		return nil, err
 	}

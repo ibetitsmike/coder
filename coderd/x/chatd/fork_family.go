@@ -44,19 +44,10 @@ func (p *Server) ForkChatFamilyCapacity(ctx context.Context, root database.Chat)
 	if !p.subagentConcurrencyLimited(limits) {
 		return family, nil
 	}
-	familyIDs, err := p.db.GetChatFamilyIDsByRootID(ctx, root.ID)
-	if err != nil {
-		return codersdk.ForkChatFamilyCapacity{}, xerrors.Errorf("list family chats: %w", err)
-	}
-	waiting, err := p.subagentsWaitingForCapacity(ctx, fdb, limits, familyIDs)
+	waiting, err := p.subagentsWaitingForCapacity(ctx, fdb, limits, nil, uuid.NullUUID{UUID: root.ID, Valid: true})
 	if err != nil {
 		return codersdk.ForkChatFamilyCapacity{}, xerrors.Errorf("list subagents waiting for capacity: %w", err)
 	}
-	// familyIDs is in creation order, so the list is too.
-	for _, id := range familyIDs {
-		if waiting[id] {
-			family.WaitingForCapacity = append(family.WaitingForCapacity, id)
-		}
-	}
+	family.WaitingForCapacity = waiting
 	return family, nil
 }

@@ -1,6 +1,7 @@
 package forkdb_test
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -207,4 +208,23 @@ func TestGetSubagentCapacityCountsAwaitingOnly(t *testing.T) {
 		ActiveOrganizationCount: 2,
 		ActiveFamilyCount:       1,
 	}, got[otherWaiter.ID])
+
+	// With root_chat_id, the query selects the family's candidates itself:
+	// the same rows as listing every chat of the family, and no row of
+	// another family.
+	rows, err := fdb.GetSubagentCapacityCounts(ctx, forkdb.GetSubagentCapacityCountsParams{
+		RootChatID:   uuid.NullUUID{UUID: root.ID, Valid: true},
+		AwaitingOnly: true,
+		StaleSeconds: 60,
+	})
+	require.NoError(t, err)
+	wantFamily := counts(true, root, coordinator, worker, sibling, abandoned, waiting, archived)
+	require.Len(t, rows, 3)
+	require.Len(t, wantFamily, 3)
+	for i, row := range rows {
+		require.Equal(t, wantFamily[row.ChatID], row)
+		if i > 0 {
+			require.Negative(t, bytes.Compare(rows[i-1].ChatID[:], row.ChatID[:]), "rows are in ID order")
+		}
+	}
 }
