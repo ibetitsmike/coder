@@ -11,9 +11,10 @@ import (
 )
 
 type Querier interface {
-	// Leases enabled plugins to a replica. A replica renews its own leases on
-	// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
-	// concurrent replicas from blocking on, or double leasing, the same rows.
+	// Leases enabled plugins that no replica holds, or whose lease expired, to a
+	// replica. It skips the replica's own leases: RenewPluginLeases renews
+	// those. SKIP LOCKED keeps concurrent replicas from blocking on, or double
+	// leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
@@ -244,6 +245,10 @@ type Querier interface {
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// Renews the leases a replica holds on enabled plugins. It returns only the
+	// id and updated_at, so a renewal reads and decrypts no config: the replica
+	// reads a full row only when updated_at changed.
+	RenewPluginLeases(ctx context.Context, arg RenewPluginLeasesParams) ([]RenewPluginLeasesRow, error)
 	// Marks the pending question of @chat_id answered by the user messages that
 	// the transaction inserts into the chat's history. @compressed is true when
 	// one of them is a context boundary, a clear or a compaction, which retires

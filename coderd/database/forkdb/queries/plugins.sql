@@ -59,9 +59,19 @@ UPDATE plugins SET last_error = @last_error WHERE id = @id;
 -- name: DeletePluginByID :exec
 DELETE FROM plugins WHERE id = @id;
 
--- Leases enabled plugins to a replica. A replica renews its own leases on
--- every call and takes over plugins whose lease expired. SKIP LOCKED keeps
--- concurrent replicas from blocking on, or double leasing, the same rows.
+-- Renews the leases a replica holds on enabled plugins. It returns only the
+-- id and updated_at, so a renewal reads and decrypts no config: the replica
+-- reads a full row only when updated_at changed.
+-- name: RenewPluginLeases :many
+UPDATE plugins
+SET lease_expires_at = now() + make_interval(secs => sqlc.arg('lease_seconds')::int)
+WHERE runner_id = @runner_id::uuid AND enabled
+RETURNING id, updated_at;
+
+-- Leases enabled plugins that no replica holds, or whose lease expired, to a
+-- replica. It skips the replica's own leases: RenewPluginLeases renews
+-- those. SKIP LOCKED keeps concurrent replicas from blocking on, or double
+-- leasing, the same rows.
 -- name: AcquirePluginLeases :many
 UPDATE plugins
 SET
@@ -71,9 +81,9 @@ WHERE id IN (
     SELECT p.id
     FROM plugins p
     WHERE p.enabled
+        AND p.runner_id IS DISTINCT FROM @runner_id::uuid
         AND (
-            p.runner_id = @runner_id::uuid
-            OR p.lease_expires_at IS NULL
+            p.lease_expires_at IS NULL
             OR p.lease_expires_at < now()
         )
     ORDER BY p.id
