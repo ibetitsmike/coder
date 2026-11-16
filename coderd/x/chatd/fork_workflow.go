@@ -80,7 +80,7 @@ Built-ins:
 - log(message) adds a line to the run log. print() does the same.
 - json.encode(value) and json.decode(text).
 - phase(name) sets the current phase of the run. Steps started after the call are tagged with that phase, and the run card shows a phase rail. ` +
-	`A name not in PHASES is accepted and shown as an observed phase.
+	`A name not in PHASES is accepted and shown as an observed phase. A phase() call past the phase cap fails the run.
 
 A top-level PHASES = ["plan", "build", "review"] list is optional. chatd reads it before main runs and shows its names on the card before the first step, as pending. ` +
 	`Names already declared stay in declared order; names first set by phase() are appended.

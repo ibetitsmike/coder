@@ -348,4 +348,66 @@ def main(args):
 		require.Equal(t, workflowStatusFailed, res.Status)
 		assert.Contains(t, res.Error, "more than 32 phases")
 	})
+
+	t.Run("PhaseBuiltinPastTheCapFailsTheRun", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A script that declares the cap and then observes one more with
+		// phase() fails the run, the way a PHASES list past the cap does.
+		script := "PHASES = [\"p\" + str(i) for i in range(" + strconv.Itoa(maxWorkflowPhases) + ")]\n\ndef main(args):\n    phase(\"one more\")\n"
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: script})
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "more than 32 phases")
+	})
+
+	t.Run("DeclaringPastTheCapLeavesNoPhasesBehind", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A declaration that fails the cap must not leak its names into
+		// the run state a terminal result or journal row exposes.
+		script := "PHASES = [\"p\" + str(i) for i in range(" + strconv.Itoa(maxWorkflowPhases+1) + ")]\n\ndef main(args):\n    pass\n"
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: script})
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "at most 32 are allowed")
+		assert.Empty(t, res.Phases)
+		fdb := forkWorkflowDB(t, f.db)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.Empty(t, row.Phases)
+	})
+
+	t.Run("DeclaringSavedPhasesPlusOnePastTheCapLeavesOnlySavedPhases", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		saved := make([]string, maxWorkflowPhases)
+		for i := range saved {
+			saved[i] = fmt.Sprintf("saved%02d", i)
+		}
+		_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
+			OrganizationID: f.org.ID,
+			UserID:         f.user.ID,
+			CreatedBy:      f.user.ID,
+			Name:           "full",
+			Description:    "A workflow with the maximum phases.",
+			Script:         "PHASES = [\"declared\"]\n\ndef main(args):\n    pass\n",
+			Phases:         saved,
+		})
+		require.NoError(t, err)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Name: "full"})
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "more than 32 phases")
+		// Only the saved phases stay visible; the failed declaration adds
+		// nothing to the snapshot or the journal row.
+		assert.Equal(t, saved, res.Phases)
+		fdb := forkWorkflowDB(t, f.db)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.Equal(t, saved, row.Phases)
+	})
 }

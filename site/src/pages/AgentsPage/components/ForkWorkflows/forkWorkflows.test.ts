@@ -225,10 +225,16 @@ describe("forkWorkflowPhaseStateOf", () => {
 		).toBe("running");
 	});
 
-	it("marks a phase holding a failed step as failed on any run", () => {
+	it("shows a passed phase with a failed step as done", () => {
+		// The run failed or stopped in a later phase and cleanup marked the
+		// phase's open step failed. The script had moved past the phase, so
+		// only the phase the run ended in shows failed.
 		const failed = [step("a", "build", "failed")];
 		expect(
-			forkWorkflowPhaseStateOf("build", 1, phases, "review", failed, "running"),
+			forkWorkflowPhaseStateOf("build", 1, phases, "review", failed, "failed"),
+		).toBe("done");
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "review", failed, "failed"),
 		).toBe("failed");
 	});
 });
@@ -298,5 +304,41 @@ describe("mergeForkWorkflowRunDetail", () => {
 				logs: ["2 reviews"],
 			}).logs,
 		).toEqual(["2 reviews"]);
+	});
+
+	it("keeps the snapshot's newer phase state while the polled detail lags", () => {
+		// The snapshot saw a phase() the detail's best-effort journal write
+		// missed, so the merge keeps the snapshot's phase list instead of
+		// moving the rail backward.
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["review", "summarize", "publish"],
+			current_phase: "publish",
+			steps: [],
+		});
+		if (!snapshot) {
+			throw new Error("the tool result did not parse");
+		}
+		const merged = mergeForkWorkflowRunDetail(snapshot, {
+			...MockChatWorkflowRunDetail,
+			status: "running",
+			logs: [],
+			phases: ["review"],
+			current_phase: "review",
+		});
+		expect(merged.phases).toEqual(["review", "summarize", "publish"]);
+		expect(merged.currentPhase).toBe("publish");
+
+		// A detail that ends the run is the authority again.
+		const ended = mergeForkWorkflowRunDetail(snapshot, {
+			...MockChatWorkflowRunDetail,
+			status: "completed",
+			logs: ["2 reviews"],
+			phases: ["review"],
+			current_phase: "review",
+		});
+		expect(ended.phases).toEqual(["review"]);
+		expect(ended.currentPhase).toBe("review");
 	});
 });

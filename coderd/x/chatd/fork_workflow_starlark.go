@@ -441,7 +441,9 @@ func (h *workflowHost) phase(
 	if err := validateWorkflowPhaseName(name); err != nil {
 		return nil, xerrors.Errorf("phase: %w", err)
 	}
-	h.run.setPhase(h.ctx, name)
+	if err := h.run.setPhase(h.ctx, name); err != nil {
+		return nil, xerrors.Errorf("phase: %w", err)
+	}
 	return starlark.None, nil
 }
 
@@ -479,14 +481,14 @@ func (r *workflowRun) journalDeclaredPhases(ctx context.Context) {
 // phase list the first time the run reaches it. It runs on the script
 // goroutine, like seen, and journals the state so the run API and a resume
 // see it. The write is best effort: a lost write only delays the rail, the
-// way a lost log line does.
-func (r *workflowRun) setPhase(ctx context.Context, name string) {
+// way a lost log line does. A phase() call past the cap fails the run the
+// way a PHASES list past it does.
+func (r *workflowRun) setPhase(ctx context.Context, name string) error {
 	r.mu.Lock()
 	if !slices.Contains(r.phases, name) {
 		if len(r.phases) >= maxWorkflowPhases {
 			r.mu.Unlock()
-			r.log(fmt.Sprintf("phase %q ignored: the run reached more than %d phases", name, maxWorkflowPhases))
-			return
+			return xerrors.Errorf("the run reached more than %d phases", maxWorkflowPhases)
 		}
 		r.phases = append(r.phases, name)
 	}
@@ -494,6 +496,7 @@ func (r *workflowRun) setPhase(ctx context.Context, name string) {
 	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: name}
 	r.mu.Unlock()
 	r.p.workflowJournal().updateRunPhases(ctx, r.id, snapshot)
+	return nil
 }
 
 // readDeclaredPhases reads the script's optional top-level PHASES list
@@ -514,6 +517,12 @@ func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
 	if list.Len() > maxWorkflowPhases {
 		return xerrors.Errorf("PHASES declares %d phases; at most %d are allowed", list.Len(), maxWorkflowPhases)
 	}
+	// The declared list joins a saved workflow's phases, so the cap holds
+	// across both sources. Validating into a temporary list keeps a
+	// declaration that fails the run from leaking its names into the run
+	// state a terminal result or journal row exposes.
+	declared := make([]string, 0, list.Len())
+	seen := make(map[string]struct{}, list.Len())
 	for i := 0; i < list.Len(); i++ {
 		name, ok := starlark.AsString(list.Index(i))
 		if !ok {
@@ -529,18 +538,28 @@ func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
 		if err := validateWorkflowPhaseName(name); err != nil {
 			return xerrors.Errorf("PHASES[%d]: %w", i, err)
 		}
-		r.mu.Lock()
-		if !slices.Contains(r.phases, name) {
-			r.phases = append(r.phases, name)
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
+			declared = append(declared, name)
 		}
-		r.mu.Unlock()
 	}
 	r.mu.Lock()
-	tooMany := len(r.phases) > maxWorkflowPhases
+	unique := len(seen)
+	for _, name := range r.phases {
+		if _, dup := seen[name]; !dup {
+			unique++
+		}
+	}
+	tooMany := unique > maxWorkflowPhases
+	if !tooMany {
+		for _, name := range declared {
+			if !slices.Contains(r.phases, name) {
+				r.phases = append(r.phases, name)
+			}
+		}
+	}
 	r.mu.Unlock()
 	if tooMany {
-		// The declared list joins a saved workflow's phases, so the cap
-		// holds across both sources.
 		return xerrors.Errorf("the run holds more than %d phases after PHASES", maxWorkflowPhases)
 	}
 	return nil
