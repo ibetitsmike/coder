@@ -252,19 +252,9 @@ func (f forkQueryMetricsStore) CountChatUserNotificationsSince(ctx context.Conte
 	return f.s.CountChatUserNotificationsSince(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.CountChatWakeupRunsSinceParams) (int64, error) {
-	defer f.observe(ctx, "CountChatWakeupRunsSince", time.Now())
-	return f.s.CountChatWakeupRunsSince(ctx, arg)
-}
-
 func (f forkQueryMetricsStore) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
 	defer f.observe(ctx, "CountLiveSubagentsInFamily", time.Now())
 	return f.s.CountLiveSubagentsInFamily(ctx, rootChatID)
-}
-
-func (f forkQueryMetricsStore) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg forkdb.CountOrganizationChatWakeupRunsSinceParams) (int64, error) {
-	defer f.observe(ctx, "CountOrganizationChatWakeupRunsSince", time.Now())
-	return f.s.CountOrganizationChatWakeupRunsSince(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) DeleteChatSecretAnswer(ctx context.Context, arg forkdb.DeleteChatSecretAnswerParams) error {
@@ -640,6 +630,11 @@ func (f forkQueryMetricsStore) SetPluginUserLinkActiveChat(ctx context.Context, 
 func (f forkQueryMetricsStore) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
 	defer f.observe(ctx, "SumChatCostMicrosSince", time.Now())
 	return f.s.SumChatCostMicrosSince(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) SumChatWakeupRunCountsSince(ctx context.Context, arg forkdb.SumChatWakeupRunCountsSinceParams) (forkdb.SumChatWakeupRunCountsSinceRow, error) {
+	defer f.observe(ctx, "SumChatWakeupRunCountsSince", time.Now())
+	return f.s.SumChatWakeupRunCountsSince(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg forkdb.SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {

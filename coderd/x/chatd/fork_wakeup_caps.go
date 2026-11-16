@@ -24,7 +24,9 @@ import (
 )
 
 // Default daily caps of wake-ups, over the rolling 24 hours before a send. An
-// organization can replace each one in chat_organization_wakeup_caps. Spend
+// organization can replace each one in chat_organization_wakeup_caps. Runs
+// count in hour buckets of chat_wakeup_run_counts, so the run window starts at
+// the start of the hour 24 hours back and can hold up to an hour more. Spend
 // counts the total_cost_micros of chat messages, which is NULL and counts as
 // zero for models without prices.
 const (
@@ -115,27 +117,29 @@ func formatWakeupSpend(micros int64) string {
 }
 
 // wakeupCapReached returns the reason of the first daily cap that chat or its
-// organization reached at now, or "" when a wake-up of chat may run. The
-// check does not hold the chat lock, so concurrent replicas can overshoot the
-// organization caps by a few runs.
+// organization reached at now, or "" when a wake-up of chat may run. It checks
+// the chat runs, the organization runs, the chat spend and the organization
+// spend in that order. The check does not hold the chat lock, so concurrent
+// replicas can overshoot the organization caps by a few runs.
 func (*Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat database.Chat, now time.Time) (string, wakeupCaps, error) {
 	caps, err := organizationWakeupCaps(ctx, fdb, chat.OrganizationID)
 	if err != nil {
 		return "", caps, err
 	}
 	since := now.Add(-wakeupCapWindow)
-	runs, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
+	runsSince := since.UTC().Truncate(time.Hour)
+	runs, err := fdb.SumChatWakeupRunCountsSince(ctx, forkdb.SumChatWakeupRunCountsSinceParams{
+		ChatID:         chat.ID,
+		OrganizationID: chat.OrganizationID,
+		Since:          runsSince,
+	})
 	if err != nil {
-		return "", caps, xerrors.Errorf("count chat wake-up runs: %w", err)
+		return "", caps, xerrors.Errorf("sum wake-up runs: %w", err)
 	}
-	if runs >= caps.MaxChatRunsPerDay {
+	if runs.ChatRuns >= caps.MaxChatRunsPerDay {
 		return wakeupReasonDailyRunCap, caps, nil
 	}
-	runs, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
-	if err != nil {
-		return "", caps, xerrors.Errorf("count organization wake-up runs: %w", err)
-	}
-	if runs >= caps.MaxOrganizationRunsPerDay {
+	if runs.OrganizationRuns >= caps.MaxOrganizationRunsPerDay {
 		return wakeupReasonOrgDailyRunCap, caps, nil
 	}
 	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID, Since: since})
