@@ -376,6 +376,15 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().InsertChatWakeupRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
 		},
+		"IncrementChatWakeupRunCount": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.IncrementChatWakeupRunCountParams{WakeupID: wakeup.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatWakeupByID(gomock.Any(), wakeup.ID).Return(wakeup, nil).AnyTimes()
+			fdb.EXPECT().IncrementChatWakeupRunCount(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
 		"InsertChatWakeupWatch": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})
@@ -441,17 +450,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().MarkChatWakeupWatchFailed(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
-		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := testutil.Fake(t, faker, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID})
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().CountChatWakeupRunsSince(gomock.Any(), arg).Return(int64(4), nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(4))
-		},
-		"CountOrganizationChatWakeupRunsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.CountOrganizationChatWakeupRunsSinceParams{})
-			fdb.EXPECT().CountOrganizationChatWakeupRunsSince(gomock.Any(), arg).Return(int64(9), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(9))
+		"SumChatWakeupRunCountsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.SumChatWakeupRunCountsSinceParams{})
+			row := forkdb.SumChatWakeupRunCountsSinceRow{ChatRuns: 4, OrganizationRuns: 9}
+			fdb.EXPECT().SumChatWakeupRunCountsSince(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(row)
 		},
 		"SumChatCostMicrosSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1578,6 +1581,9 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{WakeupID: wakeup.ID})
 			return err
 		}},
+		{name: "IncrementChatWakeupRunCount", run: func(ctx context.Context, fdb forkdb.Store) error {
+			return fdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{WakeupID: wakeup.ID})
+		}},
 		{name: "MarkChatWakeupWatchDelivered", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{WakeupID: wakeup.ID})
 			return err
@@ -1693,6 +1699,7 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Zero(t, counts.get("GetWorkflowStep"))
 				case "GetChatWakeupByID",
 					"UpdateChatWakeupRun", "InsertChatWakeupRun",
+					"IncrementChatWakeupRunCount",
 					"MarkChatWakeupWatchDelivered":
 					require.Equal(t, int64(1), counts.get("GetChatWakeupByID"))
 					require.Zero(t, counts.get("GetWorkflowRun"))
@@ -1766,6 +1773,7 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().ListPendingChatDescendantQuestionsByRoot(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().UpdateChatWakeupRun(gomock.Any(), gomock.Any()).Return(wakeup, nil).AnyTimes()
 	fdbMock.EXPECT().InsertChatWakeupRun(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupRun{}, nil).AnyTimes()
+	fdbMock.EXPECT().IncrementChatWakeupRunCount(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupWatch{}, nil).AnyTimes()
 	fdbMock.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(nil, nil).AnyTimes()

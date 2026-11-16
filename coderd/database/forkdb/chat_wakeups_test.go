@@ -234,7 +234,7 @@ func TestUpdateChatWakeupRun(t *testing.T) {
 func TestChatWakeupRuns(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 	chat := wakeupTestChat(t, db)
@@ -266,13 +266,34 @@ func TestChatWakeupRuns(t *testing.T) {
 	_, err = insertRun("2026-01-04T00:00:00Z", forkdb.ChatWakeupRunStatusDelivered)
 	require.NoError(t, err)
 
-	since := now.Add(-time.Hour)
-	count, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
+	hour := now.UTC().Truncate(time.Hour)
+	increment := func(wakeupID uuid.UUID, hour time.Time) {
+		require.NoError(t, fdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{WakeupID: wakeupID, Hour: hour}))
+	}
+	increment(wakeup.ID, hour)
+	increment(wakeup.ID, hour)
+	increment(wakeup.ID, hour.Add(-time.Hour))
+	increment(wakeup.ID, hour.Add(-2*time.Hour))
+	// A chat of the same organization counts toward the organization only.
+	sibling := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    chat.OrganizationID,
+		OwnerID:           chat.OwnerID,
+		LastModelConfigID: chat.LastModelConfigID,
+	})
+	increment(insertDelayWakeup(ctx, t, fdb, sibling, forkdb.ChatWakeupStatusActive, now).ID, hour)
+
+	runs, err := fdb.SumChatWakeupRunCountsSince(ctx, forkdb.SumChatWakeupRunCountsSinceParams{
+		ChatID:         chat.ID,
+		OrganizationID: chat.OrganizationID,
+		Since:          hour.Add(-time.Hour),
+	})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, count, "only delivered runs count")
-	count, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
-	require.NoError(t, err)
-	require.EqualValues(t, 1, count)
+	require.EqualValues(t, 3, runs.ChatRuns, "the buckets from since on count, each with its runs")
+	require.EqualValues(t, 4, runs.OrganizationRuns)
+
+	var buckets int
+	require.NoError(t, sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_wakeup_run_counts WHERE chat_id = $1`, chat.ID).Scan(&buckets))
+	require.Equal(t, 3, buckets, "a chat has one row per hour")
 }
 
 func TestSumChatCostMicrosSince(t *testing.T) {

@@ -245,7 +245,9 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 // transaction of its message, which holds the chat lock, and returns how the
 // occurrence ended. It locks the wake-up row first, so the run and the watch
 // are recorded under that lock, and only while the wake-up is still the one
-// that was listed as due.
+// that was listed as due. The run also counts in the hour bucket of
+// chat_wakeup_run_counts that the daily run caps sum, so a rolled-back
+// delivery does not count.
 func admitWakeupDelivery(ctx context.Context, txdb forkdb.Store, wakeup forkdb.ChatWakeup, delivery wakeupDelivery, admittedAt time.Time) (wakeupFinish, error) {
 	if err := lockDueWakeup(ctx, txdb, wakeup); err != nil {
 		return wakeupFinish{}, err
@@ -264,6 +266,13 @@ func admitWakeupDelivery(ctx context.Context, txdb forkdb.Store, wakeup forkdb.C
 		}
 		if err != nil {
 			return xerrors.Errorf("insert wake-up run: %w", err)
+		}
+		err = txdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{
+			WakeupID: wakeup.ID,
+			Hour:     admittedAt.UTC().Truncate(time.Hour),
+		})
+		if err != nil {
+			return xerrors.Errorf("count wake-up run: %w", err)
 		}
 		return nil
 	}

@@ -199,19 +199,23 @@ WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
--- name: CountChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE chat_id = @chat_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
+-- Counts one delivered run of the wake-up in its chat's bucket for hour, the
+-- start of a UTC hour. The chat and organization come from the wake-up.
+-- name: IncrementChatWakeupRunCount :exec
+INSERT INTO chat_wakeup_run_counts (chat_id, hour, organization_id, runs)
+SELECT w.chat_id, @hour::timestamptz, w.organization_id, 1
+FROM chat_wakeups w
+WHERE w.id = @wakeup_id::uuid
+ON CONFLICT (chat_id, hour) DO UPDATE SET runs = chat_wakeup_run_counts.runs + 1;
 
--- name: CountOrganizationChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE organization_id = @organization_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
+-- Sums the delivered runs of the chat and of its organization in the hour
+-- buckets from since on.
+-- name: SumChatWakeupRunCountsSince :one
+SELECT
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE chat_id = @chat_id::uuid AND hour >= @since::timestamptz)::bigint AS chat_runs,
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE organization_id = @organization_id::uuid AND hour >= @since::timestamptz)::bigint AS organization_runs;
 
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.
