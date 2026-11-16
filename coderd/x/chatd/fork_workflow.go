@@ -825,6 +825,11 @@ func (r *workflowRun) appendLogLocked(msg string) {
 // live lines at most by the interval.
 const workflowLogFlushInterval = 2 * time.Second
 
+// workflowLogFlushTimeout bounds one journal write of the logs. The write is
+// best effort, so a stalled store holds the flush goroutine at most this
+// long instead of outliving the run or the server close.
+const workflowLogFlushTimeout = 5 * time.Second
+
 // scheduleLogFlush flushes now when the last flush is older than the
 // interval, and otherwise arms one flush at the end of the interval. The
 // timer holds the flush, so a burst of lines lands in one write. A flush in
@@ -948,7 +953,12 @@ func (r *workflowRun) flushLogs(terminal bool) {
 	r.journaledLogSeq = seq
 	r.lastLogFlush = time.Now()
 	r.journalMu.Unlock()
-	r.p.workflowJournal().setLogs(dbauthz.AsSystemRestricted(context.Background()), r.id, int64(seq), logs)
+	// The write is best effort and must not outlive the run or the server
+	// close, so a bounded context stands in for the caller's.
+	ctx, cancel := context.WithTimeout(dbauthz.AsSystemRestricted(context.Background()),
+		workflowLogFlushTimeout)
+	defer cancel()
+	r.p.workflowJournal().setLogs(ctx, r.id, int64(seq), logs)
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the
