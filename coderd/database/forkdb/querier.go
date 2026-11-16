@@ -156,8 +156,10 @@ type Querier interface {
 	GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]GetWorkflowRunStepCountsByChatRow, error)
 	// The run list of a chat, newest first, one keyset page. after_created_at
 	// and after_id are the created_at and the ID of the last run of the page the
-	// client already has; both NULL reads the first page.
-	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error)
+	// client already has; both NULL reads the first page. The list needs no logs,
+	// args or result, so it does not read those columns: logs alone can hold the
+	// full retained tail of every run.
+	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]GetWorkflowRunsByChatRow, error)
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
@@ -269,6 +271,12 @@ type Querier interface {
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// The replay of a finished step flips only the reuse flag: its status, value
+	// and finished_at stay as the journal holds them.
+	MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error
+	// The resume of a terminal run replays every step of the stored snapshot, so
+	// the run detail reads the flag from the rows without the snapshot.
+	MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error
 	// Records a read of the poller: merges @spec_patch into the spec of the
 	// open pull_request watch, and with @fired_payload also stores the text of
 	// the read. The first such read fires the watch at @fired_at, which makes it
@@ -296,6 +304,12 @@ type Querier interface {
 	// since the match runs on the stored JSON.
 	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
+	// The engine writes the log lines of a live run through to the journal, capped
+	// to the last maxWorkflowLogs lines. lines replaces the retained lines when
+	// it is at least as new as the stored sequence, so a stalled write of an
+	// older snapshot cannot replace newer lines. The caller keeps the sequence in
+	// the lines payload under the fork_seq key.
+	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
@@ -339,7 +353,8 @@ type Querier interface {
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
-	// and applies the NullRawMessage override.
+	// and applies the NullRawMessage override. reused only sets the flag: a
+	// report from a step that a resume reused must not clear it.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.

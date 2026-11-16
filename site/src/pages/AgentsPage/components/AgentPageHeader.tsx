@@ -118,7 +118,7 @@ export const AgentPageHeader: React.FC<AgentPageHeaderProps> = ({
 	return (
 		<div
 			className={cn(
-				"order-first flex shrink-0 items-center gap-2 pl-4 pr-2 pt-3 pb-0.5 sm:order-0 sm:px-4 sm:py-0.5",
+				"order-first flex shrink-0 items-center gap-2 pl-4 pr-[calc(0.5rem+var(--ios-cover-column,0px))] pt-3 pb-0.5 sm:order-0 sm:px-4 sm:py-0.5",
 				// The row spans the page width, so only its buttons take clicks.
 				floating &&
 					"sm:pointer-events-none sm:absolute sm:inset-x-0 sm:top-0 sm:z-10",
