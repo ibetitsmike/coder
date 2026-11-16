@@ -215,7 +215,7 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 			// capabilities: a nil response leaves the reset defaults in
 			// force, which is safe to settle on.
 			m.negotiating.Store(false)
-			if _, err := m.Resync(ctx); err != nil {
+			if _, err := m.resyncCached(ctx); err != nil {
 				logger.Warn(ctx, "settling capability negotiation failed", slog.Error(err))
 				m.Trigger()
 			}

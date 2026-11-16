@@ -272,6 +272,7 @@ func (w *Watcher) run() {
 			}
 			if err != nil {
 				w.logger.Debug(context.Background(), "context watcher error", slog.Error(err))
+				w.scheduleOnOverflow(err) // fork: fork_resolve_cache.go
 			}
 		}
 	}

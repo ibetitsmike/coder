@@ -175,7 +175,7 @@ func TestResolverPackMCPSources(t *testing.T) {
 	roots := []ScanRoot{{Path: root}}
 
 	r := &Resolver{}
-	require.Empty(t, r.packMCPSources(roots), "unadvertised pack rows start no pack servers")
+	require.Empty(t, resolvePackMCPSources(r, roots), "unadvertised pack rows start no pack servers")
 
 	r.PackRowsAdvertised = func() bool { return true }
 	require.Equal(t, []PackMCPSource{{
@@ -184,7 +184,7 @@ func TestResolverPackMCPSources(t *testing.T) {
 		Claude:       true,
 		Revision:     "pack-id abc123",
 		Configs:      []PackMCPConfig{{Path: filepath.Join(dir, ".mcp.json")}},
-	}}, r.packMCPSources(roots))
+	}}, resolvePackMCPSources(r, roots))
 	require.True(t, packWatchPaths{}.relevant(filepath.Join(dir, packCommitMarkerName)), "rewriting the commit marker re-resolves")
 }
 
@@ -209,7 +209,7 @@ func TestResolverPackMCPSourcesSkipsUnmarkedManagedPacks(t *testing.T) {
 	pack("unmarked", nil)
 
 	r := &Resolver{PackRowsAdvertised: func() bool { return true }}
-	sources := r.packMCPSources([]ScanRoot{{Path: root}})
+	sources := resolvePackMCPSources(r, []ScanRoot{{Path: root}})
 	require.Len(t, sources, 1)
 	require.Equal(t, filepath.Join(root, "marked"), sources[0].Dir)
 	require.Equal(t, "pack-id abc123", sources[0].Revision)
@@ -222,23 +222,23 @@ func TestPackMCPPublisher(t *testing.T) {
 		".claude-plugin/plugin.json": `{"name": "p"}`,
 		".mcp.json":                  `{"mcpServers": {"deploy": {"command": "deploy"}}}`,
 	})
-	roots := []ScanRoot{{Path: root}}
 	r := &Resolver{PackRowsAdvertised: func() bool { return true }}
+	pass := resolvePackPass(r, []ScanRoot{{Path: root}})
 
 	var delivered [][]PackMCPSource
 	p := packMCPPublisher{deliver: func(s []PackMCPSource) { delivered = append(delivered, s) }}
-	p.publish(r, roots, 2, false)
+	p.publish(pass, 2, false)
 	require.Len(t, delivered, 1)
 	require.Len(t, delivered[0], 1)
 
-	p.publish(r, roots, 1, false)
+	p.publish(pass, 1, false)
 	require.Len(t, delivered, 1, "a stale pass must not restore an older pack list")
-	p.publish(r, roots, 3, true)
+	p.publish(pass, 3, true)
 	require.Len(t, delivered, 1, "a negotiating pass must not restart pack servers")
-	p.publish(r, roots, 3, false)
+	p.publish(pass, 3, false)
 	require.Len(t, delivered, 2)
 
-	(&packMCPPublisher{}).publish(r, roots, 1, false)
+	(&packMCPPublisher{}).publish(pass, 1, false)
 }
 
 func TestBuildMCPServerResourcesStampsPackServers(t *testing.T) {
@@ -286,4 +286,17 @@ func TestGatePackMCPResources(t *testing.T) {
 
 	m.packRowsAdvertised.Store(true)
 	require.Len(t, m.gatePackMCPResources(resources()), 2)
+}
+
+// resolvePackPass runs one resolve pass and returns the packs it walked.
+func resolvePackPass(r *Resolver, roots []ScanRoot) *packPass {
+	pass := &packPass{}
+	withPass := *r
+	withPass.packPass = pass
+	withPass.Resolve(roots)
+	return pass
+}
+
+func resolvePackMCPSources(r *Resolver, roots []ScanRoot) []PackMCPSource {
+	return resolvePackPass(r, roots).sources()
 }

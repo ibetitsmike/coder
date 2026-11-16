@@ -146,6 +146,7 @@ type Resolver struct {
 	// in Resources so they are capped and pushed (fork_rules.go). The
 	// Manager wires it to the fork-glob-rules push-response capability.
 	GlobRulesAdvertised func() bool
+	packPass            *packPass // fork: fork_pack_mcp.go
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -566,7 +567,7 @@ func (r *Resolver) readMCPConfig(scanRoot, path string, info fs.FileInfo, userSo
 		}
 		return res
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -656,7 +657,7 @@ func (r *Resolver) readFileResource(kind ResourceKind, scanRoot, path string, in
 		}
 		return res
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -705,7 +706,7 @@ func (r *Resolver) readSkillMetaNamed(scanRoot, path string, info fs.FileInfo, u
 		}
 		return res, true
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()

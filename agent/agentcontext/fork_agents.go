@@ -112,7 +112,7 @@ func (r *Resolver) readAgentDefinition(root ScanRoot, path string, info fs.FileI
 		}
 		return res, true
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()

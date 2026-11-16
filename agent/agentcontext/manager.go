@@ -151,6 +151,8 @@ type Manager struct {
 	watcher *Watcher
 
 	packMCP packMCPPublisher
+
+	resolveCache resolveCache // fork: fork_resolve_cache.go
 }
 
 // NewManager validates options and canonicalizes initial sources. The
@@ -529,7 +531,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return m.Snapshot(), ctxErr
 	}
-	snap := resolver.ResolveContext(ctx, roots)
+	snap, pass := m.resolvePass(ctx, resolver, roots, watcher)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// Cancellation mid-walk yields a partial or empty
 		// Snapshot whose SnapshotError is set to
@@ -573,7 +575,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 		subs = append(subs, ch)
 	}
 	m.mu.Unlock()
-	m.packMCP.publish(resolver, roots, myEpoch, negotiating)
+	m.packMCP.publish(pass, myEpoch, negotiating)
 
 	// The broadcast is unconditional: Resync waiters that
 	// triggered the pass without an actual content change
@@ -604,7 +606,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 // not ready (nothing has been published).
 func (m *Manager) resyncNegotiating(ctx context.Context) (Snapshot, error) {
 	m.negotiating.Store(true)
-	return m.Resync(ctx)
+	return m.resyncCached(ctx)
 }
 
 // stampNegotiating marks a freshly resolved snapshot as
@@ -634,6 +636,7 @@ func (m *Manager) stampNegotiating(snap *Snapshot, negotiating bool) {
 // signal triggers a re-resolve. Sends are non-blocking; the
 // trigger channel has a depth of 1, which coalesces bursts.
 func (m *Manager) signal() {
+	m.resolveCache.changed()
 	select {
 	case m.trigger <- struct{}{}:
 	default:
@@ -758,7 +761,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		return
 	}
-	snap := resolver.ResolveContext(ctx, roots)
+	snap, pass := m.resolvePass(ctx, resolver, roots, watcher)
 	if err := ctx.Err(); err != nil {
 		// Cancellation mid-walk yields a partial or empty
 		// Snapshot. Publishing it would replace the live
@@ -795,7 +798,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 		subs = append(subs, ch)
 	}
 	m.mu.Unlock()
-	m.packMCP.publish(resolver, roots, myEpoch, negotiating)
+	m.packMCP.publish(pass, myEpoch, negotiating)
 
 	for _, ch := range subs {
 		select {

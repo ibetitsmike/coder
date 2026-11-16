@@ -28,7 +28,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -292,14 +291,11 @@ func isPathDeclaration(raw json.RawMessage) bool {
 // never followed: a checked-in plugin.json -> /dev/zero or a FIFO must not
 // be read at all, whatever its apparent size.
 func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
-	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return nil, false
-	}
-	data, err := os.ReadFile(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, false
 	}
-	return data, true
+	return readCappedMemo(path, info, maxBytes)
 }
 
 // readCappedFollowingSymlink is readCappedRegularFile for user-owned files
@@ -309,19 +305,11 @@ func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
 // FIFO or device never blocks or streams, and the read stays bounded even if
 // the file grows in between.
 func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
-	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return nil, false
-	}
-	f, err := os.Open(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, false
 	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
-	if err != nil || int64(len(data)) > maxBytes {
-		return nil, false
-	}
-	return data, true
+	return readCappedMemo(path, info, maxBytes)
 }
 
 // packRootsFor returns the pack roots of a scan root: rootPath itself when it
@@ -1429,7 +1417,9 @@ func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]i
 	if !r.packRowsAdvertised() {
 		return
 	}
-	for _, pack := range packRootsFor(root.Path) {
+	packs := packRootsFor(root.Path)
+	r.packPass.record(packs)
+	for _, pack := range packs {
 		if len(pack.ManifestPath) > maxSourcePathBytes {
 			// The manifest path is the marker every pack row carries;
 			// a path over coderd's source_path transport limit would
