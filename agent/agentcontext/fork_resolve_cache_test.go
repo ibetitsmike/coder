@@ -504,3 +504,66 @@ func TestRunPush_RecreatedSkillDirIsWatched(t *testing.T) {
 	mustWriteSkill(t, skills, "foo", "v3 is longer")
 	require.Equal(t, "v3 is longer", skillDescription(t, connectOnce(t, m, "push3")[0], "foo"))
 }
+
+// A working directory that is a symlink can be retargeted with no event the
+// watcher sees. The next connection resolves the new target, and the
+// watcher moves its watch there.
+func TestRunPush_RetargetedRootIsReresolved(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	a, b, link := filepath.Join(base, "a"), filepath.Join(base, "b"), filepath.Join(base, "ws")
+	mustWriteFile(t, filepath.Join(a, "AGENTS.md"), "v1")
+	mustWriteFile(t, filepath.Join(b, "AGENTS.md"), "v2 in b")
+	require.NoError(t, os.Symlink(a, link))
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return link }})
+	require.Equal(t, "v1", instructionPayload(t, connectOnce(t, m, "push1")[0]))
+	requireCacheHit(t, m)
+
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink(b, link))
+	require.Equal(t, "v2 in b", instructionPayload(t, connectOnce(t, m, "push2")[0]))
+
+	mustWriteFile(t, filepath.Join(b, "AGENTS.md"), "v3 is longer")
+	require.Eventually(t, func() bool {
+		for _, res := range m.Snapshot().Resources {
+			if res.Kind == agentcontext.KindInstructionFile && string(res.Payload) == "v3 is longer" {
+				return true
+			}
+		}
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast, "an edit in the new target fires an event")
+	require.Equal(t, "v3 is longer", instructionPayload(t, connectOnce(t, m, "push3")[0]))
+}
+
+// A skill container that is a symlink can be retargeted with no event: its
+// parent has no watch. The next connection resolves the new target.
+func TestRunPush_RetargetedSkillContainerIsReresolved(t *testing.T) {
+	t.Parallel()
+	dir, store := t.TempDir(), t.TempDir()
+	s1, s2 := filepath.Join(store, "s1"), filepath.Join(store, "s2")
+	mustWriteSkill(t, s1, "foo", "v1")
+	mustWriteSkill(t, s2, "foo", "v2")
+	// .codex has no watch of its own, unlike .claude and .agents, which
+	// hold agent containers.
+	container := filepath.Join(dir, ".codex", "skills")
+	require.NoError(t, os.MkdirAll(filepath.Dir(container), 0o755))
+	require.NoError(t, os.Symlink(s1, container))
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	require.Equal(t, "v1", skillDescription(t, connectOnce(t, m, "push1")[0], "foo"))
+	requireCacheHit(t, m)
+
+	require.NoError(t, os.Remove(container))
+	require.NoError(t, os.Symlink(s2, container))
+	require.Equal(t, "v2", skillDescription(t, connectOnce(t, m, "push2")[0], "foo"))
+}
+
+// requireCacheHit asserts that a connection with no file change resolves
+// nothing, so the test that follows exercises a cached result.
+func requireCacheHit(t *testing.T, m *agentcontext.Manager) {
+	t.Helper()
+	resolves := agentcontext.ResolveCount(m)
+	connectOnce(t, m, "hit")
+	require.Equal(t, resolves, agentcontext.ResolveCount(m), "a reconnect with no file change is a cache hit")
+}

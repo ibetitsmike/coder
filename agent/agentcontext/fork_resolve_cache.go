@@ -12,6 +12,9 @@ package agentcontext
 // the pass read:
 //   - the watcher runs, is not degraded, has no debounced event pending, and
 //     its latest Sync added every directory it wanted;
+//   - every scan root and every watched directory is still the directory it
+//     was, because retargeting a symlink to a directory, or creating a root
+//     that was missing, can fire no event the watcher sees;
 //   - no watch was added since the pass started, because a change in a newly
 //     watched directory before its watch existed fired no event;
 //   - every symlink the pass followed ends in a watched directory, under a
@@ -73,7 +76,9 @@ func (c resolveCaps) pin(r *Resolver) {
 type resolveCacheEntry struct {
 	caps  resolveCaps
 	roots []ScanRoot
-	seq   uint64
+	// rootDirs are the scan roots' directories when the pass started.
+	rootDirs []os.FileInfo
+	seq      uint64
 	// watchGen is the watcher's watch generation when the pass started.
 	watchGen uint64
 	// snap is the resolver's output before the Manager stamped a version
@@ -117,11 +122,11 @@ func (c *resolveCache) store(e resolveCacheEntry) {
 	c.entries = append(c.entries, e)
 }
 
-func (c *resolveCache) lookup(caps resolveCaps, roots []ScanRoot, seq, watchGen uint64) (resolveCacheEntry, bool) {
+func (c *resolveCache) lookup(caps resolveCaps, roots []ScanRoot, rootDirs []os.FileInfo, seq, watchGen uint64) (resolveCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, e := range c.entries {
-		if e.seq == seq && e.watchGen == watchGen && e.caps == caps && slices.Equal(e.roots, roots) {
+		if e.seq == seq && e.watchGen == watchGen && e.caps == caps && slices.Equal(e.roots, roots) && sameDirs(e.rootDirs, rootDirs) {
 			return e, true
 		}
 	}
@@ -142,6 +147,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	watchGen, _ := watcher.coverage()
 	seq := m.resolveCache.seq.Load()
 	caps := m.resolveCaps()
+	rootDirs := statRootDirs(roots)
 	m.resolveCache.resolves.Add(1)
 
 	pass := &packPass{}
@@ -177,7 +183,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	if !watcher.reportsWritesTo(targets) {
 		return snap, pass
 	}
-	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), seq: seq, watchGen: watchGen, snap: snap, pass: pass})
+	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, snap: snap, pass: pass})
 	return snap, pass
 }
 
@@ -217,38 +223,41 @@ func (m *Manager) hasCached() bool {
 	if !covered {
 		return false
 	}
-	_, ok := m.resolveCache.lookup(m.resolveCaps(), roots, m.resolveCache.seq.Load(), watchGen)
+	_, ok := m.resolveCache.lookup(m.resolveCaps(), roots, statRootDirs(roots), m.resolveCache.seq.Load(), watchGen)
 	return ok
 }
 
 // publishCached publishes the cached result for the current scan roots and
-// capabilities exactly as Resync publishes a fresh pass.
+// capabilities as Resync publishes a fresh pass, except that it takes no
+// new resolve epoch: a fresh pass that is running, such as an explicit
+// Resync, still publishes its own result after the cached one.
 func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 	if ctx.Err() != nil {
 		return Snapshot{}, false
 	}
 	m.mu.Lock()
 	watcher := m.watcher
+	roots := m.scanRootsLocked()
 	m.mu.Unlock()
 	watchGen, covered := watcher.coverage()
-	if !covered {
+	if !covered || !watcher.watchedDirsUnchanged() {
 		return Snapshot{}, false
 	}
+	rootDirs := statRootDirs(roots)
 	seq := m.resolveCache.seq.Load()
 	caps := m.resolveCaps()
 
 	m.mu.Lock()
-	if m.closed || !m.ready || m.watcher != watcher {
+	if m.closed || !m.ready || m.watcher != watcher || !slices.Equal(roots, m.scanRootsLocked()) {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
-	entry, ok := m.resolveCache.lookup(caps, m.scanRootsLocked(), seq, watchGen)
+	entry, ok := m.resolveCache.lookup(caps, roots, rootDirs, seq, watchGen)
 	if !ok {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
 	negotiating := m.negotiating.Load()
-	m.resolveEpoch++
 	myEpoch := m.resolveEpoch
 	snap := entry.snap
 	m.version++
@@ -277,6 +286,10 @@ type watchCoverage struct {
 	// gen counts the watches added. A pass that started before a watch
 	// was added can have read a change that fired no event.
 	gen uint64
+	// dirs holds each watched directory as it was when its watch was
+	// added, so a Sync can replace a watch whose path now names another
+	// directory.
+	dirs map[string]os.FileInfo
 	// addFailed is set when the latest Sync could not add a directory for
 	// a reason other than ENOSPC (which degrades the watcher) or the
 	// directory being gone (which its parent's watch reports), such as
@@ -284,10 +297,23 @@ type watchCoverage struct {
 	addFailed bool
 }
 
-// beginSync starts a Sync's add loop and returns true, the initial value
-// of its addedAll.
-func (c *watchCoverage) beginSync() bool {
-	c.addFailed = false
+// beginSync starts a Sync's add loop, with w.mu held, and returns true, the
+// initial value of its addedAll. It drops the watches whose path now names
+// another directory, such as a retargeted symlink, so the add loop watches
+// the directory the path names now.
+func (w *Watcher) beginSync() bool {
+	w.cover.addFailed = false
+	for path, was := range w.cover.dirs {
+		if _, ok := w.watched[path]; !ok {
+			delete(w.cover.dirs, path)
+			continue
+		}
+		if now, err := os.Stat(path); err != nil || !os.SameFile(was, now) {
+			_ = w.watcher.Remove(path)
+			delete(w.watched, path)
+			delete(w.cover.dirs, path)
+		}
+	}
 	return true
 }
 
@@ -297,6 +323,14 @@ func (w *Watcher) addWatch(path string) error {
 	switch {
 	case err == nil:
 		w.cover.gen++
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			info = nil
+		}
+		if w.cover.dirs == nil {
+			w.cover.dirs = make(map[string]os.FileInfo)
+		}
+		w.cover.dirs[path] = info
 	case !errors.Is(err, syscall.ENOSPC) && !errors.Is(err, os.ErrNotExist):
 		w.cover.addFailed = true
 	}
@@ -318,6 +352,50 @@ func (w *Watcher) forgetRemovedWatch(fsw *fsnotify.Watcher, ev fsnotify.Event) {
 	}
 	delete(w.watched, ev.Name)
 	_ = fsw.Remove(ev.Name)
+}
+
+// watchedDirsUnchanged reports whether every watched path still names the
+// directory it named when its watch was added.
+func (w *Watcher) watchedDirsUnchanged() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.Lock()
+	dirs := make(map[string]os.FileInfo, len(w.cover.dirs))
+	for path := range w.watched {
+		dirs[path] = w.cover.dirs[path]
+	}
+	w.mu.Unlock()
+	for path, was := range dirs {
+		now, err := os.Stat(path)
+		if err != nil || was == nil || !os.SameFile(was, now) {
+			return false
+		}
+	}
+	return true
+}
+
+// statRootDirs returns each scan root's directory, following symlinks, or
+// nil for a root that is missing.
+func statRootDirs(roots []ScanRoot) []os.FileInfo {
+	out := make([]os.FileInfo, len(roots))
+	for i, root := range roots {
+		if info, err := os.Stat(root.Path); err == nil {
+			out[i] = info
+		}
+	}
+	return out
+}
+
+// sameDirs reports whether a and b name the same directories, nil standing
+// for a missing one.
+func sameDirs(a, b []os.FileInfo) bool {
+	return slices.EqualFunc(a, b, func(x, y os.FileInfo) bool {
+		if x == nil || y == nil {
+			return x == nil && y == nil
+		}
+		return os.SameFile(x, y)
+	})
 }
 
 // coverage reports the watch generation and whether the watcher is running

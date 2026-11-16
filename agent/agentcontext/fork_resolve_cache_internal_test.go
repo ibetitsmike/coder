@@ -5,6 +5,7 @@ package agentcontext
 
 import (
 	"context"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -34,7 +35,7 @@ func advertisedCacheManager(t *testing.T, opts ManagerOptions, syncRoots []ScanR
 // cachedFor returns the cached result for the Manager's current state.
 func cachedFor(m *Manager, w *Watcher, roots []ScanRoot) (resolveCacheEntry, bool) {
 	gen, _ := w.coverage()
-	return m.resolveCache.lookup(m.resolveCaps(), roots, m.resolveCache.seq.Load(), gen)
+	return m.resolveCache.lookup(m.resolveCaps(), roots, statRootDirs(roots), m.resolveCache.seq.Load(), gen)
 }
 
 func TestResolvePass_CapabilityFlipIsNotCachedMixed(t *testing.T) {
@@ -147,4 +148,75 @@ func hasResource(snap Snapshot, kind ResourceKind, name string) bool {
 		}
 	}
 	return false
+}
+
+// A cache hit while an explicit Resync walks does not make that Resync
+// discard its own pass: Resync is a barrier that re-reads the filesystem.
+func TestPublishCached_DoesNotSupersedeRunningResync(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	roots := []ScanRoot{{Path: dir}}
+	var block atomic.Bool
+	entered, release := make(chan struct{}), make(chan struct{})
+	m, w := advertisedCacheManager(t, ManagerOptions{
+		WorkingDir: func() string { return dir },
+		MCPCatalog: func() []MCPServerStatus {
+			if block.CompareAndSwap(true, false) {
+				close(entered)
+				<-release
+			}
+			return nil
+		},
+	}, roots)
+	m.mu.Lock()
+	m.watcher = w
+	m.ready = true
+	scanRoots := m.scanRootsLocked()
+	m.mu.Unlock()
+	w.Sync(context.Background(), scanRoots)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	// The built-in roots can put the home directory under watch, so retry
+	// while unrelated events there leave a debounce pending.
+	require.Eventually(t, func() bool {
+		if _, err := m.Resync(ctx); err != nil {
+			return false
+		}
+		_, ok := cachedFor(m, w, scanRoots)
+		return ok
+	}, testutil.WaitShort, testutil.IntervalFast)
+
+	block.Store(true)
+	done := make(chan Snapshot, 1)
+	go func() {
+		snap, _ := m.Resync(ctx)
+		done <- snap
+	}()
+	testutil.TryReceive(ctx, t, entered)
+	var cached Snapshot
+	require.Eventually(t, func() bool {
+		var ok bool
+		cached, ok = m.publishCached(ctx)
+		return ok
+	}, testutil.WaitShort, testutil.IntervalFast, "the cache serves while the Resync walks")
+	close(release)
+	fresh := testutil.TryReceive(ctx, t, done)
+	require.Greater(t, fresh.Version, cached.Version, "the Resync publishes its own pass")
+}
+
+// A scan root that was missing when the pass ran and has no watch that
+// reports its creation, as when it vanished between Sync's scan and its Add,
+// invalidates the cached result once it exists.
+func TestResolvePass_CreatedRootIsNotServedFromCache(t *testing.T) {
+	t.Parallel()
+	ws := filepath.Join(t.TempDir(), "ws")
+	roots := []ScanRoot{{Path: ws}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, nil)
+
+	m.resolvePass(context.Background(), m.resolver, roots, w)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the pass over the missing root is cached")
+
+	writePackFiles(t, ws, map[string]string{"AGENTS.md": "v1"})
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the created root misses the cache")
 }

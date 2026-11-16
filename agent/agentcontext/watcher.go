@@ -184,7 +184,7 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	}
 	// Track whether every Add in this pass succeeded so a
 	// recovered ENOSPC clears the degraded marker.
-	addedAll := w.cover.beginSync() // fork: fork_resolve_cache.go
+	addedAll := w.beginSync() // fork: fork_resolve_cache.go
 	// Add directories that are new.
 	for path := range desired {
 		if _, ok := w.watched[path]; ok {
