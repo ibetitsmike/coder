@@ -8,6 +8,7 @@ import {
 } from "#/testHelpers/forkWorkflows";
 import {
 	forkWorkflowPhaseState,
+	forkWorkflowPhaseStateOf,
 	forkWorkflowRunDuration,
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepPhases,
@@ -114,6 +115,80 @@ describe("phases", () => {
 			forkWorkflowPhaseState(steps.filter((s) => s.phase === "summarize")),
 		).toBe("done");
 		expect(forkWorkflowPhaseState([])).toBe("pending");
+	});
+});
+
+describe("forkWorkflowPhaseStateOf", () => {
+	const phases = ["plan", "build", "review"];
+	const step = (chatId: string, phase: string, status: string) => ({
+		chatId,
+		title: chatId,
+		status,
+		reused: false,
+		error: "",
+		phase,
+	});
+
+	it("keeps a not-yet-reached phase pending on a live run", () => {
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "plan", [], "running"),
+		).toBe("pending");
+	});
+
+	it("shows a reached phase with no steps as running while the run is live", () => {
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "build", [], "running"),
+		).toBe("running");
+	});
+
+	it("shows a passed phase with no steps as done", () => {
+		expect(
+			forkWorkflowPhaseStateOf("plan", 0, phases, "build", [], "running"),
+		).toBe("done");
+	});
+
+	it("derives the state from the steps", () => {
+		const reported = [step("a", "build", "reported")];
+		expect(
+			forkWorkflowPhaseStateOf(
+				"build",
+				1,
+				phases,
+				"build",
+				reported,
+				"running",
+			),
+		).toBe("done");
+		const running = [step("a", "build", "running")];
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "build", running, "running"),
+		).toBe("running");
+	});
+
+	it("marks unfinished phases failed on a failed run", () => {
+		// The last phase never started a step.
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "review", [], "failed"),
+		).toBe("failed");
+	});
+
+	it("marks unfinished phases failed on a stopped run", () => {
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "review", [], "stopped"),
+		).toBe("failed");
+	});
+
+	it("keeps an interrupted run's phases waiting", () => {
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "build", [], "interrupted"),
+		).toBe("running");
+	});
+
+	it("marks a phase holding a failed step as failed on any run", () => {
+		const failed = [step("a", "build", "failed")];
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "review", failed, "running"),
+		).toBe("failed");
 	});
 });
 

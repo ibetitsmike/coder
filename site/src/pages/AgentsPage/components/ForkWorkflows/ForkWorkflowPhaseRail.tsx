@@ -7,31 +7,36 @@ import type React from "react";
 import {
 	type ForkWorkflowPhaseState,
 	type ForkWorkflowStep,
-	forkWorkflowPhaseState,
+	forkWorkflowPhaseStateOf,
 } from "./forkWorkflows";
 
 const phaseDotClassName: Record<ForkWorkflowPhaseState, string> = {
 	pending: "border-border bg-transparent",
 	running: "border-border-pending bg-surface-sky",
 	done: "border-border-green bg-surface-green",
+	failed: "border-border-destructive bg-surface-red",
 };
 
 const phaseLabelClassName: Record<ForkWorkflowPhaseState, string> = {
 	pending: "text-content-secondary",
 	running: "text-content-primary",
 	done: "text-content-secondary",
+	failed: "text-content-destructive",
 };
 
 type ForkWorkflowPhaseRailProps = {
 	phases: readonly string[];
 	currentPhase: string;
 	steps: readonly ForkWorkflowStep[];
+	/** The run's status; a failed or stopped run marks unfinished phases. */
+	runStatus: string;
 };
 
 const phaseStateLabel: Record<ForkWorkflowPhaseState, string> = {
 	pending: "pending",
 	running: "running",
 	done: "done",
+	failed: "failed",
 };
 
 /**
@@ -43,40 +48,43 @@ export const ForkWorkflowPhaseRail: React.FC<ForkWorkflowPhaseRailProps> = ({
 	phases,
 	currentPhase,
 	steps,
+	runStatus,
 }) => {
 	if (phases.length === 0) {
 		return null;
 	}
-	const currentIndex = phases.indexOf(currentPhase);
 	return (
 		<ol
 			aria-label="Workflow phases"
 			className="m-0 mt-1.5 flex list-none flex-wrap items-center gap-1.5 p-0"
 		>
 			{phases.map((phase, index) => {
-				const reached = currentIndex >= index;
-				const phaseSteps = steps.filter((step) => step.phase === phase);
-				const state: ForkWorkflowPhaseState =
-					!reached || phaseSteps.length === 0
-						? reached
-							? "running"
-							: "pending"
-						: forkWorkflowPhaseState(phaseSteps);
+				const state = forkWorkflowPhaseStateOf(
+					phase,
+					index,
+					phases,
+					currentPhase,
+					steps,
+					runStatus,
+				);
 				return (
-					<li key={phase} className="flex items-center gap-1.5">
+					<li key={phase} className="flex min-w-0 items-center gap-1.5">
 						{index > 0 && (
 							<span
 								aria-hidden
 								className={cn(
 									"h-px w-3",
-									reached ? "bg-border-secondary" : "bg-border",
+									phases.indexOf(currentPhase) >= index
+										? "bg-border-secondary"
+										: "bg-border",
 								)}
 							/>
 						)}
 						<span
 							aria-current={phase === currentPhase ? "step" : undefined}
+							title={phase}
 							className={cn(
-								"flex items-center gap-1 rounded-full border border-solid px-1.5 py-0.5 text-xs",
+								"flex min-w-0 items-center gap-1 truncate rounded-full border border-solid px-1.5 py-0.5 text-xs",
 								phaseLabelClassName[state],
 							)}
 						>

@@ -173,8 +173,16 @@ export const mergeForkWorkflowRunDetail = (
 	};
 };
 
-/** Sums up how far a phase got, from its steps. */
-export type ForkWorkflowPhaseState = "pending" | "running" | "done";
+/** Summarizes how far a phase got, from its steps and the run status. */
+export type ForkWorkflowPhaseState = "pending" | "running" | "done" | "failed";
+
+/**
+ * Run statuses where no phase can still make progress. A failed or stopped
+ * run shows its unfinished phases as failed, and an interrupted one will
+ * resume, so its phases keep waiting.
+ */
+const runEndedUnfinished = (status: string): boolean =>
+	status === "failed" || status === "stopped";
 
 export const forkWorkflowPhaseState = (
 	steps: readonly ForkWorkflowStep[],
@@ -182,13 +190,49 @@ export const forkWorkflowPhaseState = (
 	if (steps.length === 0) {
 		return "pending";
 	}
+	if (steps.some((step) => step.status === "failed")) {
+		return "failed";
+	}
 	return steps.every((step) => step.status === "reported") ? "done" : "running";
 };
 
 /**
- * Groups a run's steps by phase, in the run's display order. Steps started
- * before the first phase() call land in the leading "" group, which is part
- * of the list only when such steps exist.
+ * The state of one phase of a run. reached says the script set the phase or
+ * an earlier one. A passed phase with no steps is done: the script moved on
+ * from it without starting anything in it. On a failed or stopped run, a
+ * phase that did not finish shows as failed instead of running forever.
+ */
+export const forkWorkflowPhaseStateOf = (
+	phase: string,
+	index: number,
+	phases: readonly string[],
+	currentPhase: string,
+	steps: readonly ForkWorkflowStep[],
+	runStatus: string,
+): ForkWorkflowPhaseState => {
+	const reached = phases.indexOf(currentPhase) >= index;
+	const phaseSteps = steps.filter((step) => step.phase === phase);
+	if (!reached && !runEndedUnfinished(runStatus)) {
+		return "pending";
+	}
+	const state = forkWorkflowPhaseState(phaseSteps);
+	if (state === "pending") {
+		// A phase that spawned no steps: reached phases on an ended run are
+		// done or failed, reached phases on a live run keep running, since
+		// their step may only be starting.
+		if (phases.indexOf(currentPhase) > index) {
+			return runEndedUnfinished(runStatus) ? "failed" : "done";
+		}
+		return runEndedUnfinished(runStatus) ? "failed" : "running";
+	}
+	return state;
+};
+
+/**
+ * Groups a run's steps by phase, in first-appearance order, which matches
+ * the order the script reached the phases. Steps started before the first
+ * phase() call land in the leading "" group, which is part of the list only
+ * when such steps exist.
  */
 export const forkWorkflowStepPhases = (
 	steps: readonly ForkWorkflowStep[],

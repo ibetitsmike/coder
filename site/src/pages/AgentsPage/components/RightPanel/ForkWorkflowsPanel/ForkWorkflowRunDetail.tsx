@@ -154,6 +154,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 					steps={steps}
 					phases={run.phases}
 					currentPhase={run.current_phase}
+					runStatus={run.status}
 				/>
 			)}
 			{steps.length === 0 && run.phases.length > 0 && (
@@ -161,6 +162,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 					phases={run.phases}
 					currentPhase={run.current_phase}
 					steps={steps}
+					runStatus={run.status}
 				/>
 			)}
 			{run.result !== undefined && (

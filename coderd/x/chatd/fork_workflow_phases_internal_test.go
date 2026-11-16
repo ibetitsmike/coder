@@ -265,4 +265,51 @@ def main(args):
 		assert.Empty(t, res.Phases, "a script without phases reports none")
 		assert.Empty(t, res.CurrentPhase)
 	})
+
+	t.Run("SavedWorkflowPhasesSeedTheRun", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// saveUserWorkflow stores the phases plan and work (see the fixture).
+		f.saveUserWorkflow(t, "seeded", "def main(args):\n    phase(\"work\")\n    agent(\"Work.\", title = \"work\")\n", greetArgsSchema)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Name: "seeded", Args: map[string]any{"topic": "x"}})
+
+		// The saved phases are visible before the script sets a phase of
+		// its own, both in memory and in the journal row.
+		awaitPhases(ctx, t, run, []string{"plan", "work"})
+		fdb := forkWorkflowDB(t, f.db)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"plan", "work"}, row.Phases)
+
+		steps := f.steps(ctx, t, run, 1)
+		assert.Equal(t, "work", steps[0].Phase)
+		f.report(ctx, t, steps[0].ChatID, `{"text":"done"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, run))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		// phase() does not add a name the saved list already holds.
+		assert.Equal(t, []string{"plan", "work"}, res.Phases)
+		assert.Equal(t, "work", res.CurrentPhase)
+	})
+
+	t.Run("StopKeepsThePhases", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: phasePlanScript})
+		steps := f.steps(ctx, t, run, 1)
+		assert.Equal(t, "plan", steps[0].Phase)
+
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusStopped
+		}, testutil.IntervalFast)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"plan", "build", "review"}, row.Phases,
+			"stopping a run keeps its phases")
+		assert.Equal(t, "plan", row.CurrentPhase)
+	})
 }

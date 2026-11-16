@@ -128,6 +128,22 @@ export const RunningWithRailOnly: Story = {
 	play: expand,
 };
 
+/** A failed run marks the phase that never finished. */
+export const FailedWithRailOnly: Story = {
+	args: {
+		result: {
+			run_id: MockForkWorkflowRunId,
+			status: "failed",
+			error:
+				'step "coderd/users.go" failed: the step ended its turn twice without calling workflow_report',
+			phases: ["review", "summarize", "publish"],
+			current_phase: "publish",
+			steps: [],
+		},
+	},
+	play: expand,
+};
+
 /** A run without phases renders as before, with no rail. */
 export const RunningWithoutPhases: Story = {
 	args: {

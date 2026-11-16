@@ -100,8 +100,9 @@ func (j workflowJournal) getRun(ctx context.Context, id uuid.UUID) (run forkdb.W
 // in-memory state of a live run stays authoritative, and a lost write only
 // costs the replay that the journal exists to prevent. phases carries the
 // run's phase list and current phase, the state phase() changes while the
-// script runs; a nil phases keeps the journaled one (the startup sweep and
-// other writes that run outside the script goroutine pass nil).
+// script runs; a nil phases clears them to empty, so a caller outside the
+// script goroutine must pass the run's snapshot instead. The startup sweep
+// and every other caller pass it.
 func (j workflowJournal) updateRunStatus(
 	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
 	phases *workflowPhases,
@@ -321,6 +322,8 @@ func (p *Server) resumeWorkflowRun(
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), chat) //nolint:gocritic // see startWorkflowRun
 	run.mu.Lock()
 	run.cancel = stop
+	run.phases = row.Phases
+	run.currentPhase = row.CurrentPhase
 	run.mu.Unlock()
 	err = p.goInflight(func() {
 		defer stop()

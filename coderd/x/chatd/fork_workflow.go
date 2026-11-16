@@ -414,7 +414,8 @@ func (p *Server) startWorkflowRun(
 	}
 	// A saved workflow's declared phases seed the run before the script
 	// parses, so the rail shows them without the script repeating the list
-	// in a PHASES global.
+	// in a PHASES global. The phase cap counts the saved list together with
+	// any PHASES the script declares, checked after the run is built.
 	savedPhases := []string(nil)
 	if run := p.workflows.get(runID); run != nil {
 		if run.parent.ID != chat.ID {
@@ -484,6 +485,15 @@ func (p *Server) startWorkflowRun(
 	})
 	if !added {
 		return run, nil
+	}
+	// The saved list counts toward the cap, so a saved workflow whose
+	// script also declares PHASES cannot double the limit.
+	run.mu.Lock()
+	tooMany := len(run.phases) > maxWorkflowPhases
+	run.mu.Unlock()
+	if tooMany {
+		p.workflows.remove(runID)
+		return nil, xerrors.Errorf("the workflow declares more than %d phases", maxWorkflowPhases)
 	}
 	if err := p.workflowJournal().insertRun(ctx, run); err != nil {
 		p.workflows.remove(runID)

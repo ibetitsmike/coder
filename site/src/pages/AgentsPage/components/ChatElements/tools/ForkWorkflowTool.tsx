@@ -193,6 +193,7 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 						steps={snapshot.steps}
 						phases={snapshot.phases}
 						currentPhase={snapshot.currentPhase}
+						runStatus={snapshot.status}
 					/>
 				)}
 				{snapshot &&
@@ -202,6 +203,7 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 							phases={snapshot.phases}
 							currentPhase={snapshot.currentPhase}
 							steps={snapshot.steps}
+							runStatus={snapshot.status}
 						/>
 					)}
 				{isResume && snapshot?.steps.length === 0 && (
