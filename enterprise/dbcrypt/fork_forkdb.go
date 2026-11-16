@@ -26,7 +26,8 @@ func (db *dbCrypt) ForkWrap(s forkdb.Store) forkdb.Store {
 }
 
 // forkCrypt encrypts plugins.config and chat_secret_answers.value. Queries
-// that return no secret pass through the embedded store.
+// that return no secret pass through the embedded store, for example
+// RenewPluginLeases, which returns only ids and updated_at.
 type forkCrypt struct {
 	crypt *dbCrypt
 	forkdb.Store
