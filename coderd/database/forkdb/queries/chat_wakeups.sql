@@ -49,8 +49,13 @@ SELECT * FROM chat_wakeups WHERE id = @id;
 -- name: GetChatWakeupByIDForUpdate :one
 SELECT * FROM chat_wakeups WHERE id = @id FOR UPDATE;
 
+-- Lists the wake-ups of the chat whose status is in statuses, or every
+-- wake-up when statuses is empty.
 -- name: ListChatWakeupsByChatID :many
-SELECT * FROM chat_wakeups WHERE chat_id = @chat_id ORDER BY created_at, id;
+SELECT * FROM chat_wakeups
+WHERE chat_id = @chat_id
+    AND (COALESCE(cardinality(@statuses::chat_wakeup_status[]), 0) = 0 OR status = ANY(@statuses::chat_wakeup_status[]))
+ORDER BY created_at, id;
 
 -- Pauses, resumes, cancels or completes a wake-up. The caller computes
 -- next_run_at.
@@ -213,6 +218,22 @@ SELECT
 -- read only the last 24 hours.
 -- name: DeleteOldChatWakeupRunCounts :execrows
 DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days';
+
+-- Deletes a batch of completed and canceled wake-ups that changed last more
+-- than 30 days ago, on the database clock. Their watches cascade; their runs
+-- keep counting toward the caps with a NULL wakeup_id.
+-- name: DeleteOldChatWakeups :execrows
+WITH old AS (
+    SELECT id
+    FROM chat_wakeups
+    WHERE status IN ('completed', 'canceled')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT @limit_count::int
+)
+DELETE FROM chat_wakeups
+USING old
+WHERE chat_wakeups.id = old.id;
 
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.

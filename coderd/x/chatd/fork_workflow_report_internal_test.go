@@ -115,6 +115,29 @@ func TestForkWorkflowReport(t *testing.T) {
 		assert.Contains(t, resp.Content, "does not match the schema")
 	})
 
+	t.Run("OversizedValueRejected", func(t *testing.T) {
+		t.Parallel()
+		tool, err := newWorkflowReportTool(schema)
+		require.NoError(t, err)
+
+		// A value that matches the schema but is over the cap: the journal
+		// would store it as it is.
+		bug := `"` + strings.Repeat("x", 1024) + `"`
+		bugs := strings.Repeat(bug+",", maxWorkflowReportBytes/len(bug))
+		input := `{"bugs":[` + bugs + bug + `]}`
+		require.Greater(t, len(input), maxWorkflowReportBytes)
+		resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: input})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError, "a report over 256 KiB must be a tool error")
+		assert.Contains(t, resp.Content, "at most 256 KiB")
+
+		// A value at the cap still passes.
+		under := `{"bugs":[` + bug + `]}`
+		resp, err = tool.Run(context.Background(), fantasy.ToolCall{Input: under})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+	})
+
 	t.Run("SchemaChecks", func(t *testing.T) {
 		t.Parallel()
 		_, err := checkStepSchema(json.RawMessage(`{"type":"array"}`))

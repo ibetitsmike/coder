@@ -13,13 +13,14 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
-// chatSecretAnswersBatchSize bounds how many expired answers one tick
+// forkPurgeBatchSize bounds how many rows of one fork table one tick
 // deletes.
-const chatSecretAnswersBatchSize = 1000
+const forkPurgeBatchSize = 1000
 
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
 // chat secret answers it purged. It also deletes the wake-up run counts older
-// than 7 days.
+// than 7 days, expired plugin link codes, and the closed wake-ups and ended
+// workflow runs older than 30 days.
 func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64, error) {
 	ftx, err := forkdb.From(tx)
 	if err != nil {
@@ -29,16 +30,30 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 		i.logger.Warn(ctx, "skip fork purge", slog.Error(err))
 		return 0, nil
 	}
-	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, chatSecretAnswersBatchSize)
+	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, forkPurgeBatchSize)
 	if err != nil {
 		return 0, xerrors.Errorf("failed to delete old chat secret answers: %w", err)
 	}
-	counts, err := ftx.DeleteOldChatWakeupRunCounts(ctx)
-	if err != nil {
-		return 0, xerrors.Errorf("failed to delete old chat wake-up run counts: %w", err)
-	}
-	if counts > 0 {
-		i.logger.Debug(ctx, "purged old chat wake-up run counts", slog.F("count", counts))
+	for _, purge := range []struct {
+		name string
+		run  func(context.Context) (int64, error)
+	}{
+		{"chat wake-up run counts", ftx.DeleteOldChatWakeupRunCounts},
+		{"plugin link codes", ftx.DeleteExpiredPluginLinkCodes},
+		{"chat wake-ups", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldChatWakeups(ctx, forkPurgeBatchSize)
+		}},
+		{"workflow runs", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldWorkflowRuns(ctx, forkPurgeBatchSize)
+		}},
+	} {
+		count, err := purge.run(ctx)
+		if err != nil {
+			return 0, xerrors.Errorf("failed to delete old %s: %w", purge.name, err)
+		}
+		if count > 0 {
+			i.logger.Debug(ctx, "purged old "+purge.name, slog.F("count", count))
+		}
 	}
 	return purged, nil
 }

@@ -53,12 +53,23 @@ type Querier interface {
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	DeleteChatSubagentMessagesBefore(ctx context.Context, arg DeleteChatSubagentMessagesBeforeParams) error
+	// Deletes the link codes past their expiry, on the database clock that
+	// ConsumePluginLinkCode checks. A code nobody entered stays until then.
+	DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error)
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes the run counts older than 7 days, on the database clock. The caps
 	// read only the last 24 hours.
 	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
+	// Deletes a batch of completed and canceled wake-ups that changed last more
+	// than 30 days ago, on the database clock. Their watches cascade; their runs
+	// keep counting toward the caps with a NULL wakeup_id.
+	DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error)
+	// Deletes a batch of terminal and interrupted runs whose last journal write
+	// is older than 30 days, on the database clock. Their steps cascade. A
+	// running run stays: a live replica still writes it.
+	DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
@@ -213,7 +224,9 @@ type Querier interface {
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
 	ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeupWatch, error)
 	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
-	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
+	// Lists the wake-ups of the chat whose status is in statuses, or every
+	// wake-up when statuses is empty.
+	ListChatWakeupsByChatID(ctx context.Context, arg ListChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Lists the children of @parent_chat_id that wait for events of their own:
 	// they have an open watch on an active wake-up. chat_wakeup_ready_watches
 	// uses the same rule.

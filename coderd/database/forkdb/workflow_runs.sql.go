@@ -15,6 +15,31 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const deleteOldWorkflowRuns = `-- name: DeleteOldWorkflowRuns :execrows
+WITH old AS (
+    SELECT id
+    FROM workflow_runs
+    WHERE status IN ('completed', 'failed', 'stopped', 'interrupted')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT $1::int
+)
+DELETE FROM workflow_runs
+USING old
+WHERE workflow_runs.id = old.id
+`
+
+// Deletes a batch of terminal and interrupted runs whose last journal write
+// is older than 30 days, on the database clock. Their steps cascade. A
+// running run stays: a live replica still writes it.
+func (q *Queries) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldWorkflowRuns, limitCount)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const failOpenWorkflowStepsOfRun = `-- name: FailOpenWorkflowStepsOfRun :execrows
 UPDATE workflow_steps SET status = 'failed', error = $1, finished_at = now()
 WHERE run_id = $2 AND status IN ('running', 'reminded')

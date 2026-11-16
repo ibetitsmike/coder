@@ -277,6 +277,21 @@ func (f forkQueryMetricsStore) DeleteOldChatWakeupRunCounts(ctx context.Context)
 	return f.s.DeleteOldChatWakeupRunCounts(ctx)
 }
 
+func (f forkQueryMetricsStore) DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error) {
+	defer f.observe(ctx, "DeleteOldChatWakeups", time.Now())
+	return f.s.DeleteOldChatWakeups(ctx, limitCount)
+}
+
+func (f forkQueryMetricsStore) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
+	defer f.observe(ctx, "DeleteOldWorkflowRuns", time.Now())
+	return f.s.DeleteOldWorkflowRuns(ctx, limitCount)
+}
+
+func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
+	return f.s.DeleteExpiredPluginLinkCodes(ctx)
+}
+
 func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "DeleteOrganizationAgentDefinitionByName", time.Now())
 	return f.s.DeleteOrganizationAgentDefinitionByName(ctx, arg)
@@ -597,9 +612,9 @@ func (f forkQueryMetricsStore) ListChatFamilyMembers(ctx context.Context, arg fo
 	return f.s.ListChatFamilyMembers(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
+func (f forkQueryMetricsStore) ListChatWakeupsByChatID(ctx context.Context, arg forkdb.ListChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
 	defer f.observe(ctx, "ListChatWakeupsByChatID", time.Now())
-	return f.s.ListChatWakeupsByChatID(ctx, chatID)
+	return f.s.ListChatWakeupsByChatID(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) ListOrganizationAgentDefinitionMetadata(ctx context.Context, organizationID uuid.UUID) ([]forkdb.ListOrganizationAgentDefinitionMetadataRow, error) {

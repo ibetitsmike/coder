@@ -243,7 +243,10 @@ describe("ForkComposerSlot wake-ups", () => {
 
 		await waitFor(() => {
 			expect(getTodos).toHaveBeenCalledWith(MockChat.id, expect.anything());
-			expect(getWakeups).toHaveBeenCalledWith(MockChat.id, expect.anything());
+			expect(getWakeups).toHaveBeenCalledWith(MockChat.id, expect.anything(), [
+				"active",
+				"paused",
+			]);
 		});
 	});
 

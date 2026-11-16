@@ -86,3 +86,19 @@ GROUP BY s.run_id, s.status;
 -- error: it becomes a mock parameter name.
 UPDATE workflow_steps SET status = 'failed', error = @err_text, finished_at = now()
 WHERE run_id = @run_id AND status IN ('running', 'reminded');
+
+-- name: DeleteOldWorkflowRuns :execrows
+-- Deletes a batch of terminal and interrupted runs whose last journal write
+-- is older than 30 days, on the database clock. Their steps cascade. A
+-- running run stays: a live replica still writes it.
+WITH old AS (
+    SELECT id
+    FROM workflow_runs
+    WHERE status IN ('completed', 'failed', 'stopped', 'interrupted')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT @limit_count::int
+)
+DELETE FROM workflow_runs
+USING old
+WHERE workflow_runs.id = old.id;

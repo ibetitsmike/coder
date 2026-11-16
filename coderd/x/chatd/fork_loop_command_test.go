@@ -104,7 +104,7 @@ func loopWakeups(t *testing.T, db database.Store, chatID uuid.UUID) []forkdb.Cha
 	t.Helper()
 	fdb, err := forkdb.From(db)
 	require.NoError(t, err)
-	rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), chatID)
+	rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), forkdb.ListChatWakeupsByChatIDParams{ChatID: chatID})
 	require.NoError(t, err)
 	return rows
 }

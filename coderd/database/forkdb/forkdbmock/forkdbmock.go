@@ -260,6 +260,21 @@ func (mr *MockStoreMockRecorder) DeleteChatSubagentMessagesBefore(ctx, arg any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatSubagentMessagesBefore", reflect.TypeOf((*MockStore)(nil).DeleteChatSubagentMessagesBefore), ctx, arg)
 }
 
+// DeleteExpiredPluginLinkCodes mocks base method.
+func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredPluginLinkCodes", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteExpiredPluginLinkCodes indicates an expected call of DeleteExpiredPluginLinkCodes.
+func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx)
+}
+
 // DeleteOldChatSecretAnswers mocks base method.
 func (m *MockStore) DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
@@ -288,6 +303,36 @@ func (m *MockStore) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, er
 func (mr *MockStoreMockRecorder) DeleteOldChatWakeupRunCounts(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatWakeupRunCounts", reflect.TypeOf((*MockStore)(nil).DeleteOldChatWakeupRunCounts), ctx)
+}
+
+// DeleteOldChatWakeups mocks base method.
+func (m *MockStore) DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldChatWakeups", ctx, limitCount)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldChatWakeups indicates an expected call of DeleteOldChatWakeups.
+func (mr *MockStoreMockRecorder) DeleteOldChatWakeups(ctx, limitCount any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatWakeups", reflect.TypeOf((*MockStore)(nil).DeleteOldChatWakeups), ctx, limitCount)
+}
+
+// DeleteOldWorkflowRuns mocks base method.
+func (m *MockStore) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldWorkflowRuns", ctx, limitCount)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldWorkflowRuns indicates an expected call of DeleteOldWorkflowRuns.
+func (mr *MockStoreMockRecorder) DeleteOldWorkflowRuns(ctx, limitCount any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldWorkflowRuns", reflect.TypeOf((*MockStore)(nil).DeleteOldWorkflowRuns), ctx, limitCount)
 }
 
 // DeleteOrganizationAgentDefinitionByName mocks base method.
@@ -1565,18 +1610,18 @@ func (mr *MockStoreMockRecorder) ListChatWakeupWatchesByWakeupID(ctx, wakeupID a
 }
 
 // ListChatWakeupsByChatID mocks base method.
-func (m *MockStore) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
+func (m *MockStore) ListChatWakeupsByChatID(ctx context.Context, arg forkdb.ListChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListChatWakeupsByChatID", ctx, chatID)
+	ret := m.ctrl.Call(m, "ListChatWakeupsByChatID", ctx, arg)
 	ret0, _ := ret[0].([]forkdb.ChatWakeup)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListChatWakeupsByChatID indicates an expected call of ListChatWakeupsByChatID.
-func (mr *MockStoreMockRecorder) ListChatWakeupsByChatID(ctx, chatID any) *gomock.Call {
+func (mr *MockStoreMockRecorder) ListChatWakeupsByChatID(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).ListChatWakeupsByChatID), ctx, chatID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).ListChatWakeupsByChatID), ctx, arg)
 }
 
 // ListChildChatIDsWithOpenWakeupWatches mocks base method.

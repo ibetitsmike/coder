@@ -151,6 +151,27 @@ func (f *forkQuerier) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, 
 	return f.db.DeleteOldChatWakeupRunCounts(ctx)
 }
 
+func (f *forkQuerier) DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldChatWakeups(ctx, limitCount)
+}
+
+func (f *forkQuerier) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldWorkflowRuns(ctx, limitCount)
+}
+
+func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteExpiredPluginLinkCodes(ctx)
+}
+
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 		return f.db.GetOrganizationAgentDefinitionByName(ctx, forkdb.GetOrganizationAgentDefinitionByNameParams(arg))
@@ -755,11 +776,11 @@ func (f *forkQuerier) ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeu
 	return f.db.ListChatWakeupWatchesByWakeupID(ctx, wakeupID)
 }
 
-func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatWakeup, error) {
-	if err := f.authorizeChat(ctx, policy.ActionRead, chatID); err != nil {
+func (f *forkQuerier) ListChatWakeupsByChatID(ctx context.Context, arg forkdb.ListChatWakeupsByChatIDParams) ([]forkdb.ChatWakeup, error) {
+	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return nil, err
 	}
-	return f.db.ListChatWakeupsByChatID(ctx, chatID)
+	return f.db.ListChatWakeupsByChatID(ctx, arg)
 }
 
 func (f *forkQuerier) ListChildChatIDsWithOpenWakeupWatches(ctx context.Context, parentChatID uuid.UUID) ([]uuid.UUID, error) {
