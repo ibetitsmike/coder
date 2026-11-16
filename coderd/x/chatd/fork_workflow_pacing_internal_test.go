@@ -19,11 +19,12 @@ import (
 func TestForkWorkflowLogPacing(t *testing.T) {
 	t.Parallel()
 
-	// PacingPerInterval holds the token, waits for the fallback timer to
-	// carry a burst (the timer path of the write-through), releases, and
-	// then logs one more line. The new line must wait out the rest of the
-	// interval instead of writing back to back with the timer write: at
-	// most one write per interval, whichever path produced the last one.
+	// TimerWritePacesTheNextLine holds the token, waits for the fallback
+	// timer to carry a burst (the timer path of the write-through),
+	// releases, and then logs one more line. The new line must wait out
+	// the rest of the interval instead of writing back to back with the
+	// timer write: at most one write per interval, whichever path
+	// produced the last one.
 	t.Run("TimerWritePacesTheNextLine", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
@@ -80,20 +81,22 @@ def main(args):
 		assert.False(t, stamp.Before(time.Now().Add(-workflowLogFlushInterval)),
 			"the timer write must stamp the attempt, so the next line paces behind it")
 
-		started := time.Now()
 		run.log("paced line")
 		// The paced line must wait out the rest of the interval, so the
-		// journal gains its line only when the timer the line armed fires
-		// at the interval's end. Both waits below observe journal state,
-		// not a fixed window. An unpaced path would write the line at
-		// once, which shows as a third journal write right after the
-		// timer write and a far too short wait.
+		// journal must still hold two lines half a second after the log():
+		// an unpaced path writes the line at once, which this fixed probe
+		// observes as a third line inside the same interval. The probe
+		// window is far under the interval, so a paced path cannot have
+		// fired its timer yet and this cannot fail for a slow runner.
+		time.Sleep(500 * time.Millisecond)
+		assert.Equal(t, []string{"first line", "held line"}, journalLogs(),
+			"the paced line must wait out the interval instead of writing back to back with the timer write")
+		// The timer the line armed carries it at the interval's end: the
+		// line is not stranded, the journal catches up on its own.
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return len(journalLogs()) == 3
 		}, testutil.IntervalSlow)
 		assert.Equal(t, []string{"first line", "held line", "paced line"}, journalLogs())
-		assert.Greater(t, time.Since(started), workflowLogFlushInterval/2,
-			"the paced line must wait out the interval instead of writing back to back with the timer write")
 	})
 
 	// SustainedLogging pins the one-write-per-interval bound end to end:

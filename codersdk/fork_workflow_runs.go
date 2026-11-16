@@ -114,9 +114,13 @@ type WorkflowRunDetail struct {
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
 	// Args is the JSON value that main(args) received. It is usually an
-	// object, but an inline script may be given any JSON value.
+	// object, but an inline script may be given any JSON value. The Go
+	// client decodes numbers as float64, which is lossy for big integers,
+	// so a client that needs exact values should read the raw response.
 	Args any `json:"args"`
-	// Result is the value that main returned, for a terminal run.
+	// Result is the value that main returned, for a terminal run. The Go
+	// client decodes numbers as float64, which is lossy for big integers,
+	// so a client that needs exact values should read the raw response.
 	Result any `json:"result,omitempty"`
 	// Logs are the last log lines the script printed: from the snapshot of
 	// a terminal run, or written through to the journal while it runs.

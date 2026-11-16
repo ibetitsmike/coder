@@ -13281,12 +13281,16 @@ export interface WorkflowRunDetail {
 	readonly script: string;
 	/**
 	 * Args is the JSON value that main(args) received. It is usually an
-	 * object, but an inline script may be given any JSON value.
+	 * object, but an inline script may be given any JSON value. The Go
+	 * client decodes numbers as float64, which is lossy for big integers,
+	 * so a client that needs exact values should read the raw response.
 	 */
 	// empty interface{} type, falling back to unknown
 	readonly args: unknown;
 	/**
-	 * Result is the value that main returned, for a terminal run.
+	 * Result is the value that main returned, for a terminal run. The Go
+	 * client decodes numbers as float64, which is lossy for big integers,
+	 * so a client that needs exact values should read the raw response.
 	 */
 	// empty interface{} type, falling back to unknown
 	readonly result?: unknown;

@@ -39302,7 +39302,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "args": {
-                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value."
+                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. The Go\nclient decodes numbers as float64, which is lossy for big integers,\nso a client that needs exact values should read the raw response."
                 },
                 "chat_id": {
                     "type": "string",
@@ -39341,7 +39341,7 @@ const docTemplate = `{
                     }
                 },
                 "result": {
-                    "description": "Result is the value that main returned, for a terminal run."
+                    "description": "Result is the value that main returned, for a terminal run. The Go\nclient decodes numbers as float64, which is lossy for big integers,\nso a client that needs exact values should read the raw response."
                 },
                 "script": {
                     "type": "string"

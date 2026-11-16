@@ -114,6 +114,7 @@ export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
 	status: "completed",
 	title: "Review changed files",
 	error: "",
+	args: { files: ["coderd/users.go"] },
 	result: MockForkWorkflowCompletedResult.result,
 	created_at: "2026-11-12T10:00:00Z",
 	updated_at: "2026-11-12T10:03:20Z",

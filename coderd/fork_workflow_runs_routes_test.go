@@ -212,6 +212,45 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		assert.Equal(t, []string{"review started"}, detail.Logs)
 	})
 
+	// A failed run snapshots a null result: the detail must omit the
+	// result key instead of answering "result": null, which a nil
+	// json.RawMessage in the any field would marshal as.
+	t.Run("FailedRunHasNoResultKey", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newForkWorkflowRunsAPI(t, true)
+		chat := newForkChatTodosChat(t, db, user)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		runID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            runID,
+			ChatID:        chat.ID,
+			ModelConfigID: chat.LastModelConfigID,
+			Script:        "def main(args):\n    pass\n",
+			Args:          []byte(`{}`),
+			Status:        "running",
+		}))
+		snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"failed","steps":[],"logs":["boom"],"result":null}`
+		require.NoError(t, fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+			ID:     runID,
+			Status: "failed",
+			Error:  "the step ended its turn twice without calling workflow_report",
+			Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
+		}))
+
+		res, err := client.Request(ctx, http.MethodGet,
+			"/api/v2/chats/fork/"+chat.ID.String()+"/workflow-runs/"+runID.String(), nil)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&raw))
+		_, has := raw["result"]
+		assert.False(t, has, "a failed run must omit the result key, not send null")
+		assert.Equal(t, `"failed"`, string(raw["status"]))
+	})
+
 	t.Run("MemberOwnChatOnly", func(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitLong)
