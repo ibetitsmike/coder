@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/time/rate"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 	"cdr.dev/slog/v3/sloggers/sloghuman"
@@ -20,6 +23,8 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/forkdb/forkdbmock"
+	"github.com/coder/coder/v2/coderd/database/pubsub"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/plugins/pluginhost"
 	"github.com/coder/coder/v2/coderd/x/plugins/plugintest"
@@ -158,6 +163,175 @@ func TestDeliverChatRoutesToActiveLink(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRunnerBindsOnlyChangedChats verifies the scan binds no chat: the
+// runner binds every chat of a user once when it starts to follow the user,
+// and after that one chat for each created event. Before, every scan and
+// every chat event ran the full rebind: 40 in 10 minutes of scans.
+func TestRunnerBindsOnlyChangedChats(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	ctrl := gomock.NewController(t)
+	fdb := forkdbmock.NewMockStore(ctrl)
+	ps := pubsub.NewInMemory()
+	orgID := uuid.New()
+	r := &runner{
+		m:      &Manager{opts: Options{Pubsub: ps}, fdb: fdb},
+		plugin: forkdb.Plugin{ID: uuid.New(), OrganizationID: orgID},
+		grants: codersdk.PluginGrants{
+			Chats:  []string{codersdk.PluginChatRead},
+			Events: []string{codersdk.PluginEventChatMessagesAdded},
+		},
+		logger:      testutil.Logger(t),
+		deliverWake: make(chan struct{}, 1),
+		subs:        map[uuid.UUID]func(){},
+		newChats:    map[uuid.UUID]struct{}{},
+	}
+	t.Cleanup(r.unsubscribeAll)
+
+	var (
+		mu     sync.Mutex
+		links  = []forkdb.PluginUserLink{{UserID: uuid.New()}}
+		full   int
+		one    []uuid.UUID
+		failed = map[uuid.UUID]bool{}
+		// fullFails makes the next full bind fail.
+		fullFails bool
+	)
+	fdb.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), r.plugin.ID).DoAndReturn(
+		func(context.Context, uuid.UUID) ([]forkdb.PluginUserLink, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Clone(links), nil
+		}).AnyTimes()
+	fdb.EXPECT().EnsurePluginChatBindings(gomock.Any(), r.plugin.ID).DoAndReturn(
+		func(context.Context, uuid.UUID) error {
+			mu.Lock()
+			defer mu.Unlock()
+			full++
+			if fullFails {
+				fullFails = false
+				return xerrors.New("bind failed")
+			}
+			return nil
+		}).AnyTimes()
+	fdb.EXPECT().EnsurePluginChatBinding(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, arg forkdb.EnsurePluginChatBindingParams) error {
+			mu.Lock()
+			defer mu.Unlock()
+			require.Equal(t, r.plugin.ID, arg.PluginID)
+			if failed[arg.ChatID] {
+				delete(failed, arg.ChatID)
+				return xerrors.New("bind failed")
+			}
+			one = append(one, arg.ChatID)
+			return nil
+		}).AnyTimes()
+	fdb.EXPECT().GetPluginChatBindingsDue(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	binds := func() (int, []uuid.UUID) {
+		mu.Lock()
+		defer mu.Unlock()
+		return full, slices.Clone(one)
+	}
+
+	// The first scan follows the linked user and binds its chats.
+	r.scan(ctx)
+	fullBinds, _ := binds()
+	require.Equal(t, 1, fullBinds)
+
+	// 10 minutes of scans with no change bind nothing.
+	for range 40 {
+		r.scan(ctx)
+	}
+	fullBinds, oneBinds := binds()
+	require.Equal(t, 1, fullBinds)
+	require.Empty(t, oneBinds)
+
+	userID := links[0].UserID
+	publish := func(kind codersdk.ChatWatchEventKind, chat codersdk.Chat) {
+		t.Helper()
+		msg, err := json.Marshal(codersdk.ChatWatchEvent{Kind: kind, Chat: chat})
+		require.NoError(t, err)
+		require.NoError(t, ps.Publish(coderdpubsub.ChatWatchEventChannel(userID), msg))
+	}
+	parentID := uuid.New()
+	created := codersdk.Chat{ID: uuid.New(), OrganizationID: orgID}
+	publish(codersdk.ChatWatchEventKindCreated, created)
+	// A child chat, a chat of another organization and other kinds of
+	// event bind nothing.
+	publish(codersdk.ChatWatchEventKindCreated, codersdk.Chat{ID: uuid.New(), OrganizationID: orgID, ParentChatID: &parentID})
+	publish(codersdk.ChatWatchEventKindCreated, codersdk.Chat{ID: uuid.New(), OrganizationID: uuid.New()})
+	publish(codersdk.ChatWatchEventKindStatusChange, codersdk.Chat{ID: uuid.New(), OrganizationID: orgID})
+	testutil.TryReceive(ctx, t, r.deliverWake)
+	r.deliver(ctx)
+	r.deliver(ctx)
+	fullBinds, oneBinds = binds()
+	require.Equal(t, 1, fullBinds)
+	require.Equal(t, []uuid.UUID{created.ID}, oneBinds)
+
+	// A chat whose binding failed is bound by the next delivery.
+	retried := codersdk.Chat{ID: uuid.New(), OrganizationID: orgID}
+	mu.Lock()
+	failed[retried.ID] = true
+	mu.Unlock()
+	publish(codersdk.ChatWatchEventKindCreated, retried)
+	r.deliver(ctx)
+	_, oneBinds = binds()
+	require.Equal(t, []uuid.UUID{created.ID}, oneBinds)
+	r.deliver(ctx)
+	_, oneBinds = binds()
+	require.Equal(t, []uuid.UUID{created.ID, retried.ID}, oneBinds)
+
+	// A newly linked user has its chats bound once.
+	mu.Lock()
+	links = append(links, forkdb.PluginUserLink{UserID: uuid.New()})
+	mu.Unlock()
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 2, fullBinds)
+
+	// A full bind that failed runs again on the next scan only.
+	mu.Lock()
+	links = append(links, forkdb.PluginUserLink{UserID: uuid.New()})
+	fullFails = true
+	mu.Unlock()
+	r.scan(ctx)
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 4, fullBinds)
+
+	// While a user's subscription fails, every scan binds, since no event
+	// reports that user's chats.
+	r.m.opts.Pubsub = failingChatSubscribe{ps}
+	mu.Lock()
+	links = append(links, forkdb.PluginUserLink{UserID: uuid.New()})
+	mu.Unlock()
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 6, fullBinds)
+	r.m.opts.Pubsub = ps
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 7, fullBinds)
+
+	// When pubsub dropped chat events, the next scan binds once.
+	r.onChatEvent(ctx, nil, pubsub.ErrDroppedMessages)
+	testutil.TryReceive(ctx, t, r.deliverWake)
+	r.scan(ctx)
+	r.scan(ctx)
+	fullBinds, _ = binds()
+	require.Equal(t, 8, fullBinds)
+}
+
+type failingChatSubscribe struct{ pubsub.Pubsub }
+
+func (failingChatSubscribe) SubscribeWithErr(string, pubsub.ListenerWithErr) (func(), error) {
+	return nil, xerrors.New("subscribe failed")
 }
 
 // newDeliveryRunner returns a runner with the bridge plugin loaded

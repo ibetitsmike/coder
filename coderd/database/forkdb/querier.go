@@ -60,6 +60,9 @@ type Querier interface {
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserSavedWorkflowByName(ctx context.Context, arg DeleteUserSavedWorkflowByNameParams) (SavedWorkflow, error)
+	// EnsurePluginChatBinding is EnsurePluginChatBindings for one chat, for a
+	// chat that was just created or unarchived.
+	EnsurePluginChatBinding(ctx context.Context, arg EnsurePluginChatBindingParams) error
 	// Binds every top-level, unarchived chat of a linked user in the plugin's
 	// organization. Chats created after the link start at cursor 0 so their whole
 	// history is delivered. Older chats start at their newest message so linking

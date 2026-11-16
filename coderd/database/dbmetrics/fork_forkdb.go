@@ -302,6 +302,11 @@ func (f forkQueryMetricsStore) DeleteUserAgentDefinitionByName(ctx context.Conte
 	return f.s.DeleteUserAgentDefinitionByName(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) EnsurePluginChatBinding(ctx context.Context, arg forkdb.EnsurePluginChatBindingParams) error {
+	defer f.observe(ctx, "EnsurePluginChatBinding", time.Now())
+	return f.s.EnsurePluginChatBinding(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
 	defer f.observe(ctx, "EnsurePluginChatBindings", time.Now())
 	return f.s.EnsurePluginChatBindings(ctx, pluginID)

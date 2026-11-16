@@ -137,7 +137,11 @@ func (r *runner) chatSend(ctx context.Context, req *pluginproto.ChatSend) (*plug
 	if err != nil {
 		return nil, xerrors.Errorf("set active chat: %w", err)
 	}
-	if err := r.m.fdb.EnsurePluginChatBindings(sys(ctx), r.plugin.ID); err != nil {
+	err = r.m.fdb.EnsurePluginChatBinding(sys(ctx), forkdb.EnsurePluginChatBindingParams{
+		PluginID: r.plugin.ID,
+		ChatID:   chat.ID,
+	})
+	if err != nil {
 		return nil, xerrors.Errorf("bind chat: %w", err)
 	}
 	return &pluginproto.ChatSendResult{ChatId: chat.ID.String()}, nil

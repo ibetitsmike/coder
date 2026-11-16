@@ -180,6 +180,31 @@ WHERE l.plugin_id = @plugin_id
 ORDER BY c.id, l.created_at
 ON CONFLICT (plugin_id, chat_id) DO NOTHING;
 
+-- EnsurePluginChatBinding is EnsurePluginChatBindings for one chat, for a
+-- chat that was just created or unarchived.
+-- name: EnsurePluginChatBinding :exec
+INSERT INTO plugin_chat_bindings (plugin_id, chat_id, sent_message_id, sent_status)
+SELECT DISTINCT ON (c.id)
+    l.plugin_id,
+    c.id,
+    CASE
+        WHEN c.created_at >= l.created_at THEN 0
+        ELSE COALESCE((SELECT max(m.id) FROM chat_messages m WHERE m.chat_id = c.id), 0)
+    END,
+    CASE
+        WHEN c.created_at >= l.created_at THEN NULL
+        ELSE c.status
+    END
+FROM plugin_user_links l
+JOIN plugins p ON p.id = l.plugin_id
+JOIN chats c ON c.owner_id = l.user_id AND c.organization_id = p.organization_id
+WHERE l.plugin_id = @plugin_id
+    AND c.id = @chat_id
+    AND c.parent_chat_id IS NULL
+    AND NOT c.archived
+ORDER BY c.id, l.created_at
+ON CONFLICT (plugin_id, chat_id) DO NOTHING;
+
 -- A binding is due when its chat is idle and has undelivered user-visible
 -- assistant messages or a status that was not delivered yet.
 -- name: GetPluginChatBindingsDue :many
