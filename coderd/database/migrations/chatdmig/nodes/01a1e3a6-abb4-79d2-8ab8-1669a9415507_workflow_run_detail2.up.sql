@@ -1,11 +1,14 @@
--- requires: 01a1d041-1628-77af-9c39-d4e3e711e0d3_workflow_journal
--- requires: 01a1d05b-a4aa-7050-ac85-2f3c1e806fe9_workflow_run_timestamps
+-- requires: 01a1b58c-24fa-7d7d-91d6-202388cf7cc8_adopt_chatd_schema
+-- requires: 01a1df66-ebee-7c93-aa87-3edc1f2d8fb0_workflow_phases
 -- requires: 01a1da95-80da-7dd4-a368-4b8bf0e1f65f_chat_descendant_questions_answered
 
 -- The run detail of the fork-workflows experiment reads what a run was
 -- called with, whether a step was reused, and the log lines of a live run:
 -- the journal only kept the args, the reuse flag and the logs inside the
--- result snapshot of a terminal run before.
+-- result snapshot of a terminal run before. It replaces the earlier
+-- 01a1df63 node, which was never applied on a shared database and did not
+-- order against the phases node: both added columns to the same tables, so
+-- the column order differed between an upgraded and a fresh database.
 
 ALTER TABLE workflow_runs
     ADD COLUMN logs jsonb NOT NULL DEFAULT '[]'::jsonb;

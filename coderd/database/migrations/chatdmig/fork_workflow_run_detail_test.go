@@ -26,7 +26,7 @@ func TestWorkflowRunDetailBackfill(t *testing.T) {
 	require.NoError(t, err)
 	var node *chatdmig.Node
 	for _, n := range g.Nodes {
-		if strings.HasSuffix(n.Name, "_workflow_run_detail") {
+		if strings.HasSuffix(n.Name, "_workflow_run_detail2") {
 			node = n
 		}
 	}

@@ -37,7 +37,7 @@ func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWo
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs, phases, current_phase FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase, logs FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -55,9 +55,9 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
-		&i.Logs,
 		pq.Array(&i.Phases),
 		&i.CurrentPhase,
+		&i.Logs,
 	)
 	return i, err
 }
@@ -178,7 +178,7 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 }
 
 const getWorkflowStep = `-- name: GetWorkflowStep :one
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused, phase FROM workflow_steps WHERE id = $1
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase, reused FROM workflow_steps WHERE id = $1
 `
 
 // The authorizer of UpdateWorkflowStep reads the step to find its run.
@@ -197,14 +197,14 @@ func (q *Queries) GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowSt
 		&i.Error,
 		&i.StartedAt,
 		&i.FinishedAt,
-		&i.Reused,
 		&i.Phase,
+		&i.Reused,
 	)
 	return i, err
 }
 
 const getWorkflowStepsByRun = `-- name: GetWorkflowStepsByRun :many
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused, phase FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase, reused FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
 `
 
 func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error) {
@@ -228,8 +228,8 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 			&i.Error,
 			&i.StartedAt,
 			&i.FinishedAt,
-			&i.Reused,
 			&i.Phase,
+			&i.Reused,
 		); err != nil {
 			return nil, err
 		}
