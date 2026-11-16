@@ -101,8 +101,9 @@ describe("ForkWorkflowSteps", () => {
 		]);
 
 		// The re-entered phase gets its own heading, so the later plan step
-		// does not sit under the build heading.
-		expect(screen.getAllByTitle("plan")).toHaveLength(2);
+		// does not sit under the build heading. Three plan elements now: the
+		// rail pill plus one heading per phase group.
+		expect(screen.getAllByTitle("plan")).toHaveLength(3);
 		expect(screen.getAllByTitle("build")).toHaveLength(2);
 		expect(screen.getByText("Plan the followup")).toBeDefined();
 	});

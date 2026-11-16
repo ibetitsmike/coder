@@ -116,6 +116,26 @@ describe("phases", () => {
 		).toBe("done");
 		expect(forkWorkflowPhaseState([])).toBe("pending");
 	});
+
+	it("keeps a re-entered phase in a second group in run order", () => {
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["plan", "build"],
+			steps: [
+				{ chat_id: "a", status: "reported", phase: "plan" },
+				{ chat_id: "b", status: "reported", phase: "build" },
+				{ chat_id: "c", status: "running", phase: "plan" },
+			],
+		});
+		const groups = forkWorkflowStepPhases(snapshot?.steps ?? []);
+		expect(groups.map((group) => group.phase)).toEqual([
+			"plan",
+			"build",
+			"plan",
+		]);
+		expect(groups[2]?.steps.map((step) => step.chatId)).toEqual(["c"]);
+	});
 });
 
 describe("forkWorkflowPhaseStateOf", () => {

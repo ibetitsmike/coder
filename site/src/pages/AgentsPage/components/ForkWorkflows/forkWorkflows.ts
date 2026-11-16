@@ -249,19 +249,20 @@ export const forkWorkflowPhaseStateOf = (
 };
 
 /**
- * Groups a run's steps by phase, in first-appearance order, which matches
- * the order the script reached the phases. Steps started before the first
- * phase() call land in the leading "" group, which is part of the list only
- * when such steps exist.
+ * Groups a run's steps by phase in run order: consecutive steps that share a
+ * phase form one group, so a script that re-enters a phase opens a second
+ * group for its later steps. Steps started before the first phase() call
+ * form the leading "" group, which the list holds only when such steps
+ * exist.
  */
 export const forkWorkflowStepPhases = (
 	steps: readonly ForkWorkflowStep[],
 ): readonly { phase: string; steps: readonly ForkWorkflowStep[] }[] => {
 	const groups: { phase: string; steps: ForkWorkflowStep[] }[] = [];
 	for (const step of steps) {
-		const group = groups.find((entry) => entry.phase === step.phase);
-		if (group) {
-			group.steps.push(step);
+		const last = groups[groups.length - 1];
+		if (last && last.phase === step.phase) {
+			last.steps.push(step);
 		} else {
 			groups.push({ phase: step.phase, steps: [step] });
 		}

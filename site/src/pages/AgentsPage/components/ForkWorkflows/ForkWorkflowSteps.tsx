@@ -2,6 +2,7 @@
 // (fork-workflows experiment). Each step is a child chat.
 
 import type React from "react";
+import { useId } from "react";
 import { Badge } from "#/components/Badge/Badge";
 import { ForkChatLink } from "../ChatElements/tools/ForkChatLink";
 import { ForkWorkflowPhaseRail } from "./ForkWorkflowPhaseRail";
@@ -26,6 +27,10 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 	currentPhase,
 	runStatus,
 }) => {
+	// A phase name can hold any text, so the heading ids must be opaque: an
+	// id built from the name would break on whitespace and collide across
+	// runs that reach the same phase.
+	const headingIdPrefix = useId();
 	return (
 		<>
 			<ForkWorkflowPhaseRail
@@ -38,26 +43,27 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 				aria-label="Workflow steps"
 				className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0"
 			>
-				{forkWorkflowStepPhases(steps).flatMap((group) =>
+				{forkWorkflowStepPhases(steps).flatMap((group, groupIndex) =>
 					group.steps.map((step) => {
 						// Each phase group starts with a heading, so a script that
 						// re-enters a phase shows its later steps under that phase
 						// again. Steps before the first phase() call follow no
 						// heading.
 						const isFirstStepOfGroup = group.steps[0] === step;
+						const headingId = `${headingIdPrefix}-${groupIndex}`;
 						return (
 							<li
 								key={step.chatId}
 								aria-describedby={
 									isFirstStepOfGroup && group.phase !== ""
-										? group.phase
+										? headingId
 										: undefined
 								}
 								className="flex min-w-0 flex-col gap-0.5"
 							>
 								{isFirstStepOfGroup && group.phase !== "" && (
 									<div
-										id={group.phase}
+										id={headingId}
 										title={group.phase}
 										className="mt-1 truncate font-mono text-[11px] uppercase tracking-wide text-content-secondary"
 									>
