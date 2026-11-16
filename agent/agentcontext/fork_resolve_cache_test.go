@@ -167,6 +167,46 @@ func TestResolve_ReplacedFileIsReread(t *testing.T) {
 	require.Equal(t, "bbbb", string(r.Resolve(roots).Resources[0].Payload))
 }
 
+// A file rewritten in place with its old size and mtime restored, as cp -p
+// does, is read again: its ctime moved.
+func TestResolve_RestoredMtimeIsReread(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	writeBackdated(t, path, "aaaa")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	reads := agentcontext.CountBodyReads(t, dir)
+	before, _ := agentcontext.FileChangeTime(info)
+	r := &agentcontext.Resolver{}
+	roots := []agentcontext.ScanRoot{{Path: dir}}
+	require.Equal(t, "aaaa", string(r.Resolve(roots).Resources[0].Payload))
+	require.Equal(t, "aaaa", string(r.Resolve(roots).Resources[0].Payload))
+	require.Equal(t, int64(1), reads())
+
+	// Rewrite until the ctime moves: it ticks with the kernel's coarse clock.
+	require.Eventually(t, func() bool {
+		if err := os.WriteFile(path, []byte("bbbb"), 0o600); err != nil {
+			return false
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			return false
+		}
+		now, err := os.Stat(path)
+		if err != nil {
+			return false
+		}
+		ctime, _ := agentcontext.FileChangeTime(now)
+		return ctime != before
+	}, testutil.WaitShort, testutil.IntervalFast)
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, info.ModTime(), after.ModTime())
+	require.Equal(t, info.Size(), after.Size())
+	require.Equal(t, "bbbb", string(r.Resolve(roots).Resources[0].Payload))
+	require.Equal(t, int64(2), reads())
+}
+
 func BenchmarkResolve(b *testing.B) {
 	home := b.TempDir()
 	cache := writeClaudePluginCache(b, home, 50)

@@ -1,6 +1,7 @@
 package agentcontext
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -39,7 +40,7 @@ func CountBodyReads(t testing.TB, dir string) func() int64 {
 	t.Helper()
 	if info, err := os.Stat(dir); err != nil {
 		t.Fatal(err)
-	} else if _, _, ok := fileIdentity(info); !ok {
+	} else if _, ok := fileIdentity(info); !ok {
 		t.Skip("no file identity on this platform, so the memo is off")
 	}
 	count := &atomic.Int64{}
@@ -49,4 +50,11 @@ func CountBodyReads(t testing.TB, dir string) func() int64 {
 	}
 	t.Cleanup(func() { removeBodyReadObserver(count) })
 	return count.Load
+}
+
+// FileChangeTime returns the ctime of a file as the memo sees it, or false
+// where the memo is off.
+func FileChangeTime(info fs.FileInfo) (int64, bool) {
+	id, ok := fileIdentity(info)
+	return id.ctime, ok
 }

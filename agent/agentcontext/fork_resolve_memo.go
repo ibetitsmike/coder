@@ -34,21 +34,28 @@ const (
 )
 
 // fileStamp identifies one version of a regular file. A rewrite changes the
-// mtime or size, and a replacement (rename over, symlink retarget) changes
-// the inode.
+// mtime or size, a replacement (rename over, symlink retarget) changes the
+// inode, and a rewrite that restores the old mtime (cp -p, archive
+// extraction) still changes the ctime.
 type fileStamp struct {
 	modTime int64
 	size    int64
 	mode    fs.FileMode
-	dev     uint64
-	ino     uint64
+	id      fileID
+}
+
+// fileID is what the platform's stat says about a file beyond fs.FileInfo.
+type fileID struct {
+	dev   uint64
+	ino   uint64
+	ctime int64
 }
 
 // stampOf returns the stamp of a file, or false where the platform gives no
 // file identity: without one, a replacement with the same size and mtime
 // would keep the stamp, so such files are not memoized.
 func stampOf(info fs.FileInfo) (fileStamp, bool) {
-	dev, ino, ok := fileIdentity(info)
+	id, ok := fileIdentity(info)
 	if !ok {
 		return fileStamp{}, false
 	}
@@ -56,8 +63,7 @@ func stampOf(info fs.FileInfo) (fileStamp, bool) {
 		modTime: info.ModTime().UnixNano(),
 		size:    info.Size(),
 		mode:    info.Mode(),
-		dev:     dev,
-		ino:     ino,
+		id:      id,
 	}, true
 }
 
