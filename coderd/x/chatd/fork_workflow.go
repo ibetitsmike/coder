@@ -587,6 +587,18 @@ func (r *workflowRun) isStopRequested() bool {
 	return r.stopRequested
 }
 
+// isDone reports whether the run has finished. It reads the done channel,
+// so a flush that lost the race with the end of the run can check it
+// without the journal lock.
+func (r *workflowRun) isDone() bool {
+	select {
+	case <-r.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // finish stores the result. If no await_workflow call waits, it tells the
 // parent that the run ended.
 func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
@@ -606,6 +618,19 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 		defer stop()
 		jctx = fresh
 	}
+	// The result of a stopped run carries the failed steps but not the
+	// failure log lines, so the terminal flush of a stop would write no
+	// new lines. Append them under mu before the snapshot journals.
+	if res.Status == workflowStatusStopped {
+		r.mu.Lock()
+		for _, s := range r.steps {
+			if s.status == stepStatusFailed && s.err != "" {
+				r.appendLogLocked(fmt.Sprintf("step %q failed: %s", s.title, s.err))
+			}
+		}
+		res.Logs = append([]string(nil), r.logs...)
+		r.mu.Unlock()
+	}
 	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res)
 
 	r.mu.Lock()
@@ -615,9 +640,10 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	r.notified = !waiting
 	r.mu.Unlock()
 	// The end lands the last log burst: the scheduled flush of the final
-	// lines must not outlive the run.
+	// lines must not outlive the run, and a terminal flush waits for an
+	// in-flight writer instead of dropping the write.
 	r.cancelLogFlush()
-	r.flushLogs()
+	r.flushLogs(true)
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -817,14 +843,17 @@ func (r *workflowRun) scheduleLogFlush() {
 	if wait <= 0 {
 		r.logFlushInFlight = true
 		go func() {
-			r.flushLogs()
+			r.flushLogs(false)
 			r.journalMu.Lock()
 			r.logFlushInFlight = false
 			r.journalMu.Unlock()
 			// Lines that landed while the write was in flight dropped
 			// their own request, so the completed flush re-arms one for
-			// them.
-			r.rearmLogFlush()
+			// them. A run that finished while the write was in flight
+			// already landed its terminal flush, so it must not re-arm.
+			if !r.isDone() {
+				r.rearmLogFlush()
+			}
 		}()
 		return
 	}
@@ -832,14 +861,14 @@ func (r *workflowRun) scheduleLogFlush() {
 		r.journalMu.Lock()
 		r.logFlushTimer = nil
 		r.journalMu.Unlock()
-		r.flushLogs()
+		r.flushLogs(false)
 	})
 }
 
 // cancelLogFlush drops a pending paced flush. finish calls it, so the last
-// write of the run is its own flushLogs call. A flush already in flight
-// cannot write again: it must win the seq check that the final flush below
-// also runs under journalMu.
+// write of the run is its own terminal flushLogs call. A flush already in
+// flight cannot write again: the terminal flush waits for its write token
+// and then wins the seq check that both flushes run under journalMu.
 func (r *workflowRun) cancelLogFlush() {
 	r.journalMu.Lock()
 	if r.logFlushTimer != nil {
@@ -877,14 +906,21 @@ func (r *workflowRun) rearmLogFlush() {
 // snapshot cannot replace newer lines: the newer caller waits for the
 // channel and then wins the seq check. The journal query drops a payload
 // older than the stored sequence on top.
-func (r *workflowRun) flushLogs() {
+func (r *workflowRun) flushLogs(terminal bool) {
 	if r.journalLogWrite == nil {
 		return
 	}
-	select {
-	case <-r.journalLogWrite:
-	default:
-		return
+	// A terminal flush must wait for an in-flight writer, or the end of
+	// the run would skip its final write. A paced flush keeps its drop
+	// behavior: the terminal flush of the run still carries the lines.
+	if terminal {
+		<-r.journalLogWrite
+	} else {
+		select {
+		case <-r.journalLogWrite:
+		default:
+			return
+		}
 	}
 	defer func() { r.journalLogWrite <- struct{}{} }()
 	r.mu.Lock()
@@ -982,7 +1018,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	step := &workflowStep{
 		id:         id,
 		chatID:     child.ID,
-		title:      child.Title,
+		title:      stepTitle(spec),
 		reused:     reused,
 		specKey:    key,
 		occurrence: occurrence,
@@ -1066,7 +1102,7 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 	step.status, step.err = stepStatusFailed, reason
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
 	r.mu.Unlock()
-	r.flushLogs()
+	r.flushLogs(true)
 	r.p.workflowJournal().updateStep(ctx, step)
 }
 

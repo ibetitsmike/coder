@@ -1142,11 +1142,11 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
-			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			run := testutil.Fake(t, faker, forkdb.GetWorkflowRunsByChatRow{ChatID: chat.ID})
 			arg := testutil.Fake(t, faker, forkdb.GetWorkflowRunsByChatParams{ChatID: chat.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().GetWorkflowRunsByChat(gomock.Any(), arg).Return([]forkdb.WorkflowRun{run}, nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns([]forkdb.WorkflowRun{run})
+			fdb.EXPECT().GetWorkflowRunsByChat(gomock.Any(), arg).Return([]forkdb.GetWorkflowRunsByChatRow{run}, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns([]forkdb.GetWorkflowRunsByChatRow{run})
 		},
 		"GetWorkflowRunStepCountsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})

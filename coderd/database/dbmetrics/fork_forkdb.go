@@ -722,7 +722,7 @@ func (f forkQueryMetricsStore) UpdateUserAgentDefinitionByName(ctx context.Conte
 	return f.s.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	defer f.observe(ctx, "GetWorkflowRunsByChat", time.Now())
 	return f.s.GetWorkflowRunsByChat(ctx, arg)
 }

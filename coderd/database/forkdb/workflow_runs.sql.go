@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
@@ -98,7 +99,8 @@ func (q *Queries) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uui
 }
 
 const getWorkflowRunsByChat = `-- name: GetWorkflowRunsByChat :many
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs FROM workflow_runs
+SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at
+FROM workflow_runs
 WHERE chat_id = $1
   AND ($2::timestamptz IS NULL
        OR (created_at, id) < ($2::timestamptz, $3::uuid))
@@ -113,10 +115,24 @@ type GetWorkflowRunsByChatParams struct {
 	RowLimit       int32         `db:"row_limit" json:"row_limit"`
 }
 
+type GetWorkflowRunsByChatRow struct {
+	ID            uuid.UUID    `db:"id" json:"id"`
+	ChatID        uuid.UUID    `db:"chat_id" json:"chat_id"`
+	ModelConfigID uuid.UUID    `db:"model_config_id" json:"model_config_id"`
+	Script        string       `db:"script" json:"script"`
+	Status        string       `db:"status" json:"status"`
+	Error         string       `db:"error" json:"error"`
+	CreatedAt     time.Time    `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time    `db:"updated_at" json:"updated_at"`
+	FinishedAt    sql.NullTime `db:"finished_at" json:"finished_at"`
+}
+
 // The run list of a chat, newest first, one keyset page. after_created_at
 // and after_id are the created_at and the ID of the last run of the page the
-// client already has; both NULL reads the first page.
-func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error) {
+// client already has; both NULL reads the first page. The list needs no logs,
+// args or result, so it does not read those columns: logs alone can hold the
+// full retained tail of every run.
+func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]GetWorkflowRunsByChatRow, error) {
 	rows, err := q.db.QueryContext(ctx, getWorkflowRunsByChat,
 		arg.ChatID,
 		arg.AfterCreatedAt,
@@ -127,22 +143,19 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 		return nil, err
 	}
 	defer rows.Close()
-	var items []WorkflowRun
+	var items []GetWorkflowRunsByChatRow
 	for rows.Next() {
-		var i WorkflowRun
+		var i GetWorkflowRunsByChatRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatID,
 			&i.ModelConfigID,
 			&i.Script,
-			&i.Args,
 			&i.Status,
 			&i.Error,
-			&i.Result,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
-			&i.Logs,
 		); err != nil {
 			return nil, err
 		}

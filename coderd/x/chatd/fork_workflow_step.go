@@ -20,6 +20,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 )
 
@@ -204,4 +205,13 @@ func (p *Server) createStepChat(
 	// A step must reach workflow_report, so it never runs in plan mode.
 	options.planModeOverride = &database.NullChatPlanMode{}
 	return p.createChildSubagentChatWithOptions(ctx, parent, spec.Prompt, spec.Title, options)
+}
+
+// stepTitle is the title of a step without an explicit title: the fallback
+// chat title of its prompt.
+func stepTitle(spec stepSpec) string {
+	if spec.Title != "" {
+		return spec.Title
+	}
+	return chatprompt.FallbackTitle(spec.Prompt)
 }
