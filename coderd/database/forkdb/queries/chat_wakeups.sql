@@ -217,6 +217,11 @@ SELECT
     (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
         WHERE organization_id = @organization_id::uuid AND hour >= @since::timestamptz)::bigint AS organization_runs;
 
+-- Deletes the run counts older than 7 days, on the database clock. The caps
+-- read only the last 24 hours.
+-- name: DeleteOldChatWakeupRunCounts :execrows
+DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days';
+
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.
 -- name: SumChatCostMicrosSince :one
@@ -226,12 +231,18 @@ WHERE chat_id = @chat_id::uuid
     AND created_at >= @since::timestamptz
     AND total_cost_micros IS NOT NULL;
 
--- Sums the spend of the chats of the organization that have a wake-up, so
--- chats that only humans drive do not count.
+-- Sums the spend since since of the chats of the organization that have a
+-- delivered wake-up run in an hour bucket from runs_since on, so chats that
+-- only humans drive do not count.
 -- name: SumOrganizationWakeupChatCostMicrosSince :one
 SELECT COALESCE(SUM(cm.total_cost_micros), 0)::bigint
 FROM chat_messages cm
-WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organization_id = @organization_id::uuid)
+WHERE cm.chat_id IN (
+        SELECT DISTINCT u.chat_id
+        FROM chat_wakeup_run_counts u
+        WHERE u.organization_id = @organization_id::uuid
+            AND u.hour >= @runs_since::timestamptz
+    )
     AND cm.created_at >= @since::timestamptz
     AND cm.total_cost_micros IS NOT NULL;
 

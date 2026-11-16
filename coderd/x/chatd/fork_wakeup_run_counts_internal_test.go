@@ -9,10 +9,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/database/forkdb/forkdbmock"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -120,6 +122,54 @@ func TestWakeupRunCounts(t *testing.T) {
 		require.Equal(t, wakeupReasonOrgDailyRunCap, got.StatusReason.String)
 		require.Zero(t, got.RunCount)
 	})
+}
+
+// A delivery under the caps reads the caps row, the run sums and the chat
+// spend, and reads the organization spend at most once a minute.
+func TestWakeupCapStatements(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitShort)
+	chat := database.Chat{ID: uuid.New(), OrganizationID: uuid.New()}
+	now := wakeupTestSlot
+
+	fdb := forkdbmock.NewMockStore(gomock.NewController(t))
+	var server Server
+	// expectCheck expects the statements of one check at now, with the
+	// organization spend read when readSpend is set.
+	expectCheck := func(now time.Time, readSpend bool) {
+		since := now.Add(-wakeupCapWindow)
+		runsSince := since.Truncate(time.Hour)
+		fdb.EXPECT().GetChatOrganizationWakeupCaps(gomock.Any(), chat.OrganizationID).
+			Return(forkdb.ChatOrganizationWakeupCap{}, sql.ErrNoRows).Times(1)
+		fdb.EXPECT().SumChatWakeupRunCountsSince(gomock.Any(), forkdb.SumChatWakeupRunCountsSinceParams{
+			ChatID: chat.ID, OrganizationID: chat.OrganizationID, Since: runsSince,
+		}).Return(forkdb.SumChatWakeupRunCountsSinceRow{ChatRuns: 1, OrganizationRuns: 2}, nil).Times(1)
+		fdb.EXPECT().SumChatCostMicrosSince(gomock.Any(), forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID, Since: since}).
+			Return(int64(0), nil).Times(1)
+		if readSpend {
+			fdb.EXPECT().SumOrganizationWakeupChatCostMicrosSince(gomock.Any(), forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{
+				OrganizationID: chat.OrganizationID, RunsSince: runsSince, Since: since,
+			}).Return(int64(100), nil).Times(1)
+		}
+	}
+	check := func(now time.Time) {
+		t.Helper()
+		reason, _, err := server.wakeupCapReached(ctx, fdb, chat, now)
+		require.NoError(t, err)
+		require.Empty(t, reason)
+	}
+
+	expectCheck(now, true)
+	check(now)
+	// Cached: three statements.
+	expectCheck(now.Add(59*time.Second), false)
+	check(now.Add(59 * time.Second))
+	// Stale after a minute.
+	expectCheck(now.Add(time.Minute), true)
+	check(now.Add(time.Minute))
+	// A clock that went back reads again.
+	expectCheck(now.Add(30*time.Second), true)
+	check(now.Add(30 * time.Second))
 }
 
 // wakeupRunCount sums the counted wake-up runs of chat over all hours.

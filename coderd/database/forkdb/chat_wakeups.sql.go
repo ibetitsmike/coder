@@ -106,6 +106,20 @@ func (q *Queries) CountChatUserNotificationsSince(ctx context.Context, arg Count
 	return count, err
 }
 
+const deleteOldChatWakeupRunCounts = `-- name: DeleteOldChatWakeupRunCounts :execrows
+DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days'
+`
+
+// Deletes the run counts older than 7 days, on the database clock. The caps
+// read only the last 24 hours.
+func (q *Queries) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldChatWakeupRunCounts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getChatWakeupByID = `-- name: GetChatWakeupByID :one
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1
 `
@@ -636,20 +650,27 @@ func (q *Queries) SumChatWakeupRunCountsSince(ctx context.Context, arg SumChatWa
 const sumOrganizationWakeupChatCostMicrosSince = `-- name: SumOrganizationWakeupChatCostMicrosSince :one
 SELECT COALESCE(SUM(cm.total_cost_micros), 0)::bigint
 FROM chat_messages cm
-WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organization_id = $1::uuid)
-    AND cm.created_at >= $2::timestamptz
+WHERE cm.chat_id IN (
+        SELECT DISTINCT u.chat_id
+        FROM chat_wakeup_run_counts u
+        WHERE u.organization_id = $1::uuid
+            AND u.hour >= $2::timestamptz
+    )
+    AND cm.created_at >= $3::timestamptz
     AND cm.total_cost_micros IS NOT NULL
 `
 
 type SumOrganizationWakeupChatCostMicrosSinceParams struct {
 	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+	RunsSince      time.Time `db:"runs_since" json:"runs_since"`
 	Since          time.Time `db:"since" json:"since"`
 }
 
-// Sums the spend of the chats of the organization that have a wake-up, so
-// chats that only humans drive do not count.
+// Sums the spend since since of the chats of the organization that have a
+// delivered wake-up run in an hour bucket from runs_since on, so chats that
+// only humans drive do not count.
 func (q *Queries) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, sumOrganizationWakeupChatCostMicrosSince, arg.OrganizationID, arg.Since)
+	row := q.db.QueryRowContext(ctx, sumOrganizationWakeupChatCostMicrosSince, arg.OrganizationID, arg.RunsSince, arg.Since)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err

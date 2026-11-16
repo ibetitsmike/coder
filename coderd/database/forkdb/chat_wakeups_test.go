@@ -306,7 +306,9 @@ func TestSumChatCostMicrosSince(t *testing.T) {
 	since := now.Add(-24 * time.Hour)
 
 	looping := wakeupTestChat(t, db)
-	insertDelayWakeup(ctx, t, fdb, looping, forkdb.ChatWakeupStatusCompleted, now)
+	loopingWakeup := insertDelayWakeup(ctx, t, fdb, looping, forkdb.ChatWakeupStatusCompleted, now)
+	runsSince := since.UTC().Truncate(time.Hour)
+	require.NoError(t, fdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{WakeupID: loopingWakeup.ID, Hour: runsSince}))
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 300, Valid: true}, now.Add(-time.Hour), false)
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 200, Valid: true}, now.Add(-2*time.Hour), true)
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{}, now.Add(-time.Hour), false)
@@ -319,13 +321,22 @@ func TestSumChatCostMicrosSince(t *testing.T) {
 		LastModelConfigID: looping.LastModelConfigID,
 	})
 	insertCostMessage(ctx, t, db, sqlDB, human, sql.NullInt64{Int64: 7000, Valid: true}, now.Add(-time.Hour), false)
+	// A chat whose wake-up last ran before the window does not count either.
+	stale := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    looping.OrganizationID,
+		OwnerID:           looping.OwnerID,
+		LastModelConfigID: looping.LastModelConfigID,
+	})
+	staleWakeup := insertDelayWakeup(ctx, t, fdb, stale, forkdb.ChatWakeupStatusCompleted, now)
+	require.NoError(t, fdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{WakeupID: staleWakeup.ID, Hour: runsSince.Add(-time.Hour)}))
+	insertCostMessage(ctx, t, db, sqlDB, stale, sql.NullInt64{Int64: 9000, Valid: true}, now.Add(-time.Hour), false)
 
 	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: looping.ID, Since: since})
 	require.NoError(t, err)
 	require.EqualValues(t, 500, spend, "deleted messages count, NULL costs and older messages do not")
-	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: looping.OrganizationID, Since: since})
+	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: looping.OrganizationID, RunsSince: runsSince, Since: since})
 	require.NoError(t, err)
-	require.EqualValues(t, 500, spend, "only chats with a wake-up count")
+	require.EqualValues(t, 500, spend, "only chats with a wake-up run in the window count")
 
 	empty := wakeupTestChat(t, db)
 	spend, err = fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: empty.ID, Since: since})
