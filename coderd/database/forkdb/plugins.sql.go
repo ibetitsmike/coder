@@ -113,13 +113,21 @@ func (q *Queries) ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLi
 }
 
 const deleteExpiredPluginLinkCodes = `-- name: DeleteExpiredPluginLinkCodes :execrows
-DELETE FROM plugin_link_codes WHERE expires_at < now()
+WITH expired AS (
+    SELECT code_hash
+    FROM plugin_link_codes
+    WHERE expires_at < now()
+    LIMIT $1::int
+)
+DELETE FROM plugin_link_codes
+USING expired
+WHERE plugin_link_codes.code_hash = expired.code_hash
 `
 
-// Deletes the link codes past their expiry, on the database clock that
-// ConsumePluginLinkCode checks. A code nobody entered stays until then.
-func (q *Queries) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteExpiredPluginLinkCodes)
+// Deletes a batch of the link codes past their expiry, on the database clock
+// that ConsumePluginLinkCode checks. A code nobody entered stays until then.
+func (q *Queries) DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteExpiredPluginLinkCodes, limitCount)
 	if err != nil {
 		return 0, err
 	}

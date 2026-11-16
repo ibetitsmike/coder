@@ -271,8 +271,8 @@ func TestForkQuerier(t *testing.T) {
 			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(4))
 		},
 		"DeleteExpiredPluginLinkCodes": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			fdb.EXPECT().DeleteExpiredPluginLinkCodes(gomock.Any()).Return(int64(5), nil).AnyTimes()
-			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(5))
+			fdb.EXPECT().DeleteExpiredPluginLinkCodes(gomock.Any(), int32(1000)).Return(int64(5), nil).AnyTimes()
+			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(5))
 		},
 		"LockChatForNoKeyUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})

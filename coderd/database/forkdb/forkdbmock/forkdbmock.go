@@ -261,18 +261,18 @@ func (mr *MockStoreMockRecorder) DeleteChatSubagentMessagesBefore(ctx, arg any) 
 }
 
 // DeleteExpiredPluginLinkCodes mocks base method.
-func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+func (m *MockStore) DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpiredPluginLinkCodes", ctx)
+	ret := m.ctrl.Call(m, "DeleteExpiredPluginLinkCodes", ctx, limitCount)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DeleteExpiredPluginLinkCodes indicates an expected call of DeleteExpiredPluginLinkCodes.
-func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx any) *gomock.Call {
+func (mr *MockStoreMockRecorder) DeleteExpiredPluginLinkCodes(ctx, limitCount any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPluginLinkCodes", reflect.TypeOf((*MockStore)(nil).DeleteExpiredPluginLinkCodes), ctx, limitCount)
 }
 
 // DeleteOldChatSecretAnswers mocks base method.

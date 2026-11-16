@@ -130,10 +130,18 @@ RETURNING *;
 -- name: DeletePluginLinkCodesByUser :exec
 DELETE FROM plugin_link_codes WHERE plugin_id = @plugin_id AND user_id = @user_id;
 
--- Deletes the link codes past their expiry, on the database clock that
--- ConsumePluginLinkCode checks. A code nobody entered stays until then.
+-- Deletes a batch of the link codes past their expiry, on the database clock
+-- that ConsumePluginLinkCode checks. A code nobody entered stays until then.
 -- name: DeleteExpiredPluginLinkCodes :execrows
-DELETE FROM plugin_link_codes WHERE expires_at < now();
+WITH expired AS (
+    SELECT code_hash
+    FROM plugin_link_codes
+    WHERE expires_at < now()
+    LIMIT @limit_count::int
+)
+DELETE FROM plugin_link_codes
+USING expired
+WHERE plugin_link_codes.code_hash = expired.code_hash;
 
 -- Relinking an external identity to another user clears the active chat so
 -- replies never reach a chat the new user does not own.

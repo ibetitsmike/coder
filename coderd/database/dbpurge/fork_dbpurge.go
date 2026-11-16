@@ -39,7 +39,9 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 		run  func(context.Context) (int64, error)
 	}{
 		{"chat wake-up run counts", ftx.DeleteOldChatWakeupRunCounts},
-		{"plugin link codes", ftx.DeleteExpiredPluginLinkCodes},
+		{"plugin link codes", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteExpiredPluginLinkCodes(ctx, forkPurgeBatchSize)
+		}},
 		{"chat wake-ups", func(ctx context.Context) (int64, error) {
 			return ftx.DeleteOldChatWakeups(ctx, forkPurgeBatchSize)
 		}},

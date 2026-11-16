@@ -165,11 +165,11 @@ func (f *forkQuerier) DeleteOldWorkflowRuns(ctx context.Context, limitCount int3
 	return f.db.DeleteOldWorkflowRuns(ctx, limitCount)
 }
 
-func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+func (f *forkQuerier) DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return 0, err
 	}
-	return f.db.DeleteExpiredPluginLinkCodes(ctx)
+	return f.db.DeleteExpiredPluginLinkCodes(ctx, limitCount)
 }
 
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {

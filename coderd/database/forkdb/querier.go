@@ -53,9 +53,9 @@ type Querier interface {
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	DeleteChatSubagentMessagesBefore(ctx context.Context, arg DeleteChatSubagentMessagesBeforeParams) error
-	// Deletes the link codes past their expiry, on the database clock that
-	// ConsumePluginLinkCode checks. A code nobody entered stays until then.
-	DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error)
+	// Deletes a batch of the link codes past their expiry, on the database clock
+	// that ConsumePluginLinkCode checks. A code nobody entered stays until then.
+	DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)

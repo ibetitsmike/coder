@@ -287,9 +287,9 @@ func (f forkQueryMetricsStore) DeleteOldWorkflowRuns(ctx context.Context, limitC
 	return f.s.DeleteOldWorkflowRuns(ctx, limitCount)
 }
 
-func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context) (int64, error) {
+func (f forkQueryMetricsStore) DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error) {
 	defer f.observe(ctx, "DeleteExpiredPluginLinkCodes", time.Now())
-	return f.s.DeleteExpiredPluginLinkCodes(ctx)
+	return f.s.DeleteExpiredPluginLinkCodes(ctx, limitCount)
 }
 
 func (f forkQueryMetricsStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
