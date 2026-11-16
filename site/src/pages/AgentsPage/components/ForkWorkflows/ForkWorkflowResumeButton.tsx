@@ -14,13 +14,11 @@ type ForkWorkflowResumeButtonProps = {
 	runId: string;
 	/** The chat whose composer the request lands in. */
 	chatId: string;
-	/** Accessible name, so the card and the panel can differ. */
-	label?: string;
 };
 
 export const ForkWorkflowResumeButton: React.FC<
 	ForkWorkflowResumeButtonProps
-> = ({ runId, chatId, label = "Resume run" }) => (
+> = ({ runId, chatId }) => (
 	<Button
 		variant="outline"
 		size="sm"
@@ -29,6 +27,6 @@ export const ForkWorkflowResumeButton: React.FC<
 		}
 	>
 		<PlayIcon />
-		{label}
+		Resume run
 	</Button>
 );

@@ -149,40 +149,35 @@ export const StartedThenCompleted: Story = {
 };
 
 /**
- * Seeds the cache the live card's controls read: the chat's cached copy and
- * its update check. The withQuery decorator's staleTime is Infinity, so the
- * seeds are served without a fetch.
+ * Each story lists its own cache seeds (the chat's cached copy and its update
+ * check) so the state the story depends on is visible in the story. The
+ * withQuery decorator's staleTime is Infinity, so the seeds are served
+ * without a fetch.
  */
-const liveCardQueryParameters = (canUpdateChat: boolean) => ({
-	queries: [
-		{
-			key: chatEntityKey(MockForkWorkflowChatId),
-			data: { ...MockChat, id: MockForkWorkflowChatId },
-		},
-		{
-			key: getAuthorizationKey({
-				checks: {
-					canUpdateChat: {
-						object: {
-							resource_type: "chat",
-							owner_id: MockChat.owner_id,
-							organization_id: MockChat.organization_id,
-						},
-						action: "update",
-					},
+const chatQuery = {
+	key: chatEntityKey(MockForkWorkflowChatId),
+	data: { ...MockChat, id: MockForkWorkflowChatId },
+};
+
+const canUpdateChatQuery = (canUpdateChat: boolean) => ({
+	key: getAuthorizationKey({
+		checks: {
+			canUpdateChat: {
+				object: {
+					resource_type: "chat",
+					owner_id: MockChat.owner_id,
+					organization_id: MockChat.organization_id,
 				},
-			}),
-			data: { canUpdateChat },
+				action: "update",
+			},
 		},
-	],
+	}),
+	data: { canUpdateChat },
 });
 
-const liveCardParameters = (canUpdateChat: boolean) => ({
-	...liveCardQueryParameters(canUpdateChat),
-	reactRouter: reactRouterParameters({
-		location: { pathParams: { agentId: MockForkWorkflowChatId } },
-		routing: { path: "/agents/:agentId" },
-	}),
+const liveCardReactRouter = reactRouterParameters({
+	location: { pathParams: { agentId: MockForkWorkflowChatId } },
+	routing: { path: "/agents/:agentId" },
 });
 
 const mockRunningLiveDetail: WorkflowRunDetail = {
@@ -238,7 +233,10 @@ export const StillRunningWithStop: Story = {
 			result: undefined,
 		},
 	},
-	parameters: liveCardParameters(true),
+	parameters: {
+		queries: [chatQuery, canUpdateChatQuery(true)],
+		reactRouter: liveCardReactRouter,
+	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
 			data: mockRunningLiveDetail,
@@ -265,7 +263,10 @@ export const InterruptedWithResume: Story = {
 			result: undefined,
 		},
 	},
-	parameters: liveCardParameters(true),
+	parameters: {
+		queries: [chatQuery, canUpdateChatQuery(true)],
+		reactRouter: liveCardReactRouter,
+	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
 			data: { ...mockRunningLiveDetail, status: "interrupted" },
@@ -291,7 +292,10 @@ export const NoWriteAccess: Story = {
 			result: undefined,
 		},
 	},
-	parameters: liveCardParameters(false),
+	parameters: {
+		queries: [chatQuery, canUpdateChatQuery(false)],
+		reactRouter: liveCardReactRouter,
+	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
 			data: mockRunningLiveDetail,

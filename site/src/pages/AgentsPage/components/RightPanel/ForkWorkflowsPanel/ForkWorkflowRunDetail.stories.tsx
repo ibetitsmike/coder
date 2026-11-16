@@ -152,9 +152,9 @@ export const Interrupted: Story = {
 };
 
 /**
- * Overrides the meta's granted update check, e.g. to hide the controls.
- * Story-level queries replace the meta-level array, so the chat seed the
- * update check reads comes along.
+ * Each story lists its own cache seeds so the state the story depends on is
+ * visible in the story: the chat's cached copy and its update check. The
+ * update check reads the chat seed, so both entries come along.
  */
 const writeAccessQueryParameters = (canUpdateChat: boolean) => ({
 	queries: [

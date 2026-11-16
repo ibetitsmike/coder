@@ -17,7 +17,10 @@ describe("ForkWorkflowResumeButton", () => {
 		await user.click(screen.getByRole("button", { name: "Resume run" }));
 
 		expect(dispatchEvent).toHaveBeenCalledTimes(1);
-		const event = dispatchEvent.mock.calls[0][0] as CustomEvent;
+		const event = dispatchEvent.mock.calls[0][0];
+		if (!(event instanceof CustomEvent)) {
+			return expect.fail("the dispatched event is not a CustomEvent");
+		}
 		expect(event.type).toBe(FORK_WORKFLOW_RESUME_EVENT);
 		expect(event.detail).toEqual({
 			chatId: "chat-1",
@@ -25,7 +28,7 @@ describe("ForkWorkflowResumeButton", () => {
 		});
 	});
 
-	it("does not prefill twice for the same run", async () => {
+	it("prefills once per run and ignores a double click", async () => {
 		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
 		renderComponent(<ForkWorkflowResumeButton runId="run-2" chatId="chat-1" />);
 		const user = userEvent.setup();
@@ -33,22 +36,6 @@ describe("ForkWorkflowResumeButton", () => {
 
 		await user.click(button);
 		await user.click(button);
-
-		expect(dispatchEvent).toHaveBeenCalledTimes(1);
-	});
-
-	it("uses the custom label as the accessible name", async () => {
-		const dispatchEvent = vi.spyOn(window, "dispatchEvent");
-		renderComponent(
-			<ForkWorkflowResumeButton
-				runId="run-3"
-				chatId="chat-1"
-				label="Resume workflow"
-			/>,
-		);
-		const user = userEvent.setup();
-
-		await user.click(screen.getByRole("button", { name: "Resume workflow" }));
 
 		expect(dispatchEvent).toHaveBeenCalledTimes(1);
 	});

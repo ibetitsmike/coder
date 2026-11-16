@@ -97,7 +97,9 @@ describe("ForkWorkflowRunDetail", () => {
 		const dispatchSpy = vi
 			.spyOn(window, "dispatchEvent")
 			.mockImplementation((event: Event) => {
-				dispatched.push(event as CustomEvent);
+				if (event instanceof CustomEvent) {
+					dispatched.push(event);
+				}
 				return true;
 			});
 		const user = userEvent.setup();
