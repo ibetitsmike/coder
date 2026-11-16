@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -60,6 +61,8 @@ func (api *API) forkOrganizationAgentDefinitions(rw http.ResponseWriter, r *http
 func (api *API) postForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	organization := httpmw.OrganizationParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "organization_agent_definition", forkAuditCreate)
+	defer commitAudit()
 	content, def, ok := readForkAgentDefinitionCreate(ctx, rw, r)
 	if !ok {
 		return
@@ -84,6 +87,8 @@ func (api *API) postForkOrganizationAgentDefinition(rw http.ResponseWriter, r *h
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(organization, row.ID, row.Name)
+	fa.diff(nil, forkAuditAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -120,10 +125,13 @@ func (api *API) forkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "organization_agent_definition", forkAuditUpdate)
+	defer commitAudit()
 	current, ok := api.readForkOrganizationAgentDefinition(rw, r)
 	if !ok {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), current.ID, current.Name)
 	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
 	if !ok {
 		return
@@ -143,6 +151,7 @@ func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.diff(forkAuditAgentDefinition(current), forkAuditAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
 
@@ -157,13 +166,16 @@ func (api *API) patchForkOrganizationAgentDefinition(rw http.ResponseWriter, r *
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkOrganizationAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "organization_agent_definition", forkAuditDelete)
+	defer commitAudit()
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), uuid.Nil, chi.URLParam(r, "agentDefinition"))
 	// Delete authorizes before reading so that delete-only API key scopes
 	// work. A caller who can neither delete nor read gets 404.
-	_, err := fdb.DeleteOrganizationAgentDefinitionByName(ctx, forkdb.DeleteOrganizationAgentDefinitionByNameParams{
+	deleted, err := fdb.DeleteOrganizationAgentDefinitionByName(ctx, forkdb.DeleteOrganizationAgentDefinitionByNameParams{
 		OrganizationID: httpmw.OrganizationParam(r).ID,
 		Name:           chi.URLParam(r, "agentDefinition"),
 	})
@@ -176,7 +188,22 @@ func (api *API) deleteForkOrganizationAgentDefinition(rw http.ResponseWriter, r 
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(httpmw.OrganizationParam(r), deleted.ID, deleted.Name)
+	fa.diff(forkAuditAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// forkAuditAgentDefinition is the audit view of an organization agent
+// definition.
+func forkAuditAgentDefinition(row forkdb.AgentDefinition) any {
+	return struct {
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		Content     string           `json:"content"`
+		Enabled     bool             `json:"enabled"`
+		GroupACL    database.ChatACL `json:"group_acl"`
+		UserACL     database.ChatACL `json:"user_acl"`
+	}{row.Name, row.Description, row.Content, row.Enabled, row.GroupAcl, row.UserAcl}
 }
 
 // readForkOrganizationAgentDefinition reads the organization definition
