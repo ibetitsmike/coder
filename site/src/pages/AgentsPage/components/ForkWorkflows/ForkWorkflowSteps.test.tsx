@@ -123,9 +123,6 @@ describe("ForkWorkflowSteps", () => {
 			},
 		]);
 
-		// The third step is the re-entered plan group, so it must read as
-		// plan again, not as the build step it follows. Swapping the first
-		// plan step and the build step would fail this assertion.
 		const [planStep, buildStep, reenteredPlanStep] =
 			stepList.getAllByRole("listitem");
 		expect(planStep).toHaveAccessibleDescription("plan");
