@@ -485,7 +485,9 @@ func TestWakeupPullRequestReadFailures(t *testing.T) {
 
 			worker.pollOnce(ctx, tc.wantNext.Add(-time.Second))
 			require.Equal(t, 1, fake.callCount(), "no read before the retry")
-			worker.pollOnce(ctx, tc.wantNext)
+			// The retry may sit past wantNext by the time the pass took, so the
+			// read is expected a second later.
+			worker.pollOnce(ctx, tc.wantNext.Add(time.Second))
 			require.Equal(t, 2, fake.callCount(), "a read at the retry")
 		})
 	}
