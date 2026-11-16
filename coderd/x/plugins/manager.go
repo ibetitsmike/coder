@@ -9,6 +9,13 @@
 // another replica holds an enabled plugin, so it can take over an expired
 // lease. With no enabled plugin it waits for a plugins:changed message and
 // checks once every idle interval in case a message was lost.
+//
+// Each runner keeps a delivery cursor per bound chat. A runner binds every
+// chat of its linked users when it subscribes to a new user, after a link
+// is created, and once every bind interval as a fallback. A created chat
+// watch event binds that one chat. The scan every scan interval finds due
+// chats, and binds every chat only after a full bind failed or pubsub
+// dropped chat watch events.
 package plugins
 
 import (
