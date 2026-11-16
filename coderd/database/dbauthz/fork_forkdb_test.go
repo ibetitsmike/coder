@@ -441,17 +441,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().MarkChatWakeupWatchFailed(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
-		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := testutil.Fake(t, faker, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID})
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().CountChatWakeupRunsSince(gomock.Any(), arg).Return(int64(4), nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(4))
-		},
-		"CountOrganizationChatWakeupRunsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.CountOrganizationChatWakeupRunsSinceParams{})
-			fdb.EXPECT().CountOrganizationChatWakeupRunsSince(gomock.Any(), arg).Return(int64(9), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(9))
+		"SumChatWakeupRunCountsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.SumChatWakeupRunCountsSinceParams{})
+			row := forkdb.SumChatWakeupRunCountsSinceRow{ChatRuns: 4, OrganizationRuns: 9}
+			fdb.EXPECT().SumChatWakeupRunCountsSince(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(row)
 		},
 		"SumChatCostMicrosSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
