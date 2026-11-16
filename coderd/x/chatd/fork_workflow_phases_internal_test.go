@@ -96,8 +96,11 @@ func TestForkWorkflowPhases(t *testing.T) {
 		f := newForkWorkflowFixture(t)
 		ctx := chatdTestContext(t)
 		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
-		// A script that re-enters its current phase in a loop is a no-op: it
-		// must not journal a write per call.
+		// Count the phase journal writes while the run is live: a script that
+		// re-enters its current phase in a loop is a no-op and must not
+		// journal a write per call.
+		counting, restore := countPhaseWrites(t, f.server)
+		defer restore()
 		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
 PHASES = ["plan"]
 
@@ -109,11 +112,19 @@ def main(args):
 `})
 		steps := f.steps(ctx, t, run, 1)
 		assert.Equal(t, "plan", steps[0].Phase)
+		// The declared PHASES write at Init and the first phase() call reach
+		// a new phase each, so exactly two journal writes happened before the
+		// step spawned; the 50 re-entries added none.
+		writes := counting.phaseWrites.Load()
+		assert.EqualValues(t, 2, writes, "re-entering the current phase skips the journal write")
 		f.report(ctx, t, steps[0].ChatID, `{"text":"done"}`)
 		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, run))
 		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
 		assert.Equal(t, []string{"plan"}, res.Phases)
 		assert.Equal(t, "plan", res.CurrentPhase)
+		// The end-of-run status write carries the phases but must not add a
+		// phase write of its own.
+		assert.EqualValues(t, 2, counting.phaseWrites.Load(), "the loop added no journal writes")
 	})
 
 	t.Run("UndeclaredNameIsAcceptedAndAppended", func(t *testing.T) {
