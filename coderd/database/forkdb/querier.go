@@ -88,7 +88,8 @@ type Querier interface {
 	// coderd/x/chatd derives it.
 	GetChatSubagentTypesByChatIDs(ctx context.Context, chatIds []uuid.UUID) ([]GetChatSubagentTypesByChatIDsRow, error)
 	GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]ChatSubagent, error)
-	// Returns every descendant of @root_id through parent_chat_id, leaves first.
+	// Returns every descendant of @root_id through parent_chat_id, leaves first,
+	// with its status, so that a cascade needs no read per descendant.
 	// The depth guard stops the walk if a cycle ever appears in the hierarchy.
 	GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]GetChatSubtreeIDsRow, error)
 	GetChatTodosByChatID(ctx context.Context, chatID uuid.UUID) (ChatTodo, error)
