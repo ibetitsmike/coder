@@ -538,7 +538,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			unread := wakeup.ExpiresAt.Valid && event.PolledAt.Before(wakeup.ExpiresAt.Time)
 			_, canWait := eventsFinalRetry(wakeup, now, now.Add(eventsPollInterval))
 			// The pull request poller fired the watch with its message.
-			if next == nil && watch.FiredAt.Valid && !(unread && canWait) && (polled || !watch.FailedAt.Valid) {
+			if next == nil && watch.FiredAt.Valid && (!unread || !canWait) && (polled || !watch.FailedAt.Valid) {
 				var fired pullRequestFired
 				if err := json.Unmarshal(watch.FiredPayload.RawMessage, &fired); err == nil && fired.Text != "" {
 					next = &wakeupDelivery{
