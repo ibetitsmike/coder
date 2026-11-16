@@ -19,6 +19,11 @@
 // watch event binds that one chat. The scan every scan interval finds due
 // chats, and binds every chat only after a full bind failed or pubsub
 // dropped chat watch events.
+//
+// A runner that stops with an error keeps its lease, and the Manager starts
+// the plugin again after 10 seconds, doubled for each failure in a row up to
+// 10 minutes. A runner that stayed up for 5 minutes resets the count. The
+// delay is stored in last_error. A changed plugin starts at once.
 package plugins
 
 import (
@@ -274,15 +279,28 @@ func (m *Manager) reconcile(ctx context.Context) bool {
 		}
 		p := *l.plugin
 		prev, ok := m.runners[p.ID]
-		if ok && !prev.exited() && prev.plugin.UpdatedAt.Equal(p.UpdatedAt) {
-			continue
+		// A changed plugin starts at once with no failures counted.
+		failures := 0
+		if ok && prev.plugin.UpdatedAt.Equal(p.UpdatedAt) {
+			if !prev.exited() {
+				continue
+			}
+			if !prev.restartAt.IsZero() {
+				// It stopped with an error: keep the lease and wait out the
+				// backoff, so a crashing host does not reload and recompile
+				// the module every lease interval.
+				if m.clock.Now().Before(prev.restartAt) {
+					continue
+				}
+				failures = prev.failures + 1
+			}
 		}
 		if ok {
 			prev.stop()
 		}
 		// The new runner waits for the previous one to exit, so two
 		// host processes never run the same plugin at once.
-		m.runners[p.ID] = m.startRunner(p, prev)
+		m.runners[p.ID] = m.startRunner(p, prev, failures)
 	}
 	for id, r := range m.runners {
 		if _, ok := keep[id]; !ok {
