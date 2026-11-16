@@ -13280,7 +13280,9 @@ export interface WorkflowRunDetail {
 	readonly title: string;
 	readonly script: string;
 	/**
-	 * Args is the JSON object that main(args) received.
+	 * Args is the JSON value that main(args) received: an object for a
+	 * workflow called with an object, but any JSON value verbatim when
+	 * the caller passed an array, string, number or boolean.
 	 */
 	readonly args?: unknown;
 	/**

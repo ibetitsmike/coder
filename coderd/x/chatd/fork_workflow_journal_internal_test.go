@@ -635,11 +635,22 @@ def main(args):
 		closing := run.flushClosing
 		run.journalMu.Unlock()
 		require.True(t, closing, "cancelLogFlush must set the closing flag")
+		// A line that lands while the terminal flush waits for the held
+		// token must not wake a fallback either: the closing flag must
+		// keep every path quiet even though the last attempt is now
+		// stale by construction. Without the flag, the immediate attempt
+		// drops on the token and arms a fallback that outlives the run.
+		run.journalMu.Lock()
+		run.lastLogFlush = time.Now().Add(-2 * workflowLogFlushInterval)
+		run.journalMu.Unlock()
+		run.mu.Lock()
+		run.appendLineLocked("late line")
+		run.mu.Unlock()
 		// The stop answered from its timeout, not from the unwinding run:
 		// the terminal flush still waits for the held token. Give it
 		// back, and the final write lands. The stop also failed the
 		// agent step, so the terminal write carries the stop failure
-		// line with the two script lines.
+		// line with the two script lines and the late one.
 		stopLine := `step "Never reports." failed: ` + workflowStopError
 		release()
 		require.Eventually(t, func() bool {
@@ -649,7 +660,7 @@ def main(args):
 			}
 			logs, _, _ := restoreWorkflowLogs(row.Logs)
 			return assert.ObjectsAreEqual(
-				[]string{"first line", "second line", stopLine}, logs)
+				[]string{"first line", "second line", stopLine, "late line"}, logs)
 		}, 30*time.Second, testutil.IntervalFast)
 
 		// Three full intervals after the end: a leaked fallback would
@@ -869,8 +880,8 @@ def main(args):
 		run.logFlushInFlight = false
 		run.journalMu.Unlock()
 		// Release the token: the waiting terminal flush takes it. The
-		// helper's cleanup must not send a second token, so re-take it
-		// for the cleanup to release.
+		// helper's once-guarded release makes the cleanup send a no-op,
+		// so the re-take below just restores the cleanup's ownership.
 		release()
 		holdJournalWriteToken(t, run)
 

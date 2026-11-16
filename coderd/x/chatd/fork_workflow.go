@@ -931,11 +931,14 @@ func (r *workflowRun) scheduleLogFlush() {
 				pending = false
 			}
 			r.journalMu.Unlock()
-			// Lines that landed while the write was in flight dropped
-			// their own request, so a flush that actually wrote re-arms
-			// one for them. A closing run must not re-arm: its
-			// terminal flush already carried the burst.
-			if outcome == flushWrote && pending && !closing {
+			// Lines that landed while the write was in flight dropped their
+			// own request, so a completed flush re-arms one for them. A
+			// token miss is the exception: it already armed the paced
+			// fallback above. rearmLogFlush re-checks the pending seq under
+			// journalMu, so a nothing-pending outcome re-arms nothing and
+			// this cannot loop. A closing run re-arms nothing: its terminal
+			// flush already carried the burst.
+			if outcome != flushMissedToken && pending && !closing {
 				r.rearmLogFlush()
 			}
 		}()
@@ -961,8 +964,14 @@ func (r *workflowRun) armLogFlushTimerLocked() {
 		wait = time.Nanosecond
 	}
 	r.logFlushTimer = time.AfterFunc(wait, func() {
+		now := time.Now()
 		r.journalMu.Lock()
 		r.logFlushTimer = nil
+		// The attempt is the timer firing, not the write: the flush
+		// below may write (or drop) at once, so a line that lands
+		// right after the write must pace to the next interval and
+		// not start a second write back to back.
+		r.lastLogFlush = now
 		r.journalMu.Unlock()
 		outcome := r.flushLogs(false)
 		if outcome == flushWrote {
@@ -975,15 +984,15 @@ func (r *workflowRun) armLogFlushTimerLocked() {
 			// run for nothing.
 			return
 		}
-		// The holder may still own the token when this fires. Stamp the
-		// attempt and arm one more paced timer, or the pending lines
-		// would stay unjournaled until the next log() or the end of the
-		// run. Each re-arm paces to the interval, so this cannot spin on
-		// the holder. A closing run re-arms nothing: cancelLogFlush set
-		// the flag, and its terminal flush carries the lines.
+		// The holder may still own the token when this fires. Arm one
+		// more paced timer, or the pending lines would stay unjournaled
+		// until the next log() or the end of the run. The firing above
+		// already stamped the attempt, so each re-arm paces to the
+		// interval and this cannot spin on the holder. A closing run
+		// re-arms nothing: cancelLogFlush set the flag, and its
+		// terminal flush carries the lines.
 		r.journalMu.Lock()
 		if !r.flushClosing {
-			r.lastLogFlush = time.Now()
 			r.armLogFlushTimerLocked()
 		}
 		r.journalMu.Unlock()
