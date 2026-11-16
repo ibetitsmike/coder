@@ -299,6 +299,73 @@ func TestPluginLeases(t *testing.T) {
 	require.Equal(t, forkdb.GetPluginLeaseSummaryRow{}, summary(runnerA), "no enabled plugin leaves nothing to do")
 }
 
+// TestPluginChatBindingOneChat checks that EnsurePluginChatBinding binds the
+// one chat it names, with the same rules and cursor as
+// EnsurePluginChatBindings.
+func TestPluginChatBindingOneChat(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitMedium)
+
+	org := dbgen.Organization(t, db, database.Organization{})
+	otherOrg := dbgen.Organization(t, db, database.Organization{})
+	user := dbgen.User(t, db, database.User{})
+	modelCfg := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{})
+	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
+	plugin := dbgen.Plugin(t, db, forkdb.Plugin{OrganizationID: org.ID, FileID: file.ID, CreatedBy: user.ID, Enabled: true})
+	newChat := func(orgID uuid.UUID, parent uuid.NullUUID) database.Chat {
+		return dbgen.Chat(t, db, database.Chat{
+			OrganizationID:    orgID,
+			OwnerID:           user.ID,
+			LastModelConfigID: modelCfg.ID,
+			ParentChatID:      parent,
+			RootChatID:        parent,
+		})
+	}
+
+	oldChat := newChat(org.ID, uuid.NullUUID{})
+	oldLast := dbgen.ChatMessage(t, db, database.ChatMessage{ChatID: oldChat.ID, Role: database.ChatMessageRoleAssistant})
+	_, err := fdb.UpsertPluginUserLink(ctx, forkdb.UpsertPluginUserLinkParams{PluginID: plugin.ID, ExternalID: "+15550100", UserID: user.ID})
+	require.NoError(t, err)
+	freshChat := newChat(org.ID, uuid.NullUUID{})
+	childChat := newChat(org.ID, uuid.NullUUID{UUID: freshChat.ID, Valid: true})
+	otherOrgChat := newChat(otherOrg.ID, uuid.NullUUID{})
+	archivedChat := newChat(org.ID, uuid.NullUUID{})
+	_, err = db.ArchiveChatByID(ctx, archivedChat.ID)
+	require.NoError(t, err)
+
+	bound := func() map[uuid.UUID]int64 {
+		rows, err := sqlDB.QueryContext(ctx,
+			"SELECT chat_id, sent_message_id FROM chatd.plugin_chat_bindings WHERE plugin_id = $1", plugin.ID)
+		require.NoError(t, err)
+		defer rows.Close()
+		got := map[uuid.UUID]int64{}
+		for rows.Next() {
+			var chatID uuid.UUID
+			var sent int64
+			require.NoError(t, rows.Scan(&chatID, &sent))
+			got[chatID] = sent
+		}
+		require.NoError(t, rows.Err())
+		return got
+	}
+	bind := func(chatID uuid.UUID) {
+		require.NoError(t, fdb.EnsurePluginChatBinding(ctx, forkdb.EnsurePluginChatBindingParams{PluginID: plugin.ID, ChatID: chatID}))
+	}
+
+	bind(freshChat.ID)
+	require.Equal(t, map[uuid.UUID]int64{freshChat.ID: 0}, bound(), "only the named chat is bound")
+	for _, id := range []uuid.UUID{childChat.ID, otherOrgChat.ID, archivedChat.ID} {
+		bind(id)
+	}
+	require.Equal(t, map[uuid.UUID]int64{freshChat.ID: 0}, bound(), "child, other organization and archived chats are not bound")
+	bind(oldChat.ID)
+	bind(oldChat.ID)
+	require.Equal(t, map[uuid.UUID]int64{freshChat.ID: 0, oldChat.ID: oldLast.ID}, bound(), "a chat older than the link starts at its newest message")
+}
+
 func mustFrom(t *testing.T, db database.Store) forkdb.Store {
 	t.Helper()
 	fdb, err := forkdb.From(db)

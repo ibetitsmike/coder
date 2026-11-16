@@ -213,6 +213,13 @@ func (f *forkQuerier) DeleteUserAgentDefinitionByName(ctx context.Context, arg f
 	return f.db.DeleteUserAgentDefinitionByName(ctx, arg)
 }
 
+func (f *forkQuerier) EnsurePluginChatBinding(ctx context.Context, arg forkdb.EnsurePluginChatBindingParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceSystem); err != nil {
+		return err
+	}
+	return f.db.EnsurePluginChatBinding(ctx, arg)
+}
+
 func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceSystem); err != nil {
 		return err

@@ -450,6 +450,20 @@ func (mr *MockStoreMockRecorder) DeleteUserSavedWorkflowByName(ctx, arg any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).DeleteUserSavedWorkflowByName), ctx, arg)
 }
 
+// EnsurePluginChatBinding mocks base method.
+func (m *MockStore) EnsurePluginChatBinding(ctx context.Context, arg forkdb.EnsurePluginChatBindingParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnsurePluginChatBinding", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EnsurePluginChatBinding indicates an expected call of EnsurePluginChatBinding.
+func (mr *MockStoreMockRecorder) EnsurePluginChatBinding(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsurePluginChatBinding", reflect.TypeOf((*MockStore)(nil).EnsurePluginChatBinding), ctx, arg)
+}
+
 // EnsurePluginChatBindings mocks base method.
 func (m *MockStore) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
 	m.ctrl.T.Helper()
