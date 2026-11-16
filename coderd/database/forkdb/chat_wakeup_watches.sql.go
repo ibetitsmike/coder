@@ -23,7 +23,6 @@ WITH due AS (
     JOIN chats c ON c.id = x.chat_id
     WHERE x.kind = 'pull_request'
         AND x.delivered_at IS NULL
-        AND x.fired_at IS NULL
         AND w.status = 'active'
         AND NOT c.archived
         AND COALESCE((x.spec->>'next_poll_at')::timestamptz, '-infinity') <= $1::timestamptz
@@ -37,10 +36,10 @@ claimed AS (
     SET spec = x.spec || jsonb_build_object('next_poll_at', $3::timestamptz)
     FROM due
     WHERE x.id = due.id
-    RETURNING x.id, x.wakeup_id, x.chat_id, x.pull_request_url, x.spec
+    RETURNING x.id, x.wakeup_id, x.chat_id, x.pull_request_url, x.spec, x.fired_at
 )
 SELECT claimed.id, claimed.wakeup_id, claimed.chat_id, claimed.pull_request_url, claimed.spec,
-    due.owner_id, due.expires_at AS wakeup_expires_at
+    claimed.fired_at, due.owner_id, due.expires_at AS wakeup_expires_at
 FROM claimed
 JOIN due ON due.id = claimed.id
 ORDER BY claimed.pull_request_url, due.owner_id, claimed.id
@@ -58,6 +57,7 @@ type ClaimDuePullRequestWatchesRow struct {
 	ChatID          uuid.UUID       `db:"chat_id" json:"chat_id"`
 	PullRequestUrl  sql.NullString  `db:"pull_request_url" json:"pull_request_url"`
 	Spec            json.RawMessage `db:"spec" json:"spec"`
+	FiredAt         sql.NullTime    `db:"fired_at" json:"fired_at"`
 	OwnerID         uuid.UUID       `db:"owner_id" json:"owner_id"`
 	WakeupExpiresAt sql.NullTime    `db:"wakeup_expires_at" json:"wakeup_expires_at"`
 }
@@ -65,8 +65,9 @@ type ClaimDuePullRequestWatchesRow struct {
 // Claims the open pull_request watches that the pull request poller of a
 // replica reads next: those of active wake-ups of unarchived chats whose
 // spec next_poll_at has come by @now, or that have none, and that no read
-// covered through the expiry of their wake-up yet. A watch that fired waits
-// for its delivery. The claim moves next_poll_at to @lease_until, so the
+// covered through the expiry of their wake-up yet. A watch that fired is
+// read on until its delivery, so the text it sends covers the activity up
+// to its last read. The claim moves next_poll_at to @lease_until, so the
 // poller of another replica skips the watch until the claimer records its
 // read or the lease runs out. The rows are sorted by pull request and chat
 // owner, the key of one shared read.
@@ -85,6 +86,7 @@ func (q *Queries) ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePu
 			&i.ChatID,
 			&i.PullRequestUrl,
 			&i.Spec,
+			&i.FiredAt,
 			&i.OwnerID,
 			&i.WakeupExpiresAt,
 		); err != nil {
@@ -521,13 +523,12 @@ const recordPullRequestWatchPoll = `-- name: RecordPullRequestWatchPoll :execrow
 UPDATE chat_wakeup_watches
 SET
     spec = spec || $1::jsonb,
-    fired_at = $2::timestamptz,
-    fired_payload = $3::jsonb
+    fired_at = COALESCE(fired_at, $2::timestamptz),
+    fired_payload = COALESCE($3::jsonb, fired_payload)
 WHERE id = $4::uuid
     AND wakeup_id = $5::uuid
     AND kind = 'pull_request'
     AND delivered_at IS NULL
-    AND fired_at IS NULL
 `
 
 type RecordPullRequestWatchPollParams struct {
@@ -539,9 +540,10 @@ type RecordPullRequestWatchPollParams struct {
 }
 
 // Records a read of the poller: merges @spec_patch into the spec of the
-// open pull_request watch, and with @fired_at also fires it with
-// @fired_payload, which makes it ready (chat_wakeup_ready_watches). No row
-// changes when the watch is delivered or fired already.
+// open pull_request watch, and with @fired_payload also stores the text of
+// the read. The first such read fires the watch at @fired_at, which makes it
+// ready (chat_wakeup_ready_watches), and a later one keeps that time and
+// replaces the text. No row changes when the watch is delivered.
 func (q *Queries) RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, recordPullRequestWatchPoll,
 		arg.SpecPatch,

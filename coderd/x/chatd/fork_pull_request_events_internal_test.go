@@ -530,6 +530,56 @@ func TestWakeupPullRequestAfterChild(t *testing.T) {
 	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
 }
 
+// A busy chat delays the delivery of a fired pull request. The poller reads
+// the fired watch on, so the message reports what happened until its last
+// read, not only what fired it, and the chat still gets one message.
+func TestWakeupPullRequestFiredTextStaysFresh(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, pullRequestEvents(pullRequestEventKinds, testHeadSHA, gitprovider.CheckStatePending)...)
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	first := gitprovider.PullRequestEvent{ID: 1, Author: "alice", URL: testPullRequestURL + "#issuecomment-1", CreatedAt: wakeupTestSlot.Add(-time.Minute)}
+	activity := openPullRequest(gitprovider.CheckStatePending)
+	activity.Comments = []gitprovider.PullRequestEvent{first}
+	fake := &fakePullRequestActivity{activity: activity}
+	worker.server.forkPullRequestActivity = fake.fetch
+	forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
+
+	now := wakeupTestSlot.Add(time.Second)
+	worker.pollAndWake(ctx, now)
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt), "a busy chat gets nothing yet")
+
+	// The pull request gets another comment and merges while the chat is
+	// busy.
+	second := gitprovider.PullRequestEvent{ID: 2, Author: "bob", URL: testPullRequestURL + "#issuecomment-2", CreatedAt: wakeupTestSlot.Add(30 * time.Second)}
+	activity.Comments = []gitprovider.PullRequestEvent{first, second}
+	activity.State = gitprovider.PRStateMerged
+	fake.set(activity, nil)
+	now = now.Add(pullRequestPollInterval + time.Second)
+	worker.pollAndWake(ctx, now)
+	require.Equal(t, 2, fake.callCount(), "the fired watch is read again")
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+
+	forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+	worker.wakeupOnce(ctx, now.Add(time.Second))
+	messages := f.wakeMessages(t, chat, wakeup.Prompt)
+	require.Len(t, messages, 1)
+	require.Contains(t, messages[0], first.URL)
+	require.Contains(t, messages[0], second.URL)
+	require.Contains(t, messages[0], "- state: merged")
+	require.Equal(t, []string{testPullRequestURL}, f.deliveredWatches(t, wakeup.ID))
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
+
+	// A delivered watch is not read again.
+	worker.pollAndWake(ctx, now.Add(2*pullRequestPollInterval))
+	require.Equal(t, 2, fake.callCount())
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+}
+
 // A final poll that delivers a done child reads the pull request once more
 // after that turn, and reports only what happened until the expiry.
 func TestWakeupFinalPollAfterChild(t *testing.T) {

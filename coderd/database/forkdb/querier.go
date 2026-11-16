@@ -25,8 +25,9 @@ type Querier interface {
 	// Claims the open pull_request watches that the pull request poller of a
 	// replica reads next: those of active wake-ups of unarchived chats whose
 	// spec next_poll_at has come by @now, or that have none, and that no read
-	// covered through the expiry of their wake-up yet. A watch that fired waits
-	// for its delivery. The claim moves next_poll_at to @lease_until, so the
+	// covered through the expiry of their wake-up yet. A watch that fired is
+	// read on until its delivery, so the text it sends covers the activity up
+	// to its last read. The claim moves next_poll_at to @lease_until, so the
 	// poller of another replica skips the watch until the claimer records its
 	// read or the lease runs out. The rows are sorted by pull request and chat
 	// owner, the key of one shared read.
@@ -262,9 +263,10 @@ type Querier interface {
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
 	// Records a read of the poller: merges @spec_patch into the spec of the
-	// open pull_request watch, and with @fired_at also fires it with
-	// @fired_payload, which makes it ready (chat_wakeup_ready_watches). No row
-	// changes when the watch is delivered or fired already.
+	// open pull_request watch, and with @fired_payload also stores the text of
+	// the read. The first such read fires the watch at @fired_at, which makes it
+	// ready (chat_wakeup_ready_watches), and a later one keeps that time and
+	// replaces the text. No row changes when the watch is delivered.
 	RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	// Renews the leases a replica holds on enabled plugins. It returns only the

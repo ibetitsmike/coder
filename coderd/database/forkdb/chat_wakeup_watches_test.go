@@ -332,6 +332,78 @@ func TestListReadyChatWakeupWatchesPlan(t *testing.T) {
 	}
 }
 
+// TestClaimDuePullRequestWatchesPlan checks that the claim of the pull
+// request poller, which every replica runs every 15 seconds, stays cheap
+// when ended wake-ups leave their pull request watches open: with 10,000 of
+// them, the claim takes only the watch of the active wake-up, and its plan
+// reads no table in full.
+func TestClaimDuePullRequestWatchesPlan(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
+
+	template := wakeupTestChat(t, db)
+	_, err := sqlDB.ExecContext(ctx, `
+		INSERT INTO chats
+		SELECT (jsonb_populate_record(c, jsonb_build_object('id', gen_random_uuid()))).*
+		FROM chats c, generate_series(1, 10000)
+		WHERE c.id = $1`, template.ID)
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, `
+		INSERT INTO chat_wakeups (id, chat_id, organization_id, created_by, source, kind, prompt, status, status_reason, expires_at)
+		SELECT gen_random_uuid(), c.id, c.organization_id, c.owner_id, 'wait_for_events', 'events', 'p',
+			(ARRAY['completed', 'canceled', 'paused']::chat_wakeup_status[])[1 + (row_number() OVER ()) % 3], 'done', now() + interval '1 hour'
+		FROM chats c
+		WHERE c.id <> $1`, template.ID)
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, `
+		INSERT INTO chat_wakeup_watches (id, wakeup_id, chat_id, organization_id, kind, ordinal, pull_request_url)
+		SELECT gen_random_uuid(), w.id, w.chat_id, w.organization_id, 'pull_request', 0, 'https://github.com/o/r/pull/1'
+		FROM chat_wakeups w`)
+	require.NoError(t, err)
+	live := insertEventsWakeup(ctx, t, fdb, template)
+	watch, err := fdb.InsertChatWakeupWatch(ctx, forkdb.InsertChatWakeupWatchParams{
+		ID: uuid.New(), WakeupID: live.ID, Kind: forkdb.ChatWakeupWatchKindPullRequest,
+		PullRequestUrl: sql.NullString{String: "https://github.com/o/r/pull/1", Valid: true}, Spec: json.RawMessage(`{}`), CreatedAt: dbtime.Now(),
+	})
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, "ANALYZE chats, chat_wakeups, chat_wakeup_watches")
+	require.NoError(t, err)
+
+	var count int
+	require.NoError(t, sqlDB.QueryRowContext(ctx, "SELECT count(*) FROM chat_wakeup_watches WHERE delivered_at IS NULL").Scan(&count))
+	require.Equal(t, 10001, count)
+
+	now := dbtime.Now()
+	var raw []byte
+	require.NoError(t, sqlDB.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+forkdb.ClaimDuePullRequestWatchesSQL, now, 25, now.Add(5*time.Minute)).Scan(&raw))
+	var plan []struct {
+		Plan planNode `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &plan))
+	require.Len(t, plan, 1)
+	var scans []string
+	plan[0].Plan.walk(func(node planNode) {
+		if node.NodeType != "Seq Scan" {
+			return
+		}
+		switch node.RelationName {
+		case "chat_wakeups", "chats", "chat_wakeup_watches":
+			scans = append(scans, node.RelationName)
+		}
+	})
+	require.Empty(t, scans, "sequential scans in plan:\n%s", raw)
+
+	claimed, err := fdb.ClaimDuePullRequestWatches(ctx, forkdb.ClaimDuePullRequestWatchesParams{
+		Now: now, LimitCount: 25, LeaseUntil: now.Add(5 * time.Minute),
+	})
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	require.Equal(t, watch.ID, claimed[0].ID)
+}
+
 type planNode struct {
 	NodeType     string     `json:"Node Type"`
 	RelationName string     `json:"Relation Name"`

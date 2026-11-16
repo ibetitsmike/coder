@@ -39,8 +39,11 @@ const (
 	// watches.
 	pullRequestPollerInterval = 15 * time.Second
 	// pullRequestPollerBatch is how many watches one claim takes. With
-	// maxPullRequestReads reads of at most pullRequestReadTimeout, a batch
-	// finishes within pullRequestPollerLease.
+	// maxPullRequestReads reads at once, a batch, and a group carried from
+	// it to the next claim, read well within pullRequestPollerLease unless
+	// most reads run into pullRequestReadTimeout. A watch read past its
+	// lease may be read again by another replica, which costs requests but
+	// sends no second message.
 	pullRequestPollerBatch = 25
 	// pullRequestPollerLease is how long a claimed watch is left to its
 	// claimer before the poller of another replica may read it.
@@ -209,22 +212,22 @@ func (p *Server) readPullRequest(ctx context.Context, fdb forkdb.Store, rows []f
 		return
 	}
 	for i, row := range rows {
-		patch := pullRequestPollPatch{ViewerLogin: activity.ViewerLogin, PolledAt: now}
-		text := pullRequestWakeupText(events[i], activity, row.WakeupExpiresAt.Time)
-		if text == "" {
-			patch.NextPollAt = now.Add(pullRequestPollInterval)
-			// The last read of the watch starts at its expiry, so it
-			// covers the whole lifetime.
-			if expiresAt := row.WakeupExpiresAt; expiresAt.Valid && now.Before(expiresAt.Time) && patch.NextPollAt.After(expiresAt.Time) {
-				patch.NextPollAt = expiresAt.Time
-			}
+		patch := pullRequestPollPatch{ViewerLogin: activity.ViewerLogin, PolledAt: now, NextPollAt: now.Add(pullRequestPollInterval)}
+		// The last read of the watch starts at its expiry, so it covers the
+		// whole lifetime.
+		if expiresAt := row.WakeupExpiresAt; expiresAt.Valid && now.Before(expiresAt.Time) && patch.NextPollAt.After(expiresAt.Time) {
+			patch.NextPollAt = expiresAt.Time
 		}
+		// The text covers the activity from the baseline on, so a fired
+		// watch that waits for its delivery gets the text of this read.
+		text := pullRequestWakeupText(events[i], activity, row.WakeupExpiresAt.Time)
 		p.recordPullRequestPoll(ctx, fdb, row, patch, text)
 	}
 }
 
 // recordPullRequestPoll merges patch into the spec of the watch in row and,
-// with a text, fires the watch with it and pokes the waker for its chat.
+// with a text, stores it as the text the watch sends. The first text fires
+// the watch and pokes the waker for its chat.
 func (p *Server) recordPullRequestPoll(ctx context.Context, fdb forkdb.Store, row forkdb.ClaimDuePullRequestWatchesRow, patch pullRequestPollPatch, text string) {
 	err := func() error {
 		specPatch, err := json.Marshal(patch)
@@ -240,11 +243,11 @@ func (p *Server) recordPullRequestPoll(ctx context.Context, fdb forkdb.Store, ro
 			params.FiredAt = sql.NullTime{Time: patch.PolledAt, Valid: true}
 			params.FiredPayload.RawMessage, params.FiredPayload.Valid = payload, true
 		}
-		fired, err := fdb.RecordPullRequestWatchPoll(ctx, params)
+		recorded, err := fdb.RecordPullRequestWatchPoll(ctx, params)
 		if err != nil {
 			return xerrors.Errorf("record pull request watch poll: %w", err)
 		}
-		if text != "" && fired == 1 {
+		if text != "" && !row.FiredAt.Valid && recorded == 1 {
 			p.forkWaker().poke(row.ChatID)
 		}
 		return nil
