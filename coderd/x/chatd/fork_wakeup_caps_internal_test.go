@@ -247,6 +247,10 @@ func TestWakeupCaps(t *testing.T) {
 			"SELECT COUNT(*) FROM notification_messages WHERE user_id = $1 AND notification_template_id = $2",
 			chat.OwnerID, notifications.TemplateCustomNotification).Scan(&rows))
 		require.Equal(t, 2, rows, "one notification, stored once per delivery method")
+		// The sent notification counts once toward the notify_user limit.
+		require.NoError(t, f.sqlDB.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM chat_user_notifications WHERE chat_id = $1", chat.ID).Scan(&rows))
+		require.Equal(t, 1, rows)
 	})
 }
 

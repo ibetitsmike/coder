@@ -474,6 +474,15 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountChatUserNotificationsSince(gomock.Any(), arg).Return(int64(3), nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceNotificationMessage, policy.ActionRead).Returns(int64(3))
 		},
+		"InsertChatUserNotification": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.InsertChatUserNotificationParams{})
+			fdb.EXPECT().InsertChatUserNotification(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceNotificationMessage, policy.ActionCreate).Returns()
+		},
+		"DeleteOldChatUserNotifications": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			fdb.EXPECT().DeleteOldChatUserNotifications(gomock.Any()).Return(int64(2), nil).AnyTimes()
+			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(2))
+		},
 		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
 			arg := forkdb.InsertPluginPackParams{ID: pack.ID, OrganizationID: pack.OrganizationID, Name: pack.Name}

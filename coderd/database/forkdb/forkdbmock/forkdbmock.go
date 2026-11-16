@@ -275,6 +275,21 @@ func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, limitCount any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatSecretAnswers", reflect.TypeOf((*MockStore)(nil).DeleteOldChatSecretAnswers), ctx, limitCount)
 }
 
+// DeleteOldChatUserNotifications mocks base method.
+func (m *MockStore) DeleteOldChatUserNotifications(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldChatUserNotifications", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldChatUserNotifications indicates an expected call of DeleteOldChatUserNotifications.
+func (mr *MockStoreMockRecorder) DeleteOldChatUserNotifications(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatUserNotifications", reflect.TypeOf((*MockStore)(nil).DeleteOldChatUserNotifications), ctx)
+}
+
 // DeleteOldChatWakeupRunCounts mocks base method.
 func (m *MockStore) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -1266,6 +1281,20 @@ func (m *MockStore) InsertChatSubagentMessage(ctx context.Context, arg forkdb.In
 func (mr *MockStoreMockRecorder) InsertChatSubagentMessage(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatSubagentMessage", reflect.TypeOf((*MockStore)(nil).InsertChatSubagentMessage), ctx, arg)
+}
+
+// InsertChatUserNotification mocks base method.
+func (m *MockStore) InsertChatUserNotification(ctx context.Context, arg forkdb.InsertChatUserNotificationParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChatUserNotification", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertChatUserNotification indicates an expected call of InsertChatUserNotification.
+func (mr *MockStoreMockRecorder) InsertChatUserNotification(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChatUserNotification", reflect.TypeOf((*MockStore)(nil).InsertChatUserNotification), ctx, arg)
 }
 
 // InsertChatWakeup mocks base method.

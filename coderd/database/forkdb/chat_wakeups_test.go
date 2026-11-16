@@ -15,7 +15,6 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
-	"github.com/coder/coder/v2/coderd/notifications"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -368,61 +367,61 @@ func TestSumChatCostMicrosSince(t *testing.T) {
 func TestCountChatUserNotificationsSince(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
-	ctx := testutil.Context(t, testutil.WaitShort)
+	ctx := testutil.Context(t, testutil.WaitLong)
 	chat := wakeupTestChat(t, db)
+	other := wakeupTestChat(t, db)
 	now := dbtime.Now()
 
-	enqueue := func(templateID uuid.UUID, chatID uuid.UUID, message string, createdAt time.Time, methods ...database.NotificationMethod) {
-		payload, err := json.Marshal(map[string]any{
-			"labels": map[string]string{"custom_message": message},
-			"data":   map[string]any{"chat_id": chatID.String()},
-		})
-		require.NoError(t, err)
-		for i, method := range methods {
-			require.NoError(t, db.EnqueueNotificationMessage(ctx, database.EnqueueNotificationMessageParams{
-				ID:                     uuid.New(),
-				NotificationTemplateID: templateID,
-				UserID:                 chat.OwnerID,
-				Method:                 method,
-				Payload:                payload,
-				CreatedBy:              "test",
-				// The enqueuer stamps each method's row separately.
-				CreatedAt: createdAt.Add(time.Duration(i) * time.Microsecond),
-			}))
-		}
+	for _, n := range []struct {
+		chatID    uuid.UUID
+		createdAt time.Time
+	}{
+		{chat.ID, now.Add(-10 * time.Minute)},
+		{chat.ID, now.Add(-5 * time.Minute)},
+		{chat.ID, now.Add(-2 * time.Hour)},
+		{other.ID, now.Add(-time.Minute)},
+	} {
+		require.NoError(t, fdb.InsertChatUserNotification(ctx, forkdb.InsertChatUserNotificationParams{
+			ChatID: n.chatID, CreatedAt: n.createdAt,
+		}))
 	}
-	custom := notifications.TemplateCustomNotification
-	enqueue(custom, chat.ID, "one", now.Add(-10*time.Minute), database.NotificationMethodSmtp, database.NotificationMethodInbox)
-	enqueue(custom, chat.ID, "two", now.Add(-5*time.Minute), database.NotificationMethodInbox)
-	enqueue(custom, chat.ID, "old", now.Add(-2*time.Hour), database.NotificationMethodInbox)
-	enqueue(custom, uuid.New(), "other chat", now.Add(-time.Minute), database.NotificationMethodInbox)
-	enqueue(notifications.TemplateWorkspaceDeleted, chat.ID, "other template", now.Add(-time.Minute), database.NotificationMethodInbox)
-
 	count, err := fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
-		UserID:                 chat.OwnerID,
-		NotificationTemplateID: custom,
-		ChatID:                 chat.ID.String(),
-		Since:                  now.Add(-time.Hour),
+		ChatID: chat.ID,
+		Since:  now.Add(-time.Hour),
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, count, "one enqueue counts once across its delivery methods")
+	require.EqualValues(t, 2, count, "only the chat's records in the window count")
 
-	// The dedupe resets each UTC day, so the same payload enqueued again
-	// after midnight is a second notification.
-	midnight := now.UTC().Truncate(24 * time.Hour)
-	otherChatID := uuid.New()
-	enqueue(custom, otherChatID, "same", midnight.Add(-time.Minute), database.NotificationMethodInbox)
-	enqueue(custom, otherChatID, "same", midnight.Add(time.Minute), database.NotificationMethodInbox)
-	count, err = fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
-		UserID:                 chat.OwnerID,
-		NotificationTemplateID: custom,
-		ChatID:                 otherChatID.String(),
-		Since:                  midnight.Add(-time.Hour),
-	})
+	// The count runs on every notify_user call, so it must read the index of
+	// one chat, not a table that grows with every notification of the
+	// deployment.
+	_, err = sqlDB.ExecContext(ctx, `
+		INSERT INTO chat_user_notifications (chat_id, created_at)
+		SELECT $1, now() - make_interval(secs => g)
+		FROM generate_series(1, 10000) g`, other.ID)
 	require.NoError(t, err)
-	require.EqualValues(t, 2, count, "an identical payload on another UTC day counts again")
+	_, err = sqlDB.ExecContext(ctx, "ANALYZE chat_user_notifications")
+	require.NoError(t, err)
+	var raw []byte
+	require.NoError(t, sqlDB.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+forkdb.CountChatUserNotificationsSinceSQL, chat.ID, now.Add(-time.Hour)).Scan(&raw))
+	var plan []struct {
+		Plan planNode `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &plan))
+	require.Len(t, plan, 1)
+	var relations, seqScans []string
+	plan[0].Plan.walk(func(node planNode) {
+		if node.RelationName != "" {
+			relations = append(relations, node.RelationName)
+		}
+		if node.NodeType == "Seq Scan" {
+			seqScans = append(seqScans, node.RelationName)
+		}
+	})
+	require.Equal(t, []string{"chat_user_notifications"}, relations, "plan:\n%s", raw)
+	require.Empty(t, seqScans, "plan:\n%s", raw)
 }
 
 // insertCostMessage inserts a message of chat that cost costMicros at

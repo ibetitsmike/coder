@@ -54,12 +54,21 @@ func TestNotifyUserTool(t *testing.T) {
 		notify(chat, notifyUserArgs{Message: "one too many"}, true))
 	notify(other, notifyUserArgs{Message: "another chat has its own limit"}, false)
 
+	// The limit counts the fork's own records, not notification_messages,
+	// so dropping the sent messages does not lift it.
+	_, err := f.sqlDB.ExecContext(ctx, "DELETE FROM notification_messages WHERE user_id = $1", chat.OwnerID)
+	require.NoError(t, err)
+	require.Equal(t, "notification limit reached: at most 10 per chat per hour",
+		notify(chat, notifyUserArgs{Message: "still limited"}, true))
+
 	// The server's background tickers keep the mock clock from jumping an
-	// hour, so the notifications move an hour back instead.
-	_, err := f.sqlDB.ExecContext(ctx, "UPDATE notification_messages SET created_at = created_at - interval '1 hour 1 second' WHERE user_id = $1", chat.OwnerID)
+	// hour, so the records move an hour back instead.
+	_, err = f.sqlDB.ExecContext(ctx, "UPDATE chat_user_notifications SET created_at = created_at - interval '1 hour 1 second' WHERE chat_id = $1", chat.ID)
 	require.NoError(t, err)
 	notify(chat, notifyUserArgs{Message: "an hour later"}, false)
-	require.Len(t, f.inboxNotifications(t, chat.OwnerID), maxChatUserNotificationsPerHour+2)
+	require.Equal(t, []inboxNotification{
+		{ChatID: chat.ID.String(), Title: chat.Title, Message: "an hour later"},
+	}, f.inboxNotifications(t, chat.OwnerID))
 
 	// A chat title may be longer than a notification title, so the default
 	// is cut to the limit on a rune boundary.

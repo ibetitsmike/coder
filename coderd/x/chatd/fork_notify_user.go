@@ -67,7 +67,7 @@ func (serialNotifyUserTool) SerialToolCalls() bool { return true }
 
 // notifyChatOwner sends a custom notification to the owner of chat, at most
 // maxChatUserNotificationsPerHour per chat in the rolling hour. The limit
-// counts the enqueued notifications, so it holds across replicas and
+// counts the rows of chat_user_notifications, so it holds across replicas and
 // restarts.
 func (p *Server) notifyChatOwner(ctx context.Context, chat database.Chat, args notifyUserArgs) error {
 	content := codersdk.CustomNotificationContent{
@@ -107,10 +107,8 @@ func (p *Server) notifyChatOwner(ctx context.Context, chat database.Chat, args n
 	}
 	now := p.clock.Now().UTC()
 	sent, err := fdb.CountChatUserNotificationsSince(notifierCtx, forkdb.CountChatUserNotificationsSinceParams{
-		UserID:                 chat.OwnerID,
-		NotificationTemplateID: notifications.TemplateCustomNotification,
-		ChatID:                 chat.ID.String(),
-		Since:                  now.Add(-time.Hour),
+		ChatID: chat.ID,
+		Since:  now.Add(-time.Hour),
 	})
 	if err != nil {
 		return xerrors.Errorf("count chat notifications: %w", err)
@@ -120,6 +118,14 @@ func (p *Server) notifyChatOwner(ctx context.Context, chat database.Chat, args n
 	}
 	if p.chatWorker == nil {
 		return xerrors.New("notifications are unavailable")
+	}
+	// Recorded before the send, so a send that fails after it queued some of
+	// its deliveries still counts.
+	if err := fdb.InsertChatUserNotification(notifierCtx, forkdb.InsertChatUserNotificationParams{
+		ChatID:    chat.ID,
+		CreatedAt: now,
+	}); err != nil {
+		return xerrors.Errorf("record chat notification: %w", err)
 	}
 	_, err = p.chatWorker.opts.NotificationsEnqueuer.EnqueueWithData(
 		notifierCtx,
