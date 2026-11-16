@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -54,9 +55,22 @@ func (*forkWorkflowFixture) stepTools(t *testing.T) pqtype.NullRawMessage {
 // journalRunStatus reads the status of the run's journal row.
 func journalRunStatus(ctx context.Context, t *testing.T, fdb forkdb.Store, id uuid.UUID) string {
 	t.Helper()
+	return journalRow(ctx, t, fdb, id).Status
+}
+
+// journalRunLogs reads the run's retained log lines from the journal column.
+func journalRunLogs(ctx context.Context, t *testing.T, fdb forkdb.Store, id uuid.UUID) []string {
+	t.Helper()
+	logs, _, _ := restoreWorkflowLogs(journalRow(ctx, t, fdb, id).Logs)
+	return logs
+}
+
+// journalRow reads the run's journal row.
+func journalRow(ctx context.Context, t *testing.T, fdb forkdb.Store, id uuid.UUID) forkdb.WorkflowRun {
+	t.Helper()
 	row, err := fdb.GetWorkflowRun(ctx, id)
 	require.NoError(t, err)
-	return row.Status
+	return row
 }
 
 const journalReviewScript = reviewSchemaStarlark + `
@@ -488,6 +502,84 @@ def main(args):
 			"the terminal flush landed the stopped snapshot lines")
 	})
 
+	// A capped run whose baseline holds a failure line the replay never
+	// prints again: the replay skips the unmatched baseline lines instead of
+	// treating the later new lines as misses, so none of them drops.
+	t.Run("ReplaySkipsAnUnmatchedBaselineLine", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("A")
+    step = spawn("Fail.")
+    wait([step])
+    log("B")
+    for i in range(3):
+        log("NEW %d" % i)
+    agent("Never reports.")
+`})
+		f.steps(ctx, t, run, 1)
+		step := run.snapshot().Steps[0]
+		childID := uuid.MustParse(step.ChatID)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return strings.Contains(strings.Join(f.userTexts(ctx, t, childID), "\n"), workflowReminder)
+		}, testutil.IntervalFast)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+
+		// The failure of the first step returns None from the wait, the
+		// script logs on, and the trailing agent opens the second step and
+		// holds the run: the passive fixture never runs a child chat. The
+		// journal ends with the failure line of the step and the lines the
+		// script printed after the wait.
+		failLine := `step "Fail." failed: the step stopped without a workflow_report call`
+		want := []string{"A", failLine, "B", "NEW 0", "NEW 1", "NEW 2"}
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return assert.ObjectsAreEqual(want, journalRunLogs(ctx, t, fdb, run.id))
+		}, testutil.IntervalFast)
+		f.steps(ctx, t, run, 2)
+
+		// The restart interrupts the run, and the resume replays the script
+		// from its first line. The replay never prints the failure line, so
+		// the baseline does not match from the second line on: the skip must
+		// advance to the next baseline line instead of the replay turning
+		// live early. The replay then blocks in the trailing agent, whose
+		// open step the stop fails.
+		restarted := f.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		stopLine := `step "Never reports." failed: ` + workflowStopError
+		wantStopped := append(append([]string(nil), want...), stopLine)
+		require.NoError(t, restarted.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		res := resumed.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		assert.Equal(t, wantStopped, res.Logs,
+			"the replayed lines echo the baseline once and the failure lines land once")
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return assert.ObjectsAreEqual(wantStopped, journalRunLogs(ctx, t, fdb, run.id))
+		}, testutil.IntervalFast)
+
+		// A second restart keeps the terminal row, and its resume replays
+		// the stored snapshot: the history stays one copy.
+		restarted2 := restarted.restartWorkflowServer(t)
+		require.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+		terminal, err := restarted2.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		out := terminal.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, out.Status, out.Error)
+		assert.Equal(t, wantStopped, out.Logs,
+			"the terminal replay must not duplicate the failure lines")
+		assert.Equal(t, wantStopped, journalRunLogs(ctx, t, fdb, run.id))
+	})
+
 	// A script that logs in a loop keeps a single write in flight, so its
 	// journal column ends capped like the result.
 	t.Run("CappedLikeTheResult", func(t *testing.T) {
@@ -584,6 +676,61 @@ func TestForkWorkflowReusedJournal(t *testing.T) {
 			assert.True(t, srow.Reused, "journaled step %d must read reused after the resume", i)
 		}
 	})
+
+	t.Run("ReportDoesNotClearTheFlag", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: `def main(args):
+    return agent("Say hi.", title = "hi")
+`,
+		})
+		step := f.steps(ctx, t, run, 1)[0]
+		chatID := uuid.MustParse(step.ChatID)
+
+		// A restart marks the open run interrupted, and the resume of the
+		// new server re-runs the open step in its child chat, which
+		// journals the reused flag of the row. The script blocks in the
+		// wait for the child, which the passive fixture never wakes.
+		restarted := f.restartWorkflowServer(t)
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		_, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowStep(ctx, chatID)
+			return err == nil && row.Reused
+		}, testutil.IntervalFast, "the re-run of the step must journal the flag")
+
+		// A second restart interrupts the run again while its step row
+		// already reads reused. The recovered child of the step then
+		// reports through the journal, whose write passes Reused false:
+		// the write must keep the flag, or the run detail loses the mark
+		// the resume wrote.
+		restarted2 := restarted.restartWorkflowServer(t)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		child, err := f.db.GetChatByID(ctx, chatID)
+		require.NoError(t, err)
+		tools, err := restarted2.server.appendWorkflowReportTool(nil, child)
+		require.NoError(t, err)
+		require.Len(t, tools, 1)
+		resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: `{"text":"hi again"}`})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError, resp.Content)
+		stepRow, err := fdb.GetWorkflowStep(ctx, chatID)
+		require.NoError(t, err)
+		assert.True(t, stepRow.Reused,
+			"a late report on a reused step must not clear the reused flag")
+		require.True(t, stepRow.Value.Valid)
+		assert.JSONEq(t, `{"text":"hi again"}`, string(stepRow.Value.RawMessage))
+	})
 }
 
 func TestForkWorkflowStop(t *testing.T) {
@@ -633,6 +780,62 @@ func TestForkWorkflowStop(t *testing.T) {
 		// chat's run.
 		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, uuid.New()), ErrForkWorkflowRunNotFound)
 		assert.ErrorIs(t, f.server.ForkStopWorkflowRun(ctx, uuid.New(), run.id), ErrForkWorkflowRunNotFound)
+	})
+
+	// A stop whose run already failed a step keeps one copy of the failure
+	// line: the steps the stop itself interrupted log their lines, the ones
+	// that failed earlier already sat in the logs.
+	t.Run("StopAfterAFailedStepDoesNotDuplicateTheLine", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    step = spawn("Fail.")
+    wait([step])
+    agent("Never reports.")
+`})
+		f.steps(ctx, t, run, 1)
+		step := run.snapshot().Steps[0]
+		childID := uuid.MustParse(step.ChatID)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return strings.Contains(strings.Join(f.userTexts(ctx, t, childID), "\n"), workflowReminder)
+		}, testutil.IntervalFast)
+		f.stopWithoutReport(ctx, t, step.ChatID)
+
+		// The failed step logged its line, and the trailing agent opens the
+		// second step and holds the run: the passive fixture never runs a
+		// child chat. The stop then fails only that open step, so the
+		// failure line of the first step must stay one.
+		f.steps(ctx, t, run, 2)
+		want := `step "Fail." failed: the step stopped without a workflow_report call`
+		stopLine := `step "Never reports." failed: ` + workflowStopError
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		require.Len(t, res.Steps, 2)
+		require.Equal(t, stepStatusFailed, res.Steps[0].Status)
+		require.Equal(t, stepStatusFailed, res.Steps[1].Status)
+		require.Equal(t, []string{want, stopLine}, res.Logs,
+			"the failed step logs its line once and the stop logs only its own step")
+		fdb := forkWorkflowDB(t, f.db)
+		require.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+		require.Equal(t, []string{want, stopLine}, journalRunLogs(ctx, t, fdb, run.id))
+
+		// The restart keeps the terminal row, and its resume replays the
+		// stored snapshot: the failure lines stay one copy.
+		restarted := f.restartWorkflowServer(t)
+		require.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+		terminal, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		out := terminal.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, out.Status, out.Error)
+		assert.Equal(t, []string{want, stopLine}, out.Logs,
+			"the failure line of the step that failed earlier must not log twice")
+		assert.Equal(t, []string{want, stopLine}, journalRunLogs(ctx, t, fdb, run.id))
 	})
 
 	t.Run("InterruptedRunIsNotStoppable", func(t *testing.T) {
