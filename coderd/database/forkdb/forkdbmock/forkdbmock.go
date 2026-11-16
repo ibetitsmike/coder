@@ -1138,10 +1138,10 @@ func (mr *MockStoreMockRecorder) GetWorkflowRunStepCountsByChat(ctx, chatID any)
 }
 
 // GetWorkflowRunsByChat mocks base method.
-func (m *MockStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (m *MockStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetWorkflowRunsByChat", ctx, arg)
-	ret0, _ := ret[0].([]forkdb.WorkflowRun)
+	ret0, _ := ret[0].([]forkdb.GetWorkflowRunsByChatRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -1818,6 +1818,34 @@ func (mr *MockStoreMockRecorder) MarkOpenWorkflowRunsInterrupted(ctx, errText an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkOpenWorkflowRunsInterrupted", reflect.TypeOf((*MockStore)(nil).MarkOpenWorkflowRunsInterrupted), ctx, errText)
 }
 
+// MarkWorkflowStepReused mocks base method.
+func (m *MockStore) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkWorkflowStepReused", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkWorkflowStepReused indicates an expected call of MarkWorkflowStepReused.
+func (mr *MockStoreMockRecorder) MarkWorkflowStepReused(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkWorkflowStepReused", reflect.TypeOf((*MockStore)(nil).MarkWorkflowStepReused), ctx, id)
+}
+
+// MarkWorkflowStepsReusedByRun mocks base method.
+func (m *MockStore) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkWorkflowStepsReusedByRun", ctx, runID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkWorkflowStepsReusedByRun indicates an expected call of MarkWorkflowStepsReusedByRun.
+func (mr *MockStoreMockRecorder) MarkWorkflowStepsReusedByRun(ctx, runID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkWorkflowStepsReusedByRun", reflect.TypeOf((*MockStore)(nil).MarkWorkflowStepsReusedByRun), ctx, runID)
+}
+
 // RecordPullRequestWatchPoll mocks base method.
 func (m *MockStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -1904,6 +1932,20 @@ func (m *MockStore) SetPluginUserLinkActiveChat(ctx context.Context, arg forkdb.
 func (mr *MockStoreMockRecorder) SetPluginUserLinkActiveChat(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPluginUserLinkActiveChat", reflect.TypeOf((*MockStore)(nil).SetPluginUserLinkActiveChat), ctx, arg)
+}
+
+// SetWorkflowRunLogs mocks base method.
+func (m *MockStore) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWorkflowRunLogsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetWorkflowRunLogs", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetWorkflowRunLogs indicates an expected call of SetWorkflowRunLogs.
+func (mr *MockStoreMockRecorder) SetWorkflowRunLogs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetWorkflowRunLogs", reflect.TypeOf((*MockStore)(nil).SetWorkflowRunLogs), ctx, arg)
 }
 
 // SumChatCostMicrosSince mocks base method.
