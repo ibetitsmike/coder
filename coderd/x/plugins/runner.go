@@ -108,6 +108,10 @@ type runner struct {
 	// restartAt is when the manager may start the plugin again. The runner
 	// sets it before done closes, only when it stopped with an error.
 	restartAt time.Time
+	// upAt is when the module loaded and the runner became ready. It stays
+	// zero when the runner failed before that. Only the run goroutine uses
+	// it.
+	upAt time.Time
 }
 
 func (m *Manager) startRunner(p forkdb.Plugin, prev *runner, failures int) *runner {
@@ -137,17 +141,12 @@ func (m *Manager) startRunner(p forkdb.Plugin, prev *runner, failures int) *runn
 		if prev != nil {
 			<-prev.done
 		}
-		started := m.clock.Now()
 		err := initErr
 		if err == nil {
 			err = r.run(ctx)
 		}
 		if err != nil && ctx.Err() == nil {
-			if m.clock.Since(started) >= restartResetAfter {
-				r.failures = 0
-			}
-			delay := restartDelay(r.failures)
-			r.restartAt = m.clock.Now().Add(delay)
+			delay := r.failed()
 			r.logger.Error(ctx, "plugin process stopped", slog.F("restart_in", delay), slog.Error(err))
 			// The delay comes first, so truncating a long error keeps it.
 			r.setLastError(fmt.Sprintf("restarting in %s after: %s", delay, err))
@@ -157,6 +156,19 @@ func (m *Manager) startRunner(p forkdb.Plugin, prev *runner, failures int) *runn
 }
 
 func (r *runner) stop() { r.cancel() }
+
+// failed sets when the plugin may start again after this runner stopped with
+// an error, and returns the delay. Only a runner that stayed up for
+// restartResetAfter after it became ready resets the count: a slow load
+// that fails is still a failure in a row.
+func (r *runner) failed() time.Duration {
+	if !r.upAt.IsZero() && r.m.clock.Since(r.upAt) >= restartResetAfter {
+		r.failures = 0
+	}
+	delay := restartDelay(r.failures)
+	r.restartAt = r.m.clock.Now().Add(delay)
+	return delay
+}
 
 func (r *runner) exited() bool {
 	select {
@@ -233,6 +245,7 @@ func (r *runner) run(ctx context.Context) error {
 		return xerrors.Errorf("module manifest changed: %w", err)
 	}
 	r.client = client
+	r.upAt = r.m.clock.Now()
 	close(r.ready)
 	r.setLastError("")
 	r.logger.Info(ctx, "plugin process started")

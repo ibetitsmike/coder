@@ -456,15 +456,15 @@ func TestManagerRenewalReadsNoRows(t *testing.T) {
 
 // TestManagerRestartBackoff verifies a plugin whose host fails at start is
 // started again after 10, 20, 40 and 80 seconds, reads its module once per
-// attempt and stores each delay in last_error. A runner that stayed up for
-// 5 minutes resets the delay, and a changed plugin starts at once. Before
-// the backoff the plugin was reloaded every lease interval.
+// attempt and stores each delay in last_error. A start that takes 5 minutes
+// and fails does not reset the delay, and a changed plugin starts at once.
+// Before the backoff the plugin was reloaded every lease interval.
 func TestManagerRestartBackoff(t *testing.T) {
 	t.Parallel()
 	ctx := testutil.Context(t, testutil.WaitLong)
 
 	var hosts atomic.Int32
-	// The fifth host stays up until release closes.
+	// The fifth host takes until release closes to fail.
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	h := startLeaseHarness(t, pubsub.NewInMemory(), func(o *Options) {
@@ -515,17 +515,17 @@ func TestManagerRestartBackoff(t *testing.T) {
 		step()
 	}
 	testutil.TryReceive(ctx, t, entered)
-	// The fifth host stays up for 5 minutes, then exits.
+	// The fifth start takes 5 minutes and fails. The runner never became
+	// ready, so the delay doubles to 160 seconds: no attempt at 460 seconds.
 	for range 30 {
 		h.fire(ctx, defaultLeaseInterval)
 		h.next(ctx, t, defaultLeaseInterval)
 	}
 	close(release)
-	// The delay is back at 10 seconds: an attempt at 460 seconds.
 	step()
 	h.waitRunners(ctx, t)
 
-	// The plugin changed during the 20 second backoff: it starts at once.
+	// The plugin changed during the backoff: it starts at once.
 	changed := plugin
 	changed.UpdatedAt = plugin.UpdatedAt.Add(time.Second)
 	h.leases.set(forkdb.GetPluginLeaseSummaryRow{Enabled: 1, Acquirable: 1}, changed)
@@ -535,9 +535,9 @@ func TestManagerRestartBackoff(t *testing.T) {
 
 	s := func(n int) time.Duration { return time.Duration(n) * time.Second }
 	startsMu.Lock()
-	require.Equal(t, []time.Duration{0, s(10), s(30), s(70), s(150), s(460), s(460)}, starts)
+	require.Equal(t, []time.Duration{0, s(10), s(30), s(70), s(150), s(460)}, starts)
 	startsMu.Unlock()
-	require.EqualValues(t, 7, hosts.Load(), "one module read per attempt")
+	require.EqualValues(t, 6, hosts.Load(), "one module read per attempt")
 	h.leases.mu.Lock()
 	lastErrors := h.leases.lastErrors
 	h.leases.mu.Unlock()
@@ -547,7 +547,7 @@ func TestManagerRestartBackoff(t *testing.T) {
 		delay, _, _ := strings.Cut(strings.TrimPrefix(msg, "restarting in "), " ")
 		delays = append(delays, delay)
 	}
-	require.Equal(t, []string{"10s", "20s", "40s", "1m20s", "10s", "20s", "10s"}, delays)
+	require.Equal(t, []string{"10s", "20s", "40s", "1m20s", "2m40s", "10s"}, delays)
 }
 
 func TestRestartDelay(t *testing.T) {
@@ -559,4 +559,30 @@ func TestRestartDelay(t *testing.T) {
 		require.Equal(t, want, restartDelay(failures), "failures %d", failures)
 	}
 	require.Equal(t, 10*time.Minute, restartDelay(1000))
+}
+
+// TestRunnerFailedResetsAfterUptime verifies only a runner that stayed up
+// for 5 minutes after it became ready resets the failure count.
+func TestRunnerFailedResetsAfterUptime(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	m := &Manager{clock: clock}
+	for _, tc := range []struct {
+		name string
+		up   time.Duration
+		// ready is false for a runner that failed before it became ready.
+		ready bool
+		want  time.Duration
+	}{
+		{name: "NeverReady", want: 80 * time.Second},
+		{name: "ShortUptime", ready: true, up: restartResetAfter - time.Second, want: 80 * time.Second},
+		{name: "LongUptime", ready: true, up: restartResetAfter, want: restartBaseDelay},
+	} {
+		r := &runner{m: m, failures: 3}
+		if tc.ready {
+			r.upAt = clock.Now().Add(-tc.up)
+		}
+		require.Equal(t, tc.want, r.failed(), tc.name)
+		require.Equal(t, clock.Now().Add(tc.want), r.restartAt, tc.name)
+	}
 }
