@@ -656,3 +656,57 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		assert.Contains(t, resp.Content, "script_path needs the workspace connection")
 	})
 }
+
+// The engine's own failure lines bypass the echo suppression: an engine
+// line lands while replay credit is still held, and it does not spend the
+// credit, so the replayed lines that follow still suppress against the
+// baseline.
+func TestForkWorkflowEngineLogBypass(t *testing.T) {
+	t.Parallel()
+
+	t.Run("EngineLineLandsAndKeepsTheCredit", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.logEchoLeft = 1
+		// A script line spends the credit and stays suppressed.
+		run.appendLogLocked("replayed line")
+		assert.Empty(t, run.logs)
+		assert.Equal(t, 0, run.logEchoLeft)
+		assert.Equal(t, 0, run.logSeq)
+		// The engine line lands once the credit is spent.
+		run.appendEngineLogLocked(`step "s" failed: the stop`)
+		assert.Equal(t, []string{`step "s" failed: the stop`}, run.logs)
+		assert.Equal(t, 1, run.logSeq)
+		run.mu.Unlock()
+	})
+
+	t.Run("EngineLineKeepsPositiveCredit", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.logEchoLeft = 1
+		run.appendEngineLogLocked(`step "s" failed: the stop`)
+		assert.Equal(t, []string{`step "s" failed: the stop`}, run.logs)
+		assert.Equal(t, 1, run.logEchoLeft, "the engine line must not spend the credit")
+		// The next script line still suppresses against the baseline.
+		run.appendLogLocked("replayed line")
+		assert.Len(t, run.logs, 1)
+		assert.Equal(t, 0, run.logEchoLeft)
+		run.mu.Unlock()
+	})
+
+	t.Run("EngineLineIsTruncatedAndCapped", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.appendEngineLogLocked(strings.Repeat("x", maxWorkflowLogLine+10))
+		assert.Len(t, run.logs[0], maxWorkflowLogLine)
+		// The cap loop runs on the engine path like the script path.
+		for i := 0; i < maxWorkflowLogs+5; i++ {
+			run.appendEngineLogLocked("line")
+		}
+		assert.Len(t, run.logs, maxWorkflowLogs)
+		run.mu.Unlock()
+	})
+}
