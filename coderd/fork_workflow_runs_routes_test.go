@@ -76,6 +76,8 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		Script:        "def main(args):\n    pass\n",
 		Args:          []byte(`{}`),
 		Status:        "running",
+		Phases:        []string{"plan", "build"},
+		CurrentPhase:  "build",
 	})
 	require.NoError(t, err)
 	err = fdb.InsertWorkflowStep(forkWorkflowSystemContext(t), forkdb.InsertWorkflowStepParams{
@@ -86,15 +88,18 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		Ordinal:    0,
 		Title:      "step one",
 		Status:     "reported",
+		Phase:      "plan",
 		Value:      pqtype.NullRawMessage{RawMessage: json.RawMessage(`{"text":"done"}`), Valid: true},
 	})
 	require.NoError(t, err)
-	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true}}`
+	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true},"phases":["plan","build","review"],"current_phase":"review"}`
 	err = fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
-		ID:     runID,
-		Status: "completed",
-		Error:  "",
-		Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
+		ID:           runID,
+		Status:       "completed",
+		Error:        "",
+		Result:       pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
+		Phases:       []string{"plan", "build", "review"},
+		CurrentPhase: "review",
 	})
 	require.NoError(t, err)
 	row, err := fdb.GetWorkflowRun(forkWorkflowSystemContext(t), runID)
