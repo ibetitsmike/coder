@@ -16,6 +16,11 @@ type Querier interface {
 	// those. SKIP LOCKED keeps concurrent replicas from blocking on, or double
 	// leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
+	// Takes the advisory lock @lock_id in shared mode until the transaction
+	// ends. It blocks while another transaction holds the lock with AcquireLock,
+	// and AcquireLock blocks while it is held, but shared holders do not block
+	// each other.
+	AcquireSharedLock(ctx context.Context, lockID int64) error
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Claims the open pull_request watches that the pull request poller of a
 	// replica reads next: those of active wake-ups of unarchived chats whose
@@ -27,12 +32,6 @@ type Querier interface {
 	// owner, the key of one shared read.
 	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
-	// Counts the subagent chats that hold a capacity slot: owned by a worker with
-	// a fresh heartbeat, like CountChatCapacityActiveByPool. The candidate and its
-	// ancestors never count: a coordinator blocked in wait_agent holds a slot, so
-	// its own descendants must never wait for it. The depth guard stops the walk
-	// if a cycle ever appears in the hierarchy.
-	CountActiveSubagentsForCapacity(ctx context.Context, arg CountActiveSubagentsForCapacityParams) (CountActiveSubagentsForCapacityRow, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
 	// Counts the notifications of one template that were enqueued for a user
 	// about a chat. One enqueue stores a row per delivery method, all with the
@@ -81,9 +80,6 @@ type Querier interface {
 	// stop_workflow fails the open steps of a run that it stops. err_text, not
 	// error: it becomes a mock parameter name.
 	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
-	// Reports whether no worker with a fresh heartbeat owns the chat, with the
-	// heartbeat predicate of GetChatQueuedForCapacity.
-	GetChatAwaitingWorker(ctx context.Context, arg GetChatAwaitingWorkerParams) (bool, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
 	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
@@ -110,13 +106,6 @@ type Querier interface {
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
-	// Returns the unarchived running subagent chats under @root_chat_id that no
-	// worker with a fresh heartbeat owns, with the predicate of
-	// GetChatAwaitingWorker. Each row carries the counts of
-	// CountActiveSubagentsForCapacity for that chat: the totals minus the chat's
-	// own active lineage, so one query answers for the whole family without
-	// pairing each chat with every active subagent.
-	GetFamilySubagentsAwaitingWorker(ctx context.Context, arg GetFamilySubagentsAwaitingWorkerParams) ([]GetFamilySubagentsAwaitingWorkerRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetOrganizationSavedWorkflowByName(ctx context.Context, arg GetOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
@@ -143,6 +132,20 @@ type Querier interface {
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
+	// Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is
+	// set, in the family of @root_chat_id, the subagent chats that
+	// hold a capacity slot: owned by a worker with a fresh heartbeat, like
+	// CountChatCapacityActiveByPool. active_count spans the deployment,
+	// active_organization_count the candidate's organization and
+	// active_family_count the candidate's family. The candidate and its
+	// ancestors never count: a coordinator blocked in wait_agent holds a slot, so
+	// its own descendants must never wait for it. With @awaiting_only, only the
+	// unarchived running candidates that no worker with a fresh heartbeat owns
+	// get a row. The counts are the totals minus each candidate's own active
+	// lineage, so one statement answers for every candidate without pairing each
+	// candidate with every active subagent. The depth guard stops the walk if a
+	// cycle ever appears in the hierarchy.
+	GetSubagentCapacityCounts(ctx context.Context, arg GetSubagentCapacityCountsParams) ([]GetSubagentCapacityCountsRow, error)
 	GetUserAgentDefinitionByName(ctx context.Context, arg GetUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetUserSavedWorkflowByName(ctx context.Context, arg GetUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error)

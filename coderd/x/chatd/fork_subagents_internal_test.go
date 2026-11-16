@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -336,6 +337,56 @@ func TestNestedSubagentLiveLimitSerializesResume(t *testing.T) {
 
 	require.ErrorContains(t, testutil.TryReceive(ctx, t, resumeErr), "cannot resume the child agent: this chat family has 1 live subagents and the maximum is 1")
 	f.requireStatus(t, database.ChatStatusWaiting, first)
+}
+
+// A resume that waits for the family admission lock fails with the lock
+// timeout of admission instead of blocking the send. The test waits for the
+// real Postgres lock timeout: the wait happens inside Postgres, so mock time
+// cannot shorten it.
+func TestNestedSubagentResumeLockTimeout(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	_, err := f.fdb.UpsertChatOrganizationSubagentLimits(ctx, forkdb.UpsertChatOrganizationSubagentLimitsParams{
+		OrganizationID:   f.root.OrganizationID,
+		MaxLivePerFamily: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	require.NoError(t, err)
+	child, err := f.spawn(t, f.root, childSubagentChatOptions{})
+	require.NoError(t, err)
+	f.setStatus(t, child, database.ChatStatusWaiting, uuid.NullUUID{})
+
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	releaseLock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseLock)
+	holderErr := make(chan error, 1)
+	go func() {
+		holderErr <- f.db.InTx(func(tx database.Store) error {
+			if err := tx.AcquireLock(ctx, chatFamilyAdmissionLockID(f.root.ID)); err != nil {
+				return err
+			}
+			close(holding)
+			<-release
+			return nil
+		}, nil)
+	}()
+	testutil.TryReceive(ctx, t, holding)
+
+	// Without the lock timeout the send blocks until this deadline.
+	sendCtx, cancel := context.WithTimeout(ctx, testutil.WaitMedium)
+	defer cancel()
+	start := time.Now()
+	_, err = f.server.sendSubagentMessage(sendCtx, f.root.ID, child.ID, "continue")
+	elapsed := time.Since(start)
+	require.ErrorContains(t, err, "lock timeout")
+	require.NoError(t, sendCtx.Err(), "the send must fail before its context ends")
+	require.GreaterOrEqual(t, elapsed, admissionLockTimeout)
+	f.requireStatus(t, database.ChatStatusWaiting, child)
+
+	releaseLock()
+	require.NoError(t, testutil.TryReceive(ctx, t, holderErr))
 }
 
 func TestForkLimitsFromConfig(t *testing.T) {
