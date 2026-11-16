@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -384,6 +385,53 @@ WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_ty
 		_, err := client.ForkOrganizationAgentDefinitions(ctx, owner.OrganizationID)
 		_ = requireSDKError(t, err, http.StatusForbidden)
 	})
+}
+
+// TestForkOrganizationAgentDefinitionsAudit checks that every change to an
+// organization agent definition and its ACL is audited.
+func TestForkOrganizationAgentDefinitionsAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	auditor := audit.NewMock()
+	client := coderdtest.New(t, &coderdtest.Options{
+		Auditor: auditor,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+		}),
+	})
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	orgAdmin, _ := coderdtest.CreateAnotherUser(t, client, orgID, rbac.ScopedRoleOrgAdmin(orgID))
+	_, grantee := coderdtest.CreateAnotherUser(t, client, orgID)
+
+	created, err := orgAdmin.CreateForkOrganizationAgentDefinition(ctx, orgID, codersdk.CreateForkAgentDefinitionRequest{
+		Content: "---\nname: reviewer\ndescription: Reviews diffs\n---\nReview the diff.\n",
+	})
+	require.NoError(t, err)
+	_, err = orgAdmin.UpdateForkOrganizationAgentDefinition(ctx, orgID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(false)})
+	require.NoError(t, err)
+	require.NoError(t, orgAdmin.UpdateForkOrganizationAgentDefinitionACL(ctx, orgID, "reviewer", codersdk.UpdateOrganizationSkillACLRequest{
+		UserRoles: map[string]codersdk.OrganizationSkillRole{grantee.ID.String(): codersdk.OrganizationSkillRoleRead},
+	}))
+	require.NoError(t, orgAdmin.DeleteForkOrganizationAgentDefinition(ctx, orgID, "reviewer"))
+
+	entries := forkAuditEntries(t, auditor, orgID, "organization_agent_definition")
+	require.Len(t, entries, 4)
+	for i, op := range []string{"create", "update", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, created.ID.String(), entries[i].ResourceID)
+		require.Equal(t, "reviewer", entries[i].ResourceName)
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+	require.JSONEq(t, `"Reviews diffs"`, string(entries[0].Changes["description"].New))
+	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
+	require.NotContains(t, entries[1].Changes, "content")
+	require.Contains(t, string(entries[2].Changes["user_acl"].New), grantee.ID.String())
+	require.Len(t, entries[2].Changes, 1, "an ACL change only changes the ACL")
+	require.JSONEq(t, `"reviewer"`, string(entries[3].Changes["name"].Old))
+	require.Empty(t, entries[3].Changes["name"].New)
 }
 
 func TestForkProjectAgentDefinitions(t *testing.T) {
