@@ -424,6 +424,61 @@ func TestCountChatUserNotificationsSince(t *testing.T) {
 	require.Empty(t, seqScans, "plan:\n%s", raw)
 }
 
+// TestDeleteOldChatUserNotificationsBatch checks that one purge call deletes
+// at most its batch of rows older than a day, and that it finds them through
+// an index rather than a scan of every recent notification.
+func TestDeleteOldChatUserNotificationsBatch(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
+	chat := wakeupTestChat(t, db)
+
+	_, err := sqlDB.ExecContext(ctx, `
+		INSERT INTO chat_user_notifications (chat_id, created_at)
+		SELECT $1, now() - interval '2 days' - make_interval(secs => g)
+		FROM generate_series(1, 3) g`, chat.ID)
+	require.NoError(t, err)
+	require.NoError(t, fdb.InsertChatUserNotification(ctx, forkdb.InsertChatUserNotificationParams{
+		ChatID: chat.ID, CreatedAt: dbtime.Now().Add(-time.Hour),
+	}))
+
+	for _, want := range []int64{2, 1, 0} {
+		deleted, err := fdb.DeleteOldChatUserNotifications(ctx, 2)
+		require.NoError(t, err)
+		require.Equal(t, want, deleted, "one call deletes at most its batch")
+	}
+	count, err := fdb.CountChatUserNotificationsSince(ctx, forkdb.CountChatUserNotificationsSinceParams{
+		ChatID: chat.ID,
+		Since:  dbtime.Now().Add(-48 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count, "the recent record stays")
+
+	_, err = sqlDB.ExecContext(ctx, `
+		INSERT INTO chat_user_notifications (chat_id, created_at)
+		SELECT $1, now() - make_interval(secs => g)
+		FROM generate_series(1, 10000) g`, chat.ID)
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, "ANALYZE chat_user_notifications")
+	require.NoError(t, err)
+	var raw []byte
+	require.NoError(t, sqlDB.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+forkdb.DeleteOldChatUserNotificationsSQL, 1000).Scan(&raw))
+	var plan []struct {
+		Plan planNode `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &plan))
+	require.Len(t, plan, 1)
+	var seqScans []string
+	plan[0].Plan.walk(func(node planNode) {
+		if node.NodeType == "Seq Scan" {
+			seqScans = append(seqScans, node.RelationName)
+		}
+	})
+	require.Empty(t, seqScans, "plan:\n%s", raw)
+}
+
 // insertCostMessage inserts a message of chat that cost costMicros at
 // createdAt.
 func insertCostMessage(ctx context.Context, t *testing.T, db database.Store, sqlDB *sql.DB, chat database.Chat, costMicros sql.NullInt64, createdAt time.Time, deleted bool) {

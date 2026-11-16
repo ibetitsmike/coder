@@ -15,3 +15,7 @@ const ClaimDuePullRequestWatchesSQL = claimDuePullRequestWatches
 // CountChatUserNotificationsSinceSQL is the statement of
 // CountChatUserNotificationsSince, so a test can EXPLAIN it.
 const CountChatUserNotificationsSinceSQL = countChatUserNotificationsSince
+
+// DeleteOldChatUserNotificationsSQL is the statement of
+// DeleteOldChatUserNotifications, so a test can EXPLAIN it.
+const DeleteOldChatUserNotificationsSQL = deleteOldChatUserNotifications

@@ -219,8 +219,8 @@ func (p *Server) pauseCappedWakeup(ctx context.Context, fdb forkdb.Store, chat d
 // notifyWakeupPaused tells the chat owner that a wake-up of chat paused for
 // reason. The payload has no dedupe bypass, so the enqueuer sends at most one
 // notification per chat and reason a day, however many wake-ups pause. A sent
-// notification counts toward the notify_user limit of the chat. A failure only
-// logs: it must not change the outcome of the wake-up.
+// or failed notification counts toward the notify_user limit of the chat. A
+// failure only logs: it must not change the outcome of the wake-up.
 func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, finish wakeupFinish) {
 	if p.chatWorker == nil {
 		return
@@ -249,11 +249,11 @@ func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, fin
 			slog.F("reason", reason),
 			slog.Error(err),
 		)
-		return
 	}
 	// A deduped or undeliverable notification enqueues nothing and does not
-	// count.
-	if len(ids) == 0 {
+	// count. A failed send may have queued some of its deliveries before the
+	// error, so it counts.
+	if err == nil && len(ids) == 0 {
 		return
 	}
 	fdb, err := forkdb.From(p.db)

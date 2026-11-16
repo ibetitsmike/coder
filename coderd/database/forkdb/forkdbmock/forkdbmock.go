@@ -276,18 +276,18 @@ func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, limitCount any)
 }
 
 // DeleteOldChatUserNotifications mocks base method.
-func (m *MockStore) DeleteOldChatUserNotifications(ctx context.Context) (int64, error) {
+func (m *MockStore) DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteOldChatUserNotifications", ctx)
+	ret := m.ctrl.Call(m, "DeleteOldChatUserNotifications", ctx, limitCount)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DeleteOldChatUserNotifications indicates an expected call of DeleteOldChatUserNotifications.
-func (mr *MockStoreMockRecorder) DeleteOldChatUserNotifications(ctx any) *gomock.Call {
+func (mr *MockStoreMockRecorder) DeleteOldChatUserNotifications(ctx, limitCount any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatUserNotifications", reflect.TypeOf((*MockStore)(nil).DeleteOldChatUserNotifications), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatUserNotifications", reflect.TypeOf((*MockStore)(nil).DeleteOldChatUserNotifications), ctx, limitCount)
 }
 
 // DeleteOldChatWakeupRunCounts mocks base method.

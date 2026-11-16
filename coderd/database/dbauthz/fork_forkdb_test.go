@@ -480,8 +480,8 @@ func TestForkQuerier(t *testing.T) {
 			check.Args(arg).Asserts(rbac.ResourceNotificationMessage, policy.ActionCreate).Returns()
 		},
 		"DeleteOldChatUserNotifications": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			fdb.EXPECT().DeleteOldChatUserNotifications(gomock.Any()).Return(int64(2), nil).AnyTimes()
-			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(2))
+			fdb.EXPECT().DeleteOldChatUserNotifications(gomock.Any(), int32(1000)).Return(int64(2), nil).AnyTimes()
+			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(2))
 		},
 		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})

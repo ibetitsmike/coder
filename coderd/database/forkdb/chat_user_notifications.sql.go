@@ -33,13 +33,20 @@ func (q *Queries) CountChatUserNotificationsSince(ctx context.Context, arg Count
 }
 
 const deleteOldChatUserNotifications = `-- name: DeleteOldChatUserNotifications :execrows
-DELETE FROM chat_user_notifications WHERE created_at < now() - interval '1 day'
+DELETE FROM chat_user_notifications
+WHERE id = ANY(ARRAY(
+    SELECT id
+    FROM chat_user_notifications
+    WHERE created_at < now() - interval '1 day'
+    ORDER BY created_at
+    LIMIT $1::int
+))
 `
 
-// Deletes the rows older than a day, on the database clock. The hourly limit
-// never reads them.
-func (q *Queries) DeleteOldChatUserNotifications(ctx context.Context) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteOldChatUserNotifications)
+// Deletes at most @limit_count rows older than a day, on the database clock.
+// The hourly limit never reads them.
+func (q *Queries) DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldChatUserNotifications, limitCount)
 	if err != nil {
 		return 0, err
 	}

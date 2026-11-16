@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
@@ -251,6 +252,33 @@ func TestWakeupCaps(t *testing.T) {
 		require.NoError(t, f.sqlDB.QueryRowContext(ctx,
 			"SELECT COUNT(*) FROM chat_user_notifications WHERE chat_id = $1", chat.ID).Scan(&rows))
 		require.Equal(t, 1, rows)
+	})
+
+	// The enqueuer can fail after it queued some deliveries of a
+	// notification, so a failed pause notification still counts toward the
+	// notify_user limit.
+	t.Run("FailedPauseNotificationCounts", func(t *testing.T) {
+		t.Parallel()
+		f := newWorkerTestFixture(t)
+		ctx := testutil.Context(t, testutil.WaitLong)
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+			Kind:            forkdb.ChatWakeupKindInterval,
+			IntervalSeconds: sql.NullInt32{Int32: 60, Valid: true},
+		})
+		f.seedDeliveredRuns(t, wakeup, maxChatWakeupRunsPerDay, recent)
+		worker := f.newArchiveWorker(t, nil, nil, nil)
+		enqueuer := &recordingEnqueuer{failAll: true}
+		worker.server.chatWorker.opts.NotificationsEnqueuer = enqueuer
+
+		worker.wakeupOnce(ctx, now)
+		got := f.wakeup(t, wakeup.ID)
+		require.Equal(t, forkdb.ChatWakeupStatusPaused, got.Status)
+		require.Equal(t, []uuid.UUID{chat.OwnerID}, enqueuer.enqueuedOwners())
+		var rows int
+		require.NoError(t, f.sqlDB.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM chat_user_notifications WHERE chat_id = $1", chat.ID).Scan(&rows))
+		require.Equal(t, 1, rows, "the failed send counts once")
 	})
 }
 

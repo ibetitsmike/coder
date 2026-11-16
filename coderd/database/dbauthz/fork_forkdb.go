@@ -107,11 +107,11 @@ func (f *forkQuerier) InsertChatUserNotification(ctx context.Context, arg forkdb
 	return f.db.InsertChatUserNotification(ctx, arg)
 }
 
-func (f *forkQuerier) DeleteOldChatUserNotifications(ctx context.Context) (int64, error) {
+func (f *forkQuerier) DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
 		return 0, err
 	}
-	return f.db.DeleteOldChatUserNotifications(ctx)
+	return f.db.DeleteOldChatUserNotifications(ctx, limitCount)
 }
 
 // CountLiveSubagentsInFamily authorizes through the family's root chat.

@@ -17,6 +17,10 @@ import (
 // deletes.
 const chatSecretAnswersBatchSize = 1000
 
+// chatUserNotificationsBatchSize bounds how many old notify_user records one
+// tick deletes.
+const chatUserNotificationsBatchSize = 1000
+
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
 // chat secret answers it purged. It also deletes the wake-up run counts older
 // than 7 days and the notify_user records older than a day.
@@ -40,7 +44,7 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 	if counts > 0 {
 		i.logger.Debug(ctx, "purged old chat wake-up run counts", slog.F("count", counts))
 	}
-	notified, err := ftx.DeleteOldChatUserNotifications(ctx)
+	notified, err := ftx.DeleteOldChatUserNotifications(ctx, chatUserNotificationsBatchSize)
 	if err != nil {
 		return 0, xerrors.Errorf("failed to delete old chat user notifications: %w", err)
 	}

@@ -53,9 +53,9 @@ type Querier interface {
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
-	// Deletes the rows older than a day, on the database clock. The hourly limit
-	// never reads them.
-	DeleteOldChatUserNotifications(ctx context.Context) (int64, error)
+	// Deletes at most @limit_count rows older than a day, on the database clock.
+	// The hourly limit never reads them.
+	DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes the run counts older than 7 days, on the database clock. The caps
 	// read only the last 24 hours.
 	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)

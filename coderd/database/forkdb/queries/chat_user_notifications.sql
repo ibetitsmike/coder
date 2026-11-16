@@ -11,7 +11,14 @@ FROM chat_user_notifications
 WHERE chat_id = @chat_id
     AND created_at >= @since::timestamptz;
 
--- Deletes the rows older than a day, on the database clock. The hourly limit
--- never reads them.
+-- Deletes at most @limit_count rows older than a day, on the database clock.
+-- The hourly limit never reads them.
 -- name: DeleteOldChatUserNotifications :execrows
-DELETE FROM chat_user_notifications WHERE created_at < now() - interval '1 day';
+DELETE FROM chat_user_notifications
+WHERE id = ANY(ARRAY(
+    SELECT id
+    FROM chat_user_notifications
+    WHERE created_at < now() - interval '1 day'
+    ORDER BY created_at
+    LIMIT @limit_count::int
+));
