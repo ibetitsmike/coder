@@ -164,7 +164,7 @@ func TestForkListDescendantsStatements(t *testing.T) {
 	var listed []database.Chat
 	counts := f.counted(t, func() {
 		var err error
-		listed, err = f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, maxListedSubtreeLevels)
+		listed, err = f.server.listDescendantChats(ctx, f.root.ID, maxListedSubtreeLevels)
 		require.NoError(t, err)
 	})
 	require.Equal(t, map[string]int{"GetDescendantChatsByRootIDs": 1}, counts)
@@ -172,19 +172,19 @@ func TestForkListDescendantsStatements(t *testing.T) {
 
 	counts = f.counted(t, func() {
 		var err error
-		listed, err = f.server.listDescendantChats(ctx, f.root.ID, descendants[0].ID, maxListedSubtreeLevels)
+		listed, err = f.server.listDescendantChats(ctx, descendants[0].ID, maxListedSubtreeLevels)
 		require.NoError(t, err)
 	})
 	require.Equal(t, map[string]int{"GetDescendantChatsByRootIDs": 1}, counts)
 	require.ElementsMatch(t, all[1:5], ids(listed), "only the subtree of the chat")
 
-	listed, err := f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, 1)
+	listed, err := f.server.listDescendantChats(ctx, f.root.ID, 1)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{all[0], all[5], all[10], all[15]}, ids(listed), "one level")
 
 	_, err = f.raw.ArchiveChatByID(ctx, descendants[0].ID)
 	require.NoError(t, err)
-	listed, err = f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, maxListedSubtreeLevels)
+	listed, err = f.server.listDescendantChats(ctx, f.root.ID, maxListedSubtreeLevels)
 	require.NoError(t, err)
 	require.ElementsMatch(t, all[5:], ids(listed), "an archived child hides its subtree")
 }

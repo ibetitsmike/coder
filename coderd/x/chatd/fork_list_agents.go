@@ -116,7 +116,7 @@ func (t forkListAgentsTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	if args.Recursive {
 		levels = maxListedSubtreeLevels
 	}
-	chats, err := t.server.listDescendantChats(ctx, subagentRootChatID(t.chat), targetID, levels)
+	chats, err := t.server.listDescendantChats(ctx, targetID, levels)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -145,15 +145,15 @@ func (t forkListAgentsTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 
 // listDescendantChats returns the unarchived descendants of chatID up to
 // levels below it, reached through unarchived chats, most recently active
-// first, as listSubagents orders them. rootID is the root of chatID's
-// family; the family is read in one statement and cut to chatID's subtree.
-func (p *Server) listDescendantChats(ctx context.Context, rootID, chatID uuid.UUID, levels int) ([]database.Chat, error) {
+// first, as listSubagents orders them. The subtree is read in one
+// statement.
+func (p *Server) listDescendantChats(ctx context.Context, chatID uuid.UUID, levels int) ([]database.Chat, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
 		return nil, xerrors.Errorf("fork queries: %w", err)
 	}
 	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{
-		RootIds:  []uuid.UUID{rootID},
+		RootIds:  []uuid.UUID{chatID},
 		Archived: sql.NullBool{Bool: false, Valid: true},
 	})
 	if err != nil {

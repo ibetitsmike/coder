@@ -1,9 +1,30 @@
 -- name: GetDescendantChatsByRootIDs :many
--- Returns every descendant of the given root chats in one statement, with
--- the row shape of upstream's GetChildChatsByParentIDs, optionally filtered
--- by archive state (NULL = all, true/false = match). A descendant whose
--- parent is filtered out is still returned; the caller drops it, so that a
--- hidden chat hides its subtree.
+-- Returns every descendant of the given chats in one statement, with the row
+-- shape of upstream's GetChildChatsByParentIDs, optionally filtered by
+-- archive state (NULL = all, true/false = match). It follows parent_chat_id
+-- level by level as a walk with upstream's query does, so it needs no
+-- root_chat_id: a chat whose family root was deleted, and so lost its
+-- root_chat_id, still reaches its whole subtree. The walk continues only
+-- through chats that match the archive filter. The depth guard stops it if
+-- a cycle ever appears in the hierarchy.
+WITH RECURSIVE descendants(id, depth) AS (
+    SELECT chats.id, 1
+    FROM chats
+    WHERE chats.parent_chat_id = ANY(@root_ids :: uuid[])
+        AND CASE
+            WHEN sqlc.narg('archived') :: boolean IS NULL THEN true
+            ELSE chats.archived = sqlc.narg('archived') :: boolean
+        END
+    UNION ALL
+    SELECT chats.id, descendants.depth + 1
+    FROM chats
+    JOIN descendants ON chats.parent_chat_id = descendants.id
+    WHERE descendants.depth < 64
+        AND CASE
+            WHEN sqlc.narg('archived') :: boolean IS NULL THEN true
+            ELSE chats.archived = sqlc.narg('archived') :: boolean
+        END
+)
 SELECT
     sqlc.embed(chats_expanded),
     EXISTS (
@@ -15,18 +36,7 @@ SELECT
     ) AS has_unread
 FROM
     chats_expanded
-WHERE
-    -- A direct child created without root_chat_id still hangs off its
-    -- parent.
-    (
-        chats_expanded.root_chat_id = ANY(@root_ids :: uuid[])
-        OR chats_expanded.parent_chat_id = ANY(@root_ids :: uuid[])
-    )
-    AND chats_expanded.parent_chat_id IS NOT NULL
-    AND CASE
-        WHEN sqlc.narg('archived') :: boolean IS NULL THEN true
-        ELSE chats_expanded.archived = sqlc.narg('archived') :: boolean
-    END
+JOIN descendants ON descendants.id = chats_expanded.id
 ORDER BY
     chats_expanded.created_at DESC,
     chats_expanded.id DESC;

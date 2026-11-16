@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -127,4 +128,49 @@ func TestForkListAgentsDescendants(t *testing.T) {
 		require.NotContains(t, tool.Info().Parameters, "chat_id")
 		require.NotContains(t, tool.Info().Parameters, "recursive")
 	})
+}
+
+// Deleting a family root promotes its child to a root and clears the
+// root_chat_id of every descendant, and a recursive list from the promoted
+// root still reaches the deepest chat.
+func TestForkListAgentsAfterRootDeleted(t *testing.T) {
+	t.Parallel()
+
+	f := newNestedSubagentsFixture(t, codersdk.Experiments{codersdk.ExperimentForkNestedSubagents}, Limits{})
+	ctx := chatdTestContext(t)
+	descendant := func(parent database.Chat) database.Chat {
+		return dbgen.Chat(t, f.db, database.Chat{
+			OrganizationID:    f.root.OrganizationID,
+			OwnerID:           f.root.OwnerID,
+			LastModelConfigID: f.root.LastModelConfigID,
+			ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+			RootChatID:        uuid.NullUUID{UUID: f.root.ID, Valid: true},
+			Status:            database.ChatStatusWaiting,
+		})
+	}
+	promoted := descendant(f.root)
+	child := descendant(promoted)
+	grandchild := descendant(child)
+	_, err := f.sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", f.root.ID)
+	require.NoError(t, err)
+	promoted, err = f.db.GetChatByID(ctx, promoted.ID)
+	require.NoError(t, err)
+	require.False(t, promoted.ParentChatID.Valid)
+	require.False(t, promoted.RootChatID.Valid)
+
+	base, err := f.server.subagentTools(ctx, func() database.Chat { return promoted }, promoted.LastModelConfigID)
+	require.NoError(t, err)
+	tools, err := f.server.appendForkTools(ctx, base, promoted, promoted.LastModelConfigID)
+	require.NoError(t, err)
+	content := runChatTodoTool(ctx, t, tools, "list_agents", map[string]any{"recursive": true}, false)
+	var result forkListAgentsResult
+	require.NoError(t, json.Unmarshal([]byte(content), &result))
+	parents := map[string]string{}
+	for _, agent := range result.Agents {
+		parents[agent.ChatID] = agent.ParentChatID
+	}
+	require.Equal(t, map[string]string{
+		child.ID.String():      promoted.ID.String(),
+		grandchild.ID.String(): child.ID.String(),
+	}, parents)
 }

@@ -226,7 +226,7 @@ func TestForkChatTreeStatements(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	raw, ps := dbtestutil.NewDB(t)
+	raw, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	var children, descendants atomic.Int64
 	client, _ := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
 		opts.Database = chatTreeCountStore{Store: raw, children: &children, descendants: &descendants}
@@ -308,6 +308,25 @@ func TestForkChatTreeStatements(t *testing.T) {
 	gotRoot, err = memberClient.GetChat(ctx, hiddenRoot.ID)
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{hiddenChild.ID, hiddenGrandchild.ID}, ids(gotRoot.Children))
+
+	// Deleting a family root promotes its child to a root and clears the
+	// root_chat_id of every descendant, and the promoted root still embeds
+	// its whole subtree.
+	oldRoot, promoted, promotedChild := forkChatFamily(t, raw, firstUser.OrganizationID, member.ID, modelConfig.ID)
+	promotedGrandchild := dbgen.Chat(t, raw, database.Chat{
+		OrganizationID:    firstUser.OrganizationID,
+		OwnerID:           member.ID,
+		LastModelConfigID: modelConfig.ID,
+		ParentChatID:      uuid.NullUUID{UUID: promotedChild.ID, Valid: true},
+		RootChatID:        uuid.NullUUID{UUID: oldRoot.ID, Valid: true},
+	})
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", oldRoot.ID)
+	require.NoError(t, err)
+	reset()
+	gotRoot, err = memberClient.GetChat(ctx, promoted.ID)
+	require.NoError(t, err)
+	requireOneStatement("GET of a promoted root")
+	require.Equal(t, []uuid.UUID{promotedChild.ID, promotedGrandchild.ID}, ids(gotRoot.Children))
 
 	// An archived child hides its unarchived subtree from the
 	// unarchived list.

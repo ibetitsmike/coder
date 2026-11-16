@@ -14,6 +14,24 @@ import (
 )
 
 const getDescendantChatsByRootIDs = `-- name: GetDescendantChatsByRootIDs :many
+WITH RECURSIVE descendants(id, depth) AS (
+    SELECT chats.id, 1
+    FROM chats
+    WHERE chats.parent_chat_id = ANY($1 :: uuid[])
+        AND CASE
+            WHEN $2 :: boolean IS NULL THEN true
+            ELSE chats.archived = $2 :: boolean
+        END
+    UNION ALL
+    SELECT chats.id, descendants.depth + 1
+    FROM chats
+    JOIN descendants ON chats.parent_chat_id = descendants.id
+    WHERE descendants.depth < 64
+        AND CASE
+            WHEN $2 :: boolean IS NULL THEN true
+            ELSE chats.archived = $2 :: boolean
+        END
+)
 SELECT
     chats_expanded.id, chats_expanded.owner_id, chats_expanded.workspace_id, chats_expanded.title, chats_expanded.status, chats_expanded.worker_id, chats_expanded.started_at, chats_expanded.heartbeat_at, chats_expanded.created_at, chats_expanded.updated_at, chats_expanded.parent_chat_id, chats_expanded.root_chat_id, chats_expanded.last_model_config_id, chats_expanded.last_reasoning_effort, chats_expanded.archived, chats_expanded.last_error, chats_expanded.mode, chats_expanded.mcp_server_ids, chats_expanded.labels, chats_expanded.build_id, chats_expanded.agent_id, chats_expanded.pin_order, chats_expanded.last_read_message_id, chats_expanded.dynamic_tools, chats_expanded.organization_id, chats_expanded.project_id, chats_expanded.plan_mode, chats_expanded.client_type, chats_expanded.last_turn_summary, chats_expanded.summary, chats_expanded.summary_generated_at, chats_expanded.snapshot_version, chats_expanded.history_version, chats_expanded.queue_version, chats_expanded.generation_attempt, chats_expanded.retry_state, chats_expanded.retry_state_version, chats_expanded.runner_id, chats_expanded.requires_action_deadline_at, chats_expanded.user_acl, chats_expanded.group_acl, chats_expanded.owner_username, chats_expanded.owner_name, chats_expanded.context_aggregate_hash, chats_expanded.context_dirty_since, chats_expanded.context_dirty_resources, chats_expanded.context_error, chats_expanded.compaction_requested_at, chats_expanded.title_source, chats_expanded.title_updated_at,
     EXISTS (
@@ -25,18 +43,7 @@ SELECT
     ) AS has_unread
 FROM
     chats_expanded
-WHERE
-    -- A direct child created without root_chat_id still hangs off its
-    -- parent.
-    (
-        chats_expanded.root_chat_id = ANY($1 :: uuid[])
-        OR chats_expanded.parent_chat_id = ANY($1 :: uuid[])
-    )
-    AND chats_expanded.parent_chat_id IS NOT NULL
-    AND CASE
-        WHEN $2 :: boolean IS NULL THEN true
-        ELSE chats_expanded.archived = $2 :: boolean
-    END
+JOIN descendants ON descendants.id = chats_expanded.id
 ORDER BY
     chats_expanded.created_at DESC,
     chats_expanded.id DESC
@@ -52,11 +59,14 @@ type GetDescendantChatsByRootIDsRow struct {
 	HasUnread     bool          `db:"has_unread" json:"has_unread"`
 }
 
-// Returns every descendant of the given root chats in one statement, with
-// the row shape of upstream's GetChildChatsByParentIDs, optionally filtered
-// by archive state (NULL = all, true/false = match). A descendant whose
-// parent is filtered out is still returned; the caller drops it, so that a
-// hidden chat hides its subtree.
+// Returns every descendant of the given chats in one statement, with the row
+// shape of upstream's GetChildChatsByParentIDs, optionally filtered by
+// archive state (NULL = all, true/false = match). It follows parent_chat_id
+// level by level as a walk with upstream's query does, so it needs no
+// root_chat_id: a chat whose family root was deleted, and so lost its
+// root_chat_id, still reaches its whole subtree. The walk continues only
+// through chats that match the archive filter. The depth guard stops it if
+// a cycle ever appears in the hierarchy.
 func (q *Queries) GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getDescendantChatsByRootIDs, pq.Array(arg.RootIds), arg.Archived)
 	if err != nil {
