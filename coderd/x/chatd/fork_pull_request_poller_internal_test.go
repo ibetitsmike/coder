@@ -133,6 +133,7 @@ type pollerTest struct {
 	f      *workerTestFixture
 	github *fakeGitHub
 	server *Server
+	clock  *quartz.Mock
 	fdb    forkdb.Store
 	ctx    context.Context
 }
@@ -149,7 +150,7 @@ func newPollerTest(t *testing.T) *pollerTest {
 	require.NoError(t, err)
 	//nolint:gocritic // The poller reads the pull requests of every chat.
 	ctx := dbauthz.AsChatd(testutil.Context(t, testutil.WaitLong))
-	return &pollerTest{f: f, github: github, server: server, fdb: fdb, ctx: ctx}
+	return &pollerTest{f: f, github: github, server: server, clock: clock, fdb: fdb, ctx: ctx}
 }
 
 // watch creates a chat whose wake-up waits for comments on the pull request,
@@ -252,6 +253,95 @@ func TestPullRequestPollerSharesReadsAcrossClaims(t *testing.T) {
 		watch := p.f.pullRequestWatch(t, wakeup.ID)
 		require.True(t, now.Equal(watch.PolledAt), "polled at %s", watch.PolledAt)
 	}
+}
+
+// A pass whose reads take longer than the poll interval does not claim the
+// watches it read again, so it reaches the end of the backlog.
+func TestPullRequestPollerClaimsOncePerPass(t *testing.T) {
+	t.Parallel()
+	p := newPollerTest(t)
+	const watches = pullRequestPollerBatch + 1
+	for i := range watches {
+		p.f.insertWakeup(t, p.f.createWakeupChat(t), forkdb.InsertChatWakeupParams{
+			Kind:      forkdb.ChatWakeupKindEvents,
+			ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(24 * time.Hour), Valid: true},
+		}, wakeupEvent{
+			Type:        wakeupEventPullRequest,
+			URL:         fmt.Sprintf("https://github.example.com/org/repo/pull/%d", i+1),
+			On:          []string{pullRequestEventComment},
+			Since:       wakeupTestSlot,
+			HeadSHA:     testHeadSHA,
+			ViewerLogin: "owner",
+		})
+	}
+	ctx, cancel := context.WithCancel(p.ctx)
+	defer cancel()
+	var (
+		mu    sync.Mutex
+		reads = map[string]int{}
+		total int
+	)
+	p.server.forkPullRequestActivity = func(_ context.Context, _ uuid.UUID, pullRequestURL string, _ time.Time, _ bool, _ string) (*gitprovider.PullRequestActivity, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		reads[pullRequestURL]++
+		total++
+		if total > 2*watches {
+			cancel()
+		}
+		// Each read takes longer than the poll interval. The mock clock
+		// cannot jump over the timers of the server, so it fires them.
+		target := p.clock.Now().Add(2 * pullRequestPollInterval)
+		for {
+			d, ok := p.clock.Peek()
+			if !ok || p.clock.Now().Add(d).After(target) {
+				break
+			}
+			_, w := p.clock.AdvanceNext()
+			w.MustWait(p.ctx)
+		}
+		p.clock.Set(target).MustWait(p.ctx)
+		return &gitprovider.PullRequestActivity{State: gitprovider.PRStateOpen, HeadSHA: testHeadSHA}, nil
+	}
+
+	p.server.pollPullRequests(ctx, p.fdb, wakeupTestSlot.Add(pullRequestPollInterval))
+	require.NoError(t, ctx.Err(), "the pass must end")
+	require.Len(t, reads, watches)
+	for url, n := range reads {
+		require.Equal(t, 1, n, "reads of %s", url)
+	}
+}
+
+// A failed read of the checks does not hold back the watches of the same
+// pull request that do not watch checks.
+func TestPullRequestPollerChecksFailureIsolated(t *testing.T) {
+	t.Parallel()
+	p := newPollerTest(t)
+	insert := func(on string) forkdb.ChatWakeup {
+		return p.f.insertWakeup(t, p.f.createWakeupChat(t), forkdb.InsertChatWakeupParams{
+			Kind:      forkdb.ChatWakeupKindEvents,
+			ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(24 * time.Hour), Valid: true},
+		}, wakeupEvent{
+			Type:        wakeupEventPullRequest,
+			URL:         p.github.url,
+			On:          []string{on},
+			Since:       wakeupTestSlot,
+			HeadSHA:     testHeadSHA,
+			ViewerLogin: "owner",
+		})
+	}
+	comments := insert(pullRequestEventComment)
+	checks := insert(pullRequestEventChecks)
+
+	// The fake has no checks endpoints, so the read with checks fails.
+	now := wakeupTestSlot.Add(pullRequestPollInterval)
+	p.server.pollPullRequests(p.ctx, p.fdb, now)
+	watch := p.f.pullRequestWatch(t, comments.ID)
+	require.True(t, now.Equal(watch.PolledAt), "polled at %s", watch.PolledAt)
+	require.True(t, now.Add(pullRequestPollInterval).Equal(watch.NextPollAt), "next poll at %s", watch.NextPollAt)
+	watch = p.f.pullRequestWatch(t, checks.ID)
+	require.True(t, watch.PolledAt.IsZero(), "polled at %s", watch.PolledAt)
+	require.True(t, now.Add(pullRequestErrorRetry).Equal(watch.NextPollAt), "next poll at %s", watch.NextPollAt)
 }
 
 // New activity sends exactly one message to each chat that watches the pull

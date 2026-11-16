@@ -87,17 +87,19 @@ func (p *Server) runPullRequestPoller(ctx context.Context, store database.Store,
 
 // pollPullRequests runs one pass of the poller at now: it claims the due
 // watches in batches and reads each batch with at most maxPullRequestReads
-// reads in flight. Each claim runs at now plus the time the pass took so
-// far, so its lease covers its own reads. A full batch may end inside the
-// group of one pull request and owner, so that group waits for the next
-// claim and is read once with the rest of it.
+// reads in flight. Every claim takes the watches due at now, so a pass never
+// claims a watch it read again however long it runs, and leases them from
+// now plus the time the pass took so far, so the lease covers its own
+// reads. A full batch may end inside the group of one pull request and
+// owner, so that group waits for the next claim and is read once with the
+// rest of it.
 func (p *Server) pollPullRequests(ctx context.Context, fdb forkdb.Store, now time.Time) {
 	began := p.clock.Now("chatd", "pr-poller")
 	var carry []forkdb.ClaimDuePullRequestWatchesRow
 	for ctx.Err() == nil {
 		claimNow := now.Add(p.clock.Since(began, "chatd", "pr-poller"))
 		claimed, err := fdb.ClaimDuePullRequestWatches(ctx, forkdb.ClaimDuePullRequestWatchesParams{
-			Now:        claimNow,
+			Now:        now,
 			LimitCount: pullRequestPollerBatch,
 			LeaseUntil: claimNow.Add(pullRequestPollerLease),
 		})
@@ -140,15 +142,14 @@ func (p *Server) pollPullRequests(ctx context.Context, fdb forkdb.Store, now tim
 }
 
 // pollPullRequest reads one pull request as one owner for the watches in
-// rows, and records the read on each of them.
+// rows, and records the read on each of them. A failed read of the checks
+// fails the whole read, so the watches that do not watch checks are read
+// apart from those that do.
 func (p *Server) pollPullRequest(ctx context.Context, fdb forkdb.Store, rows []forkdb.ClaimDuePullRequestWatchesRow, now time.Time) {
-	var (
-		valid         []forkdb.ClaimDuePullRequestWatchesRow
-		events        []wakeupEvent
-		since         time.Time
-		includeChecks bool
-		viewerLogin   string
-	)
+	var parts [2]struct {
+		rows   []forkdb.ClaimDuePullRequestWatchesRow
+		events []wakeupEvent
+	}
 	for _, row := range rows {
 		var event wakeupEvent
 		if err := json.Unmarshal(row.Spec, &event); err != nil {
@@ -157,17 +158,33 @@ func (p *Server) pollPullRequest(ctx context.Context, fdb forkdb.Store, rows []f
 			continue
 		}
 		event.Type, event.URL = wakeupEventPullRequest, row.PullRequestUrl.String
-		valid, events = append(valid, row), append(events, event)
+		part := &parts[0]
+		if slices.Contains(event.On, pullRequestEventChecks) {
+			part = &parts[1]
+		}
+		part.rows, part.events = append(part.rows, row), append(part.events, event)
+	}
+	for i, part := range parts {
+		if len(part.rows) > 0 {
+			p.readPullRequest(ctx, fdb, part.rows, part.events, i == 1, now)
+		}
+	}
+}
+
+// readPullRequest reads one pull request as one owner, with its checks when
+// includeChecks is set, for the watches in rows with the parsed events, and
+// records the read on each of them.
+func (p *Server) readPullRequest(ctx context.Context, fdb forkdb.Store, rows []forkdb.ClaimDuePullRequestWatchesRow, events []wakeupEvent, includeChecks bool, now time.Time) {
+	var (
+		since       time.Time
+		viewerLogin string
+	)
+	for _, event := range events {
 		if since.IsZero() || event.Since.Before(since) {
 			since = event.Since
 		}
-		includeChecks = includeChecks || slices.Contains(event.On, pullRequestEventChecks)
 		viewerLogin = cmp.Or(viewerLogin, event.ViewerLogin)
 	}
-	if len(valid) == 0 {
-		return
-	}
-	rows = valid
 	url := rows[0].PullRequestUrl.String
 	readCtx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
 	activity, err := p.forkPullRequestActivity(readCtx, rows[0].OwnerID, url, since, includeChecks, viewerLogin)
