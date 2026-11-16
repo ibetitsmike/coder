@@ -869,6 +869,21 @@ func (mr *MockStoreMockRecorder) GetPluginChatBindingsDue(ctx, arg any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginChatBindingsDue", reflect.TypeOf((*MockStore)(nil).GetPluginChatBindingsDue), ctx, arg)
 }
 
+// GetPluginLeaseSummary mocks base method.
+func (m *MockStore) GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (forkdb.GetPluginLeaseSummaryRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginLeaseSummary", ctx, runnerID)
+	ret0, _ := ret[0].(forkdb.GetPluginLeaseSummaryRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginLeaseSummary indicates an expected call of GetPluginLeaseSummary.
+func (mr *MockStoreMockRecorder) GetPluginLeaseSummary(ctx, runnerID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginLeaseSummary", reflect.TypeOf((*MockStore)(nil).GetPluginLeaseSummary), ctx, runnerID)
+}
+
 // GetPluginPackByID mocks base method.
 func (m *MockStore) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
 	m.ctrl.T.Helper()
