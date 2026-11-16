@@ -7,6 +7,7 @@ package forkdb
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,45 @@ func (q *Queries) GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getPluginPackCommitPaths = `-- name: GetPluginPackCommitPaths :many
+SELECT p.commit_sha, r.path
+FROM plugin_packs p
+LEFT JOIN plugin_pack_resources r ON r.pack_id = p.id
+WHERE p.id = $1
+ORDER BY r.path
+`
+
+type GetPluginPackCommitPathsRow struct {
+	CommitSha string         `db:"commit_sha" json:"commit_sha"`
+	Path      sql.NullString `db:"path" json:"path"`
+}
+
+// Returns the commit of the pack and the path of each of its files, one row
+// per file, or one row with a NULL path when it has none. One statement reads
+// one snapshot, so the paths are those of the returned commit.
+func (q *Queries) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]GetPluginPackCommitPathsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPluginPackCommitPaths, packID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPluginPackCommitPathsRow
+	for rows.Next() {
+		var i GetPluginPackCommitPathsRow
+		if err := rows.Scan(&i.CommitSha, &i.Path); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getPluginPackResources = `-- name: GetPluginPackResources :many

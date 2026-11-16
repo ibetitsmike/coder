@@ -254,12 +254,12 @@ type packPathsEntry struct {
 // A failed read, or a read of a commit the pack moved past, is logged and
 // returns no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
+	now := p.clock.Now()
 	cached, _ := p.forkPacks.paths.LoadOrStore(pack.ID, &packPathsEntry{})
 	entry, ok := cached.(*packPathsEntry)
 	if !ok {
 		return packPathSet{}
 	}
-	now := p.clock.Now()
 	entry.mu.Lock()
 	if c, ok := entry.commits[pack.CommitSHA]; ok {
 		c.lastRead = now
@@ -268,19 +268,14 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	}
 	entry.mu.Unlock()
 
-	resources, err := p.packResources(ctx, pack.ID)
+	// The resource table holds only the files of the pack's current commit.
+	// The commit and the paths come from one statement, so they belong
+	// together. Once the pack moved past the pinned commit, that commit's
+	// files are gone, so the gate fails closed for this step and caches
+	// nothing.
+	current, paths, err := p.packCommitPaths(ctx, pack.ID)
 	if err != nil {
 		p.logger.Warn(ctx, "failed to read plugin pack files", slog.F("pack_id", pack.ID), slog.Error(err))
-		return packPathSet{}
-	}
-	// The resource table holds only the files of the pack's current commit,
-	// and an update replaces them and the commit in one transaction. Read the
-	// commit after the files: while it is still the pinned one, the files are
-	// that commit's. Once the pack moved on, the pinned commit's files are
-	// gone, so the gate fails closed for this step and caches nothing.
-	current, err := p.packCommit(ctx, pack.ID)
-	if err != nil {
-		p.logger.Warn(ctx, "failed to read plugin pack commit", slog.F("pack_id", pack.ID), slog.Error(err))
 		return packPathSet{}
 	}
 	if current != pack.CommitSHA {
@@ -288,28 +283,47 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 			slog.F("pack_id", pack.ID), slog.F("step_commit", pack.CommitSHA), slog.F("current_commit", current))
 		return packPathSet{}
 	}
-	paths := packPathSet{}
-	for _, resource := range resources {
-		paths[resource.Path] = true
-	}
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
 	if entry.commits == nil {
 		entry.commits = map[string]*packCommitPaths{}
-	}
-	for commit, c := range entry.commits {
-		if now.Sub(c.lastRead) > packPathsIdle {
-			delete(entry.commits, commit)
-		}
 	}
 	if c, ok := entry.commits[pack.CommitSHA]; ok {
 		// A concurrent read stored the commit first.
 		c.lastRead = now
-		return c.paths
+		paths = c.paths
+	} else {
+		entry.commits[pack.CommitSHA] = &packCommitPaths{paths: paths, lastRead: now}
 	}
-	entry.commits[pack.CommitSHA] = &packCommitPaths{paths: paths, lastRead: now}
+	entry.mu.Unlock()
+	p.sweepPackPaths(now)
 	return paths
+}
+
+// sweepPackPaths drops the cached commits that no step read in the last
+// packPathsIdle, and the entries of packs left with none, such as deleted
+// packs. It runs when a new commit is stored.
+func (p *Server) sweepPackPaths(now time.Time) {
+	p.forkPacks.paths.Range(func(key, value any) bool {
+		entry, ok := value.(*packPathsEntry)
+		if !ok {
+			return true
+		}
+		entry.mu.Lock()
+		for commit, c := range entry.commits {
+			if now.Sub(c.lastRead) > packPathsIdle {
+				delete(entry.commits, commit)
+			}
+		}
+		empty := len(entry.commits) == 0
+		entry.mu.Unlock()
+		if empty {
+			// A read that loaded the entry before the delete stores into
+			// it and is lost, so the next read reads again.
+			p.forkPacks.paths.CompareAndDelete(key, entry)
+		}
+		return true
+	})
 }
 
 // packRelativePath returns source relative to the directory of the installed

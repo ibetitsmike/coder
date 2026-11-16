@@ -897,6 +897,21 @@ func (mr *MockStoreMockRecorder) GetPluginPackByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackByID", reflect.TypeOf((*MockStore)(nil).GetPluginPackByID), ctx, id)
 }
 
+// GetPluginPackCommitPaths mocks base method.
+func (m *MockStore) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPackCommitPaths", ctx, packID)
+	ret0, _ := ret[0].([]forkdb.GetPluginPackCommitPathsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPackCommitPaths indicates an expected call of GetPluginPackCommitPaths.
+func (mr *MockStoreMockRecorder) GetPluginPackCommitPaths(ctx, packID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackCommitPaths", reflect.TypeOf((*MockStore)(nil).GetPluginPackCommitPaths), ctx, packID)
+}
+
 // GetPluginPackResources mocks base method.
 func (m *MockStore) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
 	m.ctrl.T.Helper()

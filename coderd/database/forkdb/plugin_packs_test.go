@@ -54,10 +54,27 @@ func TestPluginPackResources(t *testing.T) {
 		{PackID: pack.ID, Path: "skills/b/SKILL.md", Content: []byte("b"), ContentHash: "hb"},
 	}, got)
 
+	// The commit comes with the paths of its files, one row per file.
+	paths, err := fdb.GetPluginPackCommitPaths(ctx, pack.ID)
+	require.NoError(t, err)
+	require.Equal(t, []forkdb.GetPluginPackCommitPathsRow{
+		{CommitSha: pack.CommitSha, Path: sql.NullString{String: "agents/a.md", Valid: true}},
+		{CommitSha: pack.CommitSha, Path: sql.NullString{String: "skills/b/SKILL.md", Valid: true}},
+	}, paths)
+
+	// A pack without files still returns its commit.
+	require.NoError(t, fdb.DeletePluginPackResources(ctx, pack.ID))
+	paths, err = fdb.GetPluginPackCommitPaths(ctx, pack.ID)
+	require.NoError(t, err)
+	require.Equal(t, []forkdb.GetPluginPackCommitPathsRow{{CommitSha: pack.CommitSha}}, paths)
+
 	require.NoError(t, fdb.DeletePluginPackByID(ctx, pack.ID))
 	got, err = fdb.GetPluginPackResources(ctx, pack.ID)
 	require.NoError(t, err)
 	require.Empty(t, got, "deleting a pack deletes its resources")
+	paths, err = fdb.GetPluginPackCommitPaths(ctx, pack.ID)
+	require.NoError(t, err)
+	require.Empty(t, paths, "a deleted pack returns no row")
 }
 
 func TestPluginPackEnablementOrganization(t *testing.T) {

@@ -304,18 +304,28 @@ func (p *Server) packResources(ctx context.Context, packID uuid.UUID) ([]forkdb.
 	return resources, nil
 }
 
-// packCommit returns the commit the pack is at now.
-func (p *Server) packCommit(ctx context.Context, packID uuid.UUID) (string, error) {
+// packCommitPaths returns the commit the pack is at now and the paths of its
+// files at that commit, read in one statement.
+func (p *Server) packCommitPaths(ctx context.Context, packID uuid.UUID) (string, packPathSet, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
-		return "", xerrors.Errorf("fork queries unavailable: %w", err)
+		return "", nil, xerrors.Errorf("fork queries unavailable: %w", err)
 	}
-	//nolint:gocritic // chatd reads the commit of a pack enabled for this chat.
-	pack, err := fdb.GetPluginPackByID(dbauthz.AsSystemRestricted(ctx), packID)
+	//nolint:gocritic // chatd reads the files of a pack enabled for this chat.
+	rows, err := fdb.GetPluginPackCommitPaths(dbauthz.AsSystemRestricted(ctx), packID)
 	if err != nil {
-		return "", xerrors.Errorf("get pack: %w", err)
+		return "", nil, xerrors.Errorf("get pack paths: %w", err)
 	}
-	return pack.CommitSha, nil
+	if len(rows) == 0 {
+		return "", nil, xerrors.Errorf("pack %s not found", packID)
+	}
+	paths := packPathSet{}
+	for _, row := range rows {
+		if row.Path.Valid {
+			paths[row.Path.String] = true
+		}
+	}
+	return rows[0].CommitSha, paths, nil
 }
 
 // readPackMarker returns the commit recorded in a pack directory's marker.

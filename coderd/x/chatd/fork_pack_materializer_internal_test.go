@@ -427,7 +427,8 @@ func TestMaterializePluginPacks(t *testing.T) {
 // TestPackPathsCacheOnePerPack checks that the path cache of the plugin gate
 // keeps one entry per pack, that the entry keeps a commit while steps read
 // it and drops it once no step read it for packPathsIdle, and that a read of
-// a commit the pack moved past fails closed.
+// a commit the pack moved past fails closed. The entry of a deleted pack goes
+// once its commits are idle.
 func TestPackPathsCacheOnePerPack(t *testing.T) {
 	t.Parallel()
 
@@ -530,4 +531,13 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 	install(other, "c1", "skills/beta.md")
 	read(other, "c1")
 	require.Equal(t, 2, cached())
+
+	// The entry of a deleted pack goes once its commits are idle and
+	// another pack stores a new commit.
+	require.NoError(t, fdb.DeletePluginPackByID(ctx, other.ID))
+	age(other, packPathsIdle+time.Minute)
+	install(pack, "c5", "skills/c5.md")
+	require.Equal(t, packPathSet{"skills/c5.md": true}, read(pack, "c5"))
+	require.Equal(t, 1, cached(), "the deleted pack's entry is dropped")
+	require.Equal(t, []string{"c3", "c4", "c5"}, commits(pack))
 }

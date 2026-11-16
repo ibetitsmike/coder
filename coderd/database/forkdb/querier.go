@@ -127,6 +127,10 @@ type Querier interface {
 	// AcquirePluginLeases.
 	GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (GetPluginLeaseSummaryRow, error)
 	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
+	// Returns the commit of the pack and the path of each of its files, one row
+	// per file, or one row with a NULL path when it has none. One statement reads
+	// one snapshot, so the paths are those of the returned commit.
+	GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]GetPluginPackCommitPathsRow, error)
 	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
 	GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error)
 	GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetPluginPacksByChatIDRow, error)

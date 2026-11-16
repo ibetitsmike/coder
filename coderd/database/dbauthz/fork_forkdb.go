@@ -459,6 +459,13 @@ func (f *forkQuerier) GetPluginPackByID(ctx context.Context, id uuid.UUID) (fork
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginPackByID)(ctx, id)
 }
 
+func (f *forkQuerier) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	if _, err := f.GetPluginPackByID(ctx, packID); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPackCommitPaths(ctx, packID)
+}
+
 func (f *forkQuerier) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
 	if _, err := f.GetPluginPackByID(ctx, packID); err != nil {
 		return nil, err

@@ -177,6 +177,11 @@ func (f forkQueryMetricsStore) GetPluginPackByID(ctx context.Context, id uuid.UU
 	return f.s.GetPluginPackByID(ctx, id)
 }
 
+func (f forkQueryMetricsStore) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	defer f.observe(ctx, "GetPluginPackCommitPaths", time.Now())
+	return f.s.GetPluginPackCommitPaths(ctx, packID)
+}
+
 func (f forkQueryMetricsStore) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
 	defer f.observe(ctx, "GetPluginPackResources", time.Now())
 	return f.s.GetPluginPackResources(ctx, packID)
