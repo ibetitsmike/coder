@@ -9,6 +9,7 @@ package chatd
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,15 +60,13 @@ func (p *Server) forkInterruptDescendants(ctx context.Context, chat database.Cha
 	cascadeCtx := context.WithValue(ctx, interruptCascadeKey{}, true)
 	interrupted := false
 	for _, row := range rows {
-		descendant, err := p.db.GetChatByID(ctx, row.ID)
-		if err != nil {
-			logger.Warn(ctx, "interrupt cascade: get descendant", slog.F("descendant_id", row.ID), slog.Error(err))
+		// The subtree query returns each status, so an idle descendant
+		// costs no read. InterruptChat locks the chat by ID and checks
+		// the transition against the locked row.
+		if !isActiveChatStatus(row.Status) {
 			continue
 		}
-		if !isActiveChatStatus(descendant.Status) {
-			continue
-		}
-		_, descendantInterrupted, err := p.InterruptChat(cascadeCtx, descendant)
+		_, descendantInterrupted, err := p.InterruptChat(cascadeCtx, database.Chat{ID: row.ID})
 		if err != nil {
 			if !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
 				logger.Warn(ctx, "interrupt cascade: interrupt descendant", slog.F("descendant_id", row.ID), slog.Error(err))
@@ -92,15 +91,21 @@ func (p *Server) forkArchiveActiveFamily(ctx context.Context, root database.Chat
 	if err != nil {
 		return xerrors.Errorf("get chat family: %w", err)
 	}
+	// The family comes root first in creation order. A child is created
+	// after its parent, so the reverse order lists every chat before its
+	// parent, as the cascade interrupts them.
+	slices.Reverse(ids)
 	return p.settleChatsForArchive(ctx, root, ids)
 }
 
 // settleChatsForArchive interrupts top, which cascades to its descendants,
-// until no chat in ids is active, and waits up to familyArchiveSettleTimeout
-// for that. ids holds top and its descendants. It returns nil on timeout, so
-// that the archive transition refuses the members that are still active.
+// and waits up to familyArchiveSettleTimeout until no chat in ids is active.
+// ids holds top and its descendants, every chat before its parent. Each wake reads the statuses of all of
+// them in one statement and interrupts again only the members that can still
+// transition. It returns nil on timeout, so that the archive transition
+// refuses the members that are still active.
 func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, ids []uuid.UUID) error {
-	active, err := p.activeChatIDs(ctx, ids)
+	active, err := p.activeFamilyChats(ctx, ids)
 	if err != nil || len(active) == 0 {
 		return err
 	}
@@ -114,8 +119,8 @@ func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, i
 			cancel()
 		}
 	}()
-	for _, id := range active {
-		cancel, err := p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(id), func(context.Context, []byte, error) {
+	for _, chat := range active {
+		cancel, err := p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(chat.ID), func(context.Context, []byte, error) {
 			select {
 			case notify <- struct{}{}:
 			default:
@@ -129,14 +134,13 @@ func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, i
 	ticker := p.clock.NewTicker(subagentAwaitFallbackPoll, "chatd", "family_archive_poll")
 	defer ticker.Stop()
 
+	if _, _, err := p.InterruptChat(ctx, top); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
+		return xerrors.Errorf("interrupt chat family: %w", err)
+	}
+	cascadeCtx := context.WithValue(ctx, interruptCascadeKey{}, true)
 	for {
-		// A requires_action member returns to running when interrupted,
-		// so each wake interrupts the members again.
-		if _, _, err := p.InterruptChat(ctx, top); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
-			return xerrors.Errorf("interrupt chat family: %w", err)
-		}
-		active, err = p.activeChatIDs(ctx, ids)
-		if err != nil || len(active) == 0 {
+		stillActive, err := p.settleArchivePass(cascadeCtx, ids)
+		if err != nil || !stillActive {
 			return err
 		}
 		select {
@@ -150,15 +154,44 @@ func (p *Server) settleChatsForArchive(ctx context.Context, top database.Chat, i
 	}
 }
 
-func (p *Server) activeChatIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
-	var active []uuid.UUID
-	for _, id := range ids {
-		chat, err := p.db.GetChatByID(ctx, id)
-		if err != nil {
-			return nil, xerrors.Errorf("get family chat %s: %w", id, err)
+// settleArchivePass reads the statuses of ids in one statement and
+// interrupts again the members that can still transition. It reports whether
+// any member is still active. ctx must carry interruptCascadeKey, since the
+// first interrupt of the settle already walked the subtree.
+func (p *Server) settleArchivePass(ctx context.Context, ids []uuid.UUID) (bool, error) {
+	active, err := p.activeFamilyChats(ctx, ids)
+	if err != nil || len(active) == 0 {
+		return false, err
+	}
+	// A requires_action member returns to running when interrupted, and a
+	// running member may have started after the cascade, so those are
+	// interrupted again. An interrupting member only waits for its worker.
+	for _, chat := range active {
+		if chat.Status == database.ChatStatusInterrupting {
+			continue
 		}
-		if isActiveChatStatus(chat.Status) {
-			active = append(active, id)
+		if _, _, err := p.InterruptChat(ctx, chat); err != nil && !errors.Is(err, chatstate.ErrTransitionNotAllowed) {
+			return false, xerrors.Errorf("interrupt family chat %s: %w", chat.ID, err)
+		}
+	}
+	return true, nil
+}
+
+// activeFamilyChats returns the active chats among ids, in the order of ids,
+// with one statement.
+func (p *Server) activeFamilyChats(ctx context.Context, ids []uuid.UUID) ([]database.Chat, error) {
+	chats, err := p.db.GetChatsByIDs(ctx, ids)
+	if err != nil {
+		return nil, xerrors.Errorf("get family chats: %w", err)
+	}
+	byID := make(map[uuid.UUID]database.Chat, len(chats))
+	for _, chat := range chats {
+		byID[chat.ID] = chat
+	}
+	var active []database.Chat
+	for _, id := range ids {
+		if chat, ok := byID[id]; ok && isActiveChatStatus(chat.Status) {
+			active = append(active, chat)
 		}
 	}
 	return active, nil
