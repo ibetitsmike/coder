@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	starlarkjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
@@ -25,7 +27,15 @@ const workflowFileName = "workflow.star"
 // fails because the thread has no Load function.
 var workflowFileOptions = &syntax.FileOptions{While: true}
 
-var workflowBuiltinNames = []string{"agent", "spawn", "wait", "log", "json"}
+var workflowBuiltinNames = []string{"agent", "spawn", "wait", "log", "phase", "json"}
+
+// maxWorkflowPhases bounds the phases a run can declare or observe, and
+// maxWorkflowPhaseName bounds one phase name. The phase list rides in every
+// run snapshot and API response, so a script must not grow it without end.
+const (
+	maxWorkflowPhases    = 32
+	maxWorkflowPhaseName = 128
+)
 
 // workflowProgram is a compiled script. The host API, Universe and the
 // json module are the only names a script can reach. Universe has no
@@ -66,6 +76,13 @@ func (w *workflowProgram) run(ctx context.Context, r *workflowRun) (json.RawMess
 	if err != nil {
 		return nil, scriptError(err)
 	}
+	// The declared PHASES list is read after Init and before main runs, so
+	// the run card shows every declared phase before the first step. A
+	// malformed declaration fails the run the way a broken main does.
+	if err := r.readDeclaredPhases(globals); err != nil {
+		return nil, err
+	}
+	r.journalDeclaredPhases(ctx)
 	mainFn, ok := globals["main"].(starlark.Callable)
 	if !ok {
 		return nil, xerrors.New("the script must define main(args)")
@@ -257,6 +274,7 @@ func (h *workflowHost) predeclared() starlark.StringDict {
 		"wait":  starlark.NewBuiltin("wait", h.wait),
 		"log":   starlark.NewBuiltin("log", h.log),
 		"json":  starlarkjson.Module,
+		"phase": starlark.NewBuiltin("phase", h.phase),
 	}
 }
 
@@ -390,4 +408,165 @@ func (h *workflowHost) log(
 	}
 	h.run.log(strings.Join(parts, " "))
 	return starlark.None, nil
+}
+
+// phase(name) switches the current phase of the run. The steps that start
+// after the call carry the phase, and the run reports the phase as current
+// until the script sets another one. The name must be a non-empty string of
+// at most maxWorkflowPhaseName bytes.
+//
+// A name that the script's PHASES list did not declare is not an error: it
+// is accepted and appended to the run's phase list in first-reach order,
+// behind the declared ones. A phase names a slice of the script's own
+// progress, and only the script knows where one ends, so rejecting an
+// undeclared name would trade a visible rail for a failed run. The run
+// journal keeps every reached name, so a resumed run shows them again.
+func (h *workflowHost) phase(
+	_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	if len(kwargs) > 0 {
+		return nil, xerrors.Errorf("%s: unexpected keyword arguments", b.Name())
+	}
+	var name string
+	if err := starlark.UnpackPositionalArgs(b.Name(), args, kwargs, 1, &name); err != nil {
+		return nil, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, xerrors.New("phase: the name must not be empty")
+	}
+	if len(name) > maxWorkflowPhaseName {
+		return nil, xerrors.Errorf("phase: the name is longer than %d bytes", maxWorkflowPhaseName)
+	}
+	if err := validateWorkflowPhaseName(name); err != nil {
+		return nil, xerrors.Errorf("phase: %w", err)
+	}
+	if err := h.run.setPhase(h.ctx, name); err != nil {
+		return nil, xerrors.Errorf("phase: %w", err)
+	}
+	return starlark.None, nil
+}
+
+// validateWorkflowPhaseName rejects names PostgreSQL text columns cannot
+// hold or that would display misleadingly: NUL bytes, invalid UTF-8,
+// control characters, and format characters such as bidi overrides and
+// zero-width spaces, which hide or reorder text.
+func validateWorkflowPhaseName(name string) error {
+	if !utf8.ValidString(name) || strings.ContainsRune(name, 0) ||
+		strings.ContainsFunc(name, isWorkflowPhaseHidden) {
+		return xerrors.Errorf("the phase name %q must not hold control, format or invalid characters", name)
+	}
+	return nil
+}
+
+// isWorkflowPhaseHidden reports characters a phase name must not hold:
+// control characters, and format characters such as bidi overrides and
+// zero-width spaces, which hide or reorder text.
+func isWorkflowPhaseHidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+}
+
+// journalDeclaredPhases journals the declared phase list right after Init,
+// so the run API shows the declared phases before the first step and not
+// only after the first phase() call. Best effort, like other journal
+// writes: a lost write only delays the rail.
+func (r *workflowRun) journalDeclaredPhases(ctx context.Context) {
+	r.mu.Lock()
+	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: r.currentPhase}
+	r.mu.Unlock()
+	r.p.workflowJournal().updateRunPhases(ctx, r.id, snapshot)
+}
+
+// setPhase records name as the current phase and appends it to the run's
+// phase list the first time the run reaches it. It runs on the script
+// goroutine, like seen, and journals the state so the run API and a resume
+// see it. The write is best effort: a lost write only delays the rail, the
+// way a lost log line does. A phase() call past the cap fails the run the
+// way a PHASES list past it does.
+func (r *workflowRun) setPhase(ctx context.Context, name string) error {
+	r.mu.Lock()
+	if !slices.Contains(r.phases, name) {
+		if len(r.phases) >= maxWorkflowPhases {
+			r.mu.Unlock()
+			return xerrors.Errorf("phase %q would exceed the %d-phase cap", name, maxWorkflowPhases)
+		}
+		r.phases = append(r.phases, name)
+	} else if r.currentPhase == name {
+		// A generated script can call phase() in a loop. Re-entering the
+		// phase it already holds changes nothing, so it skips the journal
+		// write and its UPDATE.
+		r.mu.Unlock()
+		return nil
+	}
+	r.currentPhase = name
+	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: name}
+	r.mu.Unlock()
+	r.p.workflowJournal().updateRunPhases(ctx, r.id, snapshot)
+	return nil
+}
+
+// readDeclaredPhases reads the script's optional top-level PHASES list
+// before main runs, so the run card shows the declared phases from the
+// start. The list must hold non-empty strings of at most
+// maxWorkflowPhaseName bytes and at most maxWorkflowPhases entries. A
+// script that assigns PHASES a wrong type fails the run with the error,
+// the way a broken main does.
+func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
+	value, ok := globals["PHASES"]
+	if !ok {
+		return nil
+	}
+	list, ok := value.(*starlark.List)
+	if !ok {
+		return xerrors.Errorf("PHASES must be a list of phase names, got %s", value.Type())
+	}
+	if list.Len() > maxWorkflowPhases {
+		return xerrors.Errorf("PHASES declares %d phases; at most %d are allowed", list.Len(), maxWorkflowPhases)
+	}
+	// The declared list joins a saved workflow's phases, so the cap holds
+	// across both sources. Validating into a temporary list keeps a
+	// declaration that fails the run from leaking its names into the run
+	// state a terminal result or journal row exposes.
+	declared := make([]string, 0, list.Len())
+	seen := make(map[string]struct{}, list.Len())
+	for i := 0; i < list.Len(); i++ {
+		name, ok := starlark.AsString(list.Index(i))
+		if !ok {
+			return xerrors.Errorf("PHASES[%d] must be a string, got %s", i, list.Index(i).Type())
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return xerrors.Errorf("PHASES[%d] must not be empty", i)
+		}
+		if len(name) > maxWorkflowPhaseName {
+			return xerrors.Errorf("PHASES[%d] is longer than %d bytes", i, maxWorkflowPhaseName)
+		}
+		if err := validateWorkflowPhaseName(name); err != nil {
+			return xerrors.Errorf("PHASES[%d]: %w", i, err)
+		}
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
+			declared = append(declared, name)
+		}
+	}
+	r.mu.Lock()
+	unique := len(seen)
+	for _, name := range r.phases {
+		if _, dup := seen[name]; !dup {
+			unique++
+		}
+	}
+	tooMany := unique > maxWorkflowPhases
+	if !tooMany {
+		for _, name := range declared {
+			if !slices.Contains(r.phases, name) {
+				r.phases = append(r.phases, name)
+			}
+		}
+	}
+	r.mu.Unlock()
+	if tooMany {
+		return xerrors.Errorf("the run holds more than %d phases after PHASES", maxWorkflowPhases)
+	}
+	return nil
 }

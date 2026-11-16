@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -36,7 +37,7 @@ func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWo
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, logs, phases, current_phase FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -55,6 +56,8 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		&i.UpdatedAt,
 		&i.FinishedAt,
 		&i.Logs,
+		pq.Array(&i.Phases),
+		&i.CurrentPhase,
 	)
 	return i, err
 }
@@ -171,7 +174,7 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 }
 
 const getWorkflowStep = `-- name: GetWorkflowStep :one
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused FROM workflow_steps WHERE id = $1
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused, phase FROM workflow_steps WHERE id = $1
 `
 
 // The authorizer of UpdateWorkflowStep reads the step to find its run.
@@ -191,12 +194,13 @@ func (q *Queries) GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowSt
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Reused,
+		&i.Phase,
 	)
 	return i, err
 }
 
 const getWorkflowStepsByRun = `-- name: GetWorkflowStepsByRun :many
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, reused, phase FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
 `
 
 func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error) {
@@ -221,6 +225,7 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Reused,
+			&i.Phase,
 		); err != nil {
 			return nil, err
 		}
@@ -236,8 +241,8 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 }
 
 const insertWorkflowRun = `-- name: InsertWorkflowRun :exec
-INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7::text[], '{}'::text[]), $8)
 `
 
 type InsertWorkflowRunParams struct {
@@ -247,8 +252,15 @@ type InsertWorkflowRunParams struct {
 	Script        string          `db:"script" json:"script"`
 	Args          json.RawMessage `db:"args" json:"args"`
 	Status        string          `db:"status" json:"status"`
+	Phases        []string        `db:"phases" json:"phases"`
+	CurrentPhase  string          `db:"current_phase" json:"current_phase"`
 }
 
+// phases holds the declared phases of the script plus every undeclared name
+// that phase() reached, in display order. Empty when the script declares no
+// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error {
 	_, err := q.db.ExecContext(ctx, insertWorkflowRun,
 		arg.ID,
@@ -257,13 +269,15 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 		arg.Script,
 		arg.Args,
 		arg.Status,
+		pq.Array(arg.Phases),
+		arg.CurrentPhase,
 	)
 	return err
 }
 
 const insertWorkflowStep = `-- name: InsertWorkflowStep :exec
-INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused, phase)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertWorkflowStepParams struct {
@@ -276,8 +290,11 @@ type InsertWorkflowStepParams struct {
 	Status     string                `db:"status" json:"status"`
 	Value      pqtype.NullRawMessage `db:"value" json:"value"`
 	Reused     bool                  `db:"reused" json:"reused"`
+	Phase      string                `db:"phase" json:"phase"`
 }
 
+// phase is the name that was current when the step started, or ” when the
+// script called no phase() before it.
 func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, insertWorkflowStep,
 		arg.ID,
@@ -289,6 +306,7 @@ func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStep
 		arg.Status,
 		arg.Value,
 		arg.Reused,
+		arg.Phase,
 	)
 	return err
 }
@@ -358,19 +376,43 @@ func (q *Queries) SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogs
 	return err
 }
 
+const updateWorkflowRunPhases = `-- name: UpdateWorkflowRunPhases :exec
+UPDATE workflow_runs
+SET phases = COALESCE($1::text[], '{}'::text[]), current_phase = $2, updated_at = now()
+WHERE id = $3
+`
+
+type UpdateWorkflowRunPhasesParams struct {
+	Phases       []string  `db:"phases" json:"phases"`
+	CurrentPhase string    `db:"current_phase" json:"current_phase"`
+	ID           uuid.UUID `db:"id" json:"id"`
+}
+
+// phase() journals the phase state of a live run as it changes: the display
+// list and the current name. The write does not touch status, error or
+// result, which updateRunStatus owns, so the two best-effort writers never
+// overwrite each other's columns.
+func (q *Queries) UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflowRunPhasesParams) error {
+	_, err := q.db.ExecContext(ctx, updateWorkflowRunPhases, pq.Array(arg.Phases), arg.CurrentPhase, arg.ID)
+	return err
+}
+
 const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :exec
 UPDATE workflow_runs
 SET status = $1, error = $2, result = $3,
+    phases = COALESCE($4::text[], '{}'::text[]), current_phase = $5,
     updated_at = now(),
     finished_at = CASE WHEN $1::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
-WHERE id = $4
+WHERE id = $6
 `
 
 type UpdateWorkflowRunStatusParams struct {
-	Status string                `db:"status" json:"status"`
-	Error  string                `db:"error" json:"error"`
-	Result pqtype.NullRawMessage `db:"result" json:"result"`
-	ID     uuid.UUID             `db:"id" json:"id"`
+	Status       string                `db:"status" json:"status"`
+	Error        string                `db:"error" json:"error"`
+	Result       pqtype.NullRawMessage `db:"result" json:"result"`
+	Phases       []string              `db:"phases" json:"phases"`
+	CurrentPhase string                `db:"current_phase" json:"current_phase"`
+	ID           uuid.UUID             `db:"id" json:"id"`
 }
 
 // result is the full terminal snapshot of the run, or NULL for interrupted.
@@ -384,6 +426,8 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 		arg.Status,
 		arg.Error,
 		arg.Result,
+		pq.Array(arg.Phases),
+		arg.CurrentPhase,
 		arg.ID,
 	)
 	return err

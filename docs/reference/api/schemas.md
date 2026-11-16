@@ -2388,7 +2388,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2535,7 +2535,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3002,7 +3002,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "subagent",
+      "kind": "instruction_file",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
@@ -3036,7 +3036,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "subagent",
+  "kind": "instruction_file",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
@@ -3073,7 +3073,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatContextResourceKind
 
 ```json
-"subagent"
+"instruction_file"
 ```
 
 ### Properties
@@ -6324,7 +6324,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -10407,7 +10407,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"example"
+"fork-chat-todos"
 ```
 
 ### Properties
@@ -20121,9 +20121,13 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 {
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
   "created_at": "2019-08-24T14:15:22Z",
+  "current_phase": "string",
   "error": "string",
   "finished_at": "2019-08-24T14:15:22Z",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+  "phases": [
+    "string"
+  ],
   "script_preview": "string",
   "status": "string",
   "step_counts": {
@@ -20139,18 +20143,20 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ### Properties
 
-| Name             | Type                                                             | Required | Restrictions | Description                                                                                                      |
-|------------------|------------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------|
-| `chat_id`        | string                                                           | false    |              |                                                                                                                  |
-| `created_at`     | string                                                           | false    |              |                                                                                                                  |
-| `error`          | string                                                           | false    |              |                                                                                                                  |
-| `finished_at`    | string                                                           | false    |              | Finished at is the end of a terminal run. An interrupted run is open, so it has none until a resume ends it.     |
-| `id`             | string                                                           | false    |              |                                                                                                                  |
-| `script_preview` | string                                                           | false    |              |                                                                                                                  |
-| `status`         | string                                                           | false    |              |                                                                                                                  |
-| `step_counts`    | [codersdk.WorkflowRunStepCounts](#codersdkworkflowrunstepcounts) | false    |              |                                                                                                                  |
-| `title`          | string                                                           | false    |              | Title is a display name for the run. Runs have no title yet, so it is empty and the UI shows the script preview. |
-| `updated_at`     | string                                                           | false    |              |                                                                                                                  |
+| Name             | Type                                                             | Required | Restrictions | Description                                                                                                                                                                                                                                  |
+|------------------|------------------------------------------------------------------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `chat_id`        | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `created_at`     | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `current_phase`  | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `error`          | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `finished_at`    | string                                                           | false    |              | Finished at is the end of a terminal run. An interrupted run is open, so it has none until a resume ends it.                                                                                                                                 |
+| `id`             | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `phases`         | array of string                                                  | false    |              | Phases lists the run's phases in display order: the script's declared PHASES list first, then every undeclared name that phase() reached. CurrentPhase is the one the script set last. Both are empty for a run whose script uses no phases. |
+| `script_preview` | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `status`         | string                                                           | false    |              |                                                                                                                                                                                                                                              |
+| `step_counts`    | [codersdk.WorkflowRunStepCounts](#codersdkworkflowrunstepcounts) | false    |              |                                                                                                                                                                                                                                              |
+| `title`          | string                                                           | false    |              | Title is a display name for the run. Runs have no title yet, so it is empty and the UI shows the script preview.                                                                                                                             |
+| `updated_at`     | string                                                           | false    |              |                                                                                                                                                                                                                                              |
 
 ## codersdk.WorkflowRunDetail
 
@@ -20159,10 +20165,14 @@ If the schedule is empty, the user will be updated to use the default schedule.|
   "args": {},
   "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
   "created_at": "2019-08-24T14:15:22Z",
+  "current_phase": "string",
   "error": "string",
   "finished_at": "2019-08-24T14:15:22Z",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "logs": [
+    "string"
+  ],
+  "phases": [
     "string"
   ],
   "result": {},
@@ -20174,6 +20184,7 @@ If the schedule is empty, the user will be updated to use the default schedule.|
       "finished_at": "2019-08-24T14:15:22Z",
       "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
       "ordinal": 0,
+      "phase": "string",
       "reused": true,
       "run_id": "dded282c-8ebd-44cf-8ba5-9a234973d1ec",
       "started_at": "2019-08-24T14:15:22Z",
@@ -20189,21 +20200,23 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ### Properties
 
-| Name          | Type                                                          | Required | Restrictions | Description                                                                                                                           |
-|---------------|---------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `args`        | object                                                        | false    |              | Args is the JSON object that main(args) received.                                                                                     |
-| `chat_id`     | string                                                        | false    |              |                                                                                                                                       |
-| `created_at`  | string                                                        | false    |              |                                                                                                                                       |
-| `error`       | string                                                        | false    |              |                                                                                                                                       |
-| `finished_at` | string                                                        | false    |              |                                                                                                                                       |
-| `id`          | string                                                        | false    |              |                                                                                                                                       |
-| `logs`        | array of string                                               | false    |              | Logs are the last log lines the script printed: from the snapshot of a terminal run, or written through to the journal while it runs. |
-| `result`      | object                                                        | false    |              | Result is the value that main returned, for a terminal run.                                                                           |
-| `script`      | string                                                        | false    |              |                                                                                                                                       |
-| `status`      | string                                                        | false    |              |                                                                                                                                       |
-| `steps`       | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                                                                                       |
-| `title`       | string                                                        | false    |              |                                                                                                                                       |
-| `updated_at`  | string                                                        | false    |              |                                                                                                                                       |
+| Name            | Type                                                          | Required | Restrictions | Description                                                                                                                           |
+|-----------------|---------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `args`          | object                                                        | false    |              | Args is the JSON object that main(args) received.                                                                                     |
+| `chat_id`       | string                                                        | false    |              |                                                                                                                                       |
+| `created_at`    | string                                                        | false    |              |                                                                                                                                       |
+| `current_phase` | string                                                        | false    |              |                                                                                                                                       |
+| `error`         | string                                                        | false    |              |                                                                                                                                       |
+| `finished_at`   | string                                                        | false    |              |                                                                                                                                       |
+| `id`            | string                                                        | false    |              |                                                                                                                                       |
+| `logs`          | array of string                                               | false    |              | Logs are the last log lines the script printed: from the snapshot of a terminal run, or written through to the journal while it runs. |
+| `phases`        | array of string                                               | false    |              | Phases and CurrentPhase carry the run's phase rail, as on the list item.                                                              |
+| `result`        | object                                                        | false    |              | Result is the value that main returned, for a terminal run.                                                                           |
+| `script`        | string                                                        | false    |              |                                                                                                                                       |
+| `status`        | string                                                        | false    |              |                                                                                                                                       |
+| `steps`         | array of [codersdk.WorkflowRunStep](#codersdkworkflowrunstep) | false    |              |                                                                                                                                       |
+| `title`         | string                                                        | false    |              |                                                                                                                                       |
+| `updated_at`    | string                                                        | false    |              |                                                                                                                                       |
 
 ## codersdk.WorkflowRunStep
 
@@ -20213,6 +20226,7 @@ If the schedule is empty, the user will be updated to use the default schedule.|
   "finished_at": "2019-08-24T14:15:22Z",
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "ordinal": 0,
+  "phase": "string",
   "reused": true,
   "run_id": "dded282c-8ebd-44cf-8ba5-9a234973d1ec",
   "started_at": "2019-08-24T14:15:22Z",
@@ -20224,18 +20238,19 @@ If the schedule is empty, the user will be updated to use the default schedule.|
 
 ### Properties
 
-| Name          | Type    | Required | Restrictions | Description                                                                                  |
-|---------------|---------|----------|--------------|----------------------------------------------------------------------------------------------|
-| `error`       | string  | false    |              |                                                                                              |
-| `finished_at` | string  | false    |              | Finished at is when the step reported or failed. An open step has none.                      |
-| `id`          | string  | false    |              |                                                                                              |
-| `ordinal`     | integer | false    |              |                                                                                              |
-| `reused`      | boolean | false    |              |                                                                                              |
-| `run_id`      | string  | false    |              |                                                                                              |
-| `started_at`  | string  | false    |              | Started at is when the step's child chat was created (or reused).                            |
-| `status`      | string  | false    |              |                                                                                              |
-| `title`       | string  | false    |              |                                                                                              |
-| `value`       | object  | false    |              | Value is the report the step sent, matching its schema. It is empty until the step reported. |
+| Name          | Type    | Required | Restrictions | Description                                                                                              |
+|---------------|---------|----------|--------------|----------------------------------------------------------------------------------------------------------|
+| `error`       | string  | false    |              |                                                                                                          |
+| `finished_at` | string  | false    |              | Finished at is when the step reported or failed. An open step has none.                                  |
+| `id`          | string  | false    |              |                                                                                                          |
+| `ordinal`     | integer | false    |              |                                                                                                          |
+| `phase`       | string  | false    |              | Phase is the phase that was current when the step started, empty before the script's first phase() call. |
+| `reused`      | boolean | false    |              |                                                                                                          |
+| `run_id`      | string  | false    |              |                                                                                                          |
+| `started_at`  | string  | false    |              | Started at is when the step's child chat was created (or reused).                                        |
+| `status`      | string  | false    |              |                                                                                                          |
+| `title`       | string  | false    |              |                                                                                                          |
+| `value`       | object  | false    |              | Value is the report the step sent, matching its schema. It is empty until the step reported.             |
 
 ## codersdk.WorkflowRunStepCounts
 

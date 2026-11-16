@@ -109,11 +109,13 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 	}
 	logs, _, _ := restoreWorkflowLogs(row.Logs)
 	res := runWorkflowResult{
-		RunID:  row.ID.String(),
-		Status: workflowStatusStopped,
-		Error:  workflowStopError,
-		Steps:  make([]stepSummary, 0, len(stepRows)),
-		Logs:   logs,
+		RunID:        row.ID.String(),
+		Status:       workflowStatusStopped,
+		Error:        workflowStopError,
+		Phases:       append([]string{}, row.Phases...),
+		CurrentPhase: row.CurrentPhase,
+		Steps:        make([]stepSummary, 0, len(stepRows)),
+		Logs:         logs,
 	}
 	for _, srow := range stepRows {
 		res.Steps = append(res.Steps, stepSummary{
@@ -121,10 +123,12 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 			Title:  srow.Title,
 			Status: srow.Status,
 			Reused: srow.Reused,
+			Phase:  srow.Phase,
 			Error:  srow.Error,
 		})
 	}
-	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res)
+	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
+		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 	return nil
 }
 
