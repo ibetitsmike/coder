@@ -76,10 +76,18 @@ func TestWakeupCaps(t *testing.T) {
 			name: "OrganizationSpendAtCap",
 			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
 				other := f.createWakeupChat(t)
-				f.insertDoneWakeup(t, other)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, recent)
 				f.insertCostMessage(t, other, cost(maxOrganizationWakeupSpendMicrosPerDay), recent)
 			},
 			wantReason: wakeupReasonOrgDailySpendCap,
+		},
+		{
+			name: "OrganizationSpendOfChatsWithoutRecentRunsIgnored",
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
+				other := f.createWakeupChat(t)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, old)
+				f.insertCostMessage(t, other, cost(maxOrganizationWakeupSpendMicrosPerDay), recent)
+			},
 		},
 		{
 			name: "OrganizationSpendOfHumanChatsIgnored",
@@ -126,7 +134,7 @@ func TestWakeupCaps(t *testing.T) {
 			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxOrganizationSpendMicrosPerDay: cost(5_000_000)},
 			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
 				other := f.createWakeupChat(t)
-				f.insertDoneWakeup(t, other)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, recent)
 				f.insertCostMessage(t, other, cost(5_000_000), recent)
 			},
 			wantReason: wakeupReasonOrgDailySpendCap,

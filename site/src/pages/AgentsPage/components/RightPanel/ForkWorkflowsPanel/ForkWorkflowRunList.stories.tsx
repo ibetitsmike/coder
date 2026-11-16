@@ -57,7 +57,9 @@ const meta: Meta<typeof ForkWorkflowRunList> = {
 		onSelectRun: fn(),
 	},
 	beforeEach: () => {
-		spyOn(Date, "now").mockReturnValue(MockForkWorkflowNow);
+		// Named "spy" so Storybook's actions addon skips logging it: its log
+		// line calls Date.now, which would recurse into the mock.
+		spyOn(Date, "now").mockName("spy").mockReturnValue(MockForkWorkflowNow);
 	},
 	decorators: [
 		(Story) => (

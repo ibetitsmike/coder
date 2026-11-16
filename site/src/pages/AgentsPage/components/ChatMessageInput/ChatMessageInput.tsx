@@ -565,7 +565,7 @@ const InsertTextPlugin: React.FC<{
 /**
  * Structured data for a file reference extracted from the editor.
  */
-type FileReferenceData = {
+export type FileReferenceData = {
 	readonly fileName: string;
 	readonly startLine: number;
 	readonly endLine: number;
@@ -580,7 +580,7 @@ type SkillInvocationData = {
 /**
  * A content part extracted from the Lexical editor in document order.
  */
-type EditorContentPart =
+export type EditorContentPart =
 	| { readonly type: "text"; readonly text: string }
 	| {
 			readonly type: "file-reference";
