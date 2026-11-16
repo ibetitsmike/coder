@@ -97,6 +97,12 @@ type Querier interface {
 	// Locks the wake-up until the transaction ends, so a delivery that starts in
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Returns every descendant of the given root chats in one statement, with
+	// the row shape of upstream's GetChildChatsByParentIDs, optionally filtered
+	// by archive state (NULL = all, true/false = match). A descendant whose
+	// parent is filtered out is still returned; the caller drops it, so that a
+	// hidden chat hides its subtree.
+	GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)

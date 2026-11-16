@@ -1,7 +1,8 @@
 package chatd
 
 // This file is fork code: it tests that the interrupt cascade, the archive
-// settle and spawn_agent read a family with a fixed number of statements.
+// settle, spawn_agent and list_agents read a family with a fixed number of
+// statements.
 
 import (
 	"context"
@@ -142,6 +143,50 @@ func TestForkInterruptCascadeStatements(t *testing.T) {
 		f.requireStatus(t, database.ChatStatusInterrupting, active...)
 		f.requireStatus(t, database.ChatStatusWaiting, descendants[1], descendants[6])
 	})
+}
+
+// list_agents reads the descendants of any chat of a family in one
+// statement, and an archived chat hides its subtree.
+func TestForkListDescendantsStatements(t *testing.T) {
+	t.Parallel()
+	f := newCountedFamily(t)
+	ctx := chatdTestContext(t)
+	descendants := f.threeLevels(t)
+	ids := func(chats []database.Chat) []uuid.UUID {
+		got := make([]uuid.UUID, 0, len(chats))
+		for _, chat := range chats {
+			got = append(got, chat.ID)
+		}
+		return got
+	}
+	all := ids(descendants)
+
+	var listed []database.Chat
+	counts := f.counted(t, func() {
+		var err error
+		listed, err = f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, maxListedSubtreeLevels)
+		require.NoError(t, err)
+	})
+	require.Equal(t, map[string]int{"GetDescendantChatsByRootIDs": 1}, counts)
+	require.ElementsMatch(t, all, ids(listed))
+
+	counts = f.counted(t, func() {
+		var err error
+		listed, err = f.server.listDescendantChats(ctx, f.root.ID, descendants[0].ID, maxListedSubtreeLevels)
+		require.NoError(t, err)
+	})
+	require.Equal(t, map[string]int{"GetDescendantChatsByRootIDs": 1}, counts)
+	require.ElementsMatch(t, all[1:5], ids(listed), "only the subtree of the chat")
+
+	listed, err := f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, 1)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []uuid.UUID{all[0], all[5], all[10], all[15]}, ids(listed), "one level")
+
+	_, err = f.raw.ArchiveChatByID(ctx, descendants[0].ID)
+	require.NoError(t, err)
+	listed, err = f.server.listDescendantChats(ctx, f.root.ID, f.root.ID, maxListedSubtreeLevels)
+	require.NoError(t, err)
+	require.ElementsMatch(t, all[5:], ids(listed), "an archived child hides its subtree")
 }
 
 // One settle pass over a root with 20 descendants reads the subtree and every

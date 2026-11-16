@@ -116,7 +116,7 @@ func (t forkListAgentsTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	if args.Recursive {
 		levels = maxListedSubtreeLevels
 	}
-	chats, err := t.server.listDescendantChats(ctx, targetID, levels)
+	chats, err := t.server.listDescendantChats(ctx, subagentRootChatID(t.chat), targetID, levels)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -145,23 +145,24 @@ func (t forkListAgentsTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 
 // listDescendantChats returns the unarchived descendants of chatID up to
 // levels below it, reached through unarchived chats, most recently active
-// first, as listSubagents orders them.
-func (p *Server) listDescendantChats(ctx context.Context, chatID uuid.UUID, levels int) ([]database.Chat, error) {
-	var chats []database.Chat
-	parents := []uuid.UUID{chatID}
-	for level := 0; len(parents) > 0 && level < levels; level++ {
-		rows, err := p.db.GetChildChatsByParentIDs(ctx, database.GetChildChatsByParentIDsParams{
-			ParentIds: parents,
-			Archived:  sql.NullBool{Bool: false, Valid: true},
-		})
-		if err != nil {
-			return nil, xerrors.Errorf("list child agents: %w", err)
-		}
-		parents = make([]uuid.UUID, 0, len(rows))
-		for _, row := range rows {
-			chats = append(chats, row.Chat)
-			parents = append(parents, row.Chat.ID)
-		}
+// first, as listSubagents orders them. rootID is the root of chatID's
+// family; the family is read in one statement and cut to chatID's subtree.
+func (p *Server) listDescendantChats(ctx context.Context, rootID, chatID uuid.UUID, levels int) ([]database.Chat, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return nil, xerrors.Errorf("fork queries: %w", err)
+	}
+	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{
+		RootIds:  []uuid.UUID{rootID},
+		Archived: sql.NullBool{Bool: false, Valid: true},
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("list child agents: %w", err)
+	}
+	rows = forkdb.DescendantsByLevel(rows, []uuid.UUID{chatID}, levels)
+	chats := make([]database.Chat, len(rows))
+	for i, row := range rows {
+		chats[i] = row.ChatsExpanded.Chat()
 	}
 	slices.SortStableFunc(chats, func(a, b database.Chat) int {
 		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {

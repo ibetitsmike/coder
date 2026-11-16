@@ -68,6 +68,40 @@ sql:
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
               type: "NullChatStatus"
+          # GetDescendantChatsByRootIDs embeds chats_expanded, so its
+          # columns take the types of database.Chat.
+          - column: "chats_expanded.last_reasoning_effort"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatReasoningEffort"
+          - column: "chats_expanded.mode"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatMode"
+          - column: "chats_expanded.labels"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "StringMap"
+          - column: "chats_expanded.plan_mode"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatPlanMode"
+          - column: "chats_expanded.client_type"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatClientType"
+          - column: "chats_expanded.user_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
+          - column: "chats_expanded.group_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
+          - column: "chats_expanded.title_source"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatTitleSource"
           - column: "agent_definitions.group_acl"
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
