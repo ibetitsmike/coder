@@ -1936,6 +1936,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 							chatId={chatId}
 							isDisabled={isDisabled}
 							workspaceSkills={workspaceSkills}
+							inputRef={internalRef}
 						/>
 						{contextUsage !== undefined && (
 							<div

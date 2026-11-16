@@ -5,7 +5,10 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
-import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
+import {
+	MockChatWorkflowRunDetail,
+	seedChatWriteAccess,
+} from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
 	renderComponent,
@@ -19,9 +22,21 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 	finished_at: undefined,
 };
 
-// Each rerender stands in for a poll that returns the run.
-const renderDetail = (run: WorkflowRunDetail) => {
+// Each rerender stands in for a poll that returns the run. The chat and its
+// update check are seeded, so the viewer may stop or resume.
+const renderDetail = (
+	run: WorkflowRunDetail,
+	options: {
+		canUpdateChat?: boolean;
+		archived?: boolean;
+		planMode?: boolean;
+	} = {},
+) => {
 	const queryClient = createTestQueryClient();
+	seedChatWriteAccess(queryClient, run.chat_id, options.canUpdateChat ?? true, {
+		archived: options.archived,
+		planMode: options.planMode,
+	});
 	const view = (current: WorkflowRunDetail) => (
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -45,7 +60,7 @@ describe("ForkWorkflowRunDetail", () => {
 		const poll = renderDetail(mockRunningRunDetail);
 		const user = userEvent.setup();
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		poll({ ...mockRunningRunDetail, status: "completed" });
 
 		await waitFor(() => expect(runHeading()).toHaveFocus());
@@ -69,7 +84,7 @@ describe("ForkWorkflowRunDetail", () => {
 			error: "stopped by user",
 		};
 
-		await user.click(screen.getByRole("button", { name: "Stop" }));
+		await user.click(screen.getByRole("button", { name: "Stop workflow run" }));
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 		await user.keyboard("{Escape}");
 		// The stop response updates the run before the request settles.
@@ -77,5 +92,81 @@ describe("ForkWorkflowRunDetail", () => {
 		resolveStop(mockStoppedRunDetail);
 
 		await waitFor(() => expect(runHeading()).toHaveFocus());
+	});
+
+	it("offers Resume for an interrupted run", async () => {
+		renderDetail({
+			...mockRunningRunDetail,
+			status: "interrupted",
+		});
+
+		const dispatched: CustomEvent[] = [];
+		const dispatchSpy = vi
+			.spyOn(window, "dispatchEvent")
+			.mockImplementation((event: Event) => {
+				if (event instanceof CustomEvent) {
+					dispatched.push(event);
+				}
+				return true;
+			});
+		const user = userEvent.setup();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Resume run" }),
+			);
+		} finally {
+			dispatchSpy.mockRestore();
+		}
+		expect(dispatched).toHaveLength(1);
+		expect(dispatched[0].type).toBe("fork-workflow-resume");
+		expect(dispatched[0].detail).toEqual({
+			chatId: MockChatWorkflowRunDetail.chat_id,
+			prompt: `Resume workflow run ${MockChatWorkflowRunDetail.id}`,
+		});
+	});
+
+	it("hides the controls without update access to the chat", async () => {
+		renderDetail(mockRunningRunDetail, { canUpdateChat: false });
+
+		await screen.findByRole("heading", { name: /review changed files/i });
+		expect(
+			screen.queryByRole("button", { name: "Stop workflow run" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("hides the controls for an archived chat", async () => {
+		renderDetail(
+			{ ...mockRunningRunDetail, status: "interrupted" },
+			{ archived: true },
+		);
+
+		await screen.findByRole("heading", { name: /review changed files/i });
+		expect(
+			screen.queryByRole("button", { name: "Stop workflow run" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("hides Resume while the chat is in plan mode", async () => {
+		renderDetail(
+			{ ...mockRunningRunDetail, status: "interrupted" },
+			{ planMode: true },
+		);
+
+		await screen.findByRole("heading", { name: /review changed files/i });
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps Stop while the chat is in plan mode", async () => {
+		renderDetail(mockRunningRunDetail, { planMode: true });
+
+		await screen.findByRole("button", { name: "Stop workflow run" });
 	});
 });
