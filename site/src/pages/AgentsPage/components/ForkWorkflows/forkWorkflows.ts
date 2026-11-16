@@ -12,6 +12,7 @@ export type ForkWorkflowStep = {
 	status: string;
 	reused: boolean;
 	error: string;
+	phase: string;
 };
 
 /** A run as run_workflow and await_workflow report it. */
@@ -21,6 +22,12 @@ export type ForkWorkflowRunSnapshot = {
 	/** What main(args) returned; undefined until the run completes. */
 	result: unknown;
 	error: string;
+	/**
+	 * Phases in display order, and the phase the script set last. Both are
+	 * empty for a run whose script uses no phases.
+	 */
+	phases: readonly string[];
+	currentPhase: string;
 	steps: readonly ForkWorkflowStep[];
 	logs: readonly string[];
 };
@@ -75,6 +82,7 @@ const parseStep = (value: unknown): ForkWorkflowStep | null => {
 		status: asString(record.status),
 		reused: record.reused === true,
 		error: asString(record.error),
+		phase: asString(record.phase),
 	};
 };
 
@@ -92,11 +100,24 @@ export const parseForkWorkflowRunSnapshot = (
 	const logs = parseArray(record.logs ?? [], (line) =>
 		typeof line === "string" ? line : null,
 	);
+	// A phase name a newer server adds still renders, so a malformed entry
+	// drops from the list instead of rejecting the run.
+	const phases: string[] = [];
+	if (Array.isArray(record?.phases)) {
+		for (const name of record.phases) {
+			const trimmed = typeof name === "string" ? name.trim() : "";
+			if (trimmed !== "" && !phases.includes(trimmed)) {
+				phases.push(trimmed);
+			}
+		}
+	}
 	return {
 		runId,
 		status,
 		result: record.result,
 		error: asString(record.error),
+		phases,
+		currentPhase: asString(record.current_phase),
 		steps,
 		logs: logs ?? [],
 	};
@@ -114,6 +135,7 @@ export const forkWorkflowRunDetailSteps = (
 			status: step.status,
 			reused: step.reused,
 			error: step.error,
+			phase: step.phase,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */
@@ -124,6 +146,8 @@ const forkWorkflowRunDetailSnapshot = (
 	status: run.status,
 	result: run.result,
 	error: run.error,
+	phases: run.phases,
+	currentPhase: run.current_phase,
 	steps: forkWorkflowRunDetailSteps(run),
 	logs: run.logs,
 });
@@ -137,16 +161,113 @@ export const mergeForkWorkflowRunDetail = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowRunSnapshot => {
 	const detail = forkWorkflowRunDetailSnapshot(run);
+	// Phase lists only grow, so a polled detail whose list is a strict
+	// prefix of the snapshot's lags the snapshot's last journal write, and
+	// the merge keeps the snapshot's phase state. Any other detail is equal
+	// or newer, and a detail that ends the run is the authority again.
+	const detailLags =
+		detail.phases.length < snapshot.phases.length &&
+		detail.phases.every((name, i) => name === snapshot.phases[i]);
+	const phaseState = runEnded(detail.status)
+		? detail
+		: detailLags
+			? { phases: snapshot.phases, currentPhase: snapshot.currentPhase }
+			: { phases: detail.phases, currentPhase: detail.currentPhase };
 	const reusedChatIds = new Set(
 		snapshot.steps.filter((step) => step.reused).map((step) => step.chatId),
 	);
 	return {
 		...detail,
+		...phaseState,
 		steps: detail.steps.map((step) =>
 			reusedChatIds.has(step.chatId) ? { ...step, reused: true } : step,
 		),
 		logs: detail.logs.length > 0 ? detail.logs : snapshot.logs,
 	};
+};
+
+/** Summarizes how far a phase got, from its steps and the run status. */
+export type ForkWorkflowPhaseState = "pending" | "running" | "done" | "failed";
+
+/** Run statuses that cannot make progress anymore. */
+const runEnded = (status: string): boolean =>
+	status === "failed" || status === "stopped" || status === "completed";
+
+export const forkWorkflowPhaseState = (
+	steps: readonly ForkWorkflowStep[],
+): ForkWorkflowPhaseState => {
+	if (steps.length === 0) {
+		return "pending";
+	}
+	if (steps.some((step) => step.status === "failed")) {
+		return "failed";
+	}
+	return steps.every((step) => step.status === "reported") ? "done" : "running";
+};
+
+/**
+ * The state of one phase of a run. A phase the script has not set or passed
+ * stays pending, on any run status. A phase whose steps are all reported is
+ * done, whatever the run went on to do. Only the phase the script was in
+ * when a run failed or stopped shows as failed, and on a completed run
+ * every reached phase is done: the script finished it or moved past it.
+ */
+export const forkWorkflowPhaseStateOf = (
+	phase: string,
+	index: number,
+	phases: readonly string[],
+	currentPhase: string,
+	steps: readonly ForkWorkflowStep[],
+	runStatus: string,
+): ForkWorkflowPhaseState => {
+	const currentIndex = phases.indexOf(currentPhase);
+	const passed = currentIndex > index;
+	if (currentIndex < index) {
+		return "pending";
+	}
+	const phaseSteps = steps.filter((step) => step.phase === phase);
+	const state = forkWorkflowPhaseState(phaseSteps);
+	// A phase the script moved past is done, and on a completed run every
+	// reached phase is done: the script finished it or moved past it. On a
+	// live run a passed phase keeps moving until its steps settle, because
+	// a spawn() step can outlive the phase that started it.
+	if (passed || runStatus === "completed") {
+		if (
+			runStatus === "running" &&
+			phaseSteps.some((step) => step.status !== "reported")
+		) {
+			return state === "failed" ? "failed" : "running";
+		}
+		return "done";
+	}
+	if (state === "pending" && phaseSteps.length === 0) {
+		// The phase spawned no steps. The phase the run ended in failed
+		// with the run. On a live run it is still starting.
+		return runEnded(runStatus) ? "failed" : "running";
+	}
+	return state;
+};
+
+/**
+ * Groups a run's steps by phase in run order: consecutive steps that share a
+ * phase form one group, so a script that re-enters a phase opens a second
+ * group for its later steps. Steps started before the first phase() call
+ * form the leading "" group, which the list holds only when such steps
+ * exist.
+ */
+export const forkWorkflowStepPhases = (
+	steps: readonly ForkWorkflowStep[],
+): readonly { phase: string; steps: readonly ForkWorkflowStep[] }[] => {
+	const groups: { phase: string; steps: ForkWorkflowStep[] }[] = [];
+	for (const step of steps) {
+		const last = groups[groups.length - 1];
+		if (last && last.phase === step.phase) {
+			last.steps.push(step);
+		} else {
+			groups.push({ phase: step.phase, steps: [step] });
+		}
+	}
+	return groups;
 };
 
 /** Summarizes step progress, for example "2 of 3 steps reported". */
