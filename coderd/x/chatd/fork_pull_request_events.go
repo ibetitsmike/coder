@@ -2,12 +2,12 @@ package chatd
 
 // This file is fork code: it holds the pull request events of the
 // wait_for_events tool of the fork-chat-wakeups experiment. The tool reads a
-// baseline of the pull request, and the wake-up worker polls it until someone
-// other than the chat owner acts on it.
+// baseline of the pull request, and the pull request poller
+// (fork_pull_request_poller.go) polls it until someone other than the chat
+// owner acts on it.
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,9 +16,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/externalauth/gitprovider"
 )
 
@@ -30,16 +28,14 @@ const (
 	// limit of its owner's token.
 	pullRequestPollInterval = time.Minute
 	// pullRequestErrorRetry is the next poll after a failed read that is not
-	// a rate limit, and the longest wait after a rate limit while child
-	// entries of the same wake-up still need a run.
+	// a rate limit, and the retry of a failed send.
 	pullRequestErrorRetry = 5 * time.Minute
 	// pullRequestFinalRetryWindow is how long after the expiry a failed
 	// final poll is retried, so a rate limit at the expiry does not lose the
 	// activity since the poll before. It covers GitHub's hourly reset.
 	pullRequestFinalRetryWindow = time.Hour
-	// pullRequestReadTimeout bounds one read, well within
-	// wakeupDeliveryTimeout, so a stalled provider holds one delivery slot
-	// of the waker for a bounded time.
+	// pullRequestReadTimeout bounds one read, so a stalled provider holds
+	// one read slot of the poller for a bounded time.
 	pullRequestReadTimeout = 30 * time.Second
 	// maxPullRequestSummaryItems caps the review and comment lines of one
 	// wake-up message.
@@ -57,8 +53,10 @@ var pullRequestEventKinds = []string{pullRequestEventReview, pullRequestEventCom
 
 // ForkPullRequestActivityFunc reads the activity of a pull request since a
 // time, and its CI when includeChecks is true, with the external auth token
-// of the chat owner ownerID.
-type ForkPullRequestActivityFunc func(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool) (*gitprovider.PullRequestActivity, error)
+// of the chat owner ownerID. A non-empty viewerLogin is the ViewerLogin of
+// an earlier result, which saves a request. It is opaque to chatd: the
+// implementation may bind it to the token, so a relink reads it again.
+type ForkPullRequestActivityFunc func(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool, viewerLogin string) (*gitprovider.PullRequestActivity, error)
 
 type waitForEventsPullRequest struct {
 	URL         string   `json:"url"`
@@ -89,7 +87,7 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 	since := p.clock.Now().UTC()
 	ctx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
 	defer cancel()
-	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, url, since, slices.Contains(on, pullRequestEventChecks))
+	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, url, since, slices.Contains(on, pullRequestEventChecks), "")
 	if err != nil {
 		return wakeupEvent{}, xerrors.Errorf("read pull request %s: %w", url, err)
 	}
@@ -123,29 +121,25 @@ func (p *Server) pullRequestWaitEvent(ctx context.Context, chat database.Chat, r
 		ChecksState:     string(activity.Checks.State),
 		ChecksUpdatedAt: checksUpdatedAt,
 		Seen:            seen,
+		ViewerLogin:     activity.ViewerLogin,
+		NextPollAt:      since.Add(pullRequestPollInterval),
 	}, nil
 }
 
-// pullRequestWakeupText reads the pull request of event as the owner of chat
-// and returns the summary of its activity until until, or "" when nothing
-// event watches for happened. A zero until has no bound. The bound keeps a
-// final poll that runs late from reporting what happened after the expiry.
-func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, until time.Time) (string, error) {
-	if p.forkPullRequestActivity == nil {
-		return "", xerrors.New("pull request events are not available")
-	}
-	ctx, cancel := context.WithTimeout(ctx, pullRequestReadTimeout)
-	defer cancel()
-	activity, err := p.forkPullRequestActivity(ctx, chat.OwnerID, event.URL, event.Since, slices.Contains(event.On, pullRequestEventChecks))
-	if err != nil {
-		return "", err
-	}
+// pullRequestWakeupText returns the summary of the activity in read that
+// event watches for until until, or "" when nothing it watches for happened.
+// read may start before event.Since, since one read serves every watch of the
+// pull request and owner. A zero until has no bound. The bound keeps a final
+// poll that runs late from reporting what happened after the expiry.
+func pullRequestWakeupText(event wakeupEvent, read *gitprovider.PullRequestActivity, until time.Time) string {
+	activity := *read
+	start := event.Since.UTC().Truncate(time.Second)
 	afterUntil := func(at time.Time) bool { return !until.IsZero() && at.After(until) }
 	skip := func(e gitprovider.PullRequestEvent) bool {
-		return slices.Contains(event.Seen, e.URL) || afterUntil(e.CreatedAt)
+		return e.CreatedAt.Before(start) || slices.Contains(event.Seen, e.URL) || afterUntil(e.CreatedAt)
 	}
-	activity.Reviews = slices.DeleteFunc(activity.Reviews, skip)
-	activity.Comments = slices.DeleteFunc(activity.Comments, skip)
+	activity.Reviews = slices.DeleteFunc(slices.Clone(read.Reviews), skip)
+	activity.Comments = slices.DeleteFunc(slices.Clone(read.Comments), skip)
 	if afterUntil(activity.ClosedAt) {
 		activity.State = gitprovider.PRStateOpen
 	}
@@ -155,10 +149,10 @@ func (p *Server) pullRequestWakeupText(ctx context.Context, chat database.Chat, 
 		activity.Checks = gitprovider.CheckSummary{State: gitprovider.CheckState(event.ChecksState), UpdatedAt: event.ChecksUpdatedAt}
 		activity.HeadSHA = event.HeadSHA
 	}
-	if !pullRequestReady(event, activity) {
-		return "", nil
+	if !pullRequestReady(event, &activity) {
+		return ""
 	}
-	return pullRequestSummary(event, activity), nil
+	return pullRequestSummary(event, &activity)
 }
 
 // pullRequestReady reports whether activity has something event watches for.
@@ -215,33 +209,4 @@ func pullRequestSummary(event wakeupEvent, activity *gitprovider.PullRequestActi
 		lines = append(lines, fmt.Sprintf("- state: %s", activity.State))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// pullRequestReadFailed ends the claim of wakeup after its pull request could
-// not be read: it polls again later and never pauses or completes early. A
-// rate limit waits until the limit resets, or at most pullRequestErrorRetry
-// while childrenPending, so the children are still polled. A failed final
-// poll is retried until pullRequestFinalRetryWindow after the expiry.
-func (p *Server) pullRequestReadFailed(ctx context.Context, wakeup forkdb.ChatWakeup, now time.Time, url string, childrenPending bool, err error) wakeupFinish {
-	next := now.Add(pullRequestErrorRetry)
-	if rateLimit, ok := errors.AsType[*gitprovider.RateLimitError](err); ok {
-		next = now.Add(pullRequestPollInterval)
-		if rateLimit.RetryAfter.After(next) {
-			next = rateLimit.RetryAfter
-		}
-		if latest := now.Add(pullRequestErrorRetry); childrenPending && next.After(latest) {
-			next = latest
-		}
-	} else {
-		p.logger.Warn(ctx, "chat wake-up could not read its pull request",
-			slog.F("wakeup_id", wakeup.ID),
-			slog.F("chat_id", wakeup.ChatID),
-			slog.F("pull_request_url", url),
-			slog.Error(err),
-		)
-	}
-	if retry, ok := eventsFinalRetry(wakeup, now, next); ok {
-		return retry
-	}
-	return eventsWakeupRunAt(wakeup, now, 0, next)
 }

@@ -81,10 +81,17 @@ type wakeupEvent struct {
 	ChecksUpdatedAt time.Time `json:"checks_updated_at,omitzero"`
 	// Seen lists the URLs of reviews and comments that the baseline read
 	// listed and that count as the baseline.
-	Seen      []string  `json:"seen,omitempty"`
-	ProcessID string    `json:"process_id,omitempty"`
-	Command   string    `json:"command,omitempty"`
-	AgentID   uuid.UUID `json:"agent_id,omitzero"`
+	Seen []string `json:"seen,omitempty"`
+	// ViewerLogin is the ViewerLogin of the last read, which names the
+	// owner's token, so a poll skips that read. NextPollAt is when the pull
+	// request poller reads the watch next, and PolledAt is when its last
+	// read started.
+	ViewerLogin string    `json:"viewer_login,omitempty"`
+	NextPollAt  time.Time `json:"next_poll_at,omitzero"`
+	PolledAt    time.Time `json:"polled_at,omitzero"`
+	ProcessID   string    `json:"process_id,omitempty"`
+	Command     string    `json:"command,omitempty"`
+	AgentID     uuid.UUID `json:"agent_id,omitzero"`
 	// OutputPattern, OutputCooldownSeconds and OutputMaxEvents are the
 	// process_output_* arguments that the call resolved.
 	OutputPattern         string `json:"output_pattern,omitempty"`
@@ -441,10 +448,11 @@ func waitForEventsSpec(prompt string, expiresInSeconds int, children []database.
 // pass, after the turn this one starts.
 //
 // The waker lists an events wake-up as due at its run time, which polls the
-// processes and the pull request it watches, and before its expiry also when
-// a watch is ready (chat_wakeup_ready_watches), such as a child that is done.
-// A delivery before the run time reads nothing: it delivers a ready watch and
-// keeps the run time.
+// processes it watches, and before its expiry also when a watch is ready
+// (chat_wakeup_ready_watches), such as a child that is done or a pull request
+// that the pull request poller fired. A delivery never reads a pull request:
+// it sends the text that the poller stored. A delivery before the run time
+// reads nothing: it delivers a ready watch and keeps the run time.
 func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat database.Chat, wakeup forkdb.ChatWakeup, now time.Time) error {
 	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
 	if err != nil {
@@ -464,8 +472,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	var next *wakeupDelivery
 	// Open watches, other than next, that still need a delivery.
 	pending := 0
-	// Whether one of them is a pull request, which is polled less often.
-	pullRequestPending := false
+	// Whether one of them is a pull request that the poller did not read
+	// through the expiry yet.
+	pullRequestUnpolled := false
 	// Whether one of them is a process, which is polled.
 	processPending := false
 	// How many of them are processes whose read failed.
@@ -522,22 +531,18 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			}
 			pending++
 		case forkdb.ChatWakeupWatchKindPullRequest:
-			// At most one read per pass: a later watch waits until next is
-			// delivered.
-			if next == nil && polled {
-				// A read that may stall starts only while the delivery
-				// has time left for it and its message. Otherwise the
-				// wake-up stays due for the next pass.
-				if !wakeupReadFits(ctx, pullRequestReadTimeout) {
-					return nil
-				}
-				summary, err := p.pullRequestWakeupText(ctx, chat, event, wakeup.ExpiresAt.Time)
-				if err != nil {
-					return p.finishWakeup(ctx, chat, wakeup, now, p.pullRequestReadFailed(ctx, wakeup, now, event.URL, pending > 0, err))
-				}
-				if summary != "" {
+			// The final poll waits for the poller to read the pull request
+			// through the expiry, fired or not, so a fired watch reports what
+			// happened until then. Past pullRequestFinalRetryWindow it sends
+			// the last text it has.
+			unread := wakeup.ExpiresAt.Valid && event.PolledAt.Before(wakeup.ExpiresAt.Time)
+			_, canWait := eventsFinalRetry(wakeup, now, now.Add(eventsPollInterval))
+			// The pull request poller fired the watch with its message.
+			if next == nil && watch.FiredAt.Valid && (!unread || !canWait) && (polled || !watch.FailedAt.Valid) {
+				var fired pullRequestFired
+				if err := json.Unmarshal(watch.FiredPayload.RawMessage, &fired); err == nil && fired.Text != "" {
 					next = &wakeupDelivery{
-						text:  wakeup.Prompt + "\n\n" + summary,
+						text:  wakeup.Prompt + "\n\n" + fired.Text,
 						watch: &watch,
 						done:  true,
 					}
@@ -545,7 +550,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				}
 			}
 			pending++
-			pullRequestPending = true
+			if unread {
+				pullRequestUnpolled = true
+			}
 		case forkdb.ChatWakeupWatchKindProcess:
 			if next == nil && polled {
 				if !wakeupReadFits(ctx, processReadTimeout) {
@@ -592,15 +599,14 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		switch {
 		case !polled:
 			return wakeup.NextRunAt.Time
-		case pullRequestPending:
-			return at.Add(pullRequestPollInterval)
 		case processErrors > 0 && processErrors == pending:
 			return at.Add(processErrorRetry)
 		case processPending:
 			return at.Add(eventsPollInterval)
 		case wakeup.ExpiresAt.Valid && at.Before(wakeup.ExpiresAt.Time):
-			// Only children are left. The commit that makes one done
-			// pokes the waker, so the next run is the final poll at the
+			// Only children and pull requests are left. The commit that
+			// makes a child done and the poller that fires a pull request
+			// poke the waker, so the next run is the final poll at the
 			// expiry.
 			return wakeup.ExpiresAt.Time
 		default:
@@ -611,6 +617,13 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		// A failed read on the final poll could miss an exit by the expiry.
 		if processErrors > 0 {
 			if retry, ok := eventsFinalRetry(wakeup, now, now.Add(processErrorRetry)); ok {
+				return p.finishWakeup(ctx, chat, wakeup, now, retry)
+			}
+		}
+		// The final poll waits for the poller to read the pull request
+		// through the expiry.
+		if pullRequestUnpolled {
+			if retry, ok := eventsFinalRetry(wakeup, now, now.Add(eventsPollInterval)); ok {
 				return p.finishWakeup(ctx, chat, wakeup, now, retry)
 			}
 		}
