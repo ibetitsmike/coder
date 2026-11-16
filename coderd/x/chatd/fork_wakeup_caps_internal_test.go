@@ -76,10 +76,18 @@ func TestWakeupCaps(t *testing.T) {
 			name: "OrganizationSpendAtCap",
 			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
 				other := f.createWakeupChat(t)
-				f.insertDoneWakeup(t, other)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, recent)
 				f.insertCostMessage(t, other, cost(maxOrganizationWakeupSpendMicrosPerDay), recent)
 			},
 			wantReason: wakeupReasonOrgDailySpendCap,
+		},
+		{
+			name: "OrganizationSpendOfChatsWithoutRecentRunsIgnored",
+			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
+				other := f.createWakeupChat(t)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, old)
+				f.insertCostMessage(t, other, cost(maxOrganizationWakeupSpendMicrosPerDay), recent)
+			},
 		},
 		{
 			name: "OrganizationSpendOfHumanChatsIgnored",
@@ -126,7 +134,7 @@ func TestWakeupCaps(t *testing.T) {
 			caps: &forkdb.UpsertChatOrganizationWakeupCapsParams{MaxOrganizationSpendMicrosPerDay: cost(5_000_000)},
 			seed: func(t *testing.T, f *workerTestFixture, _ database.Chat, _ forkdb.ChatWakeup) {
 				other := f.createWakeupChat(t)
-				f.insertDoneWakeup(t, other)
+				f.seedDeliveredRuns(t, f.insertDoneWakeup(t, other), 1, recent)
 				f.insertCostMessage(t, other, cost(5_000_000), recent)
 			},
 			wantReason: wakeupReasonOrgDailySpendCap,
@@ -281,15 +289,17 @@ func useStoreEnqueuer(t *testing.T, f *workerTestFixture, server *Server, clock 
 	server.chatWorker.opts.NotificationsEnqueuer = enqueuer
 }
 
-// seedDeliveredRuns inserts count delivered runs of wakeup created at
-// createdAt, with run keys that no real occurrence uses.
+// seedDeliveredRuns counts count delivered runs of wakeup in the hour bucket
+// of createdAt.
 func (f *workerTestFixture) seedDeliveredRuns(t *testing.T, wakeup forkdb.ChatWakeup, count int, createdAt time.Time) {
 	t.Helper()
 	_, err := f.sqlDB.ExecContext(testutil.Context(t, testutil.WaitShort), `
-		INSERT INTO chat_wakeup_runs (id, wakeup_id, chat_id, organization_id, run_key, status, created_at, updated_at)
-		SELECT gen_random_uuid(), w.id, w.chat_id, w.organization_id, 'seed:' || gen_random_uuid()::text, 'delivered', $2, $2
-		FROM chat_wakeups w, generate_series(1, $3::int)
-		WHERE w.id = $1`, wakeup.ID, createdAt, count)
+		INSERT INTO chat_wakeup_run_counts (chat_id, hour, organization_id, runs)
+		SELECT w.chat_id, $2, w.organization_id, $3::int
+		FROM chat_wakeups w
+		WHERE w.id = $1
+		ON CONFLICT (chat_id, hour) DO UPDATE SET runs = chat_wakeup_run_counts.runs + EXCLUDED.runs`,
+		wakeup.ID, createdAt.UTC().Truncate(time.Hour), count)
 	require.NoError(t, err)
 }
 

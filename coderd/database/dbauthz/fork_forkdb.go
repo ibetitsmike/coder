@@ -95,27 +95,12 @@ func (f *forkQuerier) CountChatUserNotificationsSince(ctx context.Context, arg f
 	return f.db.CountChatUserNotificationsSince(ctx, arg)
 }
 
-func (f *forkQuerier) CountChatWakeupRunsSince(ctx context.Context, arg forkdb.CountChatWakeupRunsSinceParams) (int64, error) {
-	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
-		return 0, err
-	}
-	return f.db.CountChatWakeupRunsSince(ctx, arg)
-}
-
 // CountLiveSubagentsInFamily authorizes through the family's root chat.
 func (f *forkQuerier) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, rootChatID); err != nil {
 		return 0, err
 	}
 	return f.db.CountLiveSubagentsInFamily(ctx, rootChatID)
-}
-
-// CountOrganizationChatWakeupRunsSince spans chats, so it needs site-wide chat access, like chatd's.
-func (f *forkQuerier) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg forkdb.CountOrganizationChatWakeupRunsSinceParams) (int64, error) {
-	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return 0, err
-	}
-	return f.db.CountOrganizationChatWakeupRunsSince(ctx, arg)
 }
 
 // DeleteChatPinnedSkills authorizes as an update of the owning chat.
@@ -154,6 +139,13 @@ func (f *forkQuerier) DeleteOldChatSecretAnswers(ctx context.Context, limitCount
 		return 0, err
 	}
 	return f.db.DeleteOldChatSecretAnswers(ctx, limitCount)
+}
+
+func (f *forkQuerier) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldChatWakeupRunCounts(ctx)
 }
 
 func (f *forkQuerier) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
@@ -211,6 +203,13 @@ func (f *forkQuerier) DeleteUserAgentDefinitionByName(ctx context.Context, arg f
 		return forkdb.AgentDefinition{}, err
 	}
 	return f.db.DeleteUserAgentDefinitionByName(ctx, arg)
+}
+
+func (f *forkQuerier) EnsurePluginChatBinding(ctx context.Context, arg forkdb.EnsurePluginChatBindingParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceSystem); err != nil {
+		return err
+	}
+	return f.db.EnsurePluginChatBinding(ctx, arg)
 }
 
 func (f *forkQuerier) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UUID) error {
@@ -885,6 +884,13 @@ func (f *forkQuerier) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUI
 	return f.db.ReleasePluginLeases(ctx, runnerID)
 }
 
+func (f *forkQuerier) RenewPluginLeases(ctx context.Context, arg forkdb.RenewPluginLeasesParams) ([]forkdb.RenewPluginLeasesRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.RenewPluginLeases(ctx, arg)
+}
+
 // RetireChatDescendantQuestion authorizes as an update of the owning chat.
 func (f *forkQuerier) RetireChatDescendantQuestion(ctx context.Context, arg forkdb.RetireChatDescendantQuestionParams) (int64, error) {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
@@ -905,6 +911,15 @@ func (f *forkQuerier) SumChatCostMicrosSince(ctx context.Context, arg forkdb.Sum
 		return 0, err
 	}
 	return f.db.SumChatCostMicrosSince(ctx, arg)
+}
+
+// SumChatWakeupRunCountsSince spans the chats of an organization, so it needs
+// site-wide chat access, like chatd's.
+func (f *forkQuerier) SumChatWakeupRunCountsSince(ctx context.Context, arg forkdb.SumChatWakeupRunCountsSinceParams) (forkdb.SumChatWakeupRunCountsSinceRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return forkdb.SumChatWakeupRunCountsSinceRow{}, err
+	}
+	return f.db.SumChatWakeupRunCountsSince(ctx, arg)
 }
 
 // SumOrganizationWakeupChatCostMicrosSince spans chats, so it needs site-wide chat access, like chatd's.

@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,11 +25,16 @@ import (
 )
 
 // Default daily caps of wake-ups, over the rolling 24 hours before a send. An
-// organization can replace each one in chat_organization_wakeup_caps. Spend
+// organization can replace each one in chat_organization_wakeup_caps. Runs
+// count in hour buckets of chat_wakeup_run_counts, so the run window starts at
+// the start of the hour 24 hours back and can hold up to an hour more. Spend
 // counts the total_cost_micros of chat messages, which is NULL and counts as
 // zero for models without prices.
 const (
 	wakeupCapWindow = 24 * time.Hour
+	// How long the spend of an organization's wake-up chats is reused before
+	// the next send reads it again.
+	wakeupSpendCacheTTL = time.Minute
 	// A 5-minute loop around the clock.
 	maxChatWakeupRunsPerDay                = 288
 	maxOrganizationWakeupRunsPerDay        = 2880
@@ -115,27 +121,30 @@ func formatWakeupSpend(micros int64) string {
 }
 
 // wakeupCapReached returns the reason of the first daily cap that chat or its
-// organization reached at now, or "" when a wake-up of chat may run. The
-// check does not hold the chat lock, so concurrent replicas can overshoot the
-// organization caps by a few runs.
-func (*Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat database.Chat, now time.Time) (string, wakeupCaps, error) {
+// organization reached at now, or "" when a wake-up of chat may run. It checks
+// the chat runs, the organization runs, the chat spend and the organization
+// spend in that order. The check does not hold the chat lock, so concurrent
+// replicas can overshoot the organization caps by a few runs. The organization
+// spend comes from a cache that can lag by up to wakeupSpendCacheTTL.
+func (p *Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat database.Chat, now time.Time) (string, wakeupCaps, error) {
 	caps, err := organizationWakeupCaps(ctx, fdb, chat.OrganizationID)
 	if err != nil {
 		return "", caps, err
 	}
 	since := now.Add(-wakeupCapWindow)
-	runs, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
+	runsSince := since.UTC().Truncate(time.Hour)
+	runs, err := fdb.SumChatWakeupRunCountsSince(ctx, forkdb.SumChatWakeupRunCountsSinceParams{
+		ChatID:         chat.ID,
+		OrganizationID: chat.OrganizationID,
+		Since:          runsSince,
+	})
 	if err != nil {
-		return "", caps, xerrors.Errorf("count chat wake-up runs: %w", err)
+		return "", caps, xerrors.Errorf("sum wake-up runs: %w", err)
 	}
-	if runs >= caps.MaxChatRunsPerDay {
+	if runs.ChatRuns >= caps.MaxChatRunsPerDay {
 		return wakeupReasonDailyRunCap, caps, nil
 	}
-	runs, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
-	if err != nil {
-		return "", caps, xerrors.Errorf("count organization wake-up runs: %w", err)
-	}
-	if runs >= caps.MaxOrganizationRunsPerDay {
+	if runs.OrganizationRuns >= caps.MaxOrganizationRunsPerDay {
 		return wakeupReasonOrgDailyRunCap, caps, nil
 	}
 	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: chat.ID, Since: since})
@@ -145,14 +154,56 @@ func (*Server) wakeupCapReached(ctx context.Context, fdb forkdb.Store, chat data
 	if spend >= caps.MaxChatSpendMicrosPerDay {
 		return wakeupReasonDailySpendCap, caps, nil
 	}
-	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: chat.OrganizationID, Since: since})
+	spend, err = p.forkWakeupSpend.organizationSpend(ctx, fdb, chat.OrganizationID, now, caps.MaxOrganizationSpendMicrosPerDay)
 	if err != nil {
-		return "", caps, xerrors.Errorf("sum organization wake-up spend: %w", err)
+		return "", caps, err
 	}
 	if spend >= caps.MaxOrganizationSpendMicrosPerDay {
 		return wakeupReasonOrgDailySpendCap, caps, nil
 	}
 	return "", caps, nil
+}
+
+// wakeupSpendCache holds the wake-up spend of each organization for
+// wakeupSpendCacheTTL. Its zero value is ready to use.
+type wakeupSpendCache struct {
+	mu    sync.Mutex
+	spend map[uuid.UUID]cachedWakeupSpend
+}
+
+type cachedWakeupSpend struct {
+	micros int64
+	readAt time.Time
+}
+
+// organizationSpend returns the spend over the cap window before now of the
+// chats of the organization that had a delivered wake-up run in that window.
+// It reads the database again when the cached value is wakeupSpendCacheTTL
+// old, was read after now, or reached limit, so a pause never rests on a
+// cached value.
+func (c *wakeupSpendCache) organizationSpend(ctx context.Context, fdb forkdb.Store, organizationID uuid.UUID, now time.Time, limit int64) (int64, error) {
+	c.mu.Lock()
+	cached, ok := c.spend[organizationID]
+	c.mu.Unlock()
+	if ok && cached.micros < limit && !now.Before(cached.readAt) && now.Sub(cached.readAt) < wakeupSpendCacheTTL {
+		return cached.micros, nil
+	}
+	since := now.Add(-wakeupCapWindow)
+	micros, err := fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{
+		OrganizationID: organizationID,
+		RunsSince:      since.UTC().Truncate(time.Hour),
+		Since:          since,
+	})
+	if err != nil {
+		return 0, xerrors.Errorf("sum organization wake-up spend: %w", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.spend == nil {
+		c.spend = make(map[uuid.UUID]cachedWakeupSpend)
+	}
+	c.spend[organizationID] = cachedWakeupSpend{micros: micros, readAt: now}
+	return micros, nil
 }
 
 // pauseCappedWakeup pauses wakeup when chat or its organization reached a

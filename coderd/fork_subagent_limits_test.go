@@ -6,7 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -162,4 +165,48 @@ func TestForkChatOrganizationSubagentLimits(t *testing.T) {
 		_, err = client.UpdateForkOrganizationSubagentLimits(ctx, owner.OrganizationID, codersdk.ForkOrganizationSubagentLimits{})
 		_ = requireSDKError(t, err, http.StatusForbidden)
 	})
+}
+
+// TestForkChatOrganizationSubagentLimitsAudit checks that a change to the
+// subagent limits of an organization is audited with its old and new values.
+func TestForkChatOrganizationSubagentLimitsAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	auditor := audit.NewMock()
+	client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+		Auditor: auditor,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkNestedSubagents)}
+		}),
+	})
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+
+	_, err := member.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{})
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	_, err = client.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{MaxDepth: ptr.Ref[int32](3)})
+	require.NoError(t, err)
+	// A key that may update but not read the limits can still update them.
+	_, token := dbgen.APIKey(t, db, database.APIKey{
+		UserID: owner.UserID,
+		Scopes: database.APIKeyScopes{"organization:read", "chat_model_config:update"},
+	})
+	updater := codersdk.New(client.URL)
+	updater.SetSessionToken(token)
+	_, err = updater.UpdateForkOrganizationSubagentLimits(ctx, orgID, codersdk.ForkOrganizationSubagentLimits{MaxConcurrent: ptr.Ref[int32](10)})
+	require.NoError(t, err)
+
+	entries := forkAuditEntries(t, auditor, orgID, "subagent_limits")
+	require.Len(t, entries, 2, "the denied update is not audited")
+	for _, entry := range entries {
+		require.Equal(t, "update", entry.Operation)
+		require.Equal(t, int32(http.StatusOK), entry.Log.StatusCode)
+	}
+	require.Empty(t, entries[0].Changes["max_depth"].Old)
+	require.JSONEq(t, `3`, string(entries[0].Changes["max_depth"].New))
+	require.JSONEq(t, `3`, string(entries[1].Changes["max_depth"].Old))
+	require.Empty(t, entries[1].Changes["max_depth"].New)
+	require.JSONEq(t, `10`, string(entries[1].Changes["max_concurrent"].New))
 }

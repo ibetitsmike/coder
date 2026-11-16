@@ -234,7 +234,7 @@ func TestUpdateChatWakeupRun(t *testing.T) {
 func TestChatWakeupRuns(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 	chat := wakeupTestChat(t, db)
@@ -266,13 +266,43 @@ func TestChatWakeupRuns(t *testing.T) {
 	_, err = insertRun("2026-01-04T00:00:00Z", forkdb.ChatWakeupRunStatusDelivered)
 	require.NoError(t, err)
 
-	since := now.Add(-time.Hour)
-	count, err := fdb.CountChatWakeupRunsSince(ctx, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID, Since: since})
+	// The trigger counts each delivered run in the hour of its created_at;
+	// the pending, skipped and failed runs above do not count.
+	hour := now.UTC().Truncate(time.Hour)
+	deliver := func(wakeupID uuid.UUID, runKey string, createdAt time.Time) {
+		_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeupID,
+			RunKey:    runKey,
+			Status:    forkdb.ChatWakeupRunStatusDelivered,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+		require.NoError(t, err)
+	}
+	deliver(wakeup.ID, "2026-01-05T00:00:00Z", now)
+	deliver(wakeup.ID, "2026-01-06T00:00:00Z", hour.Add(-time.Hour))
+	deliver(wakeup.ID, "2026-01-07T00:00:00Z", hour.Add(-2*time.Hour))
+	// A chat of the same organization counts toward the organization only.
+	sibling := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    chat.OrganizationID,
+		OwnerID:           chat.OwnerID,
+		LastModelConfigID: chat.LastModelConfigID,
+	})
+	deliver(insertDelayWakeup(ctx, t, fdb, sibling, forkdb.ChatWakeupStatusActive, now).ID, "2026-01-01T00:00:00Z", now)
+
+	runs, err := fdb.SumChatWakeupRunCountsSince(ctx, forkdb.SumChatWakeupRunCountsSinceParams{
+		ChatID:         chat.ID,
+		OrganizationID: chat.OrganizationID,
+		Since:          hour.Add(-time.Hour),
+	})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, count, "only delivered runs count")
-	count, err = fdb.CountOrganizationChatWakeupRunsSince(ctx, forkdb.CountOrganizationChatWakeupRunsSinceParams{OrganizationID: chat.OrganizationID, Since: since})
-	require.NoError(t, err)
-	require.EqualValues(t, 1, count)
+	require.EqualValues(t, 3, runs.ChatRuns, "the buckets from since on count, each with its runs")
+	require.EqualValues(t, 4, runs.OrganizationRuns)
+
+	var buckets int
+	require.NoError(t, sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_wakeup_run_counts WHERE chat_id = $1`, chat.ID).Scan(&buckets))
+	require.Equal(t, 3, buckets, "a chat has one row per hour")
 }
 
 func TestSumChatCostMicrosSince(t *testing.T) {
@@ -284,8 +314,22 @@ func TestSumChatCostMicrosSince(t *testing.T) {
 	now := dbtime.Now()
 	since := now.Add(-24 * time.Hour)
 
+	deliver := func(wakeupID uuid.UUID, createdAt time.Time) {
+		_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeupID,
+			RunKey:    "2026-01-01T00:00:00Z",
+			Status:    forkdb.ChatWakeupRunStatusDelivered,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+		require.NoError(t, err)
+	}
+
 	looping := wakeupTestChat(t, db)
-	insertDelayWakeup(ctx, t, fdb, looping, forkdb.ChatWakeupStatusCompleted, now)
+	loopingWakeup := insertDelayWakeup(ctx, t, fdb, looping, forkdb.ChatWakeupStatusCompleted, now)
+	runsSince := since.UTC().Truncate(time.Hour)
+	deliver(loopingWakeup.ID, runsSince)
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 300, Valid: true}, now.Add(-time.Hour), false)
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{Int64: 200, Valid: true}, now.Add(-2*time.Hour), true)
 	insertCostMessage(ctx, t, db, sqlDB, looping, sql.NullInt64{}, now.Add(-time.Hour), false)
@@ -298,13 +342,22 @@ func TestSumChatCostMicrosSince(t *testing.T) {
 		LastModelConfigID: looping.LastModelConfigID,
 	})
 	insertCostMessage(ctx, t, db, sqlDB, human, sql.NullInt64{Int64: 7000, Valid: true}, now.Add(-time.Hour), false)
+	// A chat whose wake-up last ran before the window does not count either.
+	stale := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    looping.OrganizationID,
+		OwnerID:           looping.OwnerID,
+		LastModelConfigID: looping.LastModelConfigID,
+	})
+	staleWakeup := insertDelayWakeup(ctx, t, fdb, stale, forkdb.ChatWakeupStatusCompleted, now)
+	deliver(staleWakeup.ID, runsSince.Add(-time.Minute))
+	insertCostMessage(ctx, t, db, sqlDB, stale, sql.NullInt64{Int64: 9000, Valid: true}, now.Add(-time.Hour), false)
 
 	spend, err := fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: looping.ID, Since: since})
 	require.NoError(t, err)
 	require.EqualValues(t, 500, spend, "deleted messages count, NULL costs and older messages do not")
-	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: looping.OrganizationID, Since: since})
+	spend, err = fdb.SumOrganizationWakeupChatCostMicrosSince(ctx, forkdb.SumOrganizationWakeupChatCostMicrosSinceParams{OrganizationID: looping.OrganizationID, RunsSince: runsSince, Since: since})
 	require.NoError(t, err)
-	require.EqualValues(t, 500, spend, "only chats with a wake-up count")
+	require.EqualValues(t, 500, spend, "only chats with a wake-up run in the window count")
 
 	empty := wakeupTestChat(t, db)
 	spend, err = fdb.SumChatCostMicrosSince(ctx, forkdb.SumChatCostMicrosSinceParams{ChatID: empty.ID, Since: since})

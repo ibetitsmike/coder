@@ -11,9 +11,10 @@ import (
 )
 
 type Querier interface {
-	// Leases enabled plugins to a replica. A replica renews its own leases on
-	// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
-	// concurrent replicas from blocking on, or double leasing, the same rows.
+	// Leases enabled plugins that no replica holds, or whose lease expired, to a
+	// replica. It skips the replica's own leases: RenewPluginLeases renews
+	// those. SKIP LOCKED keeps concurrent replicas from blocking on, or double
+	// leasing, the same rows.
 	AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error)
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
@@ -29,11 +30,9 @@ type Querier interface {
 	// same payload, and the enqueuer's dedupe rejects a second identical payload
 	// on the same UTC day, so distinct payloads per UTC day count enqueues.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
-	CountChatWakeupRunsSince(ctx context.Context, arg CountChatWakeupRunsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
-	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
 	// DeleteChatNote deletes a note and returns the number of deleted notes.
@@ -48,6 +47,9 @@ type Querier interface {
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
+	// Deletes the run counts older than 7 days, on the database clock. The caps
+	// read only the last 24 hours.
+	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
@@ -59,6 +61,9 @@ type Querier interface {
 	DeleteProjectAgentDefinitionByName(ctx context.Context, arg DeleteProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserAgentDefinitionByName(ctx context.Context, arg DeleteUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteUserSavedWorkflowByName(ctx context.Context, arg DeleteUserSavedWorkflowByNameParams) (SavedWorkflow, error)
+	// EnsurePluginChatBinding is EnsurePluginChatBindings for one chat, for a
+	// chat that was just created or unarchived.
+	EnsurePluginChatBinding(ctx context.Context, arg EnsurePluginChatBindingParams) error
 	// Binds every top-level, unarchived chat of a linked user in the plugin's
 	// organization. Chats created after the link start at cursor 0 so their whole
 	// history is delivered. Older chats start at their newest message so linking
@@ -251,6 +256,10 @@ type Querier interface {
 	// the run detail reads the flag from the rows without the snapshot.
 	MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// Renews the leases a replica holds on enabled plugins. It returns only the
+	// id and updated_at, so a renewal reads and decrypts no config: the replica
+	// reads a full row only when updated_at changed.
+	RenewPluginLeases(ctx context.Context, arg RenewPluginLeasesParams) ([]RenewPluginLeasesRow, error)
 	// Marks the pending question of @chat_id answered by the user messages that
 	// the transaction inserts into the chat's history. @compressed is true when
 	// one of them is a context boundary, a clear or a compaction, which retires
@@ -276,8 +285,12 @@ type Querier interface {
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
-	// Sums the spend of the chats of the organization that have a wake-up, so
-	// chats that only humans drive do not count.
+	// Sums the delivered runs of the chat and of its organization in the hour
+	// buckets from since on.
+	SumChatWakeupRunCountsSince(ctx context.Context, arg SumChatWakeupRunCountsSinceParams) (SumChatWakeupRunCountsSinceRow, error)
+	// Sums the spend since since of the chats of the organization that have a
+	// delivered wake-up run in an hour bucket from runs_since on, so chats that
+	// only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.

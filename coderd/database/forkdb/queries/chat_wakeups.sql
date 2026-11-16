@@ -199,19 +199,19 @@ WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
--- name: CountChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE chat_id = @chat_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
+-- Sums the delivered runs of the chat and of its organization in the hour
+-- buckets from since on.
+-- name: SumChatWakeupRunCountsSince :one
+SELECT
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE chat_id = @chat_id::uuid AND hour >= @since::timestamptz)::bigint AS chat_runs,
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE organization_id = @organization_id::uuid AND hour >= @since::timestamptz)::bigint AS organization_runs;
 
--- name: CountOrganizationChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE organization_id = @organization_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
+-- Deletes the run counts older than 7 days, on the database clock. The caps
+-- read only the last 24 hours.
+-- name: DeleteOldChatWakeupRunCounts :execrows
+DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days';
 
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.
@@ -222,12 +222,18 @@ WHERE chat_id = @chat_id::uuid
     AND created_at >= @since::timestamptz
     AND total_cost_micros IS NOT NULL;
 
--- Sums the spend of the chats of the organization that have a wake-up, so
--- chats that only humans drive do not count.
+-- Sums the spend since since of the chats of the organization that have a
+-- delivered wake-up run in an hour bucket from runs_since on, so chats that
+-- only humans drive do not count.
 -- name: SumOrganizationWakeupChatCostMicrosSince :one
 SELECT COALESCE(SUM(cm.total_cost_micros), 0)::bigint
 FROM chat_messages cm
-WHERE cm.chat_id IN (SELECT DISTINCT w.chat_id FROM chat_wakeups w WHERE w.organization_id = @organization_id::uuid)
+WHERE cm.chat_id IN (
+        SELECT DISTINCT u.chat_id
+        FROM chat_wakeup_run_counts u
+        WHERE u.organization_id = @organization_id::uuid
+            AND u.hour >= @runs_since::timestamptz
+    )
     AND cm.created_at >= @since::timestamptz
     AND cm.total_cost_micros IS NOT NULL;
 

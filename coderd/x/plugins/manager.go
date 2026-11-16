@@ -3,12 +3,22 @@
 // lease for each plugin it runs, so one replica runs each plugin.
 //
 // The Manager renews its leases every lease interval while it runs a plugin.
+// RenewPluginLeases returns only ids and updated_at, so a renewal reads and
+// decrypts no config: the Manager reads a full row only when a plugin
+// changed. AcquirePluginLeases takes only plugins no replica holds.
 // A replica that runs none reads GetPluginLeaseSummary instead, which takes
 // no lock and writes nothing, and calls AcquirePluginLeases only when a
 // plugin is free to lease. It keeps checking every lease interval while
 // another replica holds an enabled plugin, so it can take over an expired
 // lease. With no enabled plugin it waits for a plugins:changed message and
 // checks once every idle interval in case a message was lost.
+//
+// Each runner keeps a delivery cursor per bound chat. A runner binds every
+// chat of its linked users when it subscribes to a new user, after a link
+// is created, and once every bind interval as a fallback. A created chat
+// watch event binds that one chat. The scan every scan interval finds due
+// chats, and binds every chat only after a full bind failed or pubsub
+// dropped chat watch events.
 package plugins
 
 import (
@@ -245,15 +255,8 @@ func (m *Manager) reconcile(ctx context.Context) bool {
 			return summary.Enabled == 0
 		}
 	}
-	held, err := m.fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
-		RunnerID:     m.opts.ReplicaID,
-		LeaseSeconds: int32(m.opts.LeaseDuration.Seconds()),
-		MaxPlugins:   m.opts.MaxPlugins,
-	})
-	if err != nil {
-		if ctx.Err() == nil {
-			m.logger.Error(ctx, "acquire plugin leases", slog.Error(err))
-		}
+	held, ok := m.leases(ctx)
+	if !ok {
 		return false
 	}
 
@@ -263,8 +266,13 @@ func (m *Manager) reconcile(ctx context.Context) bool {
 		return false
 	}
 	keep := make(map[uuid.UUID]struct{}, len(held))
-	for _, p := range held {
-		keep[p.ID] = struct{}{}
+	for _, l := range held {
+		keep[l.id] = struct{}{}
+		if l.plugin == nil {
+			// The row could not be read: keep what runs and retry next time.
+			continue
+		}
+		p := *l.plugin
 		prev, ok := m.runners[p.ID]
 		if ok && !prev.exited() && prev.plugin.UpdatedAt.Equal(p.UpdatedAt) {
 			continue
@@ -283,6 +291,74 @@ func (m *Manager) reconcile(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// heldPlugin is a plugin this replica holds a lease for. plugin is nil when
+// its row could not be read.
+type heldPlugin struct {
+	id     uuid.UUID
+	plugin *forkdb.Plugin
+}
+
+// leases renews the leases of this replica and takes free ones. A renewal
+// returns only ids and updated_at: the full row, with its decrypted config,
+// is read only for a plugin that changed or that has no runner yet. It
+// reports false when the renewal failed, so nothing changes this time.
+func (m *Manager) leases(ctx context.Context) ([]heldPlugin, bool) {
+	lease := int32(m.opts.LeaseDuration.Seconds())
+	renewed, err := m.fdb.RenewPluginLeases(ctx, forkdb.RenewPluginLeasesParams{
+		RunnerID:     m.opts.ReplicaID,
+		LeaseSeconds: lease,
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.Error(ctx, "renew plugin leases", slog.Error(err))
+		}
+		return nil, false
+	}
+	m.mu.Lock()
+	running := make(map[uuid.UUID]forkdb.Plugin, len(m.runners))
+	for id, r := range m.runners {
+		running[id] = r.plugin
+	}
+	m.mu.Unlock()
+
+	held := make([]heldPlugin, 0, len(renewed))
+	for _, row := range renewed {
+		if p, ok := running[row.ID]; ok && p.UpdatedAt.Equal(row.UpdatedAt) {
+			held = append(held, heldPlugin{id: row.ID, plugin: &p})
+			continue
+		}
+		p, err := m.fdb.GetPluginByID(ctx, row.ID)
+		if err != nil {
+			if ctx.Err() == nil {
+				m.logger.Error(ctx, "get leased plugin", slog.F("plugin_id", row.ID), slog.Error(err))
+			}
+			held = append(held, heldPlugin{id: row.ID})
+			continue
+		}
+		held = append(held, heldPlugin{id: row.ID, plugin: &p})
+	}
+
+	free := m.opts.MaxPlugins - int32(len(renewed)) //nolint:gosec // At most MaxPlugins rows are leased.
+	if free <= 0 {
+		return held, true
+	}
+	acquired, err := m.fdb.AcquirePluginLeases(ctx, forkdb.AcquirePluginLeasesParams{
+		RunnerID:     m.opts.ReplicaID,
+		LeaseSeconds: lease,
+		MaxPlugins:   free,
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.Error(ctx, "acquire plugin leases", slog.Error(err))
+		}
+		return held, true
+	}
+	for i := range acquired {
+		held = append(held, heldPlugin{id: acquired[i].ID, plugin: &acquired[i]})
+	}
+	return held, true
 }
 
 func (m *Manager) stopAll() {

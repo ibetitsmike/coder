@@ -267,6 +267,10 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteOldChatSecretAnswers(gomock.Any(), int32(1000)).Return(int64(1), nil).AnyTimes()
 			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(1))
 		},
+		"DeleteOldChatWakeupRunCounts": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			fdb.EXPECT().DeleteOldChatWakeupRunCounts(gomock.Any()).Return(int64(2), nil).AnyTimes()
+			check.Args().Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(2))
+		},
 		"LockChatForNoKeyUpdate": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
@@ -441,17 +445,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().MarkChatWakeupWatchFailed(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
 		},
-		"CountChatWakeupRunsSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			chat := testutil.Fake(t, faker, database.Chat{})
-			arg := testutil.Fake(t, faker, forkdb.CountChatWakeupRunsSinceParams{ChatID: chat.ID})
-			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
-			fdb.EXPECT().CountChatWakeupRunsSince(gomock.Any(), arg).Return(int64(4), nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(4))
-		},
-		"CountOrganizationChatWakeupRunsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-			arg := testutil.Fake(t, faker, forkdb.CountOrganizationChatWakeupRunsSinceParams{})
-			fdb.EXPECT().CountOrganizationChatWakeupRunsSince(gomock.Any(), arg).Return(int64(9), nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(int64(9))
+		"SumChatWakeupRunCountsSince": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.SumChatWakeupRunCountsSinceParams{})
+			row := forkdb.SumChatWakeupRunCountsSinceRow{ChatRuns: 4, OrganizationRuns: 9}
+			fdb.EXPECT().SumChatWakeupRunCountsSince(gomock.Any(), arg).Return(row, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(row)
 		},
 		"SumChatCostMicrosSince": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -726,6 +724,12 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().AcquirePluginLeases(gomock.Any(), arg).Return([]forkdb.Plugin{plugin}, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns([]forkdb.Plugin{plugin})
 		},
+		"RenewPluginLeases": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.RenewPluginLeasesParams{RunnerID: uuid.New(), LeaseSeconds: 30}
+			rows := []forkdb.RenewPluginLeasesRow{{ID: uuid.New(), UpdatedAt: dbtime.Now()}}
+			fdb.EXPECT().RenewPluginLeases(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(rows)
+		},
 		"ReleasePluginLeases": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			runnerID := uuid.New()
 			fdb.EXPECT().ReleasePluginLeases(gomock.Any(), runnerID).Return(nil).AnyTimes()
@@ -784,6 +788,11 @@ func TestForkQuerier(t *testing.T) {
 			arg := forkdb.SetPluginUserLinkActiveChatParams{PluginID: uuid.New(), ExternalID: "+15550100", ActiveChatID: uuid.NullUUID{UUID: uuid.New(), Valid: true}}
 			fdb.EXPECT().SetPluginUserLinkActiveChat(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+		},
+		"EnsurePluginChatBinding": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.EnsurePluginChatBindingParams{PluginID: uuid.New(), ChatID: uuid.New()}
+			fdb.EXPECT().EnsurePluginChatBinding(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionCreate).Returns()
 		},
 		"GetPluginLeaseSummary": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			runnerID := uuid.New()

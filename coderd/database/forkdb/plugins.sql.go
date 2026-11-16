@@ -24,9 +24,9 @@ WHERE id IN (
     SELECT p.id
     FROM plugins p
     WHERE p.enabled
+        AND p.runner_id IS DISTINCT FROM $1::uuid
         AND (
-            p.runner_id = $1::uuid
-            OR p.lease_expires_at IS NULL
+            p.lease_expires_at IS NULL
             OR p.lease_expires_at < now()
         )
     ORDER BY p.id
@@ -42,9 +42,10 @@ type AcquirePluginLeasesParams struct {
 	MaxPlugins   int32     `db:"max_plugins" json:"max_plugins"`
 }
 
-// Leases enabled plugins to a replica. A replica renews its own leases on
-// every call and takes over plugins whose lease expired. SKIP LOCKED keeps
-// concurrent replicas from blocking on, or double leasing, the same rows.
+// Leases enabled plugins that no replica holds, or whose lease expired, to a
+// replica. It skips the replica's own leases: RenewPluginLeases renews
+// those. SKIP LOCKED keeps concurrent replicas from blocking on, or double
+// leasing, the same rows.
 func (q *Queries) AcquirePluginLeases(ctx context.Context, arg AcquirePluginLeasesParams) ([]Plugin, error) {
 	rows, err := q.db.QueryContext(ctx, acquirePluginLeases, arg.RunnerID, arg.LeaseSeconds, arg.MaxPlugins)
 	if err != nil {
@@ -145,6 +146,42 @@ type DeletePluginUserLinkParams struct {
 
 func (q *Queries) DeletePluginUserLink(ctx context.Context, arg DeletePluginUserLinkParams) error {
 	_, err := q.db.ExecContext(ctx, deletePluginUserLink, arg.PluginID, arg.ExternalID)
+	return err
+}
+
+const ensurePluginChatBinding = `-- name: EnsurePluginChatBinding :exec
+INSERT INTO plugin_chat_bindings (plugin_id, chat_id, sent_message_id, sent_status)
+SELECT DISTINCT ON (c.id)
+    l.plugin_id,
+    c.id,
+    CASE
+        WHEN c.created_at >= l.created_at THEN 0
+        ELSE COALESCE((SELECT max(m.id) FROM chat_messages m WHERE m.chat_id = c.id), 0)
+    END,
+    CASE
+        WHEN c.created_at >= l.created_at THEN NULL
+        ELSE c.status
+    END
+FROM plugin_user_links l
+JOIN plugins p ON p.id = l.plugin_id
+JOIN chats c ON c.owner_id = l.user_id AND c.organization_id = p.organization_id
+WHERE l.plugin_id = $1
+    AND c.id = $2
+    AND c.parent_chat_id IS NULL
+    AND NOT c.archived
+ORDER BY c.id, l.created_at
+ON CONFLICT (plugin_id, chat_id) DO NOTHING
+`
+
+type EnsurePluginChatBindingParams struct {
+	PluginID uuid.UUID `db:"plugin_id" json:"plugin_id"`
+	ChatID   uuid.UUID `db:"chat_id" json:"chat_id"`
+}
+
+// EnsurePluginChatBinding is EnsurePluginChatBindings for one chat, for a
+// chat that was just created or unarchived.
+func (q *Queries) EnsurePluginChatBinding(ctx context.Context, arg EnsurePluginChatBindingParams) error {
+	_, err := q.db.ExecContext(ctx, ensurePluginChatBinding, arg.PluginID, arg.ChatID)
 	return err
 }
 
@@ -618,6 +655,49 @@ WHERE runner_id = $1::uuid
 func (q *Queries) ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, releasePluginLeases, runnerID)
 	return err
+}
+
+const renewPluginLeases = `-- name: RenewPluginLeases :many
+UPDATE plugins
+SET lease_expires_at = now() + make_interval(secs => $1::int)
+WHERE runner_id = $2::uuid AND enabled
+RETURNING id, updated_at
+`
+
+type RenewPluginLeasesParams struct {
+	LeaseSeconds int32     `db:"lease_seconds" json:"lease_seconds"`
+	RunnerID     uuid.UUID `db:"runner_id" json:"runner_id"`
+}
+
+type RenewPluginLeasesRow struct {
+	ID        uuid.UUID `db:"id" json:"id"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// Renews the leases a replica holds on enabled plugins. It returns only the
+// id and updated_at, so a renewal reads and decrypts no config: the replica
+// reads a full row only when updated_at changed.
+func (q *Queries) RenewPluginLeases(ctx context.Context, arg RenewPluginLeasesParams) ([]RenewPluginLeasesRow, error) {
+	rows, err := q.db.QueryContext(ctx, renewPluginLeases, arg.LeaseSeconds, arg.RunnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RenewPluginLeasesRow
+	for rows.Next() {
+		var i RenewPluginLeasesRow
+		if err := rows.Scan(&i.ID, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setPluginUserLinkActiveChat = `-- name: SetPluginUserLinkActiveChat :exec
