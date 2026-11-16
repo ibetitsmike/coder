@@ -468,6 +468,7 @@ func resolveReadTarget(path string, info fs.FileInfo, scanRoot string) (readPath
 		return path, info, true, StatusOK, ""
 	}
 	target, err := filepath.EvalSymlinks(path)
+	noteSymlinkTarget(path, target, err) // fork: fork_resolve_cache.go
 	if err != nil {
 		return "", nil, false, StatusUnreadable, fmt.Sprintf("symlink resolve: %v", err)
 	}

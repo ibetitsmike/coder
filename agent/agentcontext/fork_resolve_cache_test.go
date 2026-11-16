@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -327,4 +328,106 @@ func TestRunPush_ReconnectReusesResolve(t *testing.T) {
 			require.NotEqual(t, first[0].AggregateHash, changed[0].AggregateHash)
 		})
 	}
+}
+
+// startWatchingManager starts a Manager over dir with its watcher running and
+// waits for the first published snapshot.
+func startWatchingManager(t *testing.T, opts agentcontext.ManagerOptions) *agentcontext.Manager {
+	t.Helper()
+	m := newPendingTestManager(t, opts)
+	runCtx, runCancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	t.Cleanup(runCancel)
+	go func() { _ = m.Run(runCtx) }()
+	require.Eventually(t, func() bool { return agentcontext.ManagerWatching(m) },
+		testutil.WaitShort, testutil.IntervalFast)
+	m.SetReady()
+	require.Eventually(t, func() bool { return m.Snapshot().Version > 0 },
+		testutil.WaitShort, testutil.IntervalFast)
+	return m
+}
+
+// connectOnce runs one push connection until its first settled push and
+// returns the settled pushes. The peer advertises every fork capability, so
+// every connection resets them and resyncs, as against a fork coderd.
+func connectOnce(t *testing.T, m *agentcontext.Manager, name string) []*agentcontext.PushRequest {
+	t.Helper()
+	p := newFakePusher()
+	p.mu.Lock()
+	p.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true, ForkAgentDefinitions: true, ForkGlobRules: true}
+	p.mu.Unlock()
+	ctx, cancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
+	done := make(chan error, 1)
+	go func() {
+		done <- m.RunPush(ctx, p, agentcontext.PushOptions{Logger: testutil.Logger(t).Named(name)})
+	}()
+	settled := waitSettled(t, p, 1)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	return settled
+}
+
+func instructionPayload(t *testing.T, req *agentcontext.PushRequest) string {
+	t.Helper()
+	for _, res := range req.Resources {
+		if res.Kind == agentcontext.KindInstructionFile {
+			return string(res.Payload)
+		}
+	}
+	t.Fatal("no instruction file in the push")
+	return ""
+}
+
+// A symlink whose target sits in a directory the watcher does not watch
+// gets no event when the target changes, so such a pass is not cached and
+// every reconnect reads the target again.
+func TestRunPush_UnwatchedSymlinkTargetIsReresolved(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "nested", "target.md")
+	mustWriteFile(t, target, "v1")
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, "AGENTS.md")))
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	require.Equal(t, "v1", instructionPayload(t, connectOnce(t, m, "push1")[0]))
+
+	mustWriteFile(t, target, "v2 is longer")
+	require.Equal(t, "v2 is longer", instructionPayload(t, connectOnce(t, m, "push2")[0]))
+}
+
+// A symlink to a file in a watched directory, such as CLAUDE.md pointing at
+// AGENTS.md next to it, keeps the cache.
+func TestRunPush_WatchedSymlinkTargetIsCached(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "AGENTS.md"), filepath.Join(dir, "CLAUDE.md")))
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	connectOnce(t, m, "push1")
+	resolves := agentcontext.ResolveCount(m)
+	connectOnce(t, m, "push2")
+	require.Equal(t, resolves, agentcontext.ResolveCount(m), "a reconnect with no file change resolves nothing")
+}
+
+// A cache hit still runs the MCP reconnect, which retries servers that
+// failed to connect.
+func TestRunPush_CacheHitReconnectsMCP(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+
+	var reconnects atomic.Int64
+	m := startWatchingManager(t, agentcontext.ManagerOptions{
+		WorkingDir: func() string { return dir },
+		MCPReconnect: func(context.Context) error {
+			reconnects.Add(1)
+			return nil
+		},
+	})
+	connectOnce(t, m, "push1")
+	resolves := agentcontext.ResolveCount(m)
+	before := reconnects.Load()
+	connectOnce(t, m, "push2")
+	require.Equal(t, resolves, agentcontext.ResolveCount(m), "the reconnect is a cache hit")
+	require.Greater(t, reconnects.Load(), before, "a cache hit still reconnects MCP servers")
 }

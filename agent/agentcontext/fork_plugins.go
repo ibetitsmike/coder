@@ -305,6 +305,10 @@ func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
 // FIFO or device never blocks or streams, and the read stays bounded even if
 // the file grows in between.
 func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
+	if link, err := os.Lstat(path); err == nil && link.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(path)
+		noteSymlinkTarget(path, target, err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, false
