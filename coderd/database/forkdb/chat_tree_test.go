@@ -87,11 +87,12 @@ func TestGetDescendantChatsByRootIDs(t *testing.T) {
 		}
 	}
 
-	ids := func(archived sql.NullBool) []uuid.UUID {
+	idsToDepth := func(archived sql.NullBool, maxDepth int32) []uuid.UUID {
 		t.Helper()
 		rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{
 			RootIds:  []uuid.UUID{root.ID},
 			Archived: archived,
+			MaxDepth: maxDepth,
 		})
 		require.NoError(t, err)
 		var got []uuid.UUID
@@ -101,7 +102,14 @@ func TestGetDescendantChatsByRootIDs(t *testing.T) {
 		}
 		return got
 	}
+	ids := func(archived sql.NullBool) []uuid.UUID {
+		t.Helper()
+		return idsToDepth(archived, 64)
+	}
 	require.ElementsMatch(t, []uuid.UUID{archivedChild.ID, greatGrandchild.ID, grandchild.ID, legacyChild.ID, child.ID}, ids(sql.NullBool{}))
+	// The walk stops max_depth levels below the root.
+	require.ElementsMatch(t, []uuid.UUID{legacyChild.ID, child.ID}, idsToDepth(sql.NullBool{Bool: false, Valid: true}, 1))
+	require.ElementsMatch(t, []uuid.UUID{grandchild.ID, legacyChild.ID, child.ID}, idsToDepth(sql.NullBool{Bool: false, Valid: true}, 2))
 	require.ElementsMatch(t, []uuid.UUID{greatGrandchild.ID, grandchild.ID, legacyChild.ID, child.ID}, ids(sql.NullBool{Bool: false, Valid: true}))
 	require.Equal(t, []uuid.UUID{archivedChild.ID}, ids(sql.NullBool{Bool: true, Valid: true}))
 
@@ -114,7 +122,7 @@ func TestGetDescendantChatsByRootIDs(t *testing.T) {
 	promotedGrandchild := chat(&oldRoot, &promotedChild)
 	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", oldRoot.ID)
 	require.NoError(t, err)
-	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{promoted.ID}})
+	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{promoted.ID}, MaxDepth: 64})
 	require.NoError(t, err)
 	var got []uuid.UUID
 	for _, row := range rows {

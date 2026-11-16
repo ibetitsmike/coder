@@ -16,8 +16,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
-	"cdr.dev/slog/v3"
 	"github.com/sqlc-dev/pqtype"
+
+	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -73,6 +74,8 @@ func (j workflowJournal) insertRun(ctx context.Context, run *workflowRun) error 
 		Script:        run.script,
 		Args:          []byte(run.argsJSON),
 		Status:        workflowStatusRunning,
+		Phases:        append([]string(nil), run.phases...),
+		CurrentPhase:  run.currentPhase,
 	})
 }
 
@@ -95,8 +98,15 @@ func (j workflowJournal) getRun(ctx context.Context, id uuid.UUID) (run forkdb.W
 
 // updateRunStatus journals a run transition. It is best effort: the
 // in-memory state of a live run stays authoritative, and a lost write only
-// costs the replay that the journal exists to prevent.
-func (j workflowJournal) updateRunStatus(ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult) {
+// costs the replay that the journal exists to prevent. phases carries the
+// run's phase list and current phase, the state phase() changes while the
+// script runs; a nil phases clears them to empty, so a caller outside the
+// script goroutine must pass the run's snapshot instead. The startup sweep
+// and every other caller pass it.
+func (j workflowJournal) updateRunStatus(
+	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
+	phases *workflowPhases,
+) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		j.warn(ctx, "open workflow journal store", id, err)
@@ -111,14 +121,55 @@ func (j workflowJournal) updateRunStatus(ctx context.Context, id uuid.UUID, stat
 		}
 		raw = data
 	}
-	if err := fdb.UpdateWorkflowRunStatus(journalCtx(ctx), forkdb.UpdateWorkflowRunStatusParams{
+	params := forkdb.UpdateWorkflowRunStatusParams{
 		ID:     id,
 		Status: status,
 		Error:  errText,
 		Result: jsonbValue(raw),
-	}); err != nil {
+	}
+	if phases != nil {
+		params.Phases = phases.names
+		params.CurrentPhase = phases.current
+	}
+	if err := fdb.UpdateWorkflowRunStatus(journalCtx(ctx), params); err != nil {
 		j.warn(ctx, "journal workflow run status", id, err)
 	}
+}
+
+// updateRunPhases journals the phase state of a live run, best effort like
+// updateRunStatus. It touches only the phase columns, so it never overwrites
+// the status write of a run that ends at the same time.
+func (j workflowJournal) updateRunPhases(ctx context.Context, id uuid.UUID, phases *workflowPhases) {
+	if phases == nil {
+		return
+	}
+	fdb, err := j.store(ctx)
+	if err != nil {
+		j.warn(ctx, "open workflow journal store", id, err)
+		return
+	}
+	if err := fdb.UpdateWorkflowRunPhases(journalCtx(ctx), forkdb.UpdateWorkflowRunPhasesParams{
+		ID:           id,
+		Phases:       phases.names,
+		CurrentPhase: phases.current,
+	}); err != nil {
+		j.warn(ctx, "journal workflow run phases", id, err)
+	}
+}
+
+// workflowPhases is the journaled phase state of a run: the display list
+// and the current name. phase() changes it on the script goroutine, so a
+// journal write reads it through the script goroutine's own pointer.
+type workflowPhases struct {
+	names   []string
+	current string
+}
+
+// phasesSnapshot copies the run's phase state for a journal write. It runs
+// on the script goroutine, so its unlocked read cannot race with phase(),
+// which runs on the same goroutine.
+func (r *workflowRun) phasesSnapshot() *workflowPhases {
+	return &workflowPhases{names: append([]string(nil), r.phases...), current: r.currentPhase}
 }
 
 // markInterrupted marks every open run of a dead process interrupted. It
@@ -148,6 +199,7 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 		Title:      step.title,
 		Status:     step.status,
 		Value:      jsonbValue(step.value),
+		Phase:      step.phase,
 	})
 }
 
@@ -263,8 +315,10 @@ func (p *Server) resumeWorkflowRun(
 		return p.workflows.get(row.ID), nil
 	}
 	// The run is live again before its script starts, so a crash during the
-	// resume leaves the row resumable.
-	p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusRunning, "", nil)
+	// resume leaves the row resumable. The write carries the journaled
+	// phases back: a nil phases would blank them.
+	p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusRunning, "", nil,
+		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), chat) //nolint:gocritic // see startWorkflowRun
 	run.mu.Lock()
 	run.cancel = stop
@@ -276,7 +330,8 @@ func (p *Server) resumeWorkflowRun(
 	if err != nil {
 		stop()
 		p.workflows.remove(row.ID)
-		p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusFailed, "resume the run: "+err.Error(), nil)
+		p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusFailed, "resume the run: "+err.Error(), nil,
+			&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 		return nil, xerrors.Errorf("resume workflow run: %w", err)
 	}
 	return run, nil
@@ -308,7 +363,13 @@ func (p *Server) rehydrateWorkflowRun(
 		script:        row.Script,
 		argsJSON:      string(row.Args),
 		seen:          map[string]int{},
-		done:          make(chan struct{}),
+		// A resumed run keeps the phases of the first process: the declared
+		// list and every name the script had reached, and the phase that
+		// was current when the process died. The re-executed script reads
+		// PHASES again, which only appends names it does not hold yet.
+		phases:       row.Phases,
+		currentPhase: row.CurrentPhase,
+		done:         make(chan struct{}),
 	}
 	for _, srow := range stepRows {
 		step := &workflowStep{
@@ -319,6 +380,7 @@ func (p *Server) rehydrateWorkflowRun(
 			ordinal:    int(srow.Ordinal),
 			title:      srow.Title,
 			reused:     true,
+			phase:      srow.Phase,
 			status:     srow.Status,
 			err:        srow.Error,
 			// The previous process may already have sent the one reminder.
@@ -336,10 +398,23 @@ func (p *Server) rehydrateWorkflowRun(
 // run_workflow and await_workflow return the same result without executing
 // anything.
 func terminalWorkflowRun(p *Server, chat database.Chat, row forkdb.WorkflowRun) (*workflowRun, error) {
-	res := runWorkflowResult{RunID: row.ID.String(), Status: row.Status, Error: row.Error}
+	res := runWorkflowResult{
+		RunID:        row.ID.String(),
+		Status:       row.Status,
+		Error:        row.Error,
+		Phases:       append([]string{}, row.Phases...),
+		CurrentPhase: row.CurrentPhase,
+		Steps:        make([]stepSummary, 0),
+	}
 	if row.Result.Valid {
 		if err := json.Unmarshal(row.Result.RawMessage, &res); err != nil {
 			return nil, xerrors.Errorf("unmarshal the journal result of run %s: %w", row.ID, err)
+		}
+		// The journaled result of an older run carries no phase state; the
+		// row does.
+		if res.Phases == nil {
+			res.Phases = append([]string{}, row.Phases...)
+			res.CurrentPhase = row.CurrentPhase
 		}
 	}
 	// A run reaches this constructor only after the registry lost it, so
@@ -388,10 +463,12 @@ func (p *Server) workflowResultFromJournal(
 		return runWorkflowResult{}, false, xerrors.Errorf("load the workflow steps of run %s: %w", row.ID, err)
 	}
 	res = runWorkflowResult{
-		RunID:  row.ID.String(),
-		Status: row.Status,
-		Error:  row.Error,
-		Steps:  make([]stepSummary, 0, len(stepRows)),
+		RunID:        row.ID.String(),
+		Status:       row.Status,
+		Error:        row.Error,
+		Phases:       append([]string{}, row.Phases...),
+		CurrentPhase: row.CurrentPhase,
+		Steps:        make([]stepSummary, 0, len(stepRows)),
 	}
 	for _, srow := range stepRows {
 		res.Steps = append(res.Steps, stepSummary{
@@ -399,6 +476,7 @@ func (p *Server) workflowResultFromJournal(
 			Title:  srow.Title,
 			Status: srow.Status,
 			Reused: true,
+			Phase:  srow.Phase,
 			Error:  srow.Error,
 		})
 	}

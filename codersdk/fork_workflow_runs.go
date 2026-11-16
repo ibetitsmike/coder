@@ -65,9 +65,15 @@ type WorkflowRun struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 	// Title is a display name for the run. Runs have no title yet, so it is
 	// empty and the UI shows the script preview.
-	Title         string                `json:"title"`
-	ScriptPreview string                `json:"script_preview,omitempty"`
-	StepCounts    WorkflowRunStepCounts `json:"step_counts"`
+	Title         string `json:"title"`
+	ScriptPreview string `json:"script_preview,omitempty"`
+	// Phases lists the run's phases in display order: the script's declared
+	// PHASES list first, then every undeclared name that phase() reached.
+	// CurrentPhase is the one the script set last. Both are empty for a run
+	// whose script uses no phases.
+	Phases       []string              `json:"phases"`
+	CurrentPhase string                `json:"current_phase"`
+	StepCounts   WorkflowRunStepCounts `json:"step_counts"`
 }
 
 // WorkflowRunStep is one step of a run. The step ID is the child chat ID.
@@ -82,6 +88,9 @@ type WorkflowRunStep struct {
 	// Value is the report the step sent, matching its schema. It is empty
 	// until the step reported.
 	Value json.RawMessage `json:"value,omitempty"`
+	// Phase is the phase that was current when the step started, empty
+	// before the script's first phase() call.
+	Phase string `json:"phase"`
 	// StartedAt is when the step's child chat was created (or reused).
 	StartedAt time.Time `json:"started_at" format:"date-time"`
 	// FinishedAt is when the step reported or failed. An open step has none.
@@ -105,8 +114,12 @@ type WorkflowRunDetail struct {
 	// Result is the value that main returned, for a terminal run.
 	Result json.RawMessage `json:"result,omitempty"`
 	// Logs are the last log lines of a terminal run, from its snapshot.
-	Logs  []string          `json:"logs"`
-	Steps []WorkflowRunStep `json:"steps"`
+	Logs []string `json:"logs"`
+	// Phases and CurrentPhase carry the run's phase rail, as on the list
+	// item.
+	Phases       []string          `json:"phases"`
+	CurrentPhase string            `json:"current_phase"`
+	Steps        []WorkflowRunStep `json:"steps"`
 } // WorkflowRunListOptions is the pagination of a chat's workflow run list.
 type WorkflowRunListOptions struct {
 	// After is the cursor of the previous page:

@@ -26,7 +26,7 @@ WITH RECURSIVE descendants(id, depth) AS (
     SELECT chats.id, descendants.depth + 1
     FROM chats
     JOIN descendants ON chats.parent_chat_id = descendants.id
-    WHERE descendants.depth < 64
+    WHERE descendants.depth < LEAST($3 :: integer, 64)
         AND CASE
             WHEN $2 :: boolean IS NULL THEN true
             ELSE chats.archived = $2 :: boolean
@@ -52,6 +52,7 @@ ORDER BY
 type GetDescendantChatsByRootIDsParams struct {
 	RootIds  []uuid.UUID  `db:"root_ids" json:"root_ids"`
 	Archived sql.NullBool `db:"archived" json:"archived"`
+	MaxDepth int32        `db:"max_depth" json:"max_depth"`
 }
 
 type GetDescendantChatsByRootIDsRow struct {
@@ -59,16 +60,17 @@ type GetDescendantChatsByRootIDsRow struct {
 	HasUnread     bool          `db:"has_unread" json:"has_unread"`
 }
 
-// Returns every descendant of the given chats in one statement, with the row
+// Returns the descendants of the given chats up to max_depth levels below
+// them (at most 64) in one statement, with the row
 // shape of upstream's GetChildChatsByParentIDs, optionally filtered by
 // archive state (NULL = all, true/false = match). It follows parent_chat_id
 // level by level as a walk with upstream's query does, so it needs no
 // root_chat_id: a chat whose family root was deleted, and so lost its
 // root_chat_id, still reaches its whole subtree. The walk continues only
-// through chats that match the archive filter. The depth guard stops it if
-// a cycle ever appears in the hierarchy.
+// through chats that match the archive filter. The 64-level cap also stops
+// it if a cycle ever appears in the hierarchy.
 func (q *Queries) GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getDescendantChatsByRootIDs, pq.Array(arg.RootIds), arg.Archived)
+	rows, err := q.db.QueryContext(ctx, getDescendantChatsByRootIDs, pq.Array(arg.RootIds), arg.Archived, arg.MaxDepth)
 	if err != nil {
 		return nil, err
 	}

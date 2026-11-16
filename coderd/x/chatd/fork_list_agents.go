@@ -146,7 +146,7 @@ func (t forkListAgentsTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 // listDescendantChats returns the unarchived descendants of chatID up to
 // levels below it, reached through unarchived chats, most recently active
 // first, as listSubagents orders them. The subtree is read in one
-// statement.
+// statement that stops levels below chatID.
 func (p *Server) listDescendantChats(ctx context.Context, chatID uuid.UUID, levels int) ([]database.Chat, error) {
 	fdb, err := forkdb.From(p.db)
 	if err != nil {
@@ -155,6 +155,7 @@ func (p *Server) listDescendantChats(ctx context.Context, chatID uuid.UUID, leve
 	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{
 		RootIds:  []uuid.UUID{chatID},
 		Archived: sql.NullBool{Bool: false, Valid: true},
+		MaxDepth: int32(levels), //nolint:gosec // levels is 1 or maxListedSubtreeLevels.
 	})
 	if err != nil {
 		return nil, xerrors.Errorf("list child agents: %w", err)

@@ -43,6 +43,7 @@ func (api *API) forkEmbeddedChildChats(ctx context.Context, rootIDs []uuid.UUID,
 	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{
 		RootIds:  rootIDs,
 		Archived: archived,
+		MaxDepth: forkMaxEmbeddedChatDepth,
 	})
 	if err != nil {
 		return nil, err

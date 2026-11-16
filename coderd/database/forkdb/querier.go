@@ -102,14 +102,15 @@ type Querier interface {
 	// Locks the wake-up until the transaction ends, so a delivery that starts in
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
-	// Returns every descendant of the given chats in one statement, with the row
+	// Returns the descendants of the given chats up to max_depth levels below
+	// them (at most 64) in one statement, with the row
 	// shape of upstream's GetChildChatsByParentIDs, optionally filtered by
 	// archive state (NULL = all, true/false = match). It follows parent_chat_id
 	// level by level as a walk with upstream's query does, so it needs no
 	// root_chat_id: a chat whose family root was deleted, and so lost its
 	// root_chat_id, still reaches its whole subtree. The walk continues only
-	// through chats that match the archive filter. The depth guard stops it if
-	// a cycle ever appears in the hierarchy.
+	// through chats that match the archive filter. The 64-level cap also stops
+	// it if a cycle ever appears in the hierarchy.
 	GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
@@ -197,7 +198,14 @@ type Querier interface {
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSavedWorkflowParams) (SavedWorkflow, error)
+	// phases holds the declared phases of the script plus every undeclared name
+	// that phase() reached, in display order. Empty when the script declares no
+	// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
+	// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
+	// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
+	// phase is the name that was current when the step started, or '' when the
+	// script called no phase() before it.
 	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
@@ -315,6 +323,11 @@ type Querier interface {
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error)
+	// phase() journals the phase state of a live run as it changes: the display
+	// list and the current name. The write does not touch status, error or
+	// result, which updateRunStatus owns, so the two best-effort writers never
+	// overwrite each other's columns.
+	UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflowRunPhasesParams) error
 	// result is the full terminal snapshot of the run, or NULL for interrupted.
 	// A terminal status stamps finished_at; interrupted keeps the run open, so
 	// a resume can end it later. The param stays uncast so sqlc ties it to the

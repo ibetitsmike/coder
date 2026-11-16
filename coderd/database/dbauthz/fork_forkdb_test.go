@@ -147,7 +147,7 @@ func TestForkQuerier(t *testing.T) {
 		"GetDescendantChatsByRootIDs": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			child := testutil.Fake(t, faker, forkdb.ChatsExpanded{})
 			grandchild := testutil.Fake(t, faker, forkdb.ChatsExpanded{ParentChatID: uuid.NullUUID{UUID: child.ID, Valid: true}})
-			arg := forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{uuid.New()}, Archived: sql.NullBool{Bool: false, Valid: true}}
+			arg := forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{uuid.New()}, Archived: sql.NullBool{Bool: false, Valid: true}, MaxDepth: 64}
 			rows := []forkdb.GetDescendantChatsByRootIDsRow{{ChatsExpanded: child}, {ChatsExpanded: grandchild, HasUnread: true}}
 			fdb.EXPECT().GetDescendantChatsByRootIDs(gomock.Any(), arg).Return(rows, nil).AnyTimes()
 			check.Args(arg).Asserts(child.Chat(), policy.ActionRead, grandchild.Chat(), policy.ActionRead).Returns(rows)
@@ -1109,6 +1109,15 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().MarkOpenWorkflowRunsInterrupted(gomock.Any(), "the coderd process restarted before the run ended").Return(int64(2), nil).AnyTimes()
 			check.Args("the coderd process restarted before the run ended").Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(int64(2))
 		},
+		"UpdateWorkflowRunPhases": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.UpdateWorkflowRunPhasesParams{ID: run.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().UpdateWorkflowRunPhases(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+		},
 		"UpdateWorkflowRunStatus": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
@@ -1617,6 +1626,9 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 		{name: "InsertWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
 			return fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{RunID: run.ID})
 		}},
+		{name: "UpdateWorkflowRunPhases", run: func(ctx context.Context, fdb forkdb.Store) error {
+			return fdb.UpdateWorkflowRunPhases(ctx, forkdb.UpdateWorkflowRunPhasesParams{ID: run.ID})
+		}},
 		{name: "UpdateWorkflowRunStatus", run: func(ctx context.Context, fdb forkdb.Store) error {
 			return fdb.UpdateWorkflowRunStatus(ctx, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
 		}},
@@ -1714,7 +1726,8 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Zero(t, counts.get("GetWorkflowRun"))
 					require.Zero(t, counts.get("GetWorkflowStep"))
 				case "GetWorkflowRun", "GetWorkflowStepsByRun",
-					"InsertWorkflowStep", "UpdateWorkflowRunStatus",
+					"InsertWorkflowStep", "UpdateWorkflowRunPhases",
+					"UpdateWorkflowRunStatus",
 					"FailOpenWorkflowStepsOfRun":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
@@ -1786,6 +1799,7 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().InsertWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowRunPhases(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), gomock.Any()).Return(int64(0), nil).AnyTimes()
