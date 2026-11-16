@@ -18,7 +18,8 @@ import (
 const chatSecretAnswersBatchSize = 1000
 
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
-// chat secret answers it purged.
+// chat secret answers it purged. It also deletes the wake-up run counts older
+// than 7 days.
 func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64, error) {
 	ftx, err := forkdb.From(tx)
 	if err != nil {
@@ -31,6 +32,13 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, chatSecretAnswersBatchSize)
 	if err != nil {
 		return 0, xerrors.Errorf("failed to delete old chat secret answers: %w", err)
+	}
+	counts, err := ftx.DeleteOldChatWakeupRunCounts(ctx)
+	if err != nil {
+		return 0, xerrors.Errorf("failed to delete old chat wake-up run counts: %w", err)
+	}
+	if counts > 0 {
+		i.logger.Debug(ctx, "purged old chat wake-up run counts", slog.F("count", counts))
 	}
 	return purged, nil
 }

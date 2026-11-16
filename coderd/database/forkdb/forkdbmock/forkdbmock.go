@@ -261,6 +261,21 @@ func (mr *MockStoreMockRecorder) DeleteOldChatSecretAnswers(ctx, limitCount any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatSecretAnswers", reflect.TypeOf((*MockStore)(nil).DeleteOldChatSecretAnswers), ctx, limitCount)
 }
 
+// DeleteOldChatWakeupRunCounts mocks base method.
+func (m *MockStore) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldChatWakeupRunCounts", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldChatWakeupRunCounts indicates an expected call of DeleteOldChatWakeupRunCounts.
+func (mr *MockStoreMockRecorder) DeleteOldChatWakeupRunCounts(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChatWakeupRunCounts", reflect.TypeOf((*MockStore)(nil).DeleteOldChatWakeupRunCounts), ctx)
+}
+
 // DeleteOrganizationAgentDefinitionByName mocks base method.
 func (m *MockStore) DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.DeleteOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	m.ctrl.T.Helper()

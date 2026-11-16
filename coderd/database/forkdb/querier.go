@@ -47,6 +47,9 @@ type Querier interface {
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
+	// Deletes the run counts older than 7 days, on the database clock. The caps
+	// read only the last 24 hours.
+	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
@@ -271,8 +274,9 @@ type Querier interface {
 	// Sums the delivered runs of the chat and of its organization in the hour
 	// buckets from since on.
 	SumChatWakeupRunCountsSince(ctx context.Context, arg SumChatWakeupRunCountsSinceParams) (SumChatWakeupRunCountsSinceRow, error)
-	// Sums the spend of the chats of the organization that have a wake-up, so
-	// chats that only humans drive do not count.
+	// Sums the spend since since of the chats of the organization that have a
+	// delivered wake-up run in an hour bucket from runs_since on, so chats that
+	// only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
