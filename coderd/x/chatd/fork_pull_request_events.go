@@ -53,8 +53,9 @@ var pullRequestEventKinds = []string{pullRequestEventReview, pullRequestEventCom
 
 // ForkPullRequestActivityFunc reads the activity of a pull request since a
 // time, and its CI when includeChecks is true, with the external auth token
-// of the chat owner ownerID. A non-empty viewerLogin is the login of that
-// token from an earlier read, which saves a request.
+// of the chat owner ownerID. A non-empty viewerLogin is the ViewerLogin of
+// an earlier result, which saves a request. It is opaque to chatd: the
+// implementation may bind it to the token, so a relink reads it again.
 type ForkPullRequestActivityFunc func(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool, viewerLogin string) (*gitprovider.PullRequestActivity, error)
 
 type waitForEventsPullRequest struct {

@@ -82,9 +82,10 @@ type wakeupEvent struct {
 	// Seen lists the URLs of reviews and comments that the baseline read
 	// listed and that count as the baseline.
 	Seen []string `json:"seen,omitempty"`
-	// ViewerLogin is the login of the owner's token, so a poll skips that
-	// read. NextPollAt is when the pull request poller reads the watch
-	// next, and PolledAt is when its last read started.
+	// ViewerLogin is the ViewerLogin of the last read, which names the
+	// owner's token, so a poll skips that read. NextPollAt is when the pull
+	// request poller reads the watch next, and PolledAt is when its last
+	// read started.
 	ViewerLogin string    `json:"viewer_login,omitempty"`
 	NextPollAt  time.Time `json:"next_poll_at,omitzero"`
 	PolledAt    time.Time `json:"polled_at,omitzero"`
