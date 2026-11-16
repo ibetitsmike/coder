@@ -47,11 +47,8 @@ WHERE id = @id;
 -- name: GetWorkflowRunsByChat :many
 -- The run list of a chat, newest first, one keyset page. after_created_at
 -- and after_id are the created_at and the ID of the last run of the page the
--- client already has; both NULL reads the first page. The list needs no logs,
--- args or result, so it does not read those columns: logs alone can hold the
--- full retained tail of every run.
-SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at
-FROM workflow_runs
+-- client already has; both NULL reads the first page.
+SELECT * FROM workflow_runs
 WHERE chat_id = @chat_id
   AND (sqlc.narg('after_created_at')::timestamptz IS NULL
        OR (created_at, id) < (sqlc.narg('after_created_at')::timestamptz, sqlc.narg('after_id')::uuid))

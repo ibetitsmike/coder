@@ -25831,20 +25831,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {

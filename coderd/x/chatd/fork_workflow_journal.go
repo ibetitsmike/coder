@@ -418,12 +418,8 @@ func (p *Server) rehydrateWorkflowRun(
 	// The replay keeps the retained pre-restart lines as its baseline: the
 	// view and the journal start from them, and appendLogLocked suppresses
 	// the replayed lines that echo them, so the history holds one copy.
-	// The counters start at the sequence the payload carries, which is past
-	// the retained lines when the run already logged more than the cap: a
-	// new line must write past the stored sequence, not behind it.
-	var seq int64
-	run.logs, seq, run.logBytes = restoreWorkflowLogs(row.Logs)
-	run.logSeq = max(len(run.logs), int(seq))
+	run.logs, _, run.logBytes = restoreWorkflowLogs(row.Logs)
+	run.logSeq = len(run.logs)
 	run.logEchoBase = append([]string(nil), run.logs...)
 	// The journal holds the lines at the sequence its payload carries, so a
 	// replayed line that matches the baseline does not write again.
@@ -431,7 +427,7 @@ func (p *Server) rehydrateWorkflowRun(
 	run.journalLogWrite <- struct{}{}
 	run.journalWriteDone = make(chan struct{})
 	close(run.journalWriteDone)
-	run.journaledLogSeq = max(len(run.logs), int(seq))
+	run.journaledLogSeq = int(len(run.logs))
 	for _, srow := range stepRows {
 		step := &workflowStep{
 			id:         srow.ID,

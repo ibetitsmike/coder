@@ -1104,7 +1104,7 @@ func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateW
 }
 
 // GetWorkflowRunsByChat authorizes through the owning chat.
-func (f *forkQuerier) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
+func (f *forkQuerier) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return nil, err
 	}

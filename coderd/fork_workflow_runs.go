@@ -235,7 +235,7 @@ func (api *API) readChatWorkflowRuns(
 	ctx context.Context,
 	chatID uuid.UUID,
 	params forkdb.GetWorkflowRunsByChatParams,
-) ([]forkdb.GetWorkflowRunsByChatRow, map[uuid.UUID]codersdk.WorkflowRunStepCounts, error) {
+) ([]forkdb.WorkflowRun, map[uuid.UUID]codersdk.WorkflowRunStepCounts, error) {
 	fdb, err := forkdb.From(api.Database)
 	if err != nil {
 		return nil, nil, err
@@ -266,7 +266,7 @@ func (api *API) readChatWorkflowRuns(
 }
 
 // workflowRunItem builds one list item from a journal row and its counts.
-func workflowRunItem(row forkdb.GetWorkflowRunsByChatRow, counts codersdk.WorkflowRunStepCounts) codersdk.WorkflowRun {
+func workflowRunItem(row forkdb.WorkflowRun, counts codersdk.WorkflowRunStepCounts) codersdk.WorkflowRun {
 	item := codersdk.WorkflowRun{
 		ID:            row.ID.String(),
 		ChatID:        row.ChatID.String(),
