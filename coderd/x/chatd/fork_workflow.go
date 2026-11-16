@@ -408,9 +408,11 @@ type workflowRun struct {
 	// script lines and cannot be replayed, so they never suppress.
 	logEchoLeft int
 	// The write-through of the logs paces itself: lastLogFlush is the last
-	// attempt the journal made, accepted or not, stamped on every attempt
-	// path (the immediate attempt of scheduleLogFlush, and the fallback
-	// timer callback's re-arm). logFlushTimer holds the pending flush of a
+	// attempt the journal made, accepted or not. Exactly two paths stamp
+	// it, the immediate attempt of scheduleLogFlush and the firing of the
+	// paced fallback timer; the failStep flush and the terminal flush of
+	// the end do not, so a line that lands after them still paces behind
+	// its own interval. logFlushTimer holds the pending flush of a
 	// burst, logFlushInFlight marks the goroutine that flushes now, and
 	// flushClosing marks a run whose terminal flush has started:
 	// cancelLogFlush sets it on the run-ending path, so a timer or

@@ -39302,8 +39302,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "args": {
-                    "description": "Args is the JSON object that main(args) received.",
-                    "type": "object"
+                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value."
                 },
                 "chat_id": {
                     "type": "string",
@@ -39342,8 +39341,7 @@ const docTemplate = `{
                     }
                 },
                 "result": {
-                    "description": "Result is the value that main returned, for a terminal run.",
-                    "type": "object"
+                    "description": "Result is the value that main returned, for a terminal run."
                 },
                 "script": {
                     "type": "string"

@@ -643,9 +643,15 @@ def main(args):
 		run.journalMu.Lock()
 		run.lastLogFlush = time.Now().Add(-2 * workflowLogFlushInterval)
 		run.journalMu.Unlock()
+		// The late line goes through run.log, the real script path, so its
+		// scheduleLogFlush attempt is covered too: appendLineLocked alone
+		// never calls it, and the test would then pass with the closing
+		// guards disabled for the wrong reason. The echo credit is spent
+		// first, or the replay suppression would swallow the line.
 		run.mu.Lock()
-		run.appendLineLocked("late line")
+		run.logEchoLeft = 0
 		run.mu.Unlock()
+		run.log("late line")
 		// The stop answered from its timeout, not from the unwinding run:
 		// the terminal flush still waits for the held token. Give it
 		// back, and the final write lands. The stop also failed the

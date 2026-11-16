@@ -149,9 +149,13 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		assert.True(t, detail.Steps[0].Reused, "the detail reads reused from the step row")
 		require.NotEmpty(t, detail.Script)
 		assert.Equal(t, "def main(args):\n    pass\n", detail.Script)
-		assert.JSONEq(t, `{"files":["a.go"]}`, string(detail.Args))
+		argsJSON, err := json.Marshal(detail.Args)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"files":["a.go"]}`, string(argsJSON))
 		assert.Equal(t, []string{"all done"}, detail.Logs)
-		assert.JSONEq(t, `{"ok":true}`, string(detail.Result))
+		resultJSON, err := json.Marshal(detail.Result)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"ok":true}`, string(resultJSON))
 		require.NotNil(t, detail.FinishedAt)
 
 		// A completed run answers 409 to a stop.
@@ -192,7 +196,9 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		assert.Equal(t, "running", detail.Status)
 		assert.Nil(t, detail.Result, "a live run has no result yet")
 		assert.Equal(t, []string{"review started", "reading main.go"}, detail.Logs)
-		assert.JSONEq(t, `{"path":"main.go"}`, string(detail.Args))
+		argsJSON, err := json.Marshal(detail.Args)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"path":"main.go"}`, string(argsJSON))
 
 		// The plain array of the backfill node stays readable too. The
 		// query keeps the write because its sequence is not behind.

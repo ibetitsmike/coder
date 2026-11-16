@@ -113,12 +113,11 @@ type WorkflowRunDetail struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
-	// Args is the JSON value that main(args) received: an object for a
-	// workflow called with an object, but any JSON value verbatim when
-	// the caller passed an array, string, number or boolean.
-	Args json.RawMessage `json:"args,omitempty" swaggertype:"object"`
+	// Args is the JSON value that main(args) received. It is usually an
+	// object, but an inline script may be given any JSON value.
+	Args any `json:"args"`
 	// Result is the value that main returned, for a terminal run.
-	Result json.RawMessage `json:"result,omitempty" swaggertype:"object"`
+	Result any `json:"result,omitempty"`
 	// Logs are the last log lines the script printed: from the snapshot of
 	// a terminal run, or written through to the journal while it runs.
 	Logs []string `json:"logs"`
