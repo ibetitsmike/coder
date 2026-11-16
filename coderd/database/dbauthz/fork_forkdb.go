@@ -865,6 +865,22 @@ func (f *forkQuerier) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.
 	return f.db.MarkChatWakeupWatchFailed(ctx, arg)
 }
 
+// ClaimDuePullRequestWatches spans chats, so it needs site-wide chat access,
+// like chatd's.
+func (f *forkQuerier) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.ClaimDuePullRequestWatches(ctx, arg)
+}
+
+func (f *forkQuerier) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
+	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
+		return 0, err
+	}
+	return f.db.RecordPullRequestWatchPoll(ctx, arg)
+}
+
 // MarkOpenWorkflowRunsInterrupted runs once at chatd startup, as the system.
 func (f *forkQuerier) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
@@ -1072,6 +1088,55 @@ func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.Up
 	return f.db.UpdateWorkflowRunStatus(ctx, arg)
 }
 
+// MarkWorkflowStepReused authorizes as an update of the step run's chat, like
+// UpdateWorkflowStep.
+func (f *forkQuerier) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	step, err := f.db.GetWorkflowStep(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
+	}
+	return f.db.MarkWorkflowStepReused(ctx, id)
+}
+
+// MarkWorkflowStepsReusedByRun authorizes as an update of the run's chat, like
+// UpdateWorkflowRunStatus.
+func (f *forkQuerier) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
+	}
+	return f.db.MarkWorkflowStepsReusedByRun(ctx, runID)
+}
+
+// SetWorkflowRunLogs authorizes as an update of the run's chat, like
+// UpdateWorkflowRunStatus.
+func (f *forkQuerier) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWorkflowRunLogsParams) error {
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
+		if err != nil {
+			return err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return err
+		}
+	}
+	return f.db.SetWorkflowRunLogs(ctx, arg)
+}
+
 // UpdateWorkflowStep authorizes as an update of the step run's chat. A caller
 // with site-wide chat permission skips the authorization reads, which no
 // longer contribute to the decision (fork issue #292). GetWorkflowStep still
@@ -1097,7 +1162,7 @@ func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateW
 }
 
 // GetWorkflowRunsByChat authorizes through the owning chat.
-func (f *forkQuerier) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (f *forkQuerier) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	if err := f.authorizeChat(ctx, policy.ActionRead, arg.ChatID); err != nil {
 		return nil, err
 	}

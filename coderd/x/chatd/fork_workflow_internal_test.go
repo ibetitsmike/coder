@@ -406,6 +406,108 @@ def main(args):
 	})
 }
 
+// TestForkWorkflowInlineArgsExact pins that the journal holds the args
+// bytes the caller sent: a number outside the float64 exact range must
+// not round when args.Args has decoded it into Go values first. It
+// drives the run_workflow tool handler, so the rawArgs capture from
+// call.Input is under test too.
+func TestForkWorkflowInlineArgsExact(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+	ctx := chatdTestContext(t)
+	parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+	callInput := `{"script":"def main(args):\n    return {\"big\": args[\"big\"]}\n","args":{"big":9007199254740993}}`
+	tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+	var runTool fantasy.AgentTool
+	for _, tool := range tools {
+		if tool.Info().Name == runWorkflowToolName {
+			runTool = tool
+			break
+		}
+	}
+	require.NotNil(t, runTool, "run_workflow must be among the fork tools")
+	resp, err := runTool.Run(workspacesdk.WithToolCallID(ctx, uuid.New()),
+		fantasy.ToolCall{ID: uuid.NewString(), Name: runWorkflowToolName, Input: callInput})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	var started runWorkflowResult
+	require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+	runID, err := uuid.Parse(started.RunID)
+	require.NoError(t, err)
+	run := f.server.workflows.get(runID)
+	require.NotNil(t, run, "the run must be live while the test reads its journal row")
+	fdb := forkWorkflowDB(t, f.db)
+	row, err := fdb.GetWorkflowRun(ctx, run.id)
+	require.NoError(t, err)
+	assert.Contains(t, string(row.Args), "9007199254740993",
+		"the journaled args must carry the big integer exactly")
+	assert.NotContains(t, string(row.Args), "9007199254740992",
+		"the journaled args must not round the big integer")
+
+	// The script reads args["big"] and spawns no step, so the run ends
+	// at once and the result keeps the exact value main(args) received.
+	res := run.await(ctx, testutil.WaitLong)
+	require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	assert.Contains(t, string(res.Result), "9007199254740993",
+		"main(args) must read the big integer exactly")
+	assert.NotContains(t, string(res.Result), "9007199254740992")
+}
+
+// TestForkWorkflowNullArgs pins that main(args) receives an empty dict,
+// never None: a literal null in the args field decodes to Args nil, so
+// startWorkflowRun journals the default empty object like a missing args
+// field.
+func TestForkWorkflowNullArgs(t *testing.T) {
+	t.Parallel()
+	t.Run("Inline", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		resp := runTool(ctx, t, tools[0], `{"script":"def main(args):\n    return {\"keys\": len(args)}\n","args":null}`)
+		require.False(t, resp.IsError, resp.Content)
+		var started runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+		run := f.server.workflows.get(uuid.MustParse(started.RunID))
+		require.NotNil(t, run)
+		fdb := forkWorkflowDB(t, f.db)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{}`, string(row.Args),
+			"a raw null must journal as the empty object, not null")
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.JSONEq(t, `{"keys":0}`, string(res.Result),
+			"main(args) must receive a dict, not None")
+	})
+
+	t.Run("Saved", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		f.saveUserWorkflow(t, "note", titleWorkflowScript("noted"), "")
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		resp := runTool(ctx, t, tools[0], `{"name":"note","args":null}`)
+		require.False(t, resp.IsError, resp.Content)
+		var started runWorkflowResult
+		require.NoError(t, json.Unmarshal([]byte(resp.Content), &started))
+		run := f.server.workflows.get(uuid.MustParse(started.RunID))
+		require.NotNil(t, run)
+		step := f.steps(ctx, t, run, 1)[0]
+		row, err := forkWorkflowDB(t, f.db).GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{}`, string(row.Args),
+			"a raw null must journal as the empty object, not null")
+		f.report(ctx, t, step.ChatID, `{"text":"hello"}`)
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.Equal(t, "noted", step.Title,
+			"main(args) must have received the empty dict, not None")
+	})
+}
+
 func TestForkWorkflowLimit(t *testing.T) {
 	t.Parallel()
 	f := newForkWorkflowFixture(t)
@@ -654,5 +756,59 @@ func TestForkWorkflowToolsGate(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.IsError, resp.Content)
 		assert.Contains(t, resp.Content, "script_path needs the workspace connection")
+	})
+}
+
+// The engine's own failure lines bypass the echo suppression: an engine
+// line lands while replay credit is still held, and it does not spend the
+// credit, so the replayed lines that follow still suppress against the
+// baseline.
+func TestForkWorkflowEngineLogBypass(t *testing.T) {
+	t.Parallel()
+
+	t.Run("EngineLineLandsAndKeepsTheCredit", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.logEchoLeft = 1
+		// A script line spends the credit and stays suppressed.
+		run.appendLogLocked("replayed line")
+		assert.Empty(t, run.logs)
+		assert.Equal(t, 0, run.logEchoLeft)
+		assert.Equal(t, 0, run.logSeq)
+		// The engine line lands once the credit is spent.
+		run.appendEngineLogLocked(`step "s" failed: the stop`)
+		assert.Equal(t, []string{`step "s" failed: the stop`}, run.logs)
+		assert.Equal(t, 1, run.logSeq)
+		run.mu.Unlock()
+	})
+
+	t.Run("EngineLineKeepsPositiveCredit", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.logEchoLeft = 1
+		run.appendEngineLogLocked(`step "s" failed: the stop`)
+		assert.Equal(t, []string{`step "s" failed: the stop`}, run.logs)
+		assert.Equal(t, 1, run.logEchoLeft, "the engine line must not spend the credit")
+		// The next script line still suppresses against the baseline.
+		run.appendLogLocked("replayed line")
+		assert.Len(t, run.logs, 1)
+		assert.Equal(t, 0, run.logEchoLeft)
+		run.mu.Unlock()
+	})
+
+	t.Run("EngineLineIsTruncatedAndCapped", func(t *testing.T) {
+		t.Parallel()
+		run := &workflowRun{}
+		run.mu.Lock()
+		run.appendEngineLogLocked(strings.Repeat("x", maxWorkflowLogLine+10))
+		assert.Len(t, run.logs[0], maxWorkflowLogLine)
+		// The cap loop runs on the engine path like the script path.
+		for i := 0; i < maxWorkflowLogs+5; i++ {
+			run.appendEngineLogLocked("line")
+		}
+		assert.Len(t, run.logs, maxWorkflowLogs)
+		run.mu.Unlock()
 	})
 }

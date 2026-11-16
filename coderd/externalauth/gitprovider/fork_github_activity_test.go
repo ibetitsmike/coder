@@ -116,7 +116,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, fake := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		require.NoError(t, err)
 		assert.Equal(t, &gitprovider.PullRequestActivity{
 			State:   gitprovider.PRStateOpen,
@@ -145,7 +145,8 @@ func TestFetchPullRequestActivity(t *testing.T) {
 				URL:       "https://github.com/org/repo/pull/7#c12",
 				CreatedAt: at("06:40:00"),
 			}},
-			Checks: gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 1},
+			Checks:      gitprovider.CheckSummary{State: gitprovider.CheckStateSuccess, Total: 1},
+			ViewerLogin: "agent",
 		}, activity)
 		for _, path := range []string{"/repos/org/repo/issues/7/comments", "/repos/org/repo/pulls/7/comments"} {
 			query, err := url.ParseQuery(fake.query(path))
@@ -167,7 +168,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, fake := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, at("06:00:00.5"), true)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, at("06:00:00.5"), true, "")
 		require.NoError(t, err)
 		require.Len(t, activity.Reviews, 1)
 		assert.EqualValues(t, 1, activity.Reviews[0].ID)
@@ -196,7 +197,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		require.NoError(t, err)
 		require.Len(t, activity.Comments, 1)
 		assert.EqualValues(t, 300, activity.Comments[0].ID)
@@ -276,7 +277,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 				gp, _ := newFakeGitHubActivity(t, routes)
 
 				ctx := testutil.Context(t, testutil.WaitShort)
-				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, activity.Checks)
 			})
@@ -326,7 +327,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 				gp, _ := newFakeGitHubActivity(t, routes)
 
 				ctx := testutil.Context(t, testutil.WaitShort)
-				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+				activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, activity.Checks)
 			})
@@ -341,7 +342,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		require.NoError(t, err)
 		assert.Equal(t, gitprovider.PRStateMerged, activity.State)
 		assert.Equal(t, at("06:50:00"), activity.ClosedAt)
@@ -361,10 +362,10 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, false)
+		activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, false, "")
 		require.NoError(t, err)
 		assert.Equal(t, gitprovider.CheckSummary{State: gitprovider.CheckStateNone}, activity.Checks)
-		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		require.Error(t, err)
 	})
 
@@ -382,7 +383,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		gp, _ := newFakeGitHubActivity(t, routes)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		_, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		_, err := gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		var rlErr *gitprovider.RateLimitError
 		require.True(t, errors.As(err, &rlErr), "error should wrap *RateLimitError, got: %v", err)
 		assert.WithinDuration(t, resetTime.Add(gitprovider.RateLimitPadding), rlErr.RetryAfter, 2*time.Second)
@@ -395,7 +396,7 @@ func TestFetchPullRequestActivity(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := testutil.Context(t, testutil.WaitShort)
-		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true)
+		_, err = gitprovider.FetchPullRequestActivity(ctx, gp, "token", ref, since, true, "")
 		require.ErrorIs(t, err, gitprovider.ErrPullRequestActivityUnsupported)
 	})
 }

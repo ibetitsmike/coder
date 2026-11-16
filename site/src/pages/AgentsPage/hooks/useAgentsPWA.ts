@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { installIosCoverColumn } from "../utils/forkIosCoverColumn";
 
 // Static files are served with immutable caching (ShouldCacheFile in
 // site/site.go), so a browser that has fetched a URL never refetches it.
@@ -56,9 +57,11 @@ export function useAgentsPWA() {
 			viewport.content =
 				"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
 		}
+		const uninstallIosCoverColumn = installIosCoverColumn();
 
 		// -- Cleanup ------------------------------------------------------------
 		return () => {
+			uninstallIosCoverColumn();
 			for (const el of injected) {
 				el.remove();
 			}

@@ -132,9 +132,12 @@ func (api *API) getChatWorkflowRuns(rw http.ResponseWriter, r *http.Request) {
 // @Failure 404 {object} codersdk.Response
 // @Router /api/v2/chats/fork/{chat}/workflow-runs/{workflowrun} [get]
 // @x-apidocgen {"skip": true}
-// @Description Returns one run with its script, its steps and, when the run
-// @Description ended, its result and the log lines of the terminal snapshot.
-// @Description A live run has no logs: the journal keeps no live log lines.
+// @Description Returns one run with its script, its args, its steps and, for
+// @Description a terminal run, its result. The logs are the last log lines of
+// @Description a live run, written through as the script logs, or of the
+// @Description terminal snapshot. A live run also reports the value of every
+// @Description step that has reported so far, and which steps a resume
+// @Description replayed.
 func (api *API) getChatWorkflowRun(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
@@ -232,7 +235,7 @@ func (api *API) readChatWorkflowRuns(
 	ctx context.Context,
 	chatID uuid.UUID,
 	params forkdb.GetWorkflowRunsByChatParams,
-) ([]forkdb.WorkflowRun, map[uuid.UUID]codersdk.WorkflowRunStepCounts, error) {
+) ([]forkdb.GetWorkflowRunsByChatRow, map[uuid.UUID]codersdk.WorkflowRunStepCounts, error) {
 	fdb, err := forkdb.From(api.Database)
 	if err != nil {
 		return nil, nil, err
@@ -263,7 +266,7 @@ func (api *API) readChatWorkflowRuns(
 }
 
 // workflowRunItem builds one list item from a journal row and its counts.
-func workflowRunItem(row forkdb.WorkflowRun, counts codersdk.WorkflowRunStepCounts) codersdk.WorkflowRun {
+func workflowRunItem(row forkdb.GetWorkflowRunsByChatRow, counts codersdk.WorkflowRunStepCounts) codersdk.WorkflowRun {
 	item := codersdk.WorkflowRun{
 		ID:            row.ID.String(),
 		ChatID:        row.ChatID.String(),
@@ -298,8 +301,8 @@ func workflowScriptPreview(script string) string {
 }
 
 // readChatWorkflowRun builds the detail of one run from its journal rows.
-// The terminal snapshot keeps the result and the log lines; a live run has
-// neither.
+// The log lines come from the terminal snapshot of a run that ended, and from
+// the journal's live column while the run still runs.
 func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID) (codersdk.WorkflowRunDetail, error) {
 	fdb, err := forkdb.From(api.Database)
 	if err != nil {
@@ -326,6 +329,7 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		UpdatedAt:    row.UpdatedAt,
 		Title:        "",
 		Script:       row.Script,
+		Args:         row.Args,
 		Logs:         []string{},
 		Phases:       append([]string{}, row.Phases...),
 		CurrentPhase: row.CurrentPhase,
@@ -336,7 +340,8 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		detail.FinishedAt = &finishedAt
 	}
 	// The snapshot of a terminal run keeps the script's result and its last
-	// log lines.
+	// log lines. The logs column of a live run carries the lines the script
+	// printed so far.
 	if row.Result.Valid {
 		var snapshot struct {
 			Result json.RawMessage `json:"result"`
@@ -345,8 +350,25 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		if err := json.Unmarshal(row.Result.RawMessage, &snapshot); err != nil {
 			return codersdk.WorkflowRunDetail{}, err
 		}
-		detail.Result = snapshot.Result
+		// The engine omits the result key of a failed or stopped run, and
+		// json.Unmarshal of a missing key leaves the raw message nil: a nil
+		// json.RawMessage inside an interface would still marshal as a
+		// present "result": null, so only a non-empty snapshot sets the
+		// field. A completed run keeps its value, even the encoded null of
+		// a script whose main returned None.
+		if len(snapshot.Result) > 0 {
+			detail.Result = snapshot.Result
+		}
 		detail.Logs = snapshot.Logs
+		if detail.Logs == nil {
+			detail.Logs = []string{}
+		}
+	} else if len(row.Logs) > 0 {
+		// The column holds an envelope with the lines and their journal
+		// sequence, and restore keeps the plain array of the backfill node
+		// readable.
+		logs, _, _ := chatd.RestoreWorkflowRunLogs(row.Logs)
+		detail.Logs = logs
 		if detail.Logs == nil {
 			detail.Logs = []string{}
 		}
@@ -357,14 +379,14 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 			RunID:     step.RunID.String(),
 			Title:     step.Title,
 			Status:    step.Status,
-			Reused:    false,
+			Reused:    step.Reused,
 			Phase:     step.Phase,
 			Error:     step.Error,
 			Ordinal:   int(step.Ordinal),
 			StartedAt: step.StartedAt,
 		}
 		if step.Value.Valid {
-			sdkStep.Value = json.RawMessage(step.Value.RawMessage)
+			sdkStep.Value = step.Value.RawMessage
 		}
 		if step.FinishedAt.Valid {
 			finishedAt := step.FinishedAt.Time

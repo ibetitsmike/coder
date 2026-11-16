@@ -97,6 +97,21 @@ func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg 
 	return f.s.UpdateWorkflowRunStatus(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	defer f.observe(ctx, "MarkWorkflowStepReused", time.Now())
+	return f.s.MarkWorkflowStepReused(ctx, id)
+}
+
+func (f forkQueryMetricsStore) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	defer f.observe(ctx, "MarkWorkflowStepsReusedByRun", time.Now())
+	return f.s.MarkWorkflowStepsReusedByRun(ctx, runID)
+}
+
+func (f forkQueryMetricsStore) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWorkflowRunLogsParams) error {
+	defer f.observe(ctx, "SetWorkflowRunLogs", time.Now())
+	return f.s.SetWorkflowRunLogs(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
 	defer f.observe(ctx, "UpdateWorkflowStep", time.Now())
 	return f.s.UpdateWorkflowStep(ctx, arg)
@@ -562,6 +577,16 @@ func (f forkQueryMetricsStore) MarkChatWakeupWatchFailed(ctx context.Context, ar
 	return f.s.MarkChatWakeupWatchFailed(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
+	defer f.observe(ctx, "ClaimDuePullRequestWatches", time.Now())
+	return f.s.ClaimDuePullRequestWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
+	defer f.observe(ctx, "RecordPullRequestWatchPoll", time.Now())
+	return f.s.RecordPullRequestWatchPoll(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) InsertOrganizationAgentDefinition(ctx context.Context, arg forkdb.InsertOrganizationAgentDefinitionParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "InsertOrganizationAgentDefinition", time.Now())
 	return f.s.InsertOrganizationAgentDefinition(ctx, arg)
@@ -727,7 +752,7 @@ func (f forkQueryMetricsStore) UpdateUserAgentDefinitionByName(ctx context.Conte
 	return f.s.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	defer f.observe(ctx, "GetWorkflowRunsByChat", time.Now())
 	return f.s.GetWorkflowRunsByChat(ctx, arg)
 }

@@ -22,6 +22,16 @@ type Querier interface {
 	// each other.
 	AcquireSharedLock(ctx context.Context, lockID int64) error
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
+	// Claims the open pull_request watches that the pull request poller of a
+	// replica reads next: those of active wake-ups of unarchived chats whose
+	// spec next_poll_at has come by @now, or that have none, and that no read
+	// covered through the expiry of their wake-up yet. A watch that fired is
+	// read on until its delivery, so the text it sends covers the activity up
+	// to its last read. The claim moves next_poll_at to @lease_until, so the
+	// poller of another replica skips the watch until the claimer records its
+	// read or the lease runs out. The rows are sorted by pull request and chat
+	// owner, the key of one shared read.
+	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
 	// Counts the notifications of one template that were enqueued for a user
@@ -161,8 +171,10 @@ type Querier interface {
 	GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]GetWorkflowRunStepCountsByChatRow, error)
 	// The run list of a chat, newest first, one keyset page. after_created_at
 	// and after_id are the created_at and the ID of the last run of the page the
-	// client already has; both NULL reads the first page.
-	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error)
+	// client already has; both NULL reads the first page. The list needs no logs,
+	// args or result, so it does not read those columns: logs alone can hold the
+	// full retained tail of every run.
+	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]GetWorkflowRunsByChatRow, error)
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
@@ -228,15 +240,16 @@ type Querier interface {
 	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
 	// is due when its chat would not queue a new message and either its run time
 	// has come or, for an events wake-up before its expiry, it has a child_done
-	// watch in chat_wakeup_ready_watches whose last send did not fail. A failed
-	// send waits for the run time that the failure set, so it does not repeat at
-	// once, and the other watches wait for their run time, which reads them. The
-	// chats that would queue are the busy and paused chats, and the errored chats
-	// with a non-empty queue (chatstate's R, I, A, P and E1 states). The wake-ups
-	// of archived chats are always due by their run time, so the waker cancels
-	// them. chat_id limits the list to the wake-ups of one chat and to those that
-	// watch it as a child. The due rows page by (next_run_at, id) after
-	// after_run_at and after_id.
+	// watch or a fired pull_request watch in chat_wakeup_ready_watches whose
+	// last send did not fail. A failed send waits for the run time that the
+	// failure set, so it does not repeat at once, and the other watches wait for
+	// their run time, which reads them. The chats that would queue are the busy
+	// and paused chats, and the errored chats with a non-empty queue
+	// (chatstate's R, I, A, P and E1 states). The wake-ups of archived chats are
+	// always due by their run time, so the waker cancels them. chat_id limits
+	// the list to the wake-ups of one chat and to those that watch it as a
+	// child. The due rows page by (next_run_at, id) after after_run_at and
+	// after_id.
 	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
 	// delivered, so a new watch can leave out what an earlier one still watches.
@@ -273,6 +286,18 @@ type Querier interface {
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.
 	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// The replay of a finished step flips only the reuse flag: its status, value
+	// and finished_at stay as the journal holds them.
+	MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error
+	// The resume of a terminal run replays every step of the stored snapshot, so
+	// the run detail reads the flag from the rows without the snapshot.
+	MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error
+	// Records a read of the poller: merges @spec_patch into the spec of the
+	// open pull_request watch, and with @fired_payload also stores the text of
+	// the read. The first such read fires the watch at @fired_at, which makes it
+	// ready (chat_wakeup_ready_watches), and a later one keeps that time and
+	// replaces the text. No row changes when the watch is delivered.
+	RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
 	// Renews the leases a replica holds on enabled plugins. It returns only the
 	// id and updated_at, so a renewal reads and decrypts no config: the replica
@@ -294,6 +319,12 @@ type Querier interface {
 	// since the match runs on the stored JSON.
 	SearchChatHistory(ctx context.Context, arg SearchChatHistoryParams) ([]SearchChatHistoryRow, error)
 	SetPluginUserLinkActiveChat(ctx context.Context, arg SetPluginUserLinkActiveChatParams) error
+	// The engine writes the log lines of a live run through to the journal, capped
+	// to the last maxWorkflowLogs lines. lines replaces the retained lines when
+	// it is at least as new as the stored sequence, so a stalled write of an
+	// older snapshot cannot replace newer lines. The caller keeps the sequence in
+	// the lines payload under the fork_seq key.
+	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
@@ -337,7 +368,8 @@ type Querier interface {
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
-	// and applies the NullRawMessage override.
+	// and applies the NullRawMessage override. reused only sets the flag: a
+	// report from a step that a resume reused must not clear it.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
