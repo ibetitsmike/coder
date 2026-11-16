@@ -199,19 +199,14 @@ WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
--- name: CountChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE chat_id = @chat_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
-
--- name: CountOrganizationChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE organization_id = @organization_id
-    AND status = 'delivered'
-    AND created_at >= @since::timestamptz;
+-- Sums the delivered runs of the chat and of its organization in the hour
+-- buckets from since on.
+-- name: SumChatWakeupRunCountsSince :one
+SELECT
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE chat_id = @chat_id::uuid AND hour >= @since::timestamptz)::bigint AS chat_runs,
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE organization_id = @organization_id::uuid AND hour >= @since::timestamptz)::bigint AS organization_runs;
 
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.

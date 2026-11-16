@@ -30,11 +30,9 @@ type Querier interface {
 	// same payload, and the enqueuer's dedupe rejects a second identical payload
 	// on the same UTC day, so distinct payloads per UTC day count enqueues.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
-	CountChatWakeupRunsSince(ctx context.Context, arg CountChatWakeupRunsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
 	// finished. A finished subagent is waiting or error.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
-	CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
 	// DeleteChatNote deletes a note and returns the number of deleted notes.
@@ -270,6 +268,9 @@ type Querier interface {
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)
+	// Sums the delivered runs of the chat and of its organization in the hour
+	// buckets from since on.
+	SumChatWakeupRunCountsSince(ctx context.Context, arg SumChatWakeupRunCountsSinceParams) (SumChatWakeupRunCountsSinceRow, error)
 	// Sums the spend of the chats of the organization that have a wake-up, so
 	// chats that only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
