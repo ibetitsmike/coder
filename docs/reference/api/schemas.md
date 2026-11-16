@@ -6110,9 +6110,9 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 
 #### Enumerated Values
 
-| Value(s)                                     |
-|----------------------------------------------|
-| `canceled`, `done`, `in_progress`, `pending` |
+| Value(s)                                      |
+|-----------------------------------------------|
+| `cancelled`, `done`, `in_progress`, `pending` |
 
 ## codersdk.ChatUnsupportedProvider
 
