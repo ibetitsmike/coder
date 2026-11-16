@@ -30397,18 +30397,6 @@ const docTemplate = `{
         "codersdk.Experiment": {
             "type": "string",
             "enum": [
-                "fork-chat-todos",
-                "fork-nested-subagents",
-                "fork-agent-definitions",
-                "fork-subagent-isolation",
-                "fork-chat-wakeups",
-                "fork-plugin-packs",
-                "fork-pinned-skills",
-                "fork-workflows",
-                "fork-family-messages",
-                "fork-html-attachments",
-                "fork-token-budget",
-                "fork-view-image",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -30426,7 +30414,19 @@ const docTemplate = `{
                 "enable-ai-workspace-debug",
                 "chat-stage-metrics",
                 "chat-acp-subagents",
-                "chat-automations"
+                "chat-automations",
+                "fork-chat-todos",
+                "fork-nested-subagents",
+                "fork-agent-definitions",
+                "fork-subagent-isolation",
+                "fork-chat-wakeups",
+                "fork-plugin-packs",
+                "fork-pinned-skills",
+                "fork-workflows",
+                "fork-family-messages",
+                "fork-html-attachments",
+                "fork-token-budget",
+                "fork-view-image"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -30449,18 +30449,6 @@ const docTemplate = `{
                 "ExperimentWorkspaceUsage": "Enables the new workspace usage tracking."
             },
             "x-enum-descriptions": [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -30478,21 +30466,21 @@ const docTemplate = `{
                 "Enables debugging failed workspace builds with Coder Agents.",
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
                 "Enables workspace-local ACP subagent tools in root chats.",
-                "Enables webhook and scheduled automations that deliver prompts to agent chats."
+                "Enables webhook and scheduled automations that deliver prompts to agent chats.",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
             ],
             "x-enum-varnames": [
-                "ExperimentForkChatTodos",
-                "ExperimentForkNestedSubagents",
-                "ExperimentForkAgentDefinitions",
-                "ExperimentForkSubagentIsolation",
-                "ExperimentForkChatWakeups",
-                "ExperimentForkPluginPacks",
-                "ExperimentForkPinnedSkills",
-                "ExperimentForkWorkflows",
-                "ExperimentForkFamilyMessages",
-                "ExperimentForkHTMLAttachments",
-                "ExperimentForkTokenBudget",
-                "ExperimentForkViewImage",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -30510,7 +30498,19 @@ const docTemplate = `{
                 "ExperimentEnableAIWorkspaceDebug",
                 "ExperimentChatStageMetrics",
                 "ExperimentChatACPSubagents",
-                "ExperimentChatAutomations"
+                "ExperimentChatAutomations",
+                "ExperimentForkChatTodos",
+                "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions",
+                "ExperimentForkSubagentIsolation",
+                "ExperimentForkChatWakeups",
+                "ExperimentForkPluginPacks",
+                "ExperimentForkPinnedSkills",
+                "ExperimentForkWorkflows",
+                "ExperimentForkFamilyMessages",
+                "ExperimentForkHTMLAttachments",
+                "ExperimentForkTokenBudget",
+                "ExperimentForkViewImage"
             ]
         },
         "codersdk.ExperimentRule": {
@@ -39302,7 +39302,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "args": {
-                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. The Go\nclient decodes numbers as float64, which is lossy for big integers,\nso a client that needs exact values should read the raw response."
+                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. Numbers\ndecode without rounding: see UnmarshalJSON."
                 },
                 "chat_id": {
                     "type": "string",
@@ -39341,7 +39341,7 @@ const docTemplate = `{
                     }
                 },
                 "result": {
-                    "description": "Result is the value that main returned, for a terminal run. The Go\nclient decodes numbers as float64, which is lossy for big integers,\nso a client that needs exact values should read the raw response."
+                    "description": "Result is the value that main returned, for a terminal run. Numbers\ndecode without rounding: see UnmarshalJSON."
                 },
                 "script": {
                     "type": "string"

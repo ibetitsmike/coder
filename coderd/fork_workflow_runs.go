@@ -6,7 +6,6 @@ package coderd
 // mounts these handlers behind the fork-workflows experiment.
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -351,12 +350,13 @@ func (api *API) readChatWorkflowRun(ctx context.Context, chatID, runID uuid.UUID
 		if err := json.Unmarshal(row.Result.RawMessage, &snapshot); err != nil {
 			return codersdk.WorkflowRunDetail{}, err
 		}
-		// A failed or stopped run stores a null result in the snapshot. The
-		// raw bytes of a JSON null are the four characters of null, so the
-		// guard compares against that literal too: a nil json.RawMessage
-		// inside an interface would still marshal as a present
-		// "result": null, and only a real value may set the field.
-		if len(snapshot.Result) > 0 && !bytes.Equal(snapshot.Result, []byte("null")) {
+		// The engine omits the result key of a failed or stopped run, and
+		// json.Unmarshal of a missing key leaves the raw message nil: a nil
+		// json.RawMessage inside an interface would still marshal as a
+		// present "result": null, so only a non-empty snapshot sets the
+		// field. A completed run keeps its value, even the encoded null of
+		// a script whose main returned None.
+		if len(snapshot.Result) > 0 {
 			detail.Result = snapshot.Result
 		}
 		detail.Logs = snapshot.Logs

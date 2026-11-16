@@ -13281,16 +13281,14 @@ export interface WorkflowRunDetail {
 	readonly script: string;
 	/**
 	 * Args is the JSON value that main(args) received. It is usually an
-	 * object, but an inline script may be given any JSON value. The Go
-	 * client decodes numbers as float64, which is lossy for big integers,
-	 * so a client that needs exact values should read the raw response.
+	 * object, but an inline script may be given any JSON value. Numbers
+	 * decode without rounding: see UnmarshalJSON.
 	 */
 	// empty interface{} type, falling back to unknown
 	readonly args: unknown;
 	/**
-	 * Result is the value that main returned, for a terminal run. The Go
-	 * client decodes numbers as float64, which is lossy for big integers,
-	 * so a client that needs exact values should read the raw response.
+	 * Result is the value that main returned, for a terminal run. Numbers
+	 * decode without rounding: see UnmarshalJSON.
 	 */
 	// empty interface{} type, falling back to unknown
 	readonly result?: unknown;
@@ -13306,7 +13304,7 @@ export interface WorkflowRunDetail {
 	readonly phases: readonly string[];
 	readonly current_phase: string;
 	readonly steps: readonly WorkflowRunStep[];
-} // WorkflowRunListOptions is the pagination of a chat's workflow run list.
+}
 
 // From codersdk/fork_workflow_runs.go
 export interface WorkflowRunListOptions {}

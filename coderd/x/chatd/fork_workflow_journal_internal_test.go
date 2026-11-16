@@ -655,19 +655,46 @@ def main(args):
 		// The stop answered from its timeout, not from the unwinding run:
 		// the terminal flush still waits for the held token. Give it
 		// back, and the final write lands. The stop also failed the
-		// agent step, so the terminal write carries the stop failure
-		// line with the two script lines and the late one.
+		// agent step, so the terminal write carries a step failure line
+		// with the two script lines and the late one. The failure line
+		// itself depends on how the unwind races the step child: the
+		// stop marks the open step with the stop reason, but if the
+		// child ends first, waitStep fails the step with the no-report
+		// line. Both are correct terminal behavior, so the assertion
+		// accepts either. A timeout prints the logs it last saw, since
+		// a loaded runner can leave the last write anywhere along the
+		// stop path and a bare eventually cannot show what it read.
 		stopLine := `step "Never reports." failed: ` + workflowStopError
+		noReportLine := `step "Never reports." failed: the step stopped without a workflow_report call`
 		release()
-		require.Eventually(t, func() bool {
-			row, err := fdb.GetWorkflowRun(context.Background(), run.id)
-			if err != nil {
-				return false
+		want := [][]string{
+			{"first line", "second line", stopLine, "late line"},
+			{"first line", "second line", noReportLine, "late line"},
+		}
+		matches := func(logs []string) bool {
+			for _, candidate := range want {
+				if assert.ObjectsAreEqual(candidate, logs) {
+					return true
+				}
 			}
-			logs, _, _ := restoreWorkflowLogs(row.Logs)
-			return assert.ObjectsAreEqual(
-				[]string{"first line", "second line", stopLine, "late line"}, logs)
-		}, 30*time.Second, testutil.IntervalFast)
+			return false
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		var lastSeen []string
+		for {
+			row, err := fdb.GetWorkflowRun(context.Background(), run.id)
+			if err == nil {
+				logs, _, _ := restoreWorkflowLogs(row.Logs)
+				if matches(logs) {
+					break
+				}
+				lastSeen = logs
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the terminal flush never carried the stop lines; last logs seen: %q", lastSeen)
+			}
+			time.Sleep(testutil.IntervalFast)
+		}
 
 		// Three full intervals after the end: a leaked fallback would
 		// have fired and re-armed in that window. The attempts must stay

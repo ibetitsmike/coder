@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"github.com/coder/quartz"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
@@ -419,7 +420,7 @@ type workflowRun struct {
 	// goroutine that raced the stop stamps nothing and re-arms nothing.
 	// journalMu guards all four.
 	lastLogFlush     time.Time
-	logFlushTimer    *time.Timer
+	logFlushTimer    *quartz.Timer
 	logFlushInFlight bool
 	flushClosing     bool
 	// flushAttempts counts the flush attempts, taken token or not. It is
@@ -908,7 +909,7 @@ func (r *workflowRun) scheduleLogFlush() {
 		// terminal flush already carried or will carry.
 		return
 	}
-	now := time.Now()
+	now := r.p.clock.Now()
 	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
 	if wait <= 0 {
 		// The stamp moves with the attempt, not the write: a write held up
@@ -961,12 +962,12 @@ func (r *workflowRun) armLogFlushTimerLocked() {
 	if r.logFlushTimer != nil || r.logFlushInFlight || r.flushClosing {
 		return
 	}
-	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(time.Now())
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now())
 	if wait <= 0 {
 		wait = time.Nanosecond
 	}
-	r.logFlushTimer = time.AfterFunc(wait, func() {
-		now := time.Now()
+	r.logFlushTimer = r.p.clock.AfterFunc(wait, func() {
+		now := r.p.clock.Now()
 		r.journalMu.Lock()
 		r.logFlushTimer = nil
 		// The attempt is the timer firing, not the write: the flush
@@ -1013,7 +1014,7 @@ func (r *workflowRun) cancelLogFlush() {
 	r.journalMu.Lock()
 	r.flushClosing = true
 	if r.logFlushTimer != nil {
-		r.logFlushTimer.Stop()
+		r.logFlushTimer.Stop("chatd", "workflow-log-flush")
 		r.logFlushTimer = nil
 	}
 	r.journalMu.Unlock()

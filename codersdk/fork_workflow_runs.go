@@ -114,13 +114,11 @@ type WorkflowRunDetail struct {
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
 	// Args is the JSON value that main(args) received. It is usually an
-	// object, but an inline script may be given any JSON value. The Go
-	// client decodes numbers as float64, which is lossy for big integers,
-	// so a client that needs exact values should read the raw response.
+	// object, but an inline script may be given any JSON value. Numbers
+	// decode without rounding: see UnmarshalJSON.
 	Args any `json:"args"`
-	// Result is the value that main returned, for a terminal run. The Go
-	// client decodes numbers as float64, which is lossy for big integers,
-	// so a client that needs exact values should read the raw response.
+	// Result is the value that main returned, for a terminal run. Numbers
+	// decode without rounding: see UnmarshalJSON.
 	Result any `json:"result,omitempty"`
 	// Logs are the last log lines the script printed: from the snapshot of
 	// a terminal run, or written through to the journal while it runs.
@@ -130,6 +128,33 @@ type WorkflowRunDetail struct {
 	Phases       []string          `json:"phases"`
 	CurrentPhase string            `json:"current_phase"`
 	Steps        []WorkflowRunStep `json:"steps"`
+}
+
+// UnmarshalJSON decodes Args and Result through json.RawMessage, so a
+// number outside the float64 exact range, for example the Starlark big
+// integer 9007199254740993, survives the SDK round trip instead of
+// rounding. The wire values are JSON, and the fields of the alias type
+// shadow the any fields: a present key keeps its raw bytes, an absent key
+// stays nil, and the result lands in the interface field only when the
+// snapshot carried one.
+func (d *WorkflowRunDetail) UnmarshalJSON(data []byte) error {
+	type workflowRunDetailAlias WorkflowRunDetail
+	var alias struct {
+		workflowRunDetailAlias
+		Args   json.RawMessage `json:"args"`
+		Result json.RawMessage `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*d = WorkflowRunDetail(alias.workflowRunDetailAlias)
+	if len(alias.Args) > 0 {
+		d.Args = alias.Args
+	}
+	if len(alias.Result) > 0 {
+		d.Result = alias.Result
+	}
+	return nil
 } // WorkflowRunListOptions is the pagination of a chat's workflow run list.
 type WorkflowRunListOptions struct {
 	// After is the cursor of the previous page:
