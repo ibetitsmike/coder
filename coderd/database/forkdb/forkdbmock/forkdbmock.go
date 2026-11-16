@@ -732,6 +732,21 @@ func (mr *MockStoreMockRecorder) GetChatWakeupByIDForUpdate(ctx, id any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByIDForUpdate", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByIDForUpdate), ctx, id)
 }
 
+// GetDescendantChatsByRootIDs mocks base method.
+func (m *MockStore) GetDescendantChatsByRootIDs(ctx context.Context, arg forkdb.GetDescendantChatsByRootIDsParams) ([]forkdb.GetDescendantChatsByRootIDsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDescendantChatsByRootIDs", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetDescendantChatsByRootIDsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDescendantChatsByRootIDs indicates an expected call of GetDescendantChatsByRootIDs.
+func (mr *MockStoreMockRecorder) GetDescendantChatsByRootIDs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDescendantChatsByRootIDs", reflect.TypeOf((*MockStore)(nil).GetDescendantChatsByRootIDs), ctx, arg)
+}
+
 // GetExcludedPluginPacksByChatID mocks base method.
 func (m *MockStore) GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.GetExcludedPluginPacksByChatIDRow, error) {
 	m.ctrl.T.Helper()

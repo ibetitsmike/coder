@@ -107,6 +107,16 @@ type Querier interface {
 	// Locks the wake-up until the transaction ends, so a delivery that starts in
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Returns the descendants of the given chats up to max_depth levels below
+	// them (at most 64) in one statement, with the row
+	// shape of upstream's GetChildChatsByParentIDs, optionally filtered by
+	// archive state (NULL = all, true/false = match). It follows parent_chat_id
+	// level by level as a walk with upstream's query does, so it needs no
+	// root_chat_id: a chat whose family root was deleted, and so lost its
+	// root_chat_id, still reaches its whole subtree. The walk continues only
+	// through chats that match the archive filter. The 64-level cap also stops
+	// it if a cycle ever appears in the hierarchy.
+	GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)

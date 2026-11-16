@@ -292,6 +292,12 @@ func (f *forkQuerier) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) (
 	return f.db.GetChatSubtreeIDs(ctx, rootID)
 }
 
+// GetDescendantChatsByRootIDs authorizes each descendant independently,
+// like upstream's GetChildChatsByParentIDs.
+func (f *forkQuerier) GetDescendantChatsByRootIDs(ctx context.Context, arg forkdb.GetDescendantChatsByRootIDsParams) ([]forkdb.GetDescendantChatsByRootIDsRow, error) {
+	return fetchWithPostFilter(f.q.auth, policy.ActionRead, f.db.GetDescendantChatsByRootIDs)(ctx, arg)
+}
+
 // DeleteChatNote authorizes as an update of the owning chat.
 func (f *forkQuerier) DeleteChatNote(ctx context.Context, arg forkdb.DeleteChatNoteParams) (int64, error) {
 	if err := f.authorizeChat(ctx, policy.ActionUpdate, arg.ChatID); err != nil {
