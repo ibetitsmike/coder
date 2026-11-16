@@ -140,9 +140,6 @@ type Querier interface {
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
-	// Counts one delivered run of the wake-up in its chat's bucket for hour, the
-	// start of a UTC hour. The chat and organization come from the wake-up.
-	IncrementChatWakeupRunCount(ctx context.Context, arg IncrementChatWakeupRunCountParams) error
 	// Turns off a pack of the chat's organization for the chat. It returns no
 	// row for a pack that does not exist or is in another organization.
 	InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error)

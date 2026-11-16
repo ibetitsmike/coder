@@ -608,13 +608,6 @@ func (f *forkQuerier) InsertChatWakeup(ctx context.Context, arg forkdb.InsertCha
 	return f.db.InsertChatWakeup(ctx, arg)
 }
 
-func (f *forkQuerier) IncrementChatWakeupRunCount(ctx context.Context, arg forkdb.IncrementChatWakeupRunCountParams) error {
-	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
-		return err
-	}
-	return f.db.IncrementChatWakeupRunCount(ctx, arg)
-}
-
 func (f *forkQuerier) InsertChatWakeupRun(ctx context.Context, arg forkdb.InsertChatWakeupRunParams) (forkdb.ChatWakeupRun, error) {
 	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
 		return forkdb.ChatWakeupRun{}, err

@@ -266,21 +266,30 @@ func TestChatWakeupRuns(t *testing.T) {
 	_, err = insertRun("2026-01-04T00:00:00Z", forkdb.ChatWakeupRunStatusDelivered)
 	require.NoError(t, err)
 
+	// The trigger counts each delivered run in the hour of its created_at;
+	// the pending, skipped and failed runs above do not count.
 	hour := now.UTC().Truncate(time.Hour)
-	increment := func(wakeupID uuid.UUID, hour time.Time) {
-		require.NoError(t, fdb.IncrementChatWakeupRunCount(ctx, forkdb.IncrementChatWakeupRunCountParams{WakeupID: wakeupID, Hour: hour}))
+	deliver := func(wakeupID uuid.UUID, runKey string, createdAt time.Time) {
+		_, err := fdb.InsertChatWakeupRun(ctx, forkdb.InsertChatWakeupRunParams{
+			ID:        uuid.New(),
+			WakeupID:  wakeupID,
+			RunKey:    runKey,
+			Status:    forkdb.ChatWakeupRunStatusDelivered,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+		require.NoError(t, err)
 	}
-	increment(wakeup.ID, hour)
-	increment(wakeup.ID, hour)
-	increment(wakeup.ID, hour.Add(-time.Hour))
-	increment(wakeup.ID, hour.Add(-2*time.Hour))
+	deliver(wakeup.ID, "2026-01-05T00:00:00Z", now)
+	deliver(wakeup.ID, "2026-01-06T00:00:00Z", hour.Add(-time.Hour))
+	deliver(wakeup.ID, "2026-01-07T00:00:00Z", hour.Add(-2*time.Hour))
 	// A chat of the same organization counts toward the organization only.
 	sibling := dbgen.Chat(t, db, database.Chat{
 		OrganizationID:    chat.OrganizationID,
 		OwnerID:           chat.OwnerID,
 		LastModelConfigID: chat.LastModelConfigID,
 	})
-	increment(insertDelayWakeup(ctx, t, fdb, sibling, forkdb.ChatWakeupStatusActive, now).ID, hour)
+	deliver(insertDelayWakeup(ctx, t, fdb, sibling, forkdb.ChatWakeupStatusActive, now).ID, "2026-01-01T00:00:00Z", now)
 
 	runs, err := fdb.SumChatWakeupRunCountsSince(ctx, forkdb.SumChatWakeupRunCountsSinceParams{
 		ChatID:         chat.ID,

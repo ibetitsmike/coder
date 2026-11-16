@@ -142,11 +142,6 @@ func (f forkQueryMetricsStore) GetPluginPacksByProjectID(ctx context.Context, pr
 	return f.s.GetPluginPacksByProjectID(ctx, projectID)
 }
 
-func (f forkQueryMetricsStore) IncrementChatWakeupRunCount(ctx context.Context, arg forkdb.IncrementChatWakeupRunCountParams) error {
-	defer f.observe(ctx, "IncrementChatWakeupRunCount", time.Now())
-	return f.s.IncrementChatWakeupRunCount(ctx, arg)
-}
-
 func (f forkQueryMetricsStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
 	defer f.observe(ctx, "InsertChatExcludedPluginPack", time.Now())
 	return f.s.InsertChatExcludedPluginPack(ctx, arg)

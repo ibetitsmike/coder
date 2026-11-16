@@ -170,26 +170,6 @@ func (q *Queries) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) 
 	return i, err
 }
 
-const incrementChatWakeupRunCount = `-- name: IncrementChatWakeupRunCount :exec
-INSERT INTO chat_wakeup_run_counts (chat_id, hour, organization_id, runs)
-SELECT w.chat_id, $1::timestamptz, w.organization_id, 1
-FROM chat_wakeups w
-WHERE w.id = $2::uuid
-ON CONFLICT (chat_id, hour) DO UPDATE SET runs = chat_wakeup_run_counts.runs + 1
-`
-
-type IncrementChatWakeupRunCountParams struct {
-	Hour     time.Time `db:"hour" json:"hour"`
-	WakeupID uuid.UUID `db:"wakeup_id" json:"wakeup_id"`
-}
-
-// Counts one delivered run of the wake-up in its chat's bucket for hour, the
-// start of a UTC hour. The chat and organization come from the wake-up.
-func (q *Queries) IncrementChatWakeupRunCount(ctx context.Context, arg IncrementChatWakeupRunCountParams) error {
-	_, err := q.db.ExecContext(ctx, incrementChatWakeupRunCount, arg.Hour, arg.WakeupID)
-	return err
-}
-
 const insertChatWakeup = `-- name: InsertChatWakeup :one
 INSERT INTO chat_wakeups (
     id,
