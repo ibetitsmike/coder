@@ -137,6 +137,14 @@ def main(args):
 		// matter how far main got.
 		awaitPhases(ctx, t, run, []string{"one", "two"})
 
+		// The declared list is journaled before main runs, so the run
+		// API shows it while the run is live, before any phase() call.
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			return err == nil && assert.ObjectsAreEqual([]string{"one", "two"}, row.Phases)
+		}, testutil.IntervalFast)
+
 		step := f.steps(ctx, t, run, 1)[0]
 		assert.Empty(t, step.Phase, "a step outside any phase has no phase")
 		f.report(ctx, t, step.ChatID, `{"text":"done"}`)
@@ -153,6 +161,7 @@ def main(args):
 			"NotStrings": {script: "PHASES = [1]\n\ndef main(args):\n    pass\n", want: "PHASES[0] must be a string"},
 			"EmptyName":  {script: "PHASES = [\" \"]\n\ndef main(args):\n    pass\n", want: "PHASES[0] must not be empty"},
 			"TooMany":    {script: tooMany, want: "at most"},
+			"NULName":    {script: "PHASES = [\"a\\u0000b\"]\n\ndef main(args):\n    pass\n", want: "must not hold control"},
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -179,6 +188,9 @@ def main(args):
 			"Empty":     {script: "def main(args):\n    phase(\"  \")\n", want: "must not be empty"},
 			"NotString": {script: "def main(args):\n    phase(1)\n", want: "want string"},
 			"TooLong":   {script: tooLong, want: "longer than"},
+			"NUL":       {script: "def main(args):\n    phase(\"a\\u0000b\")\n", want: "must not hold control"},
+			"Control":   {script: "def main(args):\n    phase(\"a\\tb\")\n", want: "must not hold control"},
+			"Format":    {script: "def main(args):\n    phase(\"a\u200bb\")\n", want: "must not hold control"},
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()

@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	starlarkjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
@@ -80,6 +82,7 @@ func (w *workflowProgram) run(ctx context.Context, r *workflowRun) (json.RawMess
 	if err := r.readDeclaredPhases(globals); err != nil {
 		return nil, err
 	}
+	r.journalDeclaredPhases(ctx)
 	mainFn, ok := globals["main"].(starlark.Callable)
 	if !ok {
 		return nil, xerrors.New("the script must define main(args)")
@@ -435,8 +438,41 @@ func (h *workflowHost) phase(
 	if len(name) > maxWorkflowPhaseName {
 		return nil, xerrors.Errorf("phase: the name is longer than %d bytes", maxWorkflowPhaseName)
 	}
+	if err := validateWorkflowPhaseName(name); err != nil {
+		return nil, xerrors.Errorf("phase: %w", err)
+	}
 	h.run.setPhase(h.ctx, name)
 	return starlark.None, nil
+}
+
+// validateWorkflowPhaseName rejects names PostgreSQL text columns cannot
+// hold or that would display misleadingly: NUL bytes, invalid UTF-8,
+// control characters, and format characters such as bidi overrides and
+// zero-width spaces, which hide or reorder text.
+func validateWorkflowPhaseName(name string) error {
+	if !utf8.ValidString(name) || strings.ContainsRune(name, 0) ||
+		strings.ContainsFunc(name, isWorkflowPhaseHidden) {
+		return xerrors.Errorf("the phase name %q must not hold control, format or invalid characters", name)
+	}
+	return nil
+}
+
+// isWorkflowPhaseHidden reports characters a phase name must not hold:
+// control characters, and format characters such as bidi overrides and
+// zero-width spaces, which hide or reorder text.
+func isWorkflowPhaseHidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+}
+
+// journalDeclaredPhases journals the declared phase list right after Init,
+// so the run API shows the declared phases before the first step and not
+// only after the first phase() call. Best effort, like other journal
+// writes: a lost write only delays the rail.
+func (r *workflowRun) journalDeclaredPhases(ctx context.Context) {
+	r.mu.Lock()
+	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: r.currentPhase}
+	r.mu.Unlock()
+	r.p.workflowJournal().updateRunPhases(ctx, r.id, snapshot)
 }
 
 // setPhase records name as the current phase and appends it to the run's
@@ -489,6 +525,9 @@ func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
 		}
 		if len(name) > maxWorkflowPhaseName {
 			return xerrors.Errorf("PHASES[%d] is longer than %d bytes", i, maxWorkflowPhaseName)
+		}
+		if err := validateWorkflowPhaseName(name); err != nil {
+			return xerrors.Errorf("PHASES[%d]: %w", i, err)
 		}
 		r.mu.Lock()
 		if !slices.Contains(r.phases, name) {
