@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/aibridgedtest"
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -247,6 +248,63 @@ func TestPlugins(t *testing.T) {
 		res = postWebhook(t, ownerClient, plugin.ID, bridgeRequest{Op: "send", ExternalID: externalID, Text: "after unlink"})
 		require.Contains(t, res.Error, "not linked")
 	})
+}
+
+// TestPluginsAudit checks that installing, changing and removing a plugin is
+// audited, and that the configuration values never reach the audit log.
+func TestPluginsAudit(t *testing.T) {
+	t.Parallel()
+	wasm := plugintest.BuildWasm(t, bridgePluginPackage)
+
+	values := coderdtest.DeploymentValues(t)
+	values.Experiments = serpent.StringArray{string(codersdk.ExperimentPlugins)}
+	auditor := audit.NewMock()
+	ownerClient := coderdtest.New(t, &coderdtest.Options{DeploymentValues: values, Auditor: auditor})
+	owner := coderdtest.CreateFirstUser(t, ownerClient)
+	client := codersdk.NewExperimentalClient(ownerClient)
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
+
+	inspected, err := client.InspectPlugin(ctx, owner.OrganizationID, wasm)
+	require.NoError(t, err)
+	plugin, err := client.CreatePlugin(ctx, owner.OrganizationID, codersdk.CreatePluginRequest{
+		Wasm:   wasm,
+		Grants: codersdk.GrantsForManifest(inspected.Manifest, nil),
+		Config: map[string]string{"token": "first-secret-value"},
+	})
+	require.NoError(t, err)
+	disabled := false
+	_, err = client.UpdatePlugin(ctx, plugin.ID, codersdk.UpdatePluginRequest{
+		Config:  &map[string]string{"token": "second-secret-value"},
+		Enabled: &disabled,
+	})
+	require.NoError(t, err)
+	_, err = client.UpdatePlugin(ctx, plugin.ID, codersdk.UpdatePluginRequest{
+		Config: &map[string]string{"token": "second-secret-value"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, client.DeletePlugin(ctx, plugin.ID))
+
+	entries := forkAuditEntries(t, auditor, owner.OrganizationID, "plugin")
+	require.Len(t, entries, 4)
+	for i, op := range []string{"create", "update", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, plugin.ID.String(), entries[i].ResourceID)
+		require.Equal(t, plugin.Name, entries[i].ResourceName)
+	}
+	require.JSONEq(t, `["token"]`, string(entries[0].Changes["config_keys"].New))
+	require.True(t, entries[0].Changes["config"].Secret)
+	require.True(t, entries[1].Changes["config"].Secret)
+	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
+	require.NotContains(t, entries[1].Changes, "config_keys", "the keys did not change")
+	require.Empty(t, entries[2].Changes, "the same config again changes nothing")
+	require.JSONEq(t, `"`+plugin.Name+`"`, string(entries[3].Changes["name"].Old))
+
+	for _, log := range auditor.AuditLogs() {
+		for _, raw := range [][]byte{log.AdditionalFields, log.Diff} {
+			require.NotContains(t, string(raw), "secret-value")
+		}
+	}
 }
 
 func TestPluginsDisabled(t *testing.T) {
