@@ -132,8 +132,10 @@ type Querier interface {
 	GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uuid.UUID) ([]GetWorkflowRunStepCountsByChatRow, error)
 	// The run list of a chat, newest first, one keyset page. after_created_at
 	// and after_id are the created_at and the ID of the last run of the page the
-	// client already has; both NULL reads the first page.
-	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error)
+	// client already has; both NULL reads the first page. The list needs no logs,
+	// args or result, so it does not read those columns: logs alone can hold the
+	// full retained tail of every run.
+	GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]GetWorkflowRunsByChatRow, error)
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)

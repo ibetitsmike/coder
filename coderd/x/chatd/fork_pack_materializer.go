@@ -43,7 +43,7 @@ const (
 	packWriteConcurrency = 16
 	// packWriteTimeout bounds one file write. Under concurrent writes an
 	// agent round trip can stall while the others finish, so a stalled
-	// write is cancelled and retried instead of holding the whole pack.
+	// write is canceled and retried instead of holding the whole pack.
 	packWriteTimeout = 2 * time.Second
 	// packWriteAttempts is how often a file write is tried within the
 	// turn's bound. The agent writes through a temp file and a rename, so

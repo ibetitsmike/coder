@@ -428,6 +428,61 @@ def main(args):
 		assert.Equal(t, "line 79", res.Logs[49])
 	})
 
+	// The terminal flush of a run waits for an in-flight writer instead of
+	// dropping the write, so the journal column ends with the final lines
+	// even when the end of the run races a paced flush.
+	t.Run("TerminalFlushWaitsForAnInFlightWriter", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("before")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			if err != nil {
+				return false
+			}
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
+			return len(logs) == 1
+		}, testutil.IntervalFast)
+
+		// A held write token stands in for a flush that is in flight when
+		// the stop lands. The terminal flush must wait for the token and
+		// then write, instead of dropping the final lines.
+		run.journalMu.Lock()
+		run.logFlushInFlight = true
+		run.journalMu.Unlock()
+		<-run.journalLogWrite
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		run.journalMu.Lock()
+		run.logFlushInFlight = false
+		run.journalMu.Unlock()
+		run.journalLogWrite <- struct{}{}
+
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusStopped, res.Status, res.Error)
+		// The terminal flush races the snapshot: the write of seq 2 lands
+		// just after this await returns, so the journal read waits for it.
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			row, err := fdb.GetWorkflowRun(ctx, run.id)
+			if err != nil {
+				return false
+			}
+			logs, _, _ := restoreWorkflowLogs(row.Logs)
+			return len(logs) == 2
+		}, testutil.IntervalFast)
+		row, err := fdb.GetWorkflowRun(ctx, run.id)
+		require.NoError(t, err)
+		logs, _, _ := restoreWorkflowLogs(row.Logs)
+		assert.Equal(t, []string{"before", `step "Never reports." failed: ` + workflowStopError}, logs,
+			"the terminal flush landed the stopped snapshot lines")
+	})
+
 	// A script that logs in a loop keeps a single write in flight, so its
 	// journal column ends capped like the result.
 	t.Run("CappedLikeTheResult", func(t *testing.T) {

@@ -1110,10 +1110,10 @@ func (mr *MockStoreMockRecorder) GetWorkflowRunStepCountsByChat(ctx, chatID any)
 }
 
 // GetWorkflowRunsByChat mocks base method.
-func (m *MockStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (m *MockStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetWorkflowRunsByChat", ctx, arg)
-	ret0, _ := ret[0].([]forkdb.WorkflowRun)
+	ret0, _ := ret[0].([]forkdb.GetWorkflowRunsByChatRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

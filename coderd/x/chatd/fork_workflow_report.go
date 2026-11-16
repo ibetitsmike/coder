@@ -16,11 +16,12 @@ import (
 	"strconv"
 	"strings"
 
-	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
+
+	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
