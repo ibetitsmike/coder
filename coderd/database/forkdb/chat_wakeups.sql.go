@@ -106,46 +106,6 @@ func (q *Queries) CountChatUserNotificationsSince(ctx context.Context, arg Count
 	return count, err
 }
 
-const countChatWakeupRunsSince = `-- name: CountChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE chat_id = $1
-    AND status = 'delivered'
-    AND created_at >= $2::timestamptz
-`
-
-type CountChatWakeupRunsSinceParams struct {
-	ChatID uuid.UUID `db:"chat_id" json:"chat_id"`
-	Since  time.Time `db:"since" json:"since"`
-}
-
-func (q *Queries) CountChatWakeupRunsSince(ctx context.Context, arg CountChatWakeupRunsSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countChatWakeupRunsSince, arg.ChatID, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countOrganizationChatWakeupRunsSince = `-- name: CountOrganizationChatWakeupRunsSince :one
-SELECT COUNT(*)
-FROM chat_wakeup_runs
-WHERE organization_id = $1
-    AND status = 'delivered'
-    AND created_at >= $2::timestamptz
-`
-
-type CountOrganizationChatWakeupRunsSinceParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	Since          time.Time `db:"since" json:"since"`
-}
-
-func (q *Queries) CountOrganizationChatWakeupRunsSince(ctx context.Context, arg CountOrganizationChatWakeupRunsSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countOrganizationChatWakeupRunsSince, arg.OrganizationID, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getChatWakeupByID = `-- name: GetChatWakeupByID :one
 SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE id = $1
 `
@@ -623,6 +583,34 @@ func (q *Queries) SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMic
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const sumChatWakeupRunCountsSince = `-- name: SumChatWakeupRunCountsSince :one
+SELECT
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE chat_id = $1::uuid AND hour >= $2::timestamptz)::bigint AS chat_runs,
+    (SELECT COALESCE(SUM(runs), 0) FROM chat_wakeup_run_counts
+        WHERE organization_id = $3::uuid AND hour >= $2::timestamptz)::bigint AS organization_runs
+`
+
+type SumChatWakeupRunCountsSinceParams struct {
+	ChatID         uuid.UUID `db:"chat_id" json:"chat_id"`
+	Since          time.Time `db:"since" json:"since"`
+	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
+}
+
+type SumChatWakeupRunCountsSinceRow struct {
+	ChatRuns         int64 `db:"chat_runs" json:"chat_runs"`
+	OrganizationRuns int64 `db:"organization_runs" json:"organization_runs"`
+}
+
+// Sums the delivered runs of the chat and of its organization in the hour
+// buckets from since on.
+func (q *Queries) SumChatWakeupRunCountsSince(ctx context.Context, arg SumChatWakeupRunCountsSinceParams) (SumChatWakeupRunCountsSinceRow, error) {
+	row := q.db.QueryRowContext(ctx, sumChatWakeupRunCountsSince, arg.ChatID, arg.Since, arg.OrganizationID)
+	var i SumChatWakeupRunCountsSinceRow
+	err := row.Scan(&i.ChatRuns, &i.OrganizationRuns)
+	return i, err
 }
 
 const sumOrganizationWakeupChatCostMicrosSince = `-- name: SumOrganizationWakeupChatCostMicrosSince :one
