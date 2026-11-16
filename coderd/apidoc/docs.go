@@ -7702,7 +7702,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/{chat}/workflow-runs/{workflowrun}": {
             "get": {
-                "description": "Returns one run with its script, its steps and, when the run\nended, its result and the log lines of the terminal snapshot.\nA live run has no logs: the journal keeps no live log lines.",
+                "description": "Returns one run with its script, its args, its steps and, for\na terminal run, its result. The logs are the last log lines of\na live run, written through as the script logs, or of the\nterminal snapshot. A live run also reports the value of every\nstep that has reported so far, and which steps a resume\nreplayed.",
                 "produces": [
                     "application/json"
                 ],
@@ -39301,6 +39301,9 @@ const docTemplate = `{
         "codersdk.WorkflowRunDetail": {
             "type": "object",
             "properties": {
+                "args": {
+                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. The API\nreturns the args bytes the run was started with, so a client that\nreads them through json.RawMessage keeps them exact."
+                },
                 "chat_id": {
                     "type": "string",
                     "format": "uuid"
@@ -39324,7 +39327,7 @@ const docTemplate = `{
                     "format": "uuid"
                 },
                 "logs": {
-                    "description": "Logs are the last log lines of a terminal run, from its snapshot.",
+                    "description": "Logs are the last log lines the script printed: from the snapshot of\na terminal run, or written through to the journal while it runs.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -39338,8 +39341,7 @@ const docTemplate = `{
                     }
                 },
                 "result": {
-                    "description": "Result is the value that main returned, for a terminal run.",
-                    "type": "object"
+                    "description": "Result is the value that main returned, for a terminal run. The API\nreturns the result bytes main encoded, so a client that reads them\nthrough json.RawMessage keeps them exact."
                 },
                 "script": {
                     "type": "string"
