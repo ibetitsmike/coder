@@ -87,22 +87,30 @@ func (p *Server) runPullRequestPoller(ctx context.Context, store database.Store,
 
 // pollPullRequests runs one pass of the poller at now: it claims the due
 // watches in batches and reads each batch with at most maxPullRequestReads
-// reads in flight.
+// reads in flight. Each claim runs at now plus the time the pass took so
+// far, so its lease covers its own reads. A full batch may end inside the
+// group of one pull request and owner, so that group waits for the next
+// claim and is read once with the rest of it.
 func (p *Server) pollPullRequests(ctx context.Context, fdb forkdb.Store, now time.Time) {
+	began := p.clock.Now("chatd", "pr-poller")
+	var carry []forkdb.ClaimDuePullRequestWatchesRow
 	for ctx.Err() == nil {
-		rows, err := fdb.ClaimDuePullRequestWatches(ctx, forkdb.ClaimDuePullRequestWatchesParams{
-			Now:        now,
+		claimNow := now.Add(p.clock.Since(began, "chatd", "pr-poller"))
+		claimed, err := fdb.ClaimDuePullRequestWatches(ctx, forkdb.ClaimDuePullRequestWatchesParams{
+			Now:        claimNow,
 			LimitCount: pullRequestPollerBatch,
-			LeaseUntil: now.Add(pullRequestPollerLease),
+			LeaseUntil: claimNow.Add(pullRequestPollerLease),
 		})
 		if err != nil {
 			if ctx.Err() == nil {
 				p.logger.Warn(ctx, "claim due pull request watches", slogError(err))
 			}
-			return
+			claimed = nil
 		}
-		var eg errgroup.Group
-		eg.SetLimit(maxPullRequestReads)
+		last := len(claimed) < pullRequestPollerBatch
+		rows := slices.Concat(carry, claimed)
+		carry = nil
+		var groups [][]forkdb.ClaimDuePullRequestWatchesRow
 		// The rows are sorted by pull request and owner, so a group is a
 		// run of rows.
 		for start := 0; start < len(rows); {
@@ -110,15 +118,22 @@ func (p *Server) pollPullRequests(ctx context.Context, fdb forkdb.Store, now tim
 			for end < len(rows) && rows[end].PullRequestUrl == rows[start].PullRequestUrl && rows[end].OwnerID == rows[start].OwnerID {
 				end++
 			}
-			group := rows[start:end]
+			groups = append(groups, rows[start:end])
 			start = end
+		}
+		if !last && len(groups) > 0 {
+			carry, groups = groups[len(groups)-1], groups[:len(groups)-1]
+		}
+		var eg errgroup.Group
+		eg.SetLimit(maxPullRequestReads)
+		for _, group := range groups {
 			eg.Go(func() error {
-				p.pollPullRequest(ctx, fdb, group, now)
+				p.pollPullRequest(ctx, fdb, group, claimNow)
 				return nil
 			})
 		}
 		_ = eg.Wait()
-		if len(rows) < pullRequestPollerBatch {
+		if last || err != nil {
 			return
 		}
 	}

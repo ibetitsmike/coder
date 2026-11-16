@@ -424,8 +424,9 @@ func TestWakeupPullRequestEvents(t *testing.T) {
 				require.Empty(t, f.deliveredWatches(t, wakeup.ID))
 				require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
 				watch := f.pullRequestWatch(t, wakeup.ID)
-				require.True(t, now.Add(pullRequestPollInterval).Equal(watch.NextPollAt), "next poll %s", watch.NextPollAt)
-				require.True(t, now.Equal(watch.PolledAt), "polled %s", watch.PolledAt)
+				// The poller adds the time its pass took to now.
+				require.WithinDuration(t, now.Add(pullRequestPollInterval), watch.NextPollAt, time.Minute)
+				require.WithinDuration(t, now, watch.PolledAt, time.Minute)
 				require.Equal(t, "owner", watch.ViewerLogin)
 				// The poll is not due yet, so the next pass reads nothing.
 				worker.pollOnce(ctx, now.Add(pullRequestPollInterval-time.Second))
@@ -478,7 +479,8 @@ func TestWakeupPullRequestReadFailures(t *testing.T) {
 			require.Empty(t, f.wakeupRunStatuses(t, wakeup.ID))
 			require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
 			watch := f.pullRequestWatch(t, wakeup.ID)
-			require.True(t, tc.wantNext.Equal(watch.NextPollAt), "next poll %s", watch.NextPollAt)
+			// The poller adds the time its pass took to now.
+			require.WithinDuration(t, tc.wantNext, watch.NextPollAt, time.Minute)
 			require.True(t, watch.PolledAt.IsZero(), "a failed read covers nothing")
 
 			worker.pollOnce(ctx, tc.wantNext.Add(-time.Second))

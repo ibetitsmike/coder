@@ -225,6 +225,35 @@ func TestPullRequestPollerSharesReads(t *testing.T) {
 	}
 }
 
+// More watches of one pull request and owner than one claim takes still
+// share one read.
+func TestPullRequestPollerSharesReadsAcrossClaims(t *testing.T) {
+	t.Parallel()
+	p := newPollerTest(t)
+	var wakeups []forkdb.ChatWakeup
+	for range pullRequestPollerBatch + 2 {
+		wakeups = append(wakeups, p.f.insertWakeup(t, p.f.createWakeupChat(t), forkdb.InsertChatWakeupParams{
+			Kind:      forkdb.ChatWakeupKindEvents,
+			ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(24 * time.Hour), Valid: true},
+		}, wakeupEvent{
+			Type:        wakeupEventPullRequest,
+			URL:         p.github.url,
+			On:          []string{pullRequestEventComment},
+			Since:       wakeupTestSlot,
+			HeadSHA:     testHeadSHA,
+			ViewerLogin: "owner",
+		}))
+	}
+
+	now := wakeupTestSlot.Add(pullRequestPollInterval)
+	p.server.pollPullRequests(p.ctx, p.fdb, now)
+	require.ElementsMatch(t, pollerEndpoints, requestPaths(p.github.takeRequests()))
+	for _, wakeup := range wakeups {
+		watch := p.f.pullRequestWatch(t, wakeup.ID)
+		require.True(t, now.Equal(watch.PolledAt), "polled at %s", watch.PolledAt)
+	}
+}
+
 // New activity sends exactly one message to each chat that watches the pull
 // request, through the waker the poller pokes, with no clock advance.
 func TestPullRequestPollerDeliversOncePerChat(t *testing.T) {
