@@ -470,7 +470,8 @@ The spend limits are \$20 of model cost in the chat and \$200 across the organiz
 An organization admin can set each limit higher or lower with `PUT /api/v2/chats/fork/organizations/{organization}/wakeup-caps`, with spend in millionths of a dollar, and a limit that the organization doesn't set keeps its default.
 The spend counts every message in those chats, not only the ones that wake-ups started, and a model without prices counts as zero.
 The check only uses the cost recorded so far, so the run that it lets through can take the spend past a limit, and runs on several replicas at once can pass an organization limit by a few runs.
-Each replica reads the organization's spend at most once a minute while it is under the limit, so the organization limit can stop runs up to a minute late, and it reads the spend again before it pauses a wake-up for it.
+Each replica keeps the organization's spend for a minute while it is under the limit, so the organization limit can stop runs up to a minute late, and it reads the spend again before it pauses a wake-up for it.
+The runs are counted per UTC hour, so both run limits and the chats that count toward the organization's spend reach back to the start of the hour 24&nbsp;hours before the run, up to an hour more than 24&nbsp;hours.
 When the chat or its organization has reached a limit, the wake-up pauses without sending its prompt.
 A wake-up also pauses when a prompt hook denies its prompt, or when its cron schedule or its events are invalid.
 A paused wake-up runs again only after a user resumes it through the API or the composer pill, and it still counts toward the chat's limit of 10 active or paused wake-ups.
