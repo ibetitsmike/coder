@@ -535,5 +535,13 @@ func (r *workflowRun) readDeclaredPhases(globals starlark.StringDict) error {
 		}
 		r.mu.Unlock()
 	}
+	r.mu.Lock()
+	tooMany := len(r.phases) > maxWorkflowPhases
+	r.mu.Unlock()
+	if tooMany {
+		// The declared list joins a saved workflow's phases, so the cap
+		// holds across both sources.
+		return xerrors.Errorf("the run holds more than %d phases after PHASES", maxWorkflowPhases)
+	}
 	return nil
 }

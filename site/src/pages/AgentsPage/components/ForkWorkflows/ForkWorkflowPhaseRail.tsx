@@ -84,17 +84,17 @@ export const ForkWorkflowPhaseRail: React.FC<ForkWorkflowPhaseRailProps> = ({
 							aria-current={phase === currentPhase ? "step" : undefined}
 							title={phase}
 							className={cn(
-								"flex min-w-0 items-center gap-1 truncate rounded-full border border-solid px-1.5 py-0.5 text-xs",
+								"flex min-w-0 items-center gap-1 rounded-full border border-solid px-1.5 py-0.5 text-xs",
 								phaseLabelClassName[state],
 							)}
 						>
 							<span
 								className={cn(
-									"size-1.5 rounded-full border border-solid",
+									"size-1.5 shrink-0 rounded-full border border-solid",
 									phaseDotClassName[state],
 								)}
 							/>
-							{phase}
+							<span className="truncate">{phase}</span>
 							<span className="sr-only"> ({phaseStateLabel[state]})</span>
 						</span>
 					</li>

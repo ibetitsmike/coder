@@ -322,8 +322,6 @@ func (p *Server) resumeWorkflowRun(
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), chat) //nolint:gocritic // see startWorkflowRun
 	run.mu.Lock()
 	run.cancel = stop
-	run.phases = row.Phases
-	run.currentPhase = row.CurrentPhase
 	run.mu.Unlock()
 	err = p.goInflight(func() {
 		defer stop()

@@ -6,6 +6,7 @@ package chatd
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/testutil"
 )
 
@@ -300,6 +302,12 @@ def main(args):
 		steps := f.steps(ctx, t, run, 1)
 		assert.Equal(t, "plan", steps[0].Phase)
 
+		// stopJournaledRun serves the live-run path of a stop through
+		// requestStop and finish, which write the phases themselves. This
+		// covers the restart path instead: the row looks like a run left
+		// behind by a restart, so the stop sweep goes through
+		// stopJournaledRun alone.
+		f.server.workflows.remove(run.id)
 		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
 
 		fdb := forkWorkflowDB(t, f.db)
@@ -311,5 +319,33 @@ def main(args):
 		assert.Equal(t, []string{"plan", "build", "review"}, row.Phases,
 			"stopping a run keeps its phases")
 		assert.Equal(t, "plan", row.CurrentPhase)
+	})
+
+	t.Run("CapCountsSavedAndDeclaredPhasesTogether", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A saved workflow capped at 32 phases plus a script that declares
+		// one more fails the run instead of reaching 64.
+		saved := make([]string, maxWorkflowPhases)
+		for i := range saved {
+			saved[i] = fmt.Sprintf("saved%02d", i)
+		}
+		_, err := forkWorkflowDB(t, f.db).InsertUserSavedWorkflow(ctx, forkdb.InsertUserSavedWorkflowParams{
+			OrganizationID: f.org.ID,
+			UserID:         f.user.ID,
+			CreatedBy:      f.user.ID,
+			Name:           "full",
+			Description:    "A workflow with the maximum phases.",
+			Script:         "PHASES = [\"one more\"]\n\ndef main(args):\n    pass\n",
+			Phases:         saved,
+		})
+		require.NoError(t, err)
+		// The saved script declares one more PHASES name on top of the 32
+		// saved phases, so the run fails instead of reaching 64.
+		run := f.start(ctx, t, parent, runWorkflowArgs{Name: "full"})
+		res := run.await(ctx, testutil.WaitShort)
+		require.Equal(t, workflowStatusFailed, res.Status)
+		assert.Contains(t, res.Error, "more than 32 phases")
 	})
 }

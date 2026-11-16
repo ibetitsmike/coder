@@ -166,16 +166,57 @@ describe("forkWorkflowPhaseStateOf", () => {
 	});
 
 	it("marks unfinished phases failed on a failed run", () => {
-		// The last phase never started a step.
+		// The last phase never started a step: it failed with the run.
 		expect(
 			forkWorkflowPhaseStateOf("review", 2, phases, "review", [], "failed"),
 		).toBe("failed");
+		// A phase the script never reached stays pending.
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "plan", [], "failed"),
+		).toBe("pending");
 	});
 
-	it("marks unfinished phases failed on a stopped run", () => {
+	it("marks a passed phase with no steps done even on a failed run", () => {
 		expect(
-			forkWorkflowPhaseStateOf("build", 1, phases, "review", [], "stopped"),
+			forkWorkflowPhaseStateOf("plan", 0, phases, "build", [], "failed"),
+		).toBe("done");
+	});
+
+	it("keeps unreached phases pending on a failed run", () => {
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "plan", [], "stopped"),
+		).toBe("pending");
+	});
+
+	it("marks only the current phase failed on a stopped run", () => {
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "review", [], "stopped"),
 		).toBe("failed");
+		const reported = [step("a", "review", "reported")];
+		expect(
+			forkWorkflowPhaseStateOf(
+				"review",
+				2,
+				phases,
+				"review",
+				reported,
+				"stopped",
+			),
+		).toBe("done");
+	});
+
+	it("marks every reached phase done on a completed run", () => {
+		// On a completed run the script reached the last phase, so the run's
+		// rail shows plan and build as done even when they spawned no steps.
+		expect(
+			forkWorkflowPhaseStateOf("plan", 0, phases, "review", [], "completed"),
+		).toBe("done");
+		expect(
+			forkWorkflowPhaseStateOf("build", 1, phases, "review", [], "completed"),
+		).toBe("done");
+		expect(
+			forkWorkflowPhaseStateOf("review", 2, phases, "review", [], "completed"),
+		).toBe("done");
 	});
 
 	it("keeps an interrupted run's phases waiting", () => {
