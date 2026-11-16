@@ -488,7 +488,7 @@ func (r *workflowRun) setPhase(ctx context.Context, name string) error {
 	if !slices.Contains(r.phases, name) {
 		if len(r.phases) >= maxWorkflowPhases {
 			r.mu.Unlock()
-			return xerrors.Errorf("the run reached more than %d phases", maxWorkflowPhases)
+			return xerrors.Errorf("phase %q would exceed the %d-phase cap", name, maxWorkflowPhases)
 		}
 		r.phases = append(r.phases, name)
 	}

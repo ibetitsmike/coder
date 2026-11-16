@@ -105,10 +105,6 @@ export const Resumed: Story = {
 	play: expand,
 };
 
-/**
- * A phase the script has not set yet stays pending, and a declared phase
- * that no step reached shows as pending too.
- */
 export const RunningWithPendingPhases: Story = {
 	args: {
 		result: {
@@ -130,7 +126,6 @@ export const RunningWithRailOnly: Story = {
 	play: expand,
 };
 
-/** A failed run marks the phase that never finished. */
 export const FailedWithRailOnly: Story = {
 	args: {
 		result: {

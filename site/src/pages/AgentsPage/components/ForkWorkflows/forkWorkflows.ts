@@ -161,17 +161,18 @@ export const mergeForkWorkflowRunDetail = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowRunSnapshot => {
 	const detail = forkWorkflowRunDetailSnapshot(run);
-	// A phase write is best effort, so a polled detail can lag an
-	// await_workflow snapshot that already saw a newer journal write. Keep
-	// the snapshot's phase state while the detail is observably behind:
-	// the detail ends the run, while the snapshot still shows it live.
-	const detailEnded = runEnded(detail.status);
-	const phaseState = detailEnded
+	// Phase lists only grow, so a polled detail whose list is a strict
+	// prefix of the snapshot's lags the snapshot's last journal write, and
+	// the merge keeps the snapshot's phase state. Any other detail is equal
+	// or newer, and a detail that ends the run is the authority again.
+	const detailLags =
+		detail.phases.length < snapshot.phases.length &&
+		detail.phases.every((name, i) => name === snapshot.phases[i]);
+	const phaseState = runEnded(detail.status)
 		? detail
-		: {
-				phases: snapshot.phases.length > 0 ? snapshot.phases : detail.phases,
-				currentPhase: snapshot.currentPhase || detail.currentPhase,
-			};
+		: detailLags
+			? { phases: snapshot.phases, currentPhase: snapshot.currentPhase }
+			: { phases: detail.phases, currentPhase: detail.currentPhase };
 	const reusedChatIds = new Set(
 		snapshot.steps.filter((step) => step.reused).map((step) => step.chatId),
 	);
@@ -224,16 +225,21 @@ export const forkWorkflowPhaseStateOf = (
 	if (currentIndex < index) {
 		return "pending";
 	}
-	// A phase the script moved past is done, and on a completed run every
-	// reached phase is done: the script finished it or moved past it. That
-	// precedence comes before the step state, so a failed or stopped run
-	// still shows the phases it left behind as done, even when cleanup
-	// marked an open step in one of them failed.
-	if (passed || runStatus === "completed") {
-		return "done";
-	}
 	const phaseSteps = steps.filter((step) => step.phase === phase);
 	const state = forkWorkflowPhaseState(phaseSteps);
+	// A phase the script moved past is done, and on a completed run every
+	// reached phase is done: the script finished it or moved past it. On a
+	// live run a passed phase keeps moving until its steps settle, because
+	// a spawn() step can outlive the phase that started it.
+	if (passed || runStatus === "completed") {
+		if (
+			runStatus === "running" &&
+			phaseSteps.some((step) => step.status !== "reported")
+		) {
+			return state === "failed" ? "failed" : "running";
+		}
+		return "done";
+	}
 	if (state === "pending" && phaseSteps.length === 0) {
 		// The phase spawned no steps. The phase the run ended in failed
 		// with the run. On a live run it is still starting.

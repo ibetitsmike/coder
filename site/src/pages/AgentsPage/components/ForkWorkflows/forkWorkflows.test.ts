@@ -237,6 +237,45 @@ describe("forkWorkflowPhaseStateOf", () => {
 			forkWorkflowPhaseStateOf("review", 2, phases, "review", failed, "failed"),
 		).toBe("failed");
 	});
+
+	it("keeps a passed phase with unfinished steps running on a live run", () => {
+		// A spawn() step can outlive the phase that started it, so a passed
+		// phase on a live run keeps moving until its steps settle.
+		const running = [step("a", "build", "running")];
+		expect(
+			forkWorkflowPhaseStateOf(
+				"build",
+				1,
+				phases,
+				"review",
+				running,
+				"running",
+			),
+		).toBe("running");
+		const reminded = [step("a", "plan", "reminded")];
+		expect(
+			forkWorkflowPhaseStateOf(
+				"plan",
+				0,
+				phases,
+				"review",
+				reminded,
+				"running",
+			),
+		).toBe("running");
+		// Once the step reports, the passed phase is done again.
+		const reported = [step("a", "build", "reported")];
+		expect(
+			forkWorkflowPhaseStateOf(
+				"build",
+				1,
+				phases,
+				"review",
+				reported,
+				"running",
+			),
+		).toBe("done");
+	});
 });
 
 describe("forkWorkflowRunStatusMeta", () => {
@@ -340,5 +379,51 @@ describe("mergeForkWorkflowRunDetail", () => {
 		});
 		expect(ended.phases).toEqual(["review"]);
 		expect(ended.currentPhase).toBe("review");
+	});
+
+	it("takes the phase state of a detail ahead of the snapshot", () => {
+		// The tool result froze at the run_workflow or await_workflow call,
+		// so a detail that has moved past it must win, or the rail stops
+		// moving until the run ends.
+		const snapshot = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["plan", "build", "review"],
+			current_phase: "plan",
+			steps: [],
+		});
+		if (!snapshot) {
+			throw new Error("the tool result did not parse");
+		}
+		const ahead = mergeForkWorkflowRunDetail(snapshot, {
+			...MockChatWorkflowRunDetail,
+			status: "running",
+			logs: [],
+			phases: ["plan", "build", "review", "extra"],
+			current_phase: "extra",
+		});
+		expect(ahead.phases).toEqual(["plan", "build", "review", "extra"]);
+		expect(ahead.currentPhase).toBe("extra");
+
+		// The snapshot had no current phase yet and the detail moved on.
+		const resumed = parseForkWorkflowRunSnapshot({
+			run_id: "r",
+			status: "running",
+			phases: ["plan", "build"],
+			current_phase: "",
+			steps: [],
+		});
+		if (!resumed) {
+			throw new Error("the tool result did not parse");
+		}
+		const moved = mergeForkWorkflowRunDetail(resumed, {
+			...MockChatWorkflowRunDetail,
+			status: "running",
+			logs: [],
+			phases: ["plan", "build", "extra"],
+			current_phase: "extra",
+		});
+		expect(moved.phases).toEqual(["plan", "build", "extra"]);
+		expect(moved.currentPhase).toBe("extra");
 	});
 });

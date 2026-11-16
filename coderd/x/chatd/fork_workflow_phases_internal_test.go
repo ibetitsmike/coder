@@ -359,7 +359,7 @@ def main(args):
 		run := f.start(ctx, t, parent, runWorkflowArgs{Script: script})
 		res := run.await(ctx, testutil.WaitShort)
 		require.Equal(t, workflowStatusFailed, res.Status)
-		assert.Contains(t, res.Error, "more than 32 phases")
+		assert.Contains(t, res.Error, "would exceed the 32-phase cap")
 	})
 
 	t.Run("DeclaringPastTheCapLeavesNoPhasesBehind", func(t *testing.T) {
