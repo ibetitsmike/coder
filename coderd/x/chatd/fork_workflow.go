@@ -846,19 +846,26 @@ func (r *workflowRun) scheduleLogFlush() {
 	now := time.Now()
 	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
 	if wait <= 0 {
+		// The stamp moves with the attempt, not the write: a write held up
+		// by another writer (terminal flush, a stop's flush) paces the next
+		// attempt to the interval instead of spinning on the taken token.
+		r.lastLogFlush = now
 		r.logFlushInFlight = true
 		go func() {
-			r.flushLogs(false)
+			wrote := r.flushLogs(false)
 			r.journalMu.Lock()
 			r.logFlushInFlight = false
 			pending := r.logFlushTimer == nil
 			r.journalMu.Unlock()
 			// Lines that landed while the write was in flight dropped
-			// their own request, so the completed flush re-arms one for
-			// them. A run that finished while the write was in flight
-			// already landed its terminal flush, so it must not re-arm.
-			// A timer armed meanwhile holds the re-arm instead.
-			if pending && !r.isDone() {
+			// their own request, so a flush that actually wrote re-arms
+			// one for them. A flush that could not write (the token was
+			// taken, or the sequence did not move) leaves the pacing to
+			// the failed attempt's stamp: re-arming here would spin until
+			// the holder finishes. A run that finished while the write
+			// was in flight already landed its terminal flush, so it must
+			// not re-arm. A timer armed meanwhile holds the re-arm instead.
+			if wrote && pending && !r.isDone() {
 				r.rearmLogFlush()
 			}
 		}()
@@ -868,12 +875,14 @@ func (r *workflowRun) scheduleLogFlush() {
 		r.journalMu.Lock()
 		r.logFlushTimer = nil
 		r.journalMu.Unlock()
-		r.flushLogs(false)
+		wrote := r.flushLogs(false)
 		// Lines that landed while this write was in flight dropped
-		// their own request, so the completed flush re-arms one for
+		// their own request, so a flush that wrote re-arms one for
 		// them. rearmLogFlush compares the sequence, so a re-arm for
 		// lines this write already carried returns without work.
-		r.rearmLogFlush()
+		if wrote {
+			r.rearmLogFlush()
+		}
 	})
 }
 
@@ -912,15 +921,18 @@ func (r *workflowRun) rearmLogFlush() {
 
 // flushLogs writes the retained log lines of a live run through to the
 // journal, so a mid-run read of the run detail and a restart keep the lines
-// the script printed so far. The write is best effort: the terminal snapshot
-// carries the final lines. The callers take the write channel before the seq
-// check and release it after the write, so a stalled write of an older
-// snapshot cannot replace newer lines: the newer caller waits for the
-// channel and then wins the seq check. The journal query drops a payload
-// older than the stored sequence on top.
-func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush path, two wait rules; a bool keeps the call sites readable
+// the script printed so far. It reports whether it attempted a write: a
+// flush that could not take the token, or whose sequence did not move,
+// wrote nothing. The write itself is best effort, and setLogs swallows its
+// errors, so an attempted write counts as written even when the store
+// dropped it. The callers take the write channel before the seq check and
+// release it after the write, so a stalled write of an older snapshot
+// cannot replace newer lines: the newer caller waits for the channel and
+// then wins the seq check. The journal query drops a payload older than
+// the stored sequence on top.
+func (r *workflowRun) flushLogs(terminal bool) bool { //nolint:revive // one flush path, two wait rules; a bool keeps the call sites readable
 	if r.journalLogWrite == nil {
-		return
+		return false
 	}
 	// A terminal flush must wait for an in-flight writer, or the end of
 	// the run would skip its final write. A paced flush keeps its drop
@@ -931,7 +943,7 @@ func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush pa
 		select {
 		case <-r.journalLogWrite:
 		default:
-			return
+			return false
 		}
 	}
 	defer func() { r.journalLogWrite <- struct{}{} }()
@@ -940,12 +952,12 @@ func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush pa
 	seq := r.logSeq
 	r.mu.Unlock()
 	if seq == 0 {
-		return
+		return false
 	}
 	r.journalMu.Lock()
 	if seq <= r.journaledLogSeq {
 		r.journalMu.Unlock()
-		return
+		return false
 	}
 	r.journalMu.Unlock()
 	// The write is best effort and must not outlive the run or the server
@@ -954,12 +966,15 @@ func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush pa
 		workflowLogFlushTimeout)
 	defer cancel()
 	r.p.workflowJournal().setLogs(ctx, r.id, int64(seq), logs)
-	// The counters advance only after the write landed: a failed write
-	// leaves the run pending, so the next flush retries the same lines.
+	// journaledLogSeq advances with the attempt, not the store's answer:
+	// setLogs swallows its errors, so the run has no failure signal to
+	// branch on. The seq check above keeps a later flush from writing an
+	// older snapshot over a newer one, and the next paced flush sends the
+	// full retained tail again.
 	r.journalMu.Lock()
 	r.journaledLogSeq = seq
-	r.lastLogFlush = time.Now()
 	r.journalMu.Unlock()
+	return true
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the

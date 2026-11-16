@@ -81,6 +81,7 @@ func TSMutations(ts *guts.Typescript) {
 		DiscriminatedChatMessagePart,
 		AgentHookRawMessages,
 		WorkflowRunRawJSON,
+
 		// Prefer enums as types
 		config.EnumAsTypes,
 		// Enum list generator
@@ -187,51 +188,6 @@ func AgentHookRawMessages(ts *guts.Typescript) {
 		if !found {
 			panic(fmt.Sprintf("agent hook field %q.%s was not generated", typeName, fieldName))
 		}
-	}
-}
-
-// WorkflowRunRawJSON maps the raw JSON fields of the workflow run detail and
-// its steps to unknown instead of the global object type: main(args) accepts
-// strings, lists, numbers and nested objects, and the generated
-// Record<string, string> would force a cast on every consumer of a
-// non-string argument or step report.
-func WorkflowRunRawJSON(ts *guts.Typescript) {
-	if _, ok := ts.Node("WorkflowRunDetail"); !ok {
-		return
-	}
-	unknown := bindings.KeywordUnknown
-	node, ok := ts.Node("WorkflowRunDetail")
-	if !ok {
-		panic("WorkflowRunDetail was not generated")
-	}
-	iface, ok := node.(*bindings.Interface)
-	if !ok {
-		panic("WorkflowRunDetail is not an interface")
-	}
-	found := 0
-	for _, field := range iface.Fields {
-		switch field.Name {
-		case "args", "result":
-			field.Type = &unknown
-			found++
-		}
-	}
-	step, ok := ts.Node("WorkflowRunStep")
-	if !ok {
-		panic("WorkflowRunStep was not generated")
-	}
-	stepIface, ok := step.(*bindings.Interface)
-	if !ok {
-		panic("WorkflowRunStep is not an interface")
-	}
-	for _, field := range stepIface.Fields {
-		if field.Name == "value" {
-			field.Type = &unknown
-			found++
-		}
-	}
-	if found != 3 {
-		panic(fmt.Sprintf("the workflow run types: found %d of the 3 raw JSON fields", found))
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
@@ -350,6 +351,58 @@ def main(args):
 		assert.Equal(t, []string{"first line", "second line", "dropped line"}, journalLogs())
 	})
 
+	// A paced attempt that finds the write token taken must not spin:
+	// the attempt stamps lastLogFlush, so the next attempt waits out the
+	// interval instead of rescheduling immediately until the holder
+	// finishes. A holder that does not set logFlushInFlight (a timer
+	// flush, a stop's or the end's terminal flush) used to produce a
+	// tight re-arm loop for the whole write.
+	t.Run("HeldTokenDoesNotSpin", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    log("first line")
+    agent("Never reports.")
+`})
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			logs, _, _ := restoreWorkflowLogs(journalRow(ctx, t, fdb, run.id).Logs)
+			return len(logs) == 1
+		}, testutil.IntervalFast)
+
+		// A plain token holder stands in for a slow write: the paced
+		// attempts during the hold must pace themselves, not spin.
+		<-run.journalLogWrite
+		run.log("held line")
+		spins := 0
+		stop := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				run.journalMu.Lock()
+				if run.logFlushInFlight {
+					spins++
+				}
+				run.journalMu.Unlock()
+				time.Sleep(time.Millisecond)
+			}
+		}()
+		time.Sleep(200 * time.Millisecond)
+		close(stop)
+		run.journalLogWrite <- struct{}{}
+		t.Logf("paced attempts during the hold: %d", spins)
+		// The interval is 2s, so a spin loop would see hundreds of
+		// attempts in 200ms; pacing allows at most a handful.
+		assert.LessOrEqual(t, spins, 3, "the flush attempts must pace while the write token is held")
+	})
+
 	// await_workflow for an interrupted run this replica does not hold
 	// reads the journaled live lines, the way a held run reports them.
 	t.Run("AwaitReadsTheJournalLogs", func(t *testing.T) {
@@ -480,7 +533,18 @@ def main(args):
 		// the open steps it finds, and a stop that races the insert would
 		// leave the step to fail on its own context instead.
 		f.steps(ctx, t, run, 1)
-		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		// The stop waits for the unwinding run, whose terminal flush waits
+		// for the held token, so the answer cannot be prompt in this test.
+		// The stop still answers: it must return, not hang, and the request
+		// must already be recorded so the unwinding run journals a stop.
+		stopDone := make(chan error, 1)
+		go func() { stopDone <- f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id) }()
+		select {
+		case err := <-stopDone:
+			require.NoError(t, err)
+		case <-time.After(2 * workflowStopTimeout):
+			t.Fatal("the stop did not answer after the bounded wait")
+		}
 		run.journalMu.Lock()
 		run.logFlushInFlight = false
 		run.journalMu.Unlock()
