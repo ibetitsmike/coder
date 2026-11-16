@@ -2776,11 +2776,16 @@ type MockAPIInput = {
 	message?: string;
 	detail?: string;
 	validations?: FieldError[];
+	/** HTTP status of the error response, when it matters to the caller. */
+	status?: number;
 };
 
 type MockAPIOutput = {
 	isAxiosError: true;
+	/** AxiosError carries the status at the top level too. */
+	status: number;
 	response: {
+		status: number;
 		data: {
 			message: string;
 			detail: string | undefined;
@@ -2793,10 +2798,13 @@ export const mockApiError = ({
 	message = "Something went wrong.",
 	detail,
 	validations,
+	status = 500,
 }: MockAPIInput): MockAPIOutput => ({
 	// This is how axios can check if it is an axios error when calling isAxiosError
 	isAxiosError: true,
+	status,
 	response: {
+		status,
 		data: {
 			message,
 			detail,

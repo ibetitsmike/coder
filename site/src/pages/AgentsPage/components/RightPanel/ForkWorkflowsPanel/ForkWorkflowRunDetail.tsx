@@ -1,24 +1,25 @@
 // This file is fork code: one run in the Workflows tab
 // (fork-workflows experiment).
 
-import { ChevronLeftIcon, SquareIcon } from "lucide-react";
+import { ChevronLeftIcon } from "lucide-react";
 import type React from "react";
-import { useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "react-query";
-import { getErrorDetail, getErrorMessage } from "#/api/errors";
-import { chatWorkflowRun, stopWorkflowRun } from "#/api/queries/forkWorkflows";
+import { useRef } from "react";
+import { useQuery } from "react-query";
+import { getErrorMessage } from "#/api/errors";
+import { chat } from "#/api/queries/chats";
+import { chatWorkflowRun } from "#/api/queries/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
-import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
 import { Spinner } from "#/components/Spinner/Spinner";
-import { toast } from "#/components/Toaster/toast";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
+import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
+import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
 import {
 	forkWorkflowRunDetailSteps,
 	forkWorkflowRunDuration,
@@ -26,6 +27,7 @@ import {
 	forkWorkflowStepProgress,
 	formatForkWorkflowValue,
 } from "../../ForkWorkflows/forkWorkflows";
+import { useCanWriteChat } from "../../ForkWorkflows/useCanWriteChat";
 
 type ForkWorkflowRunDetailProps = {
 	chatId: string;
@@ -64,9 +66,23 @@ type ForkWorkflowRunDetailViewProps = {
 export const ForkWorkflowRunDetailView: React.FC<
 	ForkWorkflowRunDetailViewProps
 > = ({ run, error, onBack }) => {
+	// The panel loads no chat of its own, so the run's chat decides whether
+	// the viewer may stop or resume; the query reads the chat page's cached
+	// copy when it has one.
+	const chatQuery = useQuery({ ...chat(run?.chat_id ?? ""), enabled: !!run });
+	const canWriteChat = useCanWriteChat(chatQuery.data);
+	// Plan mode turns omit run_workflow, so a resume could not run it.
+	const isResumeAvailable = chatQuery.data?.plan_mode !== "plan";
 	let content: React.ReactNode;
 	if (run) {
-		content = <ForkWorkflowRunSummary run={run} error={error} />;
+		content = (
+			<ForkWorkflowRunSummary
+				run={run}
+				error={error}
+				canWriteChat={canWriteChat}
+				isResumeAvailable={isResumeAvailable}
+			/>
+		);
 	} else if (error) {
 		content = <ErrorAlert error={error} showDebugDetail={false} />;
 	} else {
@@ -96,11 +112,16 @@ export const ForkWorkflowRunDetailView: React.FC<
 type ForkWorkflowRunSummaryProps = {
 	run: WorkflowRunDetail;
 	error: unknown;
+	canWriteChat: boolean | undefined;
+	/** Plan mode turns omit run_workflow, so Resume cannot work. */
+	isResumeAvailable: boolean;
 };
 
 const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 	run,
 	error,
+	canWriteChat,
+	isResumeAvailable,
 }) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
@@ -128,7 +149,14 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				>
 					{run.title || run.script.slice(0, 200) || "Untitled run"}
 				</h3>
-				<ForkWorkflowRunStopButton run={run} fallbackFocusRef={headingRef} />
+				{canWriteChat === true && (
+					<>
+						<ForkWorkflowStopButton run={run} fallbackFocusRef={headingRef} />
+						{run.status === "interrupted" && isResumeAvailable && (
+							<ForkWorkflowResumeButton runId={run.id} chatId={run.chat_id} />
+						)}
+					</>
+				)}
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">
 				{[
@@ -140,7 +168,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			<div className="mt-1 font-mono text-xs text-content-secondary">
 				Run {run.id}
 			</div>
-			{run.status === "interrupted" && (
+			{run.status === "interrupted" && canWriteChat !== true && (
 				<p className="m-0 mt-1.5 text-xs text-content-secondary">
 					The server restarted during this run. Resume it by asking the agent.
 				</p>
@@ -166,76 +194,5 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			<ForkWorkflowLongText label="Script" text={run.script} />
 		</section>
-	);
-};
-
-type ForkWorkflowRunStopButtonProps = {
-	run: WorkflowRunDetail;
-	/** Receives focus when the dialog closes after the Stop button unmounted. */
-	fallbackFocusRef: React.RefObject<HTMLElement | null>;
-};
-
-const ForkWorkflowRunStopButton: React.FC<ForkWorkflowRunStopButtonProps> = ({
-	run,
-	fallbackFocusRef,
-}) => {
-	const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-	const stopButtonRef = useRef<HTMLButtonElement>(null);
-	const queryClient = useQueryClient();
-	const stopMutation = useMutation(
-		stopWorkflowRun(queryClient, run.chat_id, run.id),
-	);
-	// Resetting the state, rather than hiding the dialog, keeps a resumed run
-	// from reopening it.
-	if (isConfirmOpen && run.status !== "running" && !stopMutation.isPending) {
-		setIsConfirmOpen(false);
-	}
-
-	const handleStop = () => {
-		stopMutation.mutate(undefined, {
-			onError: (error) => {
-				toast.error(
-					getErrorMessage(error, "Failed to stop the workflow run."),
-					{ description: getErrorDetail(error) },
-				);
-			},
-			onSettled: () => setIsConfirmOpen(false),
-		});
-	};
-
-	return (
-		<>
-			{run.status === "running" && (
-				<Button
-					ref={stopButtonRef}
-					variant="outline"
-					size="sm"
-					onClick={() => setIsConfirmOpen(true)}
-				>
-					<SquareIcon />
-					Stop
-				</Button>
-			)}
-			<ConfirmDialog
-				open={isConfirmOpen}
-				onClose={() => {
-					if (!stopMutation.isPending) {
-						setIsConfirmOpen(false);
-					}
-				}}
-				onConfirm={handleStop}
-				// The Stop button unmounts once the run ends, including on a
-				// successful stop, so focus falls back to the run heading.
-				onCloseAutoFocus={(event) => {
-					event.preventDefault();
-					(stopButtonRef.current ?? fallbackFocusRef.current)?.focus();
-				}}
-				title="Stop workflow run"
-				description="The script stops, and steps that are still running fail and stop their child chats. This cannot be undone."
-				confirmText="Stop run"
-				confirmLoading={stopMutation.isPending}
-				type="delete"
-			/>
-		</>
 	);
 };
