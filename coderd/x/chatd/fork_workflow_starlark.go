@@ -491,6 +491,12 @@ func (r *workflowRun) setPhase(ctx context.Context, name string) error {
 			return xerrors.Errorf("phase %q would exceed the %d-phase cap", name, maxWorkflowPhases)
 		}
 		r.phases = append(r.phases, name)
+	} else if r.currentPhase == name {
+		// A generated script can call phase() in a loop. Re-entering the
+		// phase it already holds changes nothing, so it skips the journal
+		// write and its UPDATE.
+		r.mu.Unlock()
+		return nil
 	}
 	r.currentPhase = name
 	snapshot := &workflowPhases{names: append([]string(nil), r.phases...), current: name}

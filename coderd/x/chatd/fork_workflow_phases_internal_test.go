@@ -92,6 +92,30 @@ func TestForkWorkflowPhases(t *testing.T) {
 		assert.Equal(t, "review", stepRows[2].Phase)
 	})
 
+	t.Run("RepeatedPhaseCallSkipsTheJournalWrite", func(t *testing.T) {
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A script that re-enters its current phase in a loop is a no-op: it
+		// must not journal a write per call.
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+PHASES = ["plan"]
+
+def main(args):
+    phase("plan")
+    for i in range(50):
+        phase("plan")
+    agent("Plan.", title = "plan")
+`})
+		steps := f.steps(ctx, t, run, 1)
+		assert.Equal(t, "plan", steps[0].Phase)
+		f.report(ctx, t, steps[0].ChatID, `{"text":"done"}`)
+		res := testutil.RequireReceive(ctx, t, awaitRegistered(ctx, t, run))
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		assert.Equal(t, []string{"plan"}, res.Phases)
+		assert.Equal(t, "plan", res.CurrentPhase)
+	})
+
 	t.Run("UndeclaredNameIsAcceptedAndAppended", func(t *testing.T) {
 		f := newForkWorkflowFixture(t)
 		ctx := chatdTestContext(t)
