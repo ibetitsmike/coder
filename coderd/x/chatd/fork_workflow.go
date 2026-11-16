@@ -141,7 +141,7 @@ type runWorkflowResult struct {
 	// the way to a stopped result. finish logs their failure lines; the
 	// lines of steps failed earlier already sit in the logs, so a resume
 	// does not log them twice. The field is not serialized.
-	interruptedSteps []*workflowStep `json:"-"`
+	interruptedSteps []*workflowStep `json:"-"` //nolint:revive // the tag documents that the field never serializes
 }
 
 type stepSummary struct {
@@ -921,7 +921,7 @@ func (r *workflowRun) rearmLogFlush() {
 // snapshot cannot replace newer lines: the newer caller waits for the
 // channel and then wins the seq check. The journal query drops a payload
 // older than the stored sequence on top.
-func (r *workflowRun) flushLogs(terminal bool) {
+func (r *workflowRun) flushLogs(terminal bool) { //nolint:revive // one flush path, two wait rules; a bool keeps the call sites readable
 	if r.journalLogWrite == nil {
 		return
 	}
