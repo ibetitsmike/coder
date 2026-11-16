@@ -41,27 +41,13 @@ func (p *Server) ForkChatFamilyCapacity(ctx context.Context, root database.Chat)
 		MaxLiveSubagents:   int64(limits.maxLivePerFamily),
 		WaitingForCapacity: []uuid.UUID{},
 	}
-	maxConcurrent := p.subagentPoolLimit(p.agentCapacityLimiter)
-	if maxConcurrent == 0 && limits.maxConcurrent == 0 && limits.maxConcurrentPerFamily == 0 {
+	if !p.subagentConcurrencyLimited(limits) {
 		return family, nil
 	}
-	awaiting, err := fdb.GetFamilySubagentsAwaitingWorker(ctx, forkdb.GetFamilySubagentsAwaitingWorkerParams{
-		RootChatID:     root.ID,
-		OrganizationID: root.OrganizationID,
-		StaleSeconds:   int32(p.inFlightChatStaleAfter.Seconds()),
-	})
+	waiting, err := p.subagentsWaitingForCapacity(ctx, fdb, limits, nil, uuid.NullUUID{UUID: root.ID, Valid: true})
 	if err != nil {
-		return codersdk.ForkChatFamilyCapacity{}, xerrors.Errorf("list subagents awaiting a worker: %w", err)
+		return codersdk.ForkChatFamilyCapacity{}, xerrors.Errorf("list subagents waiting for capacity: %w", err)
 	}
-	for _, row := range awaiting {
-		counts := forkdb.CountActiveSubagentsForCapacityRow{
-			ActiveCount:             row.ActiveCount,
-			ActiveOrganizationCount: row.ActiveOrganizationCount,
-			ActiveFamilyCount:       row.ActiveFamilyCount,
-		}
-		if subagentCapacityFull(counts, maxConcurrent, limits) {
-			family.WaitingForCapacity = append(family.WaitingForCapacity, row.ChatID)
-		}
-	}
+	family.WaitingForCapacity = waiting
 	return family, nil
 }
