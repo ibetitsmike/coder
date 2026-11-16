@@ -2,12 +2,16 @@ package coderd_test
 
 import (
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/pluginpacks/pluginpackstest"
 	"github.com/coder/coder/v2/codersdk"
@@ -88,6 +92,98 @@ func TestForkPluginPacks(t *testing.T) {
 	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
 	_, err = client.ForkPluginPack(ctx, orgID, pack.ID)
 	_ = requireSDKError(t, err, http.StatusNotFound)
+}
+
+// TestForkPluginPacksAudit checks that every change to the sources and packs
+// of an organization is audited, and that a denied request is not.
+func TestForkPluginPacksAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	repo := pluginpackstest.New(t)
+	auditor := audit.NewMock()
+	client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+		Auditor: auditor,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkPluginPacks)}
+		}),
+	})
+	api.HTTPClient = repo.Client
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+
+	_, err := client.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1"}})
+	require.NoError(t, err)
+	// A key that may update but not read the sources can still update them.
+	_, token := dbgen.APIKey(t, api.Database, database.APIKey{
+		UserID: owner.UserID,
+		Scopes: database.APIKeyScopes{"organization:read", "organization_skill:update"},
+	})
+	updater := codersdk.New(client.URL)
+	updater.SetSessionToken(token)
+	_, err = updater.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1", "example.com"}})
+	require.NoError(t, err)
+	install := codersdk.CreateForkPluginPackRequest{Name: "demo", SourceURL: repo.URL, SourcePath: "pack", Ref: "main"}
+	_, err = member.CreateForkPluginPack(ctx, orgID, install)
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	pack, err := client.CreateForkPluginPack(ctx, orgID, install)
+	require.NoError(t, err)
+	_, err = client.UpdateForkPluginPack(ctx, orgID, pack.ID, codersdk.UpdateForkPluginPackRequest{Ref: "v1"})
+	require.NoError(t, err)
+	require.NoError(t, client.DeleteForkPluginPack(ctx, orgID, pack.ID))
+
+	sources := forkAuditEntries(t, auditor, orgID, "plugin_pack_sources")
+	require.Len(t, sources, 2)
+	require.Equal(t, "update", sources[0].Operation)
+	require.JSONEq(t, `[]`, string(sources[0].Changes["hosts"].Old))
+	require.JSONEq(t, `["127.0.0.1"]`, string(sources[0].Changes["hosts"].New))
+	require.JSONEq(t, `["127.0.0.1"]`, string(sources[1].Changes["hosts"].Old))
+	require.JSONEq(t, `["127.0.0.1","example.com"]`, string(sources[1].Changes["hosts"].New))
+
+	entries := forkAuditEntries(t, auditor, orgID, "plugin_pack")
+	require.Len(t, entries, 3, "the denied install is not audited")
+	for i, op := range []string{"create", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, pack.ID.String(), entries[i].ResourceID)
+		require.Equal(t, "demo", entries[i].ResourceName)
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+	require.JSONEq(t, `"`+repo.Second+`"`, string(entries[0].Changes["commit_sha"].New))
+	require.JSONEq(t, `"main"`, string(entries[1].Changes["ref"].Old))
+	require.JSONEq(t, `"v1"`, string(entries[1].Changes["ref"].New))
+	require.JSONEq(t, `"`+repo.First+`"`, string(entries[1].Changes["commit_sha"].New))
+	require.JSONEq(t, `"demo"`, string(entries[2].Changes["name"].Old))
+	require.Empty(t, entries[2].Changes["name"].New)
+}
+
+// TestForkPluginPacksPrivateAddress checks that an allowed source host that
+// resolves to loopback is refused without a request when the deployment
+// allows no private CIDRs.
+func TestForkPluginPacksPrivateAddress(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	repo := pluginpackstest.New(t)
+	client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkPluginPacks)}
+		}),
+		MCPAllowedPrivateCIDRs: []netip.Prefix{},
+	})
+	api.HTTPClient = repo.Client
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	_, err := client.UpdateForkPluginPackSources(ctx, orgID, codersdk.ForkPluginPackSources{Hosts: []string{"127.0.0.1", "localhost"}})
+	require.NoError(t, err)
+
+	for _, src := range []string{repo.URL, strings.Replace(repo.URL, "127.0.0.1", "localhost", 1)} {
+		_, err = client.CreateForkPluginPack(ctx, orgID, codersdk.CreateForkPluginPackRequest{Name: "demo", SourceURL: src, SourcePath: "pack", Ref: "main"})
+		sdkErr := requireSDKError(t, err, http.StatusBadRequest)
+		require.Contains(t, sdkErr.Detail, "private or reserved address", src)
+		require.NotContains(t, sdkErr.Detail, "127.0.0.1", src)
+	}
+	require.Zero(t, repo.Requests(), "a refused address must not reach the server")
 }
 
 func skillHash(t *testing.T, pack codersdk.ForkPluginPack) string {
