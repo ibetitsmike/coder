@@ -47,7 +47,7 @@ func TestChatsExpandedChat(t *testing.T) {
 func TestGetDescendantChatsByRootIDs(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	fdb := mustFrom(t, db)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
@@ -104,6 +104,24 @@ func TestGetDescendantChatsByRootIDs(t *testing.T) {
 	require.ElementsMatch(t, []uuid.UUID{archivedChild.ID, greatGrandchild.ID, grandchild.ID, legacyChild.ID, child.ID}, ids(sql.NullBool{}))
 	require.ElementsMatch(t, []uuid.UUID{greatGrandchild.ID, grandchild.ID, legacyChild.ID, child.ID}, ids(sql.NullBool{Bool: false, Valid: true}))
 	require.Equal(t, []uuid.UUID{archivedChild.ID}, ids(sql.NullBool{Bool: true, Valid: true}))
+
+	// Deleting a family root sets root_chat_id and the child's
+	// parent_chat_id to NULL, so the child becomes a root and its
+	// descendants have no root_chat_id. Its whole subtree is still read.
+	oldRoot := chat(nil, nil)
+	promoted := chat(&oldRoot, &oldRoot)
+	promotedChild := chat(&oldRoot, &promoted)
+	promotedGrandchild := chat(&oldRoot, &promotedChild)
+	_, err = sqlDB.ExecContext(ctx, "DELETE FROM chats WHERE id = $1", oldRoot.ID)
+	require.NoError(t, err)
+	rows, err := fdb.GetDescendantChatsByRootIDs(ctx, forkdb.GetDescendantChatsByRootIDsParams{RootIds: []uuid.UUID{promoted.ID}})
+	require.NoError(t, err)
+	var got []uuid.UUID
+	for _, row := range rows {
+		require.False(t, row.ChatsExpanded.RootChatID.Valid)
+		got = append(got, row.ChatsExpanded.ID)
+	}
+	require.ElementsMatch(t, []uuid.UUID{promotedChild.ID, promotedGrandchild.ID}, got)
 }
 
 // DescendantsByLevel returns the reached rows level by level in the order
