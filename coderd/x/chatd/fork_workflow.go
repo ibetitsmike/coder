@@ -143,10 +143,10 @@ type runWorkflowResult struct {
 	// Phases lists the phases of the run in display order and CurrentPhase
 	// names the one the script set last. Both are empty for a run whose
 	// script uses no phases. Phases is a JSON array, never null.
-	Phases []string      `json:"phases"`
-	CurrentPhase string  `json:"current_phase,omitempty"`
-	Steps  []stepSummary `json:"steps"`
-	Logs   []string      `json:"logs,omitempty"`
+	Phases       []string      `json:"phases"`
+	CurrentPhase string        `json:"current_phase,omitempty"`
+	Steps        []stepSummary `json:"steps"`
+	Logs         []string      `json:"logs,omitempty"`
 	// interruptedSteps holds the steps that interruptOpenSteps failed on
 	// the way to a stopped result. finish logs their failure lines; the
 	// lines of steps failed earlier already sit in the logs, so a resume
