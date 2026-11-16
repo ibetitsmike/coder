@@ -1,10 +1,9 @@
 // This file is fork code: stories for the step list of a Starlark workflow
-// run (fork-workflows experiment). The Pixel captures hold the visual
-// assertions for the phase groupings; the Vitest suite in
-// ForkWorkflowSteps.test.tsx holds the behavioral coverage.
+// run (fork-workflows experiment). Pixel screenshots these stories to capture
+// the visual phase groupings; the Vitest suite in ForkWorkflowSteps.test.tsx
+// pins the aria-described-by wiring those headings provide.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
 import { ForkWorkflowSteps } from "./ForkWorkflowSteps";
 import type { ForkWorkflowStep } from "./forkWorkflows";
 
@@ -32,7 +31,6 @@ const meta = {
 	component: ForkWorkflowSteps,
 	parameters: {
 		layout: "centered",
-		pixel: { exclude: true },
 	},
 	decorators: [
 		(Story) => (
@@ -42,9 +40,9 @@ const meta = {
 		),
 	],
 	args: {
-		phases: MockChatWorkflowRunDetail.phases,
-		currentPhase: MockChatWorkflowRunDetail.current_phase,
-		runStatus: MockChatWorkflowRunDetail.status,
+		phases: ["plan", "build"],
+		currentPhase: "build",
+		runStatus: "running",
 		steps: [],
 	},
 } satisfies Meta<typeof ForkWorkflowSteps>;
