@@ -604,6 +604,12 @@ def main(args):
 			return len(journalRunLogs(ctx, t, fdb, run.id)) == 1
 		}, testutil.IntervalFast)
 
+		// The first journal line is in: wait for the step to be open in
+		// the run before holding the token, or the stop could land while
+		// startStep is still journaling and fail on a step the run does
+		// not hold yet, which is the likelier source of the round 7 flake.
+		f.steps(ctx, t, run, 1)
+
 		// Waiting for the first journal line can take most of the
 		// sub-test budget on a slow runner, so the stop and the
 		// post-stop window below run on a fresh context.
@@ -613,7 +619,7 @@ def main(args):
 		// A stale stamp makes the next attempt go immediate: the paced
 		// attempt that races the stop drops on the held token.
 		run.journalMu.Lock()
-		run.lastLogFlush = time.Now().Add(-workflowLogFlushInterval)
+		run.lastLogFlush = run.p.clock.Now().Add(-workflowLogFlushInterval)
 		base := run.flushAttempts
 		run.journalMu.Unlock()
 		run.log("second line")
@@ -641,7 +647,7 @@ def main(args):
 		// stale by construction. Without the flag, the immediate attempt
 		// drops on the token and arms a fallback that outlives the run.
 		run.journalMu.Lock()
-		run.lastLogFlush = time.Now().Add(-2 * workflowLogFlushInterval)
+		run.lastLogFlush = run.p.clock.Now().Add(-2 * workflowLogFlushInterval)
 		run.journalMu.Unlock()
 		// The late line goes through run.log, the real script path, so its
 		// scheduleLogFlush attempt is covered too: appendLineLocked alone
@@ -656,45 +662,29 @@ def main(args):
 		// the terminal flush still waits for the held token. Give it
 		// back, and the final write lands. The stop also failed the
 		// agent step, so the terminal write carries a step failure line
-		// with the two script lines and the late one. The failure line
-		// itself depends on how the unwind races the step child: the
-		// stop marks the open step with the stop reason, but if the
-		// child ends first, waitStep fails the step with the no-report
-		// line. Both are correct terminal behavior, so the assertion
-		// accepts either. A timeout prints the logs it last saw, since
-		// a loaded runner can leave the last write anywhere along the
-		// stop path and a bare eventually cannot show what it read.
+		// with the two script lines and the late one. Only the stop line
+		// is possible: interruptOpenSteps runs before finish, and finish
+		// blocks on the held token in that flush, so waitStep, which
+		// would log the no-report failure, never runs while the run is
+		// stopping. A timeout prints the logs it last saw, since a
+		// loaded runner can leave the last write anywhere along the stop
+		// path and a bare eventually cannot show what it read.
 		stopLine := `step "Never reports." failed: ` + workflowStopError
-		noReportLine := `step "Never reports." failed: the step stopped without a workflow_report call`
 		release()
-		want := [][]string{
-			{"first line", "second line", stopLine, "late line"},
-			{"first line", "second line", noReportLine, "late line"},
-		}
-		matches := func(logs []string) bool {
-			for _, candidate := range want {
-				if assert.ObjectsAreEqual(candidate, logs) {
-					return true
-				}
-			}
-			return false
-		}
-		deadline := time.Now().Add(30 * time.Second)
+		want := []string{"first line", "second line", stopLine, "late line"}
 		var lastSeen []string
-		for {
+		testutil.Eventually(ctx, t, func(context.Context) bool {
 			row, err := fdb.GetWorkflowRun(context.Background(), run.id)
 			if err == nil {
 				logs, _, _ := restoreWorkflowLogs(row.Logs)
-				if matches(logs) {
-					break
+				if assert.ObjectsAreEqual(want, logs) {
+					return true
 				}
 				lastSeen = logs
 			}
-			if time.Now().After(deadline) {
-				t.Fatalf("the terminal flush never carried the stop lines; last logs seen: %q", lastSeen)
-			}
-			time.Sleep(testutil.IntervalFast)
-		}
+			return false
+		}, testutil.IntervalFast,
+			"the terminal flush never carried the stop lines; last logs seen: %q", lastSeen)
 
 		// Three full intervals after the end: a leaked fallback would
 		// have fired and re-armed in that window. The attempts must stay

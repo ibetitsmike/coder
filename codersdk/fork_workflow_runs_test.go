@@ -50,6 +50,17 @@ func TestWorkflowRunDetailUnmarshalExactNumbers(t *testing.T) {
 	assert.Nil(t, absent.Result, "an absent result key must stay nil")
 }
 
+// TestWorkflowRunDetailUnmarshalArgsAbsent pins that an absent args key
+// keeps Args nil instead of becoming a JSON null.
+func TestWorkflowRunDetailUnmarshalArgsAbsent(t *testing.T) {
+	t.Parallel()
+
+	var absent WorkflowRunDetail
+	withoutArgs := `{"id":"497f6eca-6276-4993-bfeb-53cbbbba6f08","chat_id":"efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86","status":"completed","error":"","created_at":"2019-08-24T14:15:22Z","updated_at":"2019-08-24T14:15:22Z","title":"","script":"","logs":[],"phases":[],"current_phase":"","steps":[]}`
+	require.NoError(t, json.Unmarshal([]byte(withoutArgs), &absent))
+	assert.Nil(t, absent.Args, "an absent args key must stay nil")
+}
+
 func fieldValue(detail WorkflowRunDetail, name string) any {
 	switch name {
 	case "Args":

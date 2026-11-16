@@ -406,6 +406,42 @@ def main(args):
 	})
 }
 
+// TestForkWorkflowInlineArgsExact pins that the journal holds the args
+// bytes the caller sent: a number outside the float64 exact range must
+// not round when args.Args has decoded it into Go values first.
+func TestForkWorkflowInlineArgsExact(t *testing.T) {
+	t.Parallel()
+	f := newForkWorkflowFixture(t)
+	ctx := chatdTestContext(t)
+	parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+	callInput := `{"script":"def main(args):\n    return {\"big\": args[\"big\"]}\n","args":{"big":9007199254740993}}`
+	var args runWorkflowArgs
+	require.NoError(t, json.Unmarshal([]byte(callInput), &args))
+	var raw struct {
+		Args json.RawMessage `json:"args"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(callInput), &raw))
+	args.rawArgs = raw.Args
+	callID := uuid.New()
+	run, err := f.server.startWorkflowRun(ctx, parent, f.model.ID, args, callID)
+	require.NoError(t, err)
+	fdb := forkWorkflowDB(t, f.db)
+	row, err := fdb.GetWorkflowRun(ctx, run.id)
+	require.NoError(t, err)
+	assert.Contains(t, string(row.Args), "9007199254740993",
+		"the journaled args must carry the big integer exactly")
+	assert.NotContains(t, string(row.Args), "9007199254740992",
+		"the journaled args must not round the big integer")
+
+	// The script reads args["big"] and spawns no step, so the run ends
+	// at once and the result keeps the exact value main(args) received.
+	res := run.await(ctx, testutil.WaitLong)
+	require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	assert.Contains(t, string(res.Result), "9007199254740993",
+		"main(args) must read the big integer exactly")
+	assert.NotContains(t, string(res.Result), "9007199254740992")
+}
+
 func TestForkWorkflowLimit(t *testing.T) {
 	t.Parallel()
 	f := newForkWorkflowFixture(t)

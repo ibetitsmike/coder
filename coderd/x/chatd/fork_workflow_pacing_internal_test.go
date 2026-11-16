@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/quartz"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/testutil"
@@ -192,8 +193,11 @@ def main(args):
 		}
 		// Five lines back to back inside one interval: the paced path
 		// must fold them into one timer, so the bound below (two attempts
-		// per interval) must still hold for the burst as a whole. An
-		// unpaced path flushes per line and trips it.
+		// per interval) must still hold for the burst as a whole. A path
+		// that flushed per line would trip the bound, and the tail lines
+		// would also land unjournaled until the next interval instead of
+		// arriving with the burst's last write (pinned by the stamp check
+		// below).
 		for i := 0; i < 5; i++ {
 			run.log(fmt.Sprintf("same-interval line %d", i))
 		}

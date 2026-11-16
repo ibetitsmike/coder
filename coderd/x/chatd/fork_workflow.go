@@ -21,9 +21,10 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/coder/quartz"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
+
+	"github.com/coder/quartz"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
@@ -118,7 +119,9 @@ type runWorkflowArgs struct {
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
-	// rawArgs is args as the model sent them, before Args rounded its numbers.
+	// rawArgs is args as the model sent them, before Args decoded it into
+	// Go values. startWorkflowRun journals these bytes, so main(args) and
+	// the run detail read the exact value the caller sent.
 	rawArgs json.RawMessage
 }
 
@@ -507,7 +510,13 @@ func (p *Server) startWorkflowRun(
 		return nil, err
 	}
 	argsJSON := "{}"
-	if args.Args != nil {
+	if len(args.rawArgs) > 0 {
+		// rawArgs is the args bytes as the caller sent them. Marshaling
+		// args.Args instead would re-encode the value the Go decode built, and
+		// a number outside the float64 exact range would round: the script
+		// and the journal would hold a value main(args) never received.
+		argsJSON = string(args.rawArgs)
+	} else if args.Args != nil {
 		raw, err := json.Marshal(args.Args)
 		if err != nil {
 			return nil, xerrors.Errorf("marshal args: %w", err)
@@ -909,7 +918,7 @@ func (r *workflowRun) scheduleLogFlush() {
 		// terminal flush already carried or will carry.
 		return
 	}
-	now := r.p.clock.Now()
+	now := r.p.clock.Now("chatd", "workflow_log_flush")
 	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
 	if wait <= 0 {
 		// The stamp moves with the attempt, not the write: a write held up
@@ -962,12 +971,15 @@ func (r *workflowRun) armLogFlushTimerLocked() {
 	if r.logFlushTimer != nil || r.logFlushInFlight || r.flushClosing {
 		return
 	}
-	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now())
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now("chatd", "workflow_log_flush"))
 	if wait <= 0 {
 		wait = time.Nanosecond
 	}
+	// The quartz Clock.AfterFunc signature puts the tags after fn, and the
+	// call must stay readable as a timer arm, so the tags sit on the Now
+	// reads inside instead of on the arm itself.
 	r.logFlushTimer = r.p.clock.AfterFunc(wait, func() {
-		now := r.p.clock.Now()
+		now := r.p.clock.Now("chatd", "workflow_log_flush")
 		r.journalMu.Lock()
 		r.logFlushTimer = nil
 		// The attempt is the timer firing, not the write: the flush
@@ -1014,7 +1026,7 @@ func (r *workflowRun) cancelLogFlush() {
 	r.journalMu.Lock()
 	r.flushClosing = true
 	if r.logFlushTimer != nil {
-		r.logFlushTimer.Stop("chatd", "workflow-log-flush")
+		r.logFlushTimer.Stop("chatd", "workflow_log_flush")
 		r.logFlushTimer = nil
 	}
 	r.journalMu.Unlock()

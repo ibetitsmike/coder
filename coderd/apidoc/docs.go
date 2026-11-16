@@ -25831,20 +25831,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -39302,7 +39302,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "args": {
-                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. Numbers\ndecode without rounding: see UnmarshalJSON."
+                    "description": "Args is the JSON value that main(args) received. It is usually an\nobject, but an inline script may be given any JSON value. The API\nreturns the args bytes the run was started with, so a client that\nreads them through json.RawMessage keeps them exact."
                 },
                 "chat_id": {
                     "type": "string",
@@ -39341,7 +39341,7 @@ const docTemplate = `{
                     }
                 },
                 "result": {
-                    "description": "Result is the value that main returned, for a terminal run. Numbers\ndecode without rounding: see UnmarshalJSON."
+                    "description": "Result is the value that main returned, for a terminal run. The API\nreturns the result bytes main encoded, so a client that reads them\nthrough json.RawMessage keeps them exact."
                 },
                 "script": {
                     "type": "string"

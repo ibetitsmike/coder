@@ -114,11 +114,13 @@ type WorkflowRunDetail struct {
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
 	// Args is the JSON value that main(args) received. It is usually an
-	// object, but an inline script may be given any JSON value. Numbers
-	// decode without rounding: see UnmarshalJSON.
+	// object, but an inline script may be given any JSON value. The API
+	// returns the args bytes the run was started with, so a client that
+	// reads them through json.RawMessage keeps them exact.
 	Args any `json:"args"`
-	// Result is the value that main returned, for a terminal run. Numbers
-	// decode without rounding: see UnmarshalJSON.
+	// Result is the value that main returned, for a terminal run. The API
+	// returns the result bytes main encoded, so a client that reads them
+	// through json.RawMessage keeps them exact.
 	Result any `json:"result,omitempty"`
 	// Logs are the last log lines the script printed: from the snapshot of
 	// a terminal run, or written through to the journal while it runs.
@@ -155,7 +157,9 @@ func (d *WorkflowRunDetail) UnmarshalJSON(data []byte) error {
 		d.Result = alias.Result
 	}
 	return nil
-} // WorkflowRunListOptions is the pagination of a chat's workflow run list.
+}
+
+// WorkflowRunListOptions is the pagination of a chat's workflow run list.
 type WorkflowRunListOptions struct {
 	// After is the cursor of the previous page:
 	// <created_at RFC3339>/<run ID>. Empty reads the first page.
