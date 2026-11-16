@@ -205,7 +205,7 @@ const ForkWorkflowTool: React.FC<ForkWorkflowToolProps> = ({
 					<div
 						ref={runRowRef}
 						tabIndex={-1}
-						className="mt-1.5 font-mono text-xs text-content-secondary focus:outline-hidden"
+						className="mt-1.5 font-mono text-xs text-content-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
 					>
 						{`Run ${snapshot.runId}`}
 					</div>
@@ -259,6 +259,8 @@ const ForkWorkflowRunControls: React.FC<{
 	// The chat page already loads this chat, so this reads the cached copy.
 	const chatQuery = useQuery({ ...chat(chatId ?? ""), enabled: !!chatId });
 	const canWriteChat = useCanWriteChat(chatQuery.data);
+	// Plan mode turns omit run_workflow, so a resume could not run it.
+	const isResumeAvailable = chatQuery.data?.plan_mode !== "plan";
 	const run: WorkflowRunDetail | undefined =
 		detail &&
 		detail.chat_id === chatId &&
@@ -272,7 +274,7 @@ const ForkWorkflowRunControls: React.FC<{
 	return (
 		<div className="flex items-center gap-1.5">
 			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
-			{run.status === "interrupted" && (
+			{run.status === "interrupted" && isResumeAvailable && (
 				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
 			)}
 		</div>

@@ -71,6 +71,8 @@ export const ForkWorkflowRunDetailView: React.FC<
 	// copy when it has one.
 	const chatQuery = useQuery({ ...chat(run?.chat_id ?? ""), enabled: !!run });
 	const canWriteChat = useCanWriteChat(chatQuery.data);
+	// Plan mode turns omit run_workflow, so a resume could not run it.
+	const isResumeAvailable = chatQuery.data?.plan_mode !== "plan";
 	let content: React.ReactNode;
 	if (run) {
 		content = (
@@ -78,6 +80,7 @@ export const ForkWorkflowRunDetailView: React.FC<
 				run={run}
 				error={error}
 				canWriteChat={canWriteChat}
+				isResumeAvailable={isResumeAvailable}
 			/>
 		);
 	} else if (error) {
@@ -110,12 +113,15 @@ type ForkWorkflowRunSummaryProps = {
 	run: WorkflowRunDetail;
 	error: unknown;
 	canWriteChat: boolean | undefined;
+	/** Plan mode turns omit run_workflow, so Resume cannot work. */
+	isResumeAvailable: boolean;
 };
 
 const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 	run,
 	error,
 	canWriteChat,
+	isResumeAvailable,
 }) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
@@ -146,7 +152,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				{canWriteChat === true && (
 					<>
 						<ForkWorkflowStopButton run={run} fallbackFocusRef={headingRef} />
-						{run.status === "interrupted" && (
+						{run.status === "interrupted" && isResumeAvailable && (
 							<ForkWorkflowResumeButton runId={run.id} chatId={run.chat_id} />
 						)}
 					</>

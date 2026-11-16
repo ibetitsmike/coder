@@ -19,6 +19,7 @@ import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowChatId,
 	MockForkWorkflowCompletedResult,
+	MockForkWorkflowRunId,
 	MockForkWorkflowRunningResult,
 	MockForkWorkflowStartedResult,
 	seedChatWriteAccess,
@@ -342,6 +343,52 @@ describe("ForkWorkflowTool", () => {
 			chatId: MockForkWorkflowChatId,
 			prompt: `Resume workflow run ${MockForkWorkflowRunningResult.run_id}`,
 		});
+	});
+
+	it("hides Resume from an interrupted run of a chat in plan mode", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true, {
+			planMode: true,
+		});
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
+			...mockRunningDetail,
+			status: "interrupted",
+		});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /^started workflow/i }),
+		);
+
+		await screen.findByText(`Run ${MockForkWorkflowRunId}`);
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps Stop on a live card of a chat in plan mode", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true, {
+			planMode: true,
+		});
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			mockRunningDetail,
+		);
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /^started workflow/i }),
+		);
+
+		await screen.findByRole("button", { name: "Stop workflow run" });
 	});
 
 	it("reports a failed stop from the live card", async () => {

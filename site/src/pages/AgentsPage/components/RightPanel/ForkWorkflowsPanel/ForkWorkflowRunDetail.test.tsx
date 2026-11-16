@@ -26,15 +26,17 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 // update check are seeded, so the viewer may stop or resume.
 const renderDetail = (
 	run: WorkflowRunDetail,
-	options: { canUpdateChat?: boolean; archived?: boolean } = {},
+	options: {
+		canUpdateChat?: boolean;
+		archived?: boolean;
+		planMode?: boolean;
+	} = {},
 ) => {
 	const queryClient = createTestQueryClient();
-	seedChatWriteAccess(
-		queryClient,
-		run.chat_id,
-		options.canUpdateChat ?? true,
-		options.archived,
-	);
+	seedChatWriteAccess(queryClient, run.chat_id, options.canUpdateChat ?? true, {
+		archived: options.archived,
+		planMode: options.planMode,
+	});
 	const view = (current: WorkflowRunDetail) => (
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -148,5 +150,23 @@ describe("ForkWorkflowRunDetail", () => {
 		expect(
 			screen.queryByRole("button", { name: "Resume run" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("hides Resume while the chat is in plan mode", async () => {
+		renderDetail(
+			{ ...mockRunningRunDetail, status: "interrupted" },
+			{ planMode: true },
+		);
+
+		await screen.findByRole("heading", { name: /review changed files/i });
+		expect(
+			screen.queryByRole("button", { name: "Resume run" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps Stop while the chat is in plan mode", async () => {
+		renderDetail(mockRunningRunDetail, { planMode: true });
+
+		await screen.findByRole("button", { name: "Stop workflow run" });
 	});
 });
