@@ -177,6 +177,7 @@ func (r *Resolver) Resolve(roots []ScanRoot) Snapshot {
 // Snapshot: a canceled context returns an empty Snapshot with
 // SnapshotError set to the context error.
 func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapshot {
+	defer stopTracking(r.trackUncachedResolve(roots)) // fork: fork_resolve_cache.go
 	res := r.normalize()
 	resources, snapErrs := res.walk(ctx, roots)
 	if err := ctx.Err(); err != nil {

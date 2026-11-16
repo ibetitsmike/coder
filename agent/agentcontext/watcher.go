@@ -264,7 +264,7 @@ func (w *Watcher) run() {
 			if !ok {
 				return
 			}
-			w.forgetRemovedWatch(fsw, ev) // fork: fork_resolve_cache.go
+			w.forgetRemovedWatch(ev) // fork: fork_resolve_cache.go
 			if !w.eventRelevant(ev) {
 				continue
 			}

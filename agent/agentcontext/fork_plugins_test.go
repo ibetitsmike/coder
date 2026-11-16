@@ -841,9 +841,12 @@ func resolveSkillSources(root string) []string {
 	return sources
 }
 
+// Not parallel: the settings link lies under no scan root, so a cached
+// pass running beside it would record the link and not be cached
+// (noteSymlinkTarget in fork_resolve_cache.go).
+//
+//nolint:paralleltest,tparallel // See above.
 func TestResolver_PluginPacksClaudeSettingsSymlink(t *testing.T) {
-	t.Parallel()
-
 	home := t.TempDir()
 	cache := filepath.Join(home, ".claude", "plugins", "cache")
 	for _, plugin := range []string{"alpha", "beta"} {

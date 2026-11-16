@@ -380,7 +380,12 @@ func (w *Watcher) addWatch(path string) error {
 // fsnotify drops its watch then, so the directory must leave w.watched for
 // the next Sync to add a watch on whatever takes its place. The event
 // itself is relevant and schedules that re-resolve and Sync.
-func (w *Watcher) forgetRemovedWatch(fsw *fsnotify.Watcher, ev fsnotify.Event) {
+//
+// It must not call into fsnotify. It runs on the goroutine that reads
+// Events and Errors, and fsnotify can block on those channels while it
+// serves a Remove: inotify sends an error with its lock held when it
+// drops a moved watch, and Windows serves Remove on its reader goroutine.
+func (w *Watcher) forgetRemovedWatch(ev fsnotify.Event) {
 	if !ev.Has(fsnotify.Remove) && !ev.Has(fsnotify.Rename) {
 		return
 	}
@@ -392,7 +397,6 @@ func (w *Watcher) forgetRemovedWatch(fsw *fsnotify.Watcher, ev fsnotify.Event) {
 	delete(w.watched, ev.Name)
 	delete(w.cover.dirs, ev.Name)
 	w.cover.gen++
-	_ = fsw.Remove(ev.Name)
 }
 
 // linksUnchanged reports whether every symlink still resolves to the
@@ -548,6 +552,23 @@ func (s *symlinkTargetSet) stop() map[string]string {
 	defer symlinkTargets.mu.Unlock()
 	delete(symlinkTargets.active, s)
 	return s.links
+}
+
+// trackUncachedResolve tracks the symlinks of a resolve that is not a
+// cached pass, which tracks its own, until stopTracking. The links under its
+// scan roots then stay with it instead of going to every running pass, which
+// could not cache its result then.
+func (r *Resolver) trackUncachedResolve(roots []ScanRoot) *symlinkTargetSet {
+	if r.packPass != nil {
+		return nil
+	}
+	return trackSymlinkTargets(roots)
+}
+
+func stopTracking(set *symlinkTargetSet) {
+	if set != nil {
+		set.stop()
+	}
 }
 
 func (s *symlinkTargetSet) holds(link string) bool {

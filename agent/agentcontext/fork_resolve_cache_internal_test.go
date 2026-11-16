@@ -5,12 +5,16 @@ package agentcontext
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/testutil"
@@ -45,7 +49,9 @@ func TestResolvePass_CapabilityFlipIsNotCachedMixed(t *testing.T) {
 
 	// The resolver reads the pack-rows flag once per root. A flip after
 	// the first root and back before the pass ends must not leave a
-	// cached snapshot that lacks the second root's pack rows.
+	// cached snapshot that lacks the second root's pack rows. The pass
+	// pins the flags it read at its start, so the live reader below, which
+	// flips the flag on its first call, is never called.
 	t.Run("Resolver", func(t *testing.T) {
 		t.Parallel()
 		first, second := t.TempDir(), t.TempDir()
@@ -71,6 +77,7 @@ func TestResolvePass_CapabilityFlipIsNotCachedMixed(t *testing.T) {
 		}
 
 		m.resolvePass(context.Background(), m.resolver, roots, w)
+		require.True(t, armed.Load(), "the pass reads its pinned flags, not the live ones")
 		entry, ok := cachedFor(m, w, roots)
 		require.True(t, ok, "a pass with pinned capabilities is cached")
 		require.True(t, hasResource(entry.snap, KindSkill, "review-pr"), "the cached snapshot holds the pack rows its capabilities call for")
@@ -315,6 +322,73 @@ func TestWatcher_SyncReplacesWatchWithoutIdentity(t *testing.T) {
 	defer w.mu.Unlock()
 	require.NotNil(t, w.cover.dirs[dir], "the watch was added again")
 	require.Contains(t, w.watched, dir)
+}
+
+// The event loop keeps reading Events and Errors while watched directories
+// are moved away and deleted. inotify drops a moved watch while it holds
+// its lock, and sends the error for a watch the kernel already dropped on
+// the unbuffered Errors channel, so a Remove from the event loop would wait
+// for that lock forever. Holding w.mu while the directories move and go
+// queues their events, so the loop handles them back to back. Short holds
+// of w.mu after that, as Sync and passes take, delay the loop after each
+// event so inotify takes its lock first.
+func TestWatcher_MovedWatchDirsDoNotBlockEventLoop(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("the blocking send is in the inotify backend")
+	}
+	base := t.TempDir()
+	roots := make([]ScanRoot, 50)
+	for i := range roots {
+		roots[i] = ScanRoot{Path: filepath.Join(base, fmt.Sprintf("r%d", i))}
+		require.NoError(t, os.Mkdir(roots[i].Path, 0o755))
+	}
+	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), OnChange: func() {}})
+	require.NoError(t, err)
+	w.Sync(testutil.Context(t, testutil.WaitShort), roots)
+
+	w.mu.Lock()
+	require.Len(t, w.watched, len(roots))
+	for _, root := range roots {
+		require.NoError(t, os.Rename(root.Path, root.Path+".old"))
+	}
+	for _, root := range roots {
+		require.NoError(t, os.RemoveAll(root.Path+".old"))
+	}
+	w.mu.Unlock()
+
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			w.mu.Lock()
+			time.Sleep(50 * time.Microsecond)
+			w.mu.Unlock()
+			runtime.Gosched()
+		}
+	}()
+	if !assert.Eventually(t, func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return len(w.watched) == 0
+	}, testutil.WaitShort, testutil.IntervalFast, "the event loop forgets every moved watch") {
+		return
+	}
+	closed := make(chan struct{})
+	go func() {
+		_ = w.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(testutil.WaitShort):
+		t.Fatal("Close is blocked")
+	}
 }
 
 // A scan root that was missing when the pass ran and has no watch that
