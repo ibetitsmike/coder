@@ -412,6 +412,10 @@ func (p *Server) startWorkflowRun(
 		}
 		runID = id
 	}
+	// A saved workflow's declared phases seed the run before the script
+	// parses, so the rail shows them without the script repeating the list
+	// in a PHASES global.
+	savedPhases := []string(nil)
 	if run := p.workflows.get(runID); run != nil {
 		if run.parent.ID != chat.ID {
 			return nil, xerrors.New("the run belongs to another chat")
@@ -445,6 +449,7 @@ func (p *Server) startWorkflowRun(
 			return nil, err
 		}
 		args.Script = script
+		savedPhases = saved.Phases
 	}
 	if strings.TrimSpace(args.Script) == "" {
 		return nil, xerrors.New("script is required")
@@ -474,6 +479,7 @@ func (p *Server) startWorkflowRun(
 		script:        args.Script,
 		argsJSON:      argsJSON,
 		seen:          map[string]int{},
+		phases:        savedPhases,
 		done:          make(chan struct{}),
 	})
 	if !added {

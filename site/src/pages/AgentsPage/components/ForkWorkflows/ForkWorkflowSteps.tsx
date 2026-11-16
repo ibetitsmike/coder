@@ -14,9 +14,7 @@ import {
 
 type ForkWorkflowStepsProps = {
 	steps: readonly ForkWorkflowStep[];
-	/** The run's phases in display order; empty when the script uses none. */
 	phases: readonly string[];
-	/** The phase the script set last; empty before the first phase() call. */
 	currentPhase: string;
 };
 

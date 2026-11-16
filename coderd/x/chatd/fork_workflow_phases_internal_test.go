@@ -32,7 +32,9 @@ def main(args):
     agent("Review.", title = "review")
 `
 
-// awaitPhases waits until the run reports the given phase list.
+// awaitPhases waits until the run reports the given phase list. It does
+// not wait for a current phase: a caller that reads the current phase
+// right after the wait must first wait for the step that owns it.
 func awaitPhases(ctx context.Context, t *testing.T, run *workflowRun, want []string) {
 	t.Helper()
 	testutil.Eventually(ctx, t, func(context.Context) bool {
@@ -60,11 +62,13 @@ func TestForkWorkflowPhases(t *testing.T) {
 
 		// The declared phases are visible before the first step starts.
 		awaitPhases(ctx, t, run, []string{"plan", "build", "review"})
-		snap := run.snapshot()
-		assert.Equal(t, "plan", snap.CurrentPhase)
 
+		// The first step only exists once phase("plan") has run, so the
+		// current phase is settled by the time the step is visible.
 		steps := f.steps(ctx, t, run, 1)
 		assert.Equal(t, "plan", steps[0].Phase)
+		snap := run.snapshot()
+		assert.Equal(t, "plan", snap.CurrentPhase)
 		f.report(ctx, t, steps[0].ChatID, `{"text":"plan"}`)
 		steps = f.steps(ctx, t, run, 2)
 		assert.Equal(t, "build", steps[1].Phase)
@@ -128,8 +132,9 @@ PHASES = ["one", "two"]
 def main(args):
     agent("Only step.", title = "solo")
 `})
-		// The run holds the declared list from Init. Read the list the moment
-		// it appears; main can already have started the first step by then.
+		// The run holds the declared list from Init, and no phase() call
+		// has run in this script, so the current phase stays empty no
+		// matter how far main got.
 		awaitPhases(ctx, t, run, []string{"one", "two"})
 
 		step := f.steps(ctx, t, run, 1)[0]

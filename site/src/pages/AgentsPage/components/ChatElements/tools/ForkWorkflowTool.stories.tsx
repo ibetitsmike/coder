@@ -116,6 +116,18 @@ export const RunningWithPendingPhases: Story = {
 	play: expand,
 };
 
+/** A run that declared phases but has not started a step shows the rail alone. */
+export const RunningWithRailOnly: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowRunningResult,
+			phases: ["review", "summarize", "publish"],
+			steps: [],
+		},
+	},
+	play: expand,
+};
+
 /** A run without phases renders as before, with no rail. */
 export const RunningWithoutPhases: Story = {
 	args: {

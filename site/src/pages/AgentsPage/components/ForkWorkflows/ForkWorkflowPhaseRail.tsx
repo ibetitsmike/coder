@@ -23,12 +23,15 @@ const phaseLabelClassName: Record<ForkWorkflowPhaseState, string> = {
 };
 
 type ForkWorkflowPhaseRailProps = {
-	/** The run's phases in display order. */
 	phases: readonly string[];
-	/** The phase the script set last; empty before the first phase() call. */
 	currentPhase: string;
-	/** The run's steps, for the state of each phase. */
 	steps: readonly ForkWorkflowStep[];
+};
+
+const phaseStateLabel: Record<ForkWorkflowPhaseState, string> = {
+	pending: "pending",
+	running: "running",
+	done: "done",
 };
 
 /**
@@ -84,6 +87,7 @@ export const ForkWorkflowPhaseRail: React.FC<ForkWorkflowPhaseRailProps> = ({
 								)}
 							/>
 							{phase}
+							<span className="sr-only"> ({phaseStateLabel[state]})</span>
 						</span>
 					</li>
 				);
