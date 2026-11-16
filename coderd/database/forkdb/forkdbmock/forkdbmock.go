@@ -1787,6 +1787,21 @@ func (mr *MockStoreMockRecorder) ReleasePluginLeases(ctx, runnerID any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleasePluginLeases", reflect.TypeOf((*MockStore)(nil).ReleasePluginLeases), ctx, runnerID)
 }
 
+// RenewPluginLeases mocks base method.
+func (m *MockStore) RenewPluginLeases(ctx context.Context, arg forkdb.RenewPluginLeasesParams) ([]forkdb.RenewPluginLeasesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RenewPluginLeases", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.RenewPluginLeasesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RenewPluginLeases indicates an expected call of RenewPluginLeases.
+func (mr *MockStoreMockRecorder) RenewPluginLeases(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RenewPluginLeases", reflect.TypeOf((*MockStore)(nil).RenewPluginLeases), ctx, arg)
+}
+
 // RetireChatDescendantQuestion mocks base method.
 func (m *MockStore) RetireChatDescendantQuestion(ctx context.Context, arg forkdb.RetireChatDescendantQuestionParams) (int64, error) {
 	m.ctrl.T.Helper()
