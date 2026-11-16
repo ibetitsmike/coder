@@ -97,7 +97,10 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 								)}
 								{step.value !== undefined && (
 									<ForkWorkflowLongText
-										label="Value"
+										// Name the step, so a screen reader listing the
+										// regions reads which step each value belongs
+										// to instead of a bare "Value".
+										label={`${step.title || "Step"} value`}
 										text={formatForkWorkflowValue(step.value)}
 									/>
 								)}

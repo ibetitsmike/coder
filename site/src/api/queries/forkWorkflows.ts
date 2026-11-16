@@ -1,4 +1,5 @@
 import {
+	type InfiniteData,
 	infiniteQueryOptions,
 	mutationOptions,
 	type QueryClient,
@@ -8,15 +9,20 @@ import {
 	getChatWorkflowRun,
 	getChatWorkflowRuns,
 	stopChatWorkflowRun,
+	workflowRunsPageSize,
 } from "#/api/forkWorkflows";
-import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 
 /** Also prefixes each run's key, so invalidating it refetches the details. */
 export const chatWorkflowRunsKey = (chatId: string) =>
 	["chats", "fork-workflow-runs", chatId] as const;
 
-/** The page size of the run list. It matches the server default. */
-const workflowRunsPageSize = 50;
+type WorkflowRunPageParam = { after: string };
+
+/** Whether one of the run list's loaded pages still has a running run. */
+const hasRunningRun = (data: InfiniteData<WorkflowRun[]> | undefined) =>
+	data?.pages.some((page) => page.some((run) => run.status === "running")) ??
+	false;
 
 /**
  * Lists the chat's workflow runs, newest first, as pages that "Load older
@@ -25,10 +31,31 @@ const workflowRunsPageSize = 50;
 export const chatWorkflowRuns = (chatId: string) =>
 	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
-		queryFn: ({ signal, pageParam }) =>
-			getChatWorkflowRuns(chatId, pageParam.after, signal),
-		initialPageParam: { after: "" },
-		getNextPageParam: (lastPage) => {
+		queryFn: ({ client, queryKey, signal, pageParam }) => {
+			// A refetch walks every loaded page, one request per page. Older
+			// pages can only change behind their cursor, so when nothing on
+			// them runs, reuse the cached page instead of fetching it: steady
+			// state costs one request per tick. When a page runs, it is
+			// fetched, and a new run shifts the first page's cursor, so the
+			// page behind it is fetched with its new cursor rather than
+			// reused.
+			if (pageParam.after !== "") {
+				const cached =
+					client.getQueryData<
+						InfiniteData<WorkflowRun[], WorkflowRunPageParam>
+					>(queryKey);
+				const index = cached?.pageParams.findIndex(
+					(param) => param.after === pageParam.after,
+				);
+				const page = cached?.pages[index ?? -1];
+				if (page && !page.some((run) => run.status === "running")) {
+					return page;
+				}
+			}
+			return getChatWorkflowRuns(chatId, pageParam.after, signal);
+		},
+		initialPageParam: { after: "" } as WorkflowRunPageParam,
+		getNextPageParam: (lastPage): WorkflowRunPageParam | undefined => {
 			const last = lastPage[lastPage.length - 1];
 			// A short page has no older runs behind it.
 			if (!last || lastPage.length < workflowRunsPageSize) {
@@ -36,12 +63,10 @@ export const chatWorkflowRuns = (chatId: string) =>
 			}
 			return { after: `${last.created_at}/${last.id}` };
 		},
-		// Runs have no watch socket: poll faster while one is running, and
-		// slowly otherwise so a run the agent starts shows up.
+		// Runs have no watch socket: poll faster while any loaded page has a
+		// run going, and slowly otherwise so a run the agent starts shows up.
 		refetchInterval: ({ state }) =>
-			state.data?.pages[0]?.some((run) => run.status === "running")
-				? 5_000
-				: 30_000,
+			hasRunningRun(state.data) ? 5_000 : 30_000,
 	});
 
 /** Keys one run's detail under its chat's runs. */

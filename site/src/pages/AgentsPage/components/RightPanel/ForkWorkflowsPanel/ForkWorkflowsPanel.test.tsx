@@ -1,10 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "react-query";
+import { type InfiniteData, QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
-import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
 import {
@@ -42,7 +42,7 @@ const renderPanel = (chatId: string) => {
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
-	return router;
+	return { router, queryClient };
 };
 
 describe("ForkWorkflowsPanel", () => {
@@ -55,6 +55,8 @@ describe("ForkWorkflowsPanel", () => {
 			result: undefined,
 			finished_at: undefined,
 		};
+		// The list holds a running run, so the detail fetch loads with
+		// it; the stop does not have to.
 		const getRuns = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
 			.mockResolvedValue([{ ...MockChatWorkflowRun, status: "running" }]);
@@ -129,10 +131,14 @@ describe("ForkWorkflowsPanel", () => {
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 
-	it("shows Load older runs and loads the older page", async () => {
+	it("loads the older page with the last run's cursor", async () => {
 		const chatId = generateUUID();
 		// A full page promises older runs; the cursor page holds one.
-		const firstPage = Array.from({ length: 50 }, () => MockChatWorkflowRun);
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
 		const getRuns = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
 			.mockImplementation((_chatId, after) =>
@@ -143,19 +149,48 @@ describe("ForkWorkflowsPanel", () => {
 		);
 		renderPanel(chatId);
 
-		const loadButton = await screen.findByRole("button", {
-			name: "Load older runs",
-		});
-		await userEvent.setup().click(loadButton);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The cursor page asks for the runs behind the last run of the
+		// first page, as the server's after parameter expects.
+		const last = firstPage[firstPage.length - 1];
+		await userEvent
+			.setup()
+			.click(await screen.findByRole("button", { name: "Load older runs" }));
 		await waitFor(() =>
 			expect(getRuns).toHaveBeenCalledWith(
 				chatId,
-				expect.stringContaining("/"),
+				`${last.created_at}/${last.id}`,
 				expect.anything(),
 			),
 		);
 		const runList = screen.getByRole("list", { name: "Workflow runs" });
 		expect(within(runList).getAllByRole("button")).toHaveLength(51);
+	});
+
+	it("offers no older page after a short page", async () => {
+		const chatId = generateUUID();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			MockChatWorkflowRun,
+		]);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The query itself ends the paging: one page's params and no next
+		// cursor, so a later refresh cannot ask for a page the server never
+		// promised.
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<
+				InfiniteData<WorkflowRun[], { after: string }>
+			>(["chats", "fork-workflow-runs", chatId]);
+			expect(cached?.pageParams).toHaveLength(1);
+			expect(cached?.pageParams[0]?.after).toBe("");
+		});
+		expect(
+			screen.queryByRole("button", { name: "Load older runs" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {
@@ -166,7 +201,7 @@ describe("ForkWorkflowsPanel", () => {
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
 			.mockResolvedValue(MockChatWorkflowRunDetail);
-		const router = renderPanel(chatId);
+		const { router } = renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(

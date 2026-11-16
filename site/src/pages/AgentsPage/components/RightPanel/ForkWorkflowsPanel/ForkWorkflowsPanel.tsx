@@ -56,7 +56,9 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 						error={runsQuery.error}
 						onSelectRun={selectRun}
 						hasOlderRuns={runsQuery.hasNextPage}
-						isLoadingOlderRuns={runsQuery.isFetchingNextPage}
+						// The control also waits out a background refetch, which
+						// would otherwise drop the pages it fetches alongside.
+						isLoadingOlderRuns={runsQuery.isFetching}
 						onLoadOlderRuns={
 							runsQuery.hasNextPage
 								? () => void runsQuery.fetchNextPage()

@@ -156,8 +156,10 @@ const forkWorkflowRunDetailSnapshot = (
 });
 
 /**
- * Applies a run detail to a running tool result. The detail has no logs until
- * the run ends and does not mark reused steps, so those come from the result.
+ * Applies a run detail to a running tool result. The merge keeps the
+ * snapshot's reused flags and drops the detail's step values, so the chat's
+ * tool card reads like the run_workflow result it started as; the panel's
+ * run detail shows the values.
  */
 export const mergeForkWorkflowRunDetail = (
 	snapshot: ForkWorkflowRunSnapshot,
@@ -182,9 +184,15 @@ export const mergeForkWorkflowRunDetail = (
 	return {
 		...detail,
 		...phaseState,
-		steps: detail.steps.map((step) =>
-			reusedChatIds.has(step.chatId) ? { ...step, reused: true } : step,
-		),
+		steps: detail.steps.map((step) => {
+			const merged = reusedChatIds.has(step.chatId)
+				? { ...step, reused: true }
+				: step;
+			// The chat's tool card has no Value blocks: they belong to the
+			// panel's run detail, and await_workflow results never show them.
+			const { value: _value, ...cardStep } = merged;
+			return cardStep;
+		}),
 		logs: detail.logs.length > 0 ? detail.logs : snapshot.logs,
 	};
 };

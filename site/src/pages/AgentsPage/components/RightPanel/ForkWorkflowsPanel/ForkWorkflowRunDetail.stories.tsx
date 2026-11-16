@@ -15,12 +15,20 @@ import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
 const mockRunningRunDetail: WorkflowRunDetail = {
 	...MockChatWorkflowRunDetail,
 	status: "running",
+	// The view names an untitled run after its first step.
 	title: "",
 	result: undefined,
 	logs: [],
 	finished_at: undefined,
 	steps: MockChatWorkflowRunDetail.steps.map((step, index) =>
-		index === 0 ? step : { ...step, status: "running", finished_at: undefined },
+		index === 0
+			? step
+			: {
+					...step,
+					status: "running",
+					value: undefined,
+					finished_at: undefined,
+				},
 	),
 };
 
@@ -28,10 +36,13 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 // report, before the result exists.
 const mockRunningRunDetailWithProgress: WorkflowRunDetail = {
 	...mockRunningRunDetail,
+	logs: ["reviewing coderd/chats.go", "reviewing coderd/users.go"],
 	steps: MockChatWorkflowRunDetail.steps.map((step, index) => ({
 		...step,
 		status: index === 2 ? "running" : "reported",
 		finished_at: index === 2 ? undefined : step.finished_at,
+		// A step that still runs has not reported a value.
+		value: index === 2 ? undefined : step.value,
 	})),
 };
 
@@ -86,6 +97,8 @@ const mockPhasedRunDetail: WorkflowRunDetail = {
 		status: index === 2 ? "running" : "reported",
 		phase: index === 2 ? "summarize" : "review",
 		finished_at: index === 2 ? undefined : step.finished_at,
+		// A step that still runs has not reported a value.
+		value: index === 2 ? undefined : step.value,
 	})),
 };
 

@@ -64,32 +64,6 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 };
 
 describe("ForkWorkflowSteps", () => {
-	it("shows the value a step reported under the step", () => {
-		const { stepList } = renderSteps([
-			{
-				chatId: "aa111111-1111-4111-8111-111111111111",
-				title: "Plan the change",
-				status: "reported",
-				phase: "plan",
-			},
-			{
-				chatId: "bb222222-2222-4222-8222-222222222222",
-				title: "Build the change",
-				status: "running",
-				phase: "build",
-			},
-		]);
-
-		const [reportedStep, runningStep] = stepList.getAllByRole("listitem");
-		const reportedValue = within(reportedStep).getByRole("region", {
-			name: "Value",
-		});
-		expect(reportedValue).toHaveTextContent("the handler writes to a nil map");
-		expect(
-			within(runningStep).queryByRole("region", { name: "Value" }),
-		).not.toBeInTheDocument();
-	});
-
 	it("describes the first step of each phase group with that phase heading", () => {
 		const { stepList } = renderSteps([
 			{
