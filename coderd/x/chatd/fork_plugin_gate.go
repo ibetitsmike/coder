@@ -226,20 +226,31 @@ func packRowSourceFile(r database.ChatContextResource) string {
 	return r.Source
 }
 
-// packCommitPaths is the cached file paths of a pack at one commit.
+// packCommitPaths is the file paths of a pack at one commit.
 type packCommitPaths struct {
 	commit string
 	paths  packPathSet
 }
 
+// packPathsEntry is the cached paths of a pack at its two latest read
+// commits, so a step still pinned to the previous commit keeps its paths
+// while a newer step reads the new ones.
+type packPathsEntry [2]packCommitPaths
+
 // packPaths returns the paths of the pack's files at its current commit. A
 // commit's files never change, so they are read once per commit. The cache
-// holds one entry per pack, replaced when the commit changes. A failed read
-// is logged and returns no paths, so the gate fails closed.
+// holds the two latest commits per pack. A failed read is logged and returns
+// no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
+	var entry packPathsEntry
 	if cached, ok := p.forkPacks.paths.Load(pack.ID); ok {
-		if entry, ok := cached.(packCommitPaths); ok && entry.commit == pack.CommitSHA {
-			return entry.paths
+		if e, ok := cached.(packPathsEntry); ok {
+			entry = e
+		}
+	}
+	for _, c := range entry {
+		if c.paths != nil && c.commit == pack.CommitSHA {
+			return c.paths
 		}
 	}
 	resources, err := p.packResources(ctx, pack.ID)
@@ -251,7 +262,7 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 	for _, resource := range resources {
 		paths[resource.Path] = true
 	}
-	p.forkPacks.paths.Store(pack.ID, packCommitPaths{commit: pack.CommitSHA, paths: paths})
+	p.forkPacks.paths.Store(pack.ID, packPathsEntry{{commit: pack.CommitSHA, paths: paths}, entry[0]})
 	return paths
 }
 

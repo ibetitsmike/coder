@@ -58,7 +58,8 @@ type forkPackState struct {
 	written sync.Map
 	// repinned maps repinKey to the marker a chat was last re-pinned for.
 	repinned sync.Map
-	// paths maps a pack ID to the packCommitPaths of its latest read commit.
+	// paths maps a pack ID to the packPathsEntry of its two latest read
+	// commits.
 	paths sync.Map
 	// swept holds the agent IDs whose managed pack directories this server
 	// has checked for packs no chat on the workspace enables.

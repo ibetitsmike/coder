@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -88,6 +89,101 @@ func TestWorkflowWaitStepSeesFirstNotification(t *testing.T) {
 	defer run.mu.Unlock()
 	require.Equal(t, stepStatusReported, step.status)
 	require.JSONEq(t, `{"text":"hi"}`, string(step.value))
+}
+
+// TestWorkflowAwaitStepChildKeepsDeadline checks that a step child whose
+// state changes on every check does not keep the wait running past the step
+// deadline: each change restarts the wait, and the restarts stop at the
+// deadline so waitStep can fail the step.
+func TestWorkflowAwaitStepChildKeepsDeadline(t *testing.T) {
+	t.Parallel()
+
+	db, _ := dbtestutil.NewDB(t)
+	ps := pubsub.NewInMemory()
+	store := &publishOnEveryCheckStore{Store: db, ps: ps}
+	server := newInternalTestServer(t, store, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
+	user, org, model := seedInternalChatDeps(t, db)
+
+	ctx, cancel := context.WithCancel(chatdTestContext(t))
+	defer cancel()
+	parent := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    org.ID,
+		OwnerID:           user.ID,
+		LastModelConfigID: model.ID,
+		Status:            database.ChatStatusRunning,
+	})
+	child := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    org.ID,
+		OwnerID:           user.ID,
+		ParentChatID:      uuid.NullUUID{UUID: parent.ID, Valid: true},
+		LastModelConfigID: model.ID,
+		Status:            database.ChatStatusRunning,
+	})
+	store.arm(child.ID)
+	run := &workflowRun{
+		p:      server,
+		id:     uuid.New(),
+		parent: parent,
+		seen:   map[string]int{},
+		done:   make(chan struct{}),
+	}
+
+	waited := make(chan error, 1)
+	deadline := time.Now().Add(300 * time.Millisecond)
+	go func() { waited <- run.awaitStepChild(ctx, child.ID, deadline) }()
+	short := testutil.Context(t, testutil.WaitShort)
+	select {
+	case err := <-waited:
+		require.ErrorIs(t, err, ErrSubagentWaitTimeout)
+	case <-short.Done():
+		t.Fatal("awaitStepChild kept restarting past the step deadline")
+	}
+	require.Greater(t, store.count(), 1, "the state changes restarted the wait")
+}
+
+// publishOnEveryCheckStore publishes a state change of the armed child on
+// every completion check of it, while the child keeps running.
+type publishOnEveryCheckStore struct {
+	database.Store
+	ps pubsub.Pubsub
+
+	mu      sync.Mutex
+	childID uuid.UUID
+	checks  int
+}
+
+func (s *publishOnEveryCheckStore) arm(childID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.childID = childID
+}
+
+func (s *publishOnEveryCheckStore) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checks
+}
+
+func (s *publishOnEveryCheckStore) ForkUnwrap() database.Store { return s.Store }
+
+func (*publishOnEveryCheckStore) ForkWrap(inner forkdb.Store) forkdb.Store { return inner }
+
+func (s *publishOnEveryCheckStore) GetChatByID(ctx context.Context, id uuid.UUID) (database.Chat, error) {
+	chat, err := s.Store.GetChatByID(ctx, id)
+	if err != nil || !calledFromCompletionCheck() {
+		return chat, err
+	}
+	s.mu.Lock()
+	armed := id == s.childID
+	if armed {
+		s.checks++
+	}
+	s.mu.Unlock()
+	if armed {
+		_ = s.ps.Publish(coderdpubsub.ChatStateUpdateChannel(id), []byte("{}"))
+	}
+	return chat, nil
 }
 
 // endTurnOnFirstCheckStore ends the turn of the armed child on the first

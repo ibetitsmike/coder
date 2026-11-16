@@ -876,7 +876,7 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.interruptStepChild(ctx, step)
 			return nil
 		}
-		err := r.awaitStepChild(ctx, step.chatID)
+		err := r.awaitStepChild(ctx, step.chatID, deadline)
 		if errors.Is(err, ErrSubagentWaitTimeout) {
 			continue
 		}
@@ -922,7 +922,12 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 // subscribes, so a child that ends its turn in between is seen only at the
 // fallback tick. This subscribes first and restarts the wait when the
 // child's state changes, and the restarted wait reads the child at once.
-func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID) error {
+// No wait runs past deadline, so a child that changes state often still
+// returns control to waitStep, which enforces the step timeout.
+func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID, deadline time.Time) error {
+	waitTimeout := func() time.Duration {
+		return min(defaultSubagentWaitTimeout, deadline.Sub(r.p.clock.Now()))
+	}
 	changed := make(chan struct{}, 1)
 	unsubscribe, err := r.p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(chatID),
 		func(context.Context, []byte, error) {
@@ -932,12 +937,20 @@ func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID) erro
 			}
 		})
 	if err != nil {
+		timeout := waitTimeout()
+		if timeout <= 0 {
+			return ErrSubagentWaitTimeout
+		}
 		// Without a subscription awaitSubagentCompletion polls fast itself.
-		_, _, err = r.p.awaitSubagentCompletion(ctx, r.parent.ID, chatID, defaultSubagentWaitTimeout)
+		_, _, err = r.p.awaitSubagentCompletion(ctx, r.parent.ID, chatID, timeout)
 		return err
 	}
 	defer unsubscribe()
 	for {
+		timeout := waitTimeout()
+		if timeout <= 0 {
+			return ErrSubagentWaitTimeout
+		}
 		waitCtx, cancel := context.WithCancel(ctx)
 		restart := make(chan struct{})
 		go func() {
@@ -948,7 +961,7 @@ func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID) erro
 			case <-waitCtx.Done():
 			}
 		}()
-		_, _, err := r.p.awaitSubagentCompletion(waitCtx, r.parent.ID, chatID, defaultSubagentWaitTimeout)
+		_, _, err := r.p.awaitSubagentCompletion(waitCtx, r.parent.ID, chatID, timeout)
 		cancel()
 		select {
 		case <-restart:

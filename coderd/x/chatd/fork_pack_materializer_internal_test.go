@@ -425,7 +425,7 @@ func TestMaterializePluginPacks(t *testing.T) {
 
 // TestPackPathsCacheOnePerPack checks that the path cache of the plugin gate
 // keeps one entry per pack: a pack that moves through several commits
-// replaces its entry instead of adding one per commit.
+// keeps its two latest commits instead of adding one per commit.
 func TestPackPathsCacheOnePerPack(t *testing.T) {
 	t.Parallel()
 
@@ -474,6 +474,16 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 	setFiles(pack, "skills/changed.md")
 	require.Equal(t, packPathSet{"skills/c3.md": true},
 		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c3"}))
+	// A step still pinned to the previous commit keeps its paths while a
+	// newer step reads the new commit.
+	require.Equal(t, packPathSet{"skills/c2.md": true},
+		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c2"}),
+		"the previous commit stays cached")
+	// An older commit is evicted and read again.
+	require.Equal(t, packPathSet{"skills/changed.md": true},
+		server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: "c1"}),
+		"only two commits stay cached")
+	require.Equal(t, 1, cached())
 
 	other := insertPack("beta")
 	setFiles(other, "skills/beta.md")
