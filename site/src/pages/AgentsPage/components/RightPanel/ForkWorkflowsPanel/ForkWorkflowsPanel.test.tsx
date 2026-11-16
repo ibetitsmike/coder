@@ -10,6 +10,7 @@ import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
 	MockChatWorkflowRunDetail,
+	seedChatWriteAccess,
 } from "#/testHelpers/forkWorkflows";
 import {
 	createTestQueryClient,
@@ -31,8 +32,13 @@ const renderPanel = (chatId: string) => {
 		],
 		{ initialEntries: [chatPath] },
 	);
+	const queryClient = createTestQueryClient();
+	// The seeds stand in for the chat page's cache. The test client's gcTime
+	// is 0, so the helper's infinite staleness opts out of cache eviction: the
+	// run detail only observes them once the user opens a run.
+	seedChatWriteAccess(queryClient, chatId, true);
 	renderComponent(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={queryClient}>
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
@@ -67,14 +73,16 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		expect(stopRun).not.toHaveBeenCalled();
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		expect(stopRun).toHaveBeenCalledWith(chatId, MockChatWorkflowRunDetail.id);
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 		expect(
-			screen.queryByRole("button", { name: "Stop" }),
+			screen.queryByRole("button", { name: "Stop workflow run" }),
 		).not.toBeInTheDocument();
 		expect(
 			screen.getByRole("heading", { name: /review changed files/i }),
@@ -106,7 +114,9 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
-		await user.click(await screen.findByRole("button", { name: "Stop" }));
+		await user.click(
+			await screen.findByRole("button", { name: "Stop workflow run" }),
+		);
 		await user.click(screen.getByRole("button", { name: "Stop run" }));
 
 		await waitFor(() =>

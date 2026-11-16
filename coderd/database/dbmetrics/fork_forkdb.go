@@ -627,6 +627,11 @@ func (f forkQueryMetricsStore) ReleasePluginLeases(ctx context.Context, runnerID
 	return f.s.ReleasePluginLeases(ctx, runnerID)
 }
 
+func (f forkQueryMetricsStore) RenewPluginLeases(ctx context.Context, arg forkdb.RenewPluginLeasesParams) ([]forkdb.RenewPluginLeasesRow, error) {
+	defer f.observe(ctx, "RenewPluginLeases", time.Now())
+	return f.s.RenewPluginLeases(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) RetireChatDescendantQuestion(ctx context.Context, arg forkdb.RetireChatDescendantQuestionParams) (int64, error) {
 	defer f.observe(ctx, "RetireChatDescendantQuestion", time.Now())
 	return f.s.RetireChatDescendantQuestion(ctx, arg)
