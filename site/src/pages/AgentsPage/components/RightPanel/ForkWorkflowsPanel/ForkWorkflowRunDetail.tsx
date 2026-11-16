@@ -16,6 +16,7 @@ import { Spinner } from "#/components/Spinner/Spinner";
 import { useTime } from "#/hooks/useTime";
 import { timeFrom } from "#/utils/time";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
+import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
@@ -176,7 +177,22 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			{run.error !== "" && (
 				<ForkWorkflowLongText label="Error" text={run.error} isError />
 			)}
-			{steps.length > 0 && <ForkWorkflowSteps steps={steps} />}
+			{steps.length > 0 && (
+				<ForkWorkflowSteps
+					steps={steps}
+					phases={run.phases}
+					currentPhase={run.current_phase}
+					runStatus={run.status}
+				/>
+			)}
+			{steps.length === 0 && run.phases.length > 0 && (
+				<ForkWorkflowPhaseRail
+					phases={run.phases}
+					currentPhase={run.current_phase}
+					steps={steps}
+					runStatus={run.status}
+				/>
+			)}
 			{run.result !== undefined && (
 				<ForkWorkflowLongText
 					label="Result"

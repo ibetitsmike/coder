@@ -105,6 +105,59 @@ export const Resumed: Story = {
 	play: expand,
 };
 
+export const RunningWithPendingPhases: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowRunningResult,
+			phases: ["review", "summarize", "publish"],
+		},
+	},
+	play: expand,
+};
+
+export const RunningWithRailOnly: Story = {
+	args: {
+		result: {
+			...MockForkWorkflowRunningResult,
+			phases: ["review", "summarize", "publish"],
+			steps: [],
+		},
+	},
+	play: expand,
+};
+
+export const FailedWithRailOnly: Story = {
+	args: {
+		result: {
+			run_id: MockForkWorkflowRunId,
+			status: "failed",
+			error:
+				'step "coderd/users.go" failed: the step ended its turn twice without calling workflow_report',
+			phases: ["review", "summarize", "publish"],
+			current_phase: "publish",
+			steps: [],
+		},
+	},
+	play: expand,
+};
+
+export const RunningWithoutPhases: Story = {
+	args: {
+		result: {
+			run_id: MockForkWorkflowRunId,
+			status: "running",
+			steps: [
+				{
+					chat_id: "aa111111-1111-4111-8111-111111111111",
+					title: "coderd/chats.go",
+					status: "reported",
+				},
+			],
+		},
+	},
+	play: expand,
+};
+
 export const StillRunning: Story = {
 	args: { result: MockForkWorkflowRunningResult },
 	play: expand,

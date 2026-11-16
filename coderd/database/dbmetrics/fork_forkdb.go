@@ -87,6 +87,11 @@ func (f forkQueryMetricsStore) MarkOpenWorkflowRunsInterrupted(ctx context.Conte
 	return f.s.MarkOpenWorkflowRunsInterrupted(ctx, errText)
 }
 
+func (f forkQueryMetricsStore) UpdateWorkflowRunPhases(ctx context.Context, arg forkdb.UpdateWorkflowRunPhasesParams) error {
+	defer f.observe(ctx, "UpdateWorkflowRunPhases", time.Now())
+	return f.s.UpdateWorkflowRunPhases(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
 	defer f.observe(ctx, "UpdateWorkflowRunStatus", time.Now())
 	return f.s.UpdateWorkflowRunStatus(ctx, arg)
