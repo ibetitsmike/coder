@@ -869,6 +869,11 @@ func (r *workflowRun) scheduleLogFlush() {
 		r.logFlushTimer = nil
 		r.journalMu.Unlock()
 		r.flushLogs(false)
+		// Lines that landed while this write was in flight dropped
+		// their own request, so the completed flush re-arms one for
+		// them. rearmLogFlush compares the sequence, so a re-arm for
+		// lines this write already carried returns without work.
+		r.rearmLogFlush()
 	})
 }
 
