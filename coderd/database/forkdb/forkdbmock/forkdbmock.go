@@ -86,6 +86,21 @@ func (mr *MockStoreMockRecorder) CancelChatWakeupsByChatID(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).CancelChatWakeupsByChatID), ctx, arg)
 }
 
+// ClaimDuePullRequestWatches mocks base method.
+func (m *MockStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimDuePullRequestWatches", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.ClaimDuePullRequestWatchesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClaimDuePullRequestWatches indicates an expected call of ClaimDuePullRequestWatches.
+func (mr *MockStoreMockRecorder) ClaimDuePullRequestWatches(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimDuePullRequestWatches", reflect.TypeOf((*MockStore)(nil).ClaimDuePullRequestWatches), ctx, arg)
+}
+
 // ConsumePluginLinkCode mocks base method.
 func (m *MockStore) ConsumePluginLinkCode(ctx context.Context, arg forkdb.ConsumePluginLinkCodeParams) (forkdb.PluginLinkCode, error) {
 	m.ctrl.T.Helper()
@@ -1801,6 +1816,21 @@ func (m *MockStore) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText
 func (mr *MockStoreMockRecorder) MarkOpenWorkflowRunsInterrupted(ctx, errText any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkOpenWorkflowRunsInterrupted", reflect.TypeOf((*MockStore)(nil).MarkOpenWorkflowRunsInterrupted), ctx, errText)
+}
+
+// RecordPullRequestWatchPoll mocks base method.
+func (m *MockStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordPullRequestWatchPoll", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordPullRequestWatchPoll indicates an expected call of RecordPullRequestWatchPoll.
+func (mr *MockStoreMockRecorder) RecordPullRequestWatchPoll(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordPullRequestWatchPoll", reflect.TypeOf((*MockStore)(nil).RecordPullRequestWatchPoll), ctx, arg)
 }
 
 // ReleasePluginLeases mocks base method.

@@ -7,3 +7,7 @@ const ListReadyChatWakeupWatchesSQL = listReadyChatWakeupWatches
 // ListDueChatWakeupsSQL is the statement of ListDueChatWakeups, so a test
 // can EXPLAIN it.
 const ListDueChatWakeupsSQL = listDueChatWakeups
+
+// ClaimDuePullRequestWatchesSQL is the statement of
+// ClaimDuePullRequestWatches, so a test can EXPLAIN it.
+const ClaimDuePullRequestWatchesSQL = claimDuePullRequestWatches

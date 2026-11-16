@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,8 +24,10 @@ import (
 
 // forkChatPullRequestActivity reads the activity of the pull request at
 // pullRequestURL since since, and its CI when includeChecks is true, with the
-// external auth token that the chat owner ownerID linked for its provider.
-func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool) (*gitprovider.PullRequestActivity, error) {
+// external auth token that the chat owner ownerID linked for its provider. A
+// non-empty viewerLogin is the ViewerLogin of an earlier result. The result's
+// ViewerLogin is bound to the link, see forkViewerKey.
+func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UUID, pullRequestURL string, since time.Time, includeChecks bool, viewerLogin string) (*gitprovider.PullRequestActivity, error) {
 	config, gp := api.forkPullRequestProvider(ctx, pullRequestURL)
 	if gp == nil {
 		return nil, xerrors.Errorf("no git provider is configured for %s", pullRequestURL)
@@ -43,7 +46,9 @@ func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UU
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, xerrors.Errorf("get external auth link: %w", err)
 	}
-	if err == nil {
+	if err == nil && !link.OAuthToken().Valid() {
+		// RefreshToken also validates an unexpired token, which costs a
+		// request per poll. A revoked token fails the read instead.
 		//nolint:gocritic // System context carried through for token refresh.
 		if refreshed, refreshErr := config.RefreshToken(dbauthz.AsSystemRestricted(ctx), api.Database, link); refreshErr == nil {
 			link = refreshed
@@ -57,7 +62,23 @@ func (api *API) forkChatPullRequestActivity(ctx context.Context, ownerID uuid.UU
 		}
 		return nil, xerrors.Errorf("the chat owner has no linked account for %s", host)
 	}
-	return gitprovider.FetchPullRequestActivity(ctx, gp, token, ref, since, includeChecks)
+	login, ok := strings.CutPrefix(viewerLogin, forkViewerKey(link, ""))
+	if !ok {
+		login = ""
+	}
+	activity, err := gitprovider.FetchPullRequestActivity(ctx, gp, token, ref, since, includeChecks, login)
+	if err != nil {
+		return nil, err
+	}
+	activity.ViewerLogin = forkViewerKey(link, activity.ViewerLogin)
+	return activity, nil
+}
+
+// forkViewerKey binds the viewer login of a read to the external auth link
+// whose token it was read with. A relink or token refresh updates the link,
+// so the next read asks the provider for the login again.
+func forkViewerKey(link database.ExternalAuthLink, login string) string {
+	return strconv.FormatInt(link.UpdatedAt.UnixMicro(), 10) + ":" + login
 }
 
 // forkPullRequestProvider returns the first external auth config whose regex
