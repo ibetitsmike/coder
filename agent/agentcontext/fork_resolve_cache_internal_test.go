@@ -5,7 +5,9 @@ package agentcontext
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -150,24 +152,12 @@ func hasResource(snap Snapshot, kind ResourceKind, name string) bool {
 	return false
 }
 
-// A cache hit while an explicit Resync walks does not make that Resync
-// discard its own pass: Resync is a barrier that re-reads the filesystem.
-func TestPublishCached_DoesNotSupersedeRunningResync(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	roots := []ScanRoot{{Path: dir}}
-	var block atomic.Bool
-	entered, release := make(chan struct{}), make(chan struct{})
-	m, w := advertisedCacheManager(t, ManagerOptions{
-		WorkingDir: func() string { return dir },
-		MCPCatalog: func() []MCPServerStatus {
-			if block.CompareAndSwap(true, false) {
-				close(entered)
-				<-release
-			}
-			return nil
-		},
-	}, roots)
+// readyCacheManager returns a ready Manager over dir, with a running
+// watcher, whose current state is cached.
+func readyCacheManager(t *testing.T, dir string, opts ManagerOptions) (*Manager, *Watcher, []ScanRoot) {
+	t.Helper()
+	opts.WorkingDir = func() string { return dir }
+	m, w := advertisedCacheManager(t, opts, []ScanRoot{{Path: dir}})
 	m.mu.Lock()
 	m.watcher = w
 	m.ready = true
@@ -184,6 +174,26 @@ func TestPublishCached_DoesNotSupersedeRunningResync(t *testing.T) {
 		_, ok := cachedFor(m, w, scanRoots)
 		return ok
 	}, testutil.WaitShort, testutil.IntervalFast)
+	return m, w, scanRoots
+}
+
+// A cached result does not publish while an explicit Resync walks: it would
+// land after the Resync's fresh pass when the Resync publishes first, and
+// restore the old snapshot and pack MCP list.
+func TestPublishCached_MissesWhileResyncRuns(t *testing.T) {
+	t.Parallel()
+	var block atomic.Bool
+	entered, release := make(chan struct{}), make(chan struct{})
+	m, _, _ := readyCacheManager(t, t.TempDir(), ManagerOptions{
+		MCPCatalog: func() []MCPServerStatus {
+			if block.CompareAndSwap(true, false) {
+				close(entered)
+				<-release
+			}
+			return nil
+		},
+	})
+	ctx := testutil.Context(t, testutil.WaitShort)
 
 	block.Store(true)
 	done := make(chan Snapshot, 1)
@@ -192,15 +202,119 @@ func TestPublishCached_DoesNotSupersedeRunningResync(t *testing.T) {
 		done <- snap
 	}()
 	testutil.TryReceive(ctx, t, entered)
+	require.Never(t, func() bool {
+		_, ok := m.publishCached(ctx)
+		return ok
+	}, testutil.IntervalSlow, testutil.IntervalFast, "the cache does not serve while the Resync walks")
+	close(release)
+	fresh := testutil.TryReceive(ctx, t, done)
+
 	var cached Snapshot
 	require.Eventually(t, func() bool {
 		var ok bool
-		cached, ok = m.publishCached(ctx)
+		if cached, ok = m.publishCached(ctx); ok {
+			return true
+		}
+		// Events under the home directory can keep a pass from caching.
+		_, _ = m.Resync(ctx)
+		return false
+	}, testutil.WaitShort, testutil.IntervalFast, "the cache serves once the Resync published")
+	require.Greater(t, cached.Version, fresh.Version)
+}
+
+// A change signal that arrives after publishCached read the sequence but
+// before it publishes stops the publish.
+func TestPublishCached_MissesAfterChangeSignal(t *testing.T) {
+	t.Parallel()
+	m, _, _ := readyCacheManager(t, t.TempDir(), ManagerOptions{})
+	ctx := testutil.Context(t, testutil.WaitShort)
+	var signaled atomic.Bool
+	m.resolveCache.afterLockedLookup = func() {
+		if signaled.CompareAndSwap(false, true) {
+			m.resolveCache.changed()
+		}
+	}
+	var published atomic.Bool
+	require.Eventually(t, func() bool {
+		if _, ok := m.publishCached(ctx); ok && signaled.Load() {
+			published.Store(true)
+		}
+		return signaled.Load()
+	}, testutil.WaitShort, testutil.IntervalFast)
+	require.False(t, published.Load(), "a publish that raced a change signal")
+}
+
+// A completed pass that cannot be cached read the files as they are now, so
+// an older entry for the same state goes: here AGENTS.md became a link
+// whose target the watcher drops writes to, and no change signal reached
+// the cache, as when an explicit Resync wins the race with the event.
+func TestResolvePass_UncacheablePassEvictsOlderEntry(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1", "README.md": "v2 is longer"})
+	roots := []ScanRoot{{Path: dir}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	m.resolvePass(context.Background(), m.resolver, roots, w)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the first pass is cached")
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "AGENTS.md")))
+	require.NoError(t, os.Symlink(filepath.Join(dir, "README.md"), filepath.Join(dir, "AGENTS.md")))
+	// Let the event's debounce run out, so the pass below sees the watcher
+	// covering everything and only its symlink check refuses to cache it.
+	require.Eventually(t, func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return w.timer != nil
+	}, testutil.WaitShort, testutil.IntervalFast, "the replacement fires an event")
+	require.Eventually(t, func() bool {
+		_, ok := w.coverage()
 		return ok
-	}, testutil.WaitShort, testutil.IntervalFast, "the cache serves while the Resync walks")
-	close(release)
-	fresh := testutil.TryReceive(ctx, t, done)
-	require.Greater(t, fresh.Version, cached.Version, "the Resync publishes its own pass")
+	}, testutil.WaitShort, testutil.IntervalFast)
+
+	snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w)
+	_, covered := w.coverage()
+	require.True(t, covered, "no event during the pass")
+	require.True(t, slices.ContainsFunc(snap.Resources, func(res Resource) bool {
+		return res.Kind == KindInstructionFile && string(res.Payload) == "v2 is longer"
+	}), "the pass read the link")
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the older entry is evicted")
+}
+
+// A watch that Sync removes advances the watch generation, so a result that
+// relied on it misses.
+func TestResolvePass_RemovedWatchMissesCache(t *testing.T) {
+	t.Parallel()
+	roots := []ScanRoot{{Path: t.TempDir()}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	m.resolvePass(context.Background(), m.resolver, roots, w)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the pass is cached")
+
+	w.Sync(context.Background(), nil)
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the result relied on a watch that is gone")
+}
+
+// A watch whose directory could not be stated after its Add, and that
+// exists again, is replaced by the next Sync.
+func TestWatcher_SyncReplacesWatchWithoutIdentity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	roots := []ScanRoot{{Path: dir}}
+	_, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	w.mu.Lock()
+	_, ok := w.cover.dirs[dir]
+	require.True(t, ok, "the root has a watch")
+	w.cover.dirs[dir] = nil
+	w.mu.Unlock()
+
+	w.Sync(context.Background(), roots)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	require.NotNil(t, w.cover.dirs[dir], "the watch was added again")
+	require.Contains(t, w.watched, dir)
 }
 
 // A scan root that was missing when the pass ran and has no watch that

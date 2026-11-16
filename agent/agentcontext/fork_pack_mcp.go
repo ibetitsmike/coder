@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // manifestMCPServers is a manifest mcpServers declaration: a config file
@@ -228,6 +229,16 @@ type packMCPPublisher struct {
 	deliver func([]PackMCPSource)
 	mu      sync.Mutex
 	epoch   uint64
+	// published is the newest epoch passed to publish, whether or not it
+	// delivered.
+	published atomic.Uint64
+}
+
+// freshEpoch returns the newest resolve epoch that published. A cached
+// result publishes only while it equals the Manager's resolve epoch, so
+// no fresh pass is between claiming its epoch and publishing.
+func (p *packMCPPublisher) freshEpoch() uint64 {
+	return p.published.Load()
 }
 
 // publish delivers the declarations of pass after the resolve pass with
@@ -237,6 +248,12 @@ type packMCPPublisher struct {
 // starts one with pack rows unadvertised, and delivering its empty list
 // would restart every pack server on each reconnect.
 func (p *packMCPPublisher) publish(pass *packPass, epoch uint64, negotiating bool) {
+	for {
+		old := p.published.Load()
+		if epoch <= old || p.published.CompareAndSwap(old, epoch) {
+			break
+		}
+	}
 	if p.deliver == nil || negotiating {
 		return
 	}

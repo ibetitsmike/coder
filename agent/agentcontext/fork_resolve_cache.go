@@ -15,10 +15,19 @@ package agentcontext
 //   - every scan root and every watched directory is still the directory it
 //     was, because retargeting a symlink to a directory, or creating a root
 //     that was missing, can fire no event the watcher sees;
-//   - no watch was added since the pass started, because a change in a newly
-//     watched directory before its watch existed fired no event;
+//   - no watch was added or removed since the pass started, because a change
+//     in a newly watched directory before its watch existed fired no event,
+//     and a removed watch reports nothing;
 //   - every symlink the pass followed ends in a watched directory, under a
-//     name whose writes the watcher reports.
+//     name whose writes the watcher reports, and still resolves to the same
+//     target, because retargeting a directory link inside the target path
+//     fires no event the watcher sees.
+//
+// A pass that completes but cannot be cached drops the cached results: it
+// read the files as they are now, and an older result can predate a change
+// whose event has not arrived. A cached result does not publish while a
+// fresh pass has claimed its epoch and not yet published, or after a
+// change signal.
 //
 // The pass reads the capabilities once, at its start, so a capability flip
 // during the pass cannot mix two capability states into one snapshot.
@@ -85,6 +94,10 @@ type resolveCacheEntry struct {
 	// or a negotiation marker on it.
 	snap Snapshot
 	pass *packPass
+	// links maps each symlink the pass followed to its resolved target.
+	// Retargeting a directory link inside a target path fires no event
+	// where the watcher looks, so a hit resolves every link again.
+	links map[string]string
 }
 
 // resolveCache holds the results of recent resolve passes.
@@ -97,6 +110,10 @@ type resolveCache struct {
 
 	mu      sync.Mutex
 	entries []resolveCacheEntry
+
+	// afterLockedLookup, when set by a test, runs in publishCached between
+	// its locked lookup and its sequence check.
+	afterLockedLookup func()
 }
 
 func (c *resolveCache) changed() {
@@ -169,21 +186,22 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	}
 	followed := trackSymlinkTargets(roots)
 	snap := r.ResolveContext(ctx, roots)
-	targets := followed.stop()
+	links := followed.stop()
 	resolveMemo.sweep(start)
 
+	if ctx.Err() != nil {
+		// A canceled pass is partial and proves nothing about the files.
+		return snap, pass
+	}
 	genAfter, covered := watcher.coverage()
-	if !covered {
+	if !covered || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq || !watcher.reportsWritesTo(links) {
+		// This pass read the files as they are now and cannot be cached.
+		// An older entry with the same key can predate a change whose
+		// event has not arrived yet, so it goes too.
 		m.resolveCache.reset()
 		return snap, pass
 	}
-	if ctx.Err() != nil || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq {
-		return snap, pass
-	}
-	if !watcher.reportsWritesTo(targets) {
-		return snap, pass
-	}
-	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, snap: snap, pass: pass})
+	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, snap: snap, pass: pass, links: links})
 	return snap, pass
 }
 
@@ -228,9 +246,11 @@ func (m *Manager) hasCached() bool {
 }
 
 // publishCached publishes the cached result for the current scan roots and
-// capabilities as Resync publishes a fresh pass, except that it takes no
-// new resolve epoch: a fresh pass that is running, such as an explicit
-// Resync, still publishes its own result after the cached one.
+// capabilities as Resync publishes a fresh pass. It misses while a fresh
+// pass has claimed a resolve epoch and not yet published, so a cached
+// result never lands after the fresh pass that an explicit Resync runs.
+// It takes no epoch of its own, and a fresh pass that starts after it
+// supersedes it.
 func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 	if ctx.Err() != nil {
 		return Snapshot{}, false
@@ -246,14 +266,24 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 	rootDirs := statRootDirs(roots)
 	seq := m.resolveCache.seq.Load()
 	caps := m.resolveCaps()
+	found, ok := m.resolveCache.lookup(caps, roots, rootDirs, seq, watchGen)
+	if !ok || !linksUnchanged(found.links) {
+		return Snapshot{}, false
+	}
 
 	m.mu.Lock()
-	if m.closed || !m.ready || m.watcher != watcher || !slices.Equal(roots, m.scanRootsLocked()) {
+	if m.closed || !m.ready || m.watcher != watcher || !slices.Equal(roots, m.scanRootsLocked()) ||
+		m.packMCP.freshEpoch() != m.resolveEpoch {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
 	entry, ok := m.resolveCache.lookup(caps, roots, rootDirs, seq, watchGen)
-	if !ok {
+	if hook := m.resolveCache.afterLockedLookup; hook != nil {
+		hook()
+	}
+	// A change signal after the loads above leaves the old entry in place
+	// until a pass replaces it.
+	if !ok || entry.pass != found.pass || m.resolveCache.seq.Load() != seq {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}
@@ -283,8 +313,10 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 // watchCoverage is the Watcher state the resolve cache reads, guarded by
 // Watcher.mu.
 type watchCoverage struct {
-	// gen counts the watches added. A pass that started before a watch
-	// was added can have read a change that fired no event.
+	// gen counts the watches added and removed. A pass that started
+	// before a watch was added can have read a change that fired no
+	// event, and a pass that relied on a watch that is gone is no longer
+	// covered.
 	gen uint64
 	// dirs holds each watched directory as it was when its watch was
 	// added, so a Sync can replace a watch whose path now names another
@@ -300,19 +332,26 @@ type watchCoverage struct {
 // beginSync starts a Sync's add loop, with w.mu held, and returns true, the
 // initial value of its addedAll. It drops the watches whose path now names
 // another directory, such as a retargeted symlink, so the add loop watches
-// the directory the path names now.
+// the directory the path names now. A watch that Sync removed, or that
+// beginSync drops, advances the watch generation.
 func (w *Watcher) beginSync() bool {
 	w.cover.addFailed = false
+	removed := false
 	for path, was := range w.cover.dirs {
 		if _, ok := w.watched[path]; !ok {
 			delete(w.cover.dirs, path)
+			removed = true
 			continue
 		}
-		if now, err := os.Stat(path); err != nil || !os.SameFile(was, now) {
+		if now, err := os.Stat(path); err != nil || was == nil || !os.SameFile(was, now) {
 			_ = w.watcher.Remove(path)
 			delete(w.watched, path)
 			delete(w.cover.dirs, path)
+			removed = true
 		}
+	}
+	if removed {
+		w.cover.gen++
 	}
 	return true
 }
@@ -351,7 +390,20 @@ func (w *Watcher) forgetRemovedWatch(fsw *fsnotify.Watcher, ev fsnotify.Event) {
 		return
 	}
 	delete(w.watched, ev.Name)
+	delete(w.cover.dirs, ev.Name)
+	w.cover.gen++
 	_ = fsw.Remove(ev.Name)
+}
+
+// linksUnchanged reports whether every symlink still resolves to the
+// target it resolved to before.
+func linksUnchanged(links map[string]string) bool {
+	for link, target := range links {
+		if now, err := filepath.EvalSymlinks(link); err != nil || now != target {
+			return false
+		}
+	}
+	return true
 }
 
 // watchedDirsUnchanged reports whether every watched path still names the
@@ -410,14 +462,14 @@ func (w *Watcher) coverage() (gen uint64, ok bool) {
 	return w.cover.gen, !w.closed && w.watcher != nil && w.degraded == "" && w.timer == nil && !w.cover.addFailed
 }
 
-// reportsWritesTo reports whether the watcher reports a write to each
-// symlink target: the target's directory has a watch, compared by
-// canonical path because targets come from filepath.EvalSymlinks and a
-// watched path may pass through a symlinked directory, and the watcher
-// does not filter the write out by its name. The empty string stands for a
-// target that is unknown and never reported.
-func (w *Watcher) reportsWritesTo(targets map[string]struct{}) bool {
-	if len(targets) == 0 {
+// reportsWritesTo reports whether the watcher reports a write to the
+// target of each symlink in links: the target's directory has a watch,
+// compared by canonical path because targets come from
+// filepath.EvalSymlinks and a watched path may pass through a symlinked
+// directory, and the watcher does not filter the write out by its name.
+// The empty string stands for a target that is unknown and never reported.
+func (w *Watcher) reportsWritesTo(links map[string]string) bool {
+	if len(links) == 0 {
 		return true
 	}
 	if w == nil {
@@ -431,7 +483,7 @@ func (w *Watcher) reportsWritesTo(targets map[string]struct{}) bool {
 	w.mu.Unlock()
 
 	var canonical map[string][]string
-	for target := range targets {
+	for _, target := range links {
 		if target == "" {
 			return false
 		}
@@ -460,9 +512,9 @@ func (w *Watcher) reportsWritesTo(targets map[string]struct{}) bool {
 	return true
 }
 
-// symlinkTargets collects the symlink targets that the running resolve
-// passes read through. A target goes to the passes whose scan roots hold
-// the link, and to every running pass when none does, so a concurrent pass
+// symlinkTargets collects the symlinks, and their targets, that the running
+// resolve passes read through. A link goes to the passes whose scan roots
+// hold it, and to every running pass when none does, so a concurrent pass
 // can only make another pass more cautious.
 var symlinkTargets struct {
 	mu     sync.Mutex
@@ -470,8 +522,9 @@ var symlinkTargets struct {
 }
 
 type symlinkTargetSet struct {
-	roots   []string
-	targets map[string]struct{}
+	roots []string
+	// links maps each link to its target.
+	links map[string]string
 }
 
 func trackSymlinkTargets(roots []ScanRoot) *symlinkTargetSet {
@@ -490,22 +543,26 @@ func trackSymlinkTargets(roots []ScanRoot) *symlinkTargetSet {
 	return set
 }
 
-func (s *symlinkTargetSet) stop() map[string]struct{} {
+func (s *symlinkTargetSet) stop() map[string]string {
 	symlinkTargets.mu.Lock()
 	defer symlinkTargets.mu.Unlock()
 	delete(symlinkTargets.active, s)
-	return s.targets
+	return s.links
 }
 
 func (s *symlinkTargetSet) holds(link string) bool {
 	return slices.ContainsFunc(s.roots, func(root string) bool { return pathHasPrefix(link, root) })
 }
 
-func (s *symlinkTargetSet) add(target string) {
-	if s.targets == nil {
-		s.targets = make(map[string]struct{})
+func (s *symlinkTargetSet) add(link, target string) {
+	if s.links == nil {
+		s.links = make(map[string]string)
 	}
-	s.targets[target] = struct{}{}
+	if old, ok := s.links[link]; ok && old != target {
+		// The link changed during the pass.
+		target = ""
+	}
+	s.links[link] = target
 }
 
 // noteSymlinkTarget records the target of the symlink link that a resolve
@@ -523,7 +580,7 @@ func noteSymlinkTarget(link, target string, err error) {
 	owned := false
 	for set := range symlinkTargets.active {
 		if set.holds(link) {
-			set.add(target)
+			set.add(link, target)
 			owned = true
 		}
 	}
@@ -531,7 +588,7 @@ func noteSymlinkTarget(link, target string, err error) {
 		return
 	}
 	for set := range symlinkTargets.active {
-		set.add(target)
+		set.add(link, target)
 	}
 }
 

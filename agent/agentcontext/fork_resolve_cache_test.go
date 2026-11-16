@@ -559,6 +559,31 @@ func TestRunPush_RetargetedSkillContainerIsReresolved(t *testing.T) {
 	require.Equal(t, "v2", skillDescription(t, connectOnce(t, m, "push2")[0], "foo"))
 }
 
+// A directory symlink inside a link's target path can be retargeted with
+// no event where the watcher looks: AGENTS.md -> links/alias/SKILL.md, with
+// alias pointing at a watched skill directory and links unwatched. The next
+// connection resolves the link again.
+func TestRunPush_RetargetedIntermediateLinkIsReresolved(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	watchedSkill := filepath.Join(dir, ".claude", "skills", "x")
+	unwatched := filepath.Join(dir, "store")
+	mustWriteFile(t, filepath.Join(watchedSkill, "SKILL.md"), "v1")
+	mustWriteFile(t, filepath.Join(unwatched, "SKILL.md"), "v2 is longer")
+	alias := filepath.Join(dir, "links", "alias")
+	require.NoError(t, os.MkdirAll(filepath.Dir(alias), 0o755))
+	require.NoError(t, os.Symlink(watchedSkill, alias))
+	require.NoError(t, os.Symlink(filepath.Join(alias, "SKILL.md"), filepath.Join(dir, "AGENTS.md")))
+
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	require.Equal(t, "v1", instructionPayload(t, connectOnce(t, m, "push1")[0]))
+	requireCacheHit(t, m)
+
+	require.NoError(t, os.Remove(alias))
+	require.NoError(t, os.Symlink(unwatched, alias))
+	require.Equal(t, "v2 is longer", instructionPayload(t, connectOnce(t, m, "push2")[0]))
+}
+
 // requireCacheHit asserts that a connection with no file change resolves
 // nothing, so the test that follows exercises a cached result.
 func requireCacheHit(t *testing.T, m *agentcontext.Manager) {
