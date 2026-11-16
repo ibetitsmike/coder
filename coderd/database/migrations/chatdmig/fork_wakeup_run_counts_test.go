@@ -16,7 +16,9 @@ import (
 
 // TestWakeupRunCountsBackfill runs the node that adds the hourly wake-up run
 // counts on a database with runs. The delivered runs of the last 25 hours
-// count in the UTC hour they were created in; other runs do not.
+// count in the UTC hour they were created in; other runs do not. A run that a
+// replica without the counts inserts after the node, with a plain insert into
+// chat_wakeup_runs, counts through the trigger.
 func TestWakeupRunCountsBackfill(t *testing.T) {
 	t.Parallel()
 	admin := adminURL(t)
@@ -64,6 +66,8 @@ func TestWakeupRunCountsBackfill(t *testing.T) {
 
 	require.NoError(t, migrations.UpAll(sqlDB))
 	require.NoError(t, migrations.EnsureCleanAll(sqlDB))
+	insertRun("delivered", hour.Add(time.Hour+time.Minute))
+	insertRun("failed", hour.Add(time.Hour+2*time.Minute))
 
 	rows, err := sqlDB.Query(`SELECT hour, organization_id, runs FROM chat_wakeup_run_counts WHERE chat_id = $1 ORDER BY hour`, chat.ID)
 	require.NoError(t, err)
@@ -83,6 +87,6 @@ func TestWakeupRunCountsBackfill(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Equal(t, []count{
 		{Hour: hour, OrganizationID: chat.OrganizationID, Runs: 2},
-		{Hour: hour.Add(time.Hour), OrganizationID: chat.OrganizationID, Runs: 1},
+		{Hour: hour.Add(time.Hour), OrganizationID: chat.OrganizationID, Runs: 2},
 	}, got)
 }

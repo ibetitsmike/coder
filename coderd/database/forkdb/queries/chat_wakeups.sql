@@ -199,15 +199,6 @@ WHERE w.id = @wakeup_id::uuid
 ON CONFLICT (wakeup_id, run_key) DO NOTHING
 RETURNING *;
 
--- Counts one delivered run of the wake-up in its chat's bucket for hour, the
--- start of a UTC hour. The chat and organization come from the wake-up.
--- name: IncrementChatWakeupRunCount :exec
-INSERT INTO chat_wakeup_run_counts (chat_id, hour, organization_id, runs)
-SELECT w.chat_id, @hour::timestamptz, w.organization_id, 1
-FROM chat_wakeups w
-WHERE w.id = @wakeup_id::uuid
-ON CONFLICT (chat_id, hour) DO UPDATE SET runs = chat_wakeup_run_counts.runs + 1;
-
 -- Sums the delivered runs of the chat and of its organization in the hour
 -- buckets from since on.
 -- name: SumChatWakeupRunCountsSince :one

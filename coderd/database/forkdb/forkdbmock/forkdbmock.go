@@ -1154,20 +1154,6 @@ func (mr *MockStoreMockRecorder) GetWorkflowStepsByRun(ctx, runID any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowStepsByRun", reflect.TypeOf((*MockStore)(nil).GetWorkflowStepsByRun), ctx, runID)
 }
 
-// IncrementChatWakeupRunCount mocks base method.
-func (m *MockStore) IncrementChatWakeupRunCount(ctx context.Context, arg forkdb.IncrementChatWakeupRunCountParams) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IncrementChatWakeupRunCount", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// IncrementChatWakeupRunCount indicates an expected call of IncrementChatWakeupRunCount.
-func (mr *MockStoreMockRecorder) IncrementChatWakeupRunCount(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementChatWakeupRunCount", reflect.TypeOf((*MockStore)(nil).IncrementChatWakeupRunCount), ctx, arg)
-}
-
 // InsertChatExcludedPluginPack mocks base method.
 func (m *MockStore) InsertChatExcludedPluginPack(ctx context.Context, arg forkdb.InsertChatExcludedPluginPackParams) (forkdb.ChatExcludedPluginPack, error) {
 	m.ctrl.T.Helper()
