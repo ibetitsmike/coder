@@ -4,8 +4,8 @@ package agentcontext
 
 import "io/fs"
 
-// fileIdentity has no portable inode outside unix; the stamp relies on the
-// size and mtime there.
-func fileIdentity(fs.FileInfo) (dev, ino uint64) {
-	return 0, 0
+// fileIdentity reports no identity outside unix, which turns the memo off
+// there.
+func fileIdentity(fs.FileInfo) (dev, ino uint64, ok bool) {
+	return 0, 0, false
 }

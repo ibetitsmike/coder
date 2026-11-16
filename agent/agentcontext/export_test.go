@@ -1,6 +1,7 @@
 package agentcontext
 
 import (
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,11 @@ func ResetResolveMemo() {
 // the test ends. The returned function reads the count.
 func CountBodyReads(t testing.TB, dir string) func() int64 {
 	t.Helper()
+	if info, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	} else if _, _, ok := fileIdentity(info); !ok {
+		t.Skip("no file identity on this platform, so the memo is off")
+	}
 	count := &atomic.Int64{}
 	addBodyReadObserver(bodyReadObserver{prefix: filepath.Clean(dir), count: count})
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != filepath.Clean(dir) {

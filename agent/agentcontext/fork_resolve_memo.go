@@ -44,15 +44,21 @@ type fileStamp struct {
 	ino     uint64
 }
 
-func stampOf(info fs.FileInfo) fileStamp {
-	dev, ino := fileIdentity(info)
+// stampOf returns the stamp of a file, or false where the platform gives no
+// file identity: without one, a replacement with the same size and mtime
+// would keep the stamp, so such files are not memoized.
+func stampOf(info fs.FileInfo) (fileStamp, bool) {
+	dev, ino, ok := fileIdentity(info)
+	if !ok {
+		return fileStamp{}, false
+	}
 	return fileStamp{
 		modTime: info.ModTime().UnixNano(),
 		size:    info.Size(),
 		mode:    info.Mode(),
 		dev:     dev,
 		ino:     ino,
-	}
+	}, true
 }
 
 type memoEntry struct {
@@ -77,10 +83,10 @@ var resolveMemo = &fileMemo{entries: make(map[string]*memoEntry)}
 // Callers must not modify the returned bytes: they are shared with the memo
 // and with earlier snapshots.
 func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, error)) ([]byte, error) {
-	if !info.Mode().IsRegular() {
+	stamp, ok := stampOf(info)
+	if !ok || !info.Mode().IsRegular() {
 		return load()
 	}
-	stamp := stampOf(info)
 	now := time.Now()
 	m.mu.Lock()
 	if e, ok := m.entries[path]; ok && e.stamp == stamp {
