@@ -8,6 +8,7 @@ package chatd
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,11 +25,11 @@ import (
 // 409; every other error is a failure of the stop itself.
 var (
 	// ErrForkWorkflowRunNotFound: no run with this ID is known on this chat.
-	ErrForkWorkflowRunNotFound = xerrors.New("workflow run not found")
+	ErrForkWorkflowRunNotFound = errors.New("workflow run not found")
 	// ErrForkWorkflowRunTerminal: the run already ended. A stopped or
 	// completed run cannot stop again, and an interrupted run waits for a
 	// resume by the agent instead.
-	ErrForkWorkflowRunTerminal = xerrors.New("workflow run already ended")
+	ErrForkWorkflowRunTerminal = errors.New("workflow run already ended")
 )
 
 // workflowStopError is the error of a stopped run and of its open steps.

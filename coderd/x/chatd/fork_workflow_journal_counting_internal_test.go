@@ -8,9 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"cdr.dev/slog/v3/sloggers/slogtest"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
