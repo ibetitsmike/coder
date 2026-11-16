@@ -6,6 +6,7 @@ package agentcontext
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
 )
 
 // advertisedCacheManager returns a Manager with every fork capability on
@@ -76,7 +79,7 @@ func TestResolvePass_CapabilityFlipIsNotCachedMixed(t *testing.T) {
 			return nil
 		}
 
-		m.resolvePass(context.Background(), m.resolver, roots, w)
+		m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 		require.True(t, armed.Load(), "the pass reads its pinned flags, not the live ones")
 		entry, ok := cachedFor(m, w, roots)
 		require.True(t, ok, "a pass with pinned capabilities is cached")
@@ -105,14 +108,14 @@ func TestResolvePass_CapabilityFlipIsNotCachedMixed(t *testing.T) {
 			},
 		}, roots)
 
-		snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w)
+		snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 		require.False(t, armed.Load(), "the flip ran during the pass")
 		require.False(t, hasResource(snap, KindMCPServer, "deploy"), "the pass saw the flip")
 		if entry, ok := cachedFor(m, w, roots); ok {
 			require.True(t, hasResource(entry.snap, KindMCPServer, "deploy"), "the cached snapshot holds the pack server its capabilities call for")
 		}
 
-		m.resolvePass(context.Background(), m.resolver, roots, w)
+		m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 		entry, ok := cachedFor(m, w, roots)
 		require.True(t, ok, "a pass without a flip is cached")
 		require.True(t, hasResource(entry.snap, KindMCPServer, "deploy"))
@@ -139,13 +142,13 @@ func TestResolvePass_WatchAddedDuringPassIsNotCached(t *testing.T) {
 	}, nil)
 	before, _ := w.coverage()
 
-	m.resolvePass(context.Background(), m.resolver, roots, w)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	after, _ := w.coverage()
 	require.Greater(t, after, before, "the pass added watches")
 	_, ok := cachedFor(m, w, roots)
 	require.False(t, ok, "a pass that raced a new watch is not cached")
 
-	m.resolvePass(context.Background(), m.resolver, roots, w)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	_, ok = cachedFor(m, w, roots)
 	require.True(t, ok, "the next pass is cached")
 }
@@ -290,7 +293,7 @@ func TestResolvePass_UncacheablePassEvictsOlderEntry(t *testing.T) {
 	writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1", "README.md": "v2 is longer"})
 	roots := []ScanRoot{{Path: dir}}
 	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
-	m.resolvePass(context.Background(), m.resolver, roots, w)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	_, ok := cachedFor(m, w, roots)
 	require.True(t, ok, "the first pass is cached")
 
@@ -308,7 +311,7 @@ func TestResolvePass_UncacheablePassEvictsOlderEntry(t *testing.T) {
 		return ok
 	}, testutil.WaitShort, testutil.IntervalFast)
 
-	snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w)
+	snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	_, covered := w.coverage()
 	require.True(t, covered, "no event during the pass")
 	require.True(t, slices.ContainsFunc(snap.Resources, func(res Resource) bool {
@@ -318,13 +321,35 @@ func TestResolvePass_UncacheablePassEvictsOlderEntry(t *testing.T) {
 	require.False(t, ok, "the older entry is evicted")
 }
 
+// Of two overlapping passes with the same key, the one that claimed the
+// later epoch is the one the Manager published, so a pass with an older
+// epoch that finishes last does not replace its entry.
+func TestResolvePass_OlderEpochDoesNotReplaceEntry(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1"})
+	roots := []ScanRoot{{Path: dir}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	_, newer := m.resolvePass(context.Background(), m.resolver, roots, w, 2)
+	_, older := m.resolvePass(context.Background(), m.resolver, roots, w, 1)
+	require.NotSame(t, newer, older)
+	entry, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the newer pass is cached")
+	require.Same(t, newer, entry.pass, "the older pass replaced the newer entry")
+
+	_, newest := m.resolvePass(context.Background(), m.resolver, roots, w, 3)
+	entry, ok = cachedFor(m, w, roots)
+	require.True(t, ok)
+	require.Same(t, newest, entry.pass, "a later pass replaces the entry")
+}
+
 // A watch that Sync removes advances the watch generation, so a result that
 // relied on it misses.
 func TestResolvePass_RemovedWatchMissesCache(t *testing.T) {
 	t.Parallel()
 	roots := []ScanRoot{{Path: t.TempDir()}}
 	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
-	m.resolvePass(context.Background(), m.resolver, roots, w)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	_, ok := cachedFor(m, w, roots)
 	require.True(t, ok, "the pass is cached")
 
@@ -353,14 +378,13 @@ func TestWatcher_SyncReplacesWatchWithoutIdentity(t *testing.T) {
 	require.Contains(t, w.watched, dir)
 }
 
-// The event loop keeps reading Events and Errors while watched directories
-// are moved away and deleted. inotify drops a moved watch while it holds
-// its lock, and sends the error for a watch the kernel already dropped
-// while it still holds it, so the event loop must take that send without
-// waiting on w.mu (relayFsnotify). Holding w.mu while the directories move
-// and go queues their events, so inotify handles them back to back. Short
-// holds of w.mu after that, as Sync and passes take, delay the loop after
-// each event so inotify takes its lock first.
+// The relay keeps taking what fsnotify sends while the event loop waits for
+// w.mu. inotify drops a moved watch while it holds its lock, and sends the
+// error for a watch the kernel already dropped while it still holds it, so
+// a send that waited on the event loop would also block Add and Remove.
+// The test holds w.mu while the watched directories move and go, and until
+// the relay took at least one send for each of them. With w.mu still held,
+// an Add must not block on inotify's lock.
 func TestWatcher_MovedWatchDirsDoNotBlockEventLoop(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "linux" {
@@ -372,52 +396,95 @@ func TestWatcher_MovedWatchDirsDoNotBlockEventLoop(t *testing.T) {
 		roots[i] = ScanRoot{Path: filepath.Join(base, fmt.Sprintf("r%d", i))}
 		require.NoError(t, os.Mkdir(roots[i].Path, 0o755))
 	}
+	probe := filepath.Join(base, "probe")
+	require.NoError(t, os.Mkdir(probe, 0o755))
 	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), OnChange: func() {}})
 	require.NoError(t, err)
-	w.Sync(testutil.Context(t, testutil.WaitShort), roots)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	w.Sync(ctx, roots)
 
 	w.mu.Lock()
 	require.Len(t, w.watched, len(roots))
+	fsw := w.watcher
+	before := w.cover.relayed.Load()
 	for _, root := range roots {
 		require.NoError(t, os.Rename(root.Path, root.Path+".old"))
 	}
 	for _, root := range roots {
 		require.NoError(t, os.RemoveAll(root.Path+".old"))
 	}
+	relayed := assert.Eventually(t, func() bool {
+		return w.cover.relayed.Load()-before >= uint64(len(roots))
+	}, testutil.WaitShort, testutil.IntervalFast, "the relay takes sends while w.mu is held")
+	added := make(chan error, 1)
+	go func() { added <- fsw.Add(probe) }()
+	select {
+	case err = <-added:
+	case <-ctx.Done():
+	}
 	w.mu.Unlock()
+	require.True(t, relayed)
+	require.NoError(t, ctx.Err(), "Add is blocked on inotify's lock")
+	require.NoError(t, err)
 
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			w.mu.Lock()
-			time.Sleep(50 * time.Microsecond)
-			w.mu.Unlock()
-			runtime.Gosched()
-		}
-	}()
-	if !assert.Eventually(t, func() bool {
+	require.Eventually(t, func() bool {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		return len(w.watched) == 0
-	}, testutil.WaitShort, testutil.IntervalFast, "the event loop forgets every moved watch") {
-		return
-	}
+	}, testutil.WaitShort, testutil.IntervalFast, "the event loop forgets every moved watch")
 	closed := make(chan struct{})
 	go func() {
 		_ = w.Close()
 		close(closed)
 	}()
-	select {
-	case <-closed:
-	case <-time.After(testutil.WaitShort):
-		t.Fatal("Close is blocked")
+	testutil.TryReceive(ctx, t, closed)
+}
+
+// The relay queue holds at most its bound plus one overflow error. Past the
+// bound it drops sends until the event loop takes that error.
+func TestRelayQueue_BoundsAndCoalescesOverflow(t *testing.T) {
+	t.Parallel()
+	q := relayQueue{max: 3}
+	event := func(name string) relayItem { return relayItem{ev: fsnotify.Event{Name: name}} }
+	for i := range 3 {
+		require.False(t, q.push(event(fmt.Sprint(i))))
 	}
+	require.True(t, q.push(event("3")), "a send past the bound is dropped")
+	require.True(t, q.push(event("4")))
+	require.Len(t, q.items, 4, "one overflow error stands for every drop")
+	require.ErrorIs(t, q.items[3].err, fsnotify.ErrEventOverflow)
+
+	for range 3 {
+		q.pop()
+	}
+	require.True(t, q.push(event("5")), "drops go on until the overflow error is taken")
+	q.pop()
+	require.Empty(t, q.items)
+	require.False(t, q.push(event("6")), "the queue takes sends again")
+	require.Equal(t, "6", q.items[0].ev.Name)
+}
+
+// A watcher whose relay dropped sends reports no coverage until the event
+// loop took the overflow error and scheduled a re-resolve.
+func TestWatcher_RelayOverflowUncoversUntilHandled(t *testing.T) {
+	t.Parallel()
+	// The mock clock keeps the debounce timer armed.
+	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), Clock: quartz.NewMock(t), OnChange: func() {}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+	w.Sync(testutil.Context(t, testutil.WaitShort), []ScanRoot{{Path: t.TempDir()}})
+	_, ok := w.coverage()
+	require.True(t, ok)
+
+	w.cover.relayDropped.Add(1)
+	_, ok = w.coverage()
+	require.False(t, ok, "a dropped send leaves the watcher uncovered")
+	w.scheduleOnOverflow(errRelayOverflow)
+	require.Zero(t, w.cover.relayDropped.Load())
+	w.mu.Lock()
+	scheduled := w.timer != nil
+	w.mu.Unlock()
+	require.True(t, scheduled, "the overflow schedules a re-resolve")
 }
 
 // Sync calls Remove and Add with w.mu held, the event loop takes w.mu for
@@ -499,11 +566,48 @@ func TestResolvePass_CreatedRootIsNotServedFromCache(t *testing.T) {
 	roots := []ScanRoot{{Path: ws}}
 	m, w := advertisedCacheManager(t, ManagerOptions{}, nil)
 
-	m.resolvePass(context.Background(), m.resolver, roots, w)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 	_, ok := cachedFor(m, w, roots)
 	require.True(t, ok, "the pass over the missing root is cached")
 
 	writePackFiles(t, ws, map[string]string{"AGENTS.md": "v1"})
 	_, ok = cachedFor(m, w, roots)
 	require.False(t, ok, "the created root misses the cache")
+}
+
+// A link retargeted between the stat and the open must not store the new
+// target's body under the old target's stamp: once the link points back,
+// that stamp would serve the wrong body.
+func TestFileMemo_RetargetBetweenStatAndOpenIsNotStored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")
+	old := time.Now().Add(-time.Hour)
+	for path, body := range map[string]string{a: "body of a", b: "body of b"} {
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		require.NoError(t, os.Chtimes(path, old, old))
+	}
+	link := filepath.Join(dir, "settings.json")
+	require.NoError(t, os.Symlink(a, link))
+	statA, err := os.Stat(link)
+	require.NoError(t, err)
+	if _, ok := stampOf(statA); !ok {
+		t.Skip("no file identity on this platform, so the memo is off")
+	}
+	memo := &fileMemo{entries: make(map[string]*memoEntry)}
+	load := func() ([]byte, fs.FileInfo, error) { return readOpenFile(link, 1<<10) }
+
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink(b, link))
+	data, err := memo.read(link, statA, load)
+	require.NoError(t, err)
+	require.Equal(t, "body of b", string(data), "the read returns what the link names now")
+
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink(a, link))
+	statA, err = os.Stat(link)
+	require.NoError(t, err)
+	data, err = memo.read(link, statA, load)
+	require.NoError(t, err)
+	require.Equal(t, "body of a", string(data), "the stamp of a served the body of b")
 }

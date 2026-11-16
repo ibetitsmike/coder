@@ -84,14 +84,18 @@ type fileMemo struct {
 var resolveMemo = &fileMemo{entries: make(map[string]*memoEntry)}
 
 // read returns the body of the regular file at path whose stat is info,
-// calling load only when the memo holds no body for the same stamp. A body
-// is stored only when load succeeded and the file is not racily recent.
-// Callers must not modify the returned bytes: they are shared with the memo
-// and with earlier snapshots.
-func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, error)) ([]byte, error) {
+// calling load only when the memo holds no body for the same stamp. load
+// returns the body and the stat of the file it read. A body is stored only
+// when load succeeded, read the file that info describes, and the file is
+// not racily recent: a path replaced or retargeted between the stat and the
+// open would otherwise store the new body under the old stamp. Callers must
+// not modify the returned bytes: they are shared with the memo and with
+// earlier snapshots.
+func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, fs.FileInfo, error)) ([]byte, error) {
 	stamp, ok := stampOf(info)
 	if !ok || !info.Mode().IsRegular() {
-		return load()
+		data, _, err := load()
+		return data, err
 	}
 	now := time.Now()
 	m.mu.Lock()
@@ -103,12 +107,12 @@ func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, erro
 	}
 	m.mu.Unlock()
 
-	data, err := load()
+	data, opened, err := load()
 	if err != nil {
 		m.forget(path)
 		return nil, err
 	}
-	if now.Sub(info.ModTime()) < memoRacyWindow {
+	if openedStamp, ok := stampOf(opened); !ok || openedStamp != stamp || now.Sub(info.ModTime()) < memoRacyWindow {
 		m.forget(path)
 		return data, nil
 	}
@@ -157,10 +161,37 @@ func (m *fileMemo) sweep(passStart time.Time) {
 // readResourceFile reads the body of a resource file whose resolved stat is
 // info, through the memo.
 func readResourceFile(path string, info fs.FileInfo) ([]byte, error) {
-	return resolveMemo.read(path, info, func() ([]byte, error) {
-		noteBodyRead(path)
-		return os.ReadFile(path)
+	return resolveMemo.read(path, info, func() ([]byte, fs.FileInfo, error) {
+		return readOpenFile(path, -1)
 	})
+}
+
+// readOpenFile reads the file at path and returns its body and the stat of
+// the descriptor it read. With maxBytes at 0 or more, a body longer than
+// maxBytes is an error.
+func readOpenFile(path string, maxBytes int64) ([]byte, fs.FileInfo, error) {
+	noteBodyRead(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	var r io.Reader = f
+	if maxBytes >= 0 {
+		r = io.LimitReader(f, maxBytes+1)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	if maxBytes >= 0 && int64(len(data)) > maxBytes {
+		return nil, nil, errFileGrew
+	}
+	return data, info, nil
 }
 
 // readCappedMemo reads the file at path when info, its stat, is a regular
@@ -170,21 +201,8 @@ func readCappedMemo(path string, info fs.FileInfo, maxBytes int64) ([]byte, bool
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
 		return nil, false
 	}
-	data, err := resolveMemo.read(path, info, func() ([]byte, error) {
-		noteBodyRead(path)
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(data)) > maxBytes {
-			return nil, errFileGrew
-		}
-		return data, nil
+	data, err := resolveMemo.read(path, info, func() ([]byte, fs.FileInfo, error) {
+		return readOpenFile(path, maxBytes)
 	})
 	return data, err == nil
 }

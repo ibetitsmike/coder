@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
 )
@@ -90,6 +91,10 @@ type resolveCacheEntry struct {
 	seq      uint64
 	// watchGen is the watcher's watch generation when the pass started.
 	watchGen uint64
+	// epoch is the Manager resolve epoch the pass claimed. Of two passes
+	// with the same key, the one that started later is the one the Manager
+	// published, so its result wins whichever pass finishes last.
+	epoch uint64
 	// snap is the resolver's output before the Manager stamped a version
 	// or a negotiation marker on it.
 	snap Snapshot
@@ -124,9 +129,11 @@ func (c *resolveCache) store(e resolveCacheEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if slices.ContainsFunc(c.entries, func(old resolveCacheEntry) bool {
-		return old.seq > e.seq || old.watchGen > e.watchGen
+		return old.seq > e.seq || old.watchGen > e.watchGen ||
+			(old.epoch > e.epoch && old.caps == e.caps && slices.Equal(old.roots, e.roots))
 	}) {
-		// A pass that started after a later change already stored.
+		// A pass that started after a later change, or a later pass with
+		// the same key, already stored.
 		return
 	}
 	// A result with an older sequence or generation can never match again.
@@ -158,8 +165,9 @@ func (c *resolveCache) reset() {
 
 // resolvePass runs one resolver pass over roots and caches its result when
 // the watcher covers everything the pass read and no change signal raced
-// the pass. The returned pack pass feeds the pack MCP publisher.
-func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []ScanRoot, watcher *Watcher) (Snapshot, *packPass) {
+// the pass. epoch is the resolve epoch the pass claimed. The returned pack
+// pass feeds the pack MCP publisher.
+func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []ScanRoot, watcher *Watcher, epoch uint64) (Snapshot, *packPass) {
 	start := time.Now()
 	watchGen, _ := watcher.coverage()
 	seq := m.resolveCache.seq.Load()
@@ -201,7 +209,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 		m.resolveCache.reset()
 		return snap, pass
 	}
-	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, snap: snap, pass: pass, links: links})
+	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, epoch: epoch, snap: snap, pass: pass, links: links})
 	return snap, pass
 }
 
@@ -329,6 +337,12 @@ type watchCoverage struct {
 	// directory being gone (which its parent's watch reports), such as
 	// EMFILE from kqueue on darwin.
 	addFailed bool
+	// relayDropped counts the overflow errors the fsnotify relay queued
+	// that the event loop has not handled. The relay sets it without w.mu.
+	relayDropped atomic.Int64
+	// relayed counts the events and errors the relay took from fsnotify,
+	// for tests.
+	relayed atomic.Uint64
 }
 
 // beginSync starts a Sync's add loop, with w.mu held, and returns true, the
@@ -461,7 +475,7 @@ func (w *Watcher) coverage() (gen uint64, ok bool) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.cover.gen, !w.closed && w.watcher != nil && w.degraded == "" && w.timer == nil && !w.cover.addFailed
+	return w.cover.gen, !w.closed && w.watcher != nil && w.degraded == "" && w.timer == nil && !w.cover.addFailed && w.cover.relayDropped.Load() == 0
 }
 
 // reportsWritesTo reports whether the watcher reports a write to the
@@ -635,11 +649,68 @@ func isSymlinkChain(link string) bool {
 	return err != nil || info.Mode()&os.ModeSymlink != 0
 }
 
-// scheduleOnOverflow re-resolves after the kernel dropped events: any of
-// them could have been a change to a resolved file.
+// scheduleOnOverflow re-resolves after the kernel or the relay dropped
+// events: any of them could have been a change to a resolved file.
 func (w *Watcher) scheduleOnOverflow(err error) {
-	if errors.Is(err, fsnotify.ErrEventOverflow) {
-		w.schedule()
+	if !errors.Is(err, fsnotify.ErrEventOverflow) {
+		return
+	}
+	w.schedule()
+	if errors.Is(err, errRelayOverflow) {
+		// The debounce timer now keeps the watcher uncovered.
+		w.cover.relayDropped.Add(-1)
+	}
+}
+
+// relayQueueMax bounds the events and errors the relay holds for the event
+// loop. Past it the relay drops what fsnotify sends and queues one
+// overflow error in their place, as the kernel does when its queue fills.
+const relayQueueMax = 4096
+
+// errRelayOverflow is the overflow error the relay queues when it drops.
+var errRelayOverflow = xerrors.Errorf("agentcontext watcher relay: %w", fsnotify.ErrEventOverflow)
+
+type relayItem struct {
+	ev    fsnotify.Event
+	err   error
+	isErr bool
+	// overflow marks the errRelayOverflow item the relay queued itself.
+	overflow bool
+}
+
+// relayQueue is the bounded queue of the relay.
+type relayQueue struct {
+	items []relayItem
+	max   int
+	// dropping is set from a drop until the event loop takes the overflow
+	// error queued for it.
+	dropping bool
+}
+
+// push queues it and reports false, or drops it and reports true. The
+// first drop queues errRelayOverflow, so the queue holds at most max+1.
+func (q *relayQueue) push(it relayItem) (dropped bool) {
+	if q.dropping {
+		return true
+	}
+	if len(q.items) >= q.max {
+		q.dropping = true
+		q.items = append(q.items, relayItem{err: errRelayOverflow, isErr: true, overflow: true})
+		return true
+	}
+	q.items = append(q.items, it)
+	return false
+}
+
+// pop removes the head of the queue after the event loop took it.
+func (q *relayQueue) pop() {
+	if q.items[0].overflow {
+		q.dropping = false
+	}
+	q.items[0] = relayItem{}
+	q.items = q.items[1:]
+	if len(q.items) == 0 {
+		q.items = nil
 	}
 }
 
@@ -651,26 +722,31 @@ func (w *Watcher) scheduleOnOverflow(err error) {
 // sends. The event loop takes w.mu, and Sync calls Add and Remove with w.mu
 // held, so a send that waited on the event loop could block Sync and the
 // event loop for good. The queue grows only while the event loop waits for
-// w.mu.
+// w.mu, and is bounded: past relayQueueMax it drops sends and queues one
+// overflow error, which re-resolves. Until the event loop takes that error
+// the watcher reports no coverage, so no cached result is served while a
+// dropped event may be unaccounted for.
 func (w *Watcher) relayFsnotify(fsw *fsnotify.Watcher) (<-chan fsnotify.Event, <-chan error) {
-	type item struct {
-		ev    fsnotify.Event
-		err   error
-		isErr bool
-	}
 	events := make(chan fsnotify.Event)
 	errs := make(chan error)
 	go func() {
 		defer close(events)
 		defer close(errs)
 		inEvents, inErrs := fsw.Events, fsw.Errors
-		var queue []item
-		for inEvents != nil || inErrs != nil || len(queue) > 0 {
+		q := relayQueue{max: relayQueueMax}
+		push := func(it relayItem) {
+			w.cover.relayed.Add(1)
+			wasDropping := q.dropping
+			if q.push(it) && !wasDropping {
+				w.cover.relayDropped.Add(1)
+			}
+		}
+		for inEvents != nil || inErrs != nil || len(q.items) > 0 {
 			var outEvents chan<- fsnotify.Event
 			var outErrs chan<- error
-			var next item
-			if len(queue) > 0 {
-				next = queue[0]
+			var next relayItem
+			if len(q.items) > 0 {
+				next = q.items[0]
 				if next.isErr {
 					outErrs = errs
 				} else {
@@ -685,17 +761,17 @@ func (w *Watcher) relayFsnotify(fsw *fsnotify.Watcher) (<-chan fsnotify.Event, <
 					inEvents = nil
 					continue
 				}
-				queue = append(queue, item{ev: ev})
+				push(relayItem{ev: ev})
 			case err, ok := <-inErrs:
 				if !ok {
 					inErrs = nil
 					continue
 				}
-				queue = append(queue, item{err: err, isErr: true})
+				push(relayItem{err: err, isErr: true})
 			case outEvents <- next.ev:
-				queue = queue[1:]
+				q.pop()
 			case outErrs <- next.err:
-				queue = queue[1:]
+				q.pop()
 			}
 		}
 	}()

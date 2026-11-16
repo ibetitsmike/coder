@@ -531,7 +531,7 @@ func (m *Manager) Resync(ctx context.Context) (Snapshot, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return m.Snapshot(), ctxErr
 	}
-	snap, pass := m.resolvePass(ctx, resolver, roots, watcher)
+	snap, pass := m.resolvePass(ctx, resolver, roots, watcher, myEpoch)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// Cancellation mid-walk yields a partial or empty
 		// Snapshot whose SnapshotError is set to
@@ -761,7 +761,7 @@ func (m *Manager) resolveAndBroadcast(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		return
 	}
-	snap, pass := m.resolvePass(ctx, resolver, roots, watcher)
+	snap, pass := m.resolvePass(ctx, resolver, roots, watcher, myEpoch)
 	if err := ctx.Err(); err != nil {
 		// Cancellation mid-walk yields a partial or empty
 		// Snapshot. Publishing it would replace the live
