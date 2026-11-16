@@ -53,6 +53,13 @@ const ForkWorkflowResumePrefillListener: React.FC<{
 		if (!input) {
 			return;
 		}
+		// A double click dispatches twice. The first dispatch already put
+		// the request in the composer, so the second only focuses it: the
+		// composer's text ends with the prompt when the first click landed.
+		if (input.getValue().trimEnd().endsWith(prompt)) {
+			input.focus();
+			return;
+		}
 		// restoreEditorState keeps the draft's chips (file references and
 		// skill invocations), which a plain-text append would drop. It is also
 		// the path for any non-empty draft, where the request joins it on a new

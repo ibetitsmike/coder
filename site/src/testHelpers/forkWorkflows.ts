@@ -147,6 +147,7 @@ export const seedChatWriteAccess = (
 	queryClient: QueryClient,
 	chatId: string,
 	canUpdateChat: boolean,
+	archived = false,
 ): void => {
 	const seed = (key: readonly unknown[], data: unknown) => {
 		queryClient.setQueryDefaults(key, {
@@ -155,7 +156,7 @@ export const seedChatWriteAccess = (
 		});
 		queryClient.setQueryData(key, data);
 	};
-	seed(chatEntityKey(chatId), { ...MockChat, id: chatId });
+	seed(chatEntityKey(chatId), { ...MockChat, id: chatId, archived });
 	seed(
 		getAuthorizationKey({
 			checks: {

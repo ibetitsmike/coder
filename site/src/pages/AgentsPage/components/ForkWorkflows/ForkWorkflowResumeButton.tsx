@@ -22,9 +22,7 @@ export const ForkWorkflowResumeButton: React.FC<
 	<Button
 		variant="outline"
 		size="sm"
-		onClick={() =>
-			requestForkWorkflowResume(chatId, runId, { skipIfPrompted: true })
-		}
+		onClick={() => requestForkWorkflowResume(chatId, runId)}
 	>
 		<PlayIcon />
 		Resume run

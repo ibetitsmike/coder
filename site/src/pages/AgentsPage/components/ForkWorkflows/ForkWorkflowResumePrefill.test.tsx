@@ -200,6 +200,47 @@ describe("ForkWorkflowResumePrefill", () => {
 		);
 	});
 
+	it("prefills once when the button is clicked twice in a row", async () => {
+		// A double click dispatches twice while the listener is mounted, and
+		// the second dispatch must not append the prompt a second time.
+		const queryClient = createTestQueryClient();
+		seedChat(queryClient, MockChat);
+		const input = renderPrefill(queryClient);
+		const prompt = forkWorkflowResumePrompt(MockForkWorkflowRunId);
+
+		dispatchResume(MockChat.id, prompt);
+		dispatchResume(MockChat.id, prompt);
+
+		expect(input.getValue()).toBe(prompt);
+	});
+
+	it("does not prefill a request addressed to another chat", async () => {
+		const queryClient = createTestQueryClient();
+		seedChat(queryClient, MockChat);
+		const input = renderPrefill(queryClient);
+
+		dispatchResume(
+			"other-chat",
+			forkWorkflowResumePrompt(MockForkWorkflowRunId),
+		);
+
+		expect(input.getValue()).toBe("");
+	});
+
+	it("prefills again after a request for another chat is dropped", async () => {
+		// A request this chat does not own is dropped without marking
+		// anything, so this chat's own later resume still prefills.
+		const queryClient = createTestQueryClient();
+		seedChat(queryClient, MockChat);
+		const input = renderPrefill(queryClient);
+		const prompt = forkWorkflowResumePrompt(MockForkWorkflowRunId);
+
+		dispatchResume("other-chat", prompt);
+		dispatchResume(MockChat.id, prompt);
+
+		expect(input.getValue()).toBe(prompt);
+	});
+
 	it("ignores a resume request for another open chat", async () => {
 		const queryClient = createTestQueryClient();
 		seedChat(queryClient, MockChat);

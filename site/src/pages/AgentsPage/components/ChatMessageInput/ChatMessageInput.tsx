@@ -1263,10 +1263,7 @@ const ChatMessageInput = ({
 					if (appendText) {
 						const needsSpace =
 							paragraph.getChildrenSize() > 0 &&
-							!/\s$/.test(paragraph.getTextContent()) &&
-							// Appended text that deliberately starts with whitespace
-							// already carries its own separation.
-							!/\s/.test(appendText[0]);
+							!/\s$/.test(paragraph.getTextContent());
 						paragraph.append(
 							$createTextNode(needsSpace ? ` ${appendText}` : appendText),
 						);
