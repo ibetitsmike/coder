@@ -75,3 +75,72 @@ func (q ChatDescendantQuestion) Secret() bool {
 	}
 	return false
 }
+
+// Chat returns c as upstream's database.Chat. TestChatsExpandedChat fails
+// when a column of chats_expanded is missing on either side.
+func (c ChatsExpanded) Chat() database.Chat {
+	return database.Chat{
+		ID:                       c.ID,
+		OwnerID:                  c.OwnerID,
+		WorkspaceID:              c.WorkspaceID,
+		Title:                    c.Title,
+		Status:                   c.Status,
+		WorkerID:                 c.WorkerID,
+		StartedAt:                c.StartedAt,
+		HeartbeatAt:              c.HeartbeatAt,
+		CreatedAt:                c.CreatedAt,
+		UpdatedAt:                c.UpdatedAt,
+		ParentChatID:             c.ParentChatID,
+		RootChatID:               c.RootChatID,
+		LastModelConfigID:        c.LastModelConfigID,
+		LastReasoningEffort:      c.LastReasoningEffort,
+		Archived:                 c.Archived,
+		LastError:                c.LastError,
+		Mode:                     c.Mode,
+		MCPServerIDs:             c.McpServerIds,
+		Labels:                   c.Labels,
+		BuildID:                  c.BuildID,
+		AgentID:                  c.AgentID,
+		PinOrder:                 c.PinOrder,
+		LastReadMessageID:        c.LastReadMessageID,
+		DynamicTools:             c.DynamicTools,
+		OrganizationID:           c.OrganizationID,
+		ProjectID:                c.ProjectID,
+		PlanMode:                 c.PlanMode,
+		ClientType:               c.ClientType,
+		LastTurnSummary:          c.LastTurnSummary,
+		Summary:                  c.Summary,
+		SummaryGeneratedAt:       c.SummaryGeneratedAt,
+		SnapshotVersion:          c.SnapshotVersion,
+		HistoryVersion:           c.HistoryVersion,
+		QueueVersion:             c.QueueVersion,
+		GenerationAttempt:        c.GenerationAttempt,
+		RetryState:               c.RetryState,
+		RetryStateVersion:        c.RetryStateVersion,
+		RunnerID:                 c.RunnerID,
+		RequiresActionDeadlineAt: c.RequiresActionDeadlineAt,
+		UserACL:                  c.UserAcl,
+		GroupACL:                 c.GroupAcl,
+		OwnerUsername:            c.OwnerUsername,
+		OwnerName:                c.OwnerName,
+		ContextAggregateHash:     c.ContextAggregateHash,
+		ContextDirtySince:        c.ContextDirtySince,
+		ContextDirtyResources:    c.ContextDirtyResources,
+		ContextError:             c.ContextError,
+		CompactionRequestedAt:    c.CompactionRequestedAt,
+		TitleSource:              c.TitleSource,
+		TitleUpdatedAt:           c.TitleUpdatedAt,
+	}
+}
+
+// ChildChatRow returns r in the row shape of upstream's
+// GetChildChatsByParentIDs.
+func (r GetDescendantChatsByRootIDsRow) ChildChatRow() database.GetChildChatsByParentIDsRow {
+	return database.GetChildChatsByParentIDsRow{Chat: r.ChatsExpanded.Chat(), HasUnread: r.HasUnread}
+}
+
+// RBACObject authorizes a descendant as its chat, like upstream's
+// GetChildChatsByParentIDsRow.
+func (r GetDescendantChatsByRootIDsRow) RBACObject() rbac.Object {
+	return r.ChatsExpanded.Chat().RBACObject()
+}
