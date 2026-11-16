@@ -580,6 +580,52 @@ func TestWakeupPullRequestFiredTextStaysFresh(t *testing.T) {
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
 }
 
+// A watch that fired while the chat was busy waits at the final poll for
+// the read through the expiry, so the message reports what happened until
+// the expiry and not only until the read before.
+func TestWakeupPullRequestFinalPollWaitsForFiredRead(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	expiresAt := wakeupTestSlot.Add(30 * time.Second)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+	}, pullRequestEvents([]string{"comment"}, testHeadSHA, gitprovider.CheckStatePending)...)
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	first := gitprovider.PullRequestEvent{ID: 1, Author: "alice", URL: testPullRequestURL + "#issuecomment-1", CreatedAt: wakeupTestSlot.Add(-time.Minute)}
+	activity := openPullRequest(gitprovider.CheckStatePending)
+	activity.Comments = []gitprovider.PullRequestEvent{first}
+	fake := &fakePullRequestActivity{activity: activity}
+	worker.server.forkPullRequestActivity = fake.fetch
+	forceExecutionState(t, f, chat.ID, database.ChatStatusRunning, false)
+
+	worker.pollAndWake(ctx, wakeupTestSlot.Add(time.Second))
+	require.Equal(t, 1, fake.callCount())
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt), "a busy chat gets nothing yet")
+
+	// Another comment arrives before the expiry. The chat waits again
+	// after the expiry, and the waker runs before the poller.
+	second := gitprovider.PullRequestEvent{ID: 2, Author: "bob", URL: testPullRequestURL + "#issuecomment-2", CreatedAt: expiresAt.Add(-5 * time.Second)}
+	activity.Comments = []gitprovider.PullRequestEvent{first, second}
+	fake.set(activity, nil)
+	forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+	worker.wakeupOnce(ctx, expiresAt.Add(time.Second))
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt), "the final poll waits for the read through the expiry")
+	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status)
+
+	worker.pollAndWake(ctx, expiresAt.Add(time.Minute))
+	require.Equal(t, 2, fake.callCount())
+	messages := f.wakeMessages(t, chat, wakeup.Prompt)
+	require.Len(t, messages, 1)
+	require.Contains(t, messages[0], first.URL)
+	require.Contains(t, messages[0], second.URL)
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+}
+
 // A final poll that delivers a done child reads the pull request once more
 // after that turn, and reports only what happened until the expiry.
 func TestWakeupFinalPollAfterChild(t *testing.T) {
