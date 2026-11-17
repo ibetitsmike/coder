@@ -335,6 +335,52 @@ def main(args):
 		require.NoError(t, err)
 		assert.Equal(t, stepStatusReported, stepRow.Status)
 	})
+
+	// A step whose child is reused without a journal row, as after a crash
+	// between the child and its row, takes the report the child already
+	// sent into its history.
+	t.Run("ReusedChildWithoutARowTakesItsHistoryReport", func(t *testing.T) {
+		t.Parallel()
+		db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+		server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+			withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
+		user, org, model := seedInternalChatDeps(t, db)
+		f := &forkWorkflowFixture{db: db, ps: ps, server: server, user: user, org: org, model: model}
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: signalOneStepScript})
+		childID := uuid.MustParse(f.steps(ctx, t, run, 1)[0].ChatID)
+
+		restarted := f.restartWorkflowServer(t)
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+		f.insert(t, childID, database.ChatMessageRoleAssistant,
+			codersdk.ChatMessageToolCall("call-1", workflowReportToolName, json.RawMessage(`{"text":"history"}`)))
+		f.insert(t, childID, database.ChatMessageRoleTool,
+			codersdk.ChatMessageToolResult("call-1", workflowReportToolName,
+				json.RawMessage(`"`+reportAcceptedText+`"`), false, false))
+		_, err := sqlDB.ExecContext(ctx, "DELETE FROM workflow_steps WHERE id = $1", childID)
+		require.NoError(t, err)
+
+		claimed, ok, err := restarted.server.workflowJournal().claimRun(ctx, run.id)
+		require.NoError(t, err)
+		require.True(t, ok)
+		resumed, err := restarted.server.rehydrateWorkflowRun(ctx, parent, claimed)
+		require.NoError(t, err)
+		require.Empty(t, resumed.steps)
+
+		step, err := resumed.startStep(ctx, stepSpec{Prompt: "Say hi.", Title: "hi"})
+		require.NoError(t, err)
+		assert.Equal(t, childID, step.chatID)
+		require.True(t, step.reused, "the step reuses the child")
+		assert.Equal(t, stepStatusReported, step.status)
+		assert.JSONEq(t, `{"text":"history"}`, string(step.value))
+		stepRow, err := fdb.GetWorkflowStep(ctx, childID)
+		require.NoError(t, err)
+		assert.Equal(t, stepStatusReported, stepRow.Status)
+	})
 }
 
 // failingHistoryStore fails the next fails history reads of chatID, the

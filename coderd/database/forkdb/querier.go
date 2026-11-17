@@ -48,7 +48,10 @@ type Querier interface {
 	// Counts the notifications of a chat since a time, for the hourly limit.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
-	// finished. A finished subagent is waiting or error.
+	// finished. A finished subagent is waiting or error. A workflow step child
+	// whose step is reported counts as finished: the workflow is done with it
+	// and admits its next step while the child ends its turn. A step's ID is
+	// its child chat ID.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error

@@ -2,6 +2,7 @@ package forkdb_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -113,10 +114,23 @@ func TestCountLiveSubagentsInFamily(t *testing.T) {
 	_ = chat(&root, database.ChatStatusRunning, true)
 	otherRoot := chat(nil, database.ChatStatusRunning, false)
 	_ = chat(&otherRoot, database.ChatStatusRunning, false)
+	// A running workflow step child counts until its step is reported.
+	runID, owner := uuid.New(), uuid.NullUUID{UUID: uuid.New(), Valid: true}
+	require.NoError(t, fdb.InsertWorkflowRun(ctx, forkdb.InsertWorkflowRunParams{
+		ID: runID, ChatID: root.ID, ModelConfigID: modelID, Script: "run()",
+		Args: json.RawMessage(`{}`), Status: "running", OwnerID: owner,
+	}))
+	for i, status := range []string{"running", "reported"} {
+		step := chat(&root, database.ChatStatusRunning, false)
+		_, err := fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+			ID: step.ID, RunID: runID, SpecKey: status, Occurrence: int32(i), Status: status, OwnerID: owner,
+		})
+		require.NoError(t, err)
+	}
 
 	live, err := fdb.CountLiveSubagentsInFamily(ctx, root.ID)
 	require.NoError(t, err)
-	require.EqualValues(t, 4, live)
+	require.EqualValues(t, 5, live)
 }
 
 func TestGetSubagentCapacityCountsAwaitingOnly(t *testing.T) {

@@ -1,11 +1,19 @@
 -- name: CountLiveSubagentsInFamily :one
 -- Counts the unarchived subagent chats under @root_chat_id that have not
--- finished. A finished subagent is waiting or error.
+-- finished. A finished subagent is waiting or error. A workflow step child
+-- whose step is reported counts as finished: the workflow is done with it
+-- and admits its next step while the child ends its turn. A step's ID is
+-- its child chat ID.
 SELECT COUNT(*)::bigint AS live_count
 FROM chats
 WHERE chats.root_chat_id = @root_chat_id::uuid
 	AND chats.archived = false
-	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status);
+	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status)
+	AND NOT EXISTS (
+		SELECT 1 FROM workflow_steps
+		WHERE workflow_steps.id = chats.id
+			AND workflow_steps.status = 'reported'
+	);
 
 -- name: GetSubagentCapacityCounts :many
 -- Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is

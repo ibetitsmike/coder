@@ -1280,6 +1280,12 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	if early {
 		r.journalEarlyReport(ctx, step)
 	}
+	if reused {
+		// A reused child without a journal row (a crash between the child
+		// and the row, or a purged run) may have reported into its
+		// history already.
+		_ = r.scanJournaledStepHistory(ctx, step)
+	}
 	return step, nil
 }
 

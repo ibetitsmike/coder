@@ -31,10 +31,18 @@ FROM chats
 WHERE chats.root_chat_id = $1::uuid
 	AND chats.archived = false
 	AND chats.status IN ('running'::chat_status, 'interrupting'::chat_status, 'requires_action'::chat_status, 'paused'::chat_status)
+	AND NOT EXISTS (
+		SELECT 1 FROM workflow_steps
+		WHERE workflow_steps.id = chats.id
+			AND workflow_steps.status = 'reported'
+	)
 `
 
 // Counts the unarchived subagent chats under @root_chat_id that have not
-// finished. A finished subagent is waiting or error.
+// finished. A finished subagent is waiting or error. A workflow step child
+// whose step is reported counts as finished: the workflow is done with it
+// and admits its next step while the child ends its turn. A step's ID is
+// its child chat ID.
 func (q *Queries) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countLiveSubagentsInFamily, rootChatID)
 	var live_count int64
