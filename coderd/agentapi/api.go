@@ -127,6 +127,7 @@ type Options struct {
 	// ForkContextCache lets agents reuse their resolve cache across
 	// reconnects (the fork-context-cache experiment).
 	ForkContextCache                  bool
+	ForkChatProcessEvents             *ForkChatProcessEvents // fork: see fork_process_events.go
 	ConnectionLogger                  *atomic.Pointer[connectionlog.ConnectionLogger]
 	DerpMapFn                         func() *tailcfg.DERPMap
 	TailnetCoordinator                *atomic.Pointer[tailnet.Coordinator]

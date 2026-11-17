@@ -86,6 +86,21 @@ func (mr *MockStoreMockRecorder) CancelChatWakeupsByChatID(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).CancelChatWakeupsByChatID), ctx, arg)
 }
 
+// ChatProcessWatchTakesLines mocks base method.
+func (m *MockStore) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChatProcessWatchTakesLines", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ChatProcessWatchTakesLines indicates an expected call of ChatProcessWatchTakesLines.
+func (mr *MockStoreMockRecorder) ChatProcessWatchTakesLines(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChatProcessWatchTakesLines", reflect.TypeOf((*MockStore)(nil).ChatProcessWatchTakesLines), ctx, arg)
+}
+
 // ClaimDuePullRequestWatches mocks base method.
 func (m *MockStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
 	m.ctrl.T.Helper()
@@ -550,6 +565,21 @@ func (m *MockStore) FailOpenWorkflowStepsOfRun(ctx context.Context, arg forkdb.F
 func (mr *MockStoreMockRecorder) FailOpenWorkflowStepsOfRun(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOpenWorkflowStepsOfRun", reflect.TypeOf((*MockStore)(nil).FailOpenWorkflowStepsOfRun), ctx, arg)
+}
+
+// FireChatProcessWatches mocks base method.
+func (m *MockStore) FireChatProcessWatches(ctx context.Context, arg forkdb.FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FireChatProcessWatches", ctx, arg)
+	ret0, _ := ret[0].([]uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FireChatProcessWatches indicates an expected call of FireChatProcessWatches.
+func (mr *MockStoreMockRecorder) FireChatProcessWatches(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FireChatProcessWatches", reflect.TypeOf((*MockStore)(nil).FireChatProcessWatches), ctx, arg)
 }
 
 // GetChatFamilyMessageRecipient mocks base method.
@@ -1893,6 +1923,21 @@ func (mr *MockStoreMockRecorder) LockChatForNoKeyUpdate(ctx, id any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockChatForNoKeyUpdate", reflect.TypeOf((*MockStore)(nil).LockChatForNoKeyUpdate), ctx, id)
 }
 
+// MarkChatProcessWatchesReported mocks base method.
+func (m *MockStore) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkChatProcessWatchesReported", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkChatProcessWatchesReported indicates an expected call of MarkChatProcessWatchesReported.
+func (mr *MockStoreMockRecorder) MarkChatProcessWatchesReported(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkChatProcessWatchesReported", reflect.TypeOf((*MockStore)(nil).MarkChatProcessWatchesReported), ctx, arg)
+}
+
 // MarkChatWakeupWatchDelivered mocks base method.
 func (m *MockStore) MarkChatWakeupWatchDelivered(ctx context.Context, arg forkdb.MarkChatWakeupWatchDeliveredParams) (forkdb.ChatWakeupWatch, error) {
 	m.ctrl.T.Helper()
@@ -1920,6 +1965,21 @@ func (m *MockStore) MarkChatWakeupWatchFailed(ctx context.Context, arg forkdb.Ma
 func (mr *MockStoreMockRecorder) MarkChatWakeupWatchFailed(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkChatWakeupWatchFailed", reflect.TypeOf((*MockStore)(nil).MarkChatWakeupWatchFailed), ctx, arg)
+}
+
+// MarkLostChatProcessWatches mocks base method.
+func (m *MockStore) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkLostChatProcessWatches", ctx, arg)
+	ret0, _ := ret[0].([]uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkLostChatProcessWatches indicates an expected call of MarkLostChatProcessWatches.
+func (mr *MockStoreMockRecorder) MarkLostChatProcessWatches(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkLostChatProcessWatches", reflect.TypeOf((*MockStore)(nil).MarkLostChatProcessWatches), ctx, arg)
 }
 
 // MarkOpenWorkflowRunsInterrupted mocks base method.
