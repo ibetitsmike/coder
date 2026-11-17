@@ -594,6 +594,70 @@ func TestWakerFreedSlotCostsOneList(t *testing.T) {
 	require.Empty(t, h.waker.pending, "a freed slot pokes no skipped chat")
 }
 
+// A freed slot goes to the chat that waits in the queue, not to a chat
+// poked in the same drain, so fresh pokes cannot postpone a queued chat.
+func TestWakerQueueBeforeFreshPokes(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	queued := f.createWakeupChat(t)
+	poked := f.createWakeupChat(t)
+	for _, chat := range []database.Chat{queued, poked} {
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+		f.setNextRunAt(t, wakeup.ID, wakeupTestSlot.Add(-time.Second))
+	}
+	inner, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	fdb := &countingForkStore{Store: inner}
+	clock := quartz.NewMock(t)
+	clock.Set(wakeupTestSlot.Add(time.Second))
+
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var delivered []uuid.UUID
+	k := newForkWaker()
+	k.deliver = func(ctx context.Context, _ forkdb.Store, w forkdb.ChatWakeup, _ time.Time) error {
+		mu.Lock()
+		delivered = append(delivered, w.ChatID)
+		mu.Unlock()
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return errWakeupChatBusy
+	}
+	k.bind(newUnstartedServer(t, f.pubsub, f.db), f.db, clock, testutil.Logger(t))
+	t.Cleanup(func() {
+		close(release)
+		k.wg.Wait()
+	})
+	// One slot is free, queued waits for it, and a poke for the other chat
+	// came in with the end of the delivery that freed it.
+	for range forkWakerDeliveries - 1 {
+		k.slots <- struct{}{}
+	}
+	k.mu.Lock()
+	k.running = true
+	k.skipLocked(queued.ID)
+	k.pending[poked.ID] = struct{}{}
+	k.mu.Unlock()
+
+	//nolint:gocritic // The waker delivers the wake-ups of every chat.
+	k.drain(dbauthz.AsChatd(ctx), fdb)
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(delivered) > 0
+	}, testutil.IntervalFast, "the free slot must start a delivery")
+	mu.Lock()
+	require.Equal(t, []uuid.UUID{queued.ID}, delivered, "the queued chat gets the slot")
+	mu.Unlock()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	require.Equal(t, []uuid.UUID{poked.ID}, k.skipOrder, "the poked chat waits behind the queue")
+	require.EqualValues(t, 1, fdb.lists.Load(), "one free slot, one query")
+}
+
 // Each change that makes a watched child done delivers the events wake-up
 // of its idle parent at once: it publishes the chat update of the child or
 // pokes the child itself. Without pokes, the next full pass delivers it.

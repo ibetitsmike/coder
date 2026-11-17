@@ -224,16 +224,25 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 }
 
 // drain runs the passes that the signals since the last drain asked for. A
-// full pass covers every poked chat. While every slot is taken, a poked chat
-// is recorded as skipped with no query. Then each free slot goes to the
-// skipped chat that waited longest. So a freed slot costs about one pass,
-// however many chats wait.
+// full pass covers every poked chat. The free slots go first to the skipped
+// chats, the one that waited longest first, and a chat poked while others
+// wait joins the end of their queue. While every slot is taken, a poked chat
+// is recorded as skipped with no query. So a freed slot costs about one
+// pass, however many chats wait, and fresh pokes cannot postpone a skipped
+// chat.
 func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 	k.mu.Lock()
 	full, pending := k.full, k.pending
 	k.full, k.pending = false, make(map[uuid.UUID]struct{})
+	if !full && len(k.skipOrder) > 0 {
+		for chatID := range pending {
+			k.skipLocked(chatID)
+		}
+		pending = nil
+	}
 	k.mu.Unlock()
 	now := dbtime.Time(k.clock.Now("chatd", "waker")).UTC()
+	k.serveSkipped(ctx, fdb, now)
 	if full {
 		upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{}, now)
 		if ok {
@@ -250,6 +259,12 @@ func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 			k.chatPass(ctx, fdb, chatID, now)
 		}
 	}
+	k.serveSkipped(ctx, fdb, now)
+}
+
+// serveSkipped runs a pass over the skipped chats, oldest first, while a
+// slot is free.
+func (k *forkWaker) serveSkipped(ctx context.Context, fdb forkdb.Store, now time.Time) {
 	for ctx.Err() == nil {
 		chatID, ok := k.nextSkipped()
 		if !ok {
