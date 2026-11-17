@@ -466,6 +466,11 @@ func isWorkflowPhaseHidden(r rune) bool {
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
 
+// ValidateWorkflowPhaseName reports whether text is safe to show in model
+// context: valid UTF-8 without a NUL, control or format character. Saved
+// workflow descriptions reuse the phase-name rule.
+var ValidateWorkflowPhaseName = validateWorkflowPhaseName
+
 // journalDeclaredPhases journals the declared phase list right after Init,
 // so the run API shows the declared phases before the first step and not
 // only after the first phase() call. Best effort, like other journal

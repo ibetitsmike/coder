@@ -24,6 +24,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
@@ -633,6 +634,55 @@ def main(args):
 		require.Len(t, res.Steps, 1)
 		assert.Equal(t, stepStatusFailed, res.Steps[0].Status)
 		assert.Contains(t, res.Steps[0].Error, "ended before the step reported")
+	})
+
+	t.Run("ArgsSize", func(t *testing.T) {
+		t.Parallel()
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// The tool path checks the raw input bytes; an inline run over the
+		// cap fails before any run starts.
+		tools := f.server.forkWorkflowTools(ctx, parent, f.model.ID, nil)
+		big := `"` + strings.Repeat("a", maxWorkflowArgsBytes+1) + `"`
+		resp := runTool(ctx, t, tools[0], `{"script":"def main(args):\n    return {}\n","args":`+big+`}`)
+		assert.True(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "at most")
+		runs, err := forkWorkflowDB(t, f.db).GetWorkflowRunsByChat(ctx, forkdb.GetWorkflowRunsByChatParams{ChatID: parent.ID, RowLimit: 10})
+		require.NoError(t, err)
+		assert.Empty(t, runs, "a rejected call starts no run")
+
+		// The direct path, the way a test call takes it, checks the
+		// marshaled value.
+		_, err = f.server.startWorkflowRun(ctx, parent, f.model.ID, runWorkflowArgs{
+			Script: "def main(args):\n    return {}\n",
+			Args:   map[string]any{"pad": strings.Repeat("a", maxWorkflowArgsBytes+1)},
+		}, uuid.New())
+		require.ErrorContains(t, err, "the args are")
+		require.ErrorContains(t, err, "at most")
+
+		// Just under the cap starts the run.
+		run := f.start(ctx, t, parent, runWorkflowArgs{
+			Script: "def main(args):\n    return {}\n",
+			Args:   map[string]any{"pad": strings.Repeat("a", maxWorkflowArgsBytes-40)},
+		})
+		res := run.await(ctx, testutil.WaitLong)
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+	})
+
+	t.Run("ArgsSizeByName", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		f.saveUserWorkflow(t, "free", greetWorkflowScript, "")
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		// A named run whose args pass the cap fails before the run starts,
+		// even without an args schema that would reject the value.
+		_, err := f.server.startWorkflowRun(ctx, parent, f.model.ID, runWorkflowArgs{
+			Name: "free",
+			Args: map[string]any{"pad": strings.Repeat("a", maxWorkflowArgsBytes+1)},
+		}, uuid.New())
+		require.ErrorContains(t, err, "the args are")
+		require.ErrorContains(t, err, "at most")
 	})
 
 	t.Run("CompileErrors", func(t *testing.T) {

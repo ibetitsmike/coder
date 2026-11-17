@@ -16,11 +16,12 @@ import (
 	"strconv"
 	"strings"
 
-	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
+
+	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
@@ -118,7 +119,7 @@ func (t *workflowReportTool) Run(ctx context.Context, call fantasy.ToolCall) (fa
 	// cannot validate json.Number instances (they surface as strings), so
 	// an integer beyond the float64 range would be compared rounded while
 	// the workflow receives the original token below.
-	if err := rejectOutOfRangeNumbers(call.Input); err != nil {
+	if err := rejectOutOfRangeNumbers(call.Input, "the report contains"); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error() +
 			". Call workflow_report again with a corrected value."), nil
 	}
@@ -238,8 +239,10 @@ const (
 // validation pipeline cannot judge faithfully: integers beyond the exact
 // range in any spelling (plain, exponent, trailing zero), or mantissas and
 // exponents too large to parse exactly. Smaller fractions validate as their
-// float64 decode, which the report semantics tolerate.
-func rejectOutOfRangeNumbers(input string) error {
+// float64 decode, which the report semantics tolerate. subject names what
+// the input holds, so the args path can say "the args contain" where the
+// report path says "the report contains".
+func rejectOutOfRangeNumbers(input, subject string) error {
 	bound := new(big.Int).Lsh(big.NewInt(1), 53)
 	decoder := json.NewDecoder(strings.NewReader(input))
 	decoder.UseNumber()
@@ -262,12 +265,12 @@ func rejectOutOfRangeNumbers(input string) error {
 			// The token is valid JSON, so only an overflowing exponent can
 			// land here: a giant exponent hides any magnitude, and the
 			// float64 decode of it says nothing about the exact value.
-			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
+			return xerrors.Errorf("%s the number %s, which is too large to validate exactly: send a smaller value or bound the schema", subject, text)
 		}
 		// Two-sided rather than abs: abs(math.MinInt) overflows back to a
 		// negative value on 64-bit hosts and would bypass the bound.
 		if len(mantissa) > maxNumberDigits || exponent > maxNumberExponent || exponent < -maxNumberExponent {
-			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
+			return xerrors.Errorf("%s the number %s, which is too large to validate exactly: send a smaller value or bound the schema", subject, text)
 		}
 		// Parse exactly: an integer can hide in exponent or trailing-zero
 		// form (9007199254740993e0, 9007199254740992.0), and the float64
@@ -278,7 +281,7 @@ func rejectOutOfRangeNumbers(input string) error {
 		}
 		integer := ratio.Num()
 		if integer.Abs(integer).Cmp(bound) > 0 {
-			return xerrors.Errorf("the report contains the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", text, maxExactInteger)
+			return xerrors.Errorf("%s the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", subject, text, maxExactInteger)
 		}
 	}
 }

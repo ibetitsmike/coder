@@ -6,6 +6,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -334,6 +335,57 @@ func TestForkSavedWorkflowTools(t *testing.T) {
 		assert.Equal(t, "again", f.steps(ctx, t, run, 1)[0].Title)
 	})
 
+	// A resume replays the script the journal holds, so an edit or a
+	// delete of the saved workflow between the start and the resume
+	// changes nothing for the run in flight.
+	t.Run("ResumeUsesJournaledScript", func(t *testing.T) {
+		t.Parallel()
+		for name, mutate := range map[string]func(*forkWorkflowFixture, context.Context, *testing.T){
+			"Edit": func(f *forkWorkflowFixture, ctx context.Context, t *testing.T) {
+				_, err := forkWorkflowDB(t, f.db).UpdateUserSavedWorkflowByName(ctx, forkdb.UpdateUserSavedWorkflowByNameParams{
+					OrganizationID: f.org.ID, UserID: f.user.ID, Name: "greet",
+					Script: sql.NullString{String: titleWorkflowScript("changed"), Valid: true},
+				})
+				require.NoError(t, err)
+			},
+			"Delete": func(f *forkWorkflowFixture, ctx context.Context, t *testing.T) {
+				_, err := forkWorkflowDB(t, f.db).DeleteUserSavedWorkflowByName(ctx, forkdb.DeleteUserSavedWorkflowByNameParams{
+					OrganizationID: f.org.ID, UserID: f.user.ID, Name: "greet",
+				})
+				require.NoError(t, err)
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				f := newForkWorkflowFixture(t)
+				ctx := chatdTestContext(t)
+				f.saveUserWorkflow(t, "greet", greetWorkflowScript, greetArgsSchema)
+				parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+				run := f.startByName(ctx, t, f.server, parent, `{"name":"greet","args":{"topic":"hello"}}`)
+				step := f.steps(ctx, t, run, 1)[0]
+				mutate(f, ctx, t)
+
+				restarted := f.restartWorkflowServer(t)
+				resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
+					runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+				require.NoError(t, err)
+				f.report(ctx, t, step.ChatID, `{"text":"hello"}`)
+				res := resumed.await(ctx, testutil.WaitShort)
+				require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+				require.Len(t, res.Steps, 1)
+				assert.True(t, res.Steps[0].Reused)
+				assert.Equal(t, step.ChatID, res.Steps[0].ChatID)
+				// The replayed step prompt is the one the saved script
+				// built when the run started, not the one an edit would
+				// build; the deleted row cannot build one at all.
+				texts := f.userTexts(ctx, t, uuid.MustParse(step.ChatID))
+				require.NotEmpty(t, texts)
+				assert.Contains(t, texts[0], "Say hello.")
+				assert.NotContains(t, strings.Join(texts, "\n"), "changed")
+			})
+		}
+	})
+
 	t.Run("ToolsOnlyRead", func(t *testing.T) {
 		t.Parallel()
 		f := newForkWorkflowFixture(t)
@@ -455,4 +507,46 @@ func TestForkSavedWorkflowsAuthz(t *testing.T) {
 	}
 	_, _, err = server.loadSavedWorkflow(ctx, chatOf(outsider), "shared")
 	assert.ErrorContains(t, err, "no saved workflow is named")
+}
+
+// TestForkSavedWorkflowsOrgAdminListsPrivate pins what list_workflows
+// shows an organization admin: the list reads as the chat owner through
+// dbauthz, so an org admin's read grant reaches even an organization
+// workflow whose ACL grants nobody, while a plain member still cannot see
+// it.
+func TestForkSavedWorkflowsOrgAdminListsPrivate(t *testing.T) {
+	t.Parallel()
+
+	ctx := chatdTestContext(t)
+	db, _ := dbtestutil.NewDB(t)
+	authzDB := dbauthz.New(db, rbac.NewStrictCachingAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, nil), nil)
+	server := &Server{
+		db:          authzDB,
+		logger:      slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+		experiments: codersdk.Experiments{codersdk.ExperimentForkWorkflows},
+		modelConfigContext: func(ctx context.Context, ownerID uuid.UUID) (context.Context, error) {
+			return callerModelConfigContext(ctx, authzDB, ownerID)
+		},
+	}
+	fdb := forkWorkflowDB(t, db)
+	org := dbgen.Organization(t, db, database.Organization{})
+	admin := dbgen.User(t, db, database.User{})
+	member := dbgen.User(t, db, database.User{})
+	dbgen.OrganizationMember(t, db, database.OrganizationMember{UserID: admin.ID, OrganizationID: org.ID, Roles: []string{rbac.RoleOrgAdmin()}})
+	dbgen.OrganizationMember(t, db, database.OrganizationMember{UserID: member.ID, OrganizationID: org.ID})
+	_, err := fdb.InsertOrganizationSavedWorkflow(ctx, forkdb.InsertOrganizationSavedWorkflowParams{
+		OrganizationID: org.ID, CreatedBy: admin.ID, Name: "private", Script: titleWorkflowScript("private"),
+		// No ACL grants anyone but the admin's role reads it anyway.
+		GroupAcl: database.ChatACL{}, UserAcl: database.ChatACL{},
+	})
+	require.NoError(t, err)
+
+	listed, err := server.listSavedWorkflows(ctx, database.Chat{ID: uuid.New(), OwnerID: admin.ID, OrganizationID: org.ID})
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the org admin sees the private organization workflow")
+	assert.Equal(t, listedWorkflow{Name: "private", Tier: "organization", Description: ""}, listed[0])
+
+	listed, err = server.listSavedWorkflows(ctx, database.Chat{ID: uuid.New(), OwnerID: member.ID, OrganizationID: org.ID})
+	require.NoError(t, err)
+	assert.Empty(t, listed, "a plain member does not see it")
 }

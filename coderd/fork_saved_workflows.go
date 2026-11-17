@@ -298,6 +298,14 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	if description != nil && len(*description) > maxForkSavedWorkflowDescriptionBytes {
 		return pqtype.NullRawMessage{}, xerrors.Errorf("the description is longer than %d bytes", maxForkSavedWorkflowDescriptionBytes)
 	}
+	// The description reaches the model through list_workflows, so it gets
+	// the phase-name rule: no NUL, invalid UTF-8, control or format
+	// characters.
+	if description != nil {
+		if err := chatd.ValidateWorkflowPhaseName(*description); err != nil {
+			return pqtype.NullRawMessage{}, xerrors.New("the description must not hold control, format or invalid characters")
+		}
+	}
 	// PostgreSQL text and jsonb cannot hold a NUL character.
 	if (description != nil && strings.ContainsRune(*description, 0)) ||
 		(script != nil && strings.ContainsRune(*script, 0)) ||
