@@ -1267,8 +1267,8 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
 		},
 		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1771,7 +1771,8 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			return err
 		}},
 		{name: "UpdateWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
-			return fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+			_, err := fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+			return err
 		}},
 		{name: "FailOpenWorkflowStepsOfRun", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.FailOpenWorkflowStepsOfRun(ctx, forkdb.FailOpenWorkflowStepsOfRunParams{RunID: run.ID})
@@ -1875,11 +1876,11 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
 				case "UpdateWorkflowStep":
-					// The step read survives the fast path on purpose: the
-					// UPDATE is a :exec query, so a deleted step would
-					// otherwise vanish silently. The member still pays the
-					// run read to find the chat; the chatd fast path skips
-					// it.
+					// The step read survives the fast path on purpose: a
+					// deleted step must answer an error, not 0 rows, which
+					// means the row kept its report. The member still pays
+					// the run read to find the chat; the chatd fast path
+					// skips it.
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
@@ -1940,7 +1941,7 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().ClaimWorkflowRun(gomock.Any(), gomock.Any()).Return(run, nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowRunPhases(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(int64(1), nil).AnyTimes()
-	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(int64(1), nil).AnyTimes()
 	fdbMock.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), gomock.Any()).Return(int64(0), nil).AnyTimes()
 
 	az := dbauthz.New(mDB, rbac.NewAuthorizer(prometheus.NewRegistry()), slog.Make(), coderdtest.AccessControlStorePointer())

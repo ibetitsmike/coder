@@ -471,8 +471,12 @@ type Querier interface {
 	// as the purge's cascade. Without the join Postgres may run the two updates
 	// in any order, and a report racing the purge could deadlock. owner_id
 	// fences the write of the engine; the workflow_report tool passes NULL, so a
-	// report reaches the row whoever owns the run.
-	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
+	// report reaches the row whoever owns the run. A reported row keeps its
+	// value against every engine write, and against a later report while the
+	// run is running, because the owner wakes the step on the first report. A
+	// report to an interrupted run replaces it. A write that changes nothing
+	// returns 0 rows.
+	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error)
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)

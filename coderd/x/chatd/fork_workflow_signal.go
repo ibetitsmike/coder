@@ -77,7 +77,7 @@ func (r *workflowRun) addStepLocked(step *workflowStep) bool {
 
 // journalEarlyReport journals a report that addStepLocked applied.
 func (r *workflowRun) journalEarlyReport(ctx context.Context, step *workflowStep) {
-	if err := r.journalStepState(ctx, step, r.p.workflowJournal().reportStep); err != nil {
+	if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
 		r.p.logger.Warn(ctx, "journal an early workflow step report",
 			slog.F("workflow_id", r.id), slog.F("step_id", step.id), slog.Error(err))
 	}
@@ -113,6 +113,7 @@ func (r *workflowRun) journalStepState(
 // false when the run ended or another process took it, and the caller
 // answers through the journal. A report whose step the run has not added
 // yet waits in earlyReports: the child can report before startStep returns.
+// The first early report wins there, as it does in the journal.
 func (r *workflowRun) acceptReport(ctx context.Context, chatID uuid.UUID, input string) (fantasy.ToolResponse, bool) {
 	value := json.RawMessage(input)
 	r.mu.Lock()
@@ -128,6 +129,10 @@ func (r *workflowRun) acceptReport(ctx context.Context, chatID uuid.UUID, input 
 		}
 	}
 	if step == nil {
+		if _, ok := r.earlyReports[chatID]; ok {
+			r.mu.Unlock()
+			return fantasy.NewTextResponse(reportKeptText), true
+		}
 		if r.earlyReports == nil {
 			r.earlyReports = map[uuid.UUID]json.RawMessage{}
 		}
@@ -138,29 +143,53 @@ func (r *workflowRun) acceptReport(ctx context.Context, chatID uuid.UUID, input 
 	if step.status == stepStatusFailed {
 		reason := step.err
 		r.mu.Unlock()
-		return fantasy.NewTextErrorResponse("this step already failed (" + reason +
-			"); the workflow no longer waits for it. Stop working."), true
+		return stepFailedResponse(reason), true
 	}
 	if step.status == stepStatusReported {
 		// The wait woke on the first report, so the script may hold that
-		// value already. The write repeats the first value, for a first
-		// call whose journal write failed.
+		// value already. The write repeats the first value, for a report
+		// from the history or an early report whose journal write failed.
 		r.mu.Unlock()
-		if err := r.journalStepState(ctx, step, r.p.workflowJournal().reportStep); err != nil {
-			return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
-				". Call workflow_report again."), true
+		if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
+			return reportNotRecordedResponse(err), true
 		}
 		return fantasy.NewTextResponse(reportKeptText), true
 	}
-	step.setReportedLocked(value)
+	snap := *step
 	r.mu.Unlock()
-	// The run has the value now. The journal keeps it for a resume; a lost
-	// write asks for the retry, which carries the same value again.
-	if err := r.journalStepState(ctx, step, r.p.workflowJournal().reportStep); err != nil {
-		return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
-			". Call workflow_report again."), true
+	// The journal decides which report is first: another call, on this
+	// process or another one, may write the row between the read above and
+	// this write. Only a report that landed wakes the wait, so the script
+	// and the journal hold the same value.
+	snap.status, snap.value = stepStatusReported, value
+	landed, err := r.p.workflowJournal().reportStep(ctx, &snap)
+	if err != nil {
+		return reportNotRecordedResponse(err), true
 	}
+	if !landed {
+		r.readJournaledReport(ctx, step)
+		return fantasy.NewTextResponse(reportKeptText), true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch step.status {
+	case stepStatusFailed:
+		return stepFailedResponse(step.err), true
+	case stepStatusReported:
+		return fantasy.NewTextResponse(reportKeptText), true
+	}
+	step.setReportedLocked(value)
 	return fantasy.NewTextResponse(reportAcceptedText), true
+}
+
+func stepFailedResponse(reason string) fantasy.ToolResponse {
+	return fantasy.NewTextErrorResponse("this step already failed (" + reason +
+		"); the workflow no longer waits for it. Stop working.")
+}
+
+func reportNotRecordedResponse(err error) fantasy.ToolResponse {
+	return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
+		". Call workflow_report again.")
 }
 
 // pokeStep wakes the wait of the step whose report another process
@@ -219,33 +248,64 @@ func (r *workflowRun) readJournaledReport(ctx context.Context, step *workflowSte
 // history but not the journal, from a process that crashed before it
 // journaled or from a version that journaled reports only at the end of
 // the child's turn, becomes the step's value. A reminder in the history
-// counts as sent.
-func (r *workflowRun) scanJournaledStepHistory(ctx context.Context, step *workflowStep) {
+// counts as sent. A failed read leaves historyPending set, and waitStep
+// reads again before it treats the child as unreported.
+func (r *workflowRun) scanJournaledStepHistory(ctx context.Context, step *workflowStep) error {
 	r.mu.Lock()
 	open := step.status == stepStatusRunning || step.status == stepStatusReminded
+	step.historyPending = open
 	r.mu.Unlock()
 	if !open {
-		return
+		return nil
 	}
 	value, reminded, err := workflowStepReport(ctx, r.p.db, step.chatID)
 	if err != nil {
 		r.p.logger.Warn(ctx, "scan the history of a resumed workflow step",
 			slog.F("workflow_id", r.id), slog.F("step_id", step.id), slog.Error(err))
-		return
+		return err
 	}
 	r.mu.Lock()
+	step.historyPending = false
 	if reminded {
 		step.sentReminder = true
 	}
-	if value == nil || step.status == stepStatusFailed {
+	if value == nil || step.status == stepStatusFailed || step.status == stepStatusReported {
 		r.mu.Unlock()
-		return
+		return nil
 	}
 	step.setReportedLocked(value)
 	r.mu.Unlock()
-	if err := r.journalStepState(ctx, step, r.p.workflowJournal().reportStep); err != nil {
+	if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
 		r.p.logger.Warn(ctx, "journal a workflow step report from the history",
 			slog.F("workflow_id", r.id), slog.F("step_id", step.id), slog.Error(err))
+	}
+	return nil
+}
+
+func (r *workflowRun) stepHistoryPending(step *workflowStep) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return step.historyPending
+}
+
+// retryStepHistory reads the history that the resume of step could not
+// read, before the wait treats the child as unreported. A failed read waits
+// one poll interval, bounded by deadline, before the caller loops.
+func (r *workflowRun) retryStepHistory(ctx context.Context, step *workflowStep, deadline time.Time) error {
+	if r.scanJournaledStepHistory(ctx, step) == nil {
+		return nil
+	}
+	wait := min(subagentAwaitPollInterval, deadline.Sub(r.p.clock.Now()))
+	if wait <= 0 {
+		return nil
+	}
+	timer := r.p.clock.NewTimer(wait, "chatd", "workflow_step_history_retry")
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

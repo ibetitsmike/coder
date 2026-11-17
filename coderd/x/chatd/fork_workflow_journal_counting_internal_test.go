@@ -54,10 +54,11 @@ func (w *forkDBSwap) ForkUnwrap() database.Store { return w.Store }
 func (w *forkDBSwap) ForkWrap(s forkdb.Store) forkdb.Store { return w.fdb }
 
 // countPhaseWrites installs a phaseCountingStore as the journal store of
-// server's db and returns the counter with a restore function. The counting
-// store rides in a forkDBSwap under a dbauthz wrapper, so every query keeps
-// its authorization. Tests call restore when they are done counting.
-func countPhaseWrites(t *testing.T, server *Server) (*phaseCountingStore, func()) {
+// server's db and returns the counter. The counting store rides in a
+// forkDBSwap under a dbauthz wrapper, so every query keeps its
+// authorization. It stays installed: the run's goroutines read server.db
+// until the server closes.
+func countPhaseWrites(t *testing.T, server *Server) *phaseCountingStore {
 	t.Helper()
 	prevDB := server.db
 	inner, err := forkdb.From(prevDB)
@@ -71,5 +72,5 @@ func countPhaseWrites(t *testing.T, server *Server) (*phaseCountingStore, func()
 		slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
 		nil,
 	)
-	return counting, func() { server.db = prevDB }
+	return counting
 }

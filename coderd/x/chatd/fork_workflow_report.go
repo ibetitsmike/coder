@@ -195,16 +195,22 @@ func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.
 	}
 	// A reported row of an interrupted run keeps receiving later calls:
 	// the latest accepted call wins, the way the history scan of a resume
-	// reads it. The reuse flag carries over: a row a resume already
-	// replayed must not read as fresh.
-	if err := j.reportStep(ctx, &workflowStep{
+	// reads it. While the run is running the write lands only on an open
+	// row, so of two racing calls only the first wakes the owner. The reuse
+	// flag carries over: a row a resume already replayed must not read as
+	// fresh.
+	landed, err := j.reportStep(ctx, &workflowStep{
 		id:     step.ID,
 		status: stepStatusReported,
 		value:  json.RawMessage(input),
 		reused: step.Reused,
-	}); err != nil {
+	})
+	if err != nil {
 		return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
 			". Call workflow_report again."), nil
+	}
+	if !landed {
+		return fantasy.NewTextResponse(reportKeptText), nil
 	}
 	if row.Status == workflowStatusRunning && row.OwnerID.Valid {
 		t.p.publishStepReport(ctx, row.OwnerID.UUID, t.runID, step.ID)

@@ -331,7 +331,7 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 		j.warn(ctx, "open workflow journal store", step.id, err)
 		return
 	}
-	if err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+	if _, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
 		ID:      step.id,
 		Status:  step.status,
 		Value:   jsonbValue(step.value),
@@ -388,19 +388,28 @@ func (j workflowJournal) getStep(ctx context.Context, id uuid.UUID) (forkdb.Work
 // is not best effort: the tool's answer tells the model whether the value
 // reached the journal, and a lost write would answer "accepted" for a value
 // that only the next report's retry can save. It carries no owner fence:
-// a report reaches the row whichever process owns the run.
-func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) error {
+// a report reaches the row whichever process owns the run. landed is false
+// when the row already holds a report of a running run, which wins.
+func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) (landed bool, err error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+	n, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
 		ID:     step.id,
 		Status: step.status,
 		Value:  jsonbValue(step.value),
 		Error:  step.err,
 		Reused: step.reused,
 	})
+	return n > 0, err
+}
+
+// writeReport journals the report of step for journalStepState, which only
+// needs to know that the write ran.
+func (j workflowJournal) writeReport(ctx context.Context, step *workflowStep) error {
+	_, err := j.reportStep(ctx, step)
+	return err
 }
 
 // setLogs writes the retained log lines of a live run through to the journal,

@@ -374,6 +374,10 @@ type workflowStep struct {
 	// history scan of a resume also detects a reminder, but it matches the
 	// message text, which a user_prompt_submit hook can rewrite.
 	sentReminder bool
+	// historyPending records that the history scan of a resumed open step
+	// failed, so waitStep reads the history again before it reminds or
+	// fails the step.
+	historyPending bool
 	// signals wakes waitStep when the step gets its report.
 	signals stepSignals
 }
@@ -1237,7 +1241,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		r.mu.Unlock()
 		r.p.workflowJournal().markStepReused(ctx, journaled.id)
 		r.failJournaledStep(ctx, journaled)
-		r.scanJournaledStepHistory(ctx, journaled)
+		_ = r.scanJournaledStepHistory(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -1304,6 +1308,9 @@ func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*wo
 	}
 	r.p.workflowJournal().markStepReused(ctx, step.id)
 	r.failJournaledStep(ctx, step)
+	// The old runner's child may have reported into its history before
+	// the report reached the row, as for a step the rehydration found.
+	_ = r.scanJournaledStepHistory(ctx, step)
 	return step, nil
 }
 
@@ -1333,6 +1340,14 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if (stopped || err != nil) && r.stepHistoryPending(step) {
+			// The resume could not read the history, which may hold the
+			// report. Read it before the child counts as unreported.
+			if err := r.retryStepHistory(ctx, step, deadline); err != nil {
+				return err
+			}
+			continue
 		}
 		if statusErr, ok := errors.AsType[*subagentStatusError](err); ok {
 			r.failStep(ctx, step, "the child chat failed: "+statusErr.reason)
@@ -1376,7 +1391,14 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 	}
 }
 
+// failStep fails an open step. A report that another process journaled
+// wins: its owner event can lag the timeout or the child's stop, so the
+// step reads its row first, and the journal keeps a reported row against
+// the failed write of a report that lands after that read.
 func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason string) {
+	if r.readJournaledReport(ctx, step) {
+		return
+	}
 	r.mu.Lock()
 	if step.status == stepStatusReported {
 		// The report came in while waitStep decided to fail the step.
