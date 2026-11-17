@@ -53,6 +53,21 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		require.JSONEq(t, `{"type":"object","properties":{"repo":{"type":"string"}}}`, string(created.ArgsSchema))
 		require.Equal(t, []string{"collect", "label"}, created.Phases)
 
+		// Line breaks and tabs are ordinary text in a description.
+		multiline, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:        "multiline",
+			Description: "Triage new issues.\n\tSort by age.",
+			Script:      savedWorkflowScript,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "Triage new issues.\n\tSort by age.", multiline.Description)
+		updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "multiline", codersdk.UpdateForkSavedWorkflowRequest{
+			Description: ptr.Ref("Line one.\r\n\tLine two."),
+		})
+		require.NoError(t, err)
+		require.Equal(t, "Line one.\r\n\tLine two.", updated.Description)
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "multiline"))
+
 		_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{Name: "triage", Script: savedWorkflowScript})
 		_ = requireSDKError(t, err, http.StatusConflict)
 
@@ -187,7 +202,7 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		require.Len(t, list, 1)
 		requireSavedWorkflowMetadata(t, created.ForkSavedWorkflowMetadata, list[0])
 
-		updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{
+		updated, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{
 			Script: ptr.Ref("def main(args):\n    return 1\n"),
 		})
 		require.NoError(t, err)
@@ -224,6 +239,8 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 
 		// The update path checks the description with the same rule.
 		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\u200bb")})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\u202eb")})
 		_ = requireSDKError(t, err, http.StatusBadRequest)
 		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\x01b")})
 		_ = requireSDKError(t, err, http.StatusBadRequest)

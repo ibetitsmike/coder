@@ -300,9 +300,10 @@ func checkForkSavedWorkflow(name string, description, script *string, argsSchema
 	}
 	// The description reaches the model through list_workflows, so it gets
 	// the phase-name rule: no NUL, invalid UTF-8, control or format
-	// characters.
+	// characters, except line breaks and tabs, which a multi-line
+	// description needs.
 	if description != nil {
-		if err := chatd.ValidateWorkflowPhaseName(*description); err != nil {
+		if err := chatd.ValidateWorkflowDescription(*description); err != nil {
 			return pqtype.NullRawMessage{}, xerrors.New("the description must not hold control, format or invalid characters")
 		}
 	}

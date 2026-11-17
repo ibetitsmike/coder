@@ -117,7 +117,7 @@ const workflowNotFoundHelp = `The run is not found on this coderd replica, for e
 
 type runWorkflowArgs struct {
 	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this, script_path or name."`
-	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this or script."`
+	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this, script or name."`
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
