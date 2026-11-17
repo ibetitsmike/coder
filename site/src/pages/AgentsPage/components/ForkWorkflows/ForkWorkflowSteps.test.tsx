@@ -174,9 +174,8 @@ describe("ForkWorkflowSteps", () => {
 
 		// Two steps can share a title, so the region names carry the
 		// position each value sits at, and they are never identical.
-		const value = screen.getByRole("region", {
-			name: "Step 2: Review the file value",
-		});
-		expect(value).toBeInTheDocument();
+		const values = screen.getAllByRole("region", { name: /value$/ });
+		expect(values[0]).toHaveAccessibleName("Step 1: Review the file value");
+		expect(values[1]).toHaveAccessibleName("Step 2: Review the file value");
 	});
 });
