@@ -237,7 +237,11 @@ func (p *Server) postKeptWorktreesNotice(ctx context.Context, root database.Chat
 		ModelConfigID:  uuid.NullUUID{UUID: root.LastModelConfigID, Valid: root.LastModelConfigID != uuid.Nil},
 		ContentVersion: chatprompt.CurrentContentVersion,
 	}
-	return p.newChatMachine(root.ID).Update(ctx, func(tx *chatstate.Tx, _ database.Store) error {
+	_, err = p.newChatMachine(root.ID).Update(ctx, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 		return tx.ForkAppendNotice(notice)
 	})
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -59,7 +59,7 @@ func (s reportCountForkStore) GetChatReportMessages(ctx context.Context, arg for
 func TestForkLatestSubagentReport(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
 	user, org, model := seedInternalChatDeps(t, db)
 	newChat := func() database.Chat {
 		return dbgen.Chat(t, db, database.Chat{
@@ -127,7 +127,8 @@ func TestForkLatestSubagentReport(t *testing.T) {
 		insert(chat.ID, assistant, modelOnly, text("model only"))
 		deleted := insert(chat.ID, assistant, both, text("deleted"))
 		ctx := testutil.Context(t, testutil.WaitMedium)
-		require.NoError(t, db.SoftDeleteChatMessageByID(ctx, deleted.ID))
+		_, err := sqlDB.ExecContext(ctx, "UPDATE chat_messages SET deleted = true WHERE id = $1", deleted.ID)
+		require.NoError(t, err)
 		insert(chat.ID, userRole, both, text("user text"))
 		insert(chat.ID, assistant, both, text("   "))
 

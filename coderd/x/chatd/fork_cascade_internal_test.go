@@ -206,10 +206,11 @@ func TestNestedArchiveActiveFamily(t *testing.T) {
 				got, err := f.db.GetChatByID(ctx, grandchild.ID)
 				return err == nil && got.Status == database.ChatStatusInterrupting
 			}, testutil.IntervalFast)
-			workerErr <- chatstate.NewChatMachine(f.db, f.server.pubsub, grandchild.ID).Update(ctx, func(tx *chatstate.Tx, _ database.Store) error {
+			_, err := chatstate.NewChatMachine(f.db, f.server.pubsub, grandchild.ID).Update(ctx, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 				_, err := tx.FinishInterruption(chatstate.FinishInterruptionInput{})
 				return err
 			})
+			workerErr <- err
 		}()
 
 		require.NoError(t, f.server.ArchiveChat(ctx, f.root))
