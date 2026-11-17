@@ -1426,7 +1426,7 @@ func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*
 		return s.status == stepStatusRunning || s.status == stepStatusReminded
 	})
 	r.mu.Unlock()
-	if hasOpen && !r.confirmOwnership(ctx) {
+	if hasOpen && !r.awaitOwnership(ctx) {
 		return nil
 	}
 	r.mu.Lock()

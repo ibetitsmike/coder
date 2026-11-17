@@ -284,6 +284,31 @@ func (r *workflowRun) confirmOwnership(ctx context.Context) bool {
 	return err == nil && owned
 }
 
+// awaitOwnership confirms the ownership of a run before its cleanup touches
+// the step children. A failed read retries every heartbeat interval: a run
+// that ended with its steps still open would leave their children working.
+// It answers false once the run is lost or ctx ends, and a run that ends
+// on a shutdown is resumed with its children.
+func (r *workflowRun) awaitOwnership(ctx context.Context) bool {
+	for {
+		if r.confirmOwnership(ctx) {
+			return true
+		}
+		if r.isLost() {
+			return false
+		}
+		r.p.logger.Warn(ctx, "confirm workflow run ownership before its cleanup, retrying",
+			slog.F("workflow_id", r.id))
+		timer := r.p.clock.NewTimer(workflowHeartbeatInterval, "chatd", "workflow_confirm_owner")
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+	}
+}
+
 // recheckOwnership reads the row of a run that the heartbeat missed. The
 // run is lost when another process owns it or a sweep interrupted it. A
 // terminal row of this owner is the run's own end, which landed before the

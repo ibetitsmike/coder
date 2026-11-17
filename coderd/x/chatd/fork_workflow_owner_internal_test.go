@@ -89,10 +89,21 @@ func (f *forkWorkflowFixture) peerServer(t *testing.T, clock quartz.Clock) *Serv
 }
 
 // failingStatusStore fails the terminal status writes of runs while fail
-// is set, the way a journal outage fails them.
+// is set, and the heartbeats while failHeartbeat is set, the way a journal
+// outage fails them.
 type failingStatusStore struct {
 	forkdb.Store
-	fail atomic.Bool
+	fail          atomic.Bool
+	failHeartbeat atomic.Bool
+}
+
+func (s *failingStatusStore) HeartbeatWorkflowRuns(
+	ctx context.Context, arg forkdb.HeartbeatWorkflowRunsParams,
+) ([]uuid.UUID, error) {
+	if s.failHeartbeat.Load() {
+		return nil, xerrors.New("journal outage")
+	}
+	return s.Store.HeartbeatWorkflowRuns(ctx, arg)
 }
 
 func (s *failingStatusStore) UpdateWorkflowRunStatus(
@@ -385,6 +396,43 @@ def main(args):
 		assert.Equal(t, workflowStatusCompleted, row.Status, "the heartbeat retried the terminal write")
 		assert.Equal(t, f.server.workflows.owner.id, row.OwnerID.UUID)
 		assert.Empty(t, f.server.workflows.liveRuns(), "the run stops heartbeating once its end landed")
+	})
+
+	// A run whose cleanup cannot confirm its ownership keeps its open steps
+	// and does not end: it retries the check, then fails the steps and
+	// ends once the journal answers.
+	t.Run("CleanupRetriesAFailedOwnershipCheck", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		ctx := chatdTestContext(t)
+		failing := failStatusWrites(t, f.server)
+		failing.failHeartbeat.Store(true)
+		retry := mock.Trap().NewTimer("chatd", "workflow_confirm_owner")
+		defer retry.Close()
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    spawn("Unwaited.")
+    return {}
+`})
+		retry.MustWait(ctx).MustRelease(ctx)
+		select {
+		case <-run.done:
+			t.Fatal("the run ended while its ownership was unconfirmed")
+		default:
+		}
+		snap := run.snapshot()
+		require.Len(t, snap.Steps, 1)
+		assert.Equal(t, stepStatusRunning, snap.Steps[0].Status, "the step stays open")
+
+		failing.failHeartbeat.Store(false)
+		advanceMockClockBy(ctx, t, mock, workflowHeartbeatInterval)
+		waitWorkflowDone(ctx, t, run)
+		res := run.snapshot()
+		require.Equal(t, workflowStatusCompleted, res.Status, res.Error)
+		require.Len(t, res.Steps, 1)
+		assert.Equal(t, stepStatusFailed, res.Steps[0].Status)
+		assert.Contains(t, res.Steps[0].Error, "ended before the step reported")
 	})
 
 	// An ended run whose terminal write never landed and whose row another
