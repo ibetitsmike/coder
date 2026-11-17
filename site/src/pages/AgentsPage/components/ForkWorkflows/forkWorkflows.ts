@@ -13,7 +13,11 @@ export type ForkWorkflowStep = {
 	reused: boolean;
 	error: string;
 	phase: string;
-	/** The step's position in the run; the value regions are named with it. */
+	/**
+	 * The step's position in the run, when the API reports it; the run detail
+	 * sorts by it. The value regions name steps by their shown position
+	 * instead, so parsed snapshots need no ordinal.
+	 */
 	ordinal?: number;
 	/** The report the step sent, undefined until it reported. */
 	value?: unknown;
@@ -97,12 +101,7 @@ export const parseForkWorkflowRunSnapshot = (
 	const record = parseArgs(value);
 	const runId = asString(record?.run_id);
 	const status = asString(record?.status);
-	const steps = parseArray(record?.steps ?? [], parseStep)?.map(
-		(step, index) => ({
-			...step,
-			ordinal: index,
-		}),
-	);
+	const steps = parseArray(record?.steps ?? [], parseStep);
 	if (!record || runId === "" || status === "" || !steps) {
 		return null;
 	}

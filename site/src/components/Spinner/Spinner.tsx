@@ -50,8 +50,11 @@ export function Spinner({
 			viewBox="0 0 24 24"
 			xmlns="http://www.w3.org/2000/svg"
 			fill="currentColor"
+			// Without a label the spinner is decoration: its <title> must
+			// stay out of the accessible name of the control that holds it.
 			role={label ? "status" : undefined}
 			aria-label={label}
+			aria-hidden={label ? undefined : true}
 			className={cn(spinnerVariants({ size, className }))}
 			{...props}
 		>

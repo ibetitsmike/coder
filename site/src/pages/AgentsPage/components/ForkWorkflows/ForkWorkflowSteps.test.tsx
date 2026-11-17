@@ -60,7 +60,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 		/>,
 	);
 	const stepList = within(screen.getByRole("list", { name: "Workflow steps" }));
-	return { run, stepList };
+	return { run, stepList, mappedSteps };
 };
 
 describe("ForkWorkflowSteps", () => {
@@ -154,5 +154,29 @@ describe("ForkWorkflowSteps", () => {
 		const [prePhaseStep, buildStep] = stepList.getAllByRole("listitem");
 		expect(prePhaseStep).toHaveAccessibleDescription("");
 		expect(buildStep).toHaveAccessibleDescription("build");
+	});
+
+	it("names each reported value by the step's position in the list", () => {
+		renderSteps([
+			{
+				chatId: "aa111111-1111-4111-8111-111111111111",
+				title: "Review the file",
+				status: "reported",
+				phase: "plan",
+			},
+			{
+				chatId: "bb222222-2222-4222-8222-222222222222",
+				title: "Review the file",
+				status: "reported",
+				phase: "build",
+			},
+		]);
+
+		// Two steps can share a title, so the region names carry the
+		// position each value sits at, and they are never identical.
+		const value = screen.getByRole("region", {
+			name: "Step 2: Review the file value",
+		});
+		expect(value).toHaveTextContent("the handler writes to a nil map");
 	});
 });

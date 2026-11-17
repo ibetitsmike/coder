@@ -109,9 +109,9 @@ describe("chatWorkflowRuns polling", () => {
 
 			// One tick fetches the first page; the finished older page is
 			// reused from the cache, so its cursor is absent from the calls.
+			// The refetch resolves only after it has walked every page.
 			getRuns.mockClear();
-			refetch();
-			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(1));
+			await refetch();
 			expect(getRuns.mock.calls.map((call) => call[1])).toEqual([""]);
 		} finally {
 			unsubscribe();

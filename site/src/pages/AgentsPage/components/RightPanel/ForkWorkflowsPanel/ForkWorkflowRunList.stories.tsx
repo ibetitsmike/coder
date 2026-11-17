@@ -95,8 +95,31 @@ export const LoadingOlderRuns: Story = {
 	},
 };
 
+/**
+ * A poll tick or a refetch the user did not start holds the control busy:
+ * it signals aria-disabled and ignores clicks, without the page spinner.
+ */
+export const BusyOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		disabled: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
 export const Loading: Story = {
 	args: { runs: undefined },
+};
+
+/**
+ * When the last page ends the paging, the unmounting Load older runs
+ * control hands focus to the list, which shows the focus-visible ring.
+ */
+export const ListTakesFocus: Story = {
+	args: { hasOlderRuns: false },
+	play: async ({ canvas }) => {
+		canvas.getByRole("list", { name: "Workflow runs" }).focus();
+	},
 };
 
 export const LoadFailed: Story = {

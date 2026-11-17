@@ -135,17 +135,14 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					// next-page fetch: browsers drop focus from a disabled
 					// control, and a poll tick would steal it every 5s. The
 					// guarded handler keeps the two fetches from overlapping.
+					// The spinner stays decorative and the accessible name
+					// stays "Load older runs": it is the same control, only
+					// busy; the loading state is what aria-disabled signals.
 					aria-disabled={disabled || isLoadingOlderRuns || undefined}
 					onClick={disabled || isLoadingOlderRuns ? undefined : onLoadOlderRuns}
 				>
-					{isLoadingOlderRuns ? (
-						<>
-							<Spinner size="sm" loading />
-							Loading older runs...
-						</>
-					) : (
-						"Load older runs"
-					)}
+					<Spinner size="sm" loading={isLoadingOlderRuns} />
+					Load older runs
 				</Button>
 			)}
 		</div>

@@ -54,8 +54,8 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 						const isFirstStepOfGroup = group.steps[0] === step;
 						const headingId = `${headingIdPrefix}-${groupIndex}`;
 						// The value regions are named by the step's position in
-						// the run, which the API's ordinal reports.
-						const stepOrdinal = step.ordinal ?? steps.indexOf(step);
+						// the list as shown, so two values never share a name.
+						const stepOrdinal = steps.indexOf(step);
 						return (
 							<li
 								key={step.chatId}

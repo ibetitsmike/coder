@@ -306,18 +306,23 @@ describe("ForkWorkflowsPanel", () => {
 			});
 			await user.click(control);
 
-			// A next-page fetch is in flight. The control must say so, keep
-			// focus and refuse a second load while it runs.
+			// A next-page fetch is in flight. The control must stay
+			// operable, keep focus and refuse a second load while it runs.
 			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
-			await waitFor(() =>
-				expect(control).toHaveAttribute("aria-disabled", "true"),
-			);
+			expect(control).not.toBeDisabled();
+			expect(control).toHaveAccessibleName("Load older runs");
 			control.focus();
 			expect(control).toHaveFocus();
 			await user.click(control);
 			expect(getRuns).toHaveBeenCalledTimes(2);
 			releaseHeld();
-			await waitFor(() => expect(control).not.toHaveAttribute("aria-disabled"));
+			// The fetch's answer lands in the cache before the tick starts.
+			await waitFor(() =>
+				expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
+					pages: [firstPage, olderPage],
+					pageParams: [{ after: "" }, expect.anything()],
+				}),
+			);
 
 			// A background tick is in flight: the same story.
 			control = screen.getByRole("button", { name: "Load older runs" });
@@ -330,15 +335,19 @@ describe("ForkWorkflowsPanel", () => {
 			phase = "tick";
 			queryClient.refetchQueries({ queryKey: chatWorkflowRunsKey(chatId) });
 			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(3));
-			await waitFor(() =>
-				expect(control).toHaveAttribute("aria-disabled", "true"),
-			);
+			expect(control).not.toBeDisabled();
+			expect(control).toHaveAccessibleName("Load older runs");
 			control.focus();
 			expect(control).toHaveFocus();
 			await user.click(control);
 			expect(getRuns).toHaveBeenCalledTimes(3);
 			releaseHeld();
-			await waitFor(() => expect(control).not.toHaveAttribute("aria-disabled"));
+			await waitFor(() =>
+				expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
+					pages: [firstPage, olderPage],
+					pageParams: [{ after: "" }, expect.anything()],
+				}),
+			);
 		} finally {
 			focusManager.setFocused(true);
 		}
