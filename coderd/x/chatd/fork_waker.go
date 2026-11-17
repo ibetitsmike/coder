@@ -225,26 +225,20 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 
 // drain runs the passes that the signals since the last drain asked for. A
 // full pass covers every poked chat. The free slots go first to the skipped
-// chats, the one that waited longest first, and a chat poked while others
-// wait joins the end of their queue. While every slot is taken, a poked chat
-// is recorded as skipped with no query. So a freed slot costs about one
-// pass, however many chats wait, and fresh pokes cannot postpone a skipped
-// chat.
+// chats, the one that waited longest first. A poked chat joins the end of
+// their queue with no query while any chat waits or every slot is taken,
+// and a pass that finds a due wake-up while chats wait queues its chat too.
+// So a freed slot costs about one pass, however many chats wait, and no
+// other chat takes a slot ahead of a skipped one.
 func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 	k.mu.Lock()
 	full, pending := k.full, k.pending
 	k.full, k.pending = false, make(map[uuid.UUID]struct{})
-	if !full && len(k.skipOrder) > 0 {
-		for chatID := range pending {
-			k.skipLocked(chatID)
-		}
-		pending = nil
-	}
 	k.mu.Unlock()
 	now := dbtime.Time(k.clock.Now("chatd", "waker")).UTC()
 	k.serveSkipped(ctx, fdb, now)
 	if full {
-		upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{}, now)
+		upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{}, uuid.Nil, now)
 		if ok {
 			k.setTimer(upcoming)
 		}
@@ -256,7 +250,7 @@ func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 			if k.skipWhileFull(chatID) {
 				continue
 			}
-			k.chatPass(ctx, fdb, chatID, now)
+			k.chatPass(ctx, fdb, chatID, uuid.Nil, now)
 		}
 	}
 	k.serveSkipped(ctx, fdb, now)
@@ -270,24 +264,25 @@ func (k *forkWaker) serveSkipped(ctx context.Context, fdb forkdb.Store, now time
 		if !ok {
 			return
 		}
-		k.chatPass(ctx, fdb, chatID, now)
+		k.chatPass(ctx, fdb, chatID, chatID, now)
 	}
 }
 
-// chatPass runs a pass over the wake-ups of chatID.
-func (k *forkWaker) chatPass(ctx context.Context, fdb forkdb.Store, chatID uuid.UUID, now time.Time) {
-	upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{UUID: chatID, Valid: true}, now)
+// chatPass runs a pass over the wake-ups of chatID. served is the chat that
+// the pass serves from the queue, or uuid.Nil.
+func (k *forkWaker) chatPass(ctx context.Context, fdb forkdb.Store, chatID, served uuid.UUID, now time.Time) {
+	upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{UUID: chatID, Valid: true}, served, now)
 	if ok {
 		k.advanceTimer(upcoming)
 	}
 }
 
 // skipWhileFull records chatID as skipped and returns true when every slot
-// is taken.
+// is taken or other chats wait for one.
 func (k *forkWaker) skipWhileFull(chatID uuid.UUID) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if len(k.slots) < cap(k.slots) {
+	if len(k.skipOrder) == 0 && len(k.slots) < cap(k.slots) {
 		return false
 	}
 	k.skipLocked(chatID)
@@ -322,9 +317,10 @@ func (k *forkWaker) nextSkipped() (uuid.UUID, bool) {
 }
 
 // pass starts a delivery for each wake-up of chatID, or of every chat, that
-// is due at now. It returns the run time of the earliest active wake-up that
-// is not due, and false when the list failed.
-func (k *forkWaker) pass(ctx context.Context, fdb forkdb.Store, chatID uuid.NullUUID, now time.Time) (time.Time, bool) {
+// is due at now. served is the chat that the pass serves from the queue, or
+// uuid.Nil. It returns the run time of the earliest active wake-up that is
+// not due, and false when the list failed.
+func (k *forkWaker) pass(ctx context.Context, fdb forkdb.Store, chatID uuid.NullUUID, served uuid.UUID, now time.Time) (time.Time, bool) {
 	start := k.clock.Now("chatd", "waker")
 	arg := forkdb.ListDueChatWakeupsParams{ChatID: chatID, Now: now, LimitCount: forkWakerBatch}
 	var upcoming time.Time
@@ -344,7 +340,7 @@ func (k *forkWaker) pass(ctx context.Context, fdb forkdb.Store, chatID uuid.Null
 			}
 			due++
 			arg.AfterRunAt, arg.AfterID = row.ChatWakeup.NextRunAt.Time, row.ChatWakeup.ID
-			k.dispatch(ctx, fdb, row.ChatWakeup, now, start)
+			k.dispatch(ctx, fdb, row.ChatWakeup, served, now, start)
 		}
 		if due < forkWakerBatch || ctx.Err() != nil {
 			return upcoming, true
@@ -358,10 +354,17 @@ func (k *forkWaker) pass(ctx context.Context, fdb forkdb.Store, chatID uuid.Null
 // wake-up and records its chat, and the next drain after a slot frees runs
 // a pass over that chat. So the loop never waits for a slot, and pokes, the
 // timer and the sweep keep running while slow deliveries hold every slot.
-func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, now, start time.Time) {
+// While skipped chats wait, only the chat served from their queue takes a
+// slot, and the wake-ups of other chats are skipped in the same way.
+func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, served uuid.UUID, now, start time.Time) {
 	k.mu.Lock()
 	if _, ok := k.inflight[wakeup.ChatID]; ok {
 		k.inflight[wakeup.ChatID] = true
+		k.mu.Unlock()
+		return
+	}
+	if len(k.skipOrder) > 0 && wakeup.ChatID != served {
+		k.skipLocked(wakeup.ChatID)
 		k.mu.Unlock()
 		return
 	}

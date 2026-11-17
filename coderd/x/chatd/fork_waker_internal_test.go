@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatstate"
 	"github.com/coder/coder/v2/codersdk"
@@ -48,7 +49,7 @@ func runWakerPass(ctx context.Context, server *Server, store database.Store, clo
 	k.mu.Unlock()
 	//nolint:gocritic // The waker delivers the wake-ups of every chat.
 	ctx = dbauthz.AsChatd(ctx)
-	k.pass(ctx, fdb, uuid.NullUUID{}, now)
+	k.pass(ctx, fdb, uuid.NullUUID{}, uuid.Nil, now)
 	k.wg.Wait()
 	for range 10 {
 		k.mu.Lock()
@@ -63,7 +64,7 @@ func runWakerPass(ctx context.Context, server *Server, store database.Store, clo
 			return
 		}
 		for chatID := range pending {
-			k.pass(ctx, fdb, uuid.NullUUID{UUID: chatID, Valid: true}, now)
+			k.pass(ctx, fdb, uuid.NullUUID{UUID: chatID, Valid: true}, uuid.Nil, now)
 			k.wg.Wait()
 		}
 	}
@@ -594,68 +595,104 @@ func TestWakerFreedSlotCostsOneList(t *testing.T) {
 	require.Empty(t, h.waker.pending, "a freed slot pokes no skipped chat")
 }
 
-// A freed slot goes to the chat that waits in the queue, not to a chat
-// poked in the same drain, so fresh pokes cannot postpone a queued chat.
-func TestWakerQueueBeforeFreshPokes(t *testing.T) {
+// A freed slot goes to the chat that waits in the queue, not to a chat that
+// was poked in the same drain or that a full pass lists first, so neither
+// fresh pokes nor the timer can postpone a queued chat.
+func TestWakerQueueBeforeOtherChats(t *testing.T) {
 	t.Parallel()
-	f := newWorkerTestFixture(t)
-	ctx := testutil.Context(t, testutil.WaitLong)
-	queued := f.createWakeupChat(t)
-	poked := f.createWakeupChat(t)
-	for _, chat := range []database.Chat{queued, poked} {
-		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
-		f.setNextRunAt(t, wakeup.ID, wakeupTestSlot.Add(-time.Second))
-	}
-	inner, err := forkdb.From(f.db)
-	require.NoError(t, err)
-	fdb := &countingForkStore{Store: inner}
-	clock := quartz.NewMock(t)
-	clock.Set(wakeupTestSlot.Add(time.Second))
+	for _, sc := range []struct {
+		name string
+		// run gives the free slot away while queued waits for it and other
+		// has a due wake-up that a full pass lists first.
+		run   func(ctx context.Context, k *forkWaker, fdb forkdb.Store, other uuid.UUID)
+		lists int64
+	}{
+		{
+			// A poke for other came in with the end of the delivery that
+			// freed the slot.
+			name: "FreshPoke",
+			run: func(ctx context.Context, k *forkWaker, fdb forkdb.Store, other uuid.UUID) {
+				k.mu.Lock()
+				k.pending[other] = struct{}{}
+				k.mu.Unlock()
+				k.drain(ctx, fdb)
+			},
+			lists: 1,
+		},
+		{
+			// The slot freed after the drain served the queue, while a full
+			// pass ran.
+			name: "FullPass",
+			run: func(ctx context.Context, k *forkWaker, fdb forkdb.Store, _ uuid.UUID) {
+				now := dbtime.Time(k.clock.Now("chatd", "waker")).UTC()
+				_, ok := k.pass(ctx, fdb, uuid.NullUUID{}, uuid.Nil, now)
+				if ok {
+					k.serveSkipped(ctx, fdb, now)
+				}
+			},
+			lists: 2,
+		},
+	} {
+		t.Run(sc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWorkerTestFixture(t)
+			ctx := testutil.Context(t, testutil.WaitLong)
+			queued := f.createWakeupChat(t)
+			other := f.createWakeupChat(t)
+			for i, chat := range []database.Chat{other, queued} {
+				wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+				f.setNextRunAt(t, wakeup.ID, wakeupTestSlot.Add(-time.Duration(2-i)*time.Second))
+			}
+			inner, err := forkdb.From(f.db)
+			require.NoError(t, err)
+			fdb := &countingForkStore{Store: inner}
+			clock := quartz.NewMock(t)
+			clock.Set(wakeupTestSlot.Add(time.Second))
 
-	release := make(chan struct{})
-	var mu sync.Mutex
-	var delivered []uuid.UUID
-	k := newForkWaker()
-	k.deliver = func(ctx context.Context, _ forkdb.Store, w forkdb.ChatWakeup, _ time.Time) error {
-		mu.Lock()
-		delivered = append(delivered, w.ChatID)
-		mu.Unlock()
-		select {
-		case <-release:
-		case <-ctx.Done():
-		}
-		return errWakeupChatBusy
-	}
-	k.bind(newUnstartedServer(t, f.pubsub, f.db), f.db, clock, testutil.Logger(t))
-	t.Cleanup(func() {
-		close(release)
-		k.wg.Wait()
-	})
-	// One slot is free, queued waits for it, and a poke for the other chat
-	// came in with the end of the delivery that freed it.
-	for range forkWakerDeliveries - 1 {
-		k.slots <- struct{}{}
-	}
-	k.mu.Lock()
-	k.running = true
-	k.skipLocked(queued.ID)
-	k.pending[poked.ID] = struct{}{}
-	k.mu.Unlock()
+			release := make(chan struct{})
+			var mu sync.Mutex
+			var delivered []uuid.UUID
+			k := newForkWaker()
+			k.deliver = func(ctx context.Context, _ forkdb.Store, w forkdb.ChatWakeup, _ time.Time) error {
+				mu.Lock()
+				delivered = append(delivered, w.ChatID)
+				mu.Unlock()
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+				return errWakeupChatBusy
+			}
+			k.bind(newUnstartedServer(t, f.pubsub, f.db), f.db, clock, testutil.Logger(t))
+			t.Cleanup(func() {
+				close(release)
+				k.wg.Wait()
+			})
+			// One slot is free and queued waits for it.
+			for range forkWakerDeliveries - 1 {
+				k.slots <- struct{}{}
+			}
+			k.mu.Lock()
+			k.running = true
+			k.skipLocked(queued.ID)
+			k.mu.Unlock()
 
-	//nolint:gocritic // The waker delivers the wake-ups of every chat.
-	k.drain(dbauthz.AsChatd(ctx), fdb)
-	testutil.Eventually(ctx, t, func(context.Context) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(delivered) > 0
-	}, testutil.IntervalFast, "the free slot must start a delivery")
-	mu.Lock()
-	require.Equal(t, []uuid.UUID{queued.ID}, delivered, "the queued chat gets the slot")
-	mu.Unlock()
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	require.Equal(t, []uuid.UUID{poked.ID}, k.skipOrder, "the poked chat waits behind the queue")
-	require.EqualValues(t, 1, fdb.lists.Load(), "one free slot, one query")
+			//nolint:gocritic // The waker delivers the wake-ups of every chat.
+			sc.run(dbauthz.AsChatd(ctx), k, fdb, other.ID)
+			testutil.Eventually(ctx, t, func(context.Context) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return len(delivered) > 0
+			}, testutil.IntervalFast, "the free slot must start a delivery")
+			mu.Lock()
+			require.Equal(t, []uuid.UUID{queued.ID}, delivered, "the queued chat gets the slot")
+			mu.Unlock()
+			k.mu.Lock()
+			defer k.mu.Unlock()
+			require.Equal(t, []uuid.UUID{other.ID}, k.skipOrder, "the other chat waits behind the queue")
+			require.Equal(t, sc.lists, fdb.lists.Load())
+		})
+	}
 }
 
 // Each change that makes a watched child done delivers the events wake-up
