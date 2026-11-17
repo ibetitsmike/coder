@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -421,4 +422,134 @@ func TestMaterializePluginPacks(t *testing.T) {
 		}
 		server.materializePluginPacks(ctx, server.logger, chat, uuid.New(), dial)
 	})
+}
+
+// TestPackPathsCacheOnePerPack checks that the path cache of the plugin gate
+// keeps one entry per pack, that the entry keeps a commit while steps read
+// it and drops it once no step read it for packPathsIdle, and that a read of
+// a commit the pack moved past fails closed. The entry of a deleted pack goes
+// once its commits are idle. A store sweeps at most once per
+// packPathsSweepEvery.
+func TestPackPathsCacheOnePerPack(t *testing.T) {
+	t.Parallel()
+
+	db, ps := dbtestutil.NewDB(t)
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkPluginPacks}))
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	user, org, _ := seedInternalChatDeps(t, db)
+	ctx := chatdTestContext(t)
+
+	insertPack := func(name string) forkdb.PluginPack {
+		now := dbtime.Now()
+		pack, err := fdb.InsertPluginPack(ctx, forkdb.InsertPluginPackParams{
+			ID: uuid.New(), OrganizationID: org.ID, Name: name, SourceUrl: "https://example.com/packs.git",
+			Ref: "main", CommitSha: "c0", CreatedBy: user.ID, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		return pack
+	}
+	// install moves the pack to commit with one file, like an update.
+	install := func(pack forkdb.PluginPack, commit, path string) {
+		_, err := fdb.UpdatePluginPackCommit(ctx, forkdb.UpdatePluginPackCommitParams{
+			ID: pack.ID, Ref: pack.Ref, CommitSha: commit, UpdatedAt: dbtime.Now(),
+		})
+		require.NoError(t, err)
+		require.NoError(t, fdb.DeletePluginPackResources(ctx, pack.ID))
+		require.NoError(t, fdb.InsertPluginPackResources(ctx, forkdb.InsertPluginPackResourcesParams{
+			PackID: pack.ID, Paths: []string{path}, Contents: [][]byte{[]byte(path)}, ContentHashes: []string{"hash"},
+		}))
+	}
+	cached := func() int {
+		n := 0
+		server.forkPacks.paths.Range(func(any, any) bool {
+			n++
+			return true
+		})
+		return n
+	}
+	entryOf := func(pack forkdb.PluginPack) *packPathsEntry {
+		v, ok := server.forkPacks.paths.Load(pack.ID)
+		require.True(t, ok)
+		entry, ok := v.(*packPathsEntry)
+		require.True(t, ok)
+		return entry
+	}
+	commits := func(pack forkdb.PluginPack) []string {
+		entry := entryOf(pack)
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		got := make([]string, 0, len(entry.commits))
+		for commit := range entry.commits {
+			got = append(got, commit)
+		}
+		slices.Sort(got)
+		return got
+	}
+	// age moves the last read of every cached commit of the pack back by d.
+	age := func(pack forkdb.PluginPack, d time.Duration) {
+		entry := entryOf(pack)
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		for _, c := range entry.commits {
+			c.lastRead = c.lastRead.Add(-d)
+		}
+	}
+	// ageSweep moves the last sweep back by packPathsSweepEvery, so the next
+	// store sweeps.
+	ageSweep := func() {
+		server.forkPacks.pathsSweptAt.Add(-int64(packPathsSweepEvery))
+	}
+	read := func(pack forkdb.PluginPack, commit string) packPathSet {
+		return server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: commit})
+	}
+
+	pack := insertPack("alpha")
+	for i, commit := range []string{"c1", "c2", "c3"} {
+		path := "skills/" + commit + ".md"
+		install(pack, commit, path)
+		require.Equal(t, packPathSet{path: true}, read(pack, commit), "commit %d reads its own files", i)
+		require.Equal(t, 1, cached(), "after commit %s", commit)
+	}
+
+	// A step still pinned to the first commit keeps its paths while the
+	// pack moves on and newer steps read newer commits.
+	install(pack, "c4", "skills/c4.md")
+	require.Equal(t, packPathSet{"skills/c1.md": true}, read(pack, "c1"), "the pinned commit stays cached")
+	require.Equal(t, packPathSet{"skills/c3.md": true}, read(pack, "c3"))
+	require.Equal(t, []string{"c1", "c2", "c3"}, commits(pack))
+
+	// A commit that no step read for packPathsIdle is dropped on the next
+	// read of a new commit. c3 stays because a step read it within the hour.
+	age(pack, packPathsIdle+time.Minute)
+	ageSweep()
+	require.Equal(t, packPathSet{"skills/c3.md": true}, read(pack, "c3"))
+	require.Equal(t, packPathSet{"skills/c4.md": true}, read(pack, "c4"))
+	require.Equal(t, []string{"c3", "c4"}, commits(pack))
+
+	// The files of a dropped commit the pack moved past are gone, so its
+	// read fails closed instead of returning the files of c4.
+	require.Empty(t, read(pack, "c1"), "a commit the pack moved past fails closed")
+	require.Equal(t, []string{"c3", "c4"}, commits(pack), "a failed read caches nothing")
+	require.Equal(t, 1, cached())
+
+	other := insertPack("beta")
+	install(other, "c1", "skills/beta.md")
+	read(other, "c1")
+	require.Equal(t, 2, cached())
+
+	// The entry of a deleted pack goes once its commits are idle and
+	// another pack stores a new commit, but not within packPathsSweepEvery
+	// of the last sweep.
+	require.NoError(t, fdb.DeletePluginPackByID(ctx, other.ID))
+	age(other, packPathsIdle+time.Minute)
+	install(pack, "c5", "skills/c5.md")
+	require.Equal(t, packPathSet{"skills/c5.md": true}, read(pack, "c5"))
+	require.Equal(t, 2, cached(), "a store soon after a sweep does not sweep")
+	ageSweep()
+	install(pack, "c6", "skills/c6.md")
+	require.Equal(t, packPathSet{"skills/c6.md": true}, read(pack, "c6"))
+	require.Equal(t, 1, cached(), "the deleted pack's entry is dropped")
+	require.Equal(t, []string{"c3", "c4", "c5", "c6"}, commits(pack))
 }
