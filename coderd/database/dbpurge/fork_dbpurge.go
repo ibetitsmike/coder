@@ -23,10 +23,15 @@ const forkPurgeBatchSize = 1000
 // whole purge transaction.
 const forkWorkflowPurgeBatchSize = 100
 
+// chatUserNotificationsBatchSize bounds how many old notify_user records one
+// tick deletes.
+const chatUserNotificationsBatchSize = 1000
+
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
 // chat secret answers it purged. It also deletes the wake-up run counts older
-// than 7 days, expired plugin link codes, and the closed wake-ups and ended
-// workflow runs older than 30 days.
+// than 7 days, expired plugin link codes, the closed wake-ups and ended
+// workflow runs older than 30 days, and the notify_user records older than a
+// day.
 func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64, error) {
 	ftx, err := forkdb.From(tx)
 	if err != nil {
@@ -53,6 +58,9 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 		}},
 		{"workflow runs", func(ctx context.Context) (int64, error) {
 			return ftx.DeleteOldWorkflowRuns(ctx, forkWorkflowPurgeBatchSize)
+		}},
+		{"chat user notifications", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldChatUserNotifications(ctx, chatUserNotificationsBatchSize)
 		}},
 	} {
 		count, err := purge.run(ctx)
