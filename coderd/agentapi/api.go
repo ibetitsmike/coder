@@ -121,6 +121,9 @@ type Options struct {
 	// without agent definitions never fills its snapshot caps with
 	// rows chatd would drop anyway.
 	ForkAgentDefinitions bool
+	// ForkContextHashRows lets agents send hash-only rows for bodies
+	// coderd already stores (the fork-context-hash-rows experiment).
+	ForkContextHashRows bool
 	// ForkContextCache lets agents reuse their resolve cache across
 	// reconnects (the fork-context-cache experiment).
 	ForkContextCache                  bool
@@ -306,6 +309,7 @@ func New(opts Options, workspace database.Workspace, agent database.WorkspaceAge
 		ForkPluginPacks:      opts.ForkPluginPacks,
 		ForkAgentDefinitions: opts.ForkAgentDefinitions,
 		ForkContextCache:     opts.ForkContextCache,
+		ForkContextHashRows:  opts.ForkContextHashRows,
 	}
 
 	// Start background cache refresh loop to handle workspace changes
