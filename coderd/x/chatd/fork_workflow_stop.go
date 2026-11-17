@@ -195,8 +195,16 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 			Error:  srow.Error,
 		})
 	}
-	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
+	// The claimed run is in no registry, so nothing retries a failed
+	// terminal write: the caller learns of it and the user can stop again.
+	fenced, err := p.workflowJournal().writeRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
 		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
+	if err != nil {
+		return xerrors.Errorf("journal the stop of run %s: %w", row.ID, err)
+	}
+	if fenced {
+		return xerrors.Errorf("journal the stop of run %s: another process claimed the run", row.ID)
+	}
 	return nil
 }
 
