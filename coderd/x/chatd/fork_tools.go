@@ -21,10 +21,11 @@ import (
 // forkToolsOption carries the per-turn values that only turn_environment.go
 // can supply. The variadic keeps every existing caller valid.
 type forkToolsOption struct {
-	getWorkspaceConn func(context.Context) (workspacesdk.AgentConn, error)
-	model            *chatprovider.Model
-	prompt           *[]fantasy.Message
-	pending          []fantasy.Message
+	getWorkspaceConn  func(context.Context) (workspacesdk.AgentConn, error)
+	model             *chatprovider.Model
+	prompt            *[]fantasy.Message
+	pending           []fantasy.Message
+	customAgentPolicy *customAgentToolPolicy
 }
 
 // forkToolsWithWorkspaceConn hands the turn's workspace connection getter to
@@ -40,6 +41,13 @@ func forkToolsWithWorkspaceConn(get func(context.Context) (workspacesdk.AgentCon
 // counts toward the image budget.
 func forkToolsWithModel(model chatprovider.Model, prompt *[]fantasy.Message, pending []fantasy.Message) forkToolsOption {
 	return forkToolsOption{model: &model, prompt: prompt, pending: pending}
+}
+
+// forkToolsWithCustomAgentPolicy hands the turn's custom agent tool policy to
+// the fork features that must follow it: the viewed-image bound leaves the
+// name to a caller-supplied view_image only when the policy keeps that tool.
+func forkToolsWithCustomAgentPolicy(policy *customAgentToolPolicy) forkToolsOption {
+	return forkToolsOption{customAgentPolicy: policy}
 }
 
 // appendForkTools returns the turn tool list plus the tools of the fork
@@ -60,12 +68,17 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 			opt.prompt = o.prompt
 			opt.pending = o.pending
 		}
+		if o.customAgentPolicy != nil {
+			opt.customAgentPolicy = o.customAgentPolicy
+		}
 	}
 	// The bound applies with the experiment off too, so a chat that viewed
 	// images before the experiment was turned off stays bounded. A
-	// caller-supplied tool owns the name while the experiment is off, and its
-	// results are not viewed images.
-	if opt.prompt != nil && !p.dynamicToolOwnsViewImage(chat) {
+	// caller-supplied tool owns the name while the experiment is off, and
+	// its results are not viewed images. The ownership follows the turn's
+	// custom agent tool policy, which the caller resolved before this hook
+	// ran, so a dynamic view_image the policy drops does not own the name.
+	if opt.prompt != nil && !p.dynamicToolOwnsViewImage(chat, opt.customAgentPolicy) {
 		*opt.prompt = limitViewedImages(*opt.prompt, opt.pending, opt.model)
 	}
 	// A workflow step child gets workflow_report before the dynamic tools,
