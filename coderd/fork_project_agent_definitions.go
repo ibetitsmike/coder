@@ -6,6 +6,8 @@ package coderd
 // project can change them. Everyone else gets 404.
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -63,6 +65,8 @@ func (api *API) forkProjectAgentDefinitions(rw http.ResponseWriter, r *http.Requ
 // @x-apidocgen {"skip": true}
 func (api *API) postForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditCreate)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
@@ -82,6 +86,8 @@ func (api *API) postForkProjectAgentDefinition(rw http.ResponseWriter, r *http.R
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
+	fa.diff(nil, forkAuditProjectAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -128,12 +134,23 @@ func (api *API) forkProjectAgentDefinition(rw http.ResponseWriter, r *http.Reque
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditUpdate)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
 	}
 	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
 	if !ok {
+		return
+	}
+	current, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{
+		ProjectID: project.ID,
+		Name:      update.Name,
+	})
+	readDenied := err != nil && httpapi.Is404Error(err)
+	if err != nil && !readDenied {
+		writeForkAgentDefinitionReadError(rw, err)
 		return
 	}
 	row, err := fdb.UpdateProjectAgentDefinitionByName(ctx, forkdb.UpdateProjectAgentDefinitionByNameParams{
@@ -146,6 +163,28 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 	if err != nil {
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
+	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
+	if readDenied {
+		// The read was denied but the update is allowed, for example for
+		// an update-only scoped token. The old values are unknown, so the
+		// entry records that the requested fields changed without them.
+		if update.Content.Valid {
+			fa.secret("content")
+		}
+		if update.Description.Valid {
+			fa.change("description", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%q`, row.Description))})
+		}
+		if update.Enabled.Valid {
+			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
+		}
+	} else {
+		fa.diff(forkAuditProjectAgentDefinition(current), forkAuditProjectAgentDefinition(row))
+		if update.Content.Valid && update.Content.String != current.Content {
+			// The content is not in the audit view, so a changed prompt
+			// records that it changed without its values.
+			fa.secret("content")
+		}
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
@@ -162,11 +201,13 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditDelete)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
 	}
-	_, err := fdb.DeleteProjectAgentDefinitionByName(ctx, forkdb.DeleteProjectAgentDefinitionByNameParams{
+	deleted, err := fdb.DeleteProjectAgentDefinitionByName(ctx, forkdb.DeleteProjectAgentDefinitionByNameParams{
 		ProjectID: project.ID,
 		Name:      chi.URLParam(r, "agentDefinition"),
 	})
@@ -174,6 +215,8 @@ func (api *API) deleteForkProjectAgentDefinition(rw http.ResponseWriter, r *http
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), deleted.ID, deleted.Name)
+	fa.diff(forkAuditProjectAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 

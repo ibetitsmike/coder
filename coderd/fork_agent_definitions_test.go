@@ -434,6 +434,75 @@ func TestForkOrganizationAgentDefinitionsAudit(t *testing.T) {
 	require.Empty(t, entries[3].Changes["name"].New)
 }
 
+// TestForkUserAgentDefinitionsAudit checks that every change to a personal
+// agent definition is audited, and that a denied request is not.
+func TestForkUserAgentDefinitionsAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	auditor := audit.NewMock()
+	client := coderdtest.New(t, &coderdtest.Options{
+		Auditor: auditor,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkAgentDefinitions)}
+		}),
+	})
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	member, memberUser := coderdtest.CreateAnotherUser(t, client, orgID)
+	other, otherUser := coderdtest.CreateAnotherUser(t, client, orgID)
+	const reviewer = "---\nname: reviewer\ndescription: Reviews diffs\n---\nReview the diff.\n"
+
+	// A request denied before authorization writes no entry.
+	_, err := other.CreateForkUserAgentDefinition(ctx, orgID, memberUser.Username, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	_ = requireSDKError(t, err, http.StatusForbidden)
+	// A denied change of another member's definition also writes no entry.
+	_, err = other.UpdateForkUserAgentDefinition(ctx, orgID, memberUser.Username, "missing", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+	_ = requireSDKError(t, err, http.StatusForbidden)
+
+	created, err := member.CreateForkUserAgentDefinition(ctx, orgID, codersdk.Me, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	require.NoError(t, err)
+	// A failed request writes no entry.
+	_, err = member.CreateForkUserAgentDefinition(ctx, orgID, codersdk.Me, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	_ = requireSDKError(t, err, http.StatusConflict)
+	_, err = member.UpdateForkUserAgentDefinition(ctx, orgID, codersdk.Me, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(false)})
+	require.NoError(t, err)
+	require.NoError(t, member.DeleteForkUserAgentDefinition(ctx, orgID, codersdk.Me, "reviewer"))
+
+	entries := forkAuditEntries(t, auditor, orgID, "user_agent_definition")
+	require.Len(t, entries, 3)
+	for i, op := range []string{"create", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, created.ID.String(), entries[i].ResourceID)
+		require.Equal(t, "reviewer", entries[i].ResourceName)
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+	require.JSONEq(t, `"Reviews diffs"`, string(entries[0].Changes["description"].New))
+	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
+	require.NotContains(t, entries[1].Changes, "content", "an enabled change does not repeat the prompt")
+	require.JSONEq(t, `"reviewer"`, string(entries[2].Changes["name"].Old))
+	require.Empty(t, entries[2].Changes["name"].New)
+	for i, entry := range entries {
+		// A create and a delete record the owner; an enabled-only update
+		// repeats no unchanged field.
+		if entry.Changes["user_id"].New != nil {
+			require.JSONEq(t, `"`+memberUser.ID.String()+`"`, string(entry.Changes["user_id"].New), "entry %d names the owner", i)
+		}
+		if entry.Changes["user_id"].Old != nil {
+			require.JSONEq(t, `"`+memberUser.ID.String()+`"`, string(entry.Changes["user_id"].Old), "entry %d names the owner", i)
+		}
+		require.NotContains(t, entry.Changes, "content", "a personal prompt is not stored in the audit log")
+	}
+
+	// A failed request writes no entry.
+	_, err = member.UpdateForkUserAgentDefinition(ctx, orgID, codersdk.Me, "missing", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	err = member.DeleteForkUserAgentDefinition(ctx, orgID, otherUser.Username, "missing")
+	_ = requireSDKError(t, err, http.StatusForbidden)
+	require.Len(t, forkAuditEntries(t, auditor, orgID, "user_agent_definition"), 3)
+}
+
 func TestForkProjectAgentDefinitions(t *testing.T) {
 	t.Parallel()
 
@@ -539,4 +608,56 @@ func TestForkProjectAgentDefinitions(t *testing.T) {
 		_, err := client.ForkProjectAgentDefinitions(ctx, orgID, project.ID)
 		_ = requireSDKError(t, err, http.StatusForbidden)
 	})
+}
+
+// TestForkProjectAgentDefinitionsAudit checks that every change to a project
+// agent definition is audited, and that a denied request is not.
+func TestForkProjectAgentDefinitionsAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	auditor := audit.NewMock()
+	client, _ := newChatProjectClient(t, func(o *coderdtest.Options) {
+		o.Auditor = auditor
+		o.DeploymentValues.Experiments = append(o.DeploymentValues.Experiments, string(codersdk.ExperimentForkAgentDefinitions))
+	})
+	orgID := coderdtest.CreateFirstUser(t, client.Client).OrganizationID
+	project := createChatProject(t, client, orgID, "Audit Project")
+	const reviewer = "---\nname: reviewer\ndescription: Reviews diffs\n---\nReview the diff.\n"
+
+	// A request denied before authorization writes no entry.
+	memberRaw, _ := coderdtest.CreateAnotherUser(t, client.Client, orgID)
+	member := codersdk.NewExperimentalClient(memberRaw)
+	_, err := member.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	_ = requireSDKError(t, err, http.StatusNotFound)
+
+	created, err := client.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	require.NoError(t, err)
+	// A failed request writes no entry.
+	_, err = client.CreateForkProjectAgentDefinition(ctx, orgID, project.ID, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
+	_ = requireSDKError(t, err, http.StatusConflict)
+	_, err = client.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(false)})
+	require.NoError(t, err)
+	require.NoError(t, client.DeleteForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer"))
+
+	entries := forkAuditEntries(t, auditor, orgID, "project_agent_definition")
+	require.Len(t, entries, 3)
+	for i, op := range []string{"create", "update", "delete"} {
+		require.Equal(t, op, entries[i].Operation)
+		require.Equal(t, created.ID.String(), entries[i].ResourceID)
+		require.Equal(t, "reviewer", entries[i].ResourceName)
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+	require.JSONEq(t, `"Reviews diffs"`, string(entries[0].Changes["description"].New))
+	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
+	require.NotContains(t, entries[1].Changes, "content", "an enabled change does not repeat the prompt")
+	require.JSONEq(t, `"reviewer"`, string(entries[2].Changes["name"].Old))
+	require.Empty(t, entries[2].Changes["name"].New)
+	require.NotContains(t, entries[0].Changes, "content", "a project prompt is not stored in the audit log")
+
+	// A failed request writes no entry.
+	_, err = client.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	require.Len(t, forkAuditEntries(t, auditor, orgID, "project_agent_definition"), 3)
 }

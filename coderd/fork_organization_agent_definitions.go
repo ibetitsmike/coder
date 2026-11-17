@@ -206,6 +206,34 @@ func forkAuditAgentDefinition(row forkdb.AgentDefinition) any {
 	}{row.Name, row.Description, row.Content, row.Enabled, row.GroupAcl, row.UserAcl}
 }
 
+// forkAuditProjectAgentDefinition is the audit view of a project agent
+// definition. It omits the content, because auditors can read the audit log
+// without being able to read a chat project, and names the project, because
+// a deleted definition is otherwise not traceable to it.
+func forkAuditProjectAgentDefinition(row forkdb.AgentDefinition) any {
+	return struct {
+		ProjectID   uuid.NullUUID    `json:"project_id"`
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		Enabled     bool             `json:"enabled"`
+		GroupACL    database.ChatACL `json:"group_acl"`
+		UserACL     database.ChatACL `json:"user_acl"`
+	}{row.ProjectID, row.Name, row.Description, row.Enabled, row.GroupAcl, row.UserAcl}
+}
+
+// forkAuditUserAgentDefinition is the audit view of a personal agent
+// definition. It omits the content, because auditors can read the audit log
+// without being able to read another user's personal skill, and names the
+// owner, because a deleted personal definition is otherwise not traceable.
+func forkAuditUserAgentDefinition(row forkdb.AgentDefinition) any {
+	return struct {
+		UserID      uuid.NullUUID `json:"user_id"`
+		Name        string        `json:"name"`
+		Description string        `json:"description"`
+		Enabled     bool          `json:"enabled"`
+	}{row.UserID, row.Name, row.Description, row.Enabled}
+}
+
 // readForkOrganizationAgentDefinition reads the organization definition
 // named in the path. Updates read it first so that a caller who
 // cannot read the definition gets 404, and only readers get 403.
