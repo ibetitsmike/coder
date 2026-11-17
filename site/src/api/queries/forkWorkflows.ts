@@ -17,10 +17,17 @@ import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 export const chatWorkflowRunsKey = (chatId: string) =>
 	["chats", "fork-workflow-runs", chatId] as const;
 
-type WorkflowRunPageParam = { after: string };
+export type WorkflowRunPageParam = { after: string };
+
+/** Run statuses that cannot change anymore. Matches the journal's terminal set. */
+const terminalRunStatuses = new Set(["completed", "failed", "stopped"]);
+
+const isTerminalRun = (run: WorkflowRun) => terminalRunStatuses.has(run.status);
 
 /** Whether one of the run list's loaded pages still has a running run. */
-const hasRunningRun = (data: InfiniteData<WorkflowRun[]> | undefined) =>
+export const runListHasRunningRun = (
+	data: InfiniteData<WorkflowRun[]> | undefined,
+) =>
 	data?.pages.some((page) => page.some((run) => run.status === "running")) ??
 	false;
 
@@ -32,13 +39,13 @@ export const chatWorkflowRuns = (chatId: string) =>
 	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
 		queryFn: ({ client, queryKey, signal, pageParam }) => {
-			// A refetch walks every loaded page, one request per page. Older
-			// pages can only change behind their cursor, so when nothing on
-			// them runs, reuse the cached page instead of fetching it: steady
-			// state costs one request per tick. When a page runs, it is
-			// fetched, and a new run shifts the first page's cursor, so the
-			// page behind it is fetched with its new cursor rather than
-			// reused.
+			// A refetch walks every loaded page, one request per page. A
+			// cached older page is reusable only when every run on it is
+			// terminal, because a resume flips an interrupted run to
+			// running in place, without moving its cursor. When a page
+			// still has a live run it is fetched, and a new run shifts the
+			// first page's cursor, so the page behind it is fetched with
+			// its new cursor rather than reused.
 			if (pageParam.after !== "") {
 				const cached =
 					client.getQueryData<
@@ -48,13 +55,13 @@ export const chatWorkflowRuns = (chatId: string) =>
 					(param) => param.after === pageParam.after,
 				);
 				const page = cached?.pages[index ?? -1];
-				if (page && !page.some((run) => run.status === "running")) {
+				if (page?.every(isTerminalRun)) {
 					return page;
 				}
 			}
 			return getChatWorkflowRuns(chatId, pageParam.after, signal);
 		},
-		initialPageParam: { after: "" } as WorkflowRunPageParam,
+		initialPageParam: { after: "" } satisfies WorkflowRunPageParam,
 		getNextPageParam: (lastPage): WorkflowRunPageParam | undefined => {
 			const last = lastPage[lastPage.length - 1];
 			// A short page has no older runs behind it.
@@ -66,7 +73,7 @@ export const chatWorkflowRuns = (chatId: string) =>
 		// Runs have no watch socket: poll faster while any loaded page has a
 		// run going, and slowly otherwise so a run the agent starts shows up.
 		refetchInterval: ({ state }) =>
-			hasRunningRun(state.data) ? 5_000 : 30_000,
+			runListHasRunningRun(state.data) ? 5_000 : 30_000,
 	});
 
 /** Keys one run's detail under its chat's runs. */

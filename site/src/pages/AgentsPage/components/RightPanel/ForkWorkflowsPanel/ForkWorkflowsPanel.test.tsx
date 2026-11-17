@@ -1,9 +1,17 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type InfiniteData, QueryClientProvider } from "react-query";
+import {
+	type InfiniteData,
+	InfiniteQueryObserver,
+	QueryClientProvider,
+} from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
+import {
+	chatWorkflowRuns,
+	chatWorkflowRunsKey,
+} from "#/api/queries/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import { mockApiError } from "#/testHelpers/entities";
@@ -147,7 +155,7 @@ describe("ForkWorkflowsPanel", () => {
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
 			MockChatWorkflowRunDetail,
 		);
-		renderPanel(chatId);
+		const { queryClient } = renderPanel(chatId);
 
 		await screen.findByRole("list", { name: "Workflow runs" });
 		// The cursor page asks for the runs behind the last run of the
@@ -163,8 +171,18 @@ describe("ForkWorkflowsPanel", () => {
 				expect.anything(),
 			),
 		);
-		const runList = screen.getByRole("list", { name: "Workflow runs" });
-		expect(within(runList).getAllByRole("button")).toHaveLength(51);
+		// The query holds both pages: the first page's params plus the
+		// cursor page behind the last run of that page.
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<
+				InfiniteData<WorkflowRun[], { after: string }>
+			>(chatWorkflowRunsKey(chatId));
+			expect(cached?.pageParams).toEqual([
+				{ after: "" },
+				{ after: `${last.created_at}/${last.id}` },
+			]);
+			expect(cached?.pages).toHaveLength(2);
+		});
 	});
 
 	it("offers no older page after a short page", async () => {
@@ -184,13 +202,55 @@ describe("ForkWorkflowsPanel", () => {
 		await waitFor(() => {
 			const cached = queryClient.getQueryData<
 				InfiniteData<WorkflowRun[], { after: string }>
-			>(["chats", "fork-workflow-runs", chatId]);
-			expect(cached?.pageParams).toHaveLength(1);
-			expect(cached?.pageParams[0]?.after).toBe("");
+			>(chatWorkflowRunsKey(chatId));
+			expect(cached?.pageParams).toEqual([{ after: "" }]);
+			expect(cached?.pages).toHaveLength(1);
+		});
+		await waitFor(() => {
+			// hasNextPage is false exactly when getNextPageParam returns
+			// undefined for the short page.
+			const observer = new InfiniteQueryObserver(
+				queryClient,
+				chatWorkflowRuns(chatId),
+			);
+			expect(observer.getCurrentResult().hasNextPage).toBe(false);
 		});
 		expect(
 			screen.queryByRole("button", { name: "Load older runs" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("keeps focus on the list when the last page removes the control", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The cursor page is short, so loading it ends the paging and
+		// unmounts "Load older runs" while the user holds focus on it.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("button", { name: "Load older runs" }),
+			).not.toBeInTheDocument(),
+		);
+		// The focus moved from the unmounted button to the list, not to the
+		// body, so keyboard users keep their place.
+		expect(screen.getByRole("list", { name: "Workflow runs" })).toHaveFocus();
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {

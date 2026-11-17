@@ -2,6 +2,7 @@
 // (fork-workflows experiment).
 
 import type React from "react";
+import { useEffect, useRef } from "react";
 import { getErrorMessage } from "#/api/errors";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
@@ -23,7 +24,10 @@ type ForkWorkflowRunListProps = {
 	onSelectRun: (runId: string) => void;
 	/** Whether the chat has runs older than the loaded pages. */
 	hasOlderRuns?: boolean;
+	/** A next-page fetch is loading, so the control shows its spinner. */
 	isLoadingOlderRuns?: boolean;
+	/** Blocks the control while any fetch, including a background tick, runs. */
+	disabled?: boolean;
 	/** Absent while the first page has not loaded. */
 	onLoadOlderRuns?: () => void;
 };
@@ -34,12 +38,30 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	onSelectRun,
 	hasOlderRuns = false,
 	isLoadingOlderRuns = false,
+	disabled = false,
 	onLoadOlderRuns,
 }) => {
+	const listRef = useRef<HTMLUListElement>(null);
 	const hasRunning = runs?.some((run) => run.status === "running") ?? false;
 	const now = useTime(() => Date.now(), {
 		interval: hasRunning ? 1_000 : 30_000,
 	});
+	// "Load older runs" holds focus while the last page loads. When that
+	// page ends the paging, the button unmounts, so keep focus on the list
+	// instead of dropping it to the body.
+	const hadLoadOlder = useRef(false);
+	useEffect(() => {
+		if (hasOlderRuns) {
+			hadLoadOlder.current = true;
+		} else if (
+			hadLoadOlder.current &&
+			document.activeElement === document.body &&
+			listRef.current
+		) {
+			hadLoadOlder.current = false;
+			listRef.current.focus();
+		}
+	}, [hasOlderRuns]);
 
 	if (!runs) {
 		return error ? (
@@ -66,8 +88,12 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 				</Alert>
 			)}
 			<ul
+				ref={listRef}
 				aria-label="Workflow runs"
-				className="m-0 flex list-none flex-col gap-1 p-0"
+				className="m-0 flex list-none flex-col gap-1 p-0 outline-none"
+				// The list takes focus when "Load older runs" unmounts after
+				// the last page, so keyboard focus does not drop to the body.
+				tabIndex={-1}
 			>
 				{runs.map((run) => (
 					<li key={run.id}>
@@ -107,7 +133,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					variant="subtle"
 					size="sm"
 					className="w-full"
-					disabled={isLoadingOlderRuns}
+					disabled={disabled || isLoadingOlderRuns}
 					onClick={onLoadOlderRuns}
 				>
 					{isLoadingOlderRuns ? (
