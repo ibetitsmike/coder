@@ -1216,6 +1216,9 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		status:     stepStatusRunning,
 	}
 	if err := r.p.workflowJournal().insertStep(ctx, r.id, step); err != nil {
+		if database.IsUniqueViolation(err, workflowStepsPkey) {
+			return r.adoptJournaledStep(ctx, id)
+		}
 		// The child chat runs without a journal row. Stop it: a step that
 		// the script never reads again must not consume model capacity.
 		r.interruptStepChild(ctx, step)
@@ -1224,6 +1227,31 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	r.mu.Lock()
 	r.steps = append(r.steps, step)
 	r.mu.Unlock()
+	return step, nil
+}
+
+// adoptJournaledStep takes over the journal row of a step that another
+// runner of the same run inserted after this run was rehydrated. The
+// startup sweep marks every open run interrupted, so a run can be resumed
+// while the process that started it still runs the script, for example
+// during a rolling restart or on another replica. Both runners derive the
+// same step ID, so the later insert hits the primary key. The step is the
+// journaled one from here on and replays the way startStep replays a
+// rehydrated step. Its child chat belongs to that row and keeps running.
+func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*workflowStep, error) {
+	row, err := r.p.workflowJournal().getStep(ctx, id)
+	if err != nil {
+		return nil, xerrors.Errorf("read the workflow step another runner journaled: %w", err)
+	}
+	if row.RunID != r.id {
+		return nil, xerrors.Errorf("journal the workflow step: step %s belongs to run %s", id, row.RunID)
+	}
+	step := journaledWorkflowStep(row)
+	r.mu.Lock()
+	r.steps = append(r.steps, step)
+	r.mu.Unlock()
+	r.p.workflowJournal().markStepReused(ctx, step.id)
+	r.failJournaledStep(ctx, step)
 	return step, nil
 }
 
