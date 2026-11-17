@@ -209,6 +209,14 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 		m.resolveCache.reset()
 		return snap, pass
 	}
+	if !sameDirs(rootDirs, statRootDirs(roots)) || !watcher.watchedDirsUnchanged() {
+		// A root or a watched directory named another directory at some
+		// point of the pass, as when a symlink was retargeted, and no
+		// watch reports that. An entry keyed on the directories at the
+		// start could hold what the pass read through the other one.
+		m.resolveCache.reset()
+		return snap, pass
+	}
 	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, epoch: epoch, snap: snap, pass: pass, links: links})
 	return snap, pass
 }
@@ -410,12 +418,16 @@ func (w *Watcher) beginSync(current map[string]os.FileInfo) bool {
 
 // addWatch adds one directory watch for Sync, with w.mu held.
 func (w *Watcher) addWatch(path string) error {
+	before, beforeErr := os.Stat(path)
 	err := w.watcher.Add(path)
 	switch {
 	case err == nil:
 		w.cover.gen++
+		// A path replaced between the stats and the Add would record
+		// the identity of a directory the watch is not on. With no
+		// identity, the next Sync replaces the watch.
 		info, statErr := os.Stat(path)
-		if statErr != nil {
+		if statErr != nil || beforeErr != nil || !sameDir(before, info) {
 			info = nil
 		}
 		if w.cover.dirs == nil {
@@ -699,11 +711,39 @@ func (w *Watcher) scheduleOnOverflow(err error) {
 	if !errors.Is(err, fsnotify.ErrEventOverflow) {
 		return
 	}
+	w.dropWatchesAfterOverflow()
 	w.schedule()
 	if errors.Is(err, errRelayOverflow) {
 		// The debounce timer now keeps the watcher uncovered.
 		w.cover.relayDropped.Add(-1)
 	}
+}
+
+// dropWatchesAfterOverflow removes every watch after dropped events. A
+// dropped event can be the removal of a watched directory, whose watch the
+// kernel then dropped, and a directory created in its place can reuse the
+// inode, so beginSync would keep the dead watch. The Sync after the
+// re-resolve adds every watch again.
+func (w *Watcher) dropWatchesAfterOverflow() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.watcher == nil || len(w.watched) == 0 {
+		return
+	}
+	for path := range w.watched {
+		_ = w.watcher.Remove(path)
+		delete(w.watched, path)
+		delete(w.cover.dirs, path)
+	}
+	w.cover.gen++
+}
+
+// noteScheduled advances the watch generation when an event arms the
+// debounce timer, with w.mu held. A pass or a cached result that predates
+// the event then cannot be served once the timer fired, even before the
+// Manager took the change signal.
+func (w *Watcher) noteScheduled() {
+	w.cover.gen++
 }
 
 // relayQueueMax bounds the events and errors the relay holds for the event
@@ -778,8 +818,13 @@ func (w *Watcher) relayFsnotify(fsw *fsnotify.Watcher) (<-chan fsnotify.Event, <
 		defer close(errs)
 		inEvents, inErrs := fsw.Events, fsw.Errors
 		q := relayQueue{max: relayQueueMax}
+		closed := w.closedCh
+		draining := false
 		push := func(it relayItem) {
 			w.cover.relayed.Add(1)
+			if draining {
+				return
+			}
 			wasDropping := q.dropping
 			if q.push(it) && !wasDropping {
 				w.cover.relayDropped.Add(1)
@@ -798,8 +843,15 @@ func (w *Watcher) relayFsnotify(fsw *fsnotify.Watcher) (<-chan fsnotify.Event, <
 				}
 			}
 			select {
-			case <-w.closedCh:
-				return
+			case <-closed:
+				// Keep taking what fsnotify sends until it closes its
+				// channels: Close closes fsnotify after this, and
+				// fsnotify can wait on a send with the lock its Close
+				// takes.
+				closed = nil
+				draining = true
+				q = relayQueue{}
+				continue
 			case ev, ok := <-inEvents:
 				if !ok {
 					inEvents = nil

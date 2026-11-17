@@ -317,6 +317,7 @@ func (w *Watcher) schedule() {
 		return
 	}
 	cb := w.onChange
+	w.noteScheduled() // fork: fork_resolve_cache.go
 	if w.timer != nil {
 		w.timer.Reset(w.debounce)
 		w.mu.Unlock()

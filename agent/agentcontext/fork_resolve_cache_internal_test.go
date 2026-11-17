@@ -464,8 +464,21 @@ func TestRelayQueue_BoundsAndCoalescesOverflow(t *testing.T) {
 	require.Equal(t, "6", q.items[0].ev.Name)
 }
 
+// fakeFsnotify returns an fsnotify.Watcher whose channels the test sends
+// on, for the relay alone.
+func fakeFsnotify(t *testing.T) *fsnotify.Watcher {
+	t.Helper()
+	fsw := &fsnotify.Watcher{Events: make(chan fsnotify.Event), Errors: make(chan error)}
+	t.Cleanup(func() {
+		close(fsw.Events)
+		close(fsw.Errors)
+	})
+	return fsw
+}
+
 // A watcher whose relay dropped sends reports no coverage until the event
-// loop took the overflow error and scheduled a re-resolve.
+// loop took the overflow error and scheduled a re-resolve. The test fills a
+// relay that nothing reads past its bound.
 func TestWatcher_RelayOverflowUncoversUntilHandled(t *testing.T) {
 	t.Parallel()
 	// The mock clock keeps the debounce timer armed.
@@ -476,15 +489,188 @@ func TestWatcher_RelayOverflowUncoversUntilHandled(t *testing.T) {
 	_, ok := w.coverage()
 	require.True(t, ok)
 
-	w.cover.relayDropped.Add(1)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	fsw := fakeFsnotify(t)
+	events, errs := w.relayFsnotify(fsw)
+	// The relay takes a send only after it queued or dropped the one before,
+	// so the last send orders the count for the first drop.
+	for i := range relayQueueMax + 2 {
+		testutil.RequireSend(ctx, t, fsw.Events, fsnotify.Event{Name: fmt.Sprint(i)})
+	}
+	require.EqualValues(t, 1, w.cover.relayDropped.Load())
 	_, ok = w.coverage()
 	require.False(t, ok, "a dropped send leaves the watcher uncovered")
-	w.scheduleOnOverflow(errRelayOverflow)
+
+	for range relayQueueMax {
+		testutil.TryReceive(ctx, t, events)
+	}
+	overflow := testutil.TryReceive(ctx, t, errs)
+	require.ErrorIs(t, overflow, errRelayOverflow)
+	w.scheduleOnOverflow(overflow)
 	require.Zero(t, w.cover.relayDropped.Load())
 	w.mu.Lock()
 	scheduled := w.timer != nil
 	w.mu.Unlock()
 	require.True(t, scheduled, "the overflow schedules a re-resolve")
+}
+
+// After Close, the relay keeps taking what fsnotify sends until fsnotify
+// closes its channels: fsnotify can wait on a send with the lock that its
+// Close takes, and Close closes fsnotify after it closed closedCh.
+func TestWatcher_RelayDrainsAfterClose(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitShort)
+	w := &Watcher{closedCh: make(chan struct{})}
+	fsw := &fsnotify.Watcher{Events: make(chan fsnotify.Event), Errors: make(chan error)}
+	events, errs := w.relayFsnotify(fsw)
+	close(w.closedCh)
+	for i := range 10 {
+		testutil.RequireSend(ctx, t, fsw.Errors, fsnotify.ErrEventOverflow)
+		testutil.RequireSend(ctx, t, fsw.Events, fsnotify.Event{Name: fmt.Sprint(i)})
+	}
+	close(fsw.Events)
+	close(fsw.Errors)
+	select {
+	case _, open := <-events:
+		require.False(t, open, "the relay forwards nothing after Close")
+	case <-ctx.Done():
+		t.Fatal("the relay did not close its events")
+	}
+	select {
+	case _, open := <-errs:
+		require.False(t, open, "the relay forwards nothing after Close")
+	case <-ctx.Done():
+		t.Fatal("the relay did not close its errors")
+	}
+}
+
+// An event that arms the debounce timer advances the watch generation, so
+// a cached result that predates it misses once the timer fired, before the
+// Manager took the change signal. OnChange does nothing here, so no signal
+// ever comes.
+func TestResolvePass_EventMissesCacheBeforeSignal(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitShort)
+	dir := t.TempDir()
+	roots := []ScanRoot{{Path: dir}}
+	m, _ := advertisedCacheManager(t, ManagerOptions{}, nil)
+	clock := quartz.NewMock(t)
+	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), Clock: clock, OnChange: func() {}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+	w.Sync(ctx, roots)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "the pass is cached")
+
+	w.schedule()
+	clock.Advance(w.debounce).MustWait(ctx)
+	_, covered := w.coverage()
+	require.True(t, covered, "the timer fired")
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the result predates the event")
+}
+
+// After dropped events the watcher removes every watch, since a dropped
+// removal can leave a dead watch on a path whose new directory reuses the
+// inode. The next Sync adds them again.
+func TestWatcher_OverflowDropsWatches(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitShort)
+	dir := t.TempDir()
+	w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), Clock: quartz.NewMock(t), OnChange: func() {}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+	w.Sync(ctx, []ScanRoot{{Path: dir}})
+	genBefore, _ := w.coverage()
+
+	w.scheduleOnOverflow(fsnotify.ErrEventOverflow)
+	w.mu.Lock()
+	watched, dirs := len(w.watched), len(w.cover.dirs)
+	w.mu.Unlock()
+	require.Zero(t, watched, "every watch is removed")
+	require.Zero(t, dirs)
+	genAfter, _ := w.coverage()
+	require.Greater(t, genAfter, genBefore)
+
+	w.Sync(ctx, []ScanRoot{{Path: dir}})
+	w.mu.Lock()
+	_, rewatched := w.watched[dir]
+	w.mu.Unlock()
+	require.True(t, rewatched, "Sync adds the watch again")
+}
+
+// retargetLink points link at target in one rename.
+func retargetLink(t *testing.T, link, target string) {
+	t.Helper()
+	tmp := link + ".tmp"
+	require.NoError(t, os.Symlink(target, tmp))
+	require.NoError(t, os.Rename(tmp, link))
+}
+
+// A root or a watched directory that a pass read through another directory
+// than the one it named at the start, with no event, is not cached: here a
+// link is retargeted during the pass and back after it, and nothing watches
+// the directory that holds the link.
+func TestResolvePass_DirRetargetedDuringPassIsNotCached(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlinks need privileges on Windows")
+	}
+	for _, tc := range []struct {
+		name string
+		// setup returns the scan root, the link and its two targets.
+		setup func(t *testing.T, base string) (root, link, a, b string)
+	}{{
+		name: "Root",
+		setup: func(t *testing.T, base string) (string, string, string, string) {
+			a, b := filepath.Join(base, "a"), filepath.Join(base, "b")
+			writePackFiles(t, a, map[string]string{"AGENTS.md": "in a"})
+			writePackFiles(t, b, map[string]string{"AGENTS.md": "in b"})
+			ws := filepath.Join(base, "ws")
+			require.NoError(t, os.Symlink(a, ws))
+			return ws, ws, a, b
+		},
+	}, {
+		name: "Container",
+		setup: func(t *testing.T, base string) (string, string, string, string) {
+			ws := filepath.Join(base, "ws")
+			a, b := filepath.Join(base, "sa"), filepath.Join(base, "sb")
+			writePackFiles(t, a, map[string]string{"foo/SKILL.md": "---\nname: foo\ndescription: in a\n---\n"})
+			writePackFiles(t, b, map[string]string{"foo/SKILL.md": "---\nname: foo\ndescription: in b\n---\n"})
+			// .codex has no watch of its own.
+			link := filepath.Join(ws, ".codex", "skills")
+			require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+			require.NoError(t, os.Symlink(a, link))
+			return ws, link, a, b
+		},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, link, a, b := tc.setup(t, t.TempDir())
+			roots := []ScanRoot{{Path: root}}
+			var flip atomic.Bool
+			m, w := advertisedCacheManager(t, ManagerOptions{
+				// The catalog is read during the pass.
+				MCPCatalog: func() []MCPServerStatus {
+					if flip.CompareAndSwap(true, false) {
+						retargetLink(t, link, b)
+					}
+					return nil
+				},
+			}, roots)
+			flip.Store(true)
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.False(t, flip.Load(), "the link was retargeted during the pass")
+			_, covered := w.coverage()
+			require.True(t, covered, "no event reported the retarget")
+
+			retargetLink(t, link, a)
+			require.True(t, w.watchedDirsUnchanged())
+			_, ok := cachedFor(m, w, roots)
+			require.False(t, ok, "the pass is cached under the directories it did not read through")
+		})
+	}
 }
 
 // Sync calls Remove and Add with w.mu held, the event loop takes w.mu for
