@@ -108,8 +108,9 @@ func (g *workflowRegistry) liveRuns() []*workflowRun {
 }
 
 // setClaiming records the run a resume claimed and has not registered yet,
-// so the heartbeat renews its row while the resume rehydrates it. resumeMu
-// serializes the resumes, so at most one run is claiming.
+// or a journal-only stop claimed and has not stopped yet, so the heartbeat
+// renews its row meanwhile. Both hold resumeMu, so at most one run is
+// claiming.
 func (g *workflowRegistry) setClaiming(id uuid.UUID) {
 	g.mu.Lock()
 	g.claiming = id
