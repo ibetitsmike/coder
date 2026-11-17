@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,8 +59,11 @@ type forkPackState struct {
 	written sync.Map
 	// repinned maps repinKey to the marker a chat was last re-pinned for.
 	repinned sync.Map
-	// paths maps packCommitKey to packPathSet.
+	// paths maps a pack ID to its *packPathsEntry, the paths of its
+	// commits read in the last packPathsIdle.
 	paths sync.Map
+	// pathsSweptAt is the Unix nanoseconds of the last sweep of paths.
+	pathsSweptAt atomic.Int64
 	// swept holds the agent IDs whose managed pack directories this server
 	// has checked for packs no chat on the workspace enables.
 	swept sync.Map
@@ -301,6 +305,30 @@ func (p *Server) packResources(ctx context.Context, packID uuid.UUID) ([]forkdb.
 		return nil, xerrors.Errorf("get pack resources: %w", err)
 	}
 	return resources, nil
+}
+
+// packCommitPaths returns the commit the pack is at now and the paths of its
+// files at that commit, read in one statement.
+func (p *Server) packCommitPaths(ctx context.Context, packID uuid.UUID) (string, packPathSet, error) {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return "", nil, xerrors.Errorf("fork queries unavailable: %w", err)
+	}
+	//nolint:gocritic // chatd reads the files of a pack enabled for this chat.
+	rows, err := fdb.GetPluginPackCommitPaths(dbauthz.AsSystemRestricted(ctx), packID)
+	if err != nil {
+		return "", nil, xerrors.Errorf("get pack paths: %w", err)
+	}
+	if len(rows) == 0 {
+		return "", nil, xerrors.Errorf("pack %s not found", packID)
+	}
+	paths := packPathSet{}
+	for _, row := range rows {
+		if row.Path.Valid {
+			paths[row.Path.String] = true
+		}
+	}
+	return rows[0].CommitSha, paths, nil
 }
 
 // readPackMarker returns the commit recorded in a pack directory's marker.

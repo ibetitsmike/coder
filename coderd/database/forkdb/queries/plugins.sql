@@ -36,6 +36,27 @@ SELECT * FROM plugins WHERE id = @id;
 -- name: GetPluginsByOrganizationID :many
 SELECT * FROM plugins WHERE organization_id = @organization_id ORDER BY name;
 
+-- The enabled plugins of the live organizations a user is a member of, with
+-- the organization name, for the list of plugins the user can link to. It
+-- leaves out the config, so no caller decrypts it.
+-- name: GetLinkablePluginsByUserID :many
+SELECT
+    plugins.id,
+    plugins.organization_id,
+    organizations.name AS organization_name,
+    plugins.name,
+    plugins.version,
+    plugins.grants
+FROM plugins
+JOIN organization_members
+    ON organization_members.organization_id = plugins.organization_id
+    AND organization_members.user_id = @user_id
+JOIN organizations
+    ON organizations.id = plugins.organization_id
+    AND NOT organizations.deleted
+WHERE plugins.enabled
+ORDER BY organizations.name, plugins.name;
+
 -- name: UpdatePluginConfig :one
 UPDATE plugins
 SET

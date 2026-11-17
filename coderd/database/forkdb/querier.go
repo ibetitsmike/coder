@@ -137,6 +137,10 @@ type Querier interface {
 	// it if a cycle ever appears in the hierarchy.
 	GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
+	// The enabled plugins of the live organizations a user is a member of, with
+	// the organization name, for the list of plugins the user can link to. It
+	// leaves out the config, so no caller decrypts it.
+	GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]GetLinkablePluginsByUserIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)
 	GetOrganizationSavedWorkflowByName(ctx context.Context, arg GetOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
@@ -152,6 +156,10 @@ type Querier interface {
 	// AcquirePluginLeases.
 	GetPluginLeaseSummary(ctx context.Context, runnerID uuid.UUID) (GetPluginLeaseSummaryRow, error)
 	GetPluginPackByID(ctx context.Context, id uuid.UUID) (PluginPack, error)
+	// Returns the commit of the pack and the path of each of its files, one row
+	// per file, or one row with a NULL path when it has none. One statement reads
+	// one snapshot, so the paths are those of the returned commit.
+	GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]GetPluginPackCommitPathsRow, error)
 	GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]PluginPackResource, error)
 	GetPluginPackSources(ctx context.Context, organizationID uuid.UUID) (PluginPackSource, error)
 	GetPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetPluginPacksByChatIDRow, error)
