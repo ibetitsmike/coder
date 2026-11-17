@@ -3,8 +3,9 @@ package chatd
 // This file is fork code: stop_workflow, the API-side stop of the
 // fork-workflows experiment. The coderd fork run API (fork_workflow_runs.go)
 // calls ForkStopWorkflowRun; the registry stops the live run of this
-// replica, and a run that this replica does not hold is stopped through its
-// journal rows.
+// replica, a run that another live process owns is stopped through that
+// owner's pubsub channel, and a run whose owner is gone is stopped through
+// its journal rows.
 
 import (
 	"context"
@@ -63,7 +64,8 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 	}
 
 	// The registry does not hold the run: either it ended (the journal says
-	// which) or it is mid-resume. The journal is the source of truth.
+	// which), another process executes it, or its owner died. The journal is
+	// the source of truth.
 	row, found, err := p.workflowJournal().getRun(ctx, runID)
 	if err != nil {
 		return err
@@ -74,14 +76,36 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 	if row.Status != workflowStatusRunning {
 		return ErrForkWorkflowRunTerminal
 	}
-	return p.stopJournaledRun(ctx, row)
+	if p.workflowOwnerLive(row.OwnerID, row.HeartbeatAt.Time, row.HeartbeatAt.Valid) {
+		return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
+	}
+	// The owner is gone. Claiming the run fences a late write of the old
+	// owner before the stop writes the journal.
+	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
+	if err != nil {
+		return xerrors.Errorf("claim the workflow run: %w", err)
+	}
+	if ok {
+		return p.stopJournaledRun(ctx, claimed)
+	}
+	// The run ended, or a resume elsewhere claimed it, since the read.
+	row, found, err = p.workflowJournal().getRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrForkWorkflowRunNotFound
+	}
+	if row.Status != workflowStatusRunning || !row.OwnerID.Valid {
+		return ErrForkWorkflowRunTerminal
+	}
+	return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
 }
 
-// stopJournaledRun stops a run that this replica does not hold but the
-// journal calls running: mid-resume at worst. It fails the open steps and
-// interrupts their children, then journals the stop. A live script that
-// still unwinds elsewhere would journal its own end over this state, which
-// single-replica chatd does not produce.
+// stopJournaledRun stops a run that this replica claimed from a dead owner.
+// It fails the open steps and interrupts their children, then journals the
+// stop. The claim fences the writes of the old owner, so a late write of
+// its script cannot replace this state.
 func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) error {
 	ictx, stop := p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
 	defer stop()

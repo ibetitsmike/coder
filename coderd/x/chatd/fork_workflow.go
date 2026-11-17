@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -219,6 +220,11 @@ func (p *Server) forkWorkflowTools(
 				}
 				args.Script = script
 				run, err := p.startWorkflowRun(ctx, chat, modelConfigID, args, callID)
+				if elsewhere, ok := errors.AsType[*workflowRunElsewhereError](err); ok {
+					// Another chatd process executes the run; its journal
+					// state is the answer.
+					return workflowJSON(elsewhere.result), nil
+				}
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
@@ -310,10 +316,11 @@ func workflowJSON(res runWorkflowResult) fantasy.ToolResponse {
 	return fantasy.NewTextResponse(string(out))
 }
 
-// workflowRegistry holds the runs of this replica.
+// workflowRegistry holds the runs of this replica and its owner identity.
 type workflowRegistry struct {
-	mu   sync.Mutex
-	runs map[uuid.UUID]*workflowRun
+	mu    sync.Mutex
+	runs  map[uuid.UUID]*workflowRun
+	owner workflowOwnership
 }
 
 func (g *workflowRegistry) get(id uuid.UUID) *workflowRun {
@@ -442,6 +449,10 @@ type workflowRun struct {
 	stopRequested bool
 	cancel        context.CancelFunc
 	queuedNotice  int64 // the queued end message, 0 if none
+	// lost marks a run that another process took over or a sweep
+	// interrupted (fork_workflow_owner.go). Its script is canceled, and
+	// finish ends it without a journal write or an end message.
+	lost bool
 }
 
 func (p *Server) startWorkflowRun(
@@ -661,6 +672,10 @@ func (r *workflowRun) isStopRequested() bool {
 // finish stores the result. If no await_workflow call waits, it tells the
 // parent that the run ended.
 func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
+	if r.isLost() {
+		r.finishLost()
+		return
+	}
 	// The journal keeps the result for the resumes and awaits of a later
 	// process, best effort like every journal update of a live run. A
 	// canceled context would fail the write, so a user stop journals on a
@@ -694,7 +709,12 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	}
 	// finish runs on the script goroutine, so the phase state it snapshots
 	// cannot change while the write starts: phase() runs on this goroutine.
-	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
+	// A fenced write means another process owns the run now.
+	if r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot()) {
+		r.markLost()
+		r.finishLost()
+		return
+	}
 
 	r.mu.Lock()
 	r.result = &res
@@ -1220,6 +1240,11 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		if database.IsUniqueViolation(err, workflowStepsPkey) {
 			return r.adoptJournaledStep(ctx, id)
 		}
+		if errors.Is(err, errWorkflowRunLost) {
+			// The new owner of the run adopts the child chat.
+			r.markLost()
+			return nil, err
+		}
 		// The child chat runs without a journal row. Stop it: a step that
 		// the script never reads again must not consume model capacity.
 		r.interruptStepChild(ctx, step)
@@ -1232,11 +1257,11 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 }
 
 // adoptJournaledStep takes over the journal row of a step that another
-// runner of the same run inserted after this run was rehydrated. The
-// startup sweep marks every open run interrupted, so a run can be resumed
-// while the process that started it still runs the script, for example
-// during a rolling restart or on another replica. Both runners derive the
-// same step ID, so the later insert hits the primary key. The step is the
+// runner of the same run inserted after this run was rehydrated. The claim
+// of a resume fences the inserts of the previous owner, but an insert that
+// started before the claim committed can still land after the rehydration
+// read the steps. Both runners derive the same step ID, so the later insert
+// hits the primary key. The step is the
 // journaled one from here on and replays the way startStep replays a
 // rehydrated step. Its child chat belongs to that row and keeps running.
 func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*workflowStep, error) {
@@ -1409,7 +1434,20 @@ func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
 // step timeout. waitStep has already returned when this runs, so the step
 // fields have no other writer. It returns the steps it failed, which finish
 // logs: the failure lines of steps failed earlier already sit in the logs.
+// A run that this process lost leaves the steps alone: their child chats
+// belong to the new owner.
 func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*workflowStep {
+	if r.isLost() {
+		return nil
+	}
+	r.mu.Lock()
+	hasOpen := slices.ContainsFunc(r.steps, func(s *workflowStep) bool {
+		return s.status == stepStatusRunning || s.status == stepStatusReminded
+	})
+	r.mu.Unlock()
+	if hasOpen && !r.confirmOwnership(ctx) {
+		return nil
+	}
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {

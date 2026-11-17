@@ -206,13 +206,15 @@ func TestDeleteOldWorkflowRuns(t *testing.T) {
 		_, err := sqlDB.ExecContext(ctx, `UPDATE workflow_runs SET updated_at = $1 WHERE id = $2`, run.updatedAt, id)
 		require.NoError(t, err)
 	}
-	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+	_, err = fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
 		ID: uuid.New(), RunID: oldRunID, SpecKey: "step", Status: "reported",
-	}))
+	})
+	require.NoError(t, err)
 	reportedStepID := uuid.New()
-	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+	_, err = fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
 		ID: reportedStepID, RunID: reportedRunID, SpecKey: "step", Status: "running",
-	}))
+	})
+	require.NoError(t, err)
 	require.NoError(t, fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{
 		ID: reportedStepID, Status: "reported",
 	}))
