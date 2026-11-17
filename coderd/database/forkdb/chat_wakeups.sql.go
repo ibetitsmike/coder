@@ -101,11 +101,14 @@ WITH old AS (
 DELETE FROM chat_wakeups
 USING old
 WHERE chat_wakeups.id = old.id
+    AND chat_wakeups.status IN ('completed', 'canceled')
+    AND chat_wakeups.updated_at < now() - interval '30 days'
 `
 
 // Deletes a batch of completed and canceled wake-ups that changed last more
 // than 30 days ago, on the database clock. Their watches cascade; their runs
-// keep counting toward the caps with a NULL wakeup_id.
+// keep counting toward the caps with a NULL wakeup_id. The DELETE repeats the
+// filter, so a wake-up updated while the DELETE waits for its lock stays.
 func (q *Queries) DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteOldChatWakeups, limitCount)
 	if err != nil {

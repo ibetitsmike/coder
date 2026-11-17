@@ -221,7 +221,8 @@ DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days';
 
 -- Deletes a batch of completed and canceled wake-ups that changed last more
 -- than 30 days ago, on the database clock. Their watches cascade; their runs
--- keep counting toward the caps with a NULL wakeup_id.
+-- keep counting toward the caps with a NULL wakeup_id. The DELETE repeats the
+-- filter, so a wake-up updated while the DELETE waits for its lock stays.
 -- name: DeleteOldChatWakeups :execrows
 WITH old AS (
     SELECT id
@@ -233,7 +234,9 @@ WITH old AS (
 )
 DELETE FROM chat_wakeups
 USING old
-WHERE chat_wakeups.id = old.id;
+WHERE chat_wakeups.id = old.id
+    AND chat_wakeups.status IN ('completed', 'canceled')
+    AND chat_wakeups.updated_at < now() - interval '30 days';
 
 -- Deleted messages count too: they were paid for. Messages without a price
 -- have a NULL cost and count as zero.

@@ -28,11 +28,15 @@ WITH old AS (
 DELETE FROM workflow_runs
 USING old
 WHERE workflow_runs.id = old.id
+    AND workflow_runs.status IN ('completed', 'failed', 'stopped', 'interrupted')
+    AND workflow_runs.updated_at < now() - interval '30 days'
 `
 
 // Deletes a batch of terminal and interrupted runs whose last journal write
 // is older than 30 days, on the database clock. Their steps cascade. A
-// running run stays: a live replica still writes it.
+// running run stays: a live replica still writes it. The DELETE repeats the
+// filter: a run that a resume or a step report updates while the DELETE
+// waits for its lock is rechecked on its new row, so it stays.
 func (q *Queries) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteOldWorkflowRuns, limitCount)
 	if err != nil {

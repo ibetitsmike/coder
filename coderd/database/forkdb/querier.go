@@ -64,11 +64,14 @@ type Querier interface {
 	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
 	// Deletes a batch of completed and canceled wake-ups that changed last more
 	// than 30 days ago, on the database clock. Their watches cascade; their runs
-	// keep counting toward the caps with a NULL wakeup_id.
+	// keep counting toward the caps with a NULL wakeup_id. The DELETE repeats the
+	// filter, so a wake-up updated while the DELETE waits for its lock stays.
 	DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes a batch of terminal and interrupted runs whose last journal write
 	// is older than 30 days, on the database clock. Their steps cascade. A
-	// running run stays: a live replica still writes it.
+	// running run stays: a live replica still writes it. The DELETE repeats the
+	// filter: a run that a resume or a step report updates while the DELETE
+	// waits for its lock is rechecked on its new row, so it stays.
 	DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
