@@ -1049,10 +1049,12 @@ func TestResolvePass_ReadDirFailureIsNotCached(t *testing.T) {
 				".claude/skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody",
 			})
 			container := filepath.Join(dir, ".claude", "skills")
-			readFaults.Store(container, tc.err)
-			t.Cleanup(func() { readFaults.Delete(container) })
 			roots := []ScanRoot{{Path: dir}}
 			m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+			// The fault goes in after the watcher's Sync: a failure outside
+			// any pass of this test would mark the passes of other tests.
+			readFaults.Store(container, tc.err)
+			t.Cleanup(func() { readFaults.Delete(container) })
 
 			snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 			require.False(t, hasResource(snap, KindSkill, "foo"), "the pass could not list the skills")
