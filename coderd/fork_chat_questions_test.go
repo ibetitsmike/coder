@@ -197,7 +197,9 @@ func TestForkChatSecretAnswer(t *testing.T) {
 
 	const secret = "hunter2-secret-value"
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client, db := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
+	// The busy chat below is running under a fake worker and no runner, so
+	// a live worker would acquire it and promote the queued answer.
+	client, db := newChatClientWithDatabase(t, withChatWorkerDisabled, func(opts *coderdtest.Options) {
 		opts.DeploymentValues.Experiments = append(
 			opts.DeploymentValues.Experiments,
 			string(codersdk.ExperimentForkNestedSubagents),
@@ -505,7 +507,9 @@ func TestForkChatSecretAnswerExpired(t *testing.T) {
 
 	ctx := testutil.Context(t, testutil.WaitLong)
 	db, ps, sqlDB := dbtestutil.NewDBWithSQLDB(t)
-	client, _ := newChatClientWithDatabase(t, func(opts *coderdtest.Options) {
+	// The busy chat is running under a fake worker and no runner, so a
+	// live worker would acquire it and promote the queued answer.
+	client, _ := newChatClientWithDatabase(t, withChatWorkerDisabled, func(opts *coderdtest.Options) {
 		opts.Database = db
 		opts.Pubsub = ps
 		opts.DeploymentValues.Experiments = append(
