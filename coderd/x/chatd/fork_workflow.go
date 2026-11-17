@@ -30,7 +30,6 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
-	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -372,9 +371,11 @@ type workflowStep struct {
 	value  json.RawMessage
 	err    string
 	// sentReminder records that this run sent the one retry reminder. The
-	// scan in workflowStepReport also detects a reminder, but it matches the
+	// history scan of a resume also detects a reminder, but it matches the
 	// message text, which a user_prompt_submit hook can rewrite.
 	sentReminder bool
+	// signals wakes waitStep when the step gets its report.
+	signals stepSignals
 }
 
 type workflowRun struct {
@@ -461,6 +462,9 @@ type workflowRun struct {
 	// heartbeat keeps its row alive and retries the write
 	// (fork_workflow_owner.go). mu guards the field.
 	terminalPending bool
+	// earlyReports holds reports whose step the run has not added yet, by
+	// child chat ID (fork_workflow_signal.go). mu guards the field.
+	earlyReports map[uuid.UUID]json.RawMessage
 }
 
 func (p *Server) startWorkflowRun(
@@ -1233,6 +1237,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		r.mu.Unlock()
 		r.p.workflowJournal().markStepReused(ctx, journaled.id)
 		r.failJournaledStep(ctx, journaled)
+		r.scanJournaledStepHistory(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -1266,8 +1271,11 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		return nil, xerrors.Errorf("journal the workflow step: %w", err)
 	}
 	r.mu.Lock()
-	r.steps = append(r.steps, step)
+	early := r.addStepLocked(step)
 	r.mu.Unlock()
+	if early {
+		r.journalEarlyReport(ctx, step)
+	}
 	return step, nil
 }
 
@@ -1289,15 +1297,19 @@ func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*wo
 	}
 	step := journaledWorkflowStep(row)
 	r.mu.Lock()
-	r.steps = append(r.steps, step)
+	early := r.addStepLocked(step)
 	r.mu.Unlock()
+	if early {
+		r.journalEarlyReport(ctx, step)
+	}
 	r.p.workflowJournal().markStepReused(ctx, step.id)
 	r.failJournaledStep(ctx, step)
 	return step, nil
 }
 
-// waitStep blocks until the step has a value or fails. A child that stops
-// without a value gets one reminder.
+// waitStep blocks until the step has a value or fails. The report tool
+// wakes it (fork_workflow_signal.go); a child that stops without a value
+// gets one reminder.
 func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 	deadline := r.p.clock.Now().Add(workflowStepTimeout)
 	for {
@@ -1315,7 +1327,7 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.interruptStepChild(ctx, step)
 			return nil
 		}
-		err := r.awaitStepChild(ctx, step.chatID, deadline)
+		stopped, err := r.awaitStepChild(ctx, step, deadline)
 		if errors.Is(err, ErrSubagentWaitTimeout) {
 			continue
 		}
@@ -1330,93 +1342,47 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.failStep(ctx, step, err.Error())
 			return nil
 		}
-		value, reminded, err := workflowStepReport(ctx, r.p.db, step.chatID)
-		if err != nil {
-			return err
+		if !stopped {
+			continue
 		}
+		// The child stopped. A report another process accepted is in the
+		// journal; the owner event can lag the child's status.
+		if r.readJournaledReport(ctx, step) {
+			continue
+		}
+		r.mu.Lock()
+		remind := !step.sentReminder
+		r.mu.Unlock()
 		switch {
-		case value != nil:
-			r.mu.Lock()
-			step.status, step.value = stepStatusReported, value
-			r.mu.Unlock()
-			r.p.workflowJournal().updateStep(ctx, step)
-		case !reminded && !step.sentReminder:
+		case remind:
 			if _, err := r.p.sendSubagentMessage(ctx, r.parent.ID, step.chatID,
 				workflowReminder); err != nil {
 				r.failStep(ctx, step, "send reminder: "+err.Error())
 				return nil
 			}
 			r.mu.Lock()
-			step.status, step.sentReminder = stepStatusReminded, true
+			step.sentReminder = true
+			if step.status == stepStatusRunning {
+				step.status = stepStatusReminded
+			}
 			r.mu.Unlock()
-			r.p.workflowJournal().updateStep(ctx, step)
+			_ = r.journalStepState(ctx, step, func(ctx context.Context, s *workflowStep) error {
+				r.p.workflowJournal().updateStep(ctx, s)
+				return nil
+			})
 		default:
 			r.failStep(ctx, step, "the step stopped without a "+workflowReportToolName+" call")
 		}
 	}
 }
 
-// awaitStepChild waits for the step's child chat like
-// awaitSubagentCompletion. That function reads the child before it
-// subscribes, so a child that ends its turn in between is seen only at the
-// fallback tick. This subscribes first and restarts the wait when the
-// child's state changes, and the restarted wait reads the child at once.
-// No wait runs past deadline, so a child that changes state often still
-// returns control to waitStep, which enforces the step timeout.
-func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID, deadline time.Time) error {
-	waitTimeout := func() time.Duration {
-		return min(defaultSubagentWaitTimeout, deadline.Sub(r.p.clock.Now()))
-	}
-	changed := make(chan struct{}, 1)
-	unsubscribe, err := r.p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(chatID),
-		func(context.Context, []byte, error) {
-			select {
-			case changed <- struct{}{}:
-			default:
-			}
-		})
-	if err != nil {
-		timeout := waitTimeout()
-		if timeout <= 0 {
-			return ErrSubagentWaitTimeout
-		}
-		// Without a subscription awaitSubagentCompletion polls fast itself.
-		_, _, err = r.p.awaitSubagentCompletion(ctx, r.parent.ID, chatID, timeout)
-		return err
-	}
-	defer unsubscribe()
-	for {
-		timeout := waitTimeout()
-		if timeout <= 0 {
-			return ErrSubagentWaitTimeout
-		}
-		waitCtx, cancel := context.WithCancel(ctx)
-		restart := make(chan struct{})
-		go func() {
-			select {
-			case <-changed:
-				close(restart)
-				cancel()
-			case <-waitCtx.Done():
-			}
-		}()
-		_, _, err := r.p.awaitSubagentCompletion(waitCtx, r.parent.ID, chatID, timeout)
-		cancel()
-		select {
-		case <-restart:
-			// The cancel may surface as any error of the read it stopped.
-			// The restarted wait reports a real error again.
-			if err != nil && ctx.Err() == nil {
-				continue
-			}
-		default:
-		}
-		return err
-	}
-}
-
 func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason string) {
 	r.mu.Lock()
+	if step.status == stepStatusReported {
+		// The report came in while waitStep decided to fail the step.
+		r.mu.Unlock()
+		return
+	}
 	step.status, step.err = stepStatusFailed, reason
 	r.appendEngineLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
 	r.mu.Unlock()
