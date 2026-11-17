@@ -384,7 +384,9 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 }
 
 // A final poll well after the expiry delivers only a process that provably
-// ended by the expiry, and no final poll delivers output lines.
+// ended by the expiry, and no final poll delivers output lines. A final poll
+// with a process that has not ended waits until its agent had the chance to
+// report an exit from before the expiry.
 func TestWakeupFinalPollProcesses(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -397,16 +399,34 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 		lines bool
 		// stoppedAt, when set, is when a stop build was created, relative to
 		// the expiry.
-		stoppedAt   *time.Duration
+		stoppedAt *time.Duration
+		// connected marks the agent connected at the poll, and
+		// disconnectedAt, when set, is its last disconnect relative to the
+		// poll. A seeded agent never connected.
+		connected      bool
+		disconnectedAt *time.Duration
+		// reportExit, when set, is the exit time, relative to the expiry,
+		// that the agent reports after the first poll, which a second poll
+		// eventsPollInterval later delivers.
+		reportExit  *time.Duration
 		wantMessage bool
-		wantReason  string
+		// wantReason is the reason the wake-up completed with, or "" when it
+		// stays active for another poll.
+		wantReason string
 	}{
 		{name: "OnTime", late: time.Second, exitedAt: new(time.Second), wantMessage: true, wantReason: "done"},
-		{name: "OnTimeLines", late: time.Second, lines: true, wantReason: "expired"},
+		{name: "OnTimeLines", late: time.Second, lines: true, connected: true},
+		{name: "LateLines", late: time.Minute, lines: true, connected: true, wantReason: "expired"},
 		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 		{name: "LateExitedInExpirySecond", late: time.Minute, exitedAt: new(time.Duration(0)), wantReason: "expired"},
-		{name: "LateNotFired", late: time.Minute, wantReason: "expired"},
+		{name: "LateNotFired", late: time.Minute, connected: true, wantReason: "expired"},
+		{name: "LateNotFiredNeverConnected", late: time.Minute},
+		{name: "LateNotFiredDisconnected", late: time.Minute, disconnectedAt: new(-time.Second)},
+		{name: "LateNotFiredReconnected", late: 2 * time.Minute, connected: true, disconnectedAt: new(-30 * time.Second)},
+		{name: "LateNotFiredReconnectedBefore", late: 2 * time.Minute, connected: true, disconnectedAt: new(-processReportGrace), wantReason: "expired"},
+		{name: "PastReportWindow", late: processFinalReportWindow, disconnectedAt: new(-time.Minute), wantReason: "expired"},
+		{name: "ReportAfterReconnect", late: time.Minute, disconnectedAt: new(-time.Second), reportExit: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 		{name: "LateStoppedAfterExpiry", late: time.Minute, stoppedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateStoppedBeforeExpiry", late: time.Minute, stoppedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 	} {
@@ -427,6 +447,20 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			})
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			now := wakeupTestSlot.Add(tc.late)
+			if tc.connected || tc.disconnectedAt != nil {
+				var disconnectedAt sql.NullTime
+				if tc.disconnectedAt != nil {
+					disconnectedAt = sql.NullTime{Time: now.Add(*tc.disconnectedAt), Valid: true}
+				}
+				lastConnectedAt := now.Add(-time.Hour)
+				if tc.connected {
+					lastConnectedAt = now
+				}
+				_, err := f.sqlDB.ExecContext(ctx,
+					"UPDATE workspace_agents SET first_connected_at = $1, last_connected_at = $2, disconnected_at = $3 WHERE id = $4",
+					now.Add(-2*time.Hour), lastConnectedAt, disconnectedAt, agent.ID)
+				require.NoError(t, err)
+			}
 			if tc.exitedAt != nil {
 				require.NotEmpty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 0, "", wakeupTestSlot.Add(*tc.exitedAt)))
 			}
@@ -439,12 +473,29 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			}
 
 			worker.wakeupOnce(ctx, now)
+			if tc.reportExit != nil {
+				// The first poll waits for the agent, which reports the exit
+				// once its connection is back.
+				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
+				got := f.wakeup(t, wakeup.ID)
+				require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+				require.NotEmpty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 0, "", wakeupTestSlot.Add(*tc.reportExit)))
+				// The pass adds the time it took to now, so the next poll is
+				// due just after now plus eventsPollInterval.
+				now = now.Add(eventsPollInterval + time.Second)
+				worker.wakeupOnce(ctx, now)
+			}
 			if tc.wantMessage {
 				require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
 			} else {
 				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
 			}
 			got := f.wakeup(t, wakeup.ID)
+			if tc.wantReason == "" {
+				require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
+				require.WithinDuration(t, now.Add(eventsPollInterval), got.NextRunAt.Time, time.Second)
+				return
+			}
 			require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
 			require.Equal(t, tc.wantReason, got.StatusReason.String)
 		})

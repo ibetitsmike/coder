@@ -483,6 +483,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// Whether one of them is a pull request that the poller did not read
 	// through the expiry yet.
 	pullRequestUnpolled := false
+	// Whether one of them is a process whose agent may still hold an exit
+	// from before the expiry.
+	processUnreported := false
 	// Whether the run time has come. Before it, a watch whose send failed
 	// waits for it.
 	polled := !now.Before(wakeup.NextRunAt.Time)
@@ -574,6 +577,16 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				}
 			}
 			pending++
+			// The final poll waits for the agent to report the exits it
+			// queued before the expiry, so a connection that was down
+			// around it does not lose one.
+			if !processWatchEnded(watch) && !processUnreported && eventsFinalPoll(wakeup, now) {
+				reported, err := p.processAgentReported(ctx, event.AgentID, wakeup.ExpiresAt.Time, now)
+				if err != nil {
+					return err
+				}
+				processUnreported = !reported
+			}
 		}
 	}
 	// nextPoll is the run time after a delivery at the given time.
@@ -597,6 +610,9 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			if retry, ok := eventsFinalRetry(wakeup, now, now.Add(eventsPollInterval)); ok {
 				return p.finishWakeup(ctx, chat, wakeup, now, retry)
 			}
+		}
+		if processUnreported && now.Before(wakeup.ExpiresAt.Time.Add(processFinalReportWindow)) {
+			return p.finishWakeup(ctx, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: now.Add(eventsPollInterval), Valid: true}})
 		}
 		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, nextPoll(now)))
 	}

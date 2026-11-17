@@ -10,6 +10,7 @@ package chatd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,14 @@ const (
 	// processSweepInterval is how often the waker fires the process watches
 	// whose workspace stopped or was rebuilt as lost.
 	processSweepInterval = 5 * time.Minute
+	// processReportGrace is how long the final poll of a wake-up waits
+	// after the expiry, and after the last disconnect of the agent, for an
+	// exit that the agent queued before the expiry. It matches the longest
+	// backoff of the agent between two reports.
+	processReportGrace = time.Minute
+	// processFinalReportWindow bounds how long after the expiry the final
+	// poll waits for an agent that is not connected to report.
+	processFinalReportWindow = 10 * time.Minute
 	// maxProcessTailLines and maxProcessTailBytes cap the output that an
 	// exit message quotes.
 	maxProcessTailLines = 40
@@ -332,6 +341,31 @@ func (p *Server) registerProcessWatch(ctx context.Context, fdb forkdb.Store, con
 	return len(chats) > 0, nil
 }
 
+// processAgentReported reports whether the agent with agentID had the chance
+// to report every exit that it queued before expiresAt: processReportGrace
+// passed since expiresAt and since the last disconnect of the agent, and the
+// agent is connected. An agent that is gone has nothing left to report.
+func (p *Server) processAgentReported(ctx context.Context, agentID uuid.UUID, expiresAt, now time.Time) (bool, error) {
+	if now.Before(expiresAt.Add(processReportGrace)) {
+		return false, nil
+	}
+	agent, err := p.db.GetWorkspaceAgentByID(ctx, agentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, xerrors.Errorf("get workspace agent: %w", err)
+	}
+	timeout := p.agentInactiveDisconnectTimeout
+	if timeout <= 0 {
+		timeout = processReportGrace
+	}
+	if agent.Status(now, timeout).Status != database.WorkspaceAgentStatusConnected {
+		return false, nil
+	}
+	return !agent.DisconnectedAt.Valid || !now.Before(agent.DisconnectedAt.Time.Add(processReportGrace)), nil
+}
+
 // sweepProcessWatches fires as lost the process watches whose workspace
 // stopped or was rebuilt, or whose agent restarted after the watch began,
 // which no agent reports anything for any more, and pokes their chats.
@@ -350,6 +384,18 @@ func (k *forkWaker) sweepProcessWatches(ctx context.Context, fdb forkdb.Store) {
 	for _, chatID := range chats {
 		k.poke(chatID)
 	}
+}
+
+// processWatchEnded reports whether an exit or a loss fired watch.
+func processWatchEnded(watch forkdb.ChatWakeupWatch) bool {
+	if !watch.FiredAt.Valid {
+		return false
+	}
+	var fired forkdb.ChatProcessFired
+	if err := json.Unmarshal(watch.FiredPayload.RawMessage, &fired); err != nil {
+		return true
+	}
+	return fired.Exit != nil || fired.Lost != nil
 }
 
 // processFiredText returns the message for what fired the process watch
