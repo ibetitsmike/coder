@@ -10,6 +10,7 @@ import (
 
 	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
+	"github.com/coder/quartz"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/assert"
@@ -765,6 +766,20 @@ func newForkWorkflowFixture(t *testing.T) *forkWorkflowFixture {
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
 	user, org, model := seedInternalChatDeps(t, db)
 	return &forkWorkflowFixture{db: db, ps: ps, server: server, user: user, org: org, model: model}
+}
+
+// newForkWorkflowFixtureWithClock is newForkWorkflowFixture with the server
+// clock swapped for a quartz mock. The pacing tests drive it with Advance
+// so flush timing cannot depend on wall time.
+func newForkWorkflowFixtureWithClock(t *testing.T) (*forkWorkflowFixture, *quartz.Mock) {
+	t.Helper()
+	mock := quartz.NewMock(t)
+	db, ps := dbtestutil.NewDB(t)
+	server := newInternalTestServer(t, db, ps, chatprovider.ProviderAPIKeys{},
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}),
+		withInternalTestServerClock(mock))
+	user, org, model := seedInternalChatDeps(t, db)
+	return &forkWorkflowFixture{db: db, ps: ps, server: server, user: user, org: org, model: model}, mock
 }
 
 func (f *forkWorkflowFixture) parent(ctx context.Context, t *testing.T) database.Chat {

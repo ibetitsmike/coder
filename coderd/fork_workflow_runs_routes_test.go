@@ -61,8 +61,8 @@ func newForkWorkflowRunsAPI(t *testing.T, enabled bool) (*codersdk.Client, datab
 	return client, db, user
 }
 
-// insertForkWorkflowRun journals a completed run with one reported step, the
-// way a finished run reads to the API.
+// insertForkWorkflowRun journals a completed run with one reported step and
+// a reused one, the way a finished run reads to the API.
 func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) forkdb.WorkflowRun {
 	t.Helper()
 
@@ -74,7 +74,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		ChatID:        chat.ID,
 		ModelConfigID: chat.LastModelConfigID,
 		Script:        "def main(args):\n    pass\n",
-		Args:          []byte(`{}`),
+		Args:          []byte(`{"files":["a.go"]}`),
 		Status:        "running",
 		Phases:        []string{"plan", "build"},
 		CurrentPhase:  "build",
@@ -90,6 +90,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		Status:     "reported",
 		Phase:      "plan",
 		Value:      pqtype.NullRawMessage{RawMessage: json.RawMessage(`{"text":"done"}`), Valid: true},
+		Reused:     true,
 	})
 	require.NoError(t, err)
 	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true},"phases":["plan","build","review"],"current_phase":"review"}`
@@ -145,10 +146,16 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		require.Len(t, detail.Steps, 1)
 		assert.Equal(t, "step one", detail.Steps[0].Title)
 		assert.JSONEq(t, `{"text":"done"}`, string(detail.Steps[0].Value))
+		assert.True(t, detail.Steps[0].Reused, "the detail reads reused from the step row")
 		require.NotEmpty(t, detail.Script)
 		assert.Equal(t, "def main(args):\n    pass\n", detail.Script)
+		argsJSON, err := json.Marshal(detail.Args)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"files":["a.go"]}`, string(argsJSON))
 		assert.Equal(t, []string{"all done"}, detail.Logs)
-		assert.JSONEq(t, `{"ok":true}`, string(detail.Result))
+		resultJSON, err := json.Marshal(detail.Result)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"ok":true}`, string(resultJSON))
 		require.NotNil(t, detail.FinishedAt)
 
 		// A completed run answers 409 to a stop.
@@ -158,6 +165,130 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 		// An unknown run is 404.
 		err = client.StopChatWorkflowRun(ctx, chat.ID, uuid.New())
 		requireForkStatus(t, err, http.StatusNotFound)
+	})
+
+	t.Run("LiveLogsAndArgs", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newForkWorkflowRunsAPI(t, true)
+		chat := newForkChatTodosChat(t, db, user)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		runID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            runID,
+			ChatID:        chat.ID,
+			ModelConfigID: chat.LastModelConfigID,
+			Script:        "def main(args):\n    print(args)\n",
+			Args:          []byte(`{"path":"main.go"}`),
+			Status:        "running",
+		}))
+		require.NoError(t, fdb.SetWorkflowRunLogs(forkWorkflowSystemContext(t), forkdb.SetWorkflowRunLogsParams{
+			ID:      runID,
+			Lines:   []byte(`{"fork_seq":2,"lines":["review started","reading main.go"]}`),
+			ForkSeq: 2,
+		}))
+
+		// A running run reads its logs from the journal column and its args
+		// from the row; it has no result yet.
+		detail, err := client.GetChatWorkflowRun(ctx, chat.ID, runID)
+		require.NoError(t, err)
+		assert.Equal(t, "running", detail.Status)
+		assert.Nil(t, detail.Result, "a live run has no result yet")
+		assert.Equal(t, []string{"review started", "reading main.go"}, detail.Logs)
+		argsJSON, err := json.Marshal(detail.Args)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"path":"main.go"}`, string(argsJSON))
+
+		// The plain array of the backfill node stays readable too. The
+		// query keeps the write because its sequence is not behind.
+		require.NoError(t, fdb.SetWorkflowRunLogs(forkWorkflowSystemContext(t), forkdb.SetWorkflowRunLogsParams{
+			ID:      runID,
+			Lines:   []byte(`["review started"]`),
+			ForkSeq: 3,
+		}))
+		detail, err = client.GetChatWorkflowRun(ctx, chat.ID, runID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"review started"}, detail.Logs)
+	})
+
+	// A failed run snapshots no result key, the shape the engine writes:
+	// the detail must omit the result key instead of answering
+	// "result": null, which a nil json.RawMessage in the any field would
+	// marshal as. A completed run keeps its value even when main returned
+	// None, whose encoded JSON is null too.
+	t.Run("FailedRunHasNoResultKey", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newForkWorkflowRunsAPI(t, true)
+		chat := newForkChatTodosChat(t, db, user)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		runID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            runID,
+			ChatID:        chat.ID,
+			ModelConfigID: chat.LastModelConfigID,
+			Script:        "def main(args):\n    pass\n",
+			Args:          []byte(`{}`),
+			Status:        "running",
+		}))
+		snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"failed","steps":[],"logs":["boom"]}`
+		require.NoError(t, fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+			ID:     runID,
+			Status: "failed",
+			Error:  "the step ended its turn twice without calling workflow_report",
+			Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
+		}))
+
+		res, err := client.Request(ctx, http.MethodGet,
+			"/api/v2/chats/fork/"+chat.ID.String()+"/workflow-runs/"+runID.String(), nil)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&raw))
+		_, has := raw["result"]
+		assert.False(t, has, "a failed run must omit the result key, not send null")
+		assert.Equal(t, `"failed"`, string(raw["status"]))
+	})
+
+	// A completed run whose main returned None snapshots the encoded null:
+	// the detail must carry the key with null instead of dropping it, so a
+	// completed run stays distinguishable from one with no result.
+	t.Run("CompletedNoneReturnsNull", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db, user := newForkWorkflowRunsAPI(t, true)
+		chat := newForkChatTodosChat(t, db, user)
+		fdb, err := forkdb.From(db)
+		require.NoError(t, err)
+		runID := uuid.New()
+		require.NoError(t, fdb.InsertWorkflowRun(forkWorkflowSystemContext(t), forkdb.InsertWorkflowRunParams{
+			ID:            runID,
+			ChatID:        chat.ID,
+			ModelConfigID: chat.LastModelConfigID,
+			Script:        "def main(args):\n    return None\n",
+			Args:          []byte(`{}`),
+			Status:        "running",
+		}))
+		snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["done"],"result":null}`
+		require.NoError(t, fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+			ID:     runID,
+			Status: "completed",
+			Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
+		}))
+
+		res, err := client.Request(ctx, http.MethodGet,
+			"/api/v2/chats/fork/"+chat.ID.String()+"/workflow-runs/"+runID.String(), nil)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&raw))
+		require.Contains(t, raw, "result", "a completed run keeps its result key")
+		assert.Equal(t, "null", string(raw["result"]))
+		assert.Equal(t, `"completed"`, string(raw["status"]))
 	})
 
 	t.Run("MemberOwnChatOnly", func(t *testing.T) {

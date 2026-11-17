@@ -190,21 +190,26 @@ func TestPlugins(t *testing.T) {
 		t.Parallel()
 		ctx := testutil.Context(t, testutil.WaitSuperLong)
 		externalID := "+15551234567"
+		// The link gets its own user. The delivery hands a chat of the
+		// user that no link follows to the idle link, so a chat another
+		// sub-test makes for a shared user would become the active chat.
+		linkedRaw, linked := coderdtest.CreateAnotherUser(t, ownerClient, owner.OrganizationID)
+		linkedClient := codersdk.NewExperimentalClient(linkedRaw)
 
 		res := postWebhook(t, ownerClient, plugin.ID, bridgeRequest{Op: "link", ExternalID: externalID, Code: "NOT-A-CODE"})
 		require.Contains(t, res.Error, "not valid")
 
-		code, err := memberClient.CreatePluginLinkCode(ctx, plugin.ID)
+		code, err := linkedClient.CreatePluginLinkCode(ctx, plugin.ID)
 		require.NoError(t, err)
 		// Users type codes by hand, so case and separators do not matter.
 		res = postWebhook(t, ownerClient, plugin.ID, bridgeRequest{Op: "link", ExternalID: externalID, Code: " " + code.Code + " "})
 		require.Empty(t, res.Error)
-		require.Equal(t, member.Username, res.Value)
+		require.Equal(t, linked.Username, res.Value)
 
 		res = postWebhook(t, ownerClient, plugin.ID, bridgeRequest{Op: "link", ExternalID: "+15559999999", Code: code.Code})
 		require.Contains(t, res.Error, "not valid", "a code links one account")
 
-		linkable, err := memberClient.LinkablePlugins(ctx)
+		linkable, err := linkedClient.LinkablePlugins(ctx)
 		require.NoError(t, err)
 		require.Len(t, linkable, 1)
 		require.Equal(t, plugin.ID, linkable[0].ID)
@@ -219,7 +224,7 @@ func TestPlugins(t *testing.T) {
 		//nolint:gocritic // The test reads the chat row to check its owner.
 		chat, err := api.Database.GetChatByID(dbauthz.AsSystemRestricted(ctx), chatID)
 		require.NoError(t, err)
-		require.Equal(t, member.ID, chat.OwnerID)
+		require.Equal(t, linked.ID, chat.OwnerID)
 		require.Equal(t, plugin.Name, chat.Labels[plugins.ChatLabelPlugin])
 
 		var delivered pluginsdk.ChatEvent
@@ -244,7 +249,7 @@ func TestPlugins(t *testing.T) {
 		require.Empty(t, res.Error)
 		require.NotEqual(t, chatID.String(), res.Value)
 
-		require.NoError(t, memberClient.DeletePluginLink(ctx, plugin.ID, externalID))
+		require.NoError(t, linkedClient.DeletePluginLink(ctx, plugin.ID, externalID))
 		res = postWebhook(t, ownerClient, plugin.ID, bridgeRequest{Op: "send", ExternalID: externalID, Text: "after unlink"})
 		require.Contains(t, res.Error, "not linked")
 	})

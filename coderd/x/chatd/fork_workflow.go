@@ -24,6 +24,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/quartz"
+
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -117,7 +119,9 @@ type runWorkflowArgs struct {
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
-	// rawArgs is args as the model sent them, before Args rounded its numbers.
+	// rawArgs is args as the model sent them, before Args decoded it into
+	// Go values. startWorkflowRun journals these bytes, so main(args) and
+	// the run detail read the exact value the caller sent.
 	rawArgs json.RawMessage
 }
 
@@ -147,6 +151,11 @@ type runWorkflowResult struct {
 	CurrentPhase string        `json:"current_phase,omitempty"`
 	Steps        []stepSummary `json:"steps"`
 	Logs         []string      `json:"logs,omitempty"`
+	// interruptedSteps holds the steps that interruptOpenSteps failed on
+	// the way to a stopped result. finish logs their failure lines; the
+	// lines of steps failed earlier already sit in the logs, so a resume
+	// does not log them twice. The field is not serialized.
+	interruptedSteps []*workflowStep
 }
 
 type stepSummary struct {
@@ -377,15 +386,55 @@ type workflowRun struct {
 	phases       []string
 	currentPhase string
 
-	mu        sync.Mutex
-	steps     []*workflowStep
-	logs      []string
-	logBytes  int // the bytes of the retained logs
-	result    *runWorkflowResult
-	done      chan struct{}
-	awaiters  int
-	delivered bool // an await_workflow call returned the end
-	notified  bool // the parent got the end message
+	mu       sync.Mutex
+	steps    []*workflowStep
+	logs     []string
+	logBytes int // the bytes of the retained logs
+	// logSeq counts the appended lines. journalMu guards journaledLogSeq, the
+	// seq the journal last accepted, and journalLogWrite, which serializes the
+	// journal writes so the write of an older snapshot cannot replace newer
+	// lines after a stalled one.
+	logSeq          int
+	journalMu       sync.Mutex
+	journaledLogSeq int
+	journalLogWrite chan struct{}
+	// logEchoLeft is the number of replayed lines the echo still
+	// suppresses, rehydrated as max(fork_seq, len(baseline)): the replayed
+	// script prints the live lines again, and appendLogLocked suppresses
+	// one replayed line per pre-restart line, by count and not by content,
+	// so the view and the journal keep one copy of the pre-restart
+	// history. The count, not the content, decides: a capped baseline
+	// starts mid-stream, so the replayed prefix does not match it line for
+	// line, and a repeated line would otherwise consume the wrong entry.
+	// The replay of a journaled failed step re-emits its failure line
+	// (failJournaledStep), so the count holds. mu guards the field. The
+	// engine's own failure lines (a stop, a timeout, a failed step) are not
+	// script lines and cannot be replayed, so they never suppress.
+	logEchoLeft int
+	// The write-through of the logs paces itself: lastLogFlush is the last
+	// attempt the journal made, accepted or not. Exactly two paths stamp
+	// it, the immediate attempt of scheduleLogFlush and the firing of the
+	// paced fallback timer; the failStep flush and the terminal flush of
+	// the end do not, so a line that lands after them still paces behind
+	// its own interval. logFlushTimer holds the pending flush of a
+	// burst, logFlushInFlight marks the goroutine that flushes now, and
+	// flushClosing marks a run whose terminal flush has started:
+	// cancelLogFlush sets it on the run-ending path, so a timer or
+	// goroutine that raced the stop stamps nothing and re-arms nothing.
+	// journalMu guards all four.
+	lastLogFlush     time.Time
+	logFlushTimer    *quartz.Timer
+	logFlushInFlight bool
+	flushClosing     bool
+	// flushAttempts counts the flush attempts, taken token or not. It is
+	// test observability: the pacing tests count attempts directly instead
+	// of sampling logFlushInFlight, which a poll can miss entirely.
+	flushAttempts int
+	result        *runWorkflowResult
+	done          chan struct{}
+	awaiters      int
+	delivered     bool // an await_workflow call returned the end
+	notified      bool // the parent got the end message
 	// stopRequested marks a run that stop_workflow is unwinding. finish
 	// turns its outcome into a stopped run, not a failed one. cancel is the
 	// cancel of the script context, set before the script starts.
@@ -462,31 +511,45 @@ func (p *Server) startWorkflowRun(
 	}
 	argsJSON := "{}"
 	if args.Args != nil {
-		raw, err := json.Marshal(args.Args)
-		if err != nil {
-			return nil, xerrors.Errorf("marshal args: %w", err)
+		if len(args.rawArgs) > 0 {
+			// rawArgs is the args bytes as the caller sent them. Marshaling
+			// args.Args instead would re-encode the value the Go decode built,
+			// and a number outside the float64 exact range would round: the
+			// script and the journal would hold a value main(args) never
+			// received. A raw null decodes to Args nil, so it falls through to
+			// the empty object like a missing args field.
+			argsJSON = string(args.rawArgs)
+		} else {
+			raw, err := json.Marshal(args.Args)
+			if err != nil {
+				return nil, xerrors.Errorf("marshal args: %w", err)
+			}
+			argsJSON = string(raw)
 		}
-		argsJSON = string(raw)
 	}
 	program, err := compileWorkflow(args.Script)
 	if err != nil {
 		return nil, err
 	}
 	run, added := p.workflows.add(&workflowRun{
-		p:             p,
-		id:            runID,
-		parent:        parent,
-		modelConfigID: modelConfigID,
-		program:       program,
-		script:        args.Script,
-		argsJSON:      argsJSON,
-		seen:          map[string]int{},
-		phases:        savedPhases,
-		done:          make(chan struct{}),
+		p:               p,
+		id:              runID,
+		parent:          parent,
+		modelConfigID:   modelConfigID,
+		program:         program,
+		script:          args.Script,
+		argsJSON:        argsJSON,
+		seen:            map[string]int{},
+		phases:          savedPhases,
+		done:            make(chan struct{}),
+		journalLogWrite: make(chan struct{}, 1),
 	})
 	if !added {
 		return run, nil
 	}
+	// The write token starts in the channel, so the first flush takes
+	// it at once.
+	run.journalLogWrite <- struct{}{}
 	if err := p.workflowJournal().insertRun(ctx, run); err != nil {
 		p.workflows.remove(runID)
 		return nil, xerrors.Errorf("journal the workflow run: %w", err)
@@ -528,7 +591,7 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 	// fresh one.
 	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
 	defer stop()
-	r.interruptOpenSteps(ictx, r.stopReason())
+	interrupted := r.interruptOpenSteps(ictx, r.stopReason())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
@@ -536,6 +599,7 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 		if r.stopRequested && ctx.Err() != nil {
 			res.Status = workflowStatusStopped
 			res.Error = workflowStopError
+			res.interruptedSteps = interrupted
 			return res
 		}
 		res.Status = workflowStatusFailed
@@ -553,12 +617,13 @@ func (r *workflowRun) execute(ctx context.Context) runWorkflowResult {
 func (r *workflowRun) stoppedResult() runWorkflowResult {
 	ictx, stop := r.p.inflightChatContext(dbauthz.AsChatd(context.Background()), r.parent)
 	defer stop()
-	r.interruptOpenSteps(ictx, workflowStopError)
+	interrupted := r.interruptOpenSteps(ictx, workflowStopError)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	res := r.snapshotLocked()
 	res.Status = workflowStatusStopped
 	res.Error = workflowStopError
+	res.interruptedSteps = interrupted
 	return res
 }
 
@@ -611,16 +676,36 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 		defer stop()
 		jctx = fresh
 	}
+	// The result of a stopped run carries the failed steps but not the
+	// failure log lines, so the terminal flush of a stop would write no
+	// new lines. Append the lines of the steps this stop failed under mu
+	// before the snapshot journals: a step that failed earlier already
+	// logged its line, and a resume must not log it twice.
+	if res.Status == workflowStatusStopped {
+		r.mu.Lock()
+		for _, s := range res.interruptedSteps {
+			if s.status == stepStatusFailed && s.err != "" {
+				r.appendEngineLogLocked(fmt.Sprintf("step %q failed: %s", s.title, s.err))
+			}
+		}
+		res.Logs = append([]string(nil), r.logs...)
+		r.mu.Unlock()
+	}
 	// finish runs on the script goroutine, so the phase state it snapshots
 	// cannot change while the write starts: phase() runs on this goroutine.
 	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
 
 	r.mu.Lock()
 	r.result = &res
-	close(r.done)
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
+	// The end lands the last log burst before the run closes: the terminal
+	// flush waits for an in-flight writer, and a flush scheduled after
+	// close would read the result instead of the live logs.
+	r.cancelLogFlush()
+	r.flushLogs(true)
+	close(r.done)
 	// A stopped server must not send a message. The model resumes the run.
 	if waiting || ctx.Err() != nil {
 		return
@@ -751,18 +836,297 @@ func (r *workflowRun) snapshotLocked() runWorkflowResult {
 
 func (r *workflowRun) log(msg string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.appendLogLocked(msg)
+	r.mu.Unlock()
+	r.scheduleLogFlush()
 }
 
-func (r *workflowRun) appendLogLocked(msg string) {
+// appendEngineLogLocked appends a line the engine generated, not the script:
+// the failure line of a step the run stopped, timed out, or failed. A
+// replayed script cannot print these lines again, so they bypass the echo
+// suppression and always land, or a stop or failure that races the replay
+// would lose them to the count. mu must be held.
+func (r *workflowRun) appendEngineLogLocked(msg string) {
+	r.appendLineLocked(msg)
+}
+
+// appendLineLocked appends one line and keeps the cap. It carries no echo
+// suppression, so it serves both the script path (after appendLogLocked
+// spent the echo credit) and the engine path. mu must be held.
+func (r *workflowRun) appendLineLocked(msg string) {
 	msg = truncateLogLine(msg, maxWorkflowLogLine)
 	r.logs = append(r.logs, msg)
 	r.logBytes += len(msg)
+	r.logSeq++
 	for len(r.logs) > maxWorkflowLogs || r.logBytes > maxResultBytes {
 		r.logBytes -= len(r.logs[0])
 		r.logs = r.logs[1:]
 	}
+}
+
+func (r *workflowRun) appendLogLocked(msg string) {
+	// The replay of a restored run suppresses the first logEchoLeft
+	// replayed lines, one per pre-restart line, no matter their content:
+	// the baseline is the pre-restart history, and the replay prints a
+	// live copy of it. A capped baseline starts mid-stream, so the
+	// replayed prefix is longer than the baseline and lines do not match
+	// one for one; a repeated line would otherwise consume the wrong
+	// entry and duplicate or drop lines. The replay of a journaled failed
+	// step re-emits its failure line (failJournaledStep), so the count
+	// holds. Once the count is used up, the replay output is live again.
+	if r.logEchoLeft > 0 {
+		r.logEchoLeft--
+		return
+	}
+	r.appendLineLocked(msg)
+}
+
+// workflowLogFlushInterval paces the log write-through: a script that logs
+// in a loop must not issue a journal write per line. A run flushes at most
+// once per interval, and once more after it ends, so a mid-run read lags the
+// live lines at most by the interval.
+const workflowLogFlushInterval = 2 * time.Second
+
+// workflowLogFlushTimeout bounds one journal write of the logs. The write is
+// best effort, so a stalled store holds the flush goroutine at most this
+// long instead of outliving the run or the server close.
+const workflowLogFlushTimeout = 5 * time.Second
+
+// scheduleLogFlush flushes now when the last flush is older than the
+// interval, and otherwise arms one flush at the end of the interval. The
+// timer holds the flush, so a burst of lines lands in one write. A flush in
+// flight counts as pending, so the first burst cannot launch one goroutine
+// per line.
+func (r *workflowRun) scheduleLogFlush() {
+	if r.journalLogWrite == nil {
+		return
+	}
+	r.mu.Lock()
+	echoing := r.logEchoLeft > 0
+	r.mu.Unlock()
+	if echoing {
+		// The replay is echoing the journal lines: the column already holds
+		// them, and a write of the replay prefix would move it backward.
+		// The flushes resume when the replay has echoed the baseline, and
+		// the terminal snapshot always writes the final lines.
+		return
+	}
+	r.journalMu.Lock()
+	defer r.journalMu.Unlock()
+	if r.logFlushTimer != nil || r.logFlushInFlight {
+		return
+	}
+	if r.flushClosing {
+		// The terminal flush of the run has started: the end lands the last
+		// burst itself, and a paced flush here would write a snapshot the
+		// terminal flush already carried or will carry.
+		return
+	}
+	now := r.p.clock.Now()
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(now)
+	if wait <= 0 {
+		// The stamp moves with the attempt, not the write: a write held up
+		// by another writer (terminal flush, a stop's flush) paces the next
+		// attempt to the interval instead of spinning on the taken token.
+		r.lastLogFlush = now
+		r.logFlushInFlight = true
+		go func() {
+			outcome := r.flushLogs(false)
+			r.journalMu.Lock()
+			r.logFlushInFlight = false
+			pending := r.logFlushTimer == nil
+			closing := r.flushClosing
+			if outcome == flushMissedToken && !closing {
+				// The token was taken: lines may still be pending, and
+				// nothing else re-arms. Arm one paced timer instead of
+				// re-arming immediately, which would spin on the holder.
+				// A closing run re-arms nothing: its terminal flush
+				// carries the lines. A nothing-pending drop re-arms
+				// nothing either: the journal already holds every line.
+				r.armLogFlushTimerLocked()
+				pending = false
+			}
+			r.journalMu.Unlock()
+			// Lines that landed while the write was in flight dropped their
+			// own request, so a completed flush re-arms one for them. A
+			// token miss is the exception: it already armed the paced
+			// fallback above. rearmLogFlush re-checks the pending seq under
+			// journalMu, so a nothing-pending outcome re-arms nothing and
+			// this cannot loop. A closing run re-arms nothing: its terminal
+			// flush already carried the burst.
+			if outcome != flushMissedToken && pending && !closing {
+				r.rearmLogFlush()
+			}
+		}()
+		return
+	}
+	if r.logFlushTimer != nil || r.logFlushInFlight {
+		return
+	}
+	r.armLogFlushTimerLocked()
+}
+
+// armLogFlushTimerLocked arms one paced flush at the end of the interval.
+// journalMu must be held, and no flush may be pending or in flight. It is
+// the fallback of an attempt that could not write: the timer flushes when
+// the holder is gone, so a line cannot stay unjournaled until the next
+// log() or the end of the run.
+func (r *workflowRun) armLogFlushTimerLocked() {
+	if r.logFlushTimer != nil || r.logFlushInFlight || r.flushClosing {
+		return
+	}
+	wait := r.lastLogFlush.Add(workflowLogFlushInterval).Sub(r.p.clock.Now())
+	if wait <= 0 {
+		wait = time.Nanosecond
+	}
+	r.logFlushTimer = r.p.clock.AfterFunc(
+		wait,
+		func() {
+			now := r.p.clock.Now()
+			r.journalMu.Lock()
+			r.logFlushTimer = nil
+			// The attempt is the timer firing, not the write: the flush
+			// below may write (or drop) at once, so a line that lands
+			// right after the write must pace to the next interval and
+			// not start a second write back to back.
+			r.lastLogFlush = now
+			r.journalMu.Unlock()
+			outcome := r.flushLogs(false)
+			if outcome == flushWrote {
+				r.rearmLogFlush()
+				return
+			}
+			if outcome == flushNothingPending {
+				// The journal already holds every line: re-arming would
+				// keep a timer firing every interval until the end of the
+				// run for nothing.
+				return
+			}
+			// The holder may still own the token when this fires. Arm one
+			// more paced timer, or the pending lines would stay unjournaled
+			// until the next log() or the end of the run. The firing above
+			// already stamped the attempt, so each re-arm paces to the
+			// interval and this cannot spin on the holder. A closing run
+			// re-arms nothing: cancelLogFlush set the flag, and its
+			// terminal flush carries the lines.
+			r.journalMu.Lock()
+			if !r.flushClosing {
+				r.armLogFlushTimerLocked()
+			}
+			r.journalMu.Unlock()
+		},
+		"chatd",
+		"workflow_log_flush",
+	)
+}
+
+// cancelLogFlush drops a pending paced flush and marks the log flushes of
+// the run closed. finish calls it, so the last write of the run is its own
+// terminal flushLogs call. A flush already in flight cannot write again:
+// the terminal flush waits for its write token and then wins the seq check
+// that both flushes run under journalMu. The flag also stops the re-arm of
+// a timer whose Stop() lost the race with its own firing: without it, a
+// callback that fires between cancelLogFlush and the terminal flush would
+// stamp and re-arm forever on an already journaled sequence.
+func (r *workflowRun) cancelLogFlush() {
+	r.journalMu.Lock()
+	r.flushClosing = true
+	if r.logFlushTimer != nil {
+		r.logFlushTimer.Stop("chatd", "workflow_log_flush")
+		r.logFlushTimer = nil
+	}
+	r.journalMu.Unlock()
+}
+
+// rearmLogFlush schedules one more flush when lines landed while a flush
+// was in flight. scheduleLogFlush drops the request of such a line, so the
+// completed flush must recover it, or the line would stay unjournaled until
+// the next log call or the end of the run.
+func (r *workflowRun) rearmLogFlush() {
+	r.mu.Lock()
+	seq := r.logSeq
+	r.mu.Unlock()
+	if seq == 0 {
+		return
+	}
+	r.journalMu.Lock()
+	pending := seq > r.journaledLogSeq
+	r.journalMu.Unlock()
+	if !pending {
+		return
+	}
+	r.scheduleLogFlush()
+}
+
+// flushLogs writes the retained log lines of a live run through to the
+// journal, so a mid-run read of the run detail and a restart keep the lines
+// the script printed so far. It reports what kept it from writing:
+// flushWrote on an attempted write (best effort: setLogs swallows its
+// errors, so an attempted write counts), flushMissedToken when another
+// writer holds the write token, and flushNothingPending when the journal
+// already holds every line. Only a token miss re-arms the fallback: a
+// nothing-pending drop would otherwise re-arm every interval until the
+// end of the run. The callers take the write channel before the seq check
+// and release it after the write, so a stalled write of an older snapshot
+// cannot replace newer lines: the newer caller waits for the channel and
+// then wins the seq check. The journal query drops a payload older than
+// the stored sequence on top.
+type flushOutcome int
+
+const (
+	flushWrote flushOutcome = iota
+	flushMissedToken
+	flushNothingPending
+)
+
+func (r *workflowRun) flushLogs(terminal bool) flushOutcome {
+	if r.journalLogWrite == nil {
+		return flushNothingPending
+	}
+	// A terminal flush must wait for an in-flight writer, or the end of
+	// the run would skip its final write. A paced flush keeps its drop
+	// behavior: the terminal flush of the run still carries the lines.
+	r.journalMu.Lock()
+	r.flushAttempts++
+	r.journalMu.Unlock()
+	if terminal {
+		<-r.journalLogWrite
+	} else {
+		select {
+		case <-r.journalLogWrite:
+		default:
+			return flushMissedToken
+		}
+	}
+	defer func() { r.journalLogWrite <- struct{}{} }()
+	r.mu.Lock()
+	logs := append([]string(nil), r.logs...)
+	seq := r.logSeq
+	r.mu.Unlock()
+	if seq == 0 {
+		return flushNothingPending
+	}
+	r.journalMu.Lock()
+	if seq <= r.journaledLogSeq {
+		r.journalMu.Unlock()
+		return flushNothingPending
+	}
+	r.journalMu.Unlock()
+	// The write is best effort and must not outlive the run or the server
+	// close, so a bounded context stands in for the caller's.
+	ctx, cancel := context.WithTimeout(dbauthz.AsSystemRestricted(context.Background()),
+		workflowLogFlushTimeout)
+	defer cancel()
+	r.p.workflowJournal().setLogs(ctx, r.id, int64(seq), logs)
+	// journaledLogSeq advances with the attempt, not the store's answer:
+	// setLogs swallows its errors, so the run has no failure signal to
+	// branch on. The seq check above keeps a later flush from writing an
+	// older snapshot over a newer one, and the next paced flush sends the
+	// full retained tail again.
+	r.journalMu.Lock()
+	r.journaledLogSeq = seq
+	r.journalMu.Unlock()
+	return flushWrote
 }
 
 // truncateLogLine cuts msg to at most max bytes on a rune boundary, so the
@@ -822,10 +1186,17 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	if journaled != nil {
 		// The step came from the journal: whether it finished before the
 		// restart or is still open, the script does not run it again, so
-		// the await result reports it as reused.
+		// the await result reports it as reused. A finished row keeps its
+		// status, value and finished_at; only the flag flips in the
+		// journal, so the run detail reads it after the resume. An open row
+		// flips the flag alone too: a report the child sent while the run
+		// was interrupted can land between the rehydration and the replay,
+		// and the full update would reset that row to running.
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
+		r.p.workflowJournal().markStepReused(ctx, journaled.id)
+		r.failJournaledStep(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -845,6 +1216,9 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		status:     stepStatusRunning,
 	}
 	if err := r.p.workflowJournal().insertStep(ctx, r.id, step); err != nil {
+		if database.IsUniqueViolation(err, workflowStepsPkey) {
+			return r.adoptJournaledStep(ctx, id)
+		}
 		// The child chat runs without a journal row. Stop it: a step that
 		// the script never reads again must not consume model capacity.
 		r.interruptStepChild(ctx, step)
@@ -853,6 +1227,31 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 	r.mu.Lock()
 	r.steps = append(r.steps, step)
 	r.mu.Unlock()
+	return step, nil
+}
+
+// adoptJournaledStep takes over the journal row of a step that another
+// runner of the same run inserted after this run was rehydrated. The
+// startup sweep marks every open run interrupted, so a run can be resumed
+// while the process that started it still runs the script, for example
+// during a rolling restart or on another replica. Both runners derive the
+// same step ID, so the later insert hits the primary key. The step is the
+// journaled one from here on and replays the way startStep replays a
+// rehydrated step. Its child chat belongs to that row and keeps running.
+func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*workflowStep, error) {
+	row, err := r.p.workflowJournal().getStep(ctx, id)
+	if err != nil {
+		return nil, xerrors.Errorf("read the workflow step another runner journaled: %w", err)
+	}
+	if row.RunID != r.id {
+		return nil, xerrors.Errorf("journal the workflow step: step %s belongs to run %s", id, row.RunID)
+	}
+	step := journaledWorkflowStep(row)
+	r.mu.Lock()
+	r.steps = append(r.steps, step)
+	r.mu.Unlock()
+	r.p.workflowJournal().markStepReused(ctx, step.id)
+	r.failJournaledStep(ctx, step)
 	return step, nil
 }
 
@@ -919,17 +1318,38 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason string) {
 	r.mu.Lock()
 	step.status, step.err = stepStatusFailed, reason
-	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
+	r.appendEngineLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
 	r.mu.Unlock()
+	// Not terminal: the run continues after a failed step, so this flush
+	// must not close the log flushes. It waits for the write token like a
+	// terminal flush, because the failure line must land before the step
+	// row that reports the failure.
+	r.flushLogs(true)
 	r.p.workflowJournal().updateStep(ctx, step)
+}
+
+// failJournaledStep re-emits the failure line of a journaled failed step
+// during a replay. The baseline already holds the line, so the echo counter
+// suppresses this copy: the re-emit keeps the line count aligned with the
+// baseline, which a plain replay that never prints the failure line would
+// break. A step failed after the baseline was taken logs its line live, the
+// way failStep does.
+func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
+	if step.status != stepStatusFailed || step.err == "" {
+		return
+	}
+	r.mu.Lock()
+	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, step.err))
+	r.mu.Unlock()
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left
 // unreported: a failed, timed-out, stopped, or returning script never reads
 // their value, so they must not keep consuming model capacity until their
 // step timeout. waitStep has already returned when this runs, so the step
-// fields have no other writer.
-func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
+// fields have no other writer. It returns the steps it failed, which finish
+// logs: the failure lines of steps failed earlier already sit in the logs.
+func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*workflowStep {
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {
@@ -943,6 +1363,7 @@ func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) {
 		r.interruptStepChild(ctx, step)
 		r.p.workflowJournal().updateStep(ctx, step)
 	}
+	return open
 }
 
 // interruptStepChild stops the child chat of a step the run no longer waits
