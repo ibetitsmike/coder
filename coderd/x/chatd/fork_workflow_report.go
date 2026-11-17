@@ -40,6 +40,10 @@ const (
 		"Call this tool one time, when your work is done. The input must match the schema. " +
 		"The workflow reads only this value. It does not read your final message."
 	workflowReminder = "Call workflow_report now with a value that matches its schema. Do no other work."
+
+	// maxWorkflowReportBytes bounds the JSON input of one workflow_report
+	// call.
+	maxWorkflowReportBytes = 256 << 10
 )
 
 // workflowReportTool validates its input against the step schema on the
@@ -96,6 +100,12 @@ func (t *workflowReportTool) ProviderOptions() fantasy.ProviderOptions { return 
 func (t *workflowReportTool) SetProviderOptions(opts fantasy.ProviderOptions) { t.opts = opts }
 
 func (t *workflowReportTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	// The journal stores an accepted value as it is, so the cap bounds the
+	// step row before any decode work.
+	if len(call.Input) > maxWorkflowReportBytes {
+		return fantasy.NewTextErrorResponse("The value is " + strconv.Itoa(len(call.Input)) +
+			" bytes; a report can be at most 256 KiB. Call workflow_report again with a smaller value."), nil
+	}
 	var value any
 	if err := json.Unmarshal([]byte(call.Input), &value); err != nil {
 		return fantasy.NewTextErrorResponse("The input is not valid JSON: " + err.Error()), nil

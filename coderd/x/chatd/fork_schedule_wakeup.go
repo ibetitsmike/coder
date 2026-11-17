@@ -208,7 +208,8 @@ func (*Server) createChatWakeup(ctx context.Context, store database.Store, chat 
 	if err != nil {
 		return forkdb.ChatWakeup{}, xerrors.Errorf("fork queries: %w", err)
 	}
-	existing, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
+	// Every status: a replay must find its wake-up after it completed.
+	existing, err := fdb.ListChatWakeupsByChatID(ctx, forkdb.ListChatWakeupsByChatIDParams{ChatID: chat.ID})
 	if err != nil {
 		return forkdb.ChatWakeup{}, xerrors.Errorf("list chat wake-ups: %w", err)
 	}

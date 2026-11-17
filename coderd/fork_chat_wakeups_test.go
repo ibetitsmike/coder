@@ -157,6 +157,54 @@ func TestForkChatWakeups(t *testing.T) {
 	}, got[1].Events)
 }
 
+// TestForkChatWakeupsStatusFilter checks that the status parameter limits the
+// list to the wake-ups in the listed states, the way the wake-ups pill asks
+// for the open ones.
+func TestForkChatWakeupsStatusFilter(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	client, db := newForkChatWakeupsAPI(t, true, nil)
+	user := coderdtest.CreateFirstUser(t, client)
+	chat := newForkChatTodosChat(t, db, user)
+
+	var ids []uuid.UUID
+	for i, status := range []forkdb.ChatWakeupStatus{
+		forkdb.ChatWakeupStatusActive,
+		forkdb.ChatWakeupStatusPaused,
+		forkdb.ChatWakeupStatusCompleted,
+		forkdb.ChatWakeupStatusCanceled,
+	} {
+		wakeup := insertForkChatWakeup(t, db, chat, func(p *forkdb.InsertChatWakeupParams) {
+			p.Status = status
+			p.CreatedAt = p.CreatedAt.Add(time.Duration(i) * time.Second)
+			if status != forkdb.ChatWakeupStatusActive {
+				p.NextRunAt = sql.NullTime{}
+			}
+		})
+		ids = append(ids, wakeup.ID)
+	}
+
+	open, err := client.ChatWakeups(ctx, chat.ID, codersdk.ChatWakeupStatusActive, codersdk.ChatWakeupStatusPaused)
+	require.NoError(t, err)
+	require.Equal(t, ids[:2], forkChatWakeupIDs(open), "the filter returns only the active and paused wake-ups")
+
+	all, err := client.ChatWakeups(ctx, chat.ID)
+	require.NoError(t, err)
+	require.Equal(t, ids, forkChatWakeupIDs(all), "without a filter the list has every wake-up")
+
+	_, err = client.ChatWakeups(ctx, chat.ID, "sleeping")
+	requireForkChatWakeupStatus(t, err, http.StatusBadRequest)
+}
+
+func forkChatWakeupIDs(wakeups []codersdk.ChatWakeup) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(wakeups))
+	for _, wakeup := range wakeups {
+		ids = append(ids, wakeup.ID)
+	}
+	return ids
+}
+
 // TestForkChatWakeupStatus checks every status change of a wake-up through
 // the API.
 func TestForkChatWakeupStatus(t *testing.T) {

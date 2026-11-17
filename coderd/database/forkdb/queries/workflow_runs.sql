@@ -56,12 +56,25 @@ SELECT * FROM workflow_steps WHERE id = @id;
 -- A reported or failed step stamps finished_at; started_at is set once, at
 -- the insert. The param stays uncast so sqlc ties it to the nullable column
 -- and applies the NullRawMessage override. reused only sets the flag: a
--- report from a step that a resume reused must not clear it.
+-- report from a step that a resume reused must not clear it. The write also
+-- stamps the run's updated_at, so a report to an interrupted run restarts the
+-- run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+-- run update, so the run row is locked before the step row, the same order
+-- as the purge's cascade. Without the join Postgres may run the two updates
+-- in any order, and a report racing the purge could deadlock.
+WITH run AS (
+    UPDATE workflow_runs
+    SET updated_at = now()
+    WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = @id)
+    RETURNING workflow_runs.id
+)
 UPDATE workflow_steps
 SET status = @status, value = @value, error = @error,
-    reused = reused OR @reused,
+    reused = workflow_steps.reused OR @reused,
     finished_at = CASE WHEN @status::text IN ('reported', 'failed') THEN now() ELSE NULL END
-WHERE id = @id;
+FROM run
+WHERE workflow_steps.id = @id
+    AND workflow_steps.run_id = run.id;
 
 -- name: GetWorkflowRunsByChat :many
 -- The run list of a chat, newest first, one keyset page. after_created_at
@@ -102,6 +115,26 @@ WHERE run_id = @run_id AND NOT reused;
 -- error: it becomes a mock parameter name.
 UPDATE workflow_steps SET status = 'failed', error = @err_text, finished_at = now()
 WHERE run_id = @run_id AND status IN ('running', 'reminded');
+
+-- name: DeleteOldWorkflowRuns :execrows
+-- Deletes a batch of terminal and interrupted runs whose last journal write
+-- is older than 30 days, on the database clock. Their steps cascade. A
+-- running run stays: a live replica still writes it. The DELETE repeats the
+-- filter: a run that a resume or a step report updates while the DELETE
+-- waits for its lock is rechecked on its new row, so it stays.
+WITH old AS (
+    SELECT id
+    FROM workflow_runs
+    WHERE status IN ('completed', 'failed', 'stopped', 'interrupted')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT @limit_count::int
+)
+DELETE FROM workflow_runs
+USING old
+WHERE workflow_runs.id = old.id
+    AND workflow_runs.status IN ('completed', 'failed', 'stopped', 'interrupted')
+    AND workflow_runs.updated_at < now() - interval '30 days';
 
 -- name: SetWorkflowRunLogs :exec
 -- The engine writes the log lines of a live run through to the journal, capped
