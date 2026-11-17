@@ -77,6 +77,8 @@ type WorkflowRun struct {
 }
 
 // WorkflowRunStep is one step of a run. The step ID is the child chat ID.
+// Reused is true when a resumed run replayed the step instead of running it
+// again.
 type WorkflowRunStep struct {
 	ID      string `json:"id" format:"uuid"`
 	RunID   string `json:"run_id" format:"uuid"`
@@ -97,10 +99,10 @@ type WorkflowRunStep struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 }
 
-// WorkflowRunDetail is the full view of one run: its script, its steps, and
-// for a terminal run the result snapshot and the log lines the script
-// printed. A live run has empty logs: the journal keeps no live log lines,
-// only the terminal snapshot.
+// WorkflowRunDetail is the full view of one run: its script, its args, its
+// steps, and for a terminal run the result snapshot. The logs are the last
+// log lines of a terminal run, from its snapshot, or of a live run, written
+// through to the journal as the script logs.
 type WorkflowRunDetail struct {
 	ID         string     `json:"id" format:"uuid"`
 	ChatID     string     `json:"chat_id" format:"uuid"`
@@ -111,16 +113,53 @@ type WorkflowRunDetail struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty" format:"date-time"`
 	Title      string     `json:"title"`
 	Script     string     `json:"script"`
-	// Result is the value that main returned, for a terminal run.
-	Result json.RawMessage `json:"result,omitempty"`
-	// Logs are the last log lines of a terminal run, from its snapshot.
+	// Args is the JSON value that main(args) received. It is usually an
+	// object, but an inline script may be given any JSON value. The API
+	// returns the args bytes the run was started with, so a client that
+	// reads them through json.RawMessage keeps them exact.
+	Args any `json:"args"`
+	// Result is the value that main returned, for a terminal run. The API
+	// returns the result bytes main encoded, so a client that reads them
+	// through json.RawMessage keeps them exact.
+	Result any `json:"result,omitempty"`
+	// Logs are the last log lines the script printed: from the snapshot of
+	// a terminal run, or written through to the journal while it runs.
 	Logs []string `json:"logs"`
 	// Phases and CurrentPhase carry the run's phase rail, as on the list
 	// item.
 	Phases       []string          `json:"phases"`
 	CurrentPhase string            `json:"current_phase"`
 	Steps        []WorkflowRunStep `json:"steps"`
-} // WorkflowRunListOptions is the pagination of a chat's workflow run list.
+}
+
+// UnmarshalJSON decodes Args and Result through json.RawMessage, so a
+// number outside the float64 exact range, for example the Starlark big
+// integer 9007199254740993, survives the SDK round trip instead of
+// rounding. The wire values are JSON, and the fields of the alias type
+// shadow the any fields: a present key keeps its raw bytes, an absent key
+// stays nil, and the result lands in the interface field only when the
+// snapshot carried one.
+func (d *WorkflowRunDetail) UnmarshalJSON(data []byte) error {
+	type workflowRunDetailAlias WorkflowRunDetail
+	var alias struct {
+		workflowRunDetailAlias
+		Args   json.RawMessage `json:"args"`
+		Result json.RawMessage `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*d = WorkflowRunDetail(alias.workflowRunDetailAlias)
+	if len(alias.Args) > 0 {
+		d.Args = alias.Args
+	}
+	if len(alias.Result) > 0 {
+		d.Result = alias.Result
+	}
+	return nil
+}
+
+// WorkflowRunListOptions is the pagination of a chat's workflow run list.
 type WorkflowRunListOptions struct {
 	// After is the cursor of the previous page:
 	// <created_at RFC3339>/<run ID>. Empty reads the first page.

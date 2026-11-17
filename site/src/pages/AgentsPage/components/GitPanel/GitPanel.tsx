@@ -456,7 +456,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 	return (
 		<div className="flex h-full flex-col">
 			{/* Toolbar */}
-			<div className="flex shrink-0 items-center gap-2 px-3 pt-1.5 pb-1">
+			<div className="flex shrink-0 items-center gap-2 pl-3 pr-[calc(0.75rem+var(--ios-cover-column,0px))] pt-1.5 pb-1">
 				<div className="min-w-0 flex-1">
 					<GitViewSwitcher
 						items={items}

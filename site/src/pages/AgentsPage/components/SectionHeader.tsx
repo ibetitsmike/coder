@@ -1,3 +1,5 @@
+import { cn } from "cn";
+
 export type SectionHeaderLevel = "page" | "section";
 
 type SectionHeaderProps = {
@@ -28,7 +30,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 			: "m-0 mt-0.5 text-sm text-content-secondary";
 
 	return (
-		<div className="flex flex-wrap items-start justify-between gap-4">
+		<div
+			className={cn(
+				"flex flex-wrap items-start justify-between gap-4",
+				// A page header sits under the iOS cover display's status.
+				level === "page" && "pr-[var(--ios-cover-column,0px)]",
+			)}
+		>
 			<div className="min-w-0 flex-1 basis-64">
 				<div className="flex w-full items-center gap-2">
 					<Heading className={headingClass}>{label}</Heading>

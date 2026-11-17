@@ -13264,10 +13264,10 @@ export interface WorkflowRun {
 
 // From codersdk/fork_workflow_runs.go
 /**
- * WorkflowRunDetail is the full view of one run: its script, its steps, and
- * for a terminal run the result snapshot and the log lines the script
- * printed. A live run has empty logs: the journal keeps no live log lines,
- * only the terminal snapshot.
+ * WorkflowRunDetail is the full view of one run: its script, its args, its
+ * steps, and for a terminal run the result snapshot. The logs are the last
+ * log lines of a terminal run, from its snapshot, or of a live run, written
+ * through to the journal as the script logs.
  */
 export interface WorkflowRunDetail {
 	readonly id: string;
@@ -13280,11 +13280,23 @@ export interface WorkflowRunDetail {
 	readonly title: string;
 	readonly script: string;
 	/**
-	 * Result is the value that main returned, for a terminal run.
+	 * Args is the JSON value that main(args) received. It is usually an
+	 * object, but an inline script may be given any JSON value. The API
+	 * returns the args bytes the run was started with, so a client that
+	 * reads them through json.RawMessage keeps them exact.
 	 */
-	readonly result?: Record<string, string>;
+	// empty interface{} type, falling back to unknown
+	readonly args: unknown;
 	/**
-	 * Logs are the last log lines of a terminal run, from its snapshot.
+	 * Result is the value that main returned, for a terminal run. The API
+	 * returns the result bytes main encoded, so a client that reads them
+	 * through json.RawMessage keeps them exact.
+	 */
+	// empty interface{} type, falling back to unknown
+	readonly result?: unknown;
+	/**
+	 * Logs are the last log lines the script printed: from the snapshot of
+	 * a terminal run, or written through to the journal while it runs.
 	 */
 	readonly logs: readonly string[];
 	/**
@@ -13294,9 +13306,12 @@ export interface WorkflowRunDetail {
 	readonly phases: readonly string[];
 	readonly current_phase: string;
 	readonly steps: readonly WorkflowRunStep[];
-} // WorkflowRunListOptions is the pagination of a chat's workflow run list.
+}
 
 // From codersdk/fork_workflow_runs.go
+/**
+ * WorkflowRunListOptions is the pagination of a chat's workflow run list.
+ */
 export interface WorkflowRunListOptions {}
 
 // From codersdk/fork_workflow_runs.go
@@ -13318,6 +13333,8 @@ export const WorkflowRunStatuses: WorkflowRunStatus[] = [
 // From codersdk/fork_workflow_runs.go
 /**
  * WorkflowRunStep is one step of a run. The step ID is the child chat ID.
+ * Reused is true when a resumed run replayed the step instead of running it
+ * again.
  */
 export interface WorkflowRunStep {
 	readonly id: string;
@@ -13331,7 +13348,7 @@ export interface WorkflowRunStep {
 	 * Value is the report the step sent, matching its schema. It is empty
 	 * until the step reported.
 	 */
-	readonly value?: Record<string, string>;
+	readonly value?: unknown;
 	/**
 	 * Phase is the phase that was current when the step started, empty
 	 * before the script's first phase() call.

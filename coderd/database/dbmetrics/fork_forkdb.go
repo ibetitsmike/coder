@@ -97,6 +97,21 @@ func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg 
 	return f.s.UpdateWorkflowRunStatus(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	defer f.observe(ctx, "MarkWorkflowStepReused", time.Now())
+	return f.s.MarkWorkflowStepReused(ctx, id)
+}
+
+func (f forkQueryMetricsStore) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	defer f.observe(ctx, "MarkWorkflowStepsReusedByRun", time.Now())
+	return f.s.MarkWorkflowStepsReusedByRun(ctx, runID)
+}
+
+func (f forkQueryMetricsStore) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWorkflowRunLogsParams) error {
+	defer f.observe(ctx, "SetWorkflowRunLogs", time.Now())
+	return f.s.SetWorkflowRunLogs(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
 	defer f.observe(ctx, "UpdateWorkflowStep", time.Now())
 	return f.s.UpdateWorkflowStep(ctx, arg)
@@ -370,6 +385,16 @@ func (f forkQueryMetricsStore) GetChatSubagentTypesByChatIDs(ctx context.Context
 func (f forkQueryMetricsStore) GetChatSubagentsByParentChatID(ctx context.Context, parentChatID uuid.UUID) ([]forkdb.ChatSubagent, error) {
 	defer f.observe(ctx, "GetChatSubagentsByParentChatID", time.Now())
 	return f.s.GetChatSubagentsByParentChatID(ctx, parentChatID)
+}
+
+func (f forkQueryMetricsStore) GetDescendantChatsByRootIDs(ctx context.Context, arg forkdb.GetDescendantChatsByRootIDsParams) ([]forkdb.GetDescendantChatsByRootIDsRow, error) {
+	defer f.observe(ctx, "GetDescendantChatsByRootIDs", time.Now())
+	return f.s.GetDescendantChatsByRootIDs(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatReportMessages(ctx context.Context, arg forkdb.GetChatReportMessagesParams) ([]forkdb.GetChatReportMessagesRow, error) {
+	defer f.observe(ctx, "GetChatReportMessages", time.Now())
+	return f.s.GetChatReportMessages(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
@@ -742,7 +767,7 @@ func (f forkQueryMetricsStore) UpdateUserAgentDefinitionByName(ctx context.Conte
 	return f.s.UpdateUserAgentDefinitionByName(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.WorkflowRun, error) {
+func (f forkQueryMetricsStore) GetWorkflowRunsByChat(ctx context.Context, arg forkdb.GetWorkflowRunsByChatParams) ([]forkdb.GetWorkflowRunsByChatRow, error) {
 	defer f.observe(ctx, "GetWorkflowRunsByChat", time.Now())
 	return f.s.GetWorkflowRunsByChat(ctx, arg)
 }

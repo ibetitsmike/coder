@@ -181,11 +181,13 @@ func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.
 	}
 	// A reported row keeps receiving later calls: the history scan of a
 	// resume reads the last accepted call, so the journal must agree and
-	// record the latest value too.
+	// record the latest value too. The reuse flag carries over: a row a
+	// resume already replayed must not read as fresh.
 	if err := j.reportStep(ctx, &workflowStep{
 		id:     step.ID,
 		status: stepStatusReported,
 		value:  json.RawMessage(input),
+		reused: step.Reused,
 	}); err != nil {
 		return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
 			". Call workflow_report again."), nil

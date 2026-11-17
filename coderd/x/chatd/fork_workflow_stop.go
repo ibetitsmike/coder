@@ -98,7 +98,36 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 	if _, err := p.workflowJournal().failOpenSteps(ictx, row.ID); err != nil {
 		return xerrors.Errorf("fail the open steps of run %s: %w", row.ID, err)
 	}
-	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, nil,
+	// The stop carries a snapshot of the failed steps and the retained
+	// lines, so a later await and terminal replay read the same result a
+	// stop of a held run produces. The lines come from the journal: the
+	// interrupted steps' failure lines were appended by a live flush, and
+	// an interrupted run this replica does not hold cannot append more.
+	stepRows, err := p.workflowJournal().getSteps(ictx, row.ID)
+	if err != nil {
+		return xerrors.Errorf("load the workflow steps of run %s: %w", row.ID, err)
+	}
+	logs, _, _ := restoreWorkflowLogs(row.Logs)
+	res := runWorkflowResult{
+		RunID:        row.ID.String(),
+		Status:       workflowStatusStopped,
+		Error:        workflowStopError,
+		Phases:       append([]string{}, row.Phases...),
+		CurrentPhase: row.CurrentPhase,
+		Steps:        make([]stepSummary, 0, len(stepRows)),
+		Logs:         logs,
+	}
+	for _, srow := range stepRows {
+		res.Steps = append(res.Steps, stepSummary{
+			ChatID: srow.ID.String(),
+			Title:  srow.Title,
+			Status: srow.Status,
+			Reused: srow.Reused,
+			Phase:  srow.Phase,
+			Error:  srow.Error,
+		})
+	}
+	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
 		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 	return nil
 }

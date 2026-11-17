@@ -17,7 +17,7 @@ export const SidebarSectionHeader: React.FC<SidebarSectionHeaderProps> = ({
 	actions,
 	collapsible,
 }) => (
-	<div className="mx-2 pt-6 mb-1.5">
+	<div className="ml-2 mr-[calc(0.5rem+var(--ios-cover-column,0px))] pt-6 mb-1.5">
 		<div className="ml-2.5 flex h-7 items-center justify-between">
 			<h2 className="m-0 text-sm font-normal leading-6 text-content-secondary">
 				{collapsible ? (

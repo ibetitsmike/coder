@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -61,7 +62,7 @@ func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWo
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase, logs FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -81,6 +82,7 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		&i.FinishedAt,
 		pq.Array(&i.Phases),
 		&i.CurrentPhase,
+		&i.Logs,
 	)
 	return i, err
 }
@@ -125,7 +127,8 @@ func (q *Queries) GetWorkflowRunStepCountsByChat(ctx context.Context, chatID uui
 }
 
 const getWorkflowRunsByChat = `-- name: GetWorkflowRunsByChat :many
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase FROM workflow_runs
+SELECT id, chat_id, model_config_id, script, status, error, created_at, updated_at, finished_at, phases, current_phase
+FROM workflow_runs
 WHERE chat_id = $1
   AND ($2::timestamptz IS NULL
        OR (created_at, id) < ($2::timestamptz, $3::uuid))
@@ -140,10 +143,26 @@ type GetWorkflowRunsByChatParams struct {
 	RowLimit       int32         `db:"row_limit" json:"row_limit"`
 }
 
+type GetWorkflowRunsByChatRow struct {
+	ID            uuid.UUID    `db:"id" json:"id"`
+	ChatID        uuid.UUID    `db:"chat_id" json:"chat_id"`
+	ModelConfigID uuid.UUID    `db:"model_config_id" json:"model_config_id"`
+	Script        string       `db:"script" json:"script"`
+	Status        string       `db:"status" json:"status"`
+	Error         string       `db:"error" json:"error"`
+	CreatedAt     time.Time    `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time    `db:"updated_at" json:"updated_at"`
+	FinishedAt    sql.NullTime `db:"finished_at" json:"finished_at"`
+	Phases        []string     `db:"phases" json:"phases"`
+	CurrentPhase  string       `db:"current_phase" json:"current_phase"`
+}
+
 // The run list of a chat, newest first, one keyset page. after_created_at
 // and after_id are the created_at and the ID of the last run of the page the
-// client already has; both NULL reads the first page.
-func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]WorkflowRun, error) {
+// client already has; both NULL reads the first page. The list needs no logs,
+// args or result, so it does not read those columns: logs alone can hold the
+// full retained tail of every run.
+func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRunsByChatParams) ([]GetWorkflowRunsByChatRow, error) {
 	rows, err := q.db.QueryContext(ctx, getWorkflowRunsByChat,
 		arg.ChatID,
 		arg.AfterCreatedAt,
@@ -154,18 +173,16 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 		return nil, err
 	}
 	defer rows.Close()
-	var items []WorkflowRun
+	var items []GetWorkflowRunsByChatRow
 	for rows.Next() {
-		var i WorkflowRun
+		var i GetWorkflowRunsByChatRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatID,
 			&i.ModelConfigID,
 			&i.Script,
-			&i.Args,
 			&i.Status,
 			&i.Error,
-			&i.Result,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
@@ -186,7 +203,7 @@ func (q *Queries) GetWorkflowRunsByChat(ctx context.Context, arg GetWorkflowRuns
 }
 
 const getWorkflowStep = `-- name: GetWorkflowStep :one
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase FROM workflow_steps WHERE id = $1
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase, reused FROM workflow_steps WHERE id = $1
 `
 
 // The authorizer of UpdateWorkflowStep reads the step to find its run.
@@ -206,12 +223,13 @@ func (q *Queries) GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowSt
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Phase,
+		&i.Reused,
 	)
 	return i, err
 }
 
 const getWorkflowStepsByRun = `-- name: GetWorkflowStepsByRun :many
-SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
+SELECT id, run_id, spec_key, occurrence, ordinal, title, status, value, error, started_at, finished_at, phase, reused FROM workflow_steps WHERE run_id = $1 ORDER BY ordinal
 `
 
 func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error) {
@@ -236,6 +254,7 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Phase,
+			&i.Reused,
 		); err != nil {
 			return nil, err
 		}
@@ -286,8 +305,8 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 }
 
 const insertWorkflowStep = `-- name: InsertWorkflowStep :exec
-INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, phase)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused, phase)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertWorkflowStepParams struct {
@@ -299,6 +318,7 @@ type InsertWorkflowStepParams struct {
 	Title      string                `db:"title" json:"title"`
 	Status     string                `db:"status" json:"status"`
 	Value      pqtype.NullRawMessage `db:"value" json:"value"`
+	Reused     bool                  `db:"reused" json:"reused"`
 	Phase      string                `db:"phase" json:"phase"`
 }
 
@@ -314,6 +334,7 @@ func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStep
 		arg.Title,
 		arg.Status,
 		arg.Value,
+		arg.Reused,
 		arg.Phase,
 	)
 	return err
@@ -332,6 +353,56 @@ func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText s
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const markWorkflowStepReused = `-- name: MarkWorkflowStepReused :exec
+UPDATE workflow_steps SET reused = true WHERE id = $1
+`
+
+// The replay of a finished step flips only the reuse flag: its status, value
+// and finished_at stay as the journal holds them.
+func (q *Queries) MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markWorkflowStepReused, id)
+	return err
+}
+
+const markWorkflowStepsReusedByRun = `-- name: MarkWorkflowStepsReusedByRun :exec
+UPDATE workflow_steps SET reused = true
+WHERE run_id = $1 AND NOT reused
+`
+
+// The resume of a terminal run replays every step of the stored snapshot, so
+// the run detail reads the flag from the rows without the snapshot.
+func (q *Queries) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markWorkflowStepsReusedByRun, runID)
+	return err
+}
+
+const setWorkflowRunLogs = `-- name: SetWorkflowRunLogs :exec
+UPDATE workflow_runs
+SET logs = $1::jsonb, updated_at = now()
+WHERE id = $2
+	AND (
+		logs IS NULL
+		OR logs = 'null'::jsonb
+		OR COALESCE(logs->'fork_seq', '0'::jsonb)::bigint <= $3::bigint
+	)
+`
+
+type SetWorkflowRunLogsParams struct {
+	Lines   json.RawMessage `db:"lines" json:"lines"`
+	ID      uuid.UUID       `db:"id" json:"id"`
+	ForkSeq int64           `db:"fork_seq" json:"fork_seq"`
+}
+
+// The engine writes the log lines of a live run through to the journal, capped
+// to the last maxWorkflowLogs lines. lines replaces the retained lines when
+// it is at least as new as the stored sequence, so a stalled write of an
+// older snapshot cannot replace newer lines. The caller keeps the sequence in
+// the lines payload under the fork_seq key.
+func (q *Queries) SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error {
+	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs, arg.Lines, arg.ID, arg.ForkSeq)
+	return err
 }
 
 const updateWorkflowRunPhases = `-- name: UpdateWorkflowRunPhases :exec
@@ -394,25 +465,29 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
 UPDATE workflow_steps
 SET status = $1, value = $2, error = $3,
+    reused = reused OR $4,
     finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
-WHERE id = $4
+WHERE id = $5
 `
 
 type UpdateWorkflowStepParams struct {
 	Status string                `db:"status" json:"status"`
 	Value  pqtype.NullRawMessage `db:"value" json:"value"`
 	Error  string                `db:"error" json:"error"`
+	Reused bool                  `db:"reused" json:"reused"`
 	ID     uuid.UUID             `db:"id" json:"id"`
 }
 
 // A reported or failed step stamps finished_at; started_at is set once, at
 // the insert. The param stays uncast so sqlc ties it to the nullable column
-// and applies the NullRawMessage override.
+// and applies the NullRawMessage override. reused only sets the flag: a
+// report from a step that a resume reused must not clear it.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,
 		arg.Value,
 		arg.Error,
+		arg.Reused,
 		arg.ID,
 	)
 	return err
