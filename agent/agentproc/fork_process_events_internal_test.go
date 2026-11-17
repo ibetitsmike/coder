@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/xerrors"
+	protobuf "google.golang.org/protobuf/proto"
 
 	"cdr.dev/slog/v3"
 	"cdr.dev/slog/v3/sloggers/slogtest"
@@ -324,6 +325,59 @@ func TestForkOutputWatch(t *testing.T) {
 	}, testutil.WaitLong, testutil.IntervalFast)
 }
 
+// A line that is still open when the output passes the head of the buffer
+// is not reported: the separator that Output puts between a contiguous head
+// and tail is not a line end.
+func TestForkOutputWatchOpenLineAcrossHead(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	mClock := quartz.NewMock(t)
+	api, handler := forkTestAPI(t, mClock)
+	client := newForkEventsClient(0)
+	stop := forkReport(ctx, t, api, client)
+	defer stop()
+
+	gate := filepath.Join(t.TempDir(), "gate")
+	chatID := uuid.New()
+	long := MaxHeadBytes + 1000
+	proc := forkStart(t, api, handler, chatID, uuid.New(), fmt.Sprintf(
+		"printf ERROR; head -c %d /dev/zero | tr '\\000' x; while [ ! -e %q ]; do sleep 0.05; done; printf '\\nERROR done\\n'; sleep 60", long, gate))
+	require.Eventually(t, func() bool {
+		_, _, total := proc.buf.forkRaw()
+		return total == len("ERROR")+long
+	}, testutil.WaitLong, testutil.IntervalFast)
+	_, truncated := proc.output()
+	require.NotNil(t, truncated)
+	require.Zero(t, truncated.OmittedBytes, "the head and the tail are contiguous")
+
+	code, _ := forkWatch(t, handler, chatID, proc.id, workspacesdk.ForkWatchProcessRequest{
+		WakeupID: uuid.New(), OutputPattern: "^ERROR", OutputMaxEvents: 1,
+	})
+	require.Equal(t, http.StatusOK, code)
+	for range 3 {
+		mClock.Advance(forkOutputWatchInterval).MustWait(ctx)
+		select {
+		case req := <-client.calls:
+			t.Fatalf("unexpected report of an open line: %v", req.GetEvents()[0].GetOutputMatch().GetLines())
+		case <-time.After(testutil.IntervalMedium):
+		}
+	}
+
+	require.NoError(t, os.WriteFile(gate, nil, 0o600))
+	require.Eventually(t, func() bool {
+		output, _ := proc.output()
+		return strings.HasSuffix(output, "ERROR done\n")
+	}, testutil.WaitLong, testutil.IntervalFast)
+	mClock.Advance(forkOutputWatchInterval).MustWait(ctx)
+	req := testutil.TryReceive(ctx, t, client.calls)
+	match := req.GetEvents()[0].GetOutputMatch()
+	require.NotNil(t, match)
+	require.EqualValues(t, 2, match.GetMatched())
+	require.Len(t, match.GetLines(), 2)
+	require.Equal(t, "ERROR"+strings.Repeat("x", forkMaxReportedLineBytes-len("ERROR")), match.GetLines()[0])
+	require.Equal(t, "ERROR done", match.GetLines()[1])
+}
+
 func TestForkHandleWatchProcess(t *testing.T) {
 	t.Parallel()
 
@@ -412,39 +466,67 @@ func TestForkNewLines(t *testing.T) {
 	t.Parallel()
 	head := "h1 ERROR\nh2\n"
 	tail := "rt line\nERROR t1\nt2\npart"
-	marker := "\n\n... [omitted 100 bytes] ...\n\n"
-	truncated := &workspacesdk.ProcessTruncation{OriginalBytes: 1000, OmittedBytes: 100}
-	// The output with truncated ends at position 1000.
-	tailEnd := func(prefix string) int { return 1000 - len(tail) + len(prefix) }
+	// With bytes omitted the output ends at position 1000.
+	const total = 1000
+	tailEnd := func(prefix string) int { return total - len(tail) + len(prefix) }
 	for _, tc := range []struct {
-		name      string
-		output    string
-		truncated *workspacesdk.ProcessTruncation
-		cursor    int
-		wantLines []string
-		wantEnd   int
+		name       string
+		head, tail string
+		total      int
+		cursor     int
+		wantLines  []string
+		wantEnd    int
 	}{
-		{name: "Whole", output: "a\nb\nc", wantLines: []string{"a", "b"}, wantEnd: 4},
-		{name: "AfterCursor", output: "a\nb\nc\n", cursor: 2, wantLines: []string{"b", "c"}, wantEnd: 6},
-		{name: "NothingNew", output: "a\nb\n", cursor: 4, wantEnd: 4},
+		{name: "Whole", head: "a\nb\nc", total: 5, wantLines: []string{"a", "b"}, wantEnd: 4},
+		{name: "AfterCursor", head: "a\nb\nc\n", total: 6, cursor: 2, wantLines: []string{"b", "c"}, wantEnd: 6},
+		{name: "NothingNew", head: "a\nb\n", total: 4, cursor: 4, wantEnd: 4},
+		{
+			// The head and the tail are contiguous, so a line that
+			// spans them is one line, not two.
+			name: "Contiguous", head: "h1\nERROR pa", tail: "rt\nt2\nERROR still", total: 28, cursor: 3,
+			wantLines: []string{"ERROR part", "t2"}, wantEnd: 17,
+		},
+		{
+			name: "ContiguousOpenLine", head: "h1\nERROR pa", tail: "rt still", total: 19, cursor: 3,
+			wantEnd: 3,
+		},
 		{
 			// The head is old, and the first tail line lost its start.
-			name: "Truncated", output: head + marker + tail, truncated: truncated, cursor: 20,
+			name: "Truncated", head: head, tail: tail, total: total, cursor: 20,
 			wantLines: []string{"ERROR t1", "t2"}, wantEnd: tailEnd("rt line\nERROR t1\nt2\n"),
 		},
 		{
-			name: "TruncatedAfterCursor", output: head + marker + tail, truncated: truncated,
+			name: "TruncatedAfterCursor", head: head, tail: tail, total: total,
 			cursor: tailEnd("rt line\nERROR t1\n"), wantLines: []string{"t2"}, wantEnd: tailEnd("rt line\nERROR t1\nt2\n"),
 		},
-		{name: "UnknownMarker", output: "a\nb\n", truncated: truncated, cursor: 7, wantEnd: 7},
+		{name: "TruncatedOneLine", head: head, tail: "no line end", total: total, cursor: 7, wantEnd: 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			lines, end := forkNewLines(tc.output, tc.truncated, tc.cursor)
+			lines, end := forkNewLines(tc.head, tc.tail, tc.total, tc.cursor)
 			require.Equal(t, tc.wantLines, lines)
 			require.Equal(t, tc.wantEnd, end)
 		})
 	}
+}
+
+// The output that the agent reads for a watch is the raw buffer: a head and
+// tail that are contiguous are not split by the separator of Output.
+func TestForkRaw(t *testing.T) {
+	t.Parallel()
+	buf := NewHeadTailBufferSized(8, 8)
+	_, err := buf.Write([]byte("h1\nERROR part\n"))
+	require.NoError(t, err)
+	output, truncated := buf.Output()
+	require.NotNil(t, truncated)
+	require.Zero(t, truncated.OmittedBytes)
+	require.Equal(t, "h1\nERROR\n part\n", output, "Output adds a separator")
+	head, tail, total := buf.forkRaw()
+	require.Equal(t, "h1\nERROR part\n", head+tail)
+	require.Equal(t, 14, total)
+	lines, end := forkNewLines(head, tail, total, 3)
+	require.Equal(t, []string{"ERROR part"}, lines)
+	require.Equal(t, 14, end)
 }
 
 func TestForkOutputTail(t *testing.T) {
@@ -474,4 +556,88 @@ func TestForkCutLine(t *testing.T) {
 	cut = forkCutLine("x" + strings.Repeat("é", forkMaxReportedLineBytes))
 	require.True(t, utf8.ValidString(cut))
 	require.Len(t, cut, forkMaxReportedLineBytes-1)
+	require.Equal(t, "ERROR \uFFFD!", forkCutLine("ERROR \xff\xfe!"))
+}
+
+// Process output that is not valid UTF-8 still makes a report that
+// protobuf can encode, so it cannot block the queue.
+func TestForkInvalidUTF8(t *testing.T) {
+	t.Parallel()
+	binary := "ok \xff\xfe\n"
+	event := func(tail string, lines ...string) *proto.ReportChatProcessEventsRequest {
+		return &proto.ReportChatProcessEventsRequest{Events: []*proto.ReportChatProcessEventsRequest_Event{
+			{Kind: &proto.ReportChatProcessEventsRequest_Event_Exit_{Exit: &proto.ReportChatProcessEventsRequest_Event_Exit{OutputTail: tail}}},
+			{Kind: &proto.ReportChatProcessEventsRequest_Event_OutputMatch_{OutputMatch: &proto.ReportChatProcessEventsRequest_Event_OutputMatch{Lines: lines}}},
+		}}
+	}
+	_, err := protobuf.Marshal(event(binary, binary))
+	require.Error(t, err, "protobuf rejects invalid UTF-8")
+
+	tail := forkOutputTail(binary)
+	require.Equal(t, "ok \uFFFD\n", tail)
+	long := forkOutputTail(strings.Repeat("\xff", forkMaxOutputTailBytes+10))
+	require.True(t, utf8.ValidString(long))
+	_, err = protobuf.Marshal(event(tail, forkCutLine(binary), long))
+	require.NoError(t, err)
+}
+
+// Past the cap of the queue an output match is dropped, the oldest first,
+// and an exit is kept without its output.
+func TestForkEnqueueCap(t *testing.T) {
+	t.Parallel()
+	api, _ := forkTestAPI(t, quartz.NewMock(t))
+	exit := func(id string) *proto.ReportChatProcessEventsRequest_Event {
+		return &proto.ReportChatProcessEventsRequest_Event{
+			ProcessId: id,
+			Kind:      &proto.ReportChatProcessEventsRequest_Event_Exit_{Exit: &proto.ReportChatProcessEventsRequest_Event_Exit{OutputTail: "bye\n"}},
+		}
+	}
+	output := func(id string) *proto.ReportChatProcessEventsRequest_Event {
+		return &proto.ReportChatProcessEventsRequest_Event{
+			ProcessId: id,
+			Kind:      &proto.ReportChatProcessEventsRequest_Event_OutputMatch_{OutputMatch: &proto.ReportChatProcessEventsRequest_Event_OutputMatch{Matched: 1}},
+		}
+	}
+	ids := func() []string {
+		api.fork.mu.Lock()
+		defer api.fork.mu.Unlock()
+		ids := make([]string, 0, len(api.fork.pending))
+		for _, e := range api.fork.pending {
+			ids = append(ids, e.GetProcessId())
+		}
+		return ids
+	}
+
+	api.forkEnqueue(exit("exit-0"))
+	for i := 1; i < forkMaxPendingProcessEvents; i++ {
+		api.forkEnqueue(output(fmt.Sprintf("out-%d", i)))
+	}
+	require.Len(t, ids(), forkMaxPendingProcessEvents)
+
+	// The oldest output match makes room, not the older exit.
+	api.forkEnqueue(exit("exit-1"))
+	got := ids()
+	require.Len(t, got, forkMaxPendingProcessEvents)
+	require.Equal(t, []string{"exit-0", "out-2"}, got[:2])
+	require.Equal(t, "exit-1", got[len(got)-1])
+
+	// With only exits queued, an output match is dropped and an exit is
+	// kept without its output.
+	api.fork.mu.Lock()
+	api.fork.pending = api.fork.pending[:0]
+	api.fork.mu.Unlock()
+	for i := 0; i < forkMaxPendingProcessEvents; i++ {
+		api.forkEnqueue(exit(fmt.Sprintf("exit-%d", i)))
+	}
+	api.forkEnqueue(output("out-late"))
+	require.Len(t, ids(), forkMaxPendingProcessEvents)
+	api.forkEnqueue(exit("exit-late"))
+	got = ids()
+	require.Len(t, got, forkMaxPendingProcessEvents+1)
+	require.Equal(t, "exit-0", got[0])
+	api.fork.mu.Lock()
+	last := api.fork.pending[len(api.fork.pending)-1]
+	api.fork.mu.Unlock()
+	require.Equal(t, "exit-late", last.GetProcessId())
+	require.Empty(t, last.GetExit().GetOutputTail())
 }

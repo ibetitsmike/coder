@@ -214,6 +214,43 @@ func TestWakeupEventsProcessExit(t *testing.T) {
 	require.Zero(t, dials.Load(), "a delivery does not dial the agent")
 }
 
+// An exit that the agent reports while the wake-up is paused is kept, and
+// the wake-up delivers it once it is resumed.
+func TestWakeupEventsProcessExitWhilePaused(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	_, _, agent := f.bindProcessWorkspace(t, chat)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind: forkdb.ChatWakeupKindEvents,
+	}, processExitEvents(t, agent.ID, "proc-1")...)
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	failingAgentConn(worker.server)
+	now := wakeupTestSlot
+	tick := func() {
+		t.Helper()
+		now = now.Add(eventsPollInterval + time.Second)
+		worker.wakeupOnce(ctx, now)
+	}
+
+	_, paused, err := worker.server.SetChatWakeupStatus(ctx, chat, wakeup.ID, forkdb.ChatWakeupStatusPaused)
+	require.NoError(t, err)
+	require.Equal(t, forkdb.ChatWakeupStatusPaused, paused.Status)
+	require.Equal(t, []uuid.UUID{chat.ID}, f.fireProcessExit(t, chat, agent.ID, "proc-1", 0, "ok\nDONE\n", now))
+	tick()
+	require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt), "a paused wake-up delivers nothing")
+
+	_, resumed, err := worker.server.SetChatWakeupStatus(ctx, chat, wakeup.ID, forkdb.ChatWakeupStatusActive)
+	require.NoError(t, err)
+	require.Equal(t, forkdb.ChatWakeupStatusActive, resumed.Status)
+	tick()
+	require.Equal(t, []string{
+		wakeup.Prompt + "\n\nBackground process proc-1 (`sleep 600`) exited with code 0.\n\nLast 2 lines of output:\n```\nok\nDONE\n```",
+	}, f.wakeMessages(t, chat, wakeup.Prompt))
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, f.wakeup(t, wakeup.ID).Status)
+}
+
 // A watch with an output pattern wakes the chat for the matching lines that
 // its agent reports, collects the lines of the reports before a delivery,
 // stops after its maximum and still reports the exit.

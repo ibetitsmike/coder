@@ -123,7 +123,7 @@ SET
         END
 FROM chat_wakeups w
 WHERE w.id = x.wakeup_id
-    AND w.status = 'active'
+    AND w.status IN ('active', 'paused')
     AND x.kind = 'process'
     AND x.delivered_at IS NULL
     AND x.chat_id = $7::uuid
@@ -156,19 +156,21 @@ type FireChatProcessWatchesParams struct {
 	WakeupID  uuid.NullUUID         `db:"wakeup_id" json:"wakeup_id"`
 }
 
-// Fires the open process watches of active wake-ups on process @process_id
-// of chat @chat_id on agent @agent_id, for an event that the agent reported
-// or that chatd read from it. @wakeup_id narrows the watches when set. An
-// event that ends the watch, @ended, is an object with an exit or a lost key,
-// which merges into the payload. Otherwise the event carries @matched output
-// lines that matched the pattern of the watch, @lines, which add to the lines
-// the payload holds until a delivery, keeping the last 16384 characters, and
-// @last, set on the last report of the agent. Lines fire only a watch with an
-// output pattern whose message count is below its output_max_events, and
-// that has not ended. @output_at, the time the agent matched the lines, must
-// be after the output_at in the spec of the watch, which it then replaces,
-// so a report that the agent sends again changes nothing. The first event
-// keeps its fired_at. Returns the chats to poke.
+// Fires the open process watches of active or paused wake-ups on process
+// @process_id of chat @chat_id on agent @agent_id, for an event that the
+// agent reported or that chatd read from it. The agent drops an event once
+// it is acked, so a paused wake-up keeps it for its resume. @wakeup_id
+// narrows the watches when set. An event that ends the watch, @ended, is an
+// object with an exit or a lost key, which merges into the payload.
+// Otherwise the event carries @matched output lines that matched the
+// pattern of the watch, @lines, which add to the lines the payload holds
+// until a delivery, keeping the last 16384 characters, and @last, set on
+// the last report of the agent. Lines fire only a watch with an output
+// pattern whose message count is below its output_max_events, and that has
+// not ended. @output_at, the time the agent matched the lines, must be after
+// the output_at in the spec of the watch, which it then replaces, so a
+// report that the agent sends again changes nothing. The first event keeps
+// its fired_at. Returns the chats to poke.
 func (q *Queries) FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, fireChatProcessWatches,
 		arg.FiredAt,
@@ -540,7 +542,7 @@ UPDATE chat_wakeup_watches x
 SET spec = x.spec || jsonb_build_object('reported_at', $1::timestamptz)
 FROM chat_wakeups w
 WHERE w.id = x.wakeup_id
-    AND w.status = 'active'
+    AND w.status IN ('active', 'paused')
     AND x.kind = 'process'
     AND x.delivered_at IS NULL
     AND x.agent_id = $2::uuid
@@ -555,8 +557,8 @@ type MarkChatProcessWatchesReportedParams struct {
 
 // Records that agent @agent_id said at @reported_at that it holds no event
 // that coderd did not ack: sets reported_at in the spec of its open process
-// watches of active wake-ups that have not ended. The final poll of a
-// wake-up waits for it.
+// watches of active or paused wake-ups that have not ended. The final poll
+// of a wake-up waits for it.
 func (q *Queries) MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markChatProcessWatchesReported, arg.ReportedAt, arg.AgentID)
 	if err != nil {
@@ -687,7 +689,7 @@ WITH lost AS (
     ) ag ON true
     WHERE x.kind = 'process'
         AND x.delivered_at IS NULL
-        AND w.status = 'active'
+        AND w.status IN ('active', 'paused')
         AND x.fired_payload->'exit' IS NULL
         AND x.fired_payload->'lost' IS NULL
         AND (ag.id IS NULL OR ag.started_at > x.created_at)
@@ -710,15 +712,16 @@ type MarkLostChatProcessWatchesParams struct {
 	RestartedReason string    `db:"restarted_reason" json:"restarted_reason"`
 }
 
-// Fires as lost the open process watches of active wake-ups whose agent can
-// no longer report the process. With @reason when the agent is not an agent
-// of the latest build of the chat's workspace, or that build does not start
-// the workspace, or the chat has no workspace; the time of the loss is when
-// the latest build was created, or @now without one. With @restarted_reason
-// when the agent is current but started after the watch was created, which
-// an agent reports only when its process starts, so it lost the processes
-// of its earlier run; the time of the loss is when the agent started.
-// Watches that already ended stay as they are. Returns the chats to poke.
+// Fires as lost the open process watches of active or paused wake-ups whose
+// agent can no longer report the process. With @reason when the agent is
+// not an agent of the latest build of the chat's workspace, or that build
+// does not start the workspace, or the chat has no workspace; the time of
+// the loss is when the latest build was created, or @now without one. With
+// @restarted_reason when the agent is current but started after the watch
+// was created, which an agent reports only when its process starts, so it
+// lost the processes of its earlier run; the time of the loss is when the
+// agent started. Watches that already ended stay as they are. Returns the
+// chats to poke.
 func (q *Queries) MarkLostChatProcessWatches(ctx context.Context, arg MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, markLostChatProcessWatches, arg.Now, arg.Reason, arg.RestartedReason)
 	if err != nil {

@@ -127,11 +127,32 @@ func TestFireChatProcessWatches(t *testing.T) {
 	require.NotNil(t, afterExit.Exit)
 	require.Zero(t, afterExit.Matched)
 
-	// The watches of a wake-up that is not active do not fire.
+	// The watches of a paused wake-up fire, since the agent drops what
+	// coderd acked. Those of a wake-up that ended do not.
 	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'paused', next_run_at = NULL WHERE id = $1", wakeup.ID)
 	require.NoError(t, err)
-	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p1", AgentID: otherAgentID, FiredAt: t2, Ended: ended}))
-	require.False(t, get(otherAgent.ID).FiredAt.Valid)
+	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p1", AgentID: otherAgentID, FiredAt: t2, Ended: ended}))
+	require.True(t, get(otherAgent.ID).FiredAt.Valid)
+
+	canceled := insertEventsWakeup(ctx, t, fdb, chat)
+	canceledWatch, err := fdb.InsertChatWakeupWatch(ctx, forkdb.InsertChatWakeupWatchParams{
+		ID:        uuid.New(),
+		WakeupID:  canceled.ID,
+		Kind:      forkdb.ChatWakeupWatchKindProcess,
+		AgentID:   uuid.NullUUID{UUID: agentID, Valid: true},
+		ProcessID: sql.NullString{String: "p3", Valid: true},
+		Spec:      json.RawMessage(`{}`),
+		CreatedAt: dbtime.Now(),
+	})
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'canceled', next_run_at = NULL WHERE id = $1", canceled.ID)
+	require.NoError(t, err)
+	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p3", FiredAt: t2, Ended: ended}))
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, canceled.ID)
+	require.NoError(t, err)
+	require.Len(t, watches, 1)
+	require.Equal(t, canceledWatch.ID, watches[0].ID)
+	require.False(t, watches[0].FiredAt.Valid)
 }
 
 func TestMarkChatProcessWatchesReported(t *testing.T) {
@@ -145,6 +166,9 @@ func TestMarkChatProcessWatchesReported(t *testing.T) {
 	active := insertEventsWakeup(ctx, t, fdb, chat)
 	paused := insertEventsWakeup(ctx, t, fdb, chat)
 	_, err := sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'paused', next_run_at = NULL WHERE id = $1", paused.ID)
+	require.NoError(t, err)
+	canceled := insertEventsWakeup(ctx, t, fdb, chat)
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'canceled', next_run_at = NULL WHERE id = $1", canceled.ID)
 	require.NoError(t, err)
 	agentID, otherAgentID := uuid.New(), uuid.New()
 	insertWatch := func(wakeupID uuid.UUID, ordinal int32, agentID uuid.UUID) forkdb.ChatWakeupWatch {
@@ -166,7 +190,8 @@ func TestMarkChatProcessWatchesReported(t *testing.T) {
 	exited := insertWatch(active.ID, 1, agentID)
 	delivered := insertWatch(active.ID, 2, agentID)
 	otherAgent := insertWatch(active.ID, 3, otherAgentID)
-	inactive := insertWatch(paused.ID, 0, agentID)
+	pausedWatch := insertWatch(paused.ID, 0, agentID)
+	inactive := insertWatch(canceled.ID, 0, agentID)
 	_, err = sqlDB.ExecContext(ctx, `UPDATE chat_wakeup_watches SET fired_at = now(), fired_payload = '{"exit": {"code": 0}}' WHERE id = $1`, exited.ID)
 	require.NoError(t, err)
 	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeup_watches SET delivered_at = now() WHERE id = $1", delivered.ID)
@@ -175,10 +200,10 @@ func TestMarkChatProcessWatchesReported(t *testing.T) {
 	reportedAt := dbtime.Now()
 	n, err := fdb.MarkChatProcessWatchesReported(ctx, forkdb.MarkChatProcessWatchesReportedParams{AgentID: agentID, ReportedAt: reportedAt})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
+	require.EqualValues(t, 2, n)
 
 	specs := make(map[uuid.UUID]map[string]any)
-	for _, wakeupID := range []uuid.UUID{active.ID, paused.ID} {
+	for _, wakeupID := range []uuid.UUID{active.ID, paused.ID, canceled.ID} {
 		watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeupID)
 		require.NoError(t, err)
 		for _, watch := range watches {
@@ -188,9 +213,11 @@ func TestMarkChatProcessWatchesReported(t *testing.T) {
 		}
 	}
 	require.Equal(t, "ERR", specs[open.ID]["output_pattern"])
-	got, err := time.Parse(time.RFC3339Nano, specs[open.ID]["reported_at"].(string))
-	require.NoError(t, err)
-	require.WithinDuration(t, reportedAt, got, time.Millisecond)
+	for _, id := range []uuid.UUID{open.ID, pausedWatch.ID} {
+		got, err := time.Parse(time.RFC3339Nano, specs[id]["reported_at"].(string))
+		require.NoError(t, err)
+		require.WithinDuration(t, reportedAt, got, time.Millisecond)
+	}
 	for _, id := range []uuid.UUID{exited.ID, delivered.ID, otherAgent.ID, inactive.ID} {
 		require.NotContains(t, specs[id], "reported_at")
 	}

@@ -81,19 +81,21 @@ type Querier interface {
 	// stop_workflow fails the open steps of a run that it stops. err_text, not
 	// error: it becomes a mock parameter name.
 	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
-	// Fires the open process watches of active wake-ups on process @process_id
-	// of chat @chat_id on agent @agent_id, for an event that the agent reported
-	// or that chatd read from it. @wakeup_id narrows the watches when set. An
-	// event that ends the watch, @ended, is an object with an exit or a lost key,
-	// which merges into the payload. Otherwise the event carries @matched output
-	// lines that matched the pattern of the watch, @lines, which add to the lines
-	// the payload holds until a delivery, keeping the last 16384 characters, and
-	// @last, set on the last report of the agent. Lines fire only a watch with an
-	// output pattern whose message count is below its output_max_events, and
-	// that has not ended. @output_at, the time the agent matched the lines, must
-	// be after the output_at in the spec of the watch, which it then replaces,
-	// so a report that the agent sends again changes nothing. The first event
-	// keeps its fired_at. Returns the chats to poke.
+	// Fires the open process watches of active or paused wake-ups on process
+	// @process_id of chat @chat_id on agent @agent_id, for an event that the
+	// agent reported or that chatd read from it. The agent drops an event once
+	// it is acked, so a paused wake-up keeps it for its resume. @wakeup_id
+	// narrows the watches when set. An event that ends the watch, @ended, is an
+	// object with an exit or a lost key, which merges into the payload.
+	// Otherwise the event carries @matched output lines that matched the
+	// pattern of the watch, @lines, which add to the lines the payload holds
+	// until a delivery, keeping the last 16384 characters, and @last, set on
+	// the last report of the agent. Lines fire only a watch with an output
+	// pattern whose message count is below its output_max_events, and that has
+	// not ended. @output_at, the time the agent matched the lines, must be after
+	// the output_at in the spec of the watch, which it then replaces, so a
+	// report that the agent sends again changes nothing. The first event keeps
+	// its fired_at. Returns the chats to poke.
 	FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
@@ -292,8 +294,8 @@ type Querier interface {
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Records that agent @agent_id said at @reported_at that it holds no event
 	// that coderd did not ack: sets reported_at in the spec of its open process
-	// watches of active wake-ups that have not ended. The final poll of a
-	// wake-up waits for it.
+	// watches of active or paused wake-ups that have not ended. The final poll
+	// of a wake-up waits for it.
 	MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error)
 	// Records a message that the watch sent. Run it in the transaction that
 	// inserts the message, after the wake-up row is locked. @deliveries is the
@@ -307,15 +309,16 @@ type Querier interface {
 	// Records that a send of the watch failed. The first failure since the last
 	// delivery keeps its time.
 	MarkChatWakeupWatchFailed(ctx context.Context, arg MarkChatWakeupWatchFailedParams) error
-	// Fires as lost the open process watches of active wake-ups whose agent can
-	// no longer report the process. With @reason when the agent is not an agent
-	// of the latest build of the chat's workspace, or that build does not start
-	// the workspace, or the chat has no workspace; the time of the loss is when
-	// the latest build was created, or @now without one. With @restarted_reason
-	// when the agent is current but started after the watch was created, which
-	// an agent reports only when its process starts, so it lost the processes
-	// of its earlier run; the time of the loss is when the agent started.
-	// Watches that already ended stay as they are. Returns the chats to poke.
+	// Fires as lost the open process watches of active or paused wake-ups whose
+	// agent can no longer report the process. With @reason when the agent is
+	// not an agent of the latest build of the chat's workspace, or that build
+	// does not start the workspace, or the chat has no workspace; the time of
+	// the loss is when the latest build was created, or @now without one. With
+	// @restarted_reason when the agent is current but started after the watch
+	// was created, which an agent reports only when its process starts, so it
+	// lost the processes of its earlier run; the time of the loss is when the
+	// agent started. Watches that already ended stay as they are. Returns the
+	// chats to poke.
 	MarkLostChatProcessWatches(ctx context.Context, arg MarkLostChatProcessWatchesParams) ([]uuid.UUID, error)
 	// chatd runs this once at startup: runs owned by a dead process stay open.
 	// The parameter is err_text, not error: it becomes a mock parameter name.

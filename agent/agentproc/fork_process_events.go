@@ -8,7 +8,6 @@ package agentproc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -32,7 +31,8 @@ import (
 
 const (
 	// forkMaxPendingProcessEvents caps the events that wait for coderd's
-	// ack. Past it the oldest event is dropped.
+	// ack. Past it the oldest output match is dropped. Exits are kept, one
+	// per chat process, but past the cap they carry no output.
 	forkMaxPendingProcessEvents = 1000
 	// forkMaxProcessEventsBatch caps the events of one report.
 	forkMaxProcessEventsBatch   = 100
@@ -87,12 +87,29 @@ func (api *API) forkEnqueue(event *proto.ReportChatProcessEventsRequest_Event) {
 	f := &api.fork
 	f.mu.Lock()
 	if len(f.pending) >= forkMaxPendingProcessEvents {
-		dropped := f.pending[0]
-		f.pending = f.pending[1:]
-		api.logger.Warn(context.Background(), "drop unreported chat process event",
-			slog.F("chat_id", dropped.GetChatId()),
-			slog.F("process_id", dropped.GetProcessId()),
-		)
+		log := func(msg string, e *proto.ReportChatProcessEventsRequest_Event) {
+			api.logger.Warn(context.Background(), msg,
+				slog.F("chat_id", e.GetChatId()),
+				slog.F("process_id", e.GetProcessId()),
+			)
+		}
+		i := slices.IndexFunc(f.pending, func(e *proto.ReportChatProcessEventsRequest_Event) bool {
+			return e.GetOutputMatch() != nil
+		})
+		switch {
+		case i >= 0:
+			log("drop unreported chat process output", f.pending[i])
+			f.pending = slices.Delete(f.pending, i, i+1)
+		case event.GetExit() != nil:
+			// An exit is never dropped: the empty report that follows
+			// the drain would tell coderd that none waits.
+			log("drop output tail of unreported chat process exit", event)
+			event.GetExit().OutputTail = ""
+		default:
+			log("drop unreported chat process output", event)
+			f.mu.Unlock()
+			return
+		}
 	}
 	f.pending = append(f.pending, event)
 	if f.notify == nil {
@@ -365,9 +382,9 @@ func (api *API) forkRunOutputWatch(proc *process, chatID uuid.UUID, watch *forkO
 			return
 		case <-tick:
 		}
-		output, truncated := proc.output()
+		head, tail, total := proc.buf.forkRaw()
 		var newLines []string
-		newLines, cursor = forkNewLines(output, truncated, cursor)
+		newLines, cursor = forkNewLines(head, tail, total, cursor)
 		for _, line := range newLines {
 			if !pattern.MatchString(line) {
 				continue
@@ -410,31 +427,32 @@ func (api *API) forkRunOutputWatch(proc *process, chatID uuid.UUID, watch *forkO
 	}
 }
 
+// forkRaw returns copies of the head and the tail that b keeps, and the
+// number of bytes written to it. Unlike Output, it adds no separator and
+// cuts no line, so a position in them is a position in the whole output.
+func (b *HeadTailBuffer) forkRaw() (head, tail string, total int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.head), string(b.tailBytes()), b.totalBytes
+}
+
 // forkNewLines returns the complete lines of output that end after position
 // cursor, and the position after the last of them, or cursor when there are
-// none. A position counts the bytes of the whole output of the process. The
-// HeadTailBuffer keeps the first and the last part of it and joins them with
-// an omission marker, so once bytes are omitted only the lines after the
-// marker can be new, the first of which may have lost its start. Lines that
-// the buffer no longer keeps are missed.
-func forkNewLines(output string, truncated *workspacesdk.ProcessTruncation, cursor int) ([]string, int) {
-	total := len(output)
+// none. A position counts the bytes of the whole output of the process, of
+// which head and tail are the first and the last part, and total the size.
+// When bytes between them are omitted, only the lines of the tail can be
+// new, and the first of them may have lost its start. Lines that the buffer
+// no longer keeps are missed.
+func forkNewLines(head, tail string, total, cursor int) ([]string, int) {
+	output := head + tail
 	start := 0
-	if truncated != nil {
-		total = truncated.OriginalBytes
-		if truncated.OmittedBytes > 0 {
-			marker := fmt.Sprintf("\n\n... [omitted %d bytes] ...\n\n", truncated.OmittedBytes)
-			index := strings.Index(output, marker)
-			if index < 0 {
-				return nil, cursor
-			}
-			start = index + len(marker)
-			newline := strings.IndexByte(output[start:], '\n')
-			if newline < 0 {
-				return nil, cursor
-			}
-			start += newline + 1
+	if len(output) < total {
+		output = tail
+		newline := strings.IndexByte(output, '\n')
+		if newline < 0 {
+			return nil, cursor
 		}
+		start = newline + 1
 	}
 	// output ends at position total.
 	offset := total - len(output)
@@ -457,8 +475,10 @@ func forkNewLines(output string, truncated *workspacesdk.ProcessTruncation, curs
 }
 
 // forkCutLine returns the first forkMaxReportedLineBytes bytes of line, cut
-// at a rune start.
+// at a rune start, with invalid UTF-8 replaced, since a protobuf string must
+// be valid UTF-8.
 func forkCutLine(line string) string {
+	line = strings.ToValidUTF8(line, "\uFFFD")
 	if len(line) <= forkMaxReportedLineBytes {
 		return line
 	}
@@ -470,10 +490,11 @@ func forkCutLine(line string) string {
 }
 
 // forkOutputTail returns the last forkMaxOutputTailBytes bytes of output,
-// from a line start when one is in them, else from a rune start.
+// from a line start when one is in them, else from a rune start, with
+// invalid UTF-8 replaced, since a protobuf string must be valid UTF-8.
 func forkOutputTail(output string) string {
 	if len(output) <= forkMaxOutputTailBytes {
-		return output
+		return strings.ToValidUTF8(output, "\uFFFD")
 	}
 	start := len(output) - forkMaxOutputTailBytes
 	if output[start-1] != '\n' {
@@ -485,5 +506,5 @@ func forkOutputTail(output string) string {
 			}
 		}
 	}
-	return output[start:]
+	return strings.ToValidUTF8(output[start:], "\uFFFD")
 }
