@@ -458,10 +458,9 @@ func webpAnimated(data []byte) (bool, error) {
 
 // dynamicToolOwnsViewImage reports whether this turn offers a caller-supplied
 // view_image, which it does while fork-view-image is off and the turn keeps
-// the chat's dynamic tools. A custom agent tool policy that the turn applies
-// later filters the same tool list, so a dynamic view_image the policy drops
-// owns the name no more: policy decides, so the check takes it after the
-// resolution and returns false when the policy leaves the tool out.
+// the chat's dynamic tools. A custom agent tool policy filters the same tool
+// list, so the check takes it: the policy owns the decision, and the bound
+// runs unless the policy keeps the dynamic tool.
 func (p *Server) dynamicToolOwnsViewImage(chat database.Chat, policy *customAgentToolPolicy) bool {
 	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) || p.disableCallerSuppliedTools ||
 		isExploreSubagentMode(chat.Mode) || (chat.PlanMode.Valid && chat.PlanMode.ChatPlanMode == database.ChatPlanModePlan) {
@@ -472,9 +471,7 @@ func (p *Server) dynamicToolOwnsViewImage(chat database.Chat, policy *customAgen
 		return false
 	}
 	if policy != nil {
-		// The policy filter keeps a dynamic view_image only when the tools
-		// allowlist names it (its Read alias covers the built-in only).
-		return policy.Tools != nil && slices.Contains(policy.Tools, viewImageToolName)
+		return policy.keepsDynamicViewImage()
 	}
 	return true
 }

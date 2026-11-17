@@ -146,6 +146,20 @@ func (policy customAgentToolPolicy) keepsWorkspaceFileTools() bool {
 	})
 }
 
+// keepsDynamicViewImage reports whether policy keeps a caller-supplied
+// (dynamic) view_image tool, the same decision filter makes for it: readonly
+// drops every dynamic tool, disallowed_tools drops it (with aliases, so a
+// disallowed Read drops it too), and a tools allowlist must name it exactly.
+func (policy customAgentToolPolicy) keepsDynamicViewImage() bool {
+	if policy.ReadOnly || customAgentToolNames(policy.DisallowedTools)[viewImageToolName] {
+		return false
+	}
+	if policy.Tools != nil {
+		return slices.Contains(policy.Tools, viewImageToolName)
+	}
+	return true
+}
+
 // keepsACPTools reports whether tools, as policy filters them, hold every
 // ACP tool that the ACP subagent guidance names. A nil policy keeps tools.
 // It knows no MCP server slugs, so it only checks non-MCP tools, which the

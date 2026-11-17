@@ -588,6 +588,8 @@ func TestViewImageToolGate(t *testing.T) {
 		planMode             bool
 		policyDropsViewImage bool
 		policyKeepsViewImage bool
+		policyReadOnly       bool
+		policyDisallows      bool
 		want                 []string
 		bounded              bool
 	}{
@@ -603,6 +605,12 @@ func TestViewImageToolGate(t *testing.T) {
 		{name: "OffWithDynamicToolDroppedByPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyDropsViewImage: true, want: []string{}, bounded: true},
 		// A policy that keeps the dynamic tool leaves it the owner.
 		{name: "OffWithDynamicToolKeptByPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyKeepsViewImage: true, want: []string{}, bounded: false},
+		// A readonly policy drops every dynamic tool, with or without a
+		// tools allowlist naming view_image.
+		{name: "OffWithDynamicToolDroppedByReadOnlyPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyReadOnly: true, want: []string{}, bounded: true},
+		{name: "OffWithDynamicToolDroppedByReadOnlyAllowlistPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyReadOnly: true, policyKeepsViewImage: true, want: []string{}, bounded: true},
+		// A disallowed_tools policy with no allowlist drops the tool.
+		{name: "OffWithDynamicToolDroppedByDisallowedPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyDisallows: true, want: []string{}, bounded: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -625,18 +633,27 @@ func TestViewImageToolGate(t *testing.T) {
 			if tt.dynamic {
 				chat.DynamicTools = pqtype.NullRawMessage{RawMessage: json.RawMessage(`[{"name":"view_image"}]`), Valid: true}
 			}
-			if tt.policyDropsViewImage || tt.policyKeepsViewImage {
-				policyTools := []string{"read_file"}
-				if tt.policyKeepsViewImage {
-					policyTools = append(policyTools, viewImageToolName)
+			if tt.policyDropsViewImage || tt.policyKeepsViewImage || tt.policyReadOnly || tt.policyDisallows {
+				policy := customAgentToolPolicy{MCPMode: "inherit"}
+				if tt.policyReadOnly {
+					policy.ReadOnly = true
 				}
-				policy, err := json.Marshal(customAgentToolPolicy{Tools: policyTools, MCPMode: "inherit"})
+				if tt.policyDisallows {
+					policy.DisallowedTools = []string{viewImageToolName}
+				}
+				if tt.policyDropsViewImage || tt.policyKeepsViewImage {
+					policy.Tools = []string{"read_file"}
+					if tt.policyKeepsViewImage {
+						policy.Tools = append(policy.Tools, viewImageToolName)
+					}
+				}
+				raw, err := json.Marshal(policy)
 				require.NoError(t, err)
 				dbgen.ChatSubagent(t, db, forkdb.ChatSubagent{
 					ChatID:     chat.ID,
 					Depth:      1,
 					Isolation:  subagentIsolationShared,
-					ToolPolicy: pqtype.NullRawMessage{RawMessage: policy, Valid: true},
+					ToolPolicy: pqtype.NullRawMessage{RawMessage: raw, Valid: true},
 				})
 			}
 			if tt.planMode {
@@ -644,7 +661,7 @@ func TestViewImageToolGate(t *testing.T) {
 			}
 			original := prompt
 			var policy *customAgentToolPolicy
-			if tt.policyDropsViewImage || tt.policyKeepsViewImage {
+			if tt.policyDropsViewImage || tt.policyKeepsViewImage || tt.policyReadOnly || tt.policyDisallows {
 				policy, err = server.customAgentToolPolicyOfChat(ctx, chat)
 				require.NoError(t, err)
 				require.NotNil(t, policy)
