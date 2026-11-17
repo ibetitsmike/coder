@@ -42,7 +42,8 @@ const (
 	forkProcessEventsMaxBackoff = time.Minute
 	// forkProcessEventsHeartbeat is how often the agent tells coderd that
 	// it holds no unacked event while a chat process runs, which the final
-	// poll of a wake-up waits for.
+	// poll of a wake-up waits for. Each heartbeat sends two reports without
+	// events: the first gets a fresh acked_at, which the second sends back.
 	forkProcessEventsHeartbeat = 30 * time.Second
 	// forkMaxOutputTailBytes caps the output that an exit carries. coderd
 	// quotes less of it.
@@ -72,11 +73,20 @@ type forkProcessEvents struct {
 	watches map[*process][]*forkOutputWatch
 }
 
-// forkOutputWatch reports the output lines of one process that match its
-// pattern, for the wake-up wakeupID.
+// forkOutputWatch reports the output lines of one process of chat chatID
+// that match its pattern, for the wake-up wakeupID.
 type forkOutputWatch struct {
+	chatID   uuid.UUID
 	wakeupID uuid.UUID
 	stop     chan struct{}
+}
+
+// reportedWakeupID returns the wakeup_id of the reports of w.
+func (w *forkOutputWatch) reportedWakeupID() string {
+	if w.wakeupID == uuid.Nil {
+		return ""
+	}
+	return w.wakeupID.String()
 }
 
 func (f *forkProcessEvents) notifyChan() chan struct{} {
@@ -159,6 +169,11 @@ func (api *API) forkProcessStarted(proc *process, chatID uuid.UUID) {
 		}
 	}
 	f.started[proc] = struct{}{}
+	// A new process with the ID of one that the manager forgot is not
+	// the one that the queued events of that ID are about.
+	f.pending = slices.DeleteFunc(f.pending, func(e *proto.ReportChatProcessEventsRequest_Event) bool {
+		return e.GetChatId() == chatID.String() && e.GetProcessId() == proc.id
+	})
 	f.mu.Unlock()
 
 	go func() {
@@ -189,35 +204,41 @@ func (api *API) forkProcessStarted(proc *process, chatID uuid.UUID) {
 // ctx ends. An event leaves the queue once coderd acked it, so the events
 // that a lost connection left unacked go out on the next one. A failed
 // report is retried with backoff. While a chat process runs and the queue is
-// empty, it sends a report without events every forkProcessEventsHeartbeat,
-// which tells coderd that no exit waits for its ack. It returns only the
-// error of ctx.
+// empty, it sends reports without events every forkProcessEventsHeartbeat,
+// which tell coderd that no exit from before the last ack waits for one. The
+// output watches whose events coderd names as closed stop. It returns only
+// the error of ctx.
 func (api *API) ReportChatProcessEvents(ctx context.Context, client proto.DRPCForkChatProcessEventsClient) error {
 	f := &api.fork
 	notify := f.notifyChan()
 	heartbeat := api.manager.clock.NewTicker(forkProcessEventsHeartbeat, "agentproc", "fork", "process-events-heartbeat")
 	defer heartbeat.Stop()
-	var backoff time.Duration
-	beat := false
+	var (
+		backoff   time.Duration
+		beats     int
+		lastAcked *timestamppb.Timestamp
+	)
 	for {
 		f.mu.Lock()
+		// The queue is read after the response that lastAcked comes from,
+		// so a report without events tells that every exit queued before
+		// that response was acked.
 		batch := slices.Clone(f.pending[:min(len(f.pending), forkMaxProcessEventsBatch)])
-		// The queue is read right before the send, so a report without
-		// events covers every exit queued before it.
-		beat = beat && len(batch) == 0 && f.chatProcessRunningLocked()
+		if !f.chatProcessRunningLocked() {
+			beats = 0
+		}
 		f.mu.Unlock()
-		if len(batch) == 0 && !beat {
+		if len(batch) == 0 && beats == 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-notify:
 			case <-heartbeat.C:
-				beat = true
+				beats = 2
 			}
 			continue
 		}
-		beat = false
-		_, err := client.ReportChatProcessEvents(ctx, &proto.ReportChatProcessEventsRequest{Events: batch})
+		resp, err := client.ReportChatProcessEvents(ctx, &proto.ReportChatProcessEventsRequest{Events: batch, LastAckedAt: lastAcked})
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -240,6 +261,16 @@ func (api *API) ReportChatProcessEvents(ctx context.Context, client proto.DRPCFo
 			continue
 		}
 		backoff = 0
+		if len(batch) == 0 {
+			beats--
+		} else {
+			// The response gives a fresh acked_at, so one report without
+			// events follows.
+			beats = min(beats, 1)
+		}
+		if resp.GetAckedAt() != nil {
+			lastAcked = resp.GetAckedAt()
+		}
 		acked := make(map[*proto.ReportChatProcessEventsRequest_Event]struct{}, len(batch))
 		for _, event := range batch {
 			acked[event] = struct{}{}
@@ -252,7 +283,34 @@ func (api *API) ReportChatProcessEvents(ctx context.Context, client proto.DRPCFo
 			}
 		}
 		f.pending = pending
+		for _, i := range resp.GetClosedOutputEvents() {
+			if i >= 0 && int(i) < len(batch) && batch[i].GetOutputMatch() != nil {
+				f.stopOutputWatchLocked(batch[i])
+			}
+		}
 		f.mu.Unlock()
+	}
+}
+
+// stopOutputWatchLocked stops the output watch that reported event. f.mu
+// must be held.
+func (f *forkProcessEvents) stopOutputWatchLocked(event *proto.ReportChatProcessEventsRequest_Event) {
+	for proc, watches := range f.watches {
+		if proc.id != event.GetProcessId() {
+			continue
+		}
+		for i, w := range watches {
+			if w.chatID.String() != event.GetChatId() || w.reportedWakeupID() != event.GetOutputMatch().GetWakeupId() {
+				continue
+			}
+			close(w.stop)
+			if watches = slices.Delete(watches, i, i+1); len(watches) == 0 {
+				delete(f.watches, proc)
+			} else {
+				f.watches[proc] = watches
+			}
+			return
+		}
 	}
 }
 
@@ -354,7 +412,7 @@ func (api *API) forkWatchOutput(proc *process, chatID uuid.UUID, req workspacesd
 		close(watches[0].stop)
 		watches = slices.Delete(watches, 0, 1)
 	}
-	watch := &forkOutputWatch{wakeupID: req.WakeupID, stop: make(chan struct{})}
+	watch := &forkOutputWatch{chatID: chatID, wakeupID: req.WakeupID, stop: make(chan struct{})}
 	f.watches[proc] = append(watches, watch)
 	// Create the ticker before the goroutine runs, so a test that
 	// advances a mock clock after the request sees it.
@@ -379,11 +437,13 @@ func (api *API) forkWatchOutput(proc *process, chatID uuid.UUID, req workspacesd
 
 // forkRunOutputWatch reads the output of proc on every tick and reports the
 // lines that match pattern: the first match at once, later ones at most once
-// per cool-down, and at most OutputMaxEvents reports. It ends after the
-// last report, when the watch stops, or when the process exits, whose exit
-// report covers the lines that were not reported yet.
+// per cool-down. coderd counts the messages of the watch, which can carry
+// several reports, so the watch ends when coderd says that its watch takes
+// no more lines, when it stops otherwise, or when the process exits, whose
+// exit report covers the lines that were not reported yet. The time of a
+// report grows with each one, even when the clock goes back, since coderd
+// drops a report that is not newer than the last one.
 func (api *API) forkRunOutputWatch(proc *process, chatID uuid.UUID, watch *forkOutputWatch, req workspacesdk.ForkWatchProcessRequest, pattern *regexp.Regexp, tick <-chan time.Time) {
-	maxEvents := max(req.OutputMaxEvents, 1)
 	cooldown := time.Duration(max(req.OutputCooldownSeconds, 0)) * time.Second
 	var (
 		cursor   int
@@ -391,6 +451,7 @@ func (api *API) forkRunOutputWatch(proc *process, chatID uuid.UUID, watch *forkO
 		matched  int
 		sent     int
 		lastSent time.Time
+		lastAt   time.Time
 	)
 	for {
 		select {
@@ -421,28 +482,31 @@ func (api *API) forkRunOutputWatch(proc *process, chatID uuid.UUID, watch *forkO
 			continue
 		}
 		sent++
-		var wakeupID string
-		if watch.wakeupID != uuid.Nil {
-			wakeupID = watch.wakeupID.String()
-		}
+		lastAt = forkReportTime(now, lastAt)
 		api.forkEnqueue(&proto.ReportChatProcessEventsRequest_Event{
 			ChatId:    chatID.String(),
 			ProcessId: proc.id,
 			Kind: &proto.ReportChatProcessEventsRequest_Event_OutputMatch_{OutputMatch: &proto.ReportChatProcessEventsRequest_Event_OutputMatch{
 				Lines:    lines,
 				Matched:  int32(matched), //nolint:gosec // Bounded by the output size.
-				Last:     sent >= maxEvents,
-				WakeupId: wakeupID,
+				WakeupId: watch.reportedWakeupID(),
 			}},
-			At: timestamppb.New(now),
+			At: timestamppb.New(lastAt),
 		})
-		if sent >= maxEvents {
-			return
-		}
 		lastSent = now
 		lines = nil
 		matched = 0
 	}
+}
+
+// forkReportTime returns the time of an output report at now that follows
+// one at last: now, or a microsecond after last when the clock went back.
+// coderd keeps microseconds.
+func forkReportTime(now, last time.Time) time.Time {
+	if now.After(last) {
+		return now
+	}
+	return last.Add(time.Microsecond)
 }
 
 // forkRaw returns copies of the head and the tail that b keeps, and the

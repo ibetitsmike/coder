@@ -84,7 +84,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	require.JSONEq(t, fmt.Sprintf(`[{"type":"process_exit","process_id":"proc-3","command":"tail -f log","agent_id":%q,"output_pattern":"ERROR","output_cooldown_seconds":60,"output_max_events":10}]`, agent.ID), string(f.wakeupEvents(t, patternID)))
 	require.Equal(t, []processWatchCall{
 		{ID: "proc-3"},
-		{ID: "proc-3", Req: workspacesdk.ForkWatchProcessRequest{WakeupID: patternID, OutputPattern: "ERROR", OutputCooldownSeconds: 60, OutputMaxEvents: 10}},
+		{ID: "proc-3", Req: workspacesdk.ForkWatchProcessRequest{WakeupID: patternID, OutputPattern: "ERROR", OutputCooldownSeconds: 60}},
 	}, conn.takeCalls())
 
 	// A registration that fails after the commit keeps the wake-up and
@@ -282,8 +282,8 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	secondMessage := prefix + "is still running and printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\npartial ERROR two\nERROR three\n```" +
 		"\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
 
-	require.Equal(t, []uuid.UUID{chat.ID}, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR one"))
-	require.Empty(t, f.fireProcessLines(t, plainChat, agent.ID, "proc-1", plain.ID, false, "ERROR one"))
+	require.Equal(t, []uuid.UUID{chat.ID}, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR one"))
+	require.Empty(t, f.fireProcessLines(t, plainChat, agent.ID, "proc-1", plain.ID, "ERROR one"))
 	tick(time.Second)
 	require.Equal(t, []string{firstMessage}, f.wakeMessages(t, chat, wakeup.Prompt))
 	require.Equal(t, forkdb.ChatWakeupStatusActive, f.wakeup(t, wakeup.ID).Status, "the process still runs")
@@ -292,12 +292,12 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "nothing new")
 
 	// Two reports before a delivery make one message.
-	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "partial ERROR two"))
-	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR three"))
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "partial ERROR two"))
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR three"))
 	tick(time.Minute)
 	require.Equal(t, []string{firstMessage, secondMessage}, f.wakeMessages(t, chat, wakeup.Prompt))
 
-	require.Empty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR four"), "no lines after the maximum")
+	require.Empty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR four"), "no lines after the maximum")
 	tick(2 * time.Minute)
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 2)
 
@@ -358,7 +358,7 @@ func TestWakeupEventsProcessOutputCooldown(t *testing.T) {
 		return false
 	}
 
-	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR one"))
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR one"))
 	tick(time.Second)
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
 	first := f.wakeup(t, wakeup.ID)
@@ -368,7 +368,7 @@ func TestWakeupEventsProcessOutputCooldown(t *testing.T) {
 
 	// Lines that fire 10 seconds after the message wait.
 	now = now.Add(10 * time.Second)
-	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR two"))
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR two"))
 	require.False(t, due(), "fired lines in the cool-down do not make the wake-up due")
 	tick(0)
 	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "the cool-down runs")
@@ -552,7 +552,7 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 				require.NotEmpty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 0, "", wakeupTestSlot.Add(*tc.exitedAt)))
 			}
 			if tc.lines {
-				require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR"))
+				require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR"))
 			}
 			if tc.stoppedAt != nil {
 				f.stopProcessWorkspace(t, workspace, build, wakeupTestSlot.Add(*tc.stoppedAt))
@@ -715,21 +715,22 @@ func TestProcessFiredText(t *testing.T) {
 	t.Parallel()
 	event := wakeupEvent{Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "make", OutputPattern: "ERROR", OutputMaxEvents: 10}
 	wakeup := forkdb.ChatWakeup{Kind: forkdb.ChatWakeupKindEvents}
-	watch := func(fired string) forkdb.ChatWakeupWatch {
-		w := forkdb.ChatWakeupWatch{Deliveries: 1}
+	watch := func(fired string, deliveries int32) forkdb.ChatWakeupWatch {
+		w := forkdb.ChatWakeupWatch{Deliveries: max(deliveries, 1)}
 		w.FiredPayload.RawMessage, w.FiredPayload.Valid = json.RawMessage(fired), true
 		return w
 	}
 	prefix := "Background process proc-1 (`make`) "
 	for _, tc := range []struct {
-		name     string
-		fired    string
-		wantText string
-		wantDone bool
+		name       string
+		fired      string
+		deliveries int32
+		wantText   string
+		wantDone   bool
 	}{
 		{name: "Lines", fired: `{"matched":1,"lines":"ERROR a"}`, wantText: prefix + "is still running and printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```"},
 		{
-			name: "LastReport", fired: `{"matched":3,"lines":"ERROR b\nERROR c","last":true}`,
+			name: "LastMessage", fired: `{"matched":3,"lines":"ERROR b\nERROR c"}`, deliveries: 9,
 			wantText: prefix + "is still running and printed 3 new lines matching `ERROR`.\n\nLast 2 matching lines:\n```\nERROR b\nERROR c\n```" +
 				"\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat.",
 		},
@@ -740,7 +741,7 @@ func TestProcessFiredText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			text, done := processFiredText(wakeup, watch(tc.fired), event, wakeupTestSlot, false)
+			text, done := processFiredText(wakeup, watch(tc.fired, tc.deliveries), event, wakeupTestSlot, false)
 			require.Equal(t, tc.wantText, text)
 			require.Equal(t, tc.wantDone, done)
 		})
@@ -843,10 +844,10 @@ var processLinesMatched atomic.Int64
 
 // fireProcessLines fires the process watch of wakeupID for matching output
 // lines, like the agent's report does.
-func (f *workerTestFixture) fireProcessLines(t *testing.T, chat database.Chat, agentID uuid.UUID, processID string, wakeupID uuid.UUID, last bool, lines ...string) []uuid.UUID {
+func (f *workerTestFixture) fireProcessLines(t *testing.T, chat database.Chat, agentID uuid.UUID, processID string, wakeupID uuid.UUID, lines ...string) []uuid.UUID {
 	t.Helper()
 	return f.fireProcess(t, forkdb.FireChatProcessWatchesParams{
-		Matched: int32(len(lines)), Lines: strings.Join(lines, "\n"), Last: last, //nolint:gosec // A test fires a few lines.
+		Matched: int32(len(lines)), Lines: strings.Join(lines, "\n"), //nolint:gosec // A test fires a few lines.
 		OutputAt: wakeupTestSlot.Add(time.Duration(processLinesMatched.Add(1)) * time.Millisecond),
 		ChatID:   chat.ID, AgentID: agentID, ProcessID: processID,
 		WakeupID: uuid.NullUUID{UUID: wakeupID, Valid: true},

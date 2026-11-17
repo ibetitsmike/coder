@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/xerrors"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"cdr.dev/slog/v3"
 	"cdr.dev/slog/v3/sloggers/slogtest"
@@ -32,24 +34,40 @@ import (
 
 // forkEventsClient is a proto.DRPCForkChatProcessEventsClient that hands
 // every report to the test and fails the first fail of them, as a lost ack
-// does.
+// does. The response to the nth report carries the acked_at forkAckedAt(n).
+// While closeOutput is set, it names every output event as closed.
 type forkEventsClient struct {
-	calls chan *proto.ReportChatProcessEventsRequest
-	fail  int
+	calls       chan *proto.ReportChatProcessEventsRequest
+	fail        int
+	n           int
+	closeOutput atomic.Bool
 }
 
 func newForkEventsClient(fail int) *forkEventsClient {
 	return &forkEventsClient{calls: make(chan *proto.ReportChatProcessEventsRequest, 100), fail: fail}
 }
 
+func forkAckedAt(n int) *timestamppb.Timestamp {
+	return timestamppb.New(time.Unix(int64(1000+n), 0))
+}
+
 // ReportChatProcessEvents runs on the goroutine of the report loop only.
 func (c *forkEventsClient) ReportChatProcessEvents(_ context.Context, req *proto.ReportChatProcessEventsRequest) (*proto.ReportChatProcessEventsResponse, error) {
+	c.n++
 	c.calls <- req
 	if c.fail > 0 {
 		c.fail--
 		return nil, xerrors.New("connection lost before the ack")
 	}
-	return &proto.ReportChatProcessEventsResponse{}, nil
+	resp := &proto.ReportChatProcessEventsResponse{AckedAt: forkAckedAt(c.n)}
+	if c.closeOutput.Load() {
+		for i, event := range req.GetEvents() {
+			if event.GetOutputMatch() != nil {
+				resp.ClosedOutputEvents = append(resp.ClosedOutputEvents, int32(i)) //nolint:gosec // A test sends few events.
+			}
+		}
+	}
+	return resp, nil
 }
 
 // forkTestAPI returns an API on clock and its handler with the chat
@@ -195,9 +213,10 @@ func TestForkReportProcessEventsReconnect(t *testing.T) {
 	requireExitReport(t, testutil.TryReceive(ctx, t, next.calls), chatID, toolCallID.String(), 5)
 }
 
-// While a chat process runs, the agent sends a report without events on
+// While a chat process runs, the agent sends reports without events on
 // every heartbeat, after the events that wait for an ack, and none while
-// no chat process runs.
+// no chat process runs. Each sends back the acked_at of the response before
+// it, so coderd certifies only a time that the agent read its queue after.
 func TestForkReportProcessEventsHeartbeat(t *testing.T) {
 	t.Parallel()
 	ctx := testutil.Context(t, testutil.WaitLong)
@@ -231,23 +250,36 @@ func TestForkReportProcessEventsHeartbeat(t *testing.T) {
 	// next heartbeat.
 	exited := uuid.New()
 	forkStart(t, api, handler, chatID, exited, "exit 7")
-	requireExitReport(t, testutil.TryReceive(ctx, t, client.calls), chatID, exited.String(), 7)
+	failed := testutil.TryReceive(ctx, t, client.calls)
+	requireExitReport(t, failed, chatID, exited.String(), 7)
+	require.Nil(t, failed.GetLastAckedAt(), "nothing was acked yet")
 	backoff.MustWait(ctx).MustRelease(ctx)
 	mClock.Advance(forkProcessEventsMinBackoff).MustWait(ctx)
-	// The exit goes out before the report without events.
+	// The exit goes out before the reports without events. The second
+	// report was the first acked one.
 	requireExitReport(t, testutil.TryReceive(ctx, t, client.calls), chatID, exited.String(), 7)
-	require.Empty(t, testutil.TryReceive(ctx, t, client.calls).GetEvents())
+	empty := func(lastAcked int) {
+		t.Helper()
+		req := testutil.TryReceive(ctx, t, client.calls)
+		require.Empty(t, req.GetEvents())
+		require.Equal(t, forkAckedAt(lastAcked).AsTime(), req.GetLastAckedAt().AsTime())
+	}
+	empty(2)
+	empty(3)
 	noReport()
 
-	// The next heartbeat sends another one.
+	// The next heartbeat sends two more: the first with the acked_at of
+	// the last heartbeat, the second with a fresh one.
 	mClock.Advance(forkProcessEventsHeartbeat).MustWait(ctx)
-	require.Empty(t, testutil.TryReceive(ctx, t, client.calls).GetEvents())
+	empty(4)
+	empty(5)
+	noReport()
 	stop()
 	require.Empty(t, client.calls)
 }
 
 // An output watch reports the matching lines at once, then at most once
-// per cool-down, and stops after its last report.
+// per cool-down, and stops when coderd says that no watch takes them.
 func TestForkOutputWatch(t *testing.T) {
 	t.Parallel()
 	ctx := testutil.Context(t, testutil.WaitLong)
@@ -260,7 +292,8 @@ func TestForkOutputWatch(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "gate")
 	chatID, toolCallID, wakeupID := uuid.New(), uuid.New(), uuid.New()
 	proc := forkStart(t, api, handler, chatID, toolCallID, fmt.Sprintf(
-		"printf 'a\\nready 1\\nb\\nready 2\\n'; while [ ! -e %q ]; do sleep 0.05; done; echo ready 3; sleep 60", gate))
+		"printf 'a\\nready 1\\nb\\nready 2\\n'; while [ ! -e %q ]; do sleep 0.05; done; echo ready 3; "+
+			"while [ ! -e %q ]; do sleep 0.05; done; echo ready 4; sleep 60", gate, gate+"2"))
 	waitOutput := func(want string) {
 		require.Eventually(t, func() bool {
 			output, _ := proc.output()
@@ -272,7 +305,6 @@ func TestForkOutputWatch(t *testing.T) {
 	code, resp := forkWatch(t, handler, chatID, proc.id, workspacesdk.ForkWatchProcessRequest{
 		WakeupID:              wakeupID,
 		OutputPattern:         "^ready",
-		OutputMaxEvents:       2,
 		OutputCooldownSeconds: 10,
 	})
 	require.Equal(t, http.StatusOK, code)
@@ -298,27 +330,43 @@ func TestForkOutputWatch(t *testing.T) {
 	require.NotNil(t, match)
 	require.Equal(t, []string{"ready 1", "ready 2"}, match.GetLines())
 	require.EqualValues(t, 2, match.GetMatched())
-	require.False(t, match.GetLast())
 	require.Equal(t, wakeupID.String(), match.GetWakeupId())
 	firstAt := first.GetEvents()[0].GetAt().AsTime()
 
-	require.NoError(t, os.WriteFile(gate, nil, 0o600))
-	waitOutput("ready 3\n")
-	var second *proto.ReportChatProcessEventsRequest
-	for range 20 {
-		var ok bool
-		if second, ok = tick(); ok {
-			break
+	// next opens gate and returns the report of the line it lets out,
+	// which waits for the cool-down.
+	next := func(gate, line string) *proto.ReportChatProcessEventsRequest {
+		t.Helper()
+		require.NoError(t, os.WriteFile(gate, nil, 0o600))
+		waitOutput(line + "\n")
+		for range 20 {
+			if req, ok := tick(); ok {
+				match := req.GetEvents()[0].GetOutputMatch()
+				require.Equal(t, []string{line}, match.GetLines())
+				require.EqualValues(t, 1, match.GetMatched())
+				return req
+			}
 		}
+		t.Fatalf("%q is not reported after the cool-down", line)
+		return nil
 	}
-	require.NotNil(t, second, "the second match is reported after the cool-down")
-	match = second.GetEvents()[0].GetOutputMatch()
-	require.Equal(t, []string{"ready 3"}, match.GetLines())
-	require.EqualValues(t, 1, match.GetMatched())
-	require.True(t, match.GetLast())
-	require.GreaterOrEqual(t, second.GetEvents()[0].GetAt().AsTime().Sub(firstAt), 10*time.Second)
+	watchCount := func() int {
+		api.fork.mu.Lock()
+		defer api.fork.mu.Unlock()
+		return len(api.fork.watches[proc])
+	}
+	second := next(gate, "ready 3")
+	secondAt := second.GetEvents()[0].GetAt().AsTime()
+	require.GreaterOrEqual(t, secondAt.Sub(firstAt), 10*time.Second)
+	// coderd did not close the watch, so it goes on after any number of
+	// reports: coderd counts the messages, not the reports.
+	require.Equal(t, 1, watchCount())
 
-	// The watch ended with its last report.
+	client.closeOutput.Store(true)
+	third := next(gate+"2", "ready 4")
+	require.True(t, third.GetEvents()[0].GetAt().AsTime().After(secondAt))
+
+	// coderd named the event closed, so the watch ended.
 	require.Eventually(t, func() bool {
 		api.fork.mu.Lock()
 		defer api.fork.mu.Unlock()
@@ -352,7 +400,7 @@ func TestForkOutputWatchOpenLineAcrossHead(t *testing.T) {
 	require.Zero(t, truncated.OmittedBytes, "the head and the tail are contiguous")
 
 	code, _ := forkWatch(t, handler, chatID, proc.id, workspacesdk.ForkWatchProcessRequest{
-		WakeupID: uuid.New(), OutputPattern: "^ERROR", OutputMaxEvents: 1,
+		WakeupID: uuid.New(), OutputPattern: "^ERROR",
 	})
 	require.Equal(t, http.StatusOK, code)
 	for range 3 {
@@ -377,6 +425,38 @@ func TestForkOutputWatchOpenLineAcrossHead(t *testing.T) {
 	require.Len(t, match.GetLines(), 2)
 	require.Equal(t, "ERROR"+strings.Repeat("x", forkMaxReportedLineBytes-len("ERROR")), match.GetLines()[0])
 	require.Equal(t, "ERROR done", match.GetLines()[1])
+}
+
+// A new process with the ID of one that the manager forgot drops the queued
+// events of the old one, so they cannot fire the watches of the new one.
+func TestForkProcessIDReuse(t *testing.T) {
+	t.Parallel()
+	api, handler := forkTestAPI(t, quartz.NewReal())
+	chatID, otherChat, toolCallID := uuid.New(), uuid.New(), uuid.New()
+	stale := func(chatID uuid.UUID) *proto.ReportChatProcessEventsRequest_Event {
+		return &proto.ReportChatProcessEventsRequest_Event{
+			ChatId:    chatID.String(),
+			ProcessId: toolCallID.String(),
+			Kind:      &proto.ReportChatProcessEventsRequest_Event_Exit_{Exit: &proto.ReportChatProcessEventsRequest_Event_Exit{ExitCode: 1}},
+		}
+	}
+	api.forkEnqueue(stale(chatID))
+	kept := stale(otherChat)
+	api.forkEnqueue(kept)
+
+	forkStart(t, api, handler, chatID, toolCallID, "sleep 60")
+	api.fork.mu.Lock()
+	defer api.fork.mu.Unlock()
+	require.Equal(t, []*proto.ReportChatProcessEventsRequest_Event{kept}, api.fork.pending)
+}
+
+func TestForkReportTime(t *testing.T) {
+	t.Parallel()
+	last := time.Unix(100, 0)
+	require.Equal(t, last.Add(time.Second), forkReportTime(last.Add(time.Second), last))
+	require.Equal(t, last.Add(time.Microsecond), forkReportTime(last, last))
+	require.Equal(t, last.Add(time.Microsecond), forkReportTime(last.Add(-time.Hour), last), "the clock went back")
+	require.Equal(t, last, forkReportTime(last, time.Time{}))
 }
 
 func TestForkHandleWatchProcess(t *testing.T) {

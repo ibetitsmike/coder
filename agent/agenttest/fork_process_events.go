@@ -6,6 +6,8 @@ package agenttest
 import (
 	"context"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	agentproto "github.com/coder/coder/v2/agent/proto"
 )
 
@@ -14,8 +16,8 @@ type forkFakeAgentAPI struct {
 	processEventsErr func(*agentproto.ReportChatProcessEventsRequest) error
 }
 
-// ReportChatProcessEvents records req. With an error func set, it returns
-// what the func returns for req.
+// ReportChatProcessEvents records req and acks it at the current time. With
+// an error func set, it returns what the func returns for req.
 func (f *FakeAgentAPI) ReportChatProcessEvents(_ context.Context, req *agentproto.ReportChatProcessEventsRequest) (*agentproto.ReportChatProcessEventsResponse, error) {
 	f.Lock()
 	defer f.Unlock()
@@ -25,7 +27,7 @@ func (f *FakeAgentAPI) ReportChatProcessEvents(_ context.Context, req *agentprot
 			return nil, err
 		}
 	}
-	return &agentproto.ReportChatProcessEventsResponse{}, nil
+	return &agentproto.ReportChatProcessEventsResponse{AckedAt: timestamppb.Now()}, nil
 }
 
 // ChatProcessEventReports returns every ReportChatProcessEvents request

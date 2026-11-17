@@ -104,28 +104,49 @@ func TestReportChatProcessEvents(t *testing.T) {
 	}
 
 	// With the experiment off, the events are acked without a write.
-	_, err = newAPI(nil).ReportChatProcessEvents(ctx, exit("watched"))
+	resp, err := newAPI(nil).ReportChatProcessEvents(ctx, exit("watched"))
 	require.NoError(t, err)
-	_, err = newAPI(nil).ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{})
+	require.WithinDuration(t, mClock.Now(), resp.GetAckedAt().AsTime(), time.Microsecond)
+	_, err = newAPI(nil).ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{LastAckedAt: timestamppb.New(mClock.Now())})
 	require.NoError(t, err)
 	require.Equal(t, watch, getWatch())
 
 	poked := make(chan uuid.UUID, 10)
 	api := newAPI(&agentapi.ForkChatProcessEvents{Poke: func(chatID uuid.UUID) { poked <- chatID }})
-
-	// A report without events records when the agent said that it holds no
-	// unacked event, and pokes nobody.
-	_, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{})
-	require.NoError(t, err)
-	var spec struct {
-		ReportedAt time.Time `json:"reported_at"`
+	reportedAt := func() time.Time {
+		t.Helper()
+		var spec struct {
+			ReportedAt time.Time `json:"reported_at"`
+		}
+		require.NoError(t, json.Unmarshal(getWatch().Spec, &spec))
+		return spec.ReportedAt
 	}
+
+	// A report without events and without last_acked_at, the first of a
+	// connection, certifies nothing: the agent read its queue before any
+	// time of coderd that it knows.
+	resp, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{})
+	require.NoError(t, err)
+	require.WithinDuration(t, mClock.Now(), resp.GetAckedAt().AsTime(), time.Microsecond)
+	require.Equal(t, watch, getWatch())
+
+	// With last_acked_at it records that time, not the time of receipt,
+	// and pokes nobody.
+	mClock.Advance(10 * time.Second).MustWait(ctx)
+	lastAcked := resp.GetAckedAt()
+	resp, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{LastAckedAt: lastAcked})
+	require.NoError(t, err)
+	require.WithinDuration(t, mClock.Now(), resp.GetAckedAt().AsTime(), time.Microsecond)
+	require.WithinDuration(t, lastAcked.AsTime(), reportedAt(), time.Microsecond)
 	reported := getWatch()
-	require.NoError(t, json.Unmarshal(reported.Spec, &spec))
-	require.WithinDuration(t, mClock.Now(), spec.ReportedAt, time.Millisecond)
 	require.False(t, reported.FiredAt.Valid)
 	require.Empty(t, poked)
-	watch = reported
+
+	// A last_acked_at after the time of receipt is cut to it.
+	_, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{LastAckedAt: timestamppb.New(mClock.Now().Add(time.Hour))})
+	require.NoError(t, err)
+	require.WithinDuration(t, mClock.Now(), reportedAt(), time.Microsecond)
+	watch = getWatch()
 
 	// An exit that no watch waits for changes nothing and pokes nobody.
 	_, err = api.ReportChatProcessEvents(ctx, exit("unwatched"))
@@ -157,7 +178,8 @@ func TestReportChatProcessEvents(t *testing.T) {
 
 // A resent output match, after a lost ack, fires nothing, so it does not
 // count against the output_max_events of the watch, and a later match
-// fires it again.
+// fires it again. An output event that no open watch takes lines for is
+// named in the response, so the agent stops its output watch.
 func TestReportChatProcessEventsOutputResent(t *testing.T) {
 	t.Parallel()
 
@@ -217,37 +239,62 @@ func TestReportChatProcessEventsOutputResent(t *testing.T) {
 		Database:              authzDB,
 		ForkChatProcessEvents: &agentapi.ForkChatProcessEvents{Poke: func(chatID uuid.UUID) { poked <- chatID }},
 	}, database.Workspace{}, database.WorkspaceAgent{ID: agentID})
-	match := func(at time.Time, lines ...string) *agentproto.ReportChatProcessEventsRequest {
-		return &agentproto.ReportChatProcessEventsRequest{Events: []*agentproto.ReportChatProcessEventsRequest_Event{{
+	event := func(wakeupID uuid.UUID, at time.Time, lines ...string) *agentproto.ReportChatProcessEventsRequest_Event {
+		return &agentproto.ReportChatProcessEventsRequest_Event{
 			ChatId:    chat.ID.String(),
 			ProcessId: "watched",
 			Kind: &agentproto.ReportChatProcessEventsRequest_Event_OutputMatch_{OutputMatch: &agentproto.ReportChatProcessEventsRequest_Event_OutputMatch{
 				Lines:    lines,
 				Matched:  int32(len(lines)), //nolint:gosec // A test sends a few lines.
-				WakeupId: wakeup.ID.String(),
+				WakeupId: wakeupID.String(),
 			}},
 			At: timestamppb.New(at),
-		}}}
+		}
+	}
+	match := func(at time.Time, lines ...string) *agentproto.ReportChatProcessEventsRequest {
+		return &agentproto.ReportChatProcessEventsRequest{Events: []*agentproto.ReportChatProcessEventsRequest_Event{event(wakeup.ID, at, lines...)}}
 	}
 	var payload forkdb.ChatProcessFired
 
-	_, err = api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
+	resp, err := api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
 	require.NoError(t, err)
+	require.Empty(t, resp.GetClosedOutputEvents())
 	first := getWatch()
 	require.NoError(t, json.Unmarshal(first.FiredPayload.RawMessage, &payload))
 	require.Equal(t, 1, payload.Matched)
 	require.Equal(t, chat.ID, testutil.TryReceive(ctx, t, poked))
 
 	// The agent sends the batch again: nothing changes and nobody is poked.
-	_, err = api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
+	// The watch still takes lines, so the event is not closed.
+	resp, err = api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
 	require.NoError(t, err)
+	require.Empty(t, resp.GetClosedOutputEvents())
 	require.Equal(t, first, getWatch())
 	require.Empty(t, poked)
 
-	// A later match adds up.
-	_, err = api.ReportChatProcessEvents(ctx, match(now.Add(time.Second), "ERR b"))
+	// A later match adds up. A match for a wake-up without a watch is
+	// closed.
+	resp, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{Events: []*agentproto.ReportChatProcessEventsRequest_Event{
+		event(wakeup.ID, now.Add(time.Second), "ERR b"),
+		event(uuid.New(), now.Add(time.Second), "ERR b"),
+	}})
 	require.NoError(t, err)
+	require.Equal(t, []int32{1}, resp.GetClosedOutputEvents())
 	require.NoError(t, json.Unmarshal(getWatch().FiredPayload.RawMessage, &payload))
 	require.Equal(t, 2, payload.Matched)
 	require.Equal(t, chat.ID, testutil.TryReceive(ctx, t, poked))
+
+	// After the exit of the process, its watch takes no more lines.
+	_, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{Events: []*agentproto.ReportChatProcessEventsRequest_Event{{
+		ChatId:    chat.ID.String(),
+		ProcessId: "watched",
+		Kind:      &agentproto.ReportChatProcessEventsRequest_Event_Exit_{Exit: &agentproto.ReportChatProcessEventsRequest_Event_Exit{}},
+		At:        timestamppb.New(now.Add(2 * time.Second)),
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, chat.ID, testutil.TryReceive(ctx, t, poked))
+	resp, err = api.ReportChatProcessEvents(ctx, match(now.Add(3*time.Second), "ERR c"))
+	require.NoError(t, err)
+	require.Equal(t, []int32{0}, resp.GetClosedOutputEvents())
+	require.Empty(t, poked)
 }

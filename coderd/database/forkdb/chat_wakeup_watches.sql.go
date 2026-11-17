@@ -16,6 +16,49 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const chatProcessWatchTakesLines = `-- name: ChatProcessWatchTakesLines :one
+SELECT EXISTS (
+    SELECT 1
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    WHERE w.status IN ('active', 'paused')
+        AND x.kind = 'process'
+        AND x.delivered_at IS NULL
+        AND x.chat_id = $1::uuid
+        AND x.agent_id = $2::uuid
+        AND x.process_id = $3::text
+        AND ($4::uuid IS NULL OR x.wakeup_id = $4::uuid)
+        AND COALESCE(x.spec->>'output_pattern', '') <> ''
+        AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+        AND x.fired_payload->'exit' IS NULL
+        AND x.fired_payload->'lost' IS NULL
+)::boolean
+`
+
+type ChatProcessWatchTakesLinesParams struct {
+	ChatID    uuid.UUID     `db:"chat_id" json:"chat_id"`
+	AgentID   uuid.UUID     `db:"agent_id" json:"agent_id"`
+	ProcessID string        `db:"process_id" json:"process_id"`
+	WakeupID  uuid.NullUUID `db:"wakeup_id" json:"wakeup_id"`
+}
+
+// Reports whether an open process watch of an active or paused wake-up on
+// process @process_id of chat @chat_id on agent @agent_id still takes output
+// lines, as FireChatProcessWatches fires them, without the output_at check.
+// @wakeup_id narrows the watches when set. The agent stops its output watch
+// when none does.
+func (q *Queries) ChatProcessWatchTakesLines(ctx context.Context, arg ChatProcessWatchTakesLinesParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, chatProcessWatchTakesLines,
+		arg.ChatID,
+		arg.AgentID,
+		arg.ProcessID,
+		arg.WakeupID,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const claimDuePullRequestWatches = `-- name: ClaimDuePullRequestWatches :many
 WITH due AS (
     SELECT x.id, c.owner_id, w.expires_at
@@ -118,8 +161,7 @@ SET
         ELSE
             COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
                 'matched', COALESCE((x.fired_payload->>'matched')::int, 0) + $4::int,
-                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), $5::text), 16384),
-                'last', COALESCE((x.fired_payload->>'last')::boolean, false) OR $6::boolean
+                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), $5::text), 16384)
             )
         END
 FROM chat_wakeups w
@@ -127,10 +169,10 @@ WHERE w.id = x.wakeup_id
     AND w.status IN ('active', 'paused')
     AND x.kind = 'process'
     AND x.delivered_at IS NULL
-    AND x.chat_id = $7::uuid
-    AND x.agent_id = $8::uuid
-    AND x.process_id = $9::text
-    AND ($10::uuid IS NULL OR x.wakeup_id = $10::uuid)
+    AND x.chat_id = $6::uuid
+    AND x.agent_id = $7::uuid
+    AND x.process_id = $8::text
+    AND ($9::uuid IS NULL OR x.wakeup_id = $9::uuid)
     AND (
         $2::jsonb IS NOT NULL
         OR (
@@ -150,7 +192,6 @@ type FireChatProcessWatchesParams struct {
 	OutputAt  time.Time             `db:"output_at" json:"output_at"`
 	Matched   int32                 `db:"matched" json:"matched"`
 	Lines     string                `db:"lines" json:"lines"`
-	Last      bool                  `db:"last" json:"last"`
 	ChatID    uuid.UUID             `db:"chat_id" json:"chat_id"`
 	AgentID   uuid.UUID             `db:"agent_id" json:"agent_id"`
 	ProcessID string                `db:"process_id" json:"process_id"`
@@ -165,10 +206,9 @@ type FireChatProcessWatchesParams struct {
 // object with an exit or a lost key, which merges into the payload.
 // Otherwise the event carries @matched output lines that matched the
 // pattern of the watch, @lines, which add to the lines the payload holds
-// until a delivery, keeping the last 16384 characters, and @last, set on
-// the last report of the agent. Lines fire only a watch with an output
-// pattern whose message count is below its output_max_events, and that has
-// not ended. @output_at, the time the agent matched the lines, must be after
+// until a delivery, keeping the last 16384 characters. Lines fire only a
+// watch with an output pattern whose message count is below its
+// output_max_events, and that has not ended. @output_at, the time the agent matched the lines, must be after
 // the output_at in the spec of the watch, which it then replaces, so a
 // report that the agent sends again changes nothing. The first event keeps
 // its fired_at. Returns the chats to poke.
@@ -179,7 +219,6 @@ func (q *Queries) FireChatProcessWatches(ctx context.Context, arg FireChatProces
 		arg.OutputAt,
 		arg.Matched,
 		arg.Lines,
-		arg.Last,
 		arg.ChatID,
 		arg.AgentID,
 		arg.ProcessID,
@@ -568,8 +607,8 @@ type MarkChatProcessWatchesReportedParams struct {
 	AgentID    uuid.UUID `db:"agent_id" json:"agent_id"`
 }
 
-// Records that agent @agent_id said at @reported_at that it holds no event
-// that coderd did not ack: sets reported_at in the spec of its open process
+// Records that agent @agent_id held no event at @reported_at that coderd
+// did not ack: sets reported_at in the spec of its open process
 // watches of active or paused wake-ups that have not ended. The final poll
 // of a wake-up waits for it.
 func (q *Queries) MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error) {

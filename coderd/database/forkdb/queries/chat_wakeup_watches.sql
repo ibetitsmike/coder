@@ -115,10 +115,9 @@ RETURNING *;
 -- object with an exit or a lost key, which merges into the payload.
 -- Otherwise the event carries @matched output lines that matched the
 -- pattern of the watch, @lines, which add to the lines the payload holds
--- until a delivery, keeping the last 16384 characters, and @last, set on
--- the last report of the agent. Lines fire only a watch with an output
--- pattern whose message count is below its output_max_events, and that has
--- not ended. @output_at, the time the agent matched the lines, must be after
+-- until a delivery, keeping the last 16384 characters. Lines fire only a
+-- watch with an output pattern whose message count is below its
+-- output_max_events, and that has not ended. @output_at, the time the agent matched the lines, must be after
 -- the output_at in the spec of the watch, which it then replaces, so a
 -- report that the agent sends again changes nothing. The first event keeps
 -- its fired_at. Returns the chats to poke.
@@ -136,8 +135,7 @@ SET
         ELSE
             COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
                 'matched', COALESCE((x.fired_payload->>'matched')::int, 0) + @matched::int,
-                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), @lines::text), 16384),
-                'last', COALESCE((x.fired_payload->>'last')::boolean, false) OR @last::boolean
+                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), @lines::text), 16384)
             )
         END
 FROM chat_wakeups w
@@ -161,8 +159,31 @@ WHERE w.id = x.wakeup_id
     )
 RETURNING x.chat_id;
 
--- Records that agent @agent_id said at @reported_at that it holds no event
--- that coderd did not ack: sets reported_at in the spec of its open process
+-- Reports whether an open process watch of an active or paused wake-up on
+-- process @process_id of chat @chat_id on agent @agent_id still takes output
+-- lines, as FireChatProcessWatches fires them, without the output_at check.
+-- @wakeup_id narrows the watches when set. The agent stops its output watch
+-- when none does.
+-- name: ChatProcessWatchTakesLines :one
+SELECT EXISTS (
+    SELECT 1
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    WHERE w.status IN ('active', 'paused')
+        AND x.kind = 'process'
+        AND x.delivered_at IS NULL
+        AND x.chat_id = @chat_id::uuid
+        AND x.agent_id = @agent_id::uuid
+        AND x.process_id = @process_id::text
+        AND (sqlc.narg('wakeup_id')::uuid IS NULL OR x.wakeup_id = sqlc.narg('wakeup_id')::uuid)
+        AND COALESCE(x.spec->>'output_pattern', '') <> ''
+        AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+        AND x.fired_payload->'exit' IS NULL
+        AND x.fired_payload->'lost' IS NULL
+)::boolean;
+
+-- Records that agent @agent_id held no event at @reported_at that coderd
+-- did not ack: sets reported_at in the spec of its open process
 -- watches of active or paused wake-ups that have not ended. The final poll
 -- of a wake-up waits for it.
 -- name: MarkChatProcessWatchesReported :execrows

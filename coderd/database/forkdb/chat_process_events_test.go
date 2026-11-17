@@ -65,8 +65,23 @@ func TestFireChatProcessWatches(t *testing.T) {
 		require.NoError(t, err)
 		return chats
 	}
+	takes := func(processID string, wakeupID uuid.UUID) bool {
+		t.Helper()
+		ok, err := fdb.ChatProcessWatchTakesLines(ctx, forkdb.ChatProcessWatchTakesLinesParams{
+			ChatID: chat.ID, AgentID: agentID, ProcessID: processID,
+			WakeupID: uuid.NullUUID{UUID: wakeupID, Valid: wakeupID != uuid.Nil},
+		})
+		require.NoError(t, err)
+		return ok
+	}
 	t1 := dbtime.Now()
 	t2 := t1.Add(time.Minute)
+
+	// Only a watch with an output pattern of a matching wake-up takes lines.
+	require.True(t, takes("p2", uuid.Nil))
+	require.True(t, takes("p2", wakeup.ID))
+	require.False(t, takes("p2", uuid.New()))
+	require.False(t, takes("p1", uuid.Nil))
 
 	// Lines fire only a watch with an output pattern.
 	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p1", FiredAt: t1, Matched: 1, Lines: "ERR"}))
@@ -75,13 +90,13 @@ func TestFireChatProcessWatches(t *testing.T) {
 	// Lines add up until a delivery, and the first event keeps its time.
 	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t1, OutputAt: t1, Matched: 2, Lines: "ERR a\nERR b"}))
 	first := get(lineWatch.ID)
-	require.JSONEq(t, `{"matched": 2, "lines": "ERR a\nERR b", "last": false}`, string(first.FiredPayload.RawMessage))
+	require.JSONEq(t, `{"matched": 2, "lines": "ERR a\nERR b"}`, string(first.FiredPayload.RawMessage))
 	// A report that the agent sends again changes nothing.
 	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t1, OutputAt: t1, Matched: 2, Lines: "ERR a\nERR b"}))
 	require.Equal(t, first.FiredPayload, get(lineWatch.ID).FiredPayload)
-	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR c", Last: true}))
+	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR c"}))
 	second := get(lineWatch.ID)
-	require.JSONEq(t, `{"matched": 3, "lines": "ERR a\nERR b\nERR c", "last": true}`, string(second.FiredPayload.RawMessage))
+	require.JSONEq(t, `{"matched": 3, "lines": "ERR a\nERR b\nERR c"}`, string(second.FiredPayload.RawMessage))
 	require.WithinDuration(t, t1, second.FiredAt.Time, time.Millisecond)
 
 	// An event for another wake-up fires nothing.
@@ -105,7 +120,7 @@ func TestFireChatProcessWatches(t *testing.T) {
 	require.False(t, delivered.FiredPayload.Valid)
 	// A report that the agent sends again after a delivery fires nothing,
 	// so it does not count against output_max_events.
-	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR c", Last: true}))
+	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR c"}))
 	require.False(t, get(lineWatch.ID).FiredAt.Valid)
 
 	// An exit fires the watches on its agent only.
@@ -119,6 +134,8 @@ func TestFireChatProcessWatches(t *testing.T) {
 	require.Equal(t, "bye\n", fired.Exit.Tail)
 	require.False(t, get(otherAgent.ID).FiredAt.Valid)
 
+	// A watch takes lines until it ends.
+	require.True(t, takes("p2", wakeup.ID))
 	// Lines after the exit of a process fire nothing.
 	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, Ended: ended}))
 	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2.Add(2 * time.Second), Matched: 1, Lines: "ERR late"}))
@@ -126,6 +143,7 @@ func TestFireChatProcessWatches(t *testing.T) {
 	require.NoError(t, json.Unmarshal(get(lineWatch.ID).FiredPayload.RawMessage, &afterExit))
 	require.NotNil(t, afterExit.Exit)
 	require.Zero(t, afterExit.Matched)
+	require.False(t, takes("p2", wakeup.ID))
 
 	// The watches of a paused wake-up fire, since the agent drops what
 	// coderd acked. Those of a wake-up that ended do not.

@@ -934,6 +934,15 @@ func (f *forkQuerier) FireChatProcessWatches(ctx context.Context, arg forkdb.Fir
 	return f.db.FireChatProcessWatches(ctx, arg)
 }
 
+// ChatProcessWatchTakesLines spans the wake-ups of a chat on one agent, so
+// it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return false, err
+	}
+	return f.db.ChatProcessWatchTakesLines(ctx, arg)
+}
+
 // MarkChatProcessWatchesReported spans the wake-ups of chats on one agent,
 // so it needs site-wide chat access, like chatd's.
 func (f *forkQuerier) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {

@@ -302,7 +302,6 @@ func (p *Server) registerProcessWatch(ctx context.Context, fdb forkdb.Store, con
 		WakeupID:              wakeup.ID,
 		OutputPattern:         event.OutputPattern,
 		OutputCooldownSeconds: event.OutputCooldownSeconds,
-		OutputMaxEvents:       event.OutputMaxEvents,
 	})
 	if err != nil {
 		return false, err
@@ -432,7 +431,7 @@ func processFiredText(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, ev
 		return processLostText(event, fired.Lost.Reason), true
 	case fired.Matched > 0 && !eventsFinalPoll(wakeup, now):
 		text := processLinesText(event, fired.Matched, fired.Lines)
-		if fired.Last || int(watch.Deliveries)+1 >= event.OutputMaxEvents {
+		if int(watch.Deliveries)+1 >= event.OutputMaxEvents {
 			text += processLinesLastText
 		}
 		return text, false

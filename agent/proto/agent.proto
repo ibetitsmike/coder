@@ -787,7 +787,9 @@ service Agent {
 // Fork: ReportChatProcessEventsRequest carries events of the background
 // processes that chats started on the agent. The agent sends each event until
 // a call that carries it succeeds. A request without events says that the
-// agent holds no event that coderd did not ack.
+// agent held no event that coderd did not ack when it read its queue for the
+// request, which was after it got the response that last_acked_at comes
+// from.
 message ReportChatProcessEventsRequest {
 	message Event {
 		// Exit tells that the process exited. exit_code is -1 for a process
@@ -798,13 +800,12 @@ message ReportChatProcessEventsRequest {
 		}
 		// OutputMatch carries the output lines that matched the pattern of
 		// a watch since its last report. matched counts them; lines may
-		// leave out the oldest. last is set on the final report of the
-		// watch. wakeup_id is the wake-up that registered the watch.
+		// leave out the oldest. wakeup_id is the wake-up that registered
+		// the watch.
 		message OutputMatch {
 			repeated string lines = 1;
 			int32 matched = 2;
-			bool last = 3;
-			string wakeup_id = 4;
+			string wakeup_id = 3;
 		}
 		string chat_id = 1;
 		string process_id = 2;
@@ -815,9 +816,18 @@ message ReportChatProcessEventsRequest {
 		google.protobuf.Timestamp at = 5;
 	}
 	repeated Event events = 1;
+	// last_acked_at is the acked_at of the last response that the agent got.
+	google.protobuf.Timestamp last_acked_at = 2;
 }
 
-message ReportChatProcessEventsResponse {}
+// Fork: ReportChatProcessEventsResponse acks a ReportChatProcessEventsRequest.
+// acked_at is the time of coderd when it acked. closed_output_events are the
+// indexes in the request of the output_match events that no open watch takes
+// any more lines for, whose output watch the agent stops.
+message ReportChatProcessEventsResponse {
+	google.protobuf.Timestamp acked_at = 1;
+	repeated int32 closed_output_events = 2;
+}
 
 // ACPHarnessBody advertises cached harness metadata without launch configuration.
 message ACPHarnessBody {

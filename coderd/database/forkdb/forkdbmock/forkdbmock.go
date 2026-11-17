@@ -86,6 +86,21 @@ func (mr *MockStoreMockRecorder) CancelChatWakeupsByChatID(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelChatWakeupsByChatID", reflect.TypeOf((*MockStore)(nil).CancelChatWakeupsByChatID), ctx, arg)
 }
 
+// ChatProcessWatchTakesLines mocks base method.
+func (m *MockStore) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChatProcessWatchTakesLines", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ChatProcessWatchTakesLines indicates an expected call of ChatProcessWatchTakesLines.
+func (mr *MockStoreMockRecorder) ChatProcessWatchTakesLines(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChatProcessWatchTakesLines", reflect.TypeOf((*MockStore)(nil).ChatProcessWatchTakesLines), ctx, arg)
+}
+
 // ClaimDuePullRequestWatches mocks base method.
 func (m *MockStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
 	m.ctrl.T.Helper()

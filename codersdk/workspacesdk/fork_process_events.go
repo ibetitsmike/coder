@@ -19,16 +19,16 @@ import (
 // chat in the request's chat header. The agent reports the exit of every
 // process of a chat over its Agent API connection. With OutputPattern set,
 // it also reports the output lines that match it: the first report comes at
-// once, the next ones at most once per OutputCooldownSeconds, and at most
-// OutputMaxEvents of them. WakeupID names the wake-up that watches: a second
-// request with the same WakeupID keeps the watch it registered, and one with
-// another WakeupID replaces it. Without OutputPattern the request only reads
-// the process.
+// once and the next ones at most once per OutputCooldownSeconds, until
+// coderd answers a report with no open watch that takes more lines. WakeupID
+// names the wake-up that watches: a second request with the same WakeupID
+// keeps the watch it registered, and each other WakeupID gets its own watch,
+// up to a few per process. Without OutputPattern the request only reads the
+// process.
 type ForkWatchProcessRequest struct {
 	WakeupID              uuid.UUID `json:"wakeup_id,omitzero"`
 	OutputPattern         string    `json:"output_pattern,omitempty"`
 	OutputCooldownSeconds int       `json:"output_cooldown_seconds,omitempty"`
-	OutputMaxEvents       int       `json:"output_max_events,omitempty"`
 }
 
 // ForkWatchProcessResponse is the state of the process after the watch was

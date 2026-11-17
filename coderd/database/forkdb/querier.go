@@ -22,6 +22,12 @@ type Querier interface {
 	// each other.
 	AcquireSharedLock(ctx context.Context, lockID int64) error
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
+	// Reports whether an open process watch of an active or paused wake-up on
+	// process @process_id of chat @chat_id on agent @agent_id still takes output
+	// lines, as FireChatProcessWatches fires them, without the output_at check.
+	// @wakeup_id narrows the watches when set. The agent stops its output watch
+	// when none does.
+	ChatProcessWatchTakesLines(ctx context.Context, arg ChatProcessWatchTakesLinesParams) (bool, error)
 	// Claims the open pull_request watches that the pull request poller of a
 	// replica reads next: those of active wake-ups of unarchived chats whose
 	// spec next_poll_at has come by @now, or that have none, and that no read
@@ -103,10 +109,9 @@ type Querier interface {
 	// object with an exit or a lost key, which merges into the payload.
 	// Otherwise the event carries @matched output lines that matched the
 	// pattern of the watch, @lines, which add to the lines the payload holds
-	// until a delivery, keeping the last 16384 characters, and @last, set on
-	// the last report of the agent. Lines fire only a watch with an output
-	// pattern whose message count is below its output_max_events, and that has
-	// not ended. @output_at, the time the agent matched the lines, must be after
+	// until a delivery, keeping the last 16384 characters. Lines fire only a
+	// watch with an output pattern whose message count is below its
+	// output_max_events, and that has not ended. @output_at, the time the agent matched the lines, must be after
 	// the output_at in the spec of the watch, which it then replaces, so a
 	// report that the agent sends again changes nothing. The first event keeps
 	// its fired_at. Returns the chats to poke.
@@ -321,8 +326,8 @@ type Querier interface {
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
-	// Records that agent @agent_id said at @reported_at that it holds no event
-	// that coderd did not ack: sets reported_at in the spec of its open process
+	// Records that agent @agent_id held no event at @reported_at that coderd
+	// did not ack: sets reported_at in the spec of its open process
 	// watches of active or paused wake-ups that have not ended. The final poll
 	// of a wake-up waits for it.
 	MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error)

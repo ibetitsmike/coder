@@ -431,11 +431,12 @@ Lines that match in the cool-down before the process exits arrive only in the ex
 After a lost connection, a message doesn't repeat or miss a line.
 `process_output_max_events`, from 1 to 100 and 10 by default, caps those messages per process, and the exit message still arrives.
 The workspace agent keeps only the first and the last 16&nbsp;KiB of a process's output, and once a process has printed more, matching sees only the kept last 16&nbsp;KiB, so earlier lines can be missed.
-It also cuts a line longer than 2048&nbsp;bytes and ends it with `... [truncated]`, so a match in the cut part doesn't wake the chat.
+Matching reads the whole line as the workspace agent kept it, so a match past the first 4&nbsp;KiB of a long line still wakes the chat, but the message shows only those first 4&nbsp;KiB, with no marker.
 The result also holds `processes`, with the `process_id`, `command`, and `output_pattern` of each watched process.
 At `expires_at`, one last check reports the processes that exited by then, and no more matching lines.
 If a process has not reported an exit, the last check waits until the workspace agent says, at least 5&nbsp;seconds after the expiry, that it holds no exit it could not send, at most 10 minutes, so that an exit the agent could not send in time still arrives.
 While a chat process runs, the agent says so every 30&nbsp;seconds.
+It dates that statement by when Coder Agents answered its previous report, so a slow report or a skewed clock can't make the check miss an exit.
 That check can also report an exit in the 15&nbsp;seconds after `expires_at`, but a check that runs later, such as after a busy turn, leaves out exits after `expires_at`, by the exit time that the workspace agent reported.
 The call reads each process from the workspace agent before it returns, and fails with `process "<id>" is not a process of this chat: pass the background_process_id that execute returned` when the chat's workspace agent doesn't know it, or with `this chat has no workspace agent: start the process with execute first`.
 A workspace agent too old to report processes fails the call with `the workspace agent of this chat is too old to report process events: restart the workspace to update its agent, or poll the process with schedule_wakeup`.

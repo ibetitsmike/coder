@@ -622,6 +622,11 @@ func (f forkQueryMetricsStore) FireChatProcessWatches(ctx context.Context, arg f
 	return f.s.FireChatProcessWatches(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	defer f.observe(ctx, "ChatProcessWatchTakesLines", time.Now())
+	return f.s.ChatProcessWatchTakesLines(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
 	defer f.observe(ctx, "MarkChatProcessWatchesReported", time.Now())
 	return f.s.MarkChatProcessWatchesReported(ctx, arg)
