@@ -153,6 +153,10 @@ func (c *resolveCache) changed() {
 func (c *resolveCache) setEnabled(enable bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.setEnabledLocked(enable)
+}
+
+func (c *resolveCache) setEnabledLocked(enable bool) bool {
 	on := enable && !c.closed
 	changed := c.on != on
 	c.on = on
@@ -169,12 +173,14 @@ func (c *resolveCache) setEnabled(enable bool) bool {
 	return true
 }
 
-// close turns the cache off for good, when the Manager closes.
+// close turns the cache off for good, when the Manager closes. It sets
+// closed and turns the cache off in one critical section, so a response
+// that a closing push loop still applies cannot turn it on again.
 func (c *resolveCache) close() {
-	c.setEnabled(false)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closed = true
+	c.setEnabledLocked(false)
 }
 
 // state reports whether the cache is on and its flip count.

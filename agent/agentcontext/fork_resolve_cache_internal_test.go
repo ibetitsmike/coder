@@ -957,6 +957,46 @@ func TestFileMemo_EmptyFileCountsAgainstBudget(t *testing.T) {
 	require.Zero(t, memo.bytes)
 }
 
+// Close turns the cache off for good even while a push loop still applies a
+// response that turns it on, so the memo hold it took is released.
+func TestResolveCache_CloseRacingEnableStaysOff(t *testing.T) {
+	t.Parallel()
+	for range 2000 {
+		c := &resolveCache{}
+		c.setEnabled(true)
+		done := make(chan struct{})
+		started := make(chan struct{})
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			c.setEnabled(true)
+			close(started)
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					c.setEnabled(true)
+				}
+			}
+		}()
+		<-started
+		c.close()
+		close(done)
+		<-stopped
+		on, _ := c.state()
+		if on {
+			// Release the hold the racing enable kept, for the other tests.
+			c.mu.Lock()
+			c.closed = false
+			c.mu.Unlock()
+			c.setEnabled(false)
+		}
+		require.False(t, on, "a closed cache stays off")
+		require.False(t, c.setEnabled(true), "a closed cache cannot be turned on")
+	}
+}
+
 // With the context cache off a pass stores nothing, and turning it off drops
 // what it held. Turning it on again starts empty: a result from before the
 // flip is never served, even when nothing else changed.
