@@ -9,6 +9,7 @@ import {
 	getChatWorkflowRun,
 	getChatWorkflowRuns,
 	stopChatWorkflowRun,
+	workflowRunsMaxLimit,
 	workflowRunsPageSize,
 } from "#/api/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
@@ -32,33 +33,95 @@ export const runListHasRunningRun = (
 	false;
 
 /**
+ * An RFC 3339 timestamp as whole seconds and nanosecond digits. The server
+ * trims trailing zeros and may use an offset, so the text does not sort.
+ */
+const keysetTime = (stamp: string) => ({
+	seconds: Date.parse(stamp.replace(/\.\d+/, "")),
+	fraction: (/\.(\d+)/.exec(stamp)?.[1] ?? "").padEnd(9, "0"),
+});
+
+/** The keyset order of the run list: newest first, created_at then id. */
+const isNewerRun = (run: WorkflowRun, than: WorkflowRun) => {
+	const a = keysetTime(run.created_at);
+	const b = keysetTime(than.created_at);
+	if (a.seconds !== b.seconds) {
+		return a.seconds > b.seconds;
+	}
+	if (a.fraction !== b.fraction) {
+		return a.fraction > b.fraction;
+	}
+	return run.id > than.id;
+};
+
+/**
  * Lists the chat's workflow runs, newest first, as pages that "Load older
  * runs" extends with the keyset cursor of the last loaded run.
  */
 export const chatWorkflowRuns = (chatId: string) =>
 	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
-		queryFn: ({ client, queryKey, signal, pageParam }) => {
+		queryFn: async ({ client, queryKey, signal, pageParam }) => {
 			// A refetch revisits every loaded page, but only a page that is
 			// not all-terminal or whose cursor has shifted reaches the
 			// server: a resume flips an interrupted run to running in place,
 			// without moving its cursor, so only a fetch can notice it, and
 			// a new run shifts the first page's cursor, so the page behind
 			// it is fetched with its new cursor.
-			if (pageParam.after !== "") {
-				const cached =
-					client.getQueryData<
-						InfiniteData<WorkflowRun[], WorkflowRunPageParam>
-					>(queryKey);
-				const index = cached?.pageParams.findIndex(
-					(param) => param.after === pageParam.after,
+			const cached =
+				client.getQueryData<InfiniteData<WorkflowRun[], WorkflowRunPageParam>>(
+					queryKey,
 				);
-				const page = cached?.pages[index ?? -1];
-				if (page?.every(isTerminalRun)) {
-					return page;
+			const pages = cached?.pages ?? [];
+			const index =
+				cached?.pageParams.findIndex(
+					(param) => param.after === pageParam.after,
+				) ?? -1;
+			const cachedPage = pages[index];
+			if (pageParam.after !== "" && cachedPage?.every(isTerminalRun)) {
+				return cachedPage;
+			}
+			// A refetch asks a page for as many rows as it holds, so a page a
+			// top-up grew keeps its tail and the page behind it its cursor.
+			const limit = Math.min(
+				workflowRunsMaxLimit,
+				Math.max(workflowRunsPageSize, cachedPage?.length ?? 0),
+			);
+			const runs = await getChatWorkflowRuns(
+				chatId,
+				pageParam.after,
+				signal,
+				limit,
+			);
+			// A tick that lands between two keyset pages walks the shifted
+			// cursors, so d new runs leave the d oldest cached rows unfetched
+			// and they fall out of the cache. The last page of the walk tops
+			// up with those rows, so the flat list stays whole; a page whose
+			// tail is not past the second to last page's tail has pages
+			// behind it that fetch them. With 50 or more rows to make up the
+			// oldest rows still fall out, and Load older brings them back.
+			const tail = runs[runs.length - 1];
+			const boundary = pages[pages.length - 2]?.at(-1);
+			if (
+				runs.length === limit &&
+				tail &&
+				(!boundary || isNewerRun(boundary, tail))
+			) {
+				const remaining = pages
+					.flat()
+					.filter((run) => isNewerRun(tail, run)).length;
+				if (remaining > 0 && remaining < workflowRunsPageSize) {
+					const topUp = await getChatWorkflowRuns(
+						chatId,
+						`${tail.created_at}/${tail.id}`,
+						signal,
+						remaining,
+					);
+					const seen = new Set(runs.map((run) => run.id));
+					return [...runs, ...topUp.filter((run) => !seen.has(run.id))];
 				}
 			}
-			return getChatWorkflowRuns(chatId, pageParam.after, signal);
+			return runs;
 		},
 		initialPageParam: { after: "" } satisfies WorkflowRunPageParam,
 		getNextPageParam: (lastPage): WorkflowRunPageParam | undefined => {

@@ -71,6 +71,7 @@ const observeRuns = () => {
 	return {
 		getRuns,
 		pages: () => observer.getCurrentResult().data?.pages ?? [],
+		hasNextPage: () => observer.getCurrentResult().hasNextPage,
 		refetch: () => observer.refetch(),
 		fetchNextPage,
 		start,
@@ -94,8 +95,8 @@ describe("chatWorkflowRuns polling", () => {
 		try {
 			// The list is newest first: run 49 is the oldest run of the
 			// first page, and the cursor page holds the 50 runs behind it.
-			const first = fullPage(49, Array(50).fill("completed"));
-			const second = fullPage(-1, Array(50).fill("completed"));
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const second = fullPage(-1, new Array(50).fill("completed"));
 			const cursor = cursorOf(first);
 			getRuns
 				.mockResolvedValueOnce(first)
@@ -124,7 +125,7 @@ describe("chatWorkflowRuns polling", () => {
 		try {
 			// The older page holds a running run, addressed by the first
 			// page's cursor.
-			const first = fullPage(49, Array(50).fill("completed"));
+			const first = fullPage(49, new Array(50).fill("completed"));
 			const runningPage = fullPage(-1, ["completed", "running", "completed"]);
 			const cursor = cursorOf(first);
 			getRuns
@@ -156,7 +157,7 @@ describe("chatWorkflowRuns polling", () => {
 			// The older page holds an interrupted run. A resume flips the
 			// row to running in place, so the cursor never moves and only a
 			// fetch can notice the change.
-			const first = fullPage(49, Array(50).fill("completed"));
+			const first = fullPage(49, new Array(50).fill("completed"));
 			const cursor = cursorOf(first);
 			getRuns
 				.mockResolvedValueOnce(first)
@@ -195,11 +196,11 @@ describe("chatWorkflowRuns polling", () => {
 		try {
 			// The first page ends at run 49 and the cursor page starts at
 			// run -1, so run 50 does not exist yet.
-			const first = fullPage(49, Array(50).fill("completed"));
+			const first = fullPage(49, new Array(50).fill("completed"));
 			const cursor = cursorOf(first);
 			getRuns
 				.mockResolvedValueOnce(first)
-				.mockResolvedValueOnce(fullPage(-1, Array(50).fill("completed")))
+				.mockResolvedValueOnce(fullPage(-1, new Array(50).fill("completed")))
 				.mockResolvedValue(first);
 			start();
 			await waitForPages(pages, 1);
@@ -221,17 +222,350 @@ describe("chatWorkflowRuns polling", () => {
 					after === ""
 						? shiftedFirst
 						: after === newCursor
-							? fullPage(0, Array(50).fill("completed"))
+							? fullPage(0, new Array(50).fill("completed"))
 							: [],
 				),
 			);
 			getRuns.mockClear();
 			refetch();
-			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(3));
+			// The shifted page drops the old tail run -50 from the cache,
+			// so the walk also tops the page up with that one row.
 			expect(getRuns.mock.calls.map((call) => call[1])).toEqual([
 				"",
 				newCursor,
+				cursorOf(fullPage(0, new Array(50).fill("completed"))),
 			]);
+		} finally {
+			unsubscribe();
+		}
+	});
+});
+
+describe("chatWorkflowRuns refetch top-up", () => {
+	it("keeps the old tail when a refetch lands between pages", async () => {
+		const { getRuns, pages, fetchNextPage, refetch, start, unsubscribe } =
+			observeRuns();
+		try {
+			// Two loaded pages: runs 49 down to -50. Run 50 then arrives,
+			// so a fresh first page ends at run 1 and the tick's walk of
+			// the shifted cursors never lands on run -50, the old tail.
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const second = fullPage(-1, new Array(50).fill("completed"));
+			getRuns.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+			start();
+			await waitForPages(pages, 1);
+			await fetchNextPage();
+			await waitForPages(pages, 2);
+
+			const shiftedFirst = [makeRun(50, "completed"), ...first.slice(0, 49)];
+			const newCursor = cursorOf(shiftedFirst);
+			const shiftedSecond = fullPage(0, new Array(50).fill("completed"));
+			getRuns.mockImplementation((_chatId, after, _signal, limit) =>
+				Promise.resolve(
+					limit === 1
+						? [makeRun(-50, "completed")]
+						: after === ""
+							? shiftedFirst
+							: after === newCursor
+								? shiftedSecond
+								: [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls).toHaveLength(3);
+			// The top-up fetches exactly the one row the walk skipped.
+			expect(getRuns.mock.calls[2]?.[1]).toBe(cursorOf(shiftedSecond));
+			expect(getRuns.mock.calls[2]?.[3]).toBe(1);
+			const flatIds = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(flatIds).toHaveLength(101);
+			expect(flatIds).toEqual(
+				Array.from({ length: 101 }, (_, i) => makeRun(50 - i, "completed").id),
+			);
+			expect(pages()[1]).toHaveLength(51);
+
+			// With no new run the next tick fetches the first page only: its
+			// tail is unchanged, so the topped-up page keeps its cursor and
+			// comes from the cache.
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+			]);
+			expect(pages()[1]).toHaveLength(51);
+
+			// Load older reads the top-up page's last row, so it must not
+			// repeat the rows the top-up already covered.
+			await fetchNextPage();
+			const flatAfter = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(new Set(flatAfter).size).toBe(flatAfter.length);
+			expect(flatAfter).toHaveLength(101);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("does not top up when no run arrived", async () => {
+		const { getRuns, pages, refetch, start, unsubscribe } = observeRuns();
+		try {
+			const first = fullPage(49, new Array(50).fill("completed"));
+			getRuns.mockResolvedValue(first);
+			start();
+			await waitForPages(pages, 1);
+
+			// The tick fetches the first page; its tail already covers
+			// every cached row, so no top-up request follows.
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns).toHaveBeenCalledTimes(1);
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+			]);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("drops the oldest rows when 50 or more runs arrive between polls", async () => {
+		const {
+			getRuns,
+			pages,
+			fetchNextPage,
+			hasNextPage,
+			refetch,
+			start,
+			unsubscribe,
+		} = observeRuns();
+		try {
+			const first = fullPage(49, new Array(50).fill("completed"));
+			getRuns.mockResolvedValueOnce(first);
+			start();
+			await waitForPages(pages, 1);
+
+			// 60 new runs: the fresh first page ends at run 60, so all 50
+			// cached rows are older than its tail. That is a page or more to
+			// make up, so no top-up runs and the drop is accepted; Load
+			// older brings the lost rows back.
+			const shiftedFirst = fullPage(109, new Array(50).fill("completed"));
+			const newCursor = cursorOf(shiftedFirst);
+			getRuns.mockImplementation((_chatId, after) =>
+				Promise.resolve(
+					after === ""
+						? shiftedFirst
+						: after === newCursor
+							? fullPage(59, new Array(50).fill("completed"))
+							: [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+			]);
+			const flatIds = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(flatIds).toEqual(shiftedFirst.map((run) => run.id));
+			expect(hasNextPage()).toBe(true);
+
+			// Load older brings the dropped rows back with no duplicates.
+			await fetchNextPage();
+			const flatAfter = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(new Set(flatAfter).size).toBe(flatAfter.length);
+			expect(flatAfter).toHaveLength(100);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("tops up a single page and then polls it with one request", async () => {
+		const { getRuns, pages, refetch, start, unsubscribe } = observeRuns();
+		try {
+			const first = fullPage(49, new Array(50).fill("completed"));
+			getRuns.mockResolvedValueOnce(first);
+			start();
+			await waitForPages(pages, 1);
+
+			// Three new runs push runs 2 to 0 off the fresh first page, so
+			// the page tops up with them and holds 53 rows.
+			const shiftedFirst = fullPage(52, new Array(50).fill("completed"));
+			getRuns.mockImplementation((_chatId, after, _signal, limit) =>
+				Promise.resolve(
+					after === ""
+						? fullPage(52, new Array(limit ?? 50).fill("completed"))
+						: after === cursorOf(shiftedFirst)
+							? fullPage(2, new Array(limit ?? 50).fill("completed"))
+							: [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+				[cursorOf(shiftedFirst), 3],
+			]);
+			expect(pages()[0]?.map((run: WorkflowRun) => run.id)).toEqual(
+				fullPage(52, new Array(53).fill("completed")).map((run) => run.id),
+			);
+
+			// The next tick asks for all 53 rows, so its tail is the cached
+			// tail and no top-up follows.
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 53],
+			]);
+			expect(pages()[0]).toHaveLength(53);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("does not top up on fetchNextPage alone", async () => {
+		const { getRuns, pages, fetchNextPage, start, unsubscribe } = observeRuns();
+		try {
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const second = fullPage(-1, new Array(50).fill("completed"));
+			const third = fullPage(-101, new Array(50).fill("completed"));
+			getRuns
+				.mockResolvedValueOnce(first)
+				.mockImplementation((_chatId, after) =>
+					Promise.resolve(
+						after === cursorOf(first)
+							? second
+							: after === cursorOf(second)
+								? third
+								: [],
+					),
+				);
+			start();
+			await waitForPages(pages, 1);
+			await fetchNextPage();
+			await waitForPages(pages, 2);
+
+			// The next page's tail is older than every cached row, so
+			// nothing counts as remaining and no top-up request follows.
+			getRuns.mockClear();
+			await fetchNextPage();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				[cursorOf(second), 50],
+			]);
+			await waitForPages(pages, 3);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("keeps a short last page whole without a top-up", async () => {
+		const {
+			getRuns,
+			pages,
+			fetchNextPage,
+			hasNextPage,
+			refetch,
+			start,
+			unsubscribe,
+		} = observeRuns();
+		try {
+			// Runs 49 down to -10: a full first page and a short last page,
+			// so there is nothing older to load.
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const second = fullPage(-1, new Array(10).fill("completed"));
+			getRuns.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+			start();
+			await waitForPages(pages, 1);
+			await fetchNextPage();
+			await waitForPages(pages, 2);
+			expect(hasNextPage()).toBe(false);
+
+			// With no new run, the 10 rows older than the first page's tail
+			// belong to the page behind it, so the first page does not top
+			// up and the finished short page comes from the cache.
+			getRuns.mockImplementation((_chatId, after) =>
+				Promise.resolve(after === "" ? first : []),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+			]);
+			expect(pages().map((page) => page.length)).toEqual([50, 10]);
+
+			// Five new runs: the fresh first page ends at run 5, and the page
+			// behind its new cursor holds the 15 older rows, short, so the
+			// walk covers every row and still nothing tops up.
+			const shiftedFirst = fullPage(54, new Array(50).fill("completed"));
+			const shiftedSecond = fullPage(4, new Array(15).fill("completed"));
+			getRuns.mockImplementation((_chatId, after) =>
+				Promise.resolve(
+					after === ""
+						? shiftedFirst
+						: after === cursorOf(shiftedFirst)
+							? shiftedSecond
+							: [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+				[cursorOf(shiftedFirst), 50],
+			]);
+			const flatIds = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(flatIds).toEqual(
+				Array.from({ length: 65 }, (_, i) => makeRun(54 - i, "completed").id),
+			);
+			expect(hasNextPage()).toBe(false);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("orders runs by time, not by timestamp text", async () => {
+		const { getRuns, pages, refetch, start, unsubscribe } = observeRuns();
+		try {
+			// The server trims trailing zeros, so run 0 at a whole second
+			// sorts after run 1 half a second later as text. Run 0 is still
+			// the older run, and the top-up must count it.
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const run0 = first[49];
+			if (!run0) {
+				throw new Error("the page must hold run 0");
+			}
+			first[48] = {
+				...makeRun(1, "completed"),
+				created_at: run0.created_at.replace("Z", ".5Z"),
+			};
+			getRuns.mockResolvedValueOnce(first);
+			start();
+			await waitForPages(pages, 1);
+
+			const shiftedFirst = [makeRun(50, "completed"), ...first.slice(0, 49)];
+			getRuns.mockImplementation((_chatId, after) =>
+				Promise.resolve(
+					after === ""
+						? shiftedFirst
+						: after === cursorOf(shiftedFirst)
+							? [run0]
+							: [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 50],
+				[cursorOf(shiftedFirst), 1],
+			]);
+			expect(pages()[0]).toHaveLength(51);
 		} finally {
 			unsubscribe();
 		}
@@ -240,7 +574,7 @@ describe("chatWorkflowRuns polling", () => {
 
 describe("runListHasRunningRun", () => {
 	it("sees a running run on any loaded page, not just the first", () => {
-		const first = fullPage(49, Array(50).fill("completed"));
+		const first = fullPage(49, new Array(50).fill("completed"));
 		const data = {
 			pages: [first, fullPage(-1, ["completed", "running"])],
 			pageParams: [
@@ -251,7 +585,7 @@ describe("runListHasRunningRun", () => {
 		expect(runListHasRunningRun(data)).toBe(true);
 		expect(
 			runListHasRunningRun({
-				pages: [first, fullPage(-1, Array(50).fill("completed"))],
+				pages: [first, fullPage(-1, new Array(50).fill("completed"))],
 				pageParams: [{ after: "" }, { after: "c" }],
 			}),
 		).toBe(false);
@@ -269,7 +603,7 @@ describe("runListHasRunningRun", () => {
 			({ state: { data } }) as Parameters<
 				NonNullable<typeof refetchInterval>
 			>[0];
-		const first = fullPage(49, Array(50).fill("completed"));
+		const first = fullPage(49, new Array(50).fill("completed"));
 		// The running run sits on page 2, so the fast interval has to come
 		// from a page other than the first one.
 		expect(
@@ -291,7 +625,7 @@ describe("runListHasRunningRun", () => {
 		expect(
 			refetchInterval(
 				queryOf({
-					pages: [first, fullPage(-1, Array(50).fill("completed"))],
+					pages: [first, fullPage(-1, new Array(50).fill("completed"))],
 					pageParams: [{ after: "" }, { after: "c" }],
 				}),
 			),

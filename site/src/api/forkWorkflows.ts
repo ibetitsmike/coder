@@ -7,15 +7,19 @@ import type { WorkflowRun, WorkflowRunDetail } from "./typesGenerated";
 /** The page size of the run list, matching the server default. */
 export const workflowRunsPageSize = 50;
 
+/** The largest page the run list endpoint serves. */
+export const workflowRunsMaxLimit = 100;
+
 /** Fetches the chat's workflow runs, newest first. */
 export const getChatWorkflowRuns = async (
 	chatId: string,
 	after: string,
 	signal?: AbortSignal,
+	limit = workflowRunsPageSize,
 ): Promise<WorkflowRun[]> => {
 	const response = await API.getAxiosInstance().get<WorkflowRun[]>(
 		`/api/v2/chats/fork/${chatId}/workflow-runs`,
-		{ signal, params: { limit: workflowRunsPageSize, after } },
+		{ signal, params: { limit, after } },
 	);
 	return response.data;
 };

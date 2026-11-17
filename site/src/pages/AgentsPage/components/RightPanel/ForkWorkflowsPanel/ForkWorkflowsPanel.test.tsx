@@ -170,6 +170,7 @@ describe("ForkWorkflowsPanel", () => {
 				chatId,
 				`${last.created_at}/${last.id}`,
 				expect.anything(),
+				50,
 			),
 		);
 		// The query holds both pages: the first page's params plus the
@@ -407,9 +408,7 @@ describe("ForkWorkflowsPanel", () => {
 		);
 		renderPanel(chatId);
 		const user = userEvent.setup();
-		const getRuns = forkWorkflowsApi.getChatWorkflowRuns as ReturnType<
-			typeof vi.fn
-		>;
+		const getRuns = vi.mocked(forkWorkflowsApi.getChatWorkflowRuns);
 
 		const control = await screen.findByRole("button", {
 			name: "Load older runs",
