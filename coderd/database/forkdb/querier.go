@@ -38,6 +38,11 @@ type Querier interface {
 	// read or the lease runs out. The rows are sorted by pull request and chat
 	// owner, the key of one shared read.
 	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
+	// A resume takes over a run: an interrupted run, a running run whose owner
+	// stopped its heartbeat, or a run this process already owns. A running run
+	// of a live owner returns no row, so two resumes of one run cannot both
+	// execute it.
+	ClaimWorkflowRun(ctx context.Context, arg ClaimWorkflowRunParams) (WorkflowRun, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
 	// Counts the notifications of a chat since a time, for the hourly limit.
@@ -221,6 +226,11 @@ type Querier interface {
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
+	// The owner of the runs ids says it still executes them. It returns the IDs
+	// that it still owns: a run that is missing was swept or claimed by another
+	// process. The heartbeat leaves updated_at alone, which tells the UI that a
+	// run changed.
+	HeartbeatWorkflowRuns(ctx context.Context, arg HeartbeatWorkflowRunsParams) ([]uuid.UUID, error)
 	// Turns off a pack of the chat's organization for the chat. It returns no
 	// row for a pack that does not exist or is in another organization.
 	InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error)
@@ -261,10 +271,12 @@ type Querier interface {
 	// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
 	// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
 	// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
+	// owner_id and heartbeat_at name the chatd process that runs the script.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
 	// phase is the name that was current when the step started, or '' when the
-	// script called no phase() before it.
-	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
+	// script called no phase() before it. owner_id fences the insert like
+	// UpdateWorkflowRunStatus: a run this process does not own inserts nothing.
+	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) (int64, error)
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
 	// ListChatHistoryRows lists the rows that shape the context windows of a
@@ -354,9 +366,11 @@ type Querier interface {
 	// agent started. Watches that already ended stay as they are. Returns the
 	// chats to poke.
 	MarkLostChatProcessWatches(ctx context.Context, arg MarkLostChatProcessWatchesParams) ([]uuid.UUID, error)
-	// chatd runs this once at startup: runs owned by a dead process stay open.
-	// The parameter is err_text, not error: it becomes a mock parameter name.
-	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// chatd runs this at startup and on every heartbeat tick: a running run
+	// whose owner stopped its heartbeat belongs to a dead process. A NULL
+	// heartbeat is a row written before owners existed. The parameter is
+	// err_text, not error: it becomes a mock parameter name.
+	MarkStaleWorkflowRunsInterrupted(ctx context.Context, arg MarkStaleWorkflowRunsInterruptedParams) (int64, error)
 	// The replay of a finished step flips only the reuse flag: its status, value
 	// and finished_at stay as the journal holds them.
 	MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error
@@ -370,6 +384,11 @@ type Querier interface {
 	// replaces the text. No row changes when the watch is delivered.
 	RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// chatd runs this when it closes: the runs it still owns stay open as
+	// interrupted at once, so the next process can resume them without waiting
+	// for the stale window. err_text, not error: it becomes a mock parameter
+	// name.
+	ReleaseWorkflowRuns(ctx context.Context, arg ReleaseWorkflowRunsParams) (int64, error)
 	// Renews the leases a replica holds on enabled plugins. It returns only the
 	// id and updated_at, so a renewal reads and decrypts no config: the replica
 	// reads a full row only when updated_at changed.
@@ -394,7 +413,9 @@ type Querier interface {
 	// to the last maxWorkflowLogs lines. lines replaces the retained lines when
 	// it is at least as new as the stored sequence, so a stalled write of an
 	// older snapshot cannot replace newer lines. The caller keeps the sequence in
-	// the lines payload under the fork_seq key.
+	// the lines payload under the fork_seq key. owner_id fences the write to
+	// the owner without the running check: the terminal flush follows the
+	// terminal status write of the same owner.
 	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
@@ -435,8 +456,11 @@ type Querier interface {
 	// a resume can end it later. The param stays uncast so sqlc ties it to the
 	// nullable column and applies the NullRawMessage override: a plain
 	// json.RawMessage would reach pq as a zero-length string, which Postgres
-	// rejects on jsonb.
-	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
+	// rejects on jsonb. owner_id fences the write of a live run: only the
+	// process that owns a running run writes it, so a process that lost the run
+	// to a sweep or a claim cannot overwrite the state of the new owner. A NULL
+	// owner_id skips the fence. The same fence guards every engine write below.
+	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (int64, error)
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
 	// and applies the NullRawMessage override. reused only sets the flag: a
@@ -445,7 +469,9 @@ type Querier interface {
 	// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
 	// run update, so the run row is locked before the step row, the same order
 	// as the purge's cascade. Without the join Postgres may run the two updates
-	// in any order, and a report racing the purge could deadlock.
+	// in any order, and a report racing the purge could deadlock. owner_id
+	// fences the write of the engine; the workflow_report tool passes NULL, so a
+	// report reaches the row whoever owns the run.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.

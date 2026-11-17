@@ -16,6 +16,61 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const claimWorkflowRun = `-- name: ClaimWorkflowRun :one
+UPDATE workflow_runs
+SET owner_id = $1, heartbeat_at = $2::timestamptz, status = 'running', error = '', updated_at = now()
+WHERE id = $3
+    AND (
+        status = 'interrupted'
+        OR (status = 'running' AND (
+            owner_id = $1
+            OR heartbeat_at IS NULL
+            OR heartbeat_at < $4::timestamptz
+        ))
+    )
+RETURNING id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase, logs, owner_id, heartbeat_at
+`
+
+type ClaimWorkflowRunParams struct {
+	OwnerID     uuid.NullUUID `db:"owner_id" json:"owner_id"`
+	Now         time.Time     `db:"now" json:"now"`
+	ID          uuid.UUID     `db:"id" json:"id"`
+	StaleBefore time.Time     `db:"stale_before" json:"stale_before"`
+}
+
+// A resume takes over a run: an interrupted run, a running run whose owner
+// stopped its heartbeat, or a run this process already owns. A running run
+// of a live owner returns no row, so two resumes of one run cannot both
+// execute it.
+func (q *Queries) ClaimWorkflowRun(ctx context.Context, arg ClaimWorkflowRunParams) (WorkflowRun, error) {
+	row := q.db.QueryRowContext(ctx, claimWorkflowRun,
+		arg.OwnerID,
+		arg.Now,
+		arg.ID,
+		arg.StaleBefore,
+	)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.ChatID,
+		&i.ModelConfigID,
+		&i.Script,
+		&i.Args,
+		&i.Status,
+		&i.Error,
+		&i.Result,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		pq.Array(&i.Phases),
+		&i.CurrentPhase,
+		&i.Logs,
+		&i.OwnerID,
+		&i.HeartbeatAt,
+	)
+	return i, err
+}
+
 const deleteOldWorkflowRuns = `-- name: DeleteOldWorkflowRuns :execrows
 WITH old AS (
     SELECT id
@@ -48,17 +103,24 @@ func (q *Queries) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (
 const failOpenWorkflowStepsOfRun = `-- name: FailOpenWorkflowStepsOfRun :execrows
 UPDATE workflow_steps SET status = 'failed', error = $1, finished_at = now()
 WHERE run_id = $2 AND status IN ('running', 'reminded')
+    AND ($3::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM workflow_runs
+        WHERE workflow_runs.id = $2
+            AND workflow_runs.owner_id = $3::uuid
+            AND workflow_runs.status = 'running'
+    ))
 `
 
 type FailOpenWorkflowStepsOfRunParams struct {
-	ErrText string    `db:"err_text" json:"err_text"`
-	RunID   uuid.UUID `db:"run_id" json:"run_id"`
+	ErrText string        `db:"err_text" json:"err_text"`
+	RunID   uuid.UUID     `db:"run_id" json:"run_id"`
+	OwnerID uuid.NullUUID `db:"owner_id" json:"owner_id"`
 }
 
 // stop_workflow fails the open steps of a run that it stops. err_text, not
 // error: it becomes a mock parameter name.
 func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, failOpenWorkflowStepsOfRun, arg.ErrText, arg.RunID)
+	result, err := q.db.ExecContext(ctx, failOpenWorkflowStepsOfRun, arg.ErrText, arg.RunID, arg.OwnerID)
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +128,7 @@ func (q *Queries) FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWo
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase, logs FROM workflow_runs WHERE id = $1
+SELECT id, chat_id, model_config_id, script, args, status, error, result, created_at, updated_at, finished_at, phases, current_phase, logs, owner_id, heartbeat_at FROM workflow_runs WHERE id = $1
 `
 
 func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
@@ -87,6 +149,8 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun
 		pq.Array(&i.Phases),
 		&i.CurrentPhase,
 		&i.Logs,
+		&i.OwnerID,
+		&i.HeartbeatAt,
 	)
 	return i, err
 }
@@ -273,9 +337,51 @@ func (q *Queries) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([
 	return items, nil
 }
 
+const heartbeatWorkflowRuns = `-- name: HeartbeatWorkflowRuns :many
+UPDATE workflow_runs SET heartbeat_at = $1::timestamptz
+WHERE id = ANY($2::uuid[])
+    AND owner_id = $3
+    AND status = 'running'
+RETURNING id
+`
+
+type HeartbeatWorkflowRunsParams struct {
+	Now     time.Time     `db:"now" json:"now"`
+	Ids     []uuid.UUID   `db:"ids" json:"ids"`
+	OwnerID uuid.NullUUID `db:"owner_id" json:"owner_id"`
+}
+
+// The owner of the runs ids says it still executes them. It returns the IDs
+// that it still owns: a run that is missing was swept or claimed by another
+// process. The heartbeat leaves updated_at alone, which tells the UI that a
+// run changed.
+func (q *Queries) HeartbeatWorkflowRuns(ctx context.Context, arg HeartbeatWorkflowRunsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, heartbeatWorkflowRuns, arg.Now, pq.Array(arg.Ids), arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertWorkflowRun = `-- name: InsertWorkflowRun :exec
-INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7::text[], '{}'::text[]), $8)
+INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase, owner_id, heartbeat_at)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7::text[], '{}'::text[]), $8,
+    $9::uuid, $10::timestamptz)
 `
 
 type InsertWorkflowRunParams struct {
@@ -287,6 +393,8 @@ type InsertWorkflowRunParams struct {
 	Status        string          `db:"status" json:"status"`
 	Phases        []string        `db:"phases" json:"phases"`
 	CurrentPhase  string          `db:"current_phase" json:"current_phase"`
+	OwnerID       uuid.NullUUID   `db:"owner_id" json:"owner_id"`
+	HeartbeatAt   sql.NullTime    `db:"heartbeat_at" json:"heartbeat_at"`
 }
 
 // phases holds the declared phases of the script plus every undeclared name
@@ -294,6 +402,7 @@ type InsertWorkflowRunParams struct {
 // phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
 // bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
 // slice out of the NOT NULL column: pq encodes a nil []string as NULL.
+// owner_id and heartbeat_at name the chatd process that runs the script.
 func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error {
 	_, err := q.db.ExecContext(ctx, insertWorkflowRun,
 		arg.ID,
@@ -304,13 +413,23 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 		arg.Status,
 		pq.Array(arg.Phases),
 		arg.CurrentPhase,
+		arg.OwnerID,
+		arg.HeartbeatAt,
 	)
 	return err
 }
 
-const insertWorkflowStep = `-- name: InsertWorkflowStep :exec
+const insertWorkflowStep = `-- name: InsertWorkflowStep :execrows
 INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused, phase)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+SELECT $1::uuid, $2::uuid, $3::text, $4::int, $5::int, $6::text, $7::text,
+    $8::jsonb, $9::bool, $10::text
+WHERE $11::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM workflow_runs
+        WHERE workflow_runs.id = $2::uuid
+            AND workflow_runs.owner_id = $11::uuid
+            AND workflow_runs.status = 'running'
+    )
 `
 
 type InsertWorkflowStepParams struct {
@@ -324,12 +443,14 @@ type InsertWorkflowStepParams struct {
 	Value      pqtype.NullRawMessage `db:"value" json:"value"`
 	Reused     bool                  `db:"reused" json:"reused"`
 	Phase      string                `db:"phase" json:"phase"`
+	OwnerID    uuid.NullUUID         `db:"owner_id" json:"owner_id"`
 }
 
 // phase is the name that was current when the step started, or ” when the
-// script called no phase() before it.
-func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error {
-	_, err := q.db.ExecContext(ctx, insertWorkflowStep,
+// script called no phase() before it. owner_id fences the insert like
+// UpdateWorkflowRunStatus: a run this process does not own inserts nothing.
+func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertWorkflowStep,
 		arg.ID,
 		arg.RunID,
 		arg.SpecKey,
@@ -340,19 +461,31 @@ func (q *Queries) InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStep
 		arg.Value,
 		arg.Reused,
 		arg.Phase,
+		arg.OwnerID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const markOpenWorkflowRunsInterrupted = `-- name: MarkOpenWorkflowRunsInterrupted :execrows
+const markStaleWorkflowRunsInterrupted = `-- name: MarkStaleWorkflowRunsInterrupted :execrows
 UPDATE workflow_runs SET status = 'interrupted', error = $1, updated_at = now()
 WHERE status = 'running'
+    AND (heartbeat_at IS NULL OR heartbeat_at < $2::timestamptz)
 `
 
-// chatd runs this once at startup: runs owned by a dead process stay open.
-// The parameter is err_text, not error: it becomes a mock parameter name.
-func (q *Queries) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markOpenWorkflowRunsInterrupted, errText)
+type MarkStaleWorkflowRunsInterruptedParams struct {
+	ErrText     string    `db:"err_text" json:"err_text"`
+	StaleBefore time.Time `db:"stale_before" json:"stale_before"`
+}
+
+// chatd runs this at startup and on every heartbeat tick: a running run
+// whose owner stopped its heartbeat belongs to a dead process. A NULL
+// heartbeat is a row written before owners existed. The parameter is
+// err_text, not error: it becomes a mock parameter name.
+func (q *Queries) MarkStaleWorkflowRunsInterrupted(ctx context.Context, arg MarkStaleWorkflowRunsInterruptedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markStaleWorkflowRunsInterrupted, arg.ErrText, arg.StaleBefore)
 	if err != nil {
 		return 0, err
 	}
@@ -382,20 +515,44 @@ func (q *Queries) MarkWorkflowStepsReusedByRun(ctx context.Context, runID uuid.U
 	return err
 }
 
+const releaseWorkflowRuns = `-- name: ReleaseWorkflowRuns :execrows
+UPDATE workflow_runs SET status = 'interrupted', error = $1, updated_at = now()
+WHERE owner_id = $2 AND status = 'running'
+`
+
+type ReleaseWorkflowRunsParams struct {
+	ErrText string        `db:"err_text" json:"err_text"`
+	OwnerID uuid.NullUUID `db:"owner_id" json:"owner_id"`
+}
+
+// chatd runs this when it closes: the runs it still owns stay open as
+// interrupted at once, so the next process can resume them without waiting
+// for the stale window. err_text, not error: it becomes a mock parameter
+// name.
+func (q *Queries) ReleaseWorkflowRuns(ctx context.Context, arg ReleaseWorkflowRunsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseWorkflowRuns, arg.ErrText, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setWorkflowRunLogs = `-- name: SetWorkflowRunLogs :exec
 UPDATE workflow_runs
 SET logs = $1::jsonb, updated_at = now()
 WHERE id = $2
+	AND ($3::uuid IS NULL OR owner_id = $3::uuid)
 	AND (
 		logs IS NULL
 		OR logs = 'null'::jsonb
-		OR COALESCE(logs->'fork_seq', '0'::jsonb)::bigint <= $3::bigint
+		OR COALESCE(logs->'fork_seq', '0'::jsonb)::bigint <= $4::bigint
 	)
 `
 
 type SetWorkflowRunLogsParams struct {
 	Lines   json.RawMessage `db:"lines" json:"lines"`
 	ID      uuid.UUID       `db:"id" json:"id"`
+	OwnerID uuid.NullUUID   `db:"owner_id" json:"owner_id"`
 	ForkSeq int64           `db:"fork_seq" json:"fork_seq"`
 }
 
@@ -403,9 +560,16 @@ type SetWorkflowRunLogsParams struct {
 // to the last maxWorkflowLogs lines. lines replaces the retained lines when
 // it is at least as new as the stored sequence, so a stalled write of an
 // older snapshot cannot replace newer lines. The caller keeps the sequence in
-// the lines payload under the fork_seq key.
+// the lines payload under the fork_seq key. owner_id fences the write to
+// the owner without the running check: the terminal flush follows the
+// terminal status write of the same owner.
 func (q *Queries) SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error {
-	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs, arg.Lines, arg.ID, arg.ForkSeq)
+	_, err := q.db.ExecContext(ctx, setWorkflowRunLogs,
+		arg.Lines,
+		arg.ID,
+		arg.OwnerID,
+		arg.ForkSeq,
+	)
 	return err
 }
 
@@ -413,12 +577,14 @@ const updateWorkflowRunPhases = `-- name: UpdateWorkflowRunPhases :exec
 UPDATE workflow_runs
 SET phases = COALESCE($1::text[], '{}'::text[]), current_phase = $2, updated_at = now()
 WHERE id = $3
+    AND ($4::uuid IS NULL OR (owner_id = $4::uuid AND status = 'running'))
 `
 
 type UpdateWorkflowRunPhasesParams struct {
-	Phases       []string  `db:"phases" json:"phases"`
-	CurrentPhase string    `db:"current_phase" json:"current_phase"`
-	ID           uuid.UUID `db:"id" json:"id"`
+	Phases       []string      `db:"phases" json:"phases"`
+	CurrentPhase string        `db:"current_phase" json:"current_phase"`
+	ID           uuid.UUID     `db:"id" json:"id"`
+	OwnerID      uuid.NullUUID `db:"owner_id" json:"owner_id"`
 }
 
 // phase() journals the phase state of a live run as it changes: the display
@@ -426,17 +592,23 @@ type UpdateWorkflowRunPhasesParams struct {
 // result, which updateRunStatus owns, so the two best-effort writers never
 // overwrite each other's columns.
 func (q *Queries) UpdateWorkflowRunPhases(ctx context.Context, arg UpdateWorkflowRunPhasesParams) error {
-	_, err := q.db.ExecContext(ctx, updateWorkflowRunPhases, pq.Array(arg.Phases), arg.CurrentPhase, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateWorkflowRunPhases,
+		pq.Array(arg.Phases),
+		arg.CurrentPhase,
+		arg.ID,
+		arg.OwnerID,
+	)
 	return err
 }
 
-const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :exec
+const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :execrows
 UPDATE workflow_runs
 SET status = $1, error = $2, result = $3,
     phases = COALESCE($4::text[], '{}'::text[]), current_phase = $5,
     updated_at = now(),
     finished_at = CASE WHEN $1::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
 WHERE id = $6
+    AND ($7::uuid IS NULL OR (owner_id = $7::uuid AND status = 'running'))
 `
 
 type UpdateWorkflowRunStatusParams struct {
@@ -446,6 +618,7 @@ type UpdateWorkflowRunStatusParams struct {
 	Phases       []string              `db:"phases" json:"phases"`
 	CurrentPhase string                `db:"current_phase" json:"current_phase"`
 	ID           uuid.UUID             `db:"id" json:"id"`
+	OwnerID      uuid.NullUUID         `db:"owner_id" json:"owner_id"`
 }
 
 // result is the full terminal snapshot of the run, or NULL for interrupted.
@@ -453,17 +626,24 @@ type UpdateWorkflowRunStatusParams struct {
 // a resume can end it later. The param stays uncast so sqlc ties it to the
 // nullable column and applies the NullRawMessage override: a plain
 // json.RawMessage would reach pq as a zero-length string, which Postgres
-// rejects on jsonb.
-func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateWorkflowRunStatus,
+// rejects on jsonb. owner_id fences the write of a live run: only the
+// process that owns a running run writes it, so a process that lost the run
+// to a sweep or a claim cannot overwrite the state of the new owner. A NULL
+// owner_id skips the fence. The same fence guards every engine write below.
+func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorkflowRunStatus,
 		arg.Status,
 		arg.Error,
 		arg.Result,
 		pq.Array(arg.Phases),
 		arg.CurrentPhase,
 		arg.ID,
+		arg.OwnerID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
@@ -471,6 +651,8 @@ WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = $5)
+        AND ($6::uuid IS NULL
+            OR (workflow_runs.owner_id = $6::uuid AND workflow_runs.status = 'running'))
     RETURNING workflow_runs.id
 )
 UPDATE workflow_steps
@@ -483,11 +665,12 @@ WHERE workflow_steps.id = $5
 `
 
 type UpdateWorkflowStepParams struct {
-	Status string                `db:"status" json:"status"`
-	Value  pqtype.NullRawMessage `db:"value" json:"value"`
-	Error  string                `db:"error" json:"error"`
-	Reused bool                  `db:"reused" json:"reused"`
-	ID     uuid.UUID             `db:"id" json:"id"`
+	Status  string                `db:"status" json:"status"`
+	Value   pqtype.NullRawMessage `db:"value" json:"value"`
+	Error   string                `db:"error" json:"error"`
+	Reused  bool                  `db:"reused" json:"reused"`
+	ID      uuid.UUID             `db:"id" json:"id"`
+	OwnerID uuid.NullUUID         `db:"owner_id" json:"owner_id"`
 }
 
 // A reported or failed step stamps finished_at; started_at is set once, at
@@ -498,7 +681,9 @@ type UpdateWorkflowStepParams struct {
 // run's retention clock in DeleteOldWorkflowRuns. The step update joins the
 // run update, so the run row is locked before the step row, the same order
 // as the purge's cascade. Without the join Postgres may run the two updates
-// in any order, and a report racing the purge could deadlock.
+// in any order, and a report racing the purge could deadlock. owner_id
+// fences the write of the engine; the workflow_report tool passes NULL, so a
+// report reaches the row whoever owns the run.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,
@@ -506,6 +691,7 @@ func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStep
 		arg.Error,
 		arg.Reused,
 		arg.ID,
+		arg.OwnerID,
 	)
 	return err
 }
