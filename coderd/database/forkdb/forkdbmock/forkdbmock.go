@@ -597,6 +597,21 @@ func (mr *MockStoreMockRecorder) GetChatPinnedSkillsByChatID(ctx, chatID any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatPinnedSkillsByChatID", reflect.TypeOf((*MockStore)(nil).GetChatPinnedSkillsByChatID), ctx, chatID)
 }
 
+// GetChatReportMessages mocks base method.
+func (m *MockStore) GetChatReportMessages(ctx context.Context, arg forkdb.GetChatReportMessagesParams) ([]forkdb.GetChatReportMessagesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatReportMessages", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetChatReportMessagesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatReportMessages indicates an expected call of GetChatReportMessages.
+func (mr *MockStoreMockRecorder) GetChatReportMessages(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatReportMessages", reflect.TypeOf((*MockStore)(nil).GetChatReportMessages), ctx, arg)
+}
+
 // GetChatSecretAnswersByChatID mocks base method.
 func (m *MockStore) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
 	m.ctrl.T.Helper()

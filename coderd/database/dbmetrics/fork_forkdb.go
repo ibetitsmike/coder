@@ -377,6 +377,11 @@ func (f forkQueryMetricsStore) GetDescendantChatsByRootIDs(ctx context.Context, 
 	return f.s.GetDescendantChatsByRootIDs(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) GetChatReportMessages(ctx context.Context, arg forkdb.GetChatReportMessagesParams) ([]forkdb.GetChatReportMessagesRow, error) {
+	defer f.observe(ctx, "GetChatReportMessages", time.Now())
+	return f.s.GetChatReportMessages(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetChatSubtreeIDs(ctx context.Context, rootID uuid.UUID) ([]forkdb.GetChatSubtreeIDsRow, error) {
 	defer f.observe(ctx, "GetChatSubtreeIDs", time.Now())
 	return f.s.GetChatSubtreeIDs(ctx, rootID)
