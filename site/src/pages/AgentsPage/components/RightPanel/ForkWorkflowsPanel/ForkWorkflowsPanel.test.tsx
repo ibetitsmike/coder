@@ -246,12 +246,8 @@ describe("ForkWorkflowsPanel", () => {
 		// see before, so keyboard focus does not drop to the body.
 		await waitFor(() =>
 			expect(
-				screen.getAllByRole("listitem").find((_, index) => index === 50),
-			).toBeDefined(),
-		);
-		const rows = screen.getAllByRole("listitem");
-		await waitFor(() =>
-			expect(within(rows[50]).getByRole("button")).toHaveFocus(),
+				within(screen.getAllByRole("listitem")[50]).getByRole("button"),
+			).toHaveFocus(),
 		);
 	});
 
@@ -335,12 +331,8 @@ describe("ForkWorkflowsPanel", () => {
 		await screen.findByRole("list", { name: "Workflow runs" });
 		await waitFor(() =>
 			expect(
-				screen.getAllByRole("listitem").find((_, index) => index === 100),
-			).toBeDefined(),
-		);
-		const rows = screen.getAllByRole("listitem");
-		await waitFor(() =>
-			expect(within(rows[100]).getByRole("button")).toHaveFocus(),
+				within(screen.getAllByRole("listitem")[100]).getByRole("button"),
+			).toHaveFocus(),
 		);
 	});
 
@@ -366,24 +358,29 @@ describe("ForkWorkflowsPanel", () => {
 		);
 		await waitFor(() =>
 			expect(
-				screen.getAllByRole("listitem").find((_, index) => index === 50),
-			).toBeDefined(),
+				within(screen.getAllByRole("listitem")[50]).getByRole("button"),
+			).toHaveFocus(),
 		);
-		const rows = screen.getAllByRole("listitem");
-		const restored = within(rows[50]).getByRole("button");
-		await waitFor(() => expect(restored).toHaveFocus());
+		const restored = within(screen.getAllByRole("listitem")[50]).getByRole(
+			"button",
+		);
+		expect(restored).toHaveFocus();
 
 		// The user moves focus to an earlier run, then the list polls; the
 		// restore must not pull focus back onto the restored run. Focus
 		// moves without a click, because a click would open that run.
-		const earlier = within(rows[0]).getByRole("button");
+		const earlier = within(screen.getAllByRole("listitem")[0]).getByRole(
+			"button",
+		);
 		earlier.focus();
 		expect(earlier).toHaveFocus();
 		await queryClient.refetchQueries({
 			queryKey: chatWorkflowRunsKey(chatId),
 		});
 		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-		expect(within(rows[0]).getByRole("button")).toHaveFocus();
+		expect(
+			within(screen.getAllByRole("listitem")[0]).getByRole("button"),
+		).toHaveFocus();
 	});
 
 	it("leaves focus alone when the user moved it off the removed control", async () => {

@@ -120,7 +120,9 @@ export const FirstAppendedRunTakesFocus: Story = {
 	args: { hasOlderRuns: false },
 	play: async ({ canvas }) => {
 		const list = canvas.getByRole("list", { name: "Workflow runs" });
-		within(list).getAllByRole("listitem")[1].querySelector("button")?.focus();
+		within(within(list).getAllByRole("listitem")[1])
+			.getByRole("button")
+			.focus();
 	},
 };
 
