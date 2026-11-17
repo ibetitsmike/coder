@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
 	focusManager,
@@ -218,7 +218,7 @@ describe("ForkWorkflowsPanel", () => {
 		});
 	});
 
-	it("keeps focus on the list when the last page removes the control", async () => {
+	it("keeps focus moving through the runs when the last page removes the control", async () => {
 		const chatId = generateUUID();
 		const firstPage = Array.from({ length: 50 }, (_, index) => ({
 			...MockChatWorkflowRun,
@@ -241,10 +241,13 @@ describe("ForkWorkflowsPanel", () => {
 			await screen.findByRole("button", { name: "Load older runs" }),
 		);
 		await screen.findByRole("list", { name: "Workflow runs" });
-		// The focus moved from the unmounted button to the list, not to the
-		// body, so keyboard users keep their place.
+		// The focus moved from the unmounted button onto the first run of
+		// the appended page, the one after the last run the user could
+		// see before, so keyboard focus does not drop to the body.
+		const rows = screen.getAllByRole("listitem");
+		expect(rows).toHaveLength(51);
 		await waitFor(() =>
-			expect(screen.getByRole("list", { name: "Workflow runs" })).toHaveFocus(),
+			expect(within(rows[50]).getByRole("button")).toHaveFocus(),
 		);
 	});
 

@@ -83,25 +83,41 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 }) => {
 	const listRef = useRef<HTMLUListElement>(null);
 	// "Load older runs" holds focus while the last page loads. When that
-	// page ends the paging, the button unmounts, so keep focus on the list
-	// instead of dropping it to the body.
+	// page ends the paging, the button unmounts, so keep focus moving
+	// through the runs instead of dropping it to the body.
 	const hadLoadOlder = useRef(false);
 	// Whether the button owned focus last, tracked through its own events:
 	// the user may have moved focus away during the load, and then the
 	// removal must not pull it back onto the list.
 	const loadOlderHadFocus = useRef(false);
+	// The last run loaded while more pages remained. The next page's first
+	// run follows it, so focus continues from where the user was.
+	const lastOlderRunId = useRef<string>(null);
 	useEffect(() => {
 		if (hasOlderRuns) {
 			hadLoadOlder.current = true;
+			const last = runs?.[runs.length - 1];
+			lastOlderRunId.current = last ? last.id : null;
 		} else if (
 			hadLoadOlder.current &&
 			loadOlderHadFocus.current &&
 			listRef.current
 		) {
 			hadLoadOlder.current = false;
-			listRef.current.focus({ preventScroll: true });
+			const rows = listRef.current.children;
+			const index = runs
+				? runs.findIndex((run) => run.id === lastOlderRunId.current)
+				: -1;
+			const nextRow = index >= 0 ? rows[index + 1] : undefined;
+			const nextButton =
+				nextRow instanceof HTMLElement ? nextRow.querySelector("button") : null;
+			if (nextButton) {
+				nextButton.focus({ preventScroll: true });
+			} else {
+				listRef.current.focus({ preventScroll: true });
+			}
 		}
-	}, [hasOlderRuns]);
+	}, [hasOlderRuns, runs]);
 
 	if (!runs) {
 		return error ? (
@@ -131,8 +147,9 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 				ref={listRef}
 				aria-label="Workflow runs"
 				className="m-0 flex list-none flex-col gap-1 p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
-				// The list takes focus when "Load older runs" unmounts after
-				// the last page, so keyboard focus does not drop to the body.
+				// When "Load older runs" unmounts after the last page, focus
+				// moves to the first newer run, or here when there is no row
+				// to take it, so it does not drop to the body.
 				tabIndex={-1}
 			>
 				{runs.map((run) => (
