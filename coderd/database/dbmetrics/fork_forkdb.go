@@ -277,6 +277,16 @@ func (f forkQueryMetricsStore) CountChatUserNotificationsSince(ctx context.Conte
 	return f.s.CountChatUserNotificationsSince(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) InsertChatUserNotification(ctx context.Context, arg forkdb.InsertChatUserNotificationParams) error {
+	defer f.observe(ctx, "InsertChatUserNotification", time.Now())
+	return f.s.InsertChatUserNotification(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error) {
+	defer f.observe(ctx, "DeleteOldChatUserNotifications", time.Now())
+	return f.s.DeleteOldChatUserNotifications(ctx, limitCount)
+}
+
 func (f forkQueryMetricsStore) CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error) {
 	defer f.observe(ctx, "CountLiveSubagentsInFamily", time.Now())
 	return f.s.CountLiveSubagentsInFamily(ctx, rootChatID)
