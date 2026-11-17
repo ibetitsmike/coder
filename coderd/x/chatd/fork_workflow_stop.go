@@ -116,6 +116,10 @@ func (p *Server) stopOwnerlessRun(ctx context.Context, row forkdb.WorkflowRun) (
 	if !ok {
 		return nil, false, nil
 	}
+	// The heartbeat renews the claim while the stop interrupts the steps,
+	// so no sweep hands the run to another process meanwhile.
+	p.workflows.setClaiming(claimed.ID)
+	defer p.workflows.setClaiming(uuid.Nil)
 	return nil, true, p.stopJournaledRun(ctx, claimed)
 }
 

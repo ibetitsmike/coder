@@ -132,16 +132,21 @@ func failStatusWrites(t *testing.T, server *Server) *failingStatusStore {
 	return failing
 }
 
-// blockingStepsStore holds the step reads of a resume until release is
-// closed, the way database contention stalls a rehydration. entered
-// receives once when a read is held.
+// blockingStepsStore holds the step reads until release is closed, the
+// way database contention stalls them. entered receives once when a read
+// is held. A store with armed set holds only the reads after it is set.
 type blockingStepsStore struct {
 	forkdb.Store
 	entered chan struct{}
 	release chan struct{}
+	gated   bool
+	armed   atomic.Bool
 }
 
 func (s *blockingStepsStore) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
+	if s.gated && !s.armed.Load() {
+		return s.Store.GetWorkflowStepsByRun(ctx, runID)
+	}
 	select {
 	case s.entered <- struct{}{}:
 	default:
@@ -589,6 +594,43 @@ def main(args):
 
 		failing.fail.Store(false)
 		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+	})
+
+	// A journal-only stop that takes longer than the stale window keeps the
+	// run it claimed: the heartbeat renews the row until the stop lands.
+	t.Run("HeartbeatRenewsAClaimWhileAJournaledStopRuns", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		inner, err := forkdb.From(f.server.db)
+		require.NoError(t, err)
+		blocking := &blockingStepsStore{Store: inner, entered: make(chan struct{}, 1), release: make(chan struct{}), gated: true}
+		f.server.db = dbauthz.New(
+			&forkDBSwap{Store: f.server.db, fdb: blocking},
+			rbac.NewStrictCachingAuthorizer(prometheus.NewRegistry()),
+			slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+			nil,
+		)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		// The registry drop sends the stop through the journal.
+		f.server.workflows.remove(run.id)
+		blocking.armed.Store(true)
+		errc := make(chan error, 1)
+		go func() { errc <- f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id) }()
+		testutil.RequireReceive(ctx, t, blocking.entered)
+		advanceMockClockBy(ctx, t, mock, workflowStaleAfter+workflowHeartbeatInterval)
+		row := journalRow(ctx, t, fdb, run.id)
+		require.Equal(t, workflowStatusRunning, row.Status, "the sweep left the claimed run")
+		assert.Equal(t, f.server.workflows.owner.id, row.OwnerID.UUID)
+
+		close(blocking.release)
+		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
+		assert.Equal(t, uuid.Nil, f.server.workflows.claimingRun(), "the stop ends the claim")
 		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
