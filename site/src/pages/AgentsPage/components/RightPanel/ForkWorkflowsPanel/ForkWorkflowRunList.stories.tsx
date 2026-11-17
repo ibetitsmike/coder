@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, spyOn } from "storybook/test";
+import { fn, spyOn, within } from "storybook/test";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import {
 	MockChatWorkflowRun,
@@ -113,12 +113,14 @@ export const Loading: Story = {
 
 /**
  * When the last page ends the paging, the unmounting Load older runs
- * control hands focus to the list, which shows the focus-visible ring.
+ * control hands focus to the first run of the appended page, which shows
+ * the focus-visible ring.
  */
-export const ListTakesFocus: Story = {
+export const FirstAppendedRunTakesFocus: Story = {
 	args: { hasOlderRuns: false },
 	play: async ({ canvas }) => {
-		canvas.getByRole("list", { name: "Workflow runs" }).focus();
+		const list = canvas.getByRole("list", { name: "Workflow runs" });
+		within(list).getAllByRole("listitem")[1].querySelector("button")?.focus();
 	},
 };
 

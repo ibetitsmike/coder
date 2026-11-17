@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "react-query";
 import { MemoryRouter } from "react-router";
@@ -123,6 +123,45 @@ describe("ForkWorkflowRunDetail", () => {
 			chatId: MockChatWorkflowRunDetail.chat_id,
 			prompt: `Resume workflow run ${MockChatWorkflowRunDetail.id}`,
 		});
+	});
+
+	it("keeps the result's collapsed state out of the error block's", async () => {
+		// A poll can move a field's value from absent to long in one commit:
+		// the result appears long while the error block never existed. The
+		// key per field keeps React from reusing one block's state for the
+		// other.
+		const poll = renderDetail({
+			...mockRunningRunDetail,
+			logs: ["starting"],
+			error: "a".repeat(500),
+		});
+		await waitFor(() =>
+			expect(
+				within(screen.getByRole("region", { name: "Error" })).getByRole(
+					"button",
+					{ name: "Show more" },
+				),
+			).toHaveAccessibleName("Show more"),
+		);
+		poll({
+			...mockRunningRunDetail,
+			status: "completed",
+			finished_at: "2026-11-12T10:03:20Z",
+			error: "",
+			result: {
+				text: Array.from(
+					{ length: 13 },
+					(_, index) => `line ${index}: ${"x".repeat(40)}`,
+				).join("\n"),
+			},
+		});
+
+		expect(
+			within(screen.getByRole("region", { name: "Result" })).getByRole(
+				"button",
+				{ expanded: false },
+			),
+		).toHaveAccessibleName("Show more");
 	});
 
 	it("hides the controls without update access to the chat", async () => {

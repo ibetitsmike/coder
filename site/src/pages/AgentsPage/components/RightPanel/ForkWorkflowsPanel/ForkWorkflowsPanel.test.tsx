@@ -244,6 +244,11 @@ describe("ForkWorkflowsPanel", () => {
 		// The focus moved from the unmounted button onto the first run of
 		// the appended page, the one after the last run the user could
 		// see before, so keyboard focus does not drop to the body.
+		await waitFor(() =>
+			expect(
+				screen.getAllByRole("listitem").find((_, index) => index === 50),
+			).toBeDefined(),
+		);
 		const rows = screen.getAllByRole("listitem");
 		await waitFor(() =>
 			expect(within(rows[50]).getByRole("button")).toHaveFocus(),
@@ -280,12 +285,11 @@ describe("ForkWorkflowsPanel", () => {
 			await screen.findByRole("button", { name: "Load older runs" }),
 		);
 		await screen.findByRole("list", { name: "Workflow runs" });
-		const rows = screen.getAllByRole("listitem");
 		// The empty page leaves the previously last run as the last one, so
 		// that row's button takes focus instead of the list.
 		await waitFor(() =>
 			expect(
-				within(rows[49]).getByRole("button", {
+				within(screen.getAllByRole("listitem")[49]).getByRole("button", {
 					name: /review changed files/i,
 				}),
 			).toHaveFocus(),
@@ -329,6 +333,11 @@ describe("ForkWorkflowsPanel", () => {
 			await screen.findByRole("button", { name: "Load older runs" }),
 		);
 		await screen.findByRole("list", { name: "Workflow runs" });
+		await waitFor(() =>
+			expect(
+				screen.getAllByRole("listitem").find((_, index) => index === 100),
+			).toBeDefined(),
+		);
 		const rows = screen.getAllByRole("listitem");
 		await waitFor(() =>
 			expect(within(rows[100]).getByRole("button")).toHaveFocus(),
@@ -355,12 +364,17 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Load older runs" }),
 		);
-		const rows = await screen.findAllByRole("listitem");
+		await waitFor(() =>
+			expect(
+				screen.getAllByRole("listitem").find((_, index) => index === 50),
+			).toBeDefined(),
+		);
+		const rows = screen.getAllByRole("listitem");
 		const restored = within(rows[50]).getByRole("button");
 		await waitFor(() => expect(restored).toHaveFocus());
 
 		// The user moves focus to an earlier run, then the list polls; the
-		// restore must not pull focus back onto the moved-to run. Focus
+		// restore must not pull focus back onto the restored run. Focus
 		// moves without a click, because a click would open that run.
 		const earlier = within(rows[0]).getByRole("button");
 		earlier.focus();

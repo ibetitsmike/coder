@@ -110,10 +110,13 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 				: -1;
 			// Focus continues on the row after the last one the user saw;
 			// an empty last page leaves that row as the last one visible.
+			// Without that run the row is unknown, so the list takes focus.
 			const nextButton =
-				rows[index + 1]?.querySelector("button") ??
-				rows[index]?.querySelector("button") ??
-				null;
+				index >= 0
+					? (rows[index + 1]?.querySelector("button") ??
+						rows[index]?.querySelector("button") ??
+						null)
+					: null;
 			if (nextButton) {
 				nextButton.focus({ preventScroll: true });
 			} else {
