@@ -96,7 +96,7 @@ func skillContainersFor(rootPath string) []string {
 	}
 	for _, rel := range skillContainerRelPaths {
 		container := filepath.Join(rootPath, rel)
-		if info, err := os.Stat(container); err == nil && info.IsDir() {
+		if info, err := statNoted(container); err == nil && info.IsDir() {
 			out = append(out, container)
 		}
 	}
@@ -344,7 +344,7 @@ const maxSourcePathBytes = 1024
 // push capability is advertised; without it nothing is discovered
 // from that root, top-level files included.
 func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	info, err := os.Stat(root.Path)
+	info, err := statNoted(root.Path)
 	if err != nil {
 		// Missing roots silently fall through. The user either
 		// added a path that does not exist yet or removed it
@@ -415,7 +415,7 @@ func (r *Resolver) discoverTopLevelFiles(root ScanRoot, out *[]Resource, seenID 
 		if e.IsDir() {
 			continue
 		}
-		info, err := e.Info()
+		info, err := entryInfoNoted(root.Path, e)
 		if err != nil {
 			continue
 		}
@@ -480,7 +480,7 @@ func resolveReadTarget(path string, info fs.FileInfo, scanRoot string) (readPath
 	// /private/var path while the caller's scanRoot may still be
 	// /var, which would incorrectly trip the prefix check.
 	rootClean := filepath.Clean(scanRoot)
-	if resolved, err := filepath.EvalSymlinks(rootClean); err == nil {
+	if resolved, err := evalSymlinksNoted(rootClean); err == nil {
 		rootClean = resolved
 	}
 	if !pathHasPrefix(target, rootClean) {
@@ -753,7 +753,7 @@ func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out 
 		// Lstat (not Stat) so a symlinked SKILL.md is
 		// detected and routed through resolveReadTarget,
 		// which enforces the scan-root boundary.
-		info, err := os.Lstat(meta)
+		info, err := lstatNoted(meta)
 		if err != nil {
 			continue
 		}

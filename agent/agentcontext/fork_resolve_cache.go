@@ -753,21 +753,65 @@ func (s *symlinkTargetSet) stopPass() (map[string]string, bool) {
 // can clear with no event the watcher sees, so the failure marks the pass.
 func readDirNoted(dir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(dir)
-	if fault, ok := readDirFaults.Load(filepath.Clean(dir)); ok {
+	if err = noted(dir, err); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// statNoted, lstatNoted, entryInfoNoted and evalSymlinksNoted are the
+// metadata calls of a resolve pass, noted as readDirNoted is. The resolver
+// skips a path whose metadata it cannot read, the same way.
+func statNoted(path string) (fs.FileInfo, error) {
+	info, err := os.Stat(path)
+	if err = noted(path, err); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func lstatNoted(path string) (fs.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err = noted(path, err); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func entryInfoNoted(dir string, e fs.DirEntry) (fs.FileInfo, error) {
+	info, err := e.Info()
+	if err = noted(filepath.Join(dir, e.Name()), err); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func evalSymlinksNoted(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err = noted(path, err); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+// noted returns err, or the fault a test injected for path, and marks the
+// running passes when the result is a failure.
+func noted(path string, err error) error {
+	if fault, ok := readFaults.Load(filepath.Clean(path)); ok {
 		if ferr, ok := fault.(error); ok {
-			entries, err = nil, ferr
+			err = ferr
 		}
 	}
 	if err != nil {
-		noteReadFailure(dir, err)
+		noteReadFailure(path, err)
 	}
-	return entries, err
+	return err
 }
 
-// readDirFaults maps a directory to the error readDirNoted returns for it,
-// so tests can fail a read in a way chmod cannot: a directory without read
+// readFaults maps a path to the error the noted calls return for it, so
+// tests can fail a read in a way chmod cannot: a directory without read
 // permission cannot be watched either. It is empty in production.
-var readDirFaults sync.Map
+var readFaults sync.Map
 
 // noteReadFailure marks the running passes that own path as unable to be
 // cached, unless err says path is missing or not a directory: creating it

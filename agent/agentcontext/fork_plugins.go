@@ -205,7 +205,7 @@ func declaresAny(declared manifestPaths) bool {
 func findPackManifest(dir string) string {
 	for _, candidate := range []string{claudePluginManifestRelPath, cursorPluginManifestRelPath, rootPluginManifestRelPath} {
 		path := filepath.Join(dir, candidate)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		if info, err := statNoted(path); err == nil && !info.IsDir() {
 			return path
 		}
 	}
@@ -291,7 +291,7 @@ func isPathDeclaration(raw json.RawMessage) bool {
 // never followed: a checked-in plugin.json -> /dev/zero or a FIFO must not
 // be read at all, whatever its apparent size.
 func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
-	info, err := os.Lstat(path)
+	info, err := lstatNoted(path)
 	if err != nil {
 		return nil, false
 	}
@@ -305,7 +305,7 @@ func readCappedRegularFile(path string, maxBytes int64) ([]byte, bool) {
 // FIFO or device never blocks or streams, and the read stays bounded even if
 // the file grows in between.
 func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
-	info, err := os.Stat(path)
+	info, err := statNoted(path)
 	if err != nil {
 		return nil, false
 	}
@@ -316,8 +316,8 @@ func readCappedFollowingSymlink(path string, maxBytes int64) ([]byte, bool) {
 // the scan root cacheDir reads. It records a symlink it follows for the
 // resolve passes over cacheDir, which the file can lie outside of.
 func readClaudeFileFor(cacheDir, path string, maxBytes int64) ([]byte, bool) {
-	if link, err := os.Lstat(path); err == nil && link.Mode()&os.ModeSymlink != 0 {
-		target, err := filepath.EvalSymlinks(path)
+	if link, err := lstatNoted(path); err == nil && link.Mode()&os.ModeSymlink != 0 {
+		target, err := evalSymlinksNoted(path)
 		noteOwnedSymlinkTarget(cacheDir, path, target, err)
 	}
 	return readCappedFollowingSymlink(path, maxBytes)
@@ -432,7 +432,7 @@ func claudePluginsDirFor(cacheDir string) string {
 		if clean == cache {
 			return dir
 		}
-		if resolved, err := filepath.EvalSymlinks(cache); err == nil && clean == resolved {
+		if resolved, err := evalSymlinksNoted(cache); err == nil && clean == resolved {
 			return dir
 		}
 	}
@@ -826,7 +826,7 @@ func claudeKnownMarketplaces(cacheDir, pluginsDir string) map[string]claudeKnown
 // a git or GitHub source names a catalog path that escapes the clone. A
 // marketplace added from a local file records the file itself.
 func (m claudeKnownMarketplace) catalogPath() string {
-	if info, err := os.Stat(m.installLocation); err == nil && !info.IsDir() {
+	if info, err := statNoted(m.installLocation); err == nil && !info.IsDir() {
 		return m.installLocation
 	}
 	rel := claudeMarketplaceFileRel
@@ -898,15 +898,15 @@ func claudeInPlaceCandidates(cacheDir string, installed map[string]claudeInstall
 
 // dirInside reports whether dir is a directory that resolves inside root.
 func dirInside(dir, root string) bool {
-	resolved, err := filepath.EvalSymlinks(dir)
+	resolved, err := evalSymlinksNoted(dir)
 	if err != nil {
 		return false
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+	resolvedRoot, err := evalSymlinksNoted(root)
 	if err != nil || !pathHasPrefix(resolved, resolvedRoot) {
 		return false
 	}
-	info, err := os.Stat(resolved)
+	info, err := statNoted(resolved)
 	return err == nil && info.IsDir()
 }
 
@@ -1072,15 +1072,15 @@ func installedClaudeCacheVersion(pluginDir, installPath string, entry claudeMark
 		return packRoot{}, false
 	}
 	clean := filepath.Clean(installPath)
-	parent, err := filepath.EvalSymlinks(filepath.Dir(clean))
+	parent, err := evalSymlinksNoted(filepath.Dir(clean))
 	if err != nil {
 		return packRoot{}, false
 	}
-	if plugin, err := filepath.EvalSymlinks(pluginDir); err != nil || parent != plugin {
+	if plugin, err := evalSymlinksNoted(pluginDir); err != nil || parent != plugin {
 		return packRoot{}, false
 	}
 	versionDir := filepath.Join(pluginDir, filepath.Base(clean))
-	if info, err := os.Stat(versionDir); err != nil || !info.IsDir() || claudeVersionOrphaned(versionDir) {
+	if info, err := statNoted(versionDir); err != nil || !info.IsDir() || claudeVersionOrphaned(versionDir) {
 		return packRoot{}, false
 	}
 	return readClaudeCacheVersion(versionDir, entry)
@@ -1146,7 +1146,7 @@ func currentClaudeCacheVersion(pluginDir string, entry claudeMarketplaceEntry) (
 		found    bool
 	)
 	for _, versionDir := range claudeCacheLiveVersions(pluginDir) {
-		info, err := os.Stat(versionDir)
+		info, err := statNoted(versionDir)
 		if err != nil {
 			continue
 		}
@@ -1176,7 +1176,7 @@ func claudeCacheLiveVersions(pluginDir string) []string {
 }
 
 func claudeVersionOrphaned(versionDir string) bool {
-	_, err := os.Lstat(filepath.Join(versionDir, claudeOrphanedMarker))
+	_, err := lstatNoted(filepath.Join(versionDir, claudeOrphanedMarker))
 	return err == nil
 }
 
@@ -1262,7 +1262,7 @@ func (p packRoot) skillPaths() (containers, folders []string) {
 	}
 	for _, rel := range p.skillRels() {
 		for _, dir := range inPackContainers(p, rel) {
-			if _, err := os.Lstat(filepath.Join(dir, skillMetaFileName)); err == nil {
+			if _, err := lstatNoted(filepath.Join(dir, skillMetaFileName)); err == nil {
 				folders = append(folders, dir)
 				continue
 			}
@@ -1279,10 +1279,10 @@ func (p packRoot) loadsRootSkill() bool {
 	if !p.Claude || declaresAny(p.Manifest.Skills) {
 		return false
 	}
-	if _, err := os.Lstat(filepath.Join(p.Dir, defaultPackSkillsDir)); err == nil {
+	if _, err := lstatNoted(filepath.Join(p.Dir, defaultPackSkillsDir)); err == nil {
 		return false
 	}
-	_, err := os.Lstat(filepath.Join(p.Dir, skillMetaFileName))
+	_, err := lstatNoted(filepath.Join(p.Dir, skillMetaFileName))
 	return err == nil
 }
 
@@ -1380,18 +1380,18 @@ func inPackFiles(p packRoot, rel string) []string {
 
 func inPackPaths(p packRoot, rel string, wantDir bool) []string {
 	path := filepath.Join(p.Dir, rel)
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := evalSymlinksNoted(path)
 	if err != nil {
 		return nil
 	}
 	packResolved := p.Dir
-	if resolvedPack, err := filepath.EvalSymlinks(p.Dir); err == nil {
+	if resolvedPack, err := evalSymlinksNoted(p.Dir); err == nil {
 		packResolved = resolvedPack
 	}
 	if !pathHasPrefix(resolved, packResolved) {
 		return nil
 	}
-	info, err := os.Stat(resolved)
+	info, err := statNoted(resolved)
 	if err != nil || info.IsDir() != wantDir {
 		return nil
 	}
@@ -1475,7 +1475,7 @@ func (r *Resolver) emitPackSkill(pack packRoot, root ScanRoot, dir string, out *
 	// through resolveReadTarget, which enforces the pack-root boundary: a
 	// pack must not import skills from outside itself even when the target
 	// stays inside the scan root.
-	info, err := os.Lstat(meta)
+	info, err := lstatNoted(meta)
 	if err != nil {
 		return
 	}
@@ -1531,7 +1531,7 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 func (r *Resolver) emitPackAgentFile(pack packRoot, root ScanRoot, path string, out *[]Resource, seenID map[string]int) {
 	// Lstat so a symlinked definition goes through
 	// resolveReadTarget's scan-root boundary check.
-	info, err := os.Lstat(path)
+	info, err := lstatNoted(path)
 	if err != nil {
 		return
 	}
@@ -1791,7 +1791,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 		// manifest exists, so its parent does too.
 		if parent := filepath.Dir(pack.ManifestPath); parent != pack.Dir {
 			// A manifestless Claude cache entry has no manifest directory.
-			if info, err := os.Stat(parent); err == nil && info.IsDir() {
+			if info, err := statNoted(parent); err == nil && info.IsDir() {
 				out[parent] = struct{}{}
 			}
 		}
@@ -1847,7 +1847,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 			// A dotfile manager's symlinked settings file is edited
 			// through its target, which fires events only in the
 			// target's directory and under the target's path.
-			if target, err := filepath.EvalSymlinks(settings); err == nil && target != settings {
+			if target, err := evalSymlinksNoted(settings); err == nil && target != settings {
 				dirs = append(dirs, filepath.Dir(target))
 				watch.settingsFiles[target] = struct{}{}
 			}
@@ -1888,7 +1888,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 		}
 	}
 	for _, dir := range dirs {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		if info, err := statNoted(dir); err == nil && info.IsDir() {
 			out[dir] = struct{}{}
 		}
 	}

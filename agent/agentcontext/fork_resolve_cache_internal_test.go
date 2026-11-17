@@ -1049,8 +1049,8 @@ func TestResolvePass_ReadDirFailureIsNotCached(t *testing.T) {
 				".claude/skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody",
 			})
 			container := filepath.Join(dir, ".claude", "skills")
-			readDirFaults.Store(container, tc.err)
-			t.Cleanup(func() { readDirFaults.Delete(container) })
+			readFaults.Store(container, tc.err)
+			t.Cleanup(func() { readFaults.Delete(container) })
 			roots := []ScanRoot{{Path: dir}}
 			m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
 
@@ -1059,9 +1059,69 @@ func TestResolvePass_ReadDirFailureIsNotCached(t *testing.T) {
 			_, ok := cachedFor(m, w, roots)
 			require.Equal(t, tc.cached, ok)
 
-			readDirFaults.Delete(container)
+			readFaults.Delete(container)
 			snap, _ = m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 			require.True(t, hasResource(snap, KindSkill, "foo"), "the pass after the failure lists the skills")
+			_, ok = cachedFor(m, w, roots)
+			require.True(t, ok, "a pass with no failure is cached")
+		})
+	}
+}
+
+// A pass that cannot read the metadata of a path it would discover skips the
+// path, as with a failed ReadDir, so it is not cached either.
+func TestResolvePass_MetadataFailureIsNotCached(t *testing.T) {
+	t.Parallel()
+	eio := &fs.PathError{Op: "stat", Err: syscall.EIO}
+	for _, tc := range []struct {
+		name string
+		// fault is the path whose metadata call fails, relative to the root.
+		fault string
+		// gone is the resource source the failure hides, relative to the
+		// root.
+		gone   string
+		err    error
+		cached bool
+	}{
+		{name: "RootStat", fault: ".", gone: "AGENTS.md", err: eio},
+		{name: "TopLevelInfo", fault: "AGENTS.md", gone: "AGENTS.md", err: eio},
+		{name: "SkillContainerStat", fault: ".claude/skills", gone: ".claude/skills/foo", err: eio},
+		{name: "SkillMetaLstat", fault: ".claude/skills/foo/SKILL.md", gone: ".claude/skills/foo", err: eio},
+		{name: "AgentLstat", fault: ".claude/agents/rev.md", gone: ".claude/agents/rev.md", err: eio},
+		{name: "RuleContainerEval", fault: ".cursor/rules", gone: ".cursor/rules/top.mdc", err: eio},
+		{name: "RuleSubfolder", fault: ".cursor/rules/sub", gone: ".cursor/rules/sub/nested.mdc", err: eio},
+		{name: "NotExist", fault: ".claude/skills/foo/SKILL.md", gone: ".claude/skills/foo", err: &fs.PathError{Op: "lstat", Err: fs.ErrNotExist}, cached: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writePackFiles(t, dir, map[string]string{
+				"AGENTS.md":                    "v1",
+				".claude/skills/foo/SKILL.md":  "---\nname: foo\ndescription: A skill.\n---\nbody",
+				".claude/agents/rev.md":        "---\nname: rev\ndescription: Reviews.\n---\nReview.",
+				".cursor/rules/top.mdc":        "---\nalwaysApply: true\n---\nTop.",
+				".cursor/rules/sub/nested.mdc": "---\nalwaysApply: true\n---\nNested.",
+			})
+			roots := []ScanRoot{{Path: dir}}
+			m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+			gone := filepath.Join(dir, filepath.FromSlash(tc.gone))
+			has := func(snap Snapshot) bool {
+				return slices.ContainsFunc(snap.Resources, func(res Resource) bool { return res.Source == gone })
+			}
+			snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.True(t, has(snap), "the fixture discovers %s", tc.gone)
+
+			fault := filepath.Join(dir, filepath.FromSlash(tc.fault))
+			readFaults.Store(fault, tc.err)
+			t.Cleanup(func() { readFaults.Delete(fault) })
+			snap, _ = m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.False(t, has(snap), "the failure hides %s", tc.gone)
+			_, ok := cachedFor(m, w, roots)
+			require.Equal(t, tc.cached, ok)
+
+			readFaults.Delete(fault)
+			snap, _ = m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.True(t, has(snap), "the pass after the failure discovers %s", tc.gone)
 			_, ok = cachedFor(m, w, roots)
 			require.True(t, ok, "a pass with no failure is cached")
 		})
