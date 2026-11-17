@@ -255,43 +255,52 @@ describe("ForkWorkflowsPanel", () => {
 			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
 			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
 		}));
-		// The cursor page is short, so loading it ends the paging and
-		// unmounts "Load older runs" after the user moved focus to a run.
+		// The cursor page is held open, so the click starts the request
+		// and focus can move before the short page ends the paging and
+		// unmounts "Load older runs".
+		const cursorResolver: { current?: () => void } = {};
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
 			(_chatId, after) =>
-				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+				after
+					? new Promise<WorkflowRun[]>((resolve) => {
+							cursorResolver.current = () => resolve([MockChatWorkflowRun]);
+						})
+					: Promise.resolve(firstPage),
 		);
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
 			MockChatWorkflowRunDetail,
 		);
 		renderPanel(chatId);
+		const user = userEvent.setup();
+		const getRuns = forkWorkflowsApi.getChatWorkflowRuns as ReturnType<
+			typeof vi.fn
+		>;
 
 		const control = await screen.findByRole("button", {
 			name: "Load older runs",
 		});
-		// While the page loaded, the user moved focus to a spot that is
-		// not focusable, so it fell to the body and the button no longer
-		// owns it. jsdom does not fire blur on unmount, so move focus off
-		// the control by hand while it still owns it.
-		control.focus();
-		expect(control).toHaveFocus();
-		(control as HTMLElement).blur();
+		await user.click(control);
+		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+		// While the cursor page is pending, the user moves focus off the
+		// control, and jsdom drops it to the body.
+		await user.click(document.body);
+		expect(control).not.toHaveFocus();
 
+		cursorResolver.current?.();
 		// The cursor page is short, so the control unmounts once it
-		// resolves. No rerender happened while the test waited, so give
-		// React the interval ticks it needs to settle the result into the
-		// DOM.
+		// resolves.
 		await waitFor(() => {
 			expect(
-				screen.queryByText("Load older runs", { selector: "span" }),
+				screen.queryByRole("button", { name: "Load older runs" }),
 			).toBeNull();
 		});
-		// The list must not pull focus back: the user left it somewhere
+		// The list must not pull focus back: the user left it on the body
 		// on purpose, and the body is where a removed focused element
 		// naturally lands.
 		expect(
 			screen.getByRole("list", { name: "Workflow runs" }),
 		).not.toHaveFocus();
+		expect(document.body).toHaveFocus();
 	});
 
 	it("keeps the older-runs control focused while a fetch is in flight", async () => {

@@ -141,11 +141,12 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					onFocus={() => {
 						loadOlderHadFocus.current = true;
 					}}
-					// The button can hand focus away on purpose, so a
-					// programmatic focus call records ownership again.
-					onBlur={(event) => {
-						loadOlderHadFocus.current =
-							event.relatedTarget === event.currentTarget;
+					// Any real blur hands ownership to whatever gained focus.
+					// This relies on React not dispatching the blur a browser
+					// fires when a focused element is removed during commit;
+					// jsdom fires none.
+					onBlur={() => {
+						loadOlderHadFocus.current = false;
 					}}
 				>
 					<Spinner size="sm" loading={isLoadingOlderRuns} aria-hidden />
