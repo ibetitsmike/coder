@@ -16,6 +16,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
@@ -226,33 +228,116 @@ func packRowSourceFile(r database.ChatContextResource) string {
 	return r.Source
 }
 
-// packCommitKey identifies the files of a pack at one commit.
-type packCommitKey struct {
-	packID uuid.UUID
-	commit string
+// packPathsIdle is how long the cached paths of a pack commit stay after
+// their last read. A step reads the paths of its pinned commit each time it
+// filters pack rows, so a step pinned to an older commit keeps them while
+// newer steps read newer commits.
+const packPathsIdle = time.Hour
+
+// packPathsSweepEvery bounds how often a stored commit sweeps the path
+// cache. A cold replica stores one commit per enabled pack, and a sweep on
+// each store would scan the cache once per pack.
+const packPathsSweepEvery = time.Minute
+
+// packCommitPaths is the file paths of a pack at one commit and when they
+// were last read.
+type packCommitPaths struct {
+	paths    packPathSet
+	lastRead time.Time
+}
+
+// packPathsEntry is the cached paths of one pack, keyed by commit. Only the
+// commits read in the last packPathsIdle stay.
+type packPathsEntry struct {
+	mu      sync.Mutex
+	commits map[string]*packCommitPaths
 }
 
 // packPaths returns the paths of the pack's files at its current commit. A
-// commit's files never change, so they are read once per commit. A failed
-// read is logged and returns no paths, so the gate fails closed.
+// commit's files never change, so they are read once per commit. The cache
+// holds one entry per pack, with the commits read in the last packPathsIdle.
+// A failed read, or a read of a commit the pack moved past, is logged and
+// returns no paths, so the gate fails closed.
 func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
-	key := packCommitKey{pack.ID, pack.CommitSHA}
-	if cached, ok := p.forkPacks.paths.Load(key); ok {
-		if paths, ok := cached.(packPathSet); ok {
-			return paths
-		}
+	now := p.clock.Now()
+	cached, _ := p.forkPacks.paths.LoadOrStore(pack.ID, &packPathsEntry{})
+	entry, ok := cached.(*packPathsEntry)
+	if !ok {
+		return packPathSet{}
 	}
-	resources, err := p.packResources(ctx, pack.ID)
+	entry.mu.Lock()
+	if c, ok := entry.commits[pack.CommitSHA]; ok {
+		c.lastRead = now
+		entry.mu.Unlock()
+		return c.paths
+	}
+	entry.mu.Unlock()
+
+	// The resource table holds only the files of the pack's current commit.
+	// The commit and the paths come from one statement, so they belong
+	// together. Once the pack moved past the pinned commit, that commit's
+	// files are gone, so the gate fails closed for this step and caches
+	// nothing.
+	current, paths, err := p.packCommitPaths(ctx, pack.ID)
 	if err != nil {
 		p.logger.Warn(ctx, "failed to read plugin pack files", slog.F("pack_id", pack.ID), slog.Error(err))
 		return packPathSet{}
 	}
-	paths := packPathSet{}
-	for _, resource := range resources {
-		paths[resource.Path] = true
+	if current != pack.CommitSHA {
+		p.logger.Info(ctx, "plugin pack moved past the commit of the step",
+			slog.F("pack_id", pack.ID), slog.F("step_commit", pack.CommitSHA), slog.F("current_commit", current))
+		return packPathSet{}
 	}
-	p.forkPacks.paths.Store(key, paths)
+
+	entry.mu.Lock()
+	if entry.commits == nil {
+		entry.commits = map[string]*packCommitPaths{}
+	}
+	if c, ok := entry.commits[pack.CommitSHA]; ok {
+		// A concurrent read stored the commit first.
+		c.lastRead = now
+		paths = c.paths
+	} else {
+		entry.commits[pack.CommitSHA] = &packCommitPaths{paths: paths, lastRead: now}
+	}
+	entry.mu.Unlock()
+	p.sweepPackPaths(now)
 	return paths
+}
+
+// sweepPackPaths drops the cached commits that no step read in the last
+// packPathsIdle, and the entries of packs left with none, such as deleted
+// packs. It runs when a new commit is stored, at most once per
+// packPathsSweepEvery.
+func (p *Server) sweepPackPaths(now time.Time) {
+	last := p.forkPacks.pathsSweptAt.Load()
+	if last != 0 && now.Sub(time.Unix(0, last)) < packPathsSweepEvery {
+		return
+	}
+	if !p.forkPacks.pathsSweptAt.CompareAndSwap(last, now.UnixNano()) {
+		// A concurrent store sweeps.
+		return
+	}
+	p.forkPacks.paths.Range(func(key, value any) bool {
+		entry, ok := value.(*packPathsEntry)
+		if !ok {
+			return true
+		}
+		entry.mu.Lock()
+		for commit, c := range entry.commits {
+			if now.Sub(c.lastRead) > packPathsIdle {
+				delete(entry.commits, commit)
+			}
+		}
+		empty := len(entry.commits) == 0
+		entry.mu.Unlock()
+		if empty {
+			// A read that loaded the entry before the delete stores into
+			// it and is lost, so the next read reads again.
+			p.forkPacks.paths.CompareAndDelete(key, entry)
+		}
+		return true
+	})
 }
 
 // packRelativePath returns source relative to the directory of the installed

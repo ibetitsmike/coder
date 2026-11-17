@@ -630,11 +630,8 @@ func (api *API) getLinkablePlugins(rw http.ResponseWriter, r *http.Request) {
 	apiKey := httpmw.APIKey(r)
 	//nolint:gocritic // Members list plugins they can link to, not the full rows.
 	sysCtx := dbauthz.AsSystemRestricted(ctx)
-	orgs, err := api.Database.GetOrganizationsByUserID(sysCtx, database.GetOrganizationsByUserIDParams{
-		UserID:  apiKey.UserID,
-		Deleted: sql.NullBool{Bool: false, Valid: true},
-	})
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	rows, err := api.pluginDB.GetLinkablePluginsByUserID(sysCtx, apiKey.UserID)
+	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
@@ -648,27 +645,20 @@ func (api *API) getLinkablePlugins(rw http.ResponseWriter, r *http.Request) {
 		linksByPlugin[l.PluginID] = append(linksByPlugin[l.PluginID], l)
 	}
 	out := []codersdk.LinkablePlugin{}
-	for _, org := range orgs {
-		rows, err := api.pluginDB.GetPluginsByOrganizationID(sysCtx, org.ID)
-		if err != nil {
-			httpapi.InternalServerError(rw, err)
-			return
+	for _, p := range rows {
+		var grants codersdk.PluginGrants
+		if json.Unmarshal(p.Grants, &grants) != nil || len(grants.Chats) == 0 {
+			continue
 		}
-		for _, p := range rows {
-			var grants codersdk.PluginGrants
-			if !p.Enabled || json.Unmarshal(p.Grants, &grants) != nil || len(grants.Chats) == 0 {
-				continue
-			}
-			out = append(out, codersdk.LinkablePlugin{
-				ID:               p.ID,
-				OrganizationID:   p.OrganizationID,
-				OrganizationName: org.Name,
-				Name:             p.Name,
-				Version:          p.Version,
-				Chats:            grants.Chats,
-				Links:            convertPluginLinks(linksByPlugin[p.ID]),
-			})
-		}
+		out = append(out, codersdk.LinkablePlugin{
+			ID:               p.ID,
+			OrganizationID:   p.OrganizationID,
+			OrganizationName: p.OrganizationName,
+			Name:             p.Name,
+			Version:          p.Version,
+			Chats:            grants.Chats,
+			Links:            convertPluginLinks(linksByPlugin[p.ID]),
+		})
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, out)
 }

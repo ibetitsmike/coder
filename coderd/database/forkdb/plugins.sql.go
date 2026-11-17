@@ -217,6 +217,67 @@ func (q *Queries) EnsurePluginChatBindings(ctx context.Context, pluginID uuid.UU
 	return err
 }
 
+const getLinkablePluginsByUserID = `-- name: GetLinkablePluginsByUserID :many
+SELECT
+    plugins.id,
+    plugins.organization_id,
+    organizations.name AS organization_name,
+    plugins.name,
+    plugins.version,
+    plugins.grants
+FROM plugins
+JOIN organization_members
+    ON organization_members.organization_id = plugins.organization_id
+    AND organization_members.user_id = $1
+JOIN organizations
+    ON organizations.id = plugins.organization_id
+    AND NOT organizations.deleted
+WHERE plugins.enabled
+ORDER BY organizations.name, plugins.name
+`
+
+type GetLinkablePluginsByUserIDRow struct {
+	ID               uuid.UUID       `db:"id" json:"id"`
+	OrganizationID   uuid.UUID       `db:"organization_id" json:"organization_id"`
+	OrganizationName string          `db:"organization_name" json:"organization_name"`
+	Name             string          `db:"name" json:"name"`
+	Version          string          `db:"version" json:"version"`
+	Grants           json.RawMessage `db:"grants" json:"grants"`
+}
+
+// The enabled plugins of the live organizations a user is a member of, with
+// the organization name, for the list of plugins the user can link to. It
+// leaves out the config, so no caller decrypts it.
+func (q *Queries) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]GetLinkablePluginsByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getLinkablePluginsByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkablePluginsByUserIDRow
+	for rows.Next() {
+		var i GetLinkablePluginsByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.OrganizationName,
+			&i.Name,
+			&i.Version,
+			&i.Grants,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPluginByID = `-- name: GetPluginByID :one
 SELECT id, organization_id, name, version, file_id, manifest, grants, config, config_key_id, enabled, runner_id, lease_expires_at, last_error, created_by, created_at, updated_at FROM plugins WHERE id = $1
 `

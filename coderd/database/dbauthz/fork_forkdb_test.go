@@ -688,6 +688,13 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeletePluginPackResources(gomock.Any(), pack.ID).Return(nil).AnyTimes()
 			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionUpdate).Returns()
 		},
+		"GetPluginPackCommitPaths": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
+			rows := []forkdb.GetPluginPackCommitPathsRow{{CommitSha: pack.CommitSha, Path: sql.NullString{String: "SKILL.md", Valid: true}}}
+			fdb.EXPECT().GetPluginPackByID(gomock.Any(), pack.ID).Return(pack, nil).AnyTimes()
+			fdb.EXPECT().GetPluginPackCommitPaths(gomock.Any(), pack.ID).Return(rows, nil).AnyTimes()
+			check.Args(pack.ID).Asserts(pluginPackObject(pack), policy.ActionRead).Returns(rows)
+		},
 		"GetPluginPackResources": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
 			resources := []forkdb.PluginPackResource{{PackID: pack.ID, Path: "SKILL.md", Content: []byte("x"), ContentHash: "h"}}
@@ -798,6 +805,12 @@ func TestForkQuerier(t *testing.T) {
 			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
 			fdb.EXPECT().GetPluginUserLinksByPluginID(gomock.Any(), link.PluginID).Return([]forkdb.PluginUserLink{link}, nil).AnyTimes()
 			check.Args(link.PluginID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.PluginUserLink{link})
+		},
+		"GetLinkablePluginsByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			row := testutil.Fake(t, faker, forkdb.GetLinkablePluginsByUserIDRow{})
+			userID := uuid.New()
+			fdb.EXPECT().GetLinkablePluginsByUserID(gomock.Any(), userID).Return([]forkdb.GetLinkablePluginsByUserIDRow{row}, nil).AnyTimes()
+			check.Args(userID).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns([]forkdb.GetLinkablePluginsByUserIDRow{row})
 		},
 		"GetPluginUserLinksByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			link := testutil.Fake(t, faker, forkdb.PluginUserLink{})
