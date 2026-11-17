@@ -213,7 +213,9 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 }
 
 // drain runs the passes that the signals since the last drain asked for. A
-// full pass covers every poked chat.
+// full pass covers every poked chat. While every slot is taken, a poked chat
+// is recorded as skipped with no query, so a freed slot costs about one
+// query and not one per skipped chat.
 func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 	k.mu.Lock()
 	full, pending := k.full, k.pending
@@ -231,11 +233,27 @@ func (k *forkWaker) drain(ctx context.Context, fdb forkdb.Store) {
 		if ctx.Err() != nil {
 			return
 		}
+		if k.skipWhileFull(chatID) {
+			continue
+		}
 		upcoming, ok := k.pass(ctx, fdb, uuid.NullUUID{UUID: chatID, Valid: true}, now)
 		if ok {
 			k.advanceTimer(upcoming)
 		}
 	}
+}
+
+// skipWhileFull records chatID as skipped and returns true when every slot
+// is taken. Slots are taken and freed under k.mu, so the next delivery to end
+// pokes the chat.
+func (k *forkWaker) skipWhileFull(chatID uuid.UUID) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if len(k.slots) < cap(k.slots) {
+		return false
+	}
+	k.skipped[chatID] = struct{}{}
+	return true
 }
 
 // pass starts a delivery for each wake-up of chatID, or of every chat, that
@@ -321,8 +339,11 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 		<-k.slots
 		again := k.inflight[wakeup.ChatID]
 		delete(k.inflight, wakeup.ChatID)
-		skipped := k.skipped
-		if len(skipped) > 0 {
+		// Take the map only when it holds chats, so the range below never
+		// reads the map that dispatch writes.
+		var skipped map[uuid.UUID]struct{}
+		if len(k.skipped) > 0 {
+			skipped = k.skipped
 			k.skipped = make(map[uuid.UUID]struct{})
 		}
 		k.mu.Unlock()

@@ -533,6 +533,59 @@ func TestWakerFullSlotsDoNotStallTheLoop(t *testing.T) {
 	}
 }
 
+// A freed slot pokes every skipped chat, but only the first poked chat gets
+// a pass. The others find every slot taken again and are skipped with no
+// query, so a large backlog costs about one query per freed slot.
+func TestWakerFreedSlotCostsOneList(t *testing.T) {
+	t.Parallel()
+	const backlog = 20
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	for i := range forkWakerDeliveries + backlog {
+		chat := f.createWakeupChat(t)
+		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
+		// The first wake-ups are listed first and take every slot.
+		f.setNextRunAt(t, wakeup.ID, wakeupTestSlot.Add(-time.Duration(forkWakerDeliveries+backlog-i)*time.Second))
+	}
+
+	// Every delivery holds its slot until it gets a value from releaseOne
+	// or the test ends. It reports a busy chat, so its end pokes only the
+	// skipped chats and not its own.
+	releaseOne := make(chan struct{})
+	var started atomic.Int64
+	h := f.startWaker(t, func(h *wakerHarness) {
+		h.waker.deliver = func(ctx context.Context, _ forkdb.Store, _ forkdb.ChatWakeup, _ time.Time) error {
+			started.Add(1)
+			select {
+			case <-releaseOne:
+				return errWakeupChatBusy
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	})
+	skipped := func() int {
+		h.waker.mu.Lock()
+		defer h.waker.mu.Unlock()
+		return len(h.waker.skipped)
+	}
+
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		return started.Load() == forkWakerDeliveries && skipped() == backlog
+	}, testutil.IntervalFast, "the first pass must fill every slot and skip the rest")
+	require.EqualValues(t, 1, h.fdb.lists.Load())
+
+	select {
+	case releaseOne <- struct{}{}:
+	case <-ctx.Done():
+		t.Fatal("no delivery took the release")
+	}
+	testutil.Eventually(ctx, t, func(context.Context) bool {
+		return started.Load() == forkWakerDeliveries+1 && skipped() == backlog-1
+	}, testutil.IntervalFast, "the freed slot must deliver one skipped wake-up and skip the rest again")
+	require.EqualValues(t, 2, h.fdb.lists.Load(), "one freed slot, one more query")
+}
+
 // Each change that makes a watched child done delivers the events wake-up
 // of its idle parent at once: it publishes the chat update of the child or
 // pokes the child itself. Without pokes, the next full pass delivers it.
