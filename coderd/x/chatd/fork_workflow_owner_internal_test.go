@@ -3,6 +3,8 @@ package chatd
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -143,7 +145,7 @@ func TestForkWorkflowOwnership(t *testing.T) {
 		fdb := forkWorkflowDB(t, f.db)
 
 		_ = f.peerServer(t, mock)
-		_ = f.peerServer(t, mock)
+		peer := f.peerServer(t, mock)
 		// One heartbeat later every process has swept once more.
 		advanceMockClockBy(ctx, t, mock, workflowHeartbeatInterval)
 
@@ -152,6 +154,15 @@ func TestForkWorkflowOwnership(t *testing.T) {
 		require.True(t, row.OwnerID.Valid)
 		assert.Equal(t, f.server.workflows.owner.id, row.OwnerID.UUID, "the first process keeps the run")
 		assert.Equal(t, workflowStatusRunning, run.snapshot().Status, "the script keeps running")
+
+		// A resume on another process answers with the journal, which
+		// says what the owner says: its first attempt reused no step.
+		_, err := peer.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		var elsewhere *workflowRunElsewhereError
+		require.ErrorAs(t, err, &elsewhere)
+		require.Len(t, elsewhere.result.Steps, 1)
+		assert.False(t, elsewhere.result.Steps[0].Reused, "the snapshot of a live run marks no step reused")
 	})
 
 	// A run whose owner stopped its heartbeat goes interrupted once the
@@ -376,6 +387,73 @@ def main(args):
 		assert.Empty(t, f.server.workflows.liveRuns(), "the run stops heartbeating once its end landed")
 	})
 
+	// An ended run whose terminal write never landed and whose row another
+	// process claimed leaves the registry: the new owner may run the
+	// script again, so await_workflow must read the journal.
+	t.Run("AnEndedRunThatLostItsRowLeavesTheRegistry", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		ctx := chatdTestContext(t)
+		failing := failStatusWrites(t, f.server)
+		failing.fail.Store(true)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return "done"
+`})
+		waitWorkflowDone(ctx, t, run)
+		fdb := forkWorkflowDB(t, f.db)
+
+		ageWorkflowHeartbeats(t, f.server)
+		other := f.peerServer(t, mock)
+		require.Equal(t, workflowStatusInterrupted, journalRunStatus(ctx, t, fdb, run.id))
+		_, ok, err := other.workflowJournal().claimRun(ctx, run.id)
+		require.NoError(t, err)
+		require.True(t, ok)
+
+		advanceMockClockBy(ctx, t, mock, workflowHeartbeatInterval)
+		assert.Nil(t, f.server.workflows.get(run.id), "the ended copy left the registry")
+		row := journalRow(ctx, t, fdb, run.id)
+		assert.Equal(t, workflowStatusRunning, row.Status, "the old copy wrote nothing")
+		assert.Equal(t, other.workflows.owner.id, row.OwnerID.UUID)
+	})
+
+	// A stop that finds the row running and owned by this process while
+	// the registry is empty waits for the resume of this process that
+	// claimed it, then stops the run that resume registered.
+	t.Run("StopWaitsForAResumeOfThisProcess", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		// A resume between its claim and its registration: it holds the
+		// resume lock, and the registry does not hold the run yet.
+		f.server.workflows.resumeMu.Lock()
+		f.server.workflows.remove(run.id)
+		errc := make(chan error, 1)
+		go func() { errc <- f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id) }()
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			select {
+			case err := <-errc:
+				t.Fatalf("the stop went past the resume: %v", err)
+			default:
+			}
+			return goroutineBlockedOnLockIn("(*Server).stopOwnerlessRun")
+		}, testutil.IntervalFast)
+		_, added := f.server.workflows.add(run)
+		require.True(t, added)
+		f.server.workflows.resumeMu.Unlock()
+
+		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
+		waitWorkflowDone(ctx, t, run)
+		assert.Equal(t, workflowStatusStopped, run.snapshot().Status, "the stop reached the registered run")
+		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+	})
+
 	// A stop on the process that held a run another process claimed since
 	// the last heartbeat must not stop the local copy: it confirms the
 	// ownership first and reaches the new owner over pubsub.
@@ -437,6 +515,19 @@ def main(args):
 		assert.Equal(t, workflowStatusRunning, resumed.snapshot().Status)
 		assert.Equal(t, next.workflows.owner.id, journalRow(ctx, t, fdb, run.id).OwnerID.UUID)
 	})
+}
+
+// goroutineBlockedOnLockIn reports whether a goroutine waits for a mutex
+// inside fn.
+func goroutineBlockedOnLockIn(fn string) bool {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "sync.(*Mutex).Lock") && strings.Contains(g, fn) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitWorkflowDone waits until run closed its done channel.

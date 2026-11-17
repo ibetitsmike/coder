@@ -756,7 +756,9 @@ func (p *Server) workflowResultFromJournal(
 			ChatID: srow.ID.String(),
 			Title:  srow.Title,
 			Status: srow.Status,
-			Reused: true,
+			// A running row has a live owner, whose row carries the flag; a
+			// resume of an interrupted run replays every step.
+			Reused: srow.Reused || row.Status != workflowStatusRunning,
 			Phase:  srow.Phase,
 			Error:  srow.Error,
 		})

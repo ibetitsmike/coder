@@ -300,7 +300,13 @@ func (r *workflowRun) recheckOwnership(ctx context.Context) (bool, error) {
 	r.markLost()
 	r.mu.Lock()
 	r.terminalPending = false
+	ended := r.result != nil && !r.lost
 	r.mu.Unlock()
+	if ended {
+		// The copy ended before its end reached the row, and the new owner
+		// may run the script again: await_workflow reads the journal now.
+		r.p.workflows.removeRun(r)
+	}
 	return false, nil
 }
 

@@ -73,14 +73,13 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 	if p.workflowOwnerLive(row.OwnerID, row.HeartbeatAt.Time, row.HeartbeatAt.Valid) {
 		return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
 	}
-	// The owner is gone. Claiming the run fences a late write of the old
-	// owner before the stop writes the journal.
-	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
-	if err != nil {
-		return xerrors.Errorf("claim the workflow run: %w", err)
+	held, ok, err := p.stopOwnerlessRun(ctx, row)
+	if held != nil {
+		// A resume of this process registered the run meanwhile.
+		return p.stopHeldRun(ctx, held)
 	}
-	if ok {
-		return p.stopJournaledRun(ctx, claimed)
+	if err != nil || ok {
+		return err
 	}
 	// The run ended, or a resume elsewhere claimed it, since the read.
 	row, found, err = p.workflowJournal().getRun(ctx, runID)
@@ -94,6 +93,30 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 		return ErrForkWorkflowRunTerminal
 	}
 	return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
+}
+
+// stopOwnerlessRun stops a running run whose owner is gone. A resume of
+// this process claims the row before it registers the run, so the row can
+// name this process while the registry is still empty. The stop takes the
+// resume lock: under it the registry is current, and a resume cannot
+// claim the row between this claim and the journaled stop. held is the run
+// a resume registered meanwhile, which the caller stops instead. ok is
+// false when the claim found the run ended or owned elsewhere. Claiming the
+// run also fences a late write of the old owner before the stop writes.
+func (p *Server) stopOwnerlessRun(ctx context.Context, row forkdb.WorkflowRun) (held *workflowRun, ok bool, err error) {
+	p.workflows.resumeMu.Lock()
+	defer p.workflows.resumeMu.Unlock()
+	if run := p.workflows.get(row.ID); run != nil {
+		return run, false, nil
+	}
+	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
+	if err != nil {
+		return nil, false, xerrors.Errorf("claim the workflow run: %w", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return nil, true, p.stopJournaledRun(ctx, claimed)
 }
 
 // stopHeldRun stops a run of the registry. It confirms the ownership of a
