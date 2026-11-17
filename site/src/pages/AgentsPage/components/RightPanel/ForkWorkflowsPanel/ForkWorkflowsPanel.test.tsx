@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+	focusManager,
 	type InfiniteData,
 	InfiniteQueryObserver,
 	QueryClientProvider,
@@ -215,9 +216,6 @@ describe("ForkWorkflowsPanel", () => {
 			);
 			expect(observer.getCurrentResult().hasNextPage).toBe(false);
 		});
-		expect(
-			screen.queryByRole("button", { name: "Load older runs" }),
-		).not.toBeInTheDocument();
 	});
 
 	it("keeps focus on the list when the last page removes the control", async () => {
@@ -243,14 +241,107 @@ describe("ForkWorkflowsPanel", () => {
 			await screen.findByRole("button", { name: "Load older runs" }),
 		);
 		await screen.findByRole("list", { name: "Workflow runs" });
-		await waitFor(() =>
-			expect(
-				screen.queryByRole("button", { name: "Load older runs" }),
-			).not.toBeInTheDocument(),
-		);
 		// The focus moved from the unmounted button to the list, not to the
 		// body, so keyboard users keep their place.
-		expect(screen.getByRole("list", { name: "Workflow runs" })).toHaveFocus();
+		await waitFor(() =>
+			expect(screen.getByRole("list", { name: "Workflow runs" })).toHaveFocus(),
+		);
+	});
+
+	it("keeps the older-runs control focused while a fetch is in flight", async () => {
+		const chatId = generateUUID();
+		// The test client's refetchInterval would wait out the real tick, so
+		// the test drives both fetches itself and holds each one open.
+		focusManager.setFocused(false);
+		try {
+			// Full pages keep an older page promised, so the control stays
+			// mounted through both fetches.
+			const firstPage = Array.from({ length: 50 }, (_, index) => ({
+				...MockChatWorkflowRun,
+				id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+			}));
+			const olderPage = Array.from({ length: 50 }, (_, index) => ({
+				...MockChatWorkflowRun,
+				id: `00000001-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				created_at: `2026-11-11T10:00:${String(index).padStart(2, "0")}Z`,
+			}));
+			// The fetch in flight holds this resolver until the test lets it
+			// finish, so the control's states can be asserted mid-fetch.
+			const held: { resolve: (() => void) | null } = { resolve: null };
+			const hold = (value: WorkflowRun[]) =>
+				new Promise<WorkflowRun[]>((resolve) => {
+					held.resolve = () => resolve(value);
+				});
+			let phase: "next-page" | "tick" | "settled" = "next-page";
+			vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+				(_chatId, after) => {
+					if (phase === "next-page") {
+						return after ? hold(olderPage) : Promise.resolve(firstPage);
+					}
+					if (phase === "tick") {
+						// A tick reuses the finished older page from the cache,
+						// so holding the first page holds the whole tick.
+						return after ? Promise.resolve(olderPage) : hold(firstPage);
+					}
+					return Promise.resolve(after ? olderPage : firstPage);
+				},
+			);
+			vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+				MockChatWorkflowRunDetail,
+			);
+			const { queryClient } = renderPanel(chatId);
+			const user = userEvent.setup();
+			const getRuns = vi.mocked(forkWorkflowsApi.getChatWorkflowRuns);
+			const releaseHeld = () => {
+				const release = held.resolve;
+				phase = "settled";
+				if (release) {
+					release();
+				}
+			};
+
+			let control = await screen.findByRole("button", {
+				name: "Load older runs",
+			});
+			await user.click(control);
+
+			// A next-page fetch is in flight. The control must say so, keep
+			// focus and refuse a second load while it runs.
+			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			await waitFor(() =>
+				expect(control).toHaveAttribute("aria-disabled", "true"),
+			);
+			control.focus();
+			expect(control).toHaveFocus();
+			await user.click(control);
+			expect(getRuns).toHaveBeenCalledTimes(2);
+			releaseHeld();
+			await waitFor(() => expect(control).not.toHaveAttribute("aria-disabled"));
+
+			// A background tick is in flight: the same story.
+			control = screen.getByRole("button", { name: "Load older runs" });
+			// Move focus away first, so re-focusing the control is not a
+			// no-op on an element that already holds focus: a disabled
+			// control would then fail to take focus back.
+			const runList = screen.getByRole("list", { name: "Workflow runs" });
+			runList.focus();
+			expect(runList).toHaveFocus();
+			phase = "tick";
+			queryClient.refetchQueries({ queryKey: chatWorkflowRunsKey(chatId) });
+			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(3));
+			await waitFor(() =>
+				expect(control).toHaveAttribute("aria-disabled", "true"),
+			);
+			control.focus();
+			expect(control).toHaveFocus();
+			await user.click(control);
+			expect(getRuns).toHaveBeenCalledTimes(3);
+			releaseHeld();
+			await waitFor(() => expect(control).not.toHaveAttribute("aria-disabled"));
+		} finally {
+			focusManager.setFocused(true);
+		}
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {

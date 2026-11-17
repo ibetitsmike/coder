@@ -22,11 +22,8 @@ type ForkWorkflowRunListProps = {
 	runs: readonly WorkflowRun[] | undefined;
 	error: unknown;
 	onSelectRun: (runId: string) => void;
-	/** Whether the chat has runs older than the loaded pages. */
 	hasOlderRuns?: boolean;
-	/** A next-page fetch is loading, so the control shows its spinner. */
 	isLoadingOlderRuns?: boolean;
-	/** Blocks the control while any fetch, including a background tick, runs. */
 	disabled?: boolean;
 	/** Absent while the first page has not loaded. */
 	onLoadOlderRuns?: () => void;
@@ -59,7 +56,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			listRef.current
 		) {
 			hadLoadOlder.current = false;
-			listRef.current.focus();
+			listRef.current.focus({ preventScroll: true });
 		}
 	}, [hasOlderRuns]);
 
@@ -90,7 +87,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			<ul
 				ref={listRef}
 				aria-label="Workflow runs"
-				className="m-0 flex list-none flex-col gap-1 p-0 outline-none"
+				className="m-0 flex list-none flex-col gap-1 p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
 				// The list takes focus when "Load older runs" unmounts after
 				// the last page, so keyboard focus does not drop to the body.
 				tabIndex={-1}
@@ -133,8 +130,13 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					variant="subtle"
 					size="sm"
 					className="w-full"
-					disabled={disabled || isLoadingOlderRuns}
-					onClick={onLoadOlderRuns}
+					// aria-disabled instead of disabled keeps the control
+					// focusable through both a background refetch and a
+					// next-page fetch: browsers drop focus from a disabled
+					// control, and a poll tick would steal it every 5s. The
+					// guarded handler keeps the two fetches from overlapping.
+					aria-disabled={disabled || isLoadingOlderRuns || undefined}
+					onClick={disabled || isLoadingOlderRuns ? undefined : onLoadOlderRuns}
 				>
 					{isLoadingOlderRuns ? (
 						<>

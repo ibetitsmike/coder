@@ -59,6 +59,8 @@ const mockFailedRunDetail: WorkflowRunDetail = {
 					status: "failed",
 					error:
 						"the step ended its turn twice without calling workflow_report",
+					// A failed step has not reported a value.
+					value: undefined,
 				}
 			: step,
 	),
@@ -79,7 +81,13 @@ const mockStoppedRunDetail: WorkflowRunDetail = {
 	steps: MockChatWorkflowRunDetail.steps.map((step, index) =>
 		index === 0
 			? step
-			: { ...step, status: "failed", error: "stopped by user" },
+			: {
+					...step,
+					status: "failed",
+					error: "stopped by user",
+					// A failed step has not reported a value.
+					value: undefined,
+				},
 	),
 };
 

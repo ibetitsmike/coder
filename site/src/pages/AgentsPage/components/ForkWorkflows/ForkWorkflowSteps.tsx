@@ -53,6 +53,9 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 						// heading.
 						const isFirstStepOfGroup = group.steps[0] === step;
 						const headingId = `${headingIdPrefix}-${groupIndex}`;
+						// The value regions are named by the step's position in
+						// the run, which the API's ordinal reports.
+						const stepOrdinal = step.ordinal ?? steps.indexOf(step);
 						return (
 							<li
 								key={step.chatId}
@@ -97,10 +100,10 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 								)}
 								{step.value !== undefined && (
 									<ForkWorkflowLongText
-										// Name the step, so a screen reader listing the
-										// regions reads which step each value belongs
-										// to instead of a bare "Value".
-										label={`${step.title || "Step"} value`}
+										// Name the step and its position, so a screen reader
+										// listing the regions can tell two values apart even
+										// when the steps share a title.
+										label={`Step ${stepOrdinal + 1}: ${step.title || "Untitled step"} value`}
 										text={formatForkWorkflowValue(step.value)}
 									/>
 								)}

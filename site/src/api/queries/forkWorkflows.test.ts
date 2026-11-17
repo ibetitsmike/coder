@@ -42,15 +42,7 @@ const makeRun = (index: number, status: string): WorkflowRun => ({
  * is unique too, so a cursor always names exactly one run.
  */
 const fullPage = (firstIndex: number, statuses: readonly string[]) =>
-	statuses.map((status, offset) => {
-		const index = firstIndex - offset;
-		// Timestamps step by 3 seconds per run, so a cursor names exactly
-		// one run and a page's last run is the oldest one on it.
-		return {
-			...makeRun(index, status),
-			created_at: stampOf(index),
-		};
-	});
+	statuses.map((status, offset) => makeRun(firstIndex - offset, status));
 
 const cursorOf = (page: readonly WorkflowRun[]) =>
 	`${page[page.length - 1].created_at}/${page[page.length - 1].id}`;
@@ -96,11 +88,6 @@ afterEach(() => {
 });
 
 describe("chatWorkflowRuns polling", () => {
-	// The observer resolves a refetch when its pages settle, so a tick's
-	// later page fetch can still be in flight; flush it with a short real
-	// timeout before reading the recorded calls.
-	const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-
 	it("makes one request per tick with two finished pages", async () => {
 		const { getRuns, pages, fetchNextPage, refetch, start, unsubscribe } =
 			observeRuns();
@@ -123,8 +110,8 @@ describe("chatWorkflowRuns polling", () => {
 			// One tick fetches the first page; the finished older page is
 			// reused from the cache, so its cursor is absent from the calls.
 			getRuns.mockClear();
-			await refetch();
-			await settle();
+			refetch();
+			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(1));
 			expect(getRuns.mock.calls.map((call) => call[1])).toEqual([""]);
 		} finally {
 			unsubscribe();
@@ -151,14 +138,12 @@ describe("chatWorkflowRuns polling", () => {
 
 			// The tick fetches the running page again; the finished first
 			// page is fetched too, since the first page is always fetched
-			// fresh. The running page is full, so its cursor survives.
+			// fresh.
 			getRuns.mockResolvedValueOnce(first).mockResolvedValueOnce(runningPage);
-			await refetch();
-			await settle();
-			expect(getRuns.mock.calls.slice(2).map((call) => call[1])).toEqual([
-				"",
-				cursor,
-			]);
+			getRuns.mockClear();
+			refetch();
+			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			expect(getRuns.mock.calls.map((call) => call[1])).toEqual(["", cursor]);
 		} finally {
 			unsubscribe();
 		}
@@ -190,15 +175,15 @@ describe("chatWorkflowRuns polling", () => {
 				.mockResolvedValueOnce(
 					fullPage(-1, ["completed", "running", "completed"]),
 				);
-			await refetch();
-			await settle();
-			expect(
-				pages()[1].some((run: WorkflowRun) => run.status === "running"),
-			).toBe(true);
-			expect(getRuns.mock.calls.slice(2).map((call) => call[1])).toEqual([
-				"",
-				cursor,
-			]);
+			getRuns.mockClear();
+			refetch();
+			await vi.waitFor(() =>
+				expect(
+					pages()[1].some((run: WorkflowRun) => run.status === "running"),
+				).toBe(true),
+			);
+			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			expect(getRuns.mock.calls.map((call) => call[1])).toEqual(["", cursor]);
 		} finally {
 			unsubscribe();
 		}
@@ -240,9 +225,10 @@ describe("chatWorkflowRuns polling", () => {
 							: [],
 				),
 			);
-			await refetch();
-			await settle();
-			expect(getRuns.mock.calls.slice(2).map((call) => call[1])).toEqual([
+			getRuns.mockClear();
+			refetch();
+			await vi.waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			expect(getRuns.mock.calls.map((call) => call[1])).toEqual([
 				"",
 				newCursor,
 			]);

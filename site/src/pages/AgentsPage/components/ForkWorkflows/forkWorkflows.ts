@@ -13,6 +13,8 @@ export type ForkWorkflowStep = {
 	reused: boolean;
 	error: string;
 	phase: string;
+	/** The step's position in the run; the value regions are named with it. */
+	ordinal?: number;
 	/** The report the step sent, undefined until it reported. */
 	value?: unknown;
 };
@@ -95,7 +97,12 @@ export const parseForkWorkflowRunSnapshot = (
 	const record = parseArgs(value);
 	const runId = asString(record?.run_id);
 	const status = asString(record?.status);
-	const steps = parseArray(record?.steps ?? [], parseStep);
+	const steps = parseArray(record?.steps ?? [], parseStep)?.map(
+		(step, index) => ({
+			...step,
+			ordinal: index,
+		}),
+	);
 	if (!record || runId === "" || status === "" || !steps) {
 		return null;
 	}
@@ -131,7 +138,7 @@ export const forkWorkflowRunDetailSteps = (
 ): ForkWorkflowStep[] =>
 	run.steps
 		.toSorted((left, right) => left.ordinal - right.ordinal)
-		.map((step) => ({
+		.map((step, index) => ({
 			chatId: step.id,
 			title: step.title,
 			status: step.status,
@@ -139,6 +146,7 @@ export const forkWorkflowRunDetailSteps = (
 			error: step.error,
 			phase: step.phase,
 			value: step.value,
+			ordinal: index,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */

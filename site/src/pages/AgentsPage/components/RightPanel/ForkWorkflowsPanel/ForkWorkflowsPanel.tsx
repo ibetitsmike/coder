@@ -58,8 +58,8 @@ export const ForkWorkflowsPanel: React.FC<ForkWorkflowsPanelProps> = ({
 						hasOlderRuns={runsQuery.hasNextPage}
 						// The control waits out a background refetch, which
 						// would otherwise drop the pages it fetches
-						// alongside, but only a next-page fetch shows as a
-						// load in progress.
+						// alongside. It signals aria-disabled for it, so a
+						// poll tick never steals focus.
 						disabled={runsQuery.isFetching}
 						isLoadingOlderRuns={runsQuery.isFetchingNextPage}
 						onLoadOlderRuns={
