@@ -40,7 +40,10 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	text,
 	isError = false,
 }) => {
-	const [expanded, setExpanded] = useState(false);
+	// Once the text shows in full, it stays in full: polling can grow
+	// it past the threshold, and collapsing it under the user would
+	// hide what they were reading.
+	const [expanded, setExpanded] = useState(() => textPreview(text) === null);
 	const preview = textPreview(text);
 	const textClassName = cn(
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent p-0 font-mono text-xs leading-5",

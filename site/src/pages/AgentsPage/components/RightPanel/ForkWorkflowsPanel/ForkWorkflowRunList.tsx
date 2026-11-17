@@ -29,6 +29,49 @@ type ForkWorkflowRunListProps = {
 	onLoadOlderRuns?: () => void;
 };
 
+type ForkWorkflowRunRowProps = {
+	run: WorkflowRun;
+	onSelectRun: (runId: string) => void;
+};
+
+// The clock lives on the row so only rows with a running run tick every
+// second; completed rows keep the slow interval.
+const ForkWorkflowRunRow: React.FC<ForkWorkflowRunRowProps> = ({
+	run,
+	onSelectRun,
+}) => {
+	const now = useTime(() => Date.now(), {
+		interval: run.status === "running" ? 1_000 : 30_000,
+	});
+	return (
+		<button
+			type="button"
+			className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
+			onClick={() => onSelectRun(run.id)}
+		>
+			<span className="flex w-full min-w-0 items-center gap-1.5">
+				<ForkWorkflowStatusBadge {...forkWorkflowRunStatusMeta(run.status)} />
+				<span className="min-w-0 truncate text-sm text-content-primary">
+					{run.title || run.script_preview || "Untitled run"}
+				</span>
+			</span>
+			<span className="text-xs text-content-secondary">
+				{[
+					`Started ${timeFrom(run.created_at, now)}`,
+					forkWorkflowRunDuration(run, now),
+					forkWorkflowStepCountProgress(
+						run.step_counts.done,
+						run.step_counts.total,
+					),
+					run.step_counts.failed > 0 && `${run.step_counts.failed} failed`,
+				]
+					.filter(Boolean)
+					.join(" · ")}
+			</span>
+		</button>
+	);
+};
+
 export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	runs,
 	error,
@@ -39,10 +82,6 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	onLoadOlderRuns,
 }) => {
 	const listRef = useRef<HTMLUListElement>(null);
-	const hasRunning = runs?.some((run) => run.status === "running") ?? false;
-	const now = useTime(() => Date.now(), {
-		interval: hasRunning ? 1_000 : 30_000,
-	});
 	// "Load older runs" holds focus while the last page loads. When that
 	// page ends the paging, the button unmounts, so keep focus on the list
 	// instead of dropping it to the body.
@@ -98,34 +137,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			>
 				{runs.map((run) => (
 					<li key={run.id}>
-						<button
-							type="button"
-							className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
-							onClick={() => onSelectRun(run.id)}
-						>
-							<span className="flex w-full min-w-0 items-center gap-1.5">
-								<ForkWorkflowStatusBadge
-									{...forkWorkflowRunStatusMeta(run.status)}
-								/>
-								<span className="min-w-0 truncate text-sm text-content-primary">
-									{run.title || run.script_preview || "Untitled run"}
-								</span>
-							</span>
-							<span className="text-xs text-content-secondary">
-								{[
-									`Started ${timeFrom(run.created_at, now)}`,
-									forkWorkflowRunDuration(run, now),
-									forkWorkflowStepCountProgress(
-										run.step_counts.done,
-										run.step_counts.total,
-									),
-									run.step_counts.failed > 0 &&
-										`${run.step_counts.failed} failed`,
-								]
-									.filter(Boolean)
-									.join(" · ")}
-							</span>
-						</button>
+						<ForkWorkflowRunRow run={run} onSelectRun={onSelectRun} />
 					</li>
 				))}
 			</ul>
