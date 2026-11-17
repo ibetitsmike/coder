@@ -647,6 +647,17 @@ message ContextResource {
 		SubagentBody subagent = 100;
 	}
 
+	// Fork: fork_body_digest is set on a hash-only row. The body
+	// variant is still set, with an empty message, so the kind stays
+	// known, and the digest is sha256 over the deterministic proto
+	// encoding of the body the agent elided. coderd fills the body
+	// from its stored row for the same source when the stored body
+	// has this digest, and rejects the push otherwise. Agents send
+	// hash-only rows only to servers that advertise
+	// fork_context_hash_rows. Fork fields outside the body oneof start
+	// at 200 so fork body variants keep the tags from 100 up.
+	bytes fork_body_digest = 200;
+
 	// Reserved tags from the legacy v2.10 schema that carried
 	// id (1->renamed), kind enum, payload, description, and the
 	// removed plugin/hook/subagent/command flat fields. Keep them
@@ -761,6 +772,11 @@ message PushContextStateResponse {
 	// resolves its context in full on every push and never reads or
 	// stores the resolve cache.
 	bool fork_context_cache = 103;
+	// Fork: fork_context_hash_rows advertises that the serving coderd has
+	// the fork-context-hash-rows experiment enabled and fills hash-only
+	// rows (ContextResource.fork_body_digest) from its stored bodies.
+	// While it is false the agent sends every body in full.
+	bool fork_context_hash_rows = 104;
 }
 
 service Agent {

@@ -88,6 +88,10 @@ type ContextAPI struct {
 	// ForkContextCache mirrors the fork-context-cache experiment: agents
 	// read and store their resolve cache only while a response sets it.
 	ForkContextCache bool
+	// ForkContextHashRows mirrors the fork-context-hash-rows experiment:
+	// pushes may carry hash-only rows, filled from the stored bodies, only
+	// while it is set.
+	ForkContextHashRows bool
 }
 
 // ContextDirtyMarker hydrates chats from, and marks chats dirty against, a
@@ -166,6 +170,9 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		return nil, xerrors.New("agentapi: PushContextState request is nil")
 	}
 	if err := validateContextPushRequest(req); err != nil {
+		return nil, err
+	}
+	if err := a.forkFillHashRows(ctx, req); err != nil { // fork: hash-only rows
 		return nil, err
 	}
 
@@ -309,6 +316,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			ForkAgentDefinitions: a.ForkAgentDefinitions,
 			ForkGlobRules:        true,
 			ForkContextCache:     a.ForkContextCache,
+			ForkContextHashRows:  a.ForkContextHashRows,
 		}, nil
 	}
 
@@ -331,6 +339,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		ForkAgentDefinitions: a.ForkAgentDefinitions,
 		ForkGlobRules:        true,
 		ForkContextCache:     a.ForkContextCache,
+		ForkContextHashRows:  a.ForkContextHashRows,
 	}, nil
 }
 

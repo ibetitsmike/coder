@@ -23,6 +23,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkTokenBudget,
 	ExperimentForkViewImage,
 	ExperimentForkContextCache,
+	ExperimentForkContextHashRows,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -80,6 +81,11 @@ const ExperimentForkViewImage Experiment = "fork-view-image"
 // snapshot across reconnects while their file watcher proves that nothing
 // changed, instead of resolving the context in full on every reconnect.
 const ExperimentForkContextCache Experiment = "fork-context-cache"
+
+// ExperimentForkContextHashRows lets workspace agents send a context resource
+// whose body coderd already stores as a digest only, so a push after one file
+// changed carries one body instead of every body.
+const ExperimentForkContextHashRows Experiment = "fork-context-hash-rows"
 
 // forkExperimentDisplayNames names the fork experiments whose title-cased
 // names read wrong, such as "Html".
