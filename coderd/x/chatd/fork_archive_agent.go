@@ -168,7 +168,7 @@ func (p *Server) setSubtreeArchived(ctx context.Context, rootID, topID uuid.UUID
 				continue
 			}
 			var chat database.Chat
-			err = chatstate.NewChatMachine(tx, buffer, id).Update(ctx, func(state *chatstate.Tx, _ database.Store) error {
+			_, err = chatstate.NewChatMachine(tx, buffer, id).Update(ctx, func(state *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 				if _, err := state.SetArchived(chatstate.SetArchivedInput{Archived: true}); err != nil {
 					return err
 				}

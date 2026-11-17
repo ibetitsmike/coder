@@ -149,10 +149,11 @@ func (f *workerTestFixture) startWaker(t *testing.T, mutate func(*wakerHarness))
 func finishTurnThrough(t *testing.T, f *workerTestFixture, publisher chatstate.Publisher, chatID uuid.UUID) {
 	t.Helper()
 	ctx := testutil.Context(t, testutil.WaitShort)
-	require.NoError(t, chatstate.NewChatMachine(f.db, publisher, chatID).Update(ctx, func(tx *chatstate.Tx, _ database.Store) error {
+	_, err := chatstate.NewChatMachine(f.db, publisher, chatID).Update(ctx, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 		_, err := tx.FinishTurn(chatstate.FinishTurnInput{})
 		return err
-	}))
+	})
+	require.NoError(t, err)
 }
 
 // A due wake-up of a busy chat is delivered by the commit that ends the
