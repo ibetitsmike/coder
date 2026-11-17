@@ -1,9 +1,3 @@
-// This file is fork code: stories for the labeled long-text block
-// (fork-workflows experiment). Pixel screenshots these stories to capture
-// the collapsed and expanded visual states; the Vitest suite in
-// ForkWorkflowLongText.test.tsx pins the control's state through role
-// queries.
-
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { ForkWorkflowLongText } from "./ForkWorkflowLongText";
@@ -40,7 +34,9 @@ export const Collapsed: Story = {};
 export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByRole("button", { name: "Show more" }),
+			within(canvasElement).getByRole("button", {
+				name: "Show more of Result",
+			}),
 		);
 	},
 };

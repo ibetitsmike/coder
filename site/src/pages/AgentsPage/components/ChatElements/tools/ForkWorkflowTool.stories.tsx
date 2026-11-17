@@ -370,7 +370,9 @@ export const CompletedResultExpanded: Story = {
 	play: async (context) => {
 		await expand(context);
 		await userEvent.click(
-			within(context.canvasElement).getByRole("button", { name: "Show more" }),
+			within(context.canvasElement).getByRole("button", {
+				name: "Show more of Result",
+			}),
 		);
 	},
 };

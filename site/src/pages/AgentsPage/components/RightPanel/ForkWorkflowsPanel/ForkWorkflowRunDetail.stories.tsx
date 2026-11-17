@@ -41,7 +41,6 @@ const mockRunningRunDetailWithProgress: WorkflowRunDetail = {
 		...step,
 		status: index === 2 ? "running" : "reported",
 		finished_at: index === 2 ? undefined : step.finished_at,
-		// A step that still runs has not reported a value.
 		value: index === 2 ? undefined : step.value,
 	})),
 };
@@ -59,7 +58,6 @@ const mockFailedRunDetail: WorkflowRunDetail = {
 					status: "failed",
 					error:
 						"the step ended its turn twice without calling workflow_report",
-					// A failed step has not reported a value.
 					value: undefined,
 				}
 			: step,
@@ -85,7 +83,6 @@ const mockStoppedRunDetail: WorkflowRunDetail = {
 					...step,
 					status: "failed",
 					error: "stopped by user",
-					// A failed step has not reported a value.
 					value: undefined,
 				},
 	),
@@ -105,7 +102,6 @@ const mockPhasedRunDetail: WorkflowRunDetail = {
 		status: index === 2 ? "running" : "reported",
 		phase: index === 2 ? "summarize" : "review",
 		finished_at: index === 2 ? undefined : step.finished_at,
-		// A step that still runs has not reported a value.
 		value: index === 2 ? undefined : step.value,
 	})),
 };

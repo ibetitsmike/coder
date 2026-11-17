@@ -77,6 +77,7 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 						size="xs"
 						className="w-fit px-0"
 						aria-expanded={expanded}
+						aria-label={`${expanded ? "Show less" : "Show more"} of ${label}`}
 						onClick={() => setExpanded((value) => !value)}
 					>
 						{expanded ? "Show less" : "Show more"}
