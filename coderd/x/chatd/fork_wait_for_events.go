@@ -208,6 +208,10 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
+				// The wake-up committed, and a watched child may be done
+				// already. The poke lists it now, not at the next commit of
+				// the chat or the sweep.
+				p.forkWaker().poke(chat.ID)
 				wakeup = &created
 			}
 			result, err := p.waitForEventsResponse(ctx, chat, *wakeup)

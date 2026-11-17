@@ -110,6 +110,9 @@ type forkWaker struct {
 	running bool
 	pending map[uuid.UUID]struct{}
 	full    bool
+	// skipped holds the chats whose due wake-ups a pass skipped because
+	// every slot was taken. The next delivery to end pokes them.
+	skipped map[uuid.UUID]struct{}
 	// inflight holds the chats with a running delivery. The value records
 	// whether a pass found more for the chat meanwhile.
 	inflight map[uuid.UUID]bool
@@ -123,6 +126,7 @@ func newForkWaker() *forkWaker {
 		wake:     make(chan struct{}, 1),
 		slots:    make(chan struct{}, forkWakerDeliveries),
 		pending:  make(map[uuid.UUID]struct{}),
+		skipped:  make(map[uuid.UUID]struct{}),
 		inflight: make(map[uuid.UUID]bool),
 	}
 }
@@ -154,7 +158,8 @@ func (k *forkWaker) poke(chatID uuid.UUID) {
 }
 
 // run delivers due wake-ups until ctx ends, then waits for the running
-// deliveries. A waker runs once.
+// deliveries. One run is active at a time: a call while another runs returns
+// at once, and a call after the last run returned starts the waker again.
 func (k *forkWaker) run(ctx context.Context, server *Server, store database.Store, clock quartz.Clock, logger slog.Logger) {
 	k.mu.Lock()
 	if k.started {
@@ -171,9 +176,16 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 		k.running = false
 		if k.timer != nil {
 			k.timer.Stop("chatd", "waker", "timer")
+			k.timer = nil
 		}
+		k.timerAt = time.Time{}
 		k.mu.Unlock()
 		k.wg.Wait()
+		k.mu.Lock()
+		k.started = false
+		k.pending = make(map[uuid.UUID]struct{})
+		k.skipped = make(map[uuid.UUID]struct{})
+		k.mu.Unlock()
 	}()
 
 	//nolint:gocritic // The waker delivers the wake-ups of every chat.
@@ -257,9 +269,12 @@ func (k *forkWaker) pass(ctx context.Context, fdb forkdb.Store, chatID uuid.Null
 	}
 }
 
-// dispatch starts the delivery of wakeup in its own goroutine once a slot is
+// dispatch starts the delivery of wakeup in its own goroutine when a slot is
 // free. A chat with a running delivery is marked, and the end of that
-// delivery pokes it again.
+// delivery pokes it again. When every slot is taken, dispatch skips the
+// wake-up and records its chat, and the next delivery to end pokes that
+// chat. So the loop never waits for a slot, and pokes, the timer and the
+// sweep keep running while slow deliveries hold every slot.
 func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkdb.ChatWakeup, now, start time.Time) {
 	k.mu.Lock()
 	if _, ok := k.inflight[wakeup.ChatID]; ok {
@@ -267,20 +282,18 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 		k.mu.Unlock()
 		return
 	}
-	k.inflight[wakeup.ChatID] = false
-	k.mu.Unlock()
-
 	select {
 	case k.slots <- struct{}{}:
-	case <-ctx.Done():
-		k.mu.Lock()
-		delete(k.inflight, wakeup.ChatID)
+	default:
+		k.skipped[wakeup.ChatID] = struct{}{}
 		k.mu.Unlock()
 		return
 	}
+	k.inflight[wakeup.ChatID] = false
+	k.mu.Unlock()
+
 	k.wg.Go(func() {
-		defer func() { <-k.slots }()
-		// The delivery's own time includes the time it waited for a slot.
+		// The delivery's own time includes the time since the pass started.
 		deliverNow := now.Add(k.clock.Since(start, "chatd", "waker"))
 		deliverCtx, cancel := context.WithTimeout(withWakeupDeadline(ctx, time.Now().Add(wakeupDeliveryTimeout)), wakeupDeliveryTimeout)
 		err := k.deliver(deliverCtx, fdb, wakeup, deliverNow)
@@ -301,10 +314,21 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 				slog.Error(err),
 			)
 		}
+		// The slot and the skipped chats change under one lock, so a pass
+		// that skips a wake-up either finds this slot free or records a chat
+		// that this delivery pokes.
 		k.mu.Lock()
+		<-k.slots
 		again := k.inflight[wakeup.ChatID]
 		delete(k.inflight, wakeup.ChatID)
+		skipped := k.skipped
+		if len(skipped) > 0 {
+			k.skipped = make(map[uuid.UUID]struct{})
+		}
 		k.mu.Unlock()
+		for chatID := range skipped {
+			k.poke(chatID)
+		}
 		// A delivery that ended its occurrence may have set the next run
 		// time, so the chat gets a pass that moves the timer. A failure or
 		// a busy chat waits for the sweep or the end of the turn, unless a
