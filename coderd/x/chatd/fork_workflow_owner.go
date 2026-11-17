@@ -107,6 +107,21 @@ func (g *workflowRegistry) liveRuns() []*workflowRun {
 	return live
 }
 
+// setClaiming records the run a resume claimed and has not registered yet,
+// so the heartbeat renews its row while the resume rehydrates it. resumeMu
+// serializes the resumes, so at most one run is claiming.
+func (g *workflowRegistry) setClaiming(id uuid.UUID) {
+	g.mu.Lock()
+	g.claiming = id
+	g.mu.Unlock()
+}
+
+func (g *workflowRegistry) claimingRun() uuid.UUID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.claiming
+}
+
 // retryTerminalWrite journals the end of a run whose terminal write
 // failed. A fenced write clears the flag too: the row belongs to another
 // process now.
@@ -227,11 +242,15 @@ func (p *Server) forkCloseWorkflowJournal() {
 func (p *Server) workflowHeartbeatTick(ctx context.Context) {
 	j := p.workflowJournal()
 	jctx := journalCtx(ctx)
-	if runs := p.workflows.liveRuns(); len(runs) > 0 {
-		ids := make([]uuid.UUID, 0, len(runs))
-		for _, run := range runs {
-			ids = append(ids, run.id)
-		}
+	runs := p.workflows.liveRuns()
+	ids := make([]uuid.UUID, 0, len(runs)+1)
+	for _, run := range runs {
+		ids = append(ids, run.id)
+	}
+	if claiming := p.workflows.claimingRun(); claiming != uuid.Nil {
+		ids = append(ids, claiming)
+	}
+	if len(ids) > 0 {
 		kept, err := j.heartbeat(jctx, ids)
 		if err != nil {
 			p.logger.Warn(ctx, "renew workflow run heartbeats", slog.Error(err))

@@ -325,6 +325,9 @@ type workflowRegistry struct {
 	// this process (fork_workflow_journal.go): both callers of one run
 	// would pass the claim, which accepts the runs this process owns.
 	resumeMu sync.Mutex
+	// claiming is the run a resume of this process claimed and still
+	// rehydrates, uuid.Nil when none. It is guarded by mu.
+	claiming uuid.UUID
 }
 
 func (g *workflowRegistry) get(id uuid.UUID) *workflowRun {
