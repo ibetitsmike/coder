@@ -502,6 +502,29 @@ def main(args):
 		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
+	// A stop through the journal whose terminal write fails says so: the
+	// claimed run is in no registry, so nothing would retry the write.
+	t.Run("JournaledStopReturnsAFailedWrite", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		failing := failStatusWrites(t, f.server)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		// The registry drop sends the stop through the journal.
+		f.server.workflows.remove(run.id)
+		failing.fail.Store(true)
+		require.Error(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		require.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id))
+
+		failing.fail.Store(false)
+		require.NoError(t, f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id))
+		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+	})
+
 	// A stop on the process that held a run another process claimed since
 	// the last heartbeat must not stop the local copy: it confirms the
 	// ownership first and reaches the new owner over pubsub.
