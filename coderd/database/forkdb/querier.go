@@ -271,6 +271,8 @@ type Querier interface {
 	// chat_wakeup_ready_watches whose last send did not fail. A failed send
 	// waits for the run time that the failure set, so it does not repeat at
 	// once, and the other watches wait for their run time, which reads them.
+	// Output lines of a process watch also wait for the run time while the
+	// cool-down after the last message of the wake-up runs.
 	// The chats that would queue are the busy and paused chats, and the errored
 	// chats with a non-empty queue (chatstate's R, I, A, P and E1 states). The
 	// wake-ups of archived chats are always due by their run time, so the waker

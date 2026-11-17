@@ -318,6 +318,69 @@ func TestWakeupEventsProcessOutput(t *testing.T) {
 	require.Equal(t, "done", got.StatusReason.String)
 }
 
+// Output lines that fire during the cool-down after the last message of the
+// wake-up wait for its end: the wake-up is not due before it, and its run
+// time is the end of the cool-down.
+func TestWakeupEventsProcessOutputCooldown(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	_, _, agent := f.bindProcessWorkspace(t, chat)
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{
+		Kind:      forkdb.ChatWakeupKindEvents,
+		ExpiresAt: sql.NullTime{Time: wakeupTestSlot.Add(time.Hour), Valid: true},
+	}, wakeupEvent{
+		Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "sleep 600", AgentID: agent.ID,
+		OutputPattern: "ERROR", OutputCooldownSeconds: 60, OutputMaxEvents: 10,
+	})
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	now := wakeupTestSlot
+	tick := func(step time.Duration) {
+		t.Helper()
+		forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+		now = now.Add(step)
+		worker.wakeupOnce(ctx, now)
+	}
+	due := func() bool {
+		t.Helper()
+		rows, err := fdb.ListDueChatWakeups(ctx, forkdb.ListDueChatWakeupsParams{
+			ChatID: uuid.NullUUID{UUID: chat.ID, Valid: true}, Now: now, LimitCount: 10,
+		})
+		require.NoError(t, err)
+		for _, row := range rows {
+			if row.ChatWakeup.ID == wakeup.ID && row.Due {
+				return true
+			}
+		}
+		return false
+	}
+
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR one"))
+	tick(time.Second)
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1)
+	first := f.wakeup(t, wakeup.ID)
+	require.True(t, first.LastRunAt.Valid)
+	cooldownEnd := first.LastRunAt.Time.Add(time.Minute)
+	require.WithinDuration(t, cooldownEnd, first.NextRunAt.Time, 0, "the next run is the end of the cool-down")
+
+	// Lines that fire 10 seconds after the message wait.
+	now = now.Add(10 * time.Second)
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, false, "ERROR two"))
+	require.False(t, due(), "fired lines in the cool-down do not make the wake-up due")
+	tick(0)
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "the cool-down runs")
+
+	now = cooldownEnd.Add(-time.Second)
+	require.False(t, due())
+	tick(time.Second)
+	messages := f.wakeMessages(t, chat, wakeup.Prompt)
+	require.Len(t, messages, 2)
+	require.Contains(t, messages[1], "ERROR two")
+}
+
 // A watch whose process already exited or that the agent does not know
 // fires when it is registered, and one whose workspace stopped or whose
 // agent restarted fires on the sweep.

@@ -382,6 +382,27 @@ func processWatchEnded(watch forkdb.ChatWakeupWatch) bool {
 	return fired.Exit != nil || fired.Lost != nil
 }
 
+// processLinesCooldown returns the cool-down of the process watch watch,
+// whose event is event, when it may still deliver output lines: it has a
+// pattern and a cool-down, its line messages are not used up, and no exit or
+// loss fired it.
+func processLinesCooldown(watch forkdb.ChatWakeupWatch, event wakeupEvent) (time.Duration, bool) {
+	if event.OutputPattern == "" || event.OutputCooldownSeconds <= 0 ||
+		int(watch.Deliveries) >= event.OutputMaxEvents || processWatchEnded(watch) {
+		return 0, false
+	}
+	return time.Duration(event.OutputCooldownSeconds) * time.Second, true
+}
+
+// processLinesCooling reports whether the process watch watch of wakeup holds
+// output lines at now that wait for the cool-down after the last message of
+// wakeup. ListDueChatWakeups applies the same rule, so such a watch does not
+// make its wake-up due.
+func processLinesCooling(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, event wakeupEvent, now time.Time) bool {
+	cooldown, ok := processLinesCooldown(watch, event)
+	return ok && wakeup.LastRunAt.Valid && now.Before(wakeup.LastRunAt.Time.Add(cooldown))
+}
+
 // processFiredText returns the message for what fired the process watch
 // watch of wakeup, whose event is event, and whether it ends the watch, or
 // "" when the pass at now delivers nothing for it. An exit or a loss ends

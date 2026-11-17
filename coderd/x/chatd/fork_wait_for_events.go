@@ -43,7 +43,7 @@ type waitForEventsArgs struct {
 	ProcessIDs        []string `json:"process_ids,omitempty" description:"IDs of background processes of this chat to watch, the background_process_id that execute returns. The chat gets one message when each one exits, with its exit code and the end of its output. At most 10. Without child_chat_ids, only the processes (and the pull request) are watched."`
 	// The output pattern fields apply to every process of the call.
 	ProcessOutputPattern         string `json:"process_output_pattern,omitempty" description:"A regular expression (RE2 syntax) for output lines of the processes. While a process runs, the chat also gets a message when it printed new lines that match, with those lines. Requires process_ids."`
-	ProcessOutputCooldownSeconds *int   `json:"process_output_cooldown_seconds,omitempty" description:"Wait at least this many seconds between two messages for matching lines of one process, which collect the lines printed meanwhile. 0 to 86400. Defaults to 60. Requires process_output_pattern."`
+	ProcessOutputCooldownSeconds *int   `json:"process_output_cooldown_seconds,omitempty" description:"Wait at least this many seconds after the last message of this wake-up before a message for matching lines, which collects the lines printed meanwhile. 0 to 86400. Defaults to 60. Requires process_output_pattern."`
 	ProcessOutputMaxEvents       *int   `json:"process_output_max_events,omitempty" description:"Send at most this many messages for matching lines per process. 1 to 100. Defaults to 10. The exit message comes either way. Requires process_output_pattern."`
 }
 
@@ -491,6 +491,10 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	// Whether one of them is a process whose agent may still hold an exit
 	// from before the expiry.
 	processUnreported := false
+	// The cool-downs of the process watches that may still deliver output
+	// lines. A fired watch in its cool-down is not due, so a run at its end
+	// delivers it.
+	var lineCooldowns []time.Duration
 	// Whether the run time has come. Before it, a watch whose send failed
 	// waits for it.
 	polled := !now.Before(wakeup.NextRunAt.Time)
@@ -564,9 +568,14 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				pullRequestUnpolled = true
 			}
 		case forkdb.ChatWakeupWatchKindProcess:
+			if seconds, ok := processLinesCooldown(watch, event); ok {
+				lineCooldowns = append(lineCooldowns, seconds)
+			}
 			// The workspace agent, the tool call or the sweep fired the
-			// watch with the event.
-			if next == nil && watch.FiredAt.Valid && (polled || !watch.FailedAt.Valid) {
+			// watch with the event. Output lines wait for their cool-down
+			// after the last message of the wake-up.
+			cooling := processLinesCooling(wakeup, watch, event, now)
+			if next == nil && watch.FiredAt.Valid && !cooling && (polled || !watch.FailedAt.Valid) {
 				if text, done := processFiredText(wakeup, watch, event, now, lateFinalPoll); text != "" {
 					next = &wakeupDelivery{
 						text:         wakeup.Prompt + "\n\n" + text,
@@ -591,20 +600,34 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 			}
 		}
 	}
-	// nextPoll is the run time after a delivery at the given time.
-	nextPoll := func(at time.Time) time.Time {
+	// nextPoll is the run time after a delivery at the given time, or after
+	// a pass at that time when the last message of the wake-up was at
+	// lastRun.
+	nextPoll := func(at, lastRun time.Time) time.Time {
+		var next time.Time
 		switch {
 		case !polled:
-			return wakeup.NextRunAt.Time
+			next = wakeup.NextRunAt.Time
 		case wakeup.ExpiresAt.Valid && at.Before(wakeup.ExpiresAt.Time):
 			// The commit that makes a child done, the poller that fires a
 			// pull request and the report that fires a process poke the
 			// waker, so the next run is the final poll at the expiry.
-			return wakeup.ExpiresAt.Time
+			next = wakeup.ExpiresAt.Time
 		default:
-			return at.Add(eventsPollInterval)
+			next = at.Add(eventsPollInterval)
 		}
+		// Output lines that fire in a cool-down poke nobody who delivers
+		// them, so the wake-up runs when the cool-down ends.
+		for _, cooldown := range lineCooldowns {
+			if end := lastRun.Add(cooldown); end.After(at) && end.Before(next) {
+				next = end
+			}
+		}
+		return next
 	}
+	// A wake-up without a message has a zero LastRunAt, whose cool-downs
+	// ended long ago.
+	lastRun := wakeup.LastRunAt.Time
 	if next == nil {
 		// The final poll waits for the poller to read the pull request
 		// through the expiry.
@@ -616,7 +639,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 		if processUnreported && now.Before(wakeup.ExpiresAt.Time.Add(processFinalReportWindow)) {
 			return p.finishWakeup(ctx, chat, wakeup, now, wakeupFinish{status: forkdb.ChatWakeupStatusActive, nextRunAt: sql.NullTime{Time: now.Add(eventsPollInterval), Valid: true}})
 		}
-		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, nextPoll(now)))
+		return p.finishWakeup(ctx, chat, wakeup, now, eventsWakeupFinish(wakeup, now, 0, pending, nextPoll(now, lastRun)))
 	}
 	if paused, err := p.pauseCappedWakeup(ctx, fdb, chat, wakeup, now); paused || err != nil {
 		return err
@@ -624,7 +647,7 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 	delivery := *next
 	delivery.runKey = watchRunKey(*delivery.watch)
 	delivery.finish = func(admittedAt time.Time) wakeupFinish {
-		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, nextPoll(admittedAt))
+		return eventsWakeupFinish(wakeup, admittedAt, 1, pending, nextPoll(admittedAt, admittedAt))
 	}
 	err = p.sendWakeupPrompt(ctx, chat, wakeup, now, delivery)
 	return p.finishWakeupSend(ctx, chat, wakeup, now, delivery, err)

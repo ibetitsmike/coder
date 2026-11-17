@@ -423,8 +423,8 @@ The same message arrives within 5&nbsp;minutes when the workspace stops or is re
 With `process_output_pattern`, a regular expression in RE2 syntax of up to 1024&nbsp;bytes, the chat also gets a message while a process runs and has printed new complete lines, ending in a newline, that match.
 The workspace agent checks the output every second, and its first check also matches the lines that the process printed before the call.
 That message is made of the `prompt`, an empty line, ``Background process <id> (`<command>`) is still running and printed <n> new lines matching `<pattern>`.``, and up to the last 40 of those lines, at most 4&nbsp;KiB.
-`process_output_cooldown_seconds`, from 0 to 86400 and 60 by default, sets how long the workspace agent waits between two reports of matching lines of one process, so a report collects the lines printed meanwhile.
-The first report goes out at once.
+`process_output_cooldown_seconds`, from 0 to 86400 and 60 by default, sets how long such a message waits after the wake-up's last message, so it collects the lines printed meanwhile.
+The workspace agent also waits that long between two reports of matching lines of one process, and its first report goes out at once.
 While the chat is busy, the reports collect, and one message carries their lines, at most the last 16384 characters of them.
 A report holds at most the last 100 matching lines and cuts each one to 4&nbsp;KiB, while its count covers every match.
 Lines that match in the cool-down before the process exits arrive only in the exit message's output.

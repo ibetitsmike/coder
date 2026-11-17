@@ -32,8 +32,10 @@ import (
 const (
 	// forkMaxPendingProcessEvents caps the events that wait for coderd's
 	// ack. Past it the oldest output match is dropped. Exits are kept, one
-	// per chat process, but past the cap they carry no output.
+	// per chat process, but past the cap they carry no output, and past
+	// forkMaxPendingProcessExits the oldest exit is dropped.
 	forkMaxPendingProcessEvents = 1000
+	forkMaxPendingProcessExits  = 10 * forkMaxPendingProcessEvents
 	// forkMaxProcessEventsBatch caps the events of one report.
 	forkMaxProcessEventsBatch   = 100
 	forkProcessEventsMinBackoff = time.Second
@@ -52,6 +54,9 @@ const (
 	// lines that one report carries. The report still counts every match.
 	forkMaxReportedLines     = 100
 	forkMaxReportedLineBytes = 4096
+	// forkMaxOutputWatches caps the output watches of one process, one per
+	// wake-up. Past it the oldest stops.
+	forkMaxOutputWatches = 4
 )
 
 // forkProcessEvents holds the process events that wait for coderd's ack and
@@ -63,7 +68,8 @@ type forkProcessEvents struct {
 	started map[*process]struct{}
 	pending []*proto.ReportChatProcessEventsRequest_Event
 	notify  chan struct{}
-	watches map[*process]*forkOutputWatch
+	// watches holds the output watches of each process, oldest first.
+	watches map[*process][]*forkOutputWatch
 }
 
 // forkOutputWatch reports the output lines of one process that match its
@@ -101,10 +107,15 @@ func (api *API) forkEnqueue(event *proto.ReportChatProcessEventsRequest_Event) {
 			log("drop unreported chat process output", f.pending[i])
 			f.pending = slices.Delete(f.pending, i, i+1)
 		case event.GetExit() != nil:
-			// An exit is never dropped: the empty report that follows
-			// the drain would tell coderd that none waits.
+			// An exit is dropped only past forkMaxPendingProcessExits: the
+			// empty report that follows the drain would tell coderd that
+			// none waits.
 			log("drop output tail of unreported chat process exit", event)
 			event.GetExit().OutputTail = ""
+			if len(f.pending) >= forkMaxPendingProcessExits {
+				log("drop unreported chat process exit", f.pending[0])
+				f.pending = slices.Delete(f.pending, 0, 1)
+			}
 		default:
 			log("drop unreported chat process output", event)
 			f.mu.Unlock()
@@ -324,23 +335,27 @@ func (api *API) forkHandleWatchProcess(rw http.ResponseWriter, r *http.Request) 
 }
 
 // forkWatchOutput starts the output watch of req on proc, unless proc
-// already has one for the same wake-up. A watch for another wake-up
-// replaces the earlier one.
+// already has one for the same wake-up. Each wake-up keeps its own watch,
+// so a wake-up that is paused while another one watches the process still
+// gets its lines when it resumes. Past forkMaxOutputWatches the oldest watch
+// of proc stops.
 func (api *API) forkWatchOutput(proc *process, chatID uuid.UUID, req workspacesdk.ForkWatchProcessRequest, pattern *regexp.Regexp) {
 	f := &api.fork
 	f.mu.Lock()
 	if f.watches == nil {
-		f.watches = make(map[*process]*forkOutputWatch)
+		f.watches = make(map[*process][]*forkOutputWatch)
 	}
-	if old, ok := f.watches[proc]; ok {
-		if old.wakeupID == req.WakeupID {
-			f.mu.Unlock()
-			return
-		}
-		close(old.stop)
+	watches := f.watches[proc]
+	if slices.ContainsFunc(watches, func(w *forkOutputWatch) bool { return w.wakeupID == req.WakeupID }) {
+		f.mu.Unlock()
+		return
+	}
+	if len(watches) >= forkMaxOutputWatches {
+		close(watches[0].stop)
+		watches = slices.Delete(watches, 0, 1)
 	}
 	watch := &forkOutputWatch{wakeupID: req.WakeupID, stop: make(chan struct{})}
-	f.watches[proc] = watch
+	f.watches[proc] = append(watches, watch)
 	// Create the ticker before the goroutine runs, so a test that
 	// advances a mock clock after the request sees it.
 	ticker := api.manager.clock.NewTicker(forkOutputWatchInterval, "agentproc", "fork", "output-watch")
@@ -350,8 +365,11 @@ func (api *API) forkWatchOutput(proc *process, chatID uuid.UUID, req workspacesd
 		defer ticker.Stop()
 		defer func() {
 			f.mu.Lock()
-			if f.watches[proc] == watch {
+			watches := slices.DeleteFunc(f.watches[proc], func(w *forkOutputWatch) bool { return w == watch })
+			if len(watches) == 0 {
 				delete(f.watches, proc)
+			} else {
+				f.watches[proc] = watches
 			}
 			f.mu.Unlock()
 		}()

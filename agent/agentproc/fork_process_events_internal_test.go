@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -435,29 +436,44 @@ func TestForkHandleWatchProcess(t *testing.T) {
 		api, handler := forkTestAPI(t, quartz.NewReal())
 		chatID := uuid.New()
 		proc := forkStart(t, api, handler, chatID, uuid.New(), "sleep 60")
+		watches := func() []*forkOutputWatch {
+			api.fork.mu.Lock()
+			defer api.fork.mu.Unlock()
+			return slices.Clone(api.fork.watches[proc])
+		}
 		req := workspacesdk.ForkWatchProcessRequest{WakeupID: uuid.New(), OutputPattern: "x"}
 		forkWatch(t, handler, chatID, proc.id, req)
-		api.fork.mu.Lock()
-		watch := api.fork.watches[proc]
-		api.fork.mu.Unlock()
-		require.NotNil(t, watch)
+		first := watches()
+		require.Len(t, first, 1)
 		forkWatch(t, handler, chatID, proc.id, req)
-		api.fork.mu.Lock()
-		require.Same(t, watch, api.fork.watches[proc])
-		api.fork.mu.Unlock()
+		require.Equal(t, first, watches())
 
-		// A watch for another wake-up replaces it.
+		// A watch for another wake-up runs beside it, so a paused
+		// wake-up that resumes still gets its lines.
+		for i := 1; i < forkMaxOutputWatches; i++ {
+			req.WakeupID = uuid.New()
+			forkWatch(t, handler, chatID, proc.id, req)
+		}
+		got := watches()
+		require.Len(t, got, forkMaxOutputWatches)
+		require.Same(t, first[0], got[0])
+		select {
+		case <-first[0].stop:
+			t.Fatal("the watch of the first wake-up stopped")
+		default:
+		}
+
+		// Past the cap the oldest watch stops.
 		req.WakeupID = uuid.New()
 		forkWatch(t, handler, chatID, proc.id, req)
-		api.fork.mu.Lock()
-		replaced := api.fork.watches[proc]
-		api.fork.mu.Unlock()
-		require.NotSame(t, watch, replaced)
-		require.Equal(t, req.WakeupID, replaced.wakeupID)
+		got = watches()
+		require.Len(t, got, forkMaxOutputWatches)
+		require.NotContains(t, got, first[0])
+		require.Equal(t, req.WakeupID, got[len(got)-1].wakeupID)
 		select {
-		case <-watch.stop:
+		case <-first[0].stop:
 		default:
-			t.Fatal("the replaced watch did not stop")
+			t.Fatal("the oldest watch did not stop")
 		}
 	})
 }
@@ -640,4 +656,16 @@ func TestForkEnqueueCap(t *testing.T) {
 	api.fork.mu.Unlock()
 	require.Equal(t, "exit-late", last.GetProcessId())
 	require.Empty(t, last.GetExit().GetOutputTail())
+
+	// Past forkMaxPendingProcessExits the oldest exit is dropped, so the
+	// queue stays bounded.
+	for i := len(got); i < forkMaxPendingProcessExits; i++ {
+		api.forkEnqueue(exit(fmt.Sprintf("exit-more-%d", i)))
+	}
+	require.Len(t, ids(), forkMaxPendingProcessExits)
+	api.forkEnqueue(exit("exit-over"))
+	got = ids()
+	require.Len(t, got, forkMaxPendingProcessExits)
+	require.Equal(t, "exit-1", got[0])
+	require.Equal(t, "exit-over", got[len(got)-1])
 }
