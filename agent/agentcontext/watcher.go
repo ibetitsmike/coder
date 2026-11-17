@@ -3,7 +3,6 @@ package agentcontext
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -345,7 +344,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		if root.Path == "" {
 			continue
 		}
-		info, err := os.Stat(root.Path)
+		info, err := statNoted(root.Path) // fork: fork_resolve_cache.go
 		if err != nil {
 			// Watch the deepest existing ancestor so the
 			// root being created later still fires.
@@ -366,7 +365,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		addPackWatchDirs(root.Path, out, pack)
 		for _, container := range skillContainersFor(root.Path) {
 			out[container] = struct{}{}
-			entries, err := os.ReadDir(container)
+			entries, err := readDirNoted(container) // fork: fork_resolve_cache.go
 			if err != nil {
 				continue
 			}
@@ -389,7 +388,7 @@ func existingAncestor(path string) string {
 		if cur == "" || cur == "." {
 			return ""
 		}
-		info, err := os.Stat(cur)
+		info, err := statNoted(cur) // fork: fork_resolve_cache.go
 		if err == nil && info.IsDir() {
 			return cur
 		}

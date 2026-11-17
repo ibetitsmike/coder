@@ -464,7 +464,10 @@ type watchCoverage struct {
 	// addFailed is set when the latest Sync could not add a directory for
 	// a reason other than ENOSPC (which degrades the watcher) or the
 	// directory being gone (which its parent's watch reports), such as
-	// EMFILE from kqueue on darwin.
+	// EMFILE from kqueue on darwin. It is also set when that Sync could
+	// not read a directory or the metadata it discovers watches from, for
+	// the same kind of reason: it then dropped or never added the watches
+	// under that directory, and the failure can clear with no event.
 	addFailed bool
 	// relayDropped counts the overflow errors the fsnotify relay queued
 	// that the event loop has not handled. The relay sets it without w.mu.
@@ -474,11 +477,24 @@ type watchCoverage struct {
 	relayed atomic.Uint64
 }
 
+// syncDirs is what collectSyncDirs found for beginSync.
+type syncDirs struct {
+	// current holds each watched directory as stated, nil for one that
+	// could not be.
+	current map[string]os.FileInfo
+	// discoveryFailed is set when collectDirs failed to read a path for a
+	// reason other than it being missing.
+	discoveryFailed bool
+}
+
 // collectSyncDirs is collectDirs for Sync, which calls it without w.mu. It
-// also stats every watched directory, so beginSync can compare their
-// identities without filesystem calls under w.mu.
-func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWatchPaths, map[string]os.FileInfo) {
+// tracks the read failures of collectDirs as a resolve pass does, and stats
+// every watched directory, so beginSync can compare their identities
+// without filesystem calls under w.mu.
+func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWatchPaths, syncDirs) {
+	tracked := trackSymlinkTargets(roots)
 	desired, pack := w.collectDirs(roots)
+	_, discoveryFailed := tracked.stopPass()
 	w.mu.Lock()
 	paths := make([]string, 0, len(w.cover.dirs))
 	for path := range w.cover.dirs {
@@ -493,12 +509,13 @@ func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWa
 		}
 		current[path] = info
 	}
-	return desired, pack, current
+	return desired, pack, syncDirs{current: current, discoveryFailed: discoveryFailed}
 }
 
 // beginSync starts a Sync's add loop, with w.mu held, and returns true, the
-// initial value of its addedAll. current holds the directories that
-// collectSyncDirs stated, nil for one it could not. beginSync drops the
+// initial value of its addedAll. found.current holds the directories that
+// collectSyncDirs stated, nil for one it could not. A discovery failure
+// leaves the watcher uncovered until a Sync without one. beginSync drops the
 // watches whose path named another directory there, such as a retargeted
 // symlink, so the add loop watches the directory the path names now. It
 // records a new mode for a directory whose permissions changed, which
@@ -506,8 +523,9 @@ func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWa
 // added after that stat, by a concurrent Sync, is kept as is. A watch that
 // Sync removed or that beginSync drops, and a recorded mode change, advance
 // the watch generation.
-func (w *Watcher) beginSync(current map[string]os.FileInfo) bool {
-	w.cover.addFailed = false
+func (w *Watcher) beginSync(found syncDirs) bool {
+	w.cover.addFailed = found.discoveryFailed
+	current := found.current
 	changed := false
 	for path, was := range w.cover.dirs {
 		if _, ok := w.watched[path]; !ok {

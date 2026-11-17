@@ -923,11 +923,11 @@ func TestWatcher_BeginSyncKeepsWatchesItDidNotStat(t *testing.T) {
 	defer w.mu.Unlock()
 	require.Contains(t, w.cover.dirs, dir)
 
-	w.beginSync(map[string]os.FileInfo{})
+	w.beginSync(syncDirs{current: map[string]os.FileInfo{}})
 	require.Contains(t, w.watched, dir, "a watch beginSync did not stat is kept")
 	require.NotNil(t, w.cover.dirs[dir])
 
-	w.beginSync(map[string]os.FileInfo{dir: nil})
+	w.beginSync(syncDirs{current: map[string]os.FileInfo{dir: nil}})
 	require.NotContains(t, w.watched, dir, "a watch whose stat failed is dropped")
 	require.NotContains(t, w.cover.dirs, dir)
 }
@@ -1166,6 +1166,69 @@ func TestResolvePass_MetadataFailureIsNotCached(t *testing.T) {
 			require.True(t, has(snap), "the pass after the failure discovers %s", tc.gone)
 			_, ok = cachedFor(m, w, roots)
 			require.True(t, ok, "a pass with no failure is cached")
+		})
+	}
+}
+
+// A Sync that cannot read a path it discovers watches from drops or never
+// adds the watches under it, and the failure can clear with no event, so
+// the watcher stays uncovered until a Sync without a failure.
+func TestWatcher_DiscoveryFailureUncovers(t *testing.T) {
+	t.Parallel()
+	eio := &fs.PathError{Op: "stat", Err: syscall.EIO}
+	for _, tc := range []struct {
+		name string
+		// fault is the path whose read fails, relative to the root.
+		fault string
+		// unwatched is the directory whose watch the failure drops,
+		// relative to the root.
+		unwatched string
+		err       error
+		covered   bool
+	}{
+		{name: "RootStat", fault: ".", unwatched: ".", err: eio},
+		{name: "SkillContainerReadDir", fault: ".claude/skills", unwatched: ".claude/skills/foo", err: eio},
+		{name: "AgentParentStat", fault: ".claude", unwatched: ".claude", err: eio},
+		{name: "NotExist", fault: ".claude/skills", unwatched: ".claude/skills/foo", err: &fs.PathError{Op: "open", Err: fs.ErrNotExist}, covered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writePackFiles(t, dir, map[string]string{
+				"AGENTS.md":                   "v1",
+				".claude/skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody",
+			})
+			roots := []ScanRoot{{Path: dir}}
+			m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+			unwatched := filepath.Join(dir, filepath.FromSlash(tc.unwatched))
+			watching := func() bool {
+				w.mu.Lock()
+				defer w.mu.Unlock()
+				_, ok := w.watched[unwatched]
+				return ok
+			}
+			require.True(t, watching(), "the fixture watches %s", tc.unwatched)
+
+			fault := filepath.Join(dir, filepath.FromSlash(tc.fault))
+			readFaults.Store(fault, tc.err)
+			t.Cleanup(func() { readFaults.Delete(fault) })
+			w.Sync(context.Background(), roots)
+			readFaults.Delete(fault)
+			require.False(t, watching(), "the failure drops the watch on %s", tc.unwatched)
+			_, covered := w.coverage()
+			require.Equal(t, tc.covered, covered)
+
+			// The failure has cleared and no event says so.
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			_, ok := cachedFor(m, w, roots)
+			require.Equal(t, tc.covered, ok, "a pass while the watches are missing is cached only after a missing path")
+
+			w.Sync(context.Background(), roots)
+			_, covered = w.coverage()
+			require.True(t, covered, "a Sync without a failure covers the roots again")
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			_, ok = cachedFor(m, w, roots)
+			require.True(t, ok, "a pass after that Sync is cached")
 		})
 	}
 }
