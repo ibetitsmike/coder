@@ -365,15 +365,17 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 		ChatID: child.ID, ToolCallID: callID, Value: "a-secret-value",
 	}))
 	// A decline must not delete the value that a queued report delivers.
-	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call ` + callID + `:\nThe user gave a secret answer."}]`),
+		CreatedBy: child.OwnerID,
 	})
 	require.NoError(t, err)
 	require.ErrorIs(t, send(WithSecretAnswerDecline(ctx, callID)), ErrSecretAnswerQueued)
 	answers, err := f.fdb.GetChatSecretAnswersByChatID(ctx, child.ID)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)
-	require.NoError(t, f.db.DeleteAllChatQueuedMessages(ctx, child.ID))
+	_, err = f.db.DeleteAllChatQueuedMessagesReturningCount(ctx, child.ID)
+	require.NoError(t, err)
 	require.NoError(t, send(WithSecretAnswerReport(ctx, callID)))
 	// A late report of the answer must not answer a newer question.
 	ask(`[{"header":"Key","question":"Paste the key.","secret":true}]`)
@@ -420,8 +422,9 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	}
 	// The end of the turn would deliver a queued message after the
 	// question, and the message would answer it without the value.
-	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"queued"}]`),
+		CreatedBy: child.OwnerID,
 	})
 	require.NoError(t, err)
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_queued", Input: secretInput})
@@ -430,7 +433,8 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	require.Equal(t, errSecretQuestionQueued.Error(), resp.Content)
 	_, err = f.fdb.GetPendingChatDescendantQuestion(ctx, child.ID)
 	require.ErrorIs(t, err, sql.ErrNoRows)
-	require.NoError(t, f.db.DeleteAllChatQueuedMessages(ctx, child.ID))
+	_, err = f.db.DeleteAllChatQueuedMessagesReturningCount(ctx, child.ID)
+	require.NoError(t, err)
 
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_on", Input: secretInput})
 	require.NoError(t, err)
@@ -444,8 +448,9 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	// The end of the turn would deliver the queued report of the answer
 	// after an ordinary question of the same step, and the report would
 	// answer that question.
-	_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call call_on:\nThe user gave a secret answer."}]`),
+		CreatedBy: child.OwnerID,
 	})
 	require.NoError(t, err)
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_ordinary", Input: descendantQuestionInput})

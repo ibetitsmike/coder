@@ -177,7 +177,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 				func(t *testing.T, f *testFixture, chatID uuid.UUID) {
 					ctx := testutil.Context(t, testutil.WaitShort)
 					rollback := xerrors.New("roll back")
-					err := chatstate.NewChatMachine(f.DB, f.Pub, chatID).Update(ctx, func(tx *chatstate.Tx, _ database.Store) error {
+					_, err := chatstate.NewChatMachine(f.DB, f.Pub, chatID).Update(ctx, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						if _, err := tx.SendMessage(chatstate.SendMessageInput{
 							Message:      userTextMessage("use postgres", f.User.ID, f.Model.ID),
 							BusyBehavior: chatstate.BusyBehaviorQueue,

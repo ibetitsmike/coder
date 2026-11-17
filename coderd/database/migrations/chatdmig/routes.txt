@@ -6,3 +6,4 @@
 split mcp_server_oauth2_client_registration
 000640 chat_queued_message_busy_behavior chatd
 000641 workspace_app_stats_session_ended_at_idx core
+000642 context_resource_plugin_name core

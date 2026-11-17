@@ -460,10 +460,11 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 		useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
 			_, err := f.sqlDB.ExecContext(ctx, "UPDATE chats SET status = 'running' WHERE id = $1", chat.ID)
 			assert.NoError(t, err)
-			_, err = f.db.InsertChatQueuedMessage(ctx, database.InsertChatQueuedMessageParams{
+			_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 				ChatID:        chat.ID,
 				Content:       content.RawMessage,
 				ModelConfigID: uuid.NullUUID{UUID: f.model.ID, Valid: true},
+				CreatedBy:     chat.OwnerID,
 			})
 			assert.NoError(t, err)
 			_, _ = rw.Write([]byte(`{}`))
