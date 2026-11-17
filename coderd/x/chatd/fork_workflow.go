@@ -38,12 +38,13 @@ const (
 	runWorkflowToolName   = "run_workflow"
 	awaitWorkflowToolName = "await_workflow"
 
-	maxWorkflowSteps   = 50         // child chats per run, reused ones included
-	maxScriptBytes     = 64 << 10   // the script in the tool input
-	maxScriptSteps     = 10_000_000 // Starlark execution steps per run
-	maxResultBytes     = 64 << 10   // the JSON that main(args) returns
-	maxWorkflowLogs    = 50         // log() lines that a result keeps
-	maxWorkflowLogLine = 4 << 10    // bytes of one log() line that a result keeps
+	maxWorkflowSteps     = 50         // child chats per run, reused ones included
+	maxScriptBytes       = 64 << 10   // the script in the tool input
+	maxWorkflowArgsBytes = 64 << 10   // the args in the tool input, inline or by name
+	maxScriptSteps       = 10_000_000 // Starlark execution steps per run
+	maxResultBytes       = 64 << 10   // the JSON that main(args) returns
+	maxWorkflowLogs      = 50         // log() lines that a result keeps
+	maxWorkflowLogLine   = 4 << 10    // bytes of one log() line that a result keeps
 	// The result encodes the retained logs on every snapshot, so the line
 	// and byte caps below bound that encoding to maxResultBytes too.
 	defaultWorkflowWait = 600 * time.Second
@@ -92,7 +93,7 @@ type is "general" or "explore". schema is a JSON Schema dict with "type": "objec
 	`The step must call its workflow_report tool with a value that matches the schema. That value is the step value. Without a schema the value is {"text": "..."}.
 
 Rules: the script has no load(), no clock, no file access and no network. while loops are allowed. Recursion is not allowed. ` +
-	`Limits: script 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB, step value 256 KiB. ` +
+	`Limits: script 64 KiB, args 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB, step value 256 KiB. ` +
 	`Each step is a child chat of this chat. chatd limits how many sub-agent chats run at the same time. Extra steps wait in a queue.
 
 Resume: a run is journaled in the deployment database, so it survives a restart. ` +
@@ -115,8 +116,8 @@ const workflowNotFoundHelp = `The run is not found on this coderd replica, for e
 	`Call run_workflow again with the same script (or script_path or name), the same args and resume_run_id set to this run_id. Finished steps are reused.`
 
 type runWorkflowArgs struct {
-	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this or script_path."`
-	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this or script."`
+	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this, script_path or name."`
+	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this, script or name."`
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
@@ -268,6 +269,27 @@ func (p *Server) forkWorkflowTools(
 type serialWorkflowTool struct{ fantasy.AgentTool }
 
 func (serialWorkflowTool) SerialToolCalls() bool { return true }
+
+// checkWorkflowArgsSize bounds the args input at maxWorkflowArgsBytes, the
+// script cap, for an inline and a named run alike. rawArgs is args as the
+// caller sent them; a call that skips the tool decode, such as a test,
+// marshals the Go value instead. Fresh runs only: a journal row belongs to
+// a run that already passed this check when it started, so a legacy row
+// written by an older version replays its args unexamined.
+func checkWorkflowArgsSize(args runWorkflowArgs) error {
+	data := args.rawArgs
+	if len(data) == 0 && args.Args != nil {
+		raw, err := json.Marshal(args.Args)
+		if err != nil {
+			return xerrors.Errorf("marshal args: %w", err)
+		}
+		data = raw
+	}
+	if len(data) > maxWorkflowArgsBytes {
+		return xerrors.Errorf("the args are %d bytes; at most %d bytes are allowed", len(data), maxWorkflowArgsBytes)
+	}
+	return nil
+}
 
 // workflowScript returns args.Script, or the content of the workspace file
 // at args.ScriptPath. The run compiles this text one time, so a later edit
@@ -516,6 +538,13 @@ func (p *Server) startWorkflowRun(
 		}
 		return p.resumeWorkflowRun(ctx, chat, row)
 	}
+	// Only a fresh run reads new args, so the cap sits after the journal
+	// lookup: a journaled run replays the args it holds, which passed the
+	// cap when it started, and a legacy row from an older version replays
+	// unexamined instead of failing an otherwise resumable run.
+	if err := checkWorkflowArgsSize(args); err != nil {
+		return nil, err
+	}
 	if name := strings.TrimSpace(args.Name); name != "" {
 		if args.Script != "" {
 			return nil, xerrors.New("send name or script, not both")
@@ -531,7 +560,7 @@ func (p *Server) startWorkflowRun(
 		savedPhases = saved.Phases
 	}
 	if strings.TrimSpace(args.Script) == "" {
-		return nil, xerrors.New("script is required")
+		return nil, xerrors.New("script is required: send script, script_path or the name of a saved workflow")
 	}
 	parent, err := p.loadSubagentSpawnParentChat(ctx, func() database.Chat { return chat })
 	if err != nil {

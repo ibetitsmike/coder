@@ -466,6 +466,26 @@ func isWorkflowPhaseHidden(r rune) bool {
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
 
+// ValidateWorkflowPhaseName reports whether text is safe to show in model
+// context: valid UTF-8 without a NUL, control or format character. Saved
+// workflow descriptions reuse the phase-name rule.
+var ValidateWorkflowPhaseName = validateWorkflowPhaseName
+
+// ValidateWorkflowDescription applies the phase-name rule to a saved
+// workflow description, with one difference: line breaks and tabs are
+// allowed, since a multi-line description is ordinary text. Bidi
+// overrides, zero-width characters and every other control or format
+// character stay rejected.
+func ValidateWorkflowDescription(description string) error {
+	if !utf8.ValidString(description) || strings.ContainsRune(description, 0) ||
+		strings.ContainsFunc(description, func(r rune) bool {
+			return r != '\n' && r != '\r' && r != '\t' && isWorkflowPhaseHidden(r)
+		}) {
+		return xerrors.Errorf("the description %q must not hold control, format or invalid characters", description)
+	}
+	return nil
+}
+
 // journalDeclaredPhases journals the declared phase list right after Init,
 // so the run API shows the declared phases before the first step and not
 // only after the first phase() call. Best effort, like other journal

@@ -53,6 +53,21 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		require.JSONEq(t, `{"type":"object","properties":{"repo":{"type":"string"}}}`, string(created.ArgsSchema))
 		require.Equal(t, []string{"collect", "label"}, created.Phases)
 
+		// Line breaks and tabs are ordinary text in a description.
+		multiline, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:        "multiline",
+			Description: "Triage new issues.\n\tSort by age.",
+			Script:      savedWorkflowScript,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "Triage new issues.\n\tSort by age.", multiline.Description)
+		updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "multiline", codersdk.UpdateForkSavedWorkflowRequest{
+			Description: ptr.Ref("Line one.\r\n\tLine two."),
+		})
+		require.NoError(t, err)
+		require.Equal(t, "Line one.\r\n\tLine two.", updated.Description)
+		require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "multiline"))
+
 		_, err = member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{Name: "triage", Script: savedWorkflowScript})
 		_ = requireSDKError(t, err, http.StatusConflict)
 
@@ -62,8 +77,9 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 			phases[i] = fmt.Sprintf("%02d", i) + strings.Repeat("<", 126)
 		}
 		largest, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
-			Name:        "largest",
-			Description: strings.Repeat("\x01", 4096),
+			Name: "largest",
+			// Control characters are rejected, but ordinary filler is not.
+			Description: strings.Repeat("z", 4096),
 			Script:      savedWorkflowScript + "#" + strings.Repeat("\x01", 65536-len(savedWorkflowScript)-2) + "\n",
 			Phases:      phases,
 			// An escaped backslash before u0000 is no NUL character.
@@ -109,22 +125,25 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		_ = requireSDKError(t, err, http.StatusNotFound)
 
 		for name, req := range map[string]codersdk.CreateForkSavedWorkflowRequest{
-			"BadName":        {Name: "Triage", Script: savedWorkflowScript},
-			"NoMain":         {Name: "no-main", Script: "x = 1\n"},
-			"SyntaxError":    {Name: "syntax", Script: "def main(args):\n  return (\n"},
-			"UnknownName":    {Name: "unknown", Script: "def main(args):\n    return open('x')\n"},
-			"LargeScript":    {Name: "large", Script: savedWorkflowScript + strings.Repeat("#", 65536)},
-			"ArraySchema":    {Name: "array-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`[]`)},
-			"StringSchema":   {Name: "string-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"string"}`)},
-			"DuplicatePhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
-			"EmptyPhase":     {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
-			"SpacedPhase":    {Name: "phases", Script: savedWorkflowScript, Phases: []string{" a"}},
-			"ControlPhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\x01b"}},
-			"NewlinePhase":   {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\nb"}},
-			"BidiPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u202eb"}},
-			"ZeroWidthPhase": {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u200bb"}},
-			"LongPhase":      {Name: "phases", Script: savedWorkflowScript, Phases: []string{strings.Repeat("p", 129)}},
-			"ManyPhases":     {Name: "phases", Script: savedWorkflowScript, Phases: strings.Split(strings.Repeat("p,", 32)+"p", ",")},
+			"BadName":              {Name: "Triage", Script: savedWorkflowScript},
+			"NoMain":               {Name: "no-main", Script: "x = 1\n"},
+			"SyntaxError":          {Name: "syntax", Script: "def main(args):\n  return (\n"},
+			"UnknownName":          {Name: "unknown", Script: "def main(args):\n    return open('x')\n"},
+			"LargeScript":          {Name: "large", Script: savedWorkflowScript + strings.Repeat("#", 65536)},
+			"ArraySchema":          {Name: "array-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`[]`)},
+			"StringSchema":         {Name: "string-schema", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"string"}`)},
+			"DuplicatePhase":       {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a", "a"}},
+			"EmptyPhase":           {Name: "phases", Script: savedWorkflowScript, Phases: []string{""}},
+			"SpacedPhase":          {Name: "phases", Script: savedWorkflowScript, Phases: []string{" a"}},
+			"ControlPhase":         {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\x01b"}},
+			"NewlinePhase":         {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\nb"}},
+			"BidiPhase":            {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u202eb"}},
+			"ZeroWidthPhase":       {Name: "phases", Script: savedWorkflowScript, Phases: []string{"a\u200bb"}},
+			"BidiDescription":      {Name: "bidi-desc", Script: savedWorkflowScript, Description: "a\u202eb"},
+			"ZeroWidthDescription": {Name: "zw-desc", Script: savedWorkflowScript, Description: "a\u200bb"},
+			"ControlDescription":   {Name: "ctl-desc", Script: savedWorkflowScript, Description: "a\x01b"},
+			"LongPhase":            {Name: "phases", Script: savedWorkflowScript, Phases: []string{strings.Repeat("p", 129)}},
+			"ManyPhases":           {Name: "phases", Script: savedWorkflowScript, Phases: strings.Split(strings.Repeat("p,", 32)+"p", ",")},
 			// Below the limit compact, above it as jsonb text.
 			"SpacedSchema":   {Name: "spaced-schema", Script: savedWorkflowScript, ArgsSchema: spacedArgsSchema(6000)},
 			"DeepSchema":     {Name: "deep", Script: savedWorkflowScript, ArgsSchema: json.RawMessage(`{"type":"object","x":` + strings.Repeat("[", 2000) + strings.Repeat("]", 2000) + `}`)},
@@ -183,7 +202,7 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		require.Len(t, list, 1)
 		requireSavedWorkflowMetadata(t, created.ForkSavedWorkflowMetadata, list[0])
 
-		updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{
+		updated, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{
 			Script: ptr.Ref("def main(args):\n    return 1\n"),
 		})
 		require.NoError(t, err)
@@ -217,6 +236,14 @@ func TestForkUserSavedWorkflows(t *testing.T) {
 		}
 		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "missing", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("")})
 		_ = requireSDKError(t, err, http.StatusNotFound)
+
+		// The update path checks the description with the same rule.
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\u200bb")})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\u202eb")})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
+		_, err = member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("a\x01b")})
+		_ = requireSDKError(t, err, http.StatusBadRequest)
 
 		// Another member can see the user in the organization but not the
 		// user's workflows, and cannot change them.
