@@ -14,6 +14,7 @@ import type { WorkflowRun } from "#/api/typesGenerated";
 import { MockChatWorkflowRun } from "#/testHelpers/forkWorkflows";
 import {
 	chatWorkflowRuns,
+	chatWorkflowRunsKey,
 	runListHasRunningRun,
 	type WorkflowRunPageParam,
 } from "./forkWorkflows";
@@ -69,6 +70,7 @@ const observeRuns = () => {
 		return result;
 	};
 	return {
+		queryClient,
 		getRuns,
 		pages: () => observer.getCurrentResult().data?.pages ?? [],
 		hasNextPage: () => observer.getCurrentResult().hasNextPage,
@@ -78,6 +80,21 @@ const observeRuns = () => {
 		unsubscribe: () => unsubscribe(),
 	};
 };
+
+/**
+ * A server holding runs total - 1 down to 0 that answers the keyset
+ * query: the newest rows, or the rows behind a cursor, up to the limit.
+ */
+const serveRuns =
+	(total: number) =>
+	(_chatId: string, after: string, _signal?: AbortSignal, limit = 50) => {
+		const all = fullPage(total - 1, new Array(total).fill("completed"));
+		const start =
+			after === ""
+				? 0
+				: all.findIndex((run) => `${run.created_at}/${run.id}` === after) + 1;
+		return Promise.resolve(all.slice(start, start + limit));
+	};
 
 /** Waits for the observer to hold the given number of pages. */
 const waitForPages = async (pages: () => readonly unknown[], count: number) => {
@@ -541,8 +558,11 @@ describe("chatWorkflowRuns refetch top-up", () => {
 			if (!run0) {
 				throw new Error("the page must hold run 0");
 			}
+			// Run 1's id sorts below run 0's, so only the fraction of a
+			// second orders the two.
 			first[48] = {
 				...makeRun(1, "completed"),
+				id: "00000000-0000-3000-8000-000000000001",
 				created_at: run0.created_at.replace("Z", ".5Z"),
 			};
 			getRuns.mockResolvedValueOnce(first);
@@ -566,6 +586,62 @@ describe("chatWorkflowRuns refetch top-up", () => {
 				[cursorOf(shiftedFirst), 1],
 			]);
 			expect(pages()[0]).toHaveLength(51);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("keeps a single growing page at or below 100 rows", async () => {
+		const { getRuns, pages, refetch, start, unsubscribe } = observeRuns();
+		try {
+			getRuns.mockImplementation(serveRuns(50));
+			start();
+			await waitForPages(pages, 1);
+
+			// 49 new runs top the page up to 99 rows and one more to 100.
+			// The next run would make 101, past the server's limit, so the
+			// oldest row falls out instead.
+			for (const [total, length] of [
+				[99, 99],
+				[100, 100],
+				[101, 100],
+			]) {
+				getRuns.mockImplementation(serveRuns(total));
+				await refetch();
+				expect(pages()[0]).toHaveLength(length);
+			}
+
+			// With no new run the next tick asks for the page's 100 rows and
+			// needs no top-up.
+			getRuns.mockClear();
+			await refetch();
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 100],
+			]);
+			expect(pages()[0]).toHaveLength(100);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("asks for at most 100 rows for an oversized cached page", async () => {
+		const { queryClient, getRuns, pages, start, unsubscribe } = observeRuns();
+		try {
+			// A page of 110 rows cached before the 100-row guard: the
+			// refetch asks the server for its limit, not the page's length,
+			// and does not top the page back up past it.
+			queryClient.setQueryData<
+				InfiniteData<WorkflowRun[], WorkflowRunPageParam>
+			>(chatWorkflowRunsKey("chat-1"), {
+				pages: [fullPage(109, new Array(110).fill("completed"))],
+				pageParams: [{ after: "" }],
+			});
+			getRuns.mockImplementation(serveRuns(110));
+			start();
+			await vi.waitFor(() => expect(pages()[0]).toHaveLength(100));
+			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+				["", 100],
+			]);
 		} finally {
 			unsubscribe();
 		}

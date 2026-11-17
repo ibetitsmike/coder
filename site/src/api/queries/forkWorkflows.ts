@@ -98,8 +98,9 @@ export const chatWorkflowRuns = (chatId: string) =>
 			// and they fall out of the cache. The last page of the walk tops
 			// up with those rows, so the flat list stays whole; a page whose
 			// tail is not past the second to last page's tail has pages
-			// behind it that fetch them. With 50 or more rows to make up the
-			// oldest rows still fall out, and Load older brings them back.
+			// behind it that fetch them. With 50 or more rows to make up, or
+			// a page that would pass the server's 100-row limit, the oldest
+			// rows still fall out, and Load older brings them back.
 			const tail = runs[runs.length - 1];
 			const boundary = pages[pages.length - 2]?.at(-1);
 			if (
@@ -110,7 +111,11 @@ export const chatWorkflowRuns = (chatId: string) =>
 				const remaining = pages
 					.flat()
 					.filter((run) => isNewerRun(tail, run)).length;
-				if (remaining > 0 && remaining < workflowRunsPageSize) {
+				if (
+					remaining > 0 &&
+					remaining < workflowRunsPageSize &&
+					runs.length + remaining <= workflowRunsMaxLimit
+				) {
 					const topUp = await getChatWorkflowRuns(
 						chatId,
 						`${tail.created_at}/${tail.id}`,
