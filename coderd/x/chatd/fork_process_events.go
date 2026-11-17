@@ -10,7 +10,6 @@ package chatd
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,13 +42,14 @@ const (
 	// processSweepInterval is how often the waker fires the process watches
 	// whose workspace stopped or was rebuilt as lost.
 	processSweepInterval = 5 * time.Minute
-	// processReportGrace is how long the final poll of a wake-up waits
-	// after the expiry, and after the last disconnect of the agent, for an
-	// exit that the agent queued before the expiry. It matches the longest
-	// backoff of the agent between two reports.
-	processReportGrace = time.Minute
+	// processReportMargin is how long after the expiry of a wake-up its
+	// agent must last have said that it holds no unacked event, for the
+	// final poll to know every exit from before the expiry. It covers the
+	// time between the exit and the send of that report. The agent says so
+	// every 30 seconds while a chat process runs.
+	processReportMargin = 5 * time.Second
 	// processFinalReportWindow bounds how long after the expiry the final
-	// poll waits for an agent that is not connected to report.
+	// poll waits for that report.
 	processFinalReportWindow = 10 * time.Minute
 	// maxProcessTailLines and maxProcessTailBytes cap the output that an
 	// exit message quotes.
@@ -341,29 +341,13 @@ func (p *Server) registerProcessWatch(ctx context.Context, fdb forkdb.Store, con
 	return len(chats) > 0, nil
 }
 
-// processAgentReported reports whether the agent with agentID had the chance
-// to report every exit that it queued before expiresAt: processReportGrace
-// passed since expiresAt and since the last disconnect of the agent, and the
-// agent is connected. An agent that is gone has nothing left to report.
-func (p *Server) processAgentReported(ctx context.Context, agentID uuid.UUID, expiresAt, now time.Time) (bool, error) {
-	if now.Before(expiresAt.Add(processReportGrace)) {
-		return false, nil
-	}
-	agent, err := p.db.GetWorkspaceAgentByID(ctx, agentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
-	if err != nil {
-		return false, xerrors.Errorf("get workspace agent: %w", err)
-	}
-	timeout := p.agentInactiveDisconnectTimeout
-	if timeout <= 0 {
-		timeout = processReportGrace
-	}
-	if agent.Status(now, timeout).Status != database.WorkspaceAgentStatusConnected {
-		return false, nil
-	}
-	return !agent.DisconnectedAt.Valid || !now.Before(agent.DisconnectedAt.Time.Add(processReportGrace)), nil
+// processReported reports whether the agent of the process watch of event
+// said, processReportMargin or more after expiresAt, that it holds no event
+// that coderd did not ack, so every exit from before expiresAt fired the
+// watch. Only a report that coderd acked records it, so neither a lost
+// connection nor a failing report passes for it.
+func processReported(event wakeupEvent, expiresAt time.Time) bool {
+	return !event.ReportedAt.Before(expiresAt.Add(processReportMargin))
 }
 
 // sweepProcessWatches fires as lost the process watches whose workspace

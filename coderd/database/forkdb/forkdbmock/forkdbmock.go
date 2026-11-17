@@ -1804,6 +1804,21 @@ func (mr *MockStoreMockRecorder) LockChatForNoKeyUpdate(ctx, id any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockChatForNoKeyUpdate", reflect.TypeOf((*MockStore)(nil).LockChatForNoKeyUpdate), ctx, id)
 }
 
+// MarkChatProcessWatchesReported mocks base method.
+func (m *MockStore) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkChatProcessWatchesReported", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkChatProcessWatchesReported indicates an expected call of MarkChatProcessWatchesReported.
+func (mr *MockStoreMockRecorder) MarkChatProcessWatchesReported(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkChatProcessWatchesReported", reflect.TypeOf((*MockStore)(nil).MarkChatProcessWatchesReported), ctx, arg)
+}
+
 // MarkChatWakeupWatchDelivered mocks base method.
 func (m *MockStore) MarkChatWakeupWatchDelivered(ctx context.Context, arg forkdb.MarkChatWakeupWatchDeliveredParams) (forkdb.ChatWakeupWatch, error) {
 	m.ctrl.T.Helper()

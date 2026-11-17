@@ -587,6 +587,11 @@ func (f forkQueryMetricsStore) FireChatProcessWatches(ctx context.Context, arg f
 	return f.s.FireChatProcessWatches(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	defer f.observe(ctx, "MarkChatProcessWatchesReported", time.Now())
+	return f.s.MarkChatProcessWatchesReported(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
 	defer f.observe(ctx, "MarkLostChatProcessWatches", time.Now())
 	return f.s.MarkLostChatProcessWatches(ctx, arg)

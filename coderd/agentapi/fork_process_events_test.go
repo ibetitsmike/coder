@@ -106,10 +106,26 @@ func TestReportChatProcessEvents(t *testing.T) {
 	// With the experiment off, the events are acked without a write.
 	_, err = newAPI(nil).ReportChatProcessEvents(ctx, exit("watched"))
 	require.NoError(t, err)
+	_, err = newAPI(nil).ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{})
+	require.NoError(t, err)
 	require.Equal(t, watch, getWatch())
 
 	poked := make(chan uuid.UUID, 10)
 	api := newAPI(&agentapi.ForkChatProcessEvents{Poke: func(chatID uuid.UUID) { poked <- chatID }})
+
+	// A report without events records when the agent said that it holds no
+	// unacked event, and pokes nobody.
+	_, err = api.ReportChatProcessEvents(ctx, &agentproto.ReportChatProcessEventsRequest{})
+	require.NoError(t, err)
+	var spec struct {
+		ReportedAt time.Time `json:"reported_at"`
+	}
+	reported := getWatch()
+	require.NoError(t, json.Unmarshal(reported.Spec, &spec))
+	require.WithinDuration(t, mClock.Now(), spec.ReportedAt, time.Millisecond)
+	require.False(t, reported.FiredAt.Valid)
+	require.Empty(t, poked)
+	watch = reported
 
 	// An exit that no watch waits for changes nothing and pokes nobody.
 	_, err = api.ReportChatProcessEvents(ctx, exit("unwatched"))
@@ -137,4 +153,101 @@ func TestReportChatProcessEvents(t *testing.T) {
 	_, err = api.ReportChatProcessEvents(ctx, exit("watched"))
 	require.NoError(t, err)
 	require.Equal(t, fired.FiredAt, getWatch().FiredAt)
+}
+
+// A resent output match, after a lost ack, fires nothing, so it does not
+// count against the output_max_events of the watch, and a later match
+// fires it again.
+func TestReportChatProcessEventsOutputResent(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	db, _ := dbtestutil.NewDB(t)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+	logger := slogtest.Make(t, &slogtest.Options{IgnoreErrors: true})
+	authzDB := dbauthz.New(db, rbac.NewAuthorizer(prometheus.NewRegistry()), logger, coderdtest.AccessControlStorePointer())
+	mClock := quartz.NewMock(t)
+
+	chat := dbgen.Chat(t, db, database.Chat{
+		OrganizationID:    dbgen.Organization(t, db, database.Organization{}).ID,
+		OwnerID:           dbgen.User(t, db, database.User{}).ID,
+		LastModelConfigID: dbgen.ChatModelConfig(t, db, database.ChatModelConfig{}).ID,
+	})
+	now := dbtime.Now()
+	wakeup, err := fdb.InsertChatWakeup(ctx, forkdb.InsertChatWakeupParams{
+		ID:        uuid.New(),
+		ChatID:    chat.ID,
+		CreatedBy: chat.OwnerID,
+		Source:    "wait_for_events",
+		Kind:      forkdb.ChatWakeupKindEvents,
+		Prompt:    "continue",
+		Timezone:  "UTC",
+		Status:    forkdb.ChatWakeupStatusActive,
+		NextRunAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true},
+		ExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true},
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	agentID := uuid.New()
+	_, err = fdb.InsertChatWakeupWatch(ctx, forkdb.InsertChatWakeupWatchParams{
+		ID:        uuid.New(),
+		WakeupID:  wakeup.ID,
+		Kind:      forkdb.ChatWakeupWatchKindProcess,
+		AgentID:   uuid.NullUUID{UUID: agentID, Valid: true},
+		ProcessID: sql.NullString{String: "watched", Valid: true},
+		Spec:      json.RawMessage(`{"output_pattern": "ERR", "output_max_events": 5}`),
+		CreatedAt: now,
+	})
+	require.NoError(t, err)
+	getWatch := func() forkdb.ChatWakeupWatch {
+		t.Helper()
+		watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
+		require.NoError(t, err)
+		require.Len(t, watches, 1)
+		return watches[0]
+	}
+	poked := make(chan uuid.UUID, 10)
+	api := agentapi.New(agentapi.Options{
+		AgentID:               agentID,
+		AuthenticatedCtx:      ctx,
+		Log:                   logger,
+		Clock:                 mClock,
+		Database:              authzDB,
+		ForkChatProcessEvents: &agentapi.ForkChatProcessEvents{Poke: func(chatID uuid.UUID) { poked <- chatID }},
+	}, database.Workspace{}, database.WorkspaceAgent{ID: agentID})
+	match := func(at time.Time, lines ...string) *agentproto.ReportChatProcessEventsRequest {
+		return &agentproto.ReportChatProcessEventsRequest{Events: []*agentproto.ReportChatProcessEventsRequest_Event{{
+			ChatId:    chat.ID.String(),
+			ProcessId: "watched",
+			Kind: &agentproto.ReportChatProcessEventsRequest_Event_OutputMatch_{OutputMatch: &agentproto.ReportChatProcessEventsRequest_Event_OutputMatch{
+				Lines:    lines,
+				Matched:  int32(len(lines)), //nolint:gosec // A test sends a few lines.
+				WakeupId: wakeup.ID.String(),
+			}},
+			At: timestamppb.New(at),
+		}}}
+	}
+	var payload forkdb.ChatProcessFired
+
+	_, err = api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
+	require.NoError(t, err)
+	first := getWatch()
+	require.NoError(t, json.Unmarshal(first.FiredPayload.RawMessage, &payload))
+	require.Equal(t, 1, payload.Matched)
+	require.Equal(t, chat.ID, testutil.TryReceive(ctx, t, poked))
+
+	// The agent sends the batch again: nothing changes and nobody is poked.
+	_, err = api.ReportChatProcessEvents(ctx, match(now, "ERR a"))
+	require.NoError(t, err)
+	require.Equal(t, first, getWatch())
+	require.Empty(t, poked)
+
+	// A later match adds up.
+	_, err = api.ReportChatProcessEvents(ctx, match(now.Add(time.Second), "ERR b"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(getWatch().FiredPayload.RawMessage, &payload))
+	require.Equal(t, 2, payload.Matched)
+	require.Equal(t, chat.ID, testutil.TryReceive(ctx, t, poked))
 }

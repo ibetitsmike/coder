@@ -385,8 +385,9 @@ func TestWakeupEventsProcessOutcomes(t *testing.T) {
 
 // A final poll well after the expiry delivers only a process that provably
 // ended by the expiry, and no final poll delivers output lines. A final poll
-// with a process that has not ended waits until its agent had the chance to
-// report an exit from before the expiry.
+// with a process that has not ended waits until its agent said, a margin
+// after the expiry, that it holds no unacked event, or until the report
+// window passes.
 func TestWakeupFinalPollProcesses(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -400,11 +401,9 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 		// stoppedAt, when set, is when a stop build was created, relative to
 		// the expiry.
 		stoppedAt *time.Duration
-		// connected marks the agent connected at the poll, and
-		// disconnectedAt, when set, is its last disconnect relative to the
-		// poll. A seeded agent never connected.
-		connected      bool
-		disconnectedAt *time.Duration
+		// reportedAt, when set, is when the agent last said that it holds
+		// no unacked event, relative to the expiry.
+		reportedAt *time.Duration
 		// reportExit, when set, is the exit time, relative to the expiry,
 		// that the agent reports after the first poll, which a second poll
 		// eventsPollInterval later delivers.
@@ -415,18 +414,17 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 		wantReason string
 	}{
 		{name: "OnTime", late: time.Second, exitedAt: new(time.Second), wantMessage: true, wantReason: "done"},
-		{name: "OnTimeLines", late: time.Second, lines: true, connected: true},
-		{name: "LateLines", late: time.Minute, lines: true, connected: true, wantReason: "expired"},
+		{name: "OnTimeLines", late: time.Second, lines: true},
+		{name: "LateLines", late: time.Minute, lines: true, reportedAt: new(processReportMargin), wantReason: "expired"},
 		{name: "LateExitedAfterExpiry", late: time.Minute, exitedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateExitedBeforeExpiry", late: time.Minute, exitedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 		{name: "LateExitedInExpirySecond", late: time.Minute, exitedAt: new(time.Duration(0)), wantReason: "expired"},
-		{name: "LateNotFired", late: time.Minute, connected: true, wantReason: "expired"},
-		{name: "LateNotFiredNeverConnected", late: time.Minute},
-		{name: "LateNotFiredDisconnected", late: time.Minute, disconnectedAt: new(-time.Second)},
-		{name: "LateNotFiredReconnected", late: 2 * time.Minute, connected: true, disconnectedAt: new(-30 * time.Second)},
-		{name: "LateNotFiredReconnectedBefore", late: 2 * time.Minute, connected: true, disconnectedAt: new(-processReportGrace), wantReason: "expired"},
-		{name: "PastReportWindow", late: processFinalReportWindow, disconnectedAt: new(-time.Minute), wantReason: "expired"},
-		{name: "ReportAfterReconnect", late: time.Minute, disconnectedAt: new(-time.Second), reportExit: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
+		{name: "LateNotFired", late: time.Minute, reportedAt: new(processReportMargin), wantReason: "expired"},
+		{name: "LateNotFiredNeverReported", late: time.Minute},
+		{name: "LateNotFiredReportedBeforeExpiry", late: time.Minute, reportedAt: new(-time.Second)},
+		{name: "LateNotFiredReportedInMargin", late: time.Minute, reportedAt: new(processReportMargin - time.Second)},
+		{name: "PastReportWindow", late: processFinalReportWindow, reportedAt: new(-time.Minute), wantReason: "expired"},
+		{name: "ReportAfterRetry", late: time.Minute, reportedAt: new(-time.Second), reportExit: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 		{name: "LateStoppedAfterExpiry", late: time.Minute, stoppedAt: new(30 * time.Second), wantReason: "expired"},
 		{name: "LateStoppedBeforeExpiry", late: time.Minute, stoppedAt: new(-30 * time.Second), wantMessage: true, wantReason: "done"},
 	} {
@@ -447,19 +445,8 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			})
 			worker := f.newArchiveWorker(t, nil, nil, nil)
 			now := wakeupTestSlot.Add(tc.late)
-			if tc.connected || tc.disconnectedAt != nil {
-				var disconnectedAt sql.NullTime
-				if tc.disconnectedAt != nil {
-					disconnectedAt = sql.NullTime{Time: now.Add(*tc.disconnectedAt), Valid: true}
-				}
-				lastConnectedAt := now.Add(-time.Hour)
-				if tc.connected {
-					lastConnectedAt = now
-				}
-				_, err := f.sqlDB.ExecContext(ctx,
-					"UPDATE workspace_agents SET first_connected_at = $1, last_connected_at = $2, disconnected_at = $3 WHERE id = $4",
-					now.Add(-2*time.Hour), lastConnectedAt, disconnectedAt, agent.ID)
-				require.NoError(t, err)
+			if tc.reportedAt != nil {
+				f.markProcessReported(t, agent.ID, wakeupTestSlot.Add(*tc.reportedAt))
 			}
 			if tc.exitedAt != nil {
 				require.NotEmpty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 0, "", wakeupTestSlot.Add(*tc.exitedAt)))
@@ -475,7 +462,7 @@ func TestWakeupFinalPollProcesses(t *testing.T) {
 			worker.wakeupOnce(ctx, now)
 			if tc.reportExit != nil {
 				// The first poll waits for the agent, which reports the exit
-				// once its connection is back.
+				// once a retry of its report succeeds.
 				require.Empty(t, f.wakeMessages(t, chat, wakeup.Prompt))
 				got := f.wakeup(t, wakeup.ID)
 				require.Equal(t, forkdb.ChatWakeupStatusActive, got.Status)
@@ -750,15 +737,33 @@ func (f *workerTestFixture) fireProcessExit(t *testing.T, chat database.Chat, ag
 	})
 }
 
+// processLinesMatched counts the match times of fireProcessLines, so each
+// call reports later lines than the one before.
+var processLinesMatched atomic.Int64
+
 // fireProcessLines fires the process watch of wakeupID for matching output
 // lines, like the agent's report does.
 func (f *workerTestFixture) fireProcessLines(t *testing.T, chat database.Chat, agentID uuid.UUID, processID string, wakeupID uuid.UUID, last bool, lines ...string) []uuid.UUID {
 	t.Helper()
 	return f.fireProcess(t, forkdb.FireChatProcessWatchesParams{
 		Matched: int32(len(lines)), Lines: strings.Join(lines, "\n"), Last: last, //nolint:gosec // A test fires a few lines.
-		ChatID: chat.ID, AgentID: agentID, ProcessID: processID,
+		OutputAt: wakeupTestSlot.Add(time.Duration(processLinesMatched.Add(1)) * time.Millisecond),
+		ChatID:   chat.ID, AgentID: agentID, ProcessID: processID,
 		WakeupID: uuid.NullUUID{UUID: wakeupID, Valid: true},
 	})
+}
+
+// markProcessReported records that agentID said at at that it holds no
+// unacked event, like its report without events does.
+func (f *workerTestFixture) markProcessReported(t *testing.T, agentID uuid.UUID, at time.Time) {
+	t.Helper()
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	n, err := fdb.MarkChatProcessWatchesReported(testutil.Context(t, testutil.WaitShort), forkdb.MarkChatProcessWatchesReportedParams{
+		AgentID: agentID, ReportedAt: at,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, n)
 }
 
 func (f *workerTestFixture) fireProcess(t *testing.T, arg forkdb.FireChatProcessWatchesParams) []uuid.UUID {

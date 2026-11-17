@@ -786,7 +786,8 @@ service Agent {
 
 // Fork: ReportChatProcessEventsRequest carries events of the background
 // processes that chats started on the agent. The agent sends each event until
-// a call that carries it succeeds.
+// a call that carries it succeeds. A request without events says that the
+// agent holds no event that coderd did not ack.
 message ReportChatProcessEventsRequest {
 	message Event {
 		// Exit tells that the process exited. exit_code is -1 for a process

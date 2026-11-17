@@ -90,8 +90,10 @@ type Querier interface {
 	// the payload holds until a delivery, keeping the last 16384 characters, and
 	// @last, set on the last report of the agent. Lines fire only a watch with an
 	// output pattern whose message count is below its output_max_events, and
-	// that has not ended. The first event keeps its fired_at. Returns the chats
-	// to poke.
+	// that has not ended. @output_at, the time the agent matched the lines, must
+	// be after the output_at in the spec of the watch, which it then replaces,
+	// so a report that the agent sends again changes nothing. The first event
+	// keeps its fired_at. Returns the chats to poke.
 	FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
@@ -285,6 +287,11 @@ type Querier interface {
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Records that agent @agent_id said at @reported_at that it holds no event
+	// that coderd did not ack: sets reported_at in the spec of its open process
+	// watches of active wake-ups that have not ended. The final poll of a
+	// wake-up waits for it.
+	MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error)
 	// Records a message that the watch sent. Run it in the transaction that
 	// inserts the message, after the wake-up row is locked. @deliveries is the
 	// count the caller read: no row means another delivery of the watch won,

@@ -109,12 +109,18 @@ RETURNING *;
 -- the payload holds until a delivery, keeping the last 16384 characters, and
 -- @last, set on the last report of the agent. Lines fire only a watch with an
 -- output pattern whose message count is below its output_max_events, and
--- that has not ended. The first event keeps its fired_at. Returns the chats
--- to poke.
+-- that has not ended. @output_at, the time the agent matched the lines, must
+-- be after the output_at in the spec of the watch, which it then replaces,
+-- so a report that the agent sends again changes nothing. The first event
+-- keeps its fired_at. Returns the chats to poke.
 -- name: FireChatProcessWatches :many
 UPDATE chat_wakeup_watches x
 SET
     fired_at = COALESCE(x.fired_at, @fired_at::timestamptz),
+    spec = CASE
+        WHEN sqlc.narg('ended')::jsonb IS NOT NULL THEN x.spec
+        ELSE x.spec || jsonb_build_object('output_at', @output_at::timestamptz)
+        END,
     fired_payload = CASE
         WHEN sqlc.narg('ended')::jsonb IS NOT NULL THEN
             COALESCE(x.fired_payload, '{}'::jsonb) || sqlc.narg('ended')::jsonb
@@ -141,9 +147,26 @@ WHERE w.id = x.wakeup_id
             AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
             AND x.fired_payload->'exit' IS NULL
             AND x.fired_payload->'lost' IS NULL
+            AND COALESCE((x.spec->>'output_at')::timestamptz, '-infinity') < @output_at::timestamptz
         )
     )
 RETURNING x.chat_id;
+
+-- Records that agent @agent_id said at @reported_at that it holds no event
+-- that coderd did not ack: sets reported_at in the spec of its open process
+-- watches of active wake-ups that have not ended. The final poll of a
+-- wake-up waits for it.
+-- name: MarkChatProcessWatchesReported :execrows
+UPDATE chat_wakeup_watches x
+SET spec = x.spec || jsonb_build_object('reported_at', @reported_at::timestamptz)
+FROM chat_wakeups w
+WHERE w.id = x.wakeup_id
+    AND w.status = 'active'
+    AND x.kind = 'process'
+    AND x.delivered_at IS NULL
+    AND x.agent_id = @agent_id::uuid
+    AND x.fired_payload->'exit' IS NULL
+    AND x.fired_payload->'lost' IS NULL;
 
 -- Fires as lost the open process watches of active wake-ups whose agent can
 -- no longer report the process. With @reason when the agent is not an agent

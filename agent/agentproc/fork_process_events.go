@@ -38,6 +38,10 @@ const (
 	forkMaxProcessEventsBatch   = 100
 	forkProcessEventsMinBackoff = time.Second
 	forkProcessEventsMaxBackoff = time.Minute
+	// forkProcessEventsHeartbeat is how often the agent tells coderd that
+	// it holds no unacked event while a chat process runs, which the final
+	// poll of a wake-up waits for.
+	forkProcessEventsHeartbeat = 30 * time.Second
 	// forkMaxOutputTailBytes caps the output that an exit carries. coderd
 	// quotes less of it.
 	forkMaxOutputTailBytes = 8192
@@ -156,23 +160,35 @@ func (api *API) forkProcessStarted(proc *process, chatID uuid.UUID) {
 // ReportChatProcessEvents sends the process events of chats to coderd until
 // ctx ends. An event leaves the queue once coderd acked it, so the events
 // that a lost connection left unacked go out on the next one. A failed
-// report is retried with backoff. It returns only the error of ctx.
+// report is retried with backoff. While a chat process runs and the queue is
+// empty, it sends a report without events every forkProcessEventsHeartbeat,
+// which tells coderd that no exit waits for its ack. It returns only the
+// error of ctx.
 func (api *API) ReportChatProcessEvents(ctx context.Context, client proto.DRPCForkChatProcessEventsClient) error {
 	f := &api.fork
 	notify := f.notifyChan()
+	heartbeat := api.manager.clock.NewTicker(forkProcessEventsHeartbeat, "agentproc", "fork", "process-events-heartbeat")
+	defer heartbeat.Stop()
 	var backoff time.Duration
+	beat := false
 	for {
 		f.mu.Lock()
 		batch := slices.Clone(f.pending[:min(len(f.pending), forkMaxProcessEventsBatch)])
+		// The queue is read right before the send, so a report without
+		// events covers every exit queued before it.
+		beat = beat && len(batch) == 0 && f.chatProcessRunningLocked()
 		f.mu.Unlock()
-		if len(batch) == 0 {
+		if len(batch) == 0 && !beat {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-notify:
+			case <-heartbeat.C:
+				beat = true
 			}
 			continue
 		}
+		beat = false
 		_, err := client.ReportChatProcessEvents(ctx, &proto.ReportChatProcessEventsRequest{Events: batch})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -210,6 +226,17 @@ func (api *API) ReportChatProcessEvents(ctx context.Context, client proto.DRPCFo
 		f.pending = pending
 		f.mu.Unlock()
 	}
+}
+
+// chatProcessRunningLocked reports whether a chat process whose exit is
+// reported still runs. f.mu must be held.
+func (f *forkProcessEvents) chatProcessRunningLocked() bool {
+	for proc := range f.started {
+		if proc.info().Running {
+			return true
+		}
+	}
+	return false
 }
 
 // forkRoutes adds the fork routes of the process API to r.

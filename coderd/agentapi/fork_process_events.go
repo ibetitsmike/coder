@@ -30,9 +30,12 @@ type ForkChatProcessEvents struct {
 // of req match and pokes the chats of those watches. Events that match no
 // watch change nothing, and with the fork-chat-wakeups experiment off it
 // acks without a write. An error makes the agent send the whole batch
-// again, which fires the same watches with the same events.
+// again, which fires the same watches with the same events. A report
+// without events says that the agent holds no event that coderd did not
+// ack: it records that time on the open process watches of the agent, which
+// the final poll of a wake-up waits for.
 func (a *API) ReportChatProcessEvents(ctx context.Context, req *agentproto.ReportChatProcessEventsRequest) (*agentproto.ReportChatProcessEventsResponse, error) {
-	if a.opts.ForkChatProcessEvents == nil || len(req.GetEvents()) == 0 {
+	if a.opts.ForkChatProcessEvents == nil {
 		return &agentproto.ReportChatProcessEventsResponse{}, nil
 	}
 	fdb, err := forkdb.From(a.opts.Database)
@@ -41,6 +44,15 @@ func (a *API) ReportChatProcessEvents(ctx context.Context, req *agentproto.Repor
 	}
 	//nolint:gocritic // The query fires only the watches on this agent.
 	ctx = dbauthz.AsChatd(ctx)
+	if len(req.GetEvents()) == 0 {
+		if _, err := fdb.MarkChatProcessWatchesReported(ctx, forkdb.MarkChatProcessWatchesReportedParams{
+			AgentID:    a.opts.AgentID,
+			ReportedAt: dbtime.Time(a.opts.Clock.Now()),
+		}); err != nil {
+			return nil, xerrors.Errorf("mark chat process watches reported: %w", err)
+		}
+		return &agentproto.ReportChatProcessEventsResponse{}, nil
+	}
 	poked := make(map[uuid.UUID]struct{})
 	for _, event := range req.GetEvents() {
 		chatID, err := uuid.Parse(event.GetChatId())
@@ -86,6 +98,7 @@ func (a *API) ReportChatProcessEvents(ctx context.Context, req *agentproto.Repor
 			arg.Matched = match.GetMatched()
 			arg.Lines = strings.Join(match.GetLines(), "\n")
 			arg.Last = match.GetLast()
+			arg.OutputAt = at
 		default:
 			continue
 		}

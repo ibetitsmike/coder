@@ -100,6 +100,11 @@ type wakeupEvent struct {
 	OutputPattern         string `json:"output_pattern,omitempty"`
 	OutputCooldownSeconds int    `json:"output_cooldown_seconds,omitempty"`
 	OutputMaxEvents       int    `json:"output_max_events,omitempty"`
+	// OutputAt is when the agent matched the output lines of its last
+	// report that fired the watch, and ReportedAt is when the agent last
+	// said that it holds no event that coderd did not ack.
+	OutputAt   time.Time `json:"output_at,omitzero"`
+	ReportedAt time.Time `json:"reported_at,omitzero"`
 }
 
 // watchKinds maps the type of a wakeupEvent to the kind of its watch row.
@@ -577,15 +582,12 @@ func (p *Server) deliverEventsWakeup(ctx context.Context, fdb forkdb.Store, chat
 				}
 			}
 			pending++
-			// The final poll waits for the agent to report the exits it
-			// queued before the expiry, so a connection that was down
-			// around it does not lose one.
-			if !processWatchEnded(watch) && !processUnreported && eventsFinalPoll(wakeup, now) {
-				reported, err := p.processAgentReported(ctx, event.AgentID, wakeup.ExpiresAt.Time, now)
-				if err != nil {
-					return err
-				}
-				processUnreported = !reported
+			// The final poll waits for the agent to say after the expiry
+			// that it holds no unacked event, so an exit from before the
+			// expiry that a failed report or a lost connection held back
+			// is not lost.
+			if !processWatchEnded(watch) && eventsFinalPoll(wakeup, now) && !processReported(event, wakeup.ExpiresAt.Time) {
+				processUnreported = true
 			}
 		}
 	}

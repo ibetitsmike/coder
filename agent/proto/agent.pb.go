@@ -4933,7 +4933,8 @@ func (x *PushContextStateResponse) GetForkGlobRules() bool {
 
 // Fork: ReportChatProcessEventsRequest carries events of the background
 // processes that chats started on the agent. The agent sends each event until
-// a call that carries it succeeds.
+// a call that carries it succeeds. A request without events says that the
+// agent holds no event that coderd did not ack.
 type ReportChatProcessEventsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

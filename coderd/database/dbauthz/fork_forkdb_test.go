@@ -456,6 +456,11 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().FireChatProcessWatches(gomock.Any(), arg).Return(chats, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chats)
 		},
+		"MarkChatProcessWatchesReported": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.MarkChatProcessWatchesReportedParams{})
+			fdb.EXPECT().MarkChatProcessWatchesReported(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(int64(1))
+		},
 		"MarkLostChatProcessWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.MarkLostChatProcessWatchesParams{})
 			chats := []uuid.UUID{uuid.New()}

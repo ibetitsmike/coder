@@ -193,6 +193,57 @@ func TestForkReportProcessEventsReconnect(t *testing.T) {
 	requireExitReport(t, testutil.TryReceive(ctx, t, next.calls), chatID, toolCallID.String(), 5)
 }
 
+// While a chat process runs, the agent sends a report without events on
+// every heartbeat, after the events that wait for an ack, and none while
+// no chat process runs.
+func TestForkReportProcessEventsHeartbeat(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	mClock := quartz.NewMock(t)
+	heartbeat := mClock.Trap().NewTicker("agentproc", "fork", "process-events-heartbeat")
+	defer heartbeat.Close()
+	backoff := mClock.Trap().NewTimer("agentproc", "fork", "process-events-backoff")
+	defer backoff.Close()
+	api, handler := forkTestAPI(t, mClock)
+	client := newForkEventsClient(1)
+	stop := forkReport(ctx, t, api, client)
+	heartbeat.MustWait(ctx).MustRelease(ctx)
+	noReport := func() {
+		t.Helper()
+		select {
+		case req := <-client.calls:
+			t.Fatalf("unexpected report %v", req)
+		case <-time.After(testutil.IntervalMedium):
+		}
+	}
+
+	// No chat process runs, so a heartbeat sends nothing.
+	mClock.Advance(forkProcessEventsHeartbeat).MustWait(ctx)
+	noReport()
+
+	chatID := uuid.New()
+	forkStart(t, api, handler, chatID, uuid.New(), "sleep 60")
+	mClock.Advance(forkProcessEventsHeartbeat - forkProcessEventsMinBackoff).MustWait(ctx)
+	noReport()
+	// An exit whose ack is lost waits for the backoff, which ends with the
+	// next heartbeat.
+	exited := uuid.New()
+	forkStart(t, api, handler, chatID, exited, "exit 7")
+	requireExitReport(t, testutil.TryReceive(ctx, t, client.calls), chatID, exited.String(), 7)
+	backoff.MustWait(ctx).MustRelease(ctx)
+	mClock.Advance(forkProcessEventsMinBackoff).MustWait(ctx)
+	// The exit goes out before the report without events.
+	requireExitReport(t, testutil.TryReceive(ctx, t, client.calls), chatID, exited.String(), 7)
+	require.Empty(t, testutil.TryReceive(ctx, t, client.calls).GetEvents())
+	noReport()
+
+	// The next heartbeat sends another one.
+	mClock.Advance(forkProcessEventsHeartbeat).MustWait(ctx)
+	require.Empty(t, testutil.TryReceive(ctx, t, client.calls).GetEvents())
+	stop()
+	require.Empty(t, client.calls)
+}
+
 // An output watch reports the matching lines at once, then at most once
 // per cool-down, and stops after its last report.
 func TestForkOutputWatch(t *testing.T) {
