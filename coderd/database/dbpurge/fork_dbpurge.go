@@ -17,6 +17,12 @@ import (
 // deletes.
 const forkPurgeBatchSize = 1000
 
+// forkWorkflowPurgeBatchSize bounds the workflow runs one tick deletes. It
+// is smaller than forkPurgeBatchSize because a run cascades to up to 50
+// steps with values of up to 256 KiB, and a slow delete would roll back the
+// whole purge transaction.
+const forkWorkflowPurgeBatchSize = 100
+
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
 // chat secret answers it purged. It also deletes the wake-up run counts older
 // than 7 days, expired plugin link codes, and the closed wake-ups and ended
@@ -46,7 +52,7 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 			return ftx.DeleteOldChatWakeups(ctx, forkPurgeBatchSize)
 		}},
 		{"workflow runs", func(ctx context.Context) (int64, error) {
-			return ftx.DeleteOldWorkflowRuns(ctx, forkPurgeBatchSize)
+			return ftx.DeleteOldWorkflowRuns(ctx, forkWorkflowPurgeBatchSize)
 		}},
 	} {
 		count, err := purge.run(ctx)
