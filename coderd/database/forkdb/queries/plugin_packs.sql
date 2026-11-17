@@ -56,6 +56,16 @@ DELETE FROM plugin_pack_resources WHERE pack_id = @pack_id;
 -- name: GetPluginPackResources :many
 SELECT * FROM plugin_pack_resources WHERE pack_id = @pack_id ORDER BY path;
 
+-- Returns the commit of the pack and the path of each of its files, one row
+-- per file, or one row with a NULL path when it has none. One statement reads
+-- one snapshot, so the paths are those of the returned commit.
+-- name: GetPluginPackCommitPaths :many
+SELECT p.commit_sha, r.path
+FROM plugin_packs p
+LEFT JOIN plugin_pack_resources r ON r.pack_id = p.id
+WHERE p.id = @pack_id
+ORDER BY r.path;
+
 -- name: GetPluginPackSources :one
 SELECT * FROM plugin_pack_sources WHERE organization_id = @organization_id;
 

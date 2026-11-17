@@ -461,6 +461,13 @@ func (f *forkQuerier) GetOrganizationAgentDefinitionByNameForUpdate(ctx context.
 	return fetch(f.q.log, f.q.auth, f.db.GetOrganizationAgentDefinitionByNameForUpdate)(ctx, arg)
 }
 
+func (f *forkQuerier) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.GetLinkablePluginsByUserIDRow, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.GetLinkablePluginsByUserID(ctx, userID)
+}
+
 func (f *forkQuerier) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginByID)(ctx, id)
 }
@@ -481,6 +488,13 @@ func (f *forkQuerier) GetPluginLeaseSummary(ctx context.Context, runnerID uuid.U
 
 func (f *forkQuerier) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb.PluginPack, error) {
 	return fetch(f.q.log, f.q.auth, f.db.GetPluginPackByID)(ctx, id)
+}
+
+func (f *forkQuerier) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	if _, err := f.GetPluginPackByID(ctx, packID); err != nil {
+		return nil, err
+	}
+	return f.db.GetPluginPackCommitPaths(ctx, packID)
 }
 
 func (f *forkQuerier) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
