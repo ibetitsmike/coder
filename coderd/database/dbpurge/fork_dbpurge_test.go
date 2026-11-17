@@ -215,9 +215,10 @@ func TestDeleteOldWorkflowRuns(t *testing.T) {
 		ID: reportedStepID, RunID: reportedRunID, SpecKey: "step", Status: "running",
 	})
 	require.NoError(t, err)
-	require.NoError(t, fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{
+	_, err = fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{
 		ID: reportedStepID, Status: "reported",
-	}))
+	})
+	require.NoError(t, err)
 
 	done := awaitDoTick(ctx, t, clk)
 	closer := dbpurge.New(ctx, logger, db, &codersdk.DeploymentValues{}, prometheus.NewRegistry(), dbpurge.WithClock(clk))

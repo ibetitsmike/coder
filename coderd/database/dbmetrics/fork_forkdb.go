@@ -127,7 +127,7 @@ func (f forkQueryMetricsStore) SetWorkflowRunLogs(ctx context.Context, arg forkd
 	return f.s.SetWorkflowRunLogs(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) (int64, error) {
 	defer f.observe(ctx, "UpdateWorkflowStep", time.Now())
 	return f.s.UpdateWorkflowStep(ctx, arg)
 }
