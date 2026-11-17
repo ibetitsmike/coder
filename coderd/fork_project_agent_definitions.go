@@ -63,6 +63,8 @@ func (api *API) forkProjectAgentDefinitions(rw http.ResponseWriter, r *http.Requ
 // @x-apidocgen {"skip": true}
 func (api *API) postForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditCreate)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
@@ -82,6 +84,8 @@ func (api *API) postForkProjectAgentDefinition(rw http.ResponseWriter, r *http.R
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
+	fa.diff(nil, forkAuditAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -128,10 +132,21 @@ func (api *API) forkProjectAgentDefinition(rw http.ResponseWriter, r *http.Reque
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditUpdate)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
 	}
+	current, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{
+		ProjectID: project.ID,
+		Name:      chi.URLParam(r, "agentDefinition"),
+	})
+	if err != nil {
+		writeForkAgentDefinitionReadError(rw, err)
+		return
+	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), current.ID, current.Name)
 	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
 	if !ok {
 		return
@@ -147,6 +162,7 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.diff(forkAuditAgentDefinition(current), forkAuditAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
 
@@ -162,11 +178,13 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkProjectAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fa, commitAudit := api.initForkAudit(rw, r, "project_agent_definition", forkAuditDelete)
+	defer commitAudit()
 	project, fdb, ok := api.forkProjectAgentDefinitionAccess(rw, r, policy.ActionUpdate)
 	if !ok {
 		return
 	}
-	_, err := fdb.DeleteProjectAgentDefinitionByName(ctx, forkdb.DeleteProjectAgentDefinitionByNameParams{
+	deleted, err := fdb.DeleteProjectAgentDefinitionByName(ctx, forkdb.DeleteProjectAgentDefinitionByNameParams{
 		ProjectID: project.ID,
 		Name:      chi.URLParam(r, "agentDefinition"),
 	})
@@ -174,6 +192,8 @@ func (api *API) deleteForkProjectAgentDefinition(rw http.ResponseWriter, r *http
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), deleted.ID, deleted.Name)
+	fa.diff(forkAuditAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 

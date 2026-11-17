@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
@@ -126,6 +127,76 @@ func TestForkPluginPackEnablement(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, packs)
 	})
+}
+
+// TestForkPluginPackEnablementAudit checks that every enablement change of a
+// plugin pack is audited, and that a denied request is not.
+func TestForkPluginPackEnablementAudit(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	db, ps := dbtestutil.NewDB(t)
+	auditor := audit.NewMock()
+	client := coderdtest.New(t, &coderdtest.Options{
+		Auditor:  auditor,
+		Database: db,
+		Pubsub:   ps,
+		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+			dv.Experiments = []string{string(codersdk.ExperimentForkPluginPacks)}
+		}),
+	})
+	owner := coderdtest.CreateFirstUser(t, client)
+	orgID := owner.OrganizationID
+	member, memberUser := coderdtest.CreateAnotherUser(t, client, orgID)
+	pack := insertForkPluginPack(t, db, orgID, owner.UserID, "demo")
+	want := []codersdk.ForkEnabledPluginPack{{ID: pack.ID, Name: pack.Name, CommitSHA: pack.CommitSha}}
+
+	// A denied request before authorization writes no entry.
+	_ = requireSDKError(t, member.EnableForkProjectPluginPack(ctx, orgID, uuid.New(), pack.ID), http.StatusNotFound)
+	project := dbgen.ChatProject(t, db, database.ChatProject{OrganizationID: orgID, OwnerID: memberUser.ID})
+
+	require.NoError(t, member.EnableForkProjectPluginPack(ctx, orgID, project.ID, pack.ID))
+	packs, err := member.ForkProjectPluginPacks(ctx, orgID, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, want, packs)
+	require.NoError(t, member.DisableForkProjectPluginPack(ctx, orgID, project.ID, pack.ID))
+
+	model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: orgID})
+	chat := dbgen.Chat(t, db, database.Chat{OrganizationID: orgID, OwnerID: memberUser.ID, LastModelConfigID: model.ID})
+	require.NoError(t, member.EnableForkChatPluginPack(ctx, chat.ID, pack.ID))
+	require.NoError(t, member.ExcludeForkChatPluginPack(ctx, chat.ID, pack.ID))
+	require.NoError(t, member.IncludeForkChatPluginPack(ctx, chat.ID, pack.ID))
+	require.NoError(t, member.DisableForkChatPluginPack(ctx, chat.ID, pack.ID))
+
+	entries := forkAuditEntries(t, auditor, orgID, "project_plugin_pack")
+	require.Len(t, entries, 2)
+	require.Equal(t, "update", entries[0].Operation)
+	require.Equal(t, pack.ID.String(), entries[0].ResourceID)
+	require.Equal(t, "demo", entries[0].ResourceName)
+	require.JSONEq(t, `{"project_plugin_pack":false}`, string(entries[0].Changes["enabled"].Old))
+	require.JSONEq(t, `{"project_plugin_pack":true}`, string(entries[0].Changes["enabled"].New))
+	require.JSONEq(t, `{"project_plugin_pack":false}`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `{"project_plugin_pack":true}`, string(entries[1].Changes["enabled"].New))
+	for i := range entries {
+		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+	}
+
+	entries = forkAuditEntries(t, auditor, orgID, "chat_plugin_pack")
+	require.Len(t, entries, 2)
+	require.Equal(t, "demo", entries[0].ResourceName)
+	require.JSONEq(t, `{"chat_plugin_pack":false}`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `{"chat_plugin_pack":true}`, string(entries[1].Changes["enabled"].New))
+
+	entries = forkAuditEntries(t, auditor, orgID, "chat_excluded_plugin_pack")
+	require.Len(t, entries, 2)
+	require.Equal(t, "demo", entries[0].ResourceName)
+	require.JSONEq(t, `{"chat_excluded_plugin_pack":false}`, string(entries[0].Changes["enabled"].Old))
+	require.JSONEq(t, `{"chat_excluded_plugin_pack":true}`, string(entries[0].Changes["enabled"].New))
+
+	// A request that fails after authorization writes no entry.
+	err = member.EnableForkProjectPluginPack(ctx, orgID, project.ID, uuid.New())
+	_ = requireSDKError(t, err, http.StatusNotFound)
+	require.Len(t, forkAuditEntries(t, auditor, orgID, "project_plugin_pack"), 2)
 }
 
 func insertForkPluginPack(t *testing.T, db database.Store, organizationID, createdBy uuid.UUID, name string) forkdb.PluginPack {

@@ -8,11 +8,14 @@ package coderd
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 
+	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
@@ -98,7 +101,7 @@ func (api *API) forkProjectPluginPacks(rw http.ResponseWriter, r *http.Request) 
 // @x-apidocgen {"skip": true}
 func (api *API) putForkProjectPluginPack(rw http.ResponseWriter, r *http.Request) {
 	project := httpmw.ChatProjectParam(r)
-	api.writeForkPluginPackEnablement(rw, r, project, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, project, "project_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		_, err := fdb.InsertPluginPackProject(r.Context(), forkdb.InsertPluginPackProjectParams{ProjectID: project.ID, PackID: packID})
 		return err
 	})
@@ -116,7 +119,7 @@ func (api *API) putForkProjectPluginPack(rw http.ResponseWriter, r *http.Request
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkProjectPluginPack(rw http.ResponseWriter, r *http.Request) {
 	project := httpmw.ChatProjectParam(r)
-	api.writeForkPluginPackEnablement(rw, r, project, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, project, "project_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		return fdb.DeletePluginPackProject(r.Context(), forkdb.DeletePluginPackProjectParams{ProjectID: project.ID, PackID: packID})
 	})
 }
@@ -159,7 +162,7 @@ func (api *API) forkChatPluginPacks(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) putForkChatPluginPack(rw http.ResponseWriter, r *http.Request) {
 	chat := httpmw.ChatParam(r)
-	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, chat, "chat_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		_, err := fdb.InsertChatPluginPack(r.Context(), forkdb.InsertChatPluginPackParams{ChatID: chat.ID, PackID: packID})
 		return err
 	})
@@ -176,7 +179,7 @@ func (api *API) putForkChatPluginPack(rw http.ResponseWriter, r *http.Request) {
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkChatPluginPack(rw http.ResponseWriter, r *http.Request) {
 	chat := httpmw.ChatParam(r)
-	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, chat, "chat_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		return fdb.DeleteChatPluginPack(r.Context(), forkdb.DeleteChatPluginPackParams{ChatID: chat.ID, PackID: packID})
 	})
 }
@@ -220,7 +223,7 @@ func (api *API) forkChatExcludedPluginPacks(rw http.ResponseWriter, r *http.Requ
 // @x-apidocgen {"skip": true}
 func (api *API) putForkChatExcludedPluginPack(rw http.ResponseWriter, r *http.Request) {
 	chat := httpmw.ChatParam(r)
-	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, chat, "chat_excluded_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		_, err := fdb.InsertChatExcludedPluginPack(r.Context(), forkdb.InsertChatExcludedPluginPackParams{ChatID: chat.ID, PackID: packID})
 		return err
 	})
@@ -237,15 +240,17 @@ func (api *API) putForkChatExcludedPluginPack(rw http.ResponseWriter, r *http.Re
 // @x-apidocgen {"skip": true}
 func (api *API) deleteForkChatExcludedPluginPack(rw http.ResponseWriter, r *http.Request) {
 	chat := httpmw.ChatParam(r)
-	api.writeForkPluginPackEnablement(rw, r, chat, func(fdb forkdb.Store, packID uuid.UUID) error {
+	api.writeForkPluginPackEnablement(rw, r, chat, "chat_excluded_plugin_pack", func(fdb forkdb.Store, packID uuid.UUID) error {
 		return fdb.DeleteChatExcludedPluginPack(r.Context(), forkdb.DeleteChatExcludedPluginPackParams{ChatID: chat.ID, PackID: packID})
 	})
 }
 
 // writeForkPluginPackEnablement authorizes an update of target, then runs
 // write for the {pluginPack} parameter. A pack that does not exist or is in
-// another organization answers 404, like a pack the user cannot see.
-func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Request, target rbac.Objecter, write func(forkdb.Store, uuid.UUID) error) {
+// another organization answers 404, like a pack the user cannot see. On
+// success it writes one audit entry of the target's organization with the
+// enablement operation and the pack in the additional fields.
+func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Request, target rbac.Objecter, resource string, write func(forkdb.Store, uuid.UUID) error) {
 	packID, ok := httpmw.ParseUUIDParam(rw, r, "pluginPack")
 	if !ok {
 		return
@@ -253,10 +258,31 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 	if !api.authorizeForkPluginPacks(rw, r, policy.ActionUpdate, target) {
 		return
 	}
+	fa, commitAudit := api.initForkAudit(rw, r, resource, forkAuditUpdate)
+	defer commitAudit()
 	fdb, ok := forkPluginPackStore(rw, api.Database)
 	if !ok {
 		return
 	}
+	// The pack read only names the audit target, so it runs as the system
+	// after the authorization above.
+	//nolint:gocritic // Authorized by authorizeForkPluginPacks.
+	pack, err := fdb.GetPluginPackByID(dbauthz.AsSystemRestricted(r.Context()), packID)
+	if err != nil {
+		// The write reports the same 404 for a pack of another organization.
+		if errors.Is(err, sql.ErrNoRows) {
+			httpapi.ResourceNotFound(rw)
+			return
+		}
+		httpapi.InternalServerError(rw, err)
+		return
+	}
+	if pack.OrganizationID != targetOrganizationID(target) {
+		httpapi.ResourceNotFound(rw)
+		return
+	}
+	fa.target(api.forkAuditOrganization(r.Context(), pack.OrganizationID), pack.ID, pack.Name)
+	fa.change("enabled", forkAuditChange{Old: json.RawMessage(forkAuditEnablement(resource, false)), New: json.RawMessage(forkAuditEnablement(resource, true))})
 	if err := write(fdb, packID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httpapi.ResourceNotFound(rw)
@@ -266,4 +292,23 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// targetOrganizationID reads the organization that owns the enablement
+// target. A chat project carries its organization, and a chat's middleware
+// reads the chat's organization.
+func targetOrganizationID(target rbac.Objecter) uuid.UUID {
+	switch t := target.(type) {
+	case database.ChatProject:
+		return t.OrganizationID
+	case database.Chat:
+		return t.OrganizationID
+	default:
+		return uuid.Nil
+	}
+}
+
+// forkAuditEnablement is the audit view of one enablement state.
+func forkAuditEnablement(resource string, enabled bool) string {
+	return fmt.Sprintf(`{%q:%t}`, resource, enabled)
 }
