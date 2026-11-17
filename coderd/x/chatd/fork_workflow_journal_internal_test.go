@@ -253,6 +253,57 @@ func TestForkWorkflowJournal(t *testing.T) {
 		}, testutil.IntervalFast)
 		assert.JSONEq(t, `{"text":"hi"}`, string(out.Result))
 	})
+
+	// The startup sweep interrupts a run that its first runner still
+	// executes, so a resume can rehydrate before that runner journals its
+	// next step. Both derive the same step ID: the resume must adopt the
+	// row the other runner inserted, not fail the run on the primary key
+	// and stop the child that the row belongs to.
+	t.Run("ResumeAdoptsAStepAnotherRunnerJournaled", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return agent("Never reports.")
+`})
+		step := f.steps(ctx, t, run, 1)[0]
+		childID := uuid.MustParse(step.ChatID)
+
+		restarted := f.restartWorkflowServer(t)
+		fdb := forkWorkflowDB(t, f.db)
+		testutil.Eventually(ctx, t, func(context.Context) bool {
+			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
+		}, testutil.IntervalFast)
+
+		// The resumed run rehydrates as if the first runner had not yet
+		// journaled the step: its journal row exists, the rehydrated run
+		// does not hold it.
+		resumed, err := restarted.server.rehydrateWorkflowRun(ctx, parent, journalRow(ctx, t, fdb, run.id))
+		require.NoError(t, err)
+		require.Len(t, resumed.steps, 1)
+		resumed.steps = nil
+		before, err := f.db.GetChatByID(ctx, childID)
+		require.NoError(t, err)
+
+		adopted, err := resumed.startStep(ctx, stepSpec{Prompt: "Never reports."})
+		require.NoError(t, err, "the resume adopts the journaled step")
+		assert.Equal(t, childID, adopted.id)
+		assert.Equal(t, childID, adopted.chatID)
+		assert.True(t, adopted.reused)
+		assert.Equal(t, stepStatusRunning, adopted.status)
+		require.Len(t, resumed.steps, 1)
+		assert.Same(t, adopted, resumed.steps[0])
+
+		after, err := f.db.GetChatByID(ctx, childID)
+		require.NoError(t, err)
+		assert.Equal(t, before.Status, after.Status, "the adopted step's child keeps running")
+		stepRows, err := fdb.GetWorkflowStepsByRun(ctx, run.id)
+		require.NoError(t, err)
+		require.Len(t, stepRows, 1)
+		assert.True(t, stepRows[0].Reused, "the adopted row carries the reuse flag")
+	})
 }
 
 // TestForkWorkflowLiveLogs covers the log write-through of a live run: the
@@ -484,27 +535,27 @@ def main(args):
 		// the second round even if its timer fired and re-armed again. The
 		// token stays held for the whole sub-test, so every attempt here is
 		// a dropped one: the attempts must reach base plus three (the held
-		// line, and two fallback rounds).
+		// line, and two fallback rounds). The timer callback counts its
+		// attempt before it re-arms, so the wait reads both under one lock
+		// and only stops once the re-arm of a counted round has landed.
 		deadline := time.Now().Add(10 * time.Second)
+		var (
+			attempts int
+			armed    bool
+		)
 		for {
 			run.journalMu.Lock()
-			attempts := run.flushAttempts
+			attempts = run.flushAttempts
+			armed = run.logFlushTimer != nil
 			run.journalMu.Unlock()
-			if attempts >= base+3 {
+			if attempts >= base+3 && armed {
 				break
 			}
 			if !time.Now().Before(deadline) {
-				run.journalMu.Lock()
-				armed := run.logFlushTimer != nil
-				run.journalMu.Unlock()
 				t.Fatalf("the flush made only %d attempts while the token was held (timer armed: %v); the fallback did not re-arm", attempts, armed)
 			}
 			time.Sleep(testutil.IntervalFast)
 		}
-		run.journalMu.Lock()
-		attempts := run.flushAttempts
-		armed := run.logFlushTimer != nil
-		run.journalMu.Unlock()
 		assert.GreaterOrEqual(t, attempts, base+3, "the dropped fallback must arm a second paced round")
 		assert.True(t, armed, "the second round must still be armed while the token is held")
 
@@ -818,7 +869,12 @@ def main(args):
 			return logs
 		}
 		testutil.Eventually(ctx, t, func(context.Context) bool {
-			return len(journalLogs()) == maxWorkflowLogs
+			// Wait for the tail itself, not just the count: the 80 lines
+			// land in paced writes, and an early write already holds
+			// maxWorkflowLogs lines that start before "line 30".
+			logs := journalLogs()
+			return len(logs) == maxWorkflowLogs && logs[0] == "line 30" &&
+				logs[len(logs)-1] == "line 79"
 		}, testutil.IntervalFast)
 
 		// The restart interrupts the run, and the resume replays it from
@@ -1140,6 +1196,12 @@ def main(args):
 			logs := journalRunLogs(ctx, t, fdb, run.id)
 			return len(logs) == 1 && logs[0] == failLine
 		}, testutil.IntervalFast)
+		// The restart must find the second step journaled, the way
+		// ReplaySkipsAnUnmatchedBaselineLine waits for it: the first runner
+		// keeps running the script after the restart, so a restart that
+		// races its insert of the trailing agent step resumes without that
+		// step. ResumeAdoptsAStepAnotherRunnerJournaled covers that race.
+		f.steps(ctx, t, run, 2)
 
 		restarted := f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {

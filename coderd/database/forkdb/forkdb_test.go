@@ -133,18 +133,22 @@ func TestInTx(t *testing.T) {
 	raw, _ := dbtestutil.NewDB(t)
 	db := wrap(t, raw)
 	fdb := mustFrom(t, db)
-	// The system subject may not create plugins, so act as an owner.
-	ctx := dbauthz.As(testutil.Context(t, testutil.WaitShort), rbac.Subject{
-		ID:     uuid.NewString(),
-		Roles:  rbac.RoleIdentifiers{rbac.RoleOwner()},
-		Groups: []string{},
-		Scope:  rbac.ScopeAll,
-	})
+	// The system subject may not create plugins, so act as an owner. Each
+	// subtest makes its own context: a parallel subtest can wait for a slot
+	// longer than a context of the parent lives.
+	ownerCtx := func(t *testing.T) context.Context {
+		return dbauthz.As(testutil.Context(t, testutil.WaitShort), rbac.Subject{
+			ID:     uuid.NewString(),
+			Roles:  rbac.RoleIdentifiers{rbac.RoleOwner()},
+			Groups: []string{},
+			Scope:  rbac.ScopeAll,
+		})
+	}
 
 	// insert inserts a plugin whose organization, user and file come from
 	// the upstream queries of the same transaction, so the foreign keys
 	// fail unless both run in it.
-	insert := func(tx database.Store, ftx forkdb.Store) (database.Organization, forkdb.Plugin, error) {
+	insert := func(ctx context.Context, tx database.Store, ftx forkdb.Store) (database.Organization, forkdb.Plugin, error) {
 		org := dbgen.Organization(t, tx, database.Organization{})
 		user := dbgen.User(t, tx, database.User{})
 		file := dbgen.File(t, tx, database.File{CreatedBy: user.ID})
@@ -164,11 +168,12 @@ func TestInTx(t *testing.T) {
 
 	t.Run("Commit", func(t *testing.T) {
 		t.Parallel()
+		ctx := ownerCtx(t)
 
 		var plugin forkdb.Plugin
 		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
 			var err error
-			_, plugin, err = insert(tx, ftx)
+			_, plugin, err = insert(ctx, tx, ftx)
 			return err
 		}, nil)
 		require.NoError(t, err)
@@ -180,13 +185,14 @@ func TestInTx(t *testing.T) {
 
 	t.Run("Rollback", func(t *testing.T) {
 		t.Parallel()
+		ctx := ownerCtx(t)
 
 		errRollback := xerrors.New("roll back")
 		var org database.Organization
 		var plugin forkdb.Plugin
 		err := forkdb.InTx(db, func(tx database.Store, ftx forkdb.Store) error {
 			var err error
-			org, plugin, err = insert(tx, ftx)
+			org, plugin, err = insert(ctx, tx, ftx)
 			require.NoError(t, err)
 			return errRollback
 		}, nil)
@@ -200,6 +206,7 @@ func TestInTx(t *testing.T) {
 
 	t.Run("RollbackChatSubagent", func(t *testing.T) {
 		t.Parallel()
+		ctx := ownerCtx(t)
 
 		errRollback := xerrors.New("roll back")
 		var chat database.Chat

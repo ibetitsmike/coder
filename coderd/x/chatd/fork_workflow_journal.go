@@ -29,6 +29,11 @@ import (
 // runs of a dead process.
 const workflowInterruptedError = "the coderd process restarted before the run ended"
 
+// workflowStepsPkey is the primary key of workflow_steps. A step ID derives
+// from the run ID and the step spec, so two runners of one run insert the
+// same key.
+const workflowStepsPkey database.UniqueConstraint = "workflow_steps_pkey"
+
 // jsonbValue wraps an optional JSON document for a nullable jsonb column.
 // A nil json.RawMessage is not a driver NULL: database/sql converts it to a
 // zero-length []byte, which Postgres rejects as invalid JSON, so it must go
@@ -498,28 +503,33 @@ func (p *Server) rehydrateWorkflowRun(
 	run.journalLogWrite <- struct{}{}
 	run.journaledLogSeq = max(len(run.logs), int(seq))
 	for _, srow := range stepRows {
-		step := &workflowStep{
-			id:         srow.ID,
-			chatID:     srow.ID,
-			specKey:    srow.SpecKey,
-			occurrence: int(srow.Occurrence),
-			ordinal:    int(srow.Ordinal),
-			title:      srow.Title,
-			// Every step of a rehydrated run is replayed, never run again,
-			// so the journal marks it reused and the detail reads the flag.
-			reused: true,
-			phase:  srow.Phase,
-			status: srow.Status,
-			err:    srow.Error,
-			// The previous process may already have sent the one reminder.
-			sentReminder: srow.Status == stepStatusReminded,
-		}
-		if srow.Value.Valid {
-			step.value = srow.Value.RawMessage
-		}
-		run.steps = append(run.steps, step)
+		run.steps = append(run.steps, journaledWorkflowStep(srow))
 	}
 	return run, nil
+}
+
+// journaledWorkflowStep rebuilds a step from its journal row.
+func journaledWorkflowStep(srow forkdb.WorkflowStep) *workflowStep {
+	step := &workflowStep{
+		id:         srow.ID,
+		chatID:     srow.ID,
+		specKey:    srow.SpecKey,
+		occurrence: int(srow.Occurrence),
+		ordinal:    int(srow.Ordinal),
+		title:      srow.Title,
+		// A step read from the journal is replayed, never run again, so the
+		// journal marks it reused and the detail reads the flag.
+		reused: true,
+		phase:  srow.Phase,
+		status: srow.Status,
+		err:    srow.Error,
+		// The previous process may already have sent the one reminder.
+		sentReminder: srow.Status == stepStatusReminded,
+	}
+	if srow.Value.Valid {
+		step.value = srow.Value.RawMessage
+	}
+	return step
 }
 
 // terminalWorkflowRun rebuilds a run that ended before the restart, so
