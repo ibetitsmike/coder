@@ -86,9 +86,9 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	// page ends the paging, the button unmounts, so keep focus moving
 	// through the runs instead of dropping it to the body.
 	const hadLoadOlder = useRef(false);
-	// Whether the button owned focus last, tracked through its own events:
-	// the user may have moved focus away during the load, and then the
-	// removal must not pull it back onto the list.
+	// Whether the button owned focus last, tracked through its own
+	// events: the user may have moved focus away during the load, and
+	// then the removal must not pull focus back.
 	const loadOlderHadFocus = useRef(false);
 	// The last run loaded while more pages remained. The next page's first
 	// run follows it, so focus continues from where the user was.
@@ -108,9 +108,12 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			const index = runs
 				? runs.findIndex((run) => run.id === lastOlderRunId.current)
 				: -1;
-			const nextRow = index >= 0 ? rows[index + 1] : undefined;
+			// Focus continues on the row after the last one the user saw;
+			// an empty last page leaves that row as the last one visible.
 			const nextButton =
-				nextRow instanceof HTMLElement ? nextRow.querySelector("button") : null;
+				rows[index + 1]?.querySelector("button") ??
+				rows[index]?.querySelector("button") ??
+				null;
 			if (nextButton) {
 				nextButton.focus({ preventScroll: true });
 			} else {
@@ -148,8 +151,9 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 				aria-label="Workflow runs"
 				className="m-0 flex list-none flex-col gap-1 p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
 				// When "Load older runs" unmounts after the last page, focus
-				// moves to the first newer run, or here when there is no row
-				// to take it, so it does not drop to the body.
+				// moves to the first run of the appended page, or to the last
+				// run when that page is empty, or here, so it does not drop to
+				// the body.
 				tabIndex={-1}
 			>
 				{runs.map((run) => (

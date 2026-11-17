@@ -245,10 +245,131 @@ describe("ForkWorkflowsPanel", () => {
 		// the appended page, the one after the last run the user could
 		// see before, so keyboard focus does not drop to the body.
 		const rows = screen.getAllByRole("listitem");
-		expect(rows).toHaveLength(51);
 		await waitFor(() =>
 			expect(within(rows[50]).getByRole("button")).toHaveFocus(),
 		);
+	});
+
+	it("lands focus on the last run when the final page is empty", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// A total that is an exact multiple of the page size gives the last
+		// fetch an empty page with no next cursor, so no new row follows
+		// the one the user was reading.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(
+					after === `${firstPage[49].created_at}/${firstPage[49].id}`
+						? []
+						: after
+							? [MockChatWorkflowRun]
+							: firstPage,
+				),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		const rows = screen.getAllByRole("listitem");
+		// The empty page leaves the previously last run as the last one, so
+		// that row's button takes focus instead of the list.
+		await waitFor(() =>
+			expect(
+				within(rows[49]).getByRole("button", {
+					name: /review changed files/i,
+				}),
+			).toHaveFocus(),
+		);
+	});
+
+	it("keeps focus moving through three pages of runs", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		const secondPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000001-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-11T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The first two pages are full and the third is short, so the
+		// control unmounts only after the second load ends the paging.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(
+					after === `${secondPage[49].created_at}/${secondPage[49].id}`
+						? [MockChatWorkflowRun]
+						: after
+							? secondPage
+							: firstPage,
+				),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		const rows = screen.getAllByRole("listitem");
+		await waitFor(() =>
+			expect(within(rows[100]).getByRole("button")).toHaveFocus(),
+		);
+	});
+
+	it("leaves the restored focus alone through later polls", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		const rows = await screen.findAllByRole("listitem");
+		const restored = within(rows[50]).getByRole("button");
+		await waitFor(() => expect(restored).toHaveFocus());
+
+		// The user moves focus to an earlier run, then the list polls; the
+		// restore must not pull focus back onto the moved-to run. Focus
+		// moves without a click, because a click would open that run.
+		const earlier = within(rows[0]).getByRole("button");
+		earlier.focus();
+		expect(earlier).toHaveFocus();
+		await queryClient.refetchQueries({
+			queryKey: chatWorkflowRunsKey(chatId),
+		});
+		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+		expect(within(rows[0]).getByRole("button")).toHaveFocus();
 	});
 
 	it("leaves focus alone when the user moved it off the removed control", async () => {

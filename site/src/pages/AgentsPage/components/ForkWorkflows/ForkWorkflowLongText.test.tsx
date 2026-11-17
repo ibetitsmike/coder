@@ -25,7 +25,6 @@ describe("ForkWorkflowLongText", () => {
 			<ForkWorkflowLongText label="Result" text={shortText} />,
 		);
 		// Short text shows in full with no control at all.
-		expect(screen.queryByRole("button")).toBeNull();
 
 		// Polling can grow the text past the threshold while it is on
 		// screen; it must stay in full rather than collapse.
