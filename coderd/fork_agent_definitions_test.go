@@ -478,12 +478,22 @@ func TestForkUserAgentDefinitionsAudit(t *testing.T) {
 		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
 	}
 	require.JSONEq(t, `"Reviews diffs"`, string(entries[0].Changes["description"].New))
-	require.NotContains(t, entries[0].Changes, "content", "a personal prompt is not stored in the audit log")
 	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
 	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
 	require.NotContains(t, entries[1].Changes, "content", "an enabled change does not repeat the prompt")
 	require.JSONEq(t, `"reviewer"`, string(entries[2].Changes["name"].Old))
 	require.Empty(t, entries[2].Changes["name"].New)
+	for i, entry := range entries {
+		// A create and a delete record the owner; an enabled-only update
+		// repeats no unchanged field.
+		if entry.Changes["user_id"].New != nil {
+			require.JSONEq(t, `"`+memberUser.ID.String()+`"`, string(entry.Changes["user_id"].New), "entry %d names the owner", i)
+		}
+		if entry.Changes["user_id"].Old != nil {
+			require.JSONEq(t, `"`+memberUser.ID.String()+`"`, string(entry.Changes["user_id"].Old), "entry %d names the owner", i)
+		}
+		require.NotContains(t, entry.Changes, "content", "a personal prompt is not stored in the audit log")
+	}
 
 	// A failed request writes no entry.
 	_, err = member.UpdateForkUserAgentDefinition(ctx, orgID, codersdk.Me, "missing", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
@@ -644,6 +654,7 @@ func TestForkProjectAgentDefinitionsAudit(t *testing.T) {
 	require.NotContains(t, entries[1].Changes, "content", "an enabled change does not repeat the prompt")
 	require.JSONEq(t, `"reviewer"`, string(entries[2].Changes["name"].Old))
 	require.Empty(t, entries[2].Changes["name"].New)
+	require.NotContains(t, entries[0].Changes, "content", "a project prompt is not stored in the audit log")
 
 	// A failed request writes no entry.
 	_, err = client.UpdateForkProjectAgentDefinition(ctx, orgID, project.ID, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})

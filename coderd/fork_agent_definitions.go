@@ -6,7 +6,9 @@ package coderd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -164,7 +166,8 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 		UserID:         member.UserID,
 		Name:           update.Name,
 	})
-	if err != nil && !errors.Is(err, sql.ErrNoRows) && !httpapi.IsUnauthorizedError(err) {
+	readDenied := err != nil && httpapi.IsUnauthorizedError(err)
+	if err != nil && !readDenied && !errors.Is(err, sql.ErrNoRows) {
 		writeForkAgentDefinitionReadError(rw, err)
 		return
 	}
@@ -174,7 +177,16 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
-	if current.ID != (uuid.UUID{}) {
+	if readDenied {
+		// The read was denied but the update is allowed, for example for
+		// an update-only scoped token. Record the requested fields.
+		if update.Enabled.Valid {
+			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
+		}
+		if update.Content.Valid {
+			fa.change("description", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%q`, row.Description))})
+		}
+	} else if current.ID != (uuid.UUID{}) {
 		fa.diff(forkAuditUserAgentDefinition(current), forkAuditUserAgentDefinition(row))
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))

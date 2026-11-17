@@ -85,7 +85,7 @@ func (api *API) postForkProjectAgentDefinition(rw http.ResponseWriter, r *http.R
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
-	fa.diff(nil, forkAuditAgentDefinition(row))
+	fa.diff(nil, forkAuditProjectAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -162,7 +162,7 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
-	fa.diff(forkAuditAgentDefinition(current), forkAuditAgentDefinition(row))
+	fa.diff(forkAuditProjectAgentDefinition(current), forkAuditProjectAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
 
@@ -193,7 +193,7 @@ func (api *API) deleteForkProjectAgentDefinition(rw http.ResponseWriter, r *http
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), deleted.ID, deleted.Name)
-	fa.diff(forkAuditAgentDefinition(deleted), nil)
+	fa.diff(forkAuditProjectAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 
