@@ -754,11 +754,13 @@ func (p *Server) buildTurnEnvironment(
 		}
 	}
 
-	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn), forkToolsWithModel(model, &prompt, pendingPrompt)); err != nil {
-		return turnEnvironment{}, err
-	}
 	customAgentPolicy, err := p.customAgentToolPolicyOfChat(ctx, chat)
 	if err != nil {
+		return turnEnvironment{}, err
+	}
+	// The viewed-image bound needs the policy, so it loads before the fork
+	// hook. The tools the policy filters are built later.
+	if tools, err = p.appendForkTools(ctx, tools, chat, modelConfig.ID, forkToolsWithWorkspaceConn(workspaceCtx.getWorkspaceConn), forkToolsWithModel(model, &prompt, pendingPrompt), forkToolsWithCustomAgentPolicy(customAgentPolicy)); err != nil {
 		return turnEnvironment{}, err
 	}
 	acpSubagentsAvailable := !isExploreSubagent && customAgentPolicy.keepsACPTools(tools)
@@ -1111,6 +1113,7 @@ func (p *Server) buildTurnEnvironment(
 		MaxSteps:             p.chatLimits.MaxStepsPerTurn,
 		Compaction: &generationCompaction{
 			Override:        compactionOverride,
+			Policy:          customAgentPolicy,
 			TriggerSource:   bindingSource,
 			OtherTrigger:    otherTrigger,
 			ChatModelConfig: modelConfig,

@@ -184,6 +184,16 @@ func viewImage(ctx context.Context, conn workspacesdk.AgentConn, model chatprovi
 				path, frames)
 		}
 	}
+	if mediaType == "image/webp" {
+		// OpenAI rejects animated WebP, and the stored result would fail
+		// every later request. The VP8X animation flag or any ANMF frame
+		// makes the file animated.
+		if animated, err := webpAnimated(data); err != nil {
+			return fantasy.ToolResponse{}, xerrors.Errorf("%s is not a valid %s image: %w", path, mediaType, err)
+		} else if animated {
+			return fantasy.ToolResponse{}, xerrors.Errorf("%s is an animated WebP, and view_image accepts only still images. Save one frame as a PNG and view that", path)
+		}
+	}
 	resp := fantasy.NewImageResponse(data, mediaType)
 	resp.Content = fmt.Sprintf("Image %s (%s, %d bytes, %dx%d pixels).", path, mediaType, len(data), width, height)
 	return resp, nil
@@ -417,23 +427,63 @@ func webpDimensions(data []byte) (width, height int, err error) {
 	}
 }
 
+// webpAnimated reports whether a WebP file is animated: its VP8X header
+// carries the animation flag, or it holds any ANMF chunk, per the WebP
+// container specification.
+func webpAnimated(data []byte) (bool, error) {
+	end := int64(binary.LittleEndian.Uint32(data[4:8])) + 8
+	for offset := int64(12); offset < end; {
+		if end-offset < 8 {
+			return false, nil
+		}
+		name := data[offset : offset+4]
+		size := int64(binary.LittleEndian.Uint32(data[offset+4:]))
+		payload := offset + 8
+		if size > end-payload {
+			return false, nil
+		}
+		switch string(name) {
+		case "ANMF":
+			return true, nil
+		case "VP8X":
+			if size >= 1 && data[payload]&0x02 != 0 {
+				return true, nil
+			}
+		}
+		// A chunk with an odd size has a pad byte.
+		offset = payload + size + size&1
+	}
+	return false, nil
+}
+
 // dynamicToolOwnsViewImage reports whether this turn offers a caller-supplied
-// view_image, which it does while fork-view-image is off and appendDynamicTools
-// adds the chat's dynamic tools.
-func (p *Server) dynamicToolOwnsViewImage(chat database.Chat) bool {
+// view_image, which it does while fork-view-image is off and the turn keeps
+// the chat's dynamic tools. A custom agent tool policy that the turn applies
+// later filters the same tool list, so a dynamic view_image the policy drops
+// owns the name no more: policy decides, so the check takes it after the
+// resolution and returns false when the policy leaves the tool out.
+func (p *Server) dynamicToolOwnsViewImage(chat database.Chat, policy *customAgentToolPolicy) bool {
 	if p.experiments.Enabled(codersdk.ExperimentForkViewImage) || p.disableCallerSuppliedTools ||
 		isExploreSubagentMode(chat.Mode) || (chat.PlanMode.Valid && chat.PlanMode.ChatPlanMode == database.ChatPlanModePlan) {
 		return false
 	}
 	names, err := parseDynamicToolNames(chat.DynamicTools)
-	return err == nil && names[viewImageToolName]
+	if err != nil || !names[viewImageToolName] {
+		return false
+	}
+	if policy != nil {
+		// The policy filter keeps a dynamic view_image only when the tools
+		// allowlist names it (its Read alias covers the built-in only).
+		return policy.Tools != nil && slices.Contains(policy.Tools, viewImageToolName)
+	}
+	return true
 }
 
 // limitViewedImagesForModel applies limitViewedImages with another model than
 // the turn's, such as a compaction override. The override can have a lower
 // view_image size limit than the chat model.
-func (p *Server) limitViewedImagesForModel(chat database.Chat, messages []fantasy.Message, model chatprovider.Model) []fantasy.Message {
-	if p.dynamicToolOwnsViewImage(chat) {
+func (p *Server) limitViewedImagesForModel(chat database.Chat, policy *customAgentToolPolicy, messages []fantasy.Message, model chatprovider.Model) []fantasy.Message {
+	if p.dynamicToolOwnsViewImage(chat, policy) {
 		return messages
 	}
 	return limitViewedImages(messages, nil, &model)
@@ -442,14 +492,16 @@ func (p *Server) limitViewedImagesForModel(chat database.Chat, messages []fantas
 // limitViewedImages keeps the newest view_image results of messages as images,
 // at most maxViewedImagesInPrompt of them, maxImagesInPrompt images and
 // maxViewedImageBytesInPrompt decoded bytes together with the other media of
-// the prompt, and always the newest one. It replaces older ones with a text
-// note. The stored conversation keeps every image and only the prompt drops
-// them, so each turn sends a bounded amount of image data. With a model, it also
-// replaces an image over view_image's size limit for that model, which a chat
-// can hold after it switched from a model with a higher limit. It copies the
-// messages it changes and leaves messages itself unchanged. pending is the
-// tail the turn appends after messages. Its media counts toward the byte
-// budget, and limitViewedImages does not change it.
+// the prompt. The count bound holds for every viewed image, the newest one
+// included, so the total never goes above maxImagesInPrompt. The newest one
+// alone still ignores the byte budget, so a single large view stays visible.
+// It replaces older ones with a text note. The stored conversation keeps every
+// image and only the prompt drops them, so each turn sends a bounded amount of
+// image data. With a model, it also replaces an image over view_image's size
+// limit for that model, which a chat can hold after it switched from a model
+// with a higher limit. It copies the messages it changes and leaves messages
+// itself unchanged. pending is the tail the turn appends after messages. Its
+// media counts toward the byte budget, and limitViewedImages does not change it.
 func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.Model) []fantasy.Message {
 	sizeLimit := -1
 	if model != nil {
@@ -508,7 +560,7 @@ func limitViewedImages(messages, pending []fantasy.Message, model *chatprovider.
 		switch {
 		case sizeLimit >= 0 && size > sizeLimit:
 			note = fmt.Sprintf("[image omitted: %d bytes is larger than the view_image limit of %d bytes for this model. Scale the image down and call view_image again.]", size, sizeLimit)
-		case kept == 0 || (kept < maxViewedImagesInPrompt && otherImages+kept < maxImagesInPrompt && keptBytes+size <= maxViewedImageBytesInPrompt):
+		case kept < maxViewedImagesInPrompt && otherImages+kept < maxImagesInPrompt && (kept == 0 || keptBytes+size <= maxViewedImageBytesInPrompt):
 			kept++
 			keptBytes += size
 			continue
