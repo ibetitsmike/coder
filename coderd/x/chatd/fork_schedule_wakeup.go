@@ -95,6 +95,9 @@ func (p *Server) scheduleWakeupTool(chat database.Chat) fantasy.AgentTool {
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			// The wake-up committed. The poke arms the timer for its run
+			// time now, not at the next commit of the chat or the sweep.
+			p.forkWaker().poke(chat.ID)
 			result := scheduleWakeupResult{
 				ID:        wakeup.ID,
 				Kind:      wakeup.Kind,
