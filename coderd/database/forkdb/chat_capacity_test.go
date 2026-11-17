@@ -120,10 +120,10 @@ func TestCountLiveSubagentsInFamily(t *testing.T) {
 		ID: runID, ChatID: root.ID, ModelConfigID: modelID, Script: "run()",
 		Args: json.RawMessage(`{}`), Status: "running", OwnerID: owner,
 	}))
-	for i, status := range []string{"running", "reported"} {
+	for _, status := range []string{"running", "reported"} {
 		step := chat(&root, database.ChatStatusRunning, false)
 		_, err := fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
-			ID: step.ID, RunID: runID, SpecKey: status, Occurrence: int32(i), Status: status, OwnerID: owner,
+			ID: step.ID, RunID: runID, SpecKey: status, Status: status, OwnerID: owner,
 		})
 		require.NoError(t, err)
 	}
