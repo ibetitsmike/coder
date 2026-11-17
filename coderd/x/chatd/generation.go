@@ -67,6 +67,9 @@ type generationCompaction struct {
 	// prepare time. Its model client is built in the compact action path,
 	// so construction failures cannot fail turns that never compact.
 	Override *resolvedModelOverride
+	// Policy is the chat's custom agent tool policy resolved at prepare
+	// time, which the viewed-image bound follows.
+	Policy *customAgentToolPolicy
 	// ChatModelConfig is the chat model's config, used to detect provider
 	// changes when sanitizing the compaction prompt.
 	ChatModelConfig database.ChatModelConfig
@@ -1348,7 +1351,7 @@ func (s *taskStarter) generateCompaction(
 			overrideModel.dbConfig,
 			prepared.ReasoningProvenance.Model,
 		)
-		compactionOpts.Messages = s.server.limitViewedImagesForModel(prepared.Chat, compactionOpts.Messages, overrideModel.model)
+		compactionOpts.Messages = s.server.limitViewedImagesForModel(prepared.Chat, prepared.Compaction.Policy, compactionOpts.Messages, overrideModel.model)
 	}
 	preResult, err := s.server.hooks.Trigger(ctx, chathooks.ChatFor(prepared.Chat, input.hookTurnID()), chathooks.Message{}, agenthooks.EventPreCompact, dispatch.CapacityClassGeneration)
 	if err != nil {
