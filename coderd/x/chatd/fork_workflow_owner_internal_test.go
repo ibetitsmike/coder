@@ -132,6 +132,24 @@ func failStatusWrites(t *testing.T, server *Server) *failingStatusStore {
 	return failing
 }
 
+// blockingStepsStore holds the step reads of a resume until release is
+// closed, the way database contention stalls a rehydration. entered
+// receives once when a read is held.
+type blockingStepsStore struct {
+	forkdb.Store
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingStepsStore) GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]forkdb.WorkflowStep, error) {
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	<-s.release
+	return s.Store.GetWorkflowStepsByRun(ctx, runID)
+}
+
 const ownerNeverReportsScript = `
 def main(args):
     return agent("Never reports.")
@@ -243,6 +261,55 @@ func TestForkWorkflowOwnership(t *testing.T) {
 		row = journalRow(ctx, t, fdb, run.id)
 		assert.Equal(t, workflowStatusCompleted, row.Status)
 		assert.Equal(t, second.workflows.owner.id, row.OwnerID.UUID)
+	})
+
+	// A resume that rehydrates for longer than the stale window keeps the
+	// run it claimed: the heartbeat renews the claimed row before the run
+	// is registered, so the sweep leaves it running.
+	t.Run("HeartbeatRenewsAClaimWhileItRehydrates", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		crashWorkflowServer(t, f.server)
+		second := f.peerServer(t, mock)
+		require.Equal(t, workflowStatusInterrupted, journalRunStatus(ctx, t, fdb, run.id))
+		inner, err := forkdb.From(second.db)
+		require.NoError(t, err)
+		blocking := &blockingStepsStore{Store: inner, entered: make(chan struct{}, 1), release: make(chan struct{})}
+		second.db = dbauthz.New(
+			&forkDBSwap{Store: second.db, fdb: blocking},
+			rbac.NewStrictCachingAuthorizer(prometheus.NewRegistry()),
+			slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+			nil,
+		)
+
+		type resumed struct {
+			run *workflowRun
+			err error
+		}
+		done := make(chan resumed, 1)
+		go func() {
+			r, err := second.startWorkflowRun(ctx, parent, f.model.ID,
+				runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+			done <- resumed{run: r, err: err}
+		}()
+		testutil.RequireReceive(ctx, t, blocking.entered)
+		advanceMockClockBy(ctx, t, mock, workflowStaleAfter+workflowHeartbeatInterval)
+		row := journalRow(ctx, t, fdb, run.id)
+		require.Equal(t, workflowStatusRunning, row.Status, "the sweep left the claimed run")
+		assert.Equal(t, second.workflows.owner.id, row.OwnerID.UUID)
+
+		close(blocking.release)
+		res := testutil.RequireReceive(ctx, t, done)
+		require.NoError(t, res.err)
+		require.Same(t, res.run, second.workflows.get(run.id))
+		assert.Equal(t, uuid.Nil, second.workflows.claimingRun(), "the registration ends the claim")
+		assert.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
 	// Two processes resume the same interrupted run at once. The claim lets

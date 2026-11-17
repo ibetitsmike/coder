@@ -532,8 +532,10 @@ func (p *Server) resumeWorkflowRun(
 		return p.resumeUnclaimedWorkflowRun(ctx, chat, row.ID)
 	}
 	row = claimed
+	p.workflows.setClaiming(row.ID)
 	run, err := p.rehydrateWorkflowRun(ctx, chat, row)
 	if err != nil {
+		p.workflows.setClaiming(uuid.Nil)
 		// The row stays resumable for a later process that can compile it,
 		// unless another caller of this process resumed the run meanwhile.
 		if p.workflows.get(row.ID) == nil {
@@ -544,6 +546,7 @@ func (p *Server) resumeWorkflowRun(
 		return nil, err
 	}
 	_, added := p.workflows.add(run)
+	p.workflows.setClaiming(uuid.Nil)
 	p.workflows.resumeMu.Unlock()
 	if !added {
 		// Another caller resumed the same run first.
