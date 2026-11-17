@@ -208,15 +208,17 @@ func forkAuditAgentDefinition(row forkdb.AgentDefinition) any {
 
 // forkAuditProjectAgentDefinition is the audit view of a project agent
 // definition. It omits the content, because auditors can read the audit log
-// without being able to read a chat project.
+// without being able to read a chat project, and names the project, because
+// a deleted definition is otherwise not traceable to it.
 func forkAuditProjectAgentDefinition(row forkdb.AgentDefinition) any {
 	return struct {
+		ProjectID   uuid.NullUUID    `json:"project_id"`
 		Name        string           `json:"name"`
 		Description string           `json:"description"`
 		Enabled     bool             `json:"enabled"`
 		GroupACL    database.ChatACL `json:"group_acl"`
 		UserACL     database.ChatACL `json:"user_acl"`
-	}{row.Name, row.Description, row.Enabled, row.GroupAcl, row.UserAcl}
+	}{row.ProjectID, row.Name, row.Description, row.Enabled, row.GroupAcl, row.UserAcl}
 }
 
 // forkAuditUserAgentDefinition is the audit view of a personal agent

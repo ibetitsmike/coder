@@ -250,7 +250,8 @@ func (api *API) deleteForkChatExcludedPluginPack(rw http.ResponseWriter, r *http
 // another organization answers 404, like a pack the user cannot see. On
 // success it writes one audit entry of the target's organization with the
 // pack, the enablement transition and the project or chat ID in the
-// additional fields.
+// additional fields. A failed write leaves no entry, because the target is
+// named only after the write succeeded.
 func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Request, target rbac.Objecter, resource string, enabled bool, write func(forkdb.Store, uuid.UUID) error) {
 	packID, ok := httpmw.ParseUUIDParam(rw, r, "pluginPack")
 	if !ok {
@@ -283,11 +284,6 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 		return
 	}
 	fa.target(api.forkAuditOrganization(r.Context(), pack.OrganizationID), pack.ID, pack.Name)
-	fa.change("enabled", forkAuditChange{
-		Old: json.RawMessage(forkAuditEnablement(resource, !enabled)),
-		New: json.RawMessage(forkAuditEnablement(resource, enabled)),
-	})
-	fa.change("target_id", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`{"target_id":%q}`, target.RBACObject().ID))})
 	if err := write(fdb, packID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httpapi.ResourceNotFound(rw)
@@ -296,6 +292,13 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 		httpapi.InternalServerError(rw, err)
 		return
 	}
+	// The transition is recorded only after the write succeeded, so a
+	// failed write does not claim a state change.
+	fa.change("enabled", forkAuditChange{
+		Old: json.RawMessage(forkAuditEnablement(resource, !enabled)),
+		New: json.RawMessage(forkAuditEnablement(resource, enabled)),
+	})
+	fa.change("target_id", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`{"target_id":%q}`, target.RBACObject().ID))})
 	rw.WriteHeader(http.StatusNoContent)
 }
 

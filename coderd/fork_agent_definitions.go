@@ -179,12 +179,13 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
 	if readDenied {
 		// The read was denied but the update is allowed, for example for
-		// an update-only scoped token. Record the requested fields.
+		// an update-only scoped token. The old values are unknown, so the
+		// entry records that the requested fields changed without them.
+		if update.Content.Valid {
+			fa.secret("content")
+		}
 		if update.Enabled.Valid {
 			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
-		}
-		if update.Content.Valid {
-			fa.change("description", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%q`, row.Description))})
 		}
 	} else if current.ID != (uuid.UUID{}) {
 		fa.diff(forkAuditUserAgentDefinition(current), forkAuditUserAgentDefinition(row))

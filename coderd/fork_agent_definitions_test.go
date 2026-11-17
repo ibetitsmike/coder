@@ -500,7 +500,7 @@ func TestForkUserAgentDefinitionsAudit(t *testing.T) {
 	_ = requireSDKError(t, err, http.StatusNotFound)
 	err = member.DeleteForkUserAgentDefinition(ctx, orgID, otherUser.Username, "missing")
 	_ = requireSDKError(t, err, http.StatusForbidden)
-	require.Len(t, entries, 3)
+	require.Len(t, forkAuditEntries(t, auditor, orgID, "user_agent_definition"), 3)
 }
 
 func TestForkProjectAgentDefinitions(t *testing.T) {
