@@ -96,7 +96,7 @@ func skillContainersFor(rootPath string) []string {
 	}
 	for _, rel := range skillContainerRelPaths {
 		container := filepath.Join(rootPath, rel)
-		if info, err := os.Stat(container); err == nil && info.IsDir() {
+		if info, err := statNoted(container); err == nil && info.IsDir() {
 			out = append(out, container)
 		}
 	}
@@ -146,6 +146,7 @@ type Resolver struct {
 	// in Resources so they are capped and pushed (fork_rules.go). The
 	// Manager wires it to the fork-glob-rules push-response capability.
 	GlobRulesAdvertised func() bool
+	packPass            *packPass // fork: fork_pack_mcp.go
 }
 
 // ScanRoot describes a single directory or file the resolver
@@ -176,6 +177,7 @@ func (r *Resolver) Resolve(roots []ScanRoot) Snapshot {
 // Snapshot: a canceled context returns an empty Snapshot with
 // SnapshotError set to the context error.
 func (r *Resolver) ResolveContext(ctx context.Context, roots []ScanRoot) Snapshot {
+	defer stopTracking(r.trackUncachedResolve(roots)) // fork: fork_resolve_cache.go
 	res := r.normalize()
 	resources, snapErrs := res.walk(ctx, roots)
 	if err := ctx.Err(); err != nil {
@@ -342,7 +344,7 @@ const maxSourcePathBytes = 1024
 // push capability is advertised; without it nothing is discovered
 // from that root, top-level files included.
 func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	info, err := os.Stat(root.Path)
+	info, err := statNoted(root.Path)
 	if err != nil {
 		// Missing roots silently fall through. The user either
 		// added a path that does not exist yet or removed it
@@ -397,7 +399,7 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 // ignored: instruction files and MCP configs are recognized only
 // at a scan root's top level.
 func (r *Resolver) discoverTopLevelFiles(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	entries, err := os.ReadDir(root.Path)
+	entries, err := readDirNoted(root.Path)
 	if err != nil {
 		return
 	}
@@ -413,7 +415,7 @@ func (r *Resolver) discoverTopLevelFiles(root ScanRoot, out *[]Resource, seenID 
 		if e.IsDir() {
 			continue
 		}
-		info, err := e.Info()
+		info, err := entryInfoNoted(root.Path, e)
 		if err != nil {
 			continue
 		}
@@ -467,6 +469,7 @@ func resolveReadTarget(path string, info fs.FileInfo, scanRoot string) (readPath
 		return path, info, true, StatusOK, ""
 	}
 	target, err := filepath.EvalSymlinks(path)
+	noteSymlinkTarget(path, target, err) // fork: fork_resolve_cache.go
 	if err != nil {
 		return "", nil, false, StatusUnreadable, fmt.Sprintf("symlink resolve: %v", err)
 	}
@@ -477,7 +480,7 @@ func resolveReadTarget(path string, info fs.FileInfo, scanRoot string) (readPath
 	// /private/var path while the caller's scanRoot may still be
 	// /var, which would incorrectly trip the prefix check.
 	rootClean := filepath.Clean(scanRoot)
-	if resolved, err := filepath.EvalSymlinks(rootClean); err == nil {
+	if resolved, err := evalSymlinksNoted(rootClean); err == nil {
 		rootClean = resolved
 	}
 	if !pathHasPrefix(target, rootClean) {
@@ -566,7 +569,7 @@ func (r *Resolver) readMCPConfig(scanRoot, path string, info fs.FileInfo, userSo
 		}
 		return res
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -656,7 +659,7 @@ func (r *Resolver) readFileResource(kind ResourceKind, scanRoot, path string, in
 		}
 		return res
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -705,7 +708,7 @@ func (r *Resolver) readSkillMetaNamed(scanRoot, path string, info fs.FileInfo, u
 		}
 		return res, true
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -738,7 +741,7 @@ func (r *Resolver) readSkillMetaNamed(scanRoot, path string, info fs.FileInfo, u
 // recognized skills-container directory and emits one Skill
 // resource per subdirectory whose SKILL.md parses cleanly.
 func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out *[]Resource, seenID map[string]int) {
-	entries, err := os.ReadDir(container)
+	entries, err := readDirNoted(container)
 	if err != nil {
 		return
 	}
@@ -750,7 +753,7 @@ func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out 
 		// Lstat (not Stat) so a symlinked SKILL.md is
 		// detected and routed through resolveReadTarget,
 		// which enforces the scan-root boundary.
-		info, err := os.Lstat(meta)
+		info, err := lstatNoted(meta)
 		if err != nil {
 			continue
 		}
@@ -870,6 +873,7 @@ func resourceID(kind ResourceKind, source string) string {
 func readFileCapped(path string, maxBytes int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		noteReadFailure(path, err) // fork: fork_resolve_cache.go
 		return nil, err
 	}
 	defer f.Close()

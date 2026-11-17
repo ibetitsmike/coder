@@ -51,6 +51,7 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		ForkPluginPacks:      resp.GetForkPluginPacks(),
 		ForkAgentDefinitions: resp.GetForkAgentDefinitions(),
 		ForkGlobRules:        resp.GetForkGlobRules(),
+		ForkContextCache:     resp.GetForkContextCache(),
 	}, nil
 }
 

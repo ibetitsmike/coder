@@ -120,7 +120,10 @@ type Options struct {
 	// visible pack agent rows only while it is set, so a deployment
 	// without agent definitions never fills its snapshot caps with
 	// rows chatd would drop anyway.
-	ForkAgentDefinitions              bool
+	ForkAgentDefinitions bool
+	// ForkContextCache lets agents reuse their resolve cache across
+	// reconnects (the fork-context-cache experiment).
+	ForkContextCache                  bool
 	ForkChatProcessEvents             *ForkChatProcessEvents // fork: see fork_process_events.go
 	ConnectionLogger                  *atomic.Pointer[connectionlog.ConnectionLogger]
 	DerpMapFn                         func() *tailcfg.DERPMap
@@ -302,6 +305,7 @@ func New(opts Options, workspace database.Workspace, agent database.WorkspaceAge
 		Disabled:             opts.ContextSyncDisabled,
 		ForkPluginPacks:      opts.ForkPluginPacks,
 		ForkAgentDefinitions: opts.ForkAgentDefinitions,
+		ForkContextCache:     opts.ForkContextCache,
 	}
 
 	// Start background cache refresh loop to handle workspace changes

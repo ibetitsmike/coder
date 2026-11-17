@@ -3,7 +3,6 @@ package agentcontext
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -57,6 +56,8 @@ type Watcher struct {
 	// pack holds the pack paths whose writes are relevant (guarded by
 	// mu, see packWatchPaths).
 	pack packWatchPaths
+
+	cover watchCoverage // fork: fork_resolve_cache.go
 }
 
 // NewWatcher constructs a recursive watcher. The watcher does
@@ -138,6 +139,7 @@ func (w *Watcher) Degraded() string {
 // schedule, and the run goroutine are not blocked by a slow
 // filesystem.
 func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
+	defer w.revalidateSync(roots, w.watchAdds()) // fork: fork_resolve_cache.go
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
@@ -163,7 +165,7 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	// scan root and skill container). Compute the desired set
 	// outside the mutex so it does not block the run goroutine,
 	// Close, or schedule.
-	desired, pack := w.collectDirs(roots)
+	desired, pack, current := w.collectSyncDirs(roots) // fork: fork_resolve_cache.go
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -182,13 +184,13 @@ func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
 	}
 	// Track whether every Add in this pass succeeded so a
 	// recovered ENOSPC clears the degraded marker.
-	addedAll := true
+	addedAll := w.beginSync(current) // fork: fork_resolve_cache.go
 	// Add directories that are new.
 	for path := range desired {
 		if _, ok := w.watched[path]; ok {
 			continue
 		}
-		if err := w.watcher.Add(path); err != nil {
+		if err := w.addWatch(path); err != nil { // fork: fork_resolve_cache.go
 			// ENOSPC means the kernel's per-user inotify
 			// watch budget is exhausted. Mark the watcher
 			// degraded; subsequent Sync calls still fire
@@ -254,24 +256,27 @@ func (w *Watcher) run() {
 	if fsw == nil {
 		return
 	}
+	events, errs := w.relayFsnotify(fsw) // fork: fork_resolve_cache.go
 	for {
 		select {
 		case <-w.closedCh:
 			return
-		case ev, ok := <-fsw.Events:
+		case ev, ok := <-events: // fork: relayed
 			if !ok {
 				return
 			}
+			w.forgetRemovedWatch(ev) // fork: fork_resolve_cache.go
 			if !w.eventRelevant(ev) {
 				continue
 			}
 			w.schedule()
-		case err, ok := <-fsw.Errors:
+		case err, ok := <-errs: // fork: relayed
 			if !ok {
 				return
 			}
 			if err != nil {
 				w.logger.Debug(context.Background(), "context watcher error", slog.Error(err))
+				w.scheduleOnOverflow(err) // fork: fork_resolve_cache.go
 			}
 		}
 	}
@@ -312,6 +317,7 @@ func (w *Watcher) schedule() {
 		return
 	}
 	cb := w.onChange
+	w.noteScheduled() // fork: fork_resolve_cache.go
 	if w.timer != nil {
 		w.timer.Reset(w.debounce)
 		w.mu.Unlock()
@@ -339,7 +345,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		if root.Path == "" {
 			continue
 		}
-		info, err := os.Stat(root.Path)
+		info, err := statNoted(root.Path) // fork: fork_resolve_cache.go
 		if err != nil {
 			// Watch the deepest existing ancestor so the
 			// root being created later still fires.
@@ -355,12 +361,13 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		out[root.Path] = struct{}{}
 		addAgentWatchDirs(root.Path, out)
 		addRuleWatchDirs(root.Path, out)
+		addSkillParentWatchDirs(root.Path, out) // fork: fork_resolve_cache.go
 		// Watch pack roots and their declared containers so
 		// plugin pack changes re-resolve (fork_plugins.go).
 		addPackWatchDirs(root.Path, out, pack)
 		for _, container := range skillContainersFor(root.Path) {
 			out[container] = struct{}{}
-			entries, err := os.ReadDir(container)
+			entries, err := readDirNoted(container) // fork: fork_resolve_cache.go
 			if err != nil {
 				continue
 			}
@@ -383,7 +390,7 @@ func existingAncestor(path string) string {
 		if cur == "" || cur == "." {
 			return ""
 		}
-		info, err := os.Stat(cur)
+		info, err := statNoted(cur) // fork: fork_resolve_cache.go
 		if err == nil && info.IsDir() {
 			return cur
 		}
