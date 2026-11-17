@@ -807,6 +807,21 @@ func (mr *MockStoreMockRecorder) GetExcludedPluginPacksByChatID(ctx, chatID any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExcludedPluginPacksByChatID", reflect.TypeOf((*MockStore)(nil).GetExcludedPluginPacksByChatID), ctx, chatID)
 }
 
+// GetLinkablePluginsByUserID mocks base method.
+func (m *MockStore) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.GetLinkablePluginsByUserIDRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLinkablePluginsByUserID", ctx, userID)
+	ret0, _ := ret[0].([]forkdb.GetLinkablePluginsByUserIDRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLinkablePluginsByUserID indicates an expected call of GetLinkablePluginsByUserID.
+func (mr *MockStoreMockRecorder) GetLinkablePluginsByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLinkablePluginsByUserID", reflect.TypeOf((*MockStore)(nil).GetLinkablePluginsByUserID), ctx, userID)
+}
+
 // GetOrganizationAgentDefinitionByName mocks base method.
 func (m *MockStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	m.ctrl.T.Helper()
@@ -940,6 +955,21 @@ func (m *MockStore) GetPluginPackByID(ctx context.Context, id uuid.UUID) (forkdb
 func (mr *MockStoreMockRecorder) GetPluginPackByID(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackByID", reflect.TypeOf((*MockStore)(nil).GetPluginPackByID), ctx, id)
+}
+
+// GetPluginPackCommitPaths mocks base method.
+func (m *MockStore) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPluginPackCommitPaths", ctx, packID)
+	ret0, _ := ret[0].([]forkdb.GetPluginPackCommitPathsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPluginPackCommitPaths indicates an expected call of GetPluginPackCommitPaths.
+func (mr *MockStoreMockRecorder) GetPluginPackCommitPaths(ctx, packID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPluginPackCommitPaths", reflect.TypeOf((*MockStore)(nil).GetPluginPackCommitPaths), ctx, packID)
 }
 
 // GetPluginPackResources mocks base method.

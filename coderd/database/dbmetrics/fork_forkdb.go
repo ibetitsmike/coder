@@ -192,6 +192,11 @@ func (f forkQueryMetricsStore) GetPluginPackByID(ctx context.Context, id uuid.UU
 	return f.s.GetPluginPackByID(ctx, id)
 }
 
+func (f forkQueryMetricsStore) GetPluginPackCommitPaths(ctx context.Context, packID uuid.UUID) ([]forkdb.GetPluginPackCommitPathsRow, error) {
+	defer f.observe(ctx, "GetPluginPackCommitPaths", time.Now())
+	return f.s.GetPluginPackCommitPaths(ctx, packID)
+}
+
 func (f forkQueryMetricsStore) GetPluginPackResources(ctx context.Context, packID uuid.UUID) ([]forkdb.PluginPackResource, error) {
 	defer f.observe(ctx, "GetPluginPackResources", time.Now())
 	return f.s.GetPluginPackResources(ctx, packID)
@@ -465,6 +470,11 @@ func (f forkQueryMetricsStore) GetSubagentCapacityCounts(ctx context.Context, ar
 func (f forkQueryMetricsStore) GetOrganizationAgentDefinitionByName(ctx context.Context, arg forkdb.GetOrganizationAgentDefinitionByNameParams) (forkdb.AgentDefinition, error) {
 	defer f.observe(ctx, "GetOrganizationAgentDefinitionByName", time.Now())
 	return f.s.GetOrganizationAgentDefinitionByName(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetLinkablePluginsByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.GetLinkablePluginsByUserIDRow, error) {
+	defer f.observe(ctx, "GetLinkablePluginsByUserID", time.Now())
+	return f.s.GetLinkablePluginsByUserID(ctx, userID)
 }
 
 func (f forkQueryMetricsStore) GetPluginByID(ctx context.Context, id uuid.UUID) (forkdb.Plugin, error) {

@@ -417,3 +417,56 @@ func mustFrom(t *testing.T, db database.Store) forkdb.Store {
 	require.NoError(t, err)
 	return fdb
 }
+
+// TestGetLinkablePluginsByUserID checks that one query returns the enabled
+// plugins of the live organizations the user is a member of, with the
+// organization name, sorted by organization and plugin name.
+func TestGetLinkablePluginsByUserID(t *testing.T) {
+	t.Parallel()
+
+	db, _ := dbtestutil.NewDB(t)
+	fdb := mustFrom(t, db)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	user := dbgen.User(t, db, database.User{})
+	file := dbgen.File(t, db, database.File{CreatedBy: user.ID})
+	orgA := dbgen.Organization(t, db, database.Organization{Name: "linkable-a"})
+	orgB := dbgen.Organization(t, db, database.Organization{Name: "linkable-b"})
+	notMember := dbgen.Organization(t, db, database.Organization{})
+	gone := dbgen.Organization(t, db, database.Organization{})
+	for _, org := range []database.Organization{orgA, orgB, gone} {
+		dbgen.OrganizationMember(t, db, database.OrganizationMember{OrganizationID: org.ID, UserID: user.ID})
+	}
+	plugin := func(org database.Organization, name string, enabled bool) forkdb.Plugin {
+		return dbgen.Plugin(t, db, forkdb.Plugin{
+			OrganizationID: org.ID,
+			Name:           name,
+			FileID:         file.ID,
+			CreatedBy:      user.ID,
+			Enabled:        enabled,
+			Grants:         []byte(`{"chats":["read"]}`),
+		})
+	}
+	b2 := plugin(orgB, "b2", true)
+	b1 := plugin(orgB, "b1", true)
+	a1 := plugin(orgA, "a1", true)
+	plugin(orgA, "a-disabled", false)
+	plugin(notMember, "not-member", true)
+	plugin(gone, "gone", true)
+	require.NoError(t, db.UpdateOrganizationDeletedByID(ctx, database.UpdateOrganizationDeletedByIDParams{
+		ID:        gone.ID,
+		UpdatedAt: dbtime.Now(),
+	}))
+
+	rows, err := fdb.GetLinkablePluginsByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, []forkdb.GetLinkablePluginsByUserIDRow{
+		{ID: a1.ID, OrganizationID: orgA.ID, OrganizationName: orgA.Name, Name: "a1", Version: a1.Version, Grants: a1.Grants},
+		{ID: b1.ID, OrganizationID: orgB.ID, OrganizationName: orgB.Name, Name: "b1", Version: b1.Version, Grants: b1.Grants},
+		{ID: b2.ID, OrganizationID: orgB.ID, OrganizationName: orgB.Name, Name: "b2", Version: b2.Version, Grants: b2.Grants},
+	}, rows)
+
+	rows, err = fdb.GetLinkablePluginsByUserID(ctx, uuid.New())
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}

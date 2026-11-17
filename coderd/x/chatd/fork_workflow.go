@@ -29,6 +29,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -1274,7 +1275,7 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.interruptStepChild(ctx, step)
 			return nil
 		}
-		_, _, err := r.p.awaitSubagentCompletion(ctx, r.parent.ID, step.chatID, defaultSubagentWaitTimeout)
+		err := r.awaitStepChild(ctx, step.chatID, deadline)
 		if errors.Is(err, ErrSubagentWaitTimeout) {
 			continue
 		}
@@ -1312,6 +1313,65 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 		default:
 			r.failStep(ctx, step, "the step stopped without a "+workflowReportToolName+" call")
 		}
+	}
+}
+
+// awaitStepChild waits for the step's child chat like
+// awaitSubagentCompletion. That function reads the child before it
+// subscribes, so a child that ends its turn in between is seen only at the
+// fallback tick. This subscribes first and restarts the wait when the
+// child's state changes, and the restarted wait reads the child at once.
+// No wait runs past deadline, so a child that changes state often still
+// returns control to waitStep, which enforces the step timeout.
+func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID, deadline time.Time) error {
+	waitTimeout := func() time.Duration {
+		return min(defaultSubagentWaitTimeout, deadline.Sub(r.p.clock.Now()))
+	}
+	changed := make(chan struct{}, 1)
+	unsubscribe, err := r.p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(chatID),
+		func(context.Context, []byte, error) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		})
+	if err != nil {
+		timeout := waitTimeout()
+		if timeout <= 0 {
+			return ErrSubagentWaitTimeout
+		}
+		// Without a subscription awaitSubagentCompletion polls fast itself.
+		_, _, err = r.p.awaitSubagentCompletion(ctx, r.parent.ID, chatID, timeout)
+		return err
+	}
+	defer unsubscribe()
+	for {
+		timeout := waitTimeout()
+		if timeout <= 0 {
+			return ErrSubagentWaitTimeout
+		}
+		waitCtx, cancel := context.WithCancel(ctx)
+		restart := make(chan struct{})
+		go func() {
+			select {
+			case <-changed:
+				close(restart)
+				cancel()
+			case <-waitCtx.Done():
+			}
+		}()
+		_, _, err := r.p.awaitSubagentCompletion(waitCtx, r.parent.ID, chatID, timeout)
+		cancel()
+		select {
+		case <-restart:
+			// The cancel may surface as any error of the read it stopped.
+			// The restarted wait reports a real error again.
+			if err != nil && ctx.Err() == nil {
+				continue
+			}
+		default:
+		}
+		return err
 	}
 }
 
