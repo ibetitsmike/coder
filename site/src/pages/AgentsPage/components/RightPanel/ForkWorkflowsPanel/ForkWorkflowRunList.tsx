@@ -141,7 +141,7 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					aria-disabled={disabled || isLoadingOlderRuns || undefined}
 					onClick={disabled || isLoadingOlderRuns ? undefined : onLoadOlderRuns}
 				>
-					<Spinner size="sm" loading={isLoadingOlderRuns} />
+					<Spinner size="sm" loading={isLoadingOlderRuns} aria-hidden />
 					Load older runs
 				</Button>
 			)}
