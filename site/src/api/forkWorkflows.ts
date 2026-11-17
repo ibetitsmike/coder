@@ -10,7 +10,7 @@ export const workflowRunsPageSize = 50;
 /** Fetches the chat's workflow runs, newest first. */
 export const getChatWorkflowRuns = async (
 	chatId: string,
-	after?: string,
+	after: string,
 	signal?: AbortSignal,
 ): Promise<WorkflowRun[]> => {
 	const response = await API.getAxiosInstance().get<WorkflowRun[]>(

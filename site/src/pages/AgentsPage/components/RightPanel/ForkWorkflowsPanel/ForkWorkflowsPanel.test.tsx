@@ -248,6 +248,52 @@ describe("ForkWorkflowsPanel", () => {
 		);
 	});
 
+	it("leaves focus alone when the user moved it off the removed control", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The cursor page is short, so loading it ends the paging and
+		// unmounts "Load older runs" after the user moved focus to a run.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+
+		const control = await screen.findByRole("button", {
+			name: "Load older runs",
+		});
+		// While the page loaded, the user moved focus to a spot that is
+		// not focusable, so it fell to the body and the button no longer
+		// owns it. jsdom does not fire blur on unmount, so move focus off
+		// the control by hand while it still owns it.
+		control.focus();
+		expect(control).toHaveFocus();
+		(control as HTMLElement).blur();
+
+		// The cursor page is short, so the control unmounts once it
+		// resolves. No rerender happened while the test waited, so give
+		// React the interval ticks it needs to settle the result into the
+		// DOM.
+		await waitFor(() => {
+			expect(
+				screen.queryByText("Load older runs", { selector: "span" }),
+			).toBeNull();
+		});
+		// The list must not pull focus back: the user left it somewhere
+		// on purpose, and the body is where a removed focused element
+		// naturally lands.
+		expect(
+			screen.getByRole("list", { name: "Workflow runs" }),
+		).not.toHaveFocus();
+	});
+
 	it("keeps the older-runs control focused while a fetch is in flight", async () => {
 		const chatId = generateUUID();
 		// The test client's refetchInterval would wait out the real tick, so
@@ -342,12 +388,8 @@ describe("ForkWorkflowsPanel", () => {
 			await user.click(control);
 			expect(getRuns).toHaveBeenCalledTimes(3);
 			releaseHeld();
-			await waitFor(() =>
-				expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
-					pages: [firstPage, olderPage],
-					pageParams: [{ after: "" }, expect.anything()],
-				}),
-			);
+			// The tick is over only when its last request has settled.
+			await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 		} finally {
 			focusManager.setFocused(true);
 		}

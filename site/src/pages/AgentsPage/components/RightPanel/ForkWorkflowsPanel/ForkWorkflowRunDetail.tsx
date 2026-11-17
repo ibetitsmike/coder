@@ -179,7 +179,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			{run.args !== undefined && (
 				<ForkWorkflowLongText
-					label="Args"
+					label="Arguments"
 					text={formatForkWorkflowValue(run.args)}
 				/>
 			)}

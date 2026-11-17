@@ -39,13 +39,12 @@ export const chatWorkflowRuns = (chatId: string) =>
 	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
 		queryFn: ({ client, queryKey, signal, pageParam }) => {
-			// A refetch walks every loaded page, one request per page. A
-			// cached older page is reusable only when every run on it is
-			// terminal, because a resume flips an interrupted run to
-			// running in place, without moving its cursor. When a page
-			// still has a live run it is fetched, and a new run shifts the
-			// first page's cursor, so the page behind it is fetched with
-			// its new cursor rather than reused.
+			// A refetch revisits every loaded page, but only a page that is
+			// not all-terminal or whose cursor has shifted reaches the
+			// server: a resume flips an interrupted run to running in place,
+			// without moving its cursor, so only a fetch can notice it, and
+			// a new run shifts the first page's cursor, so the page behind
+			// it is fetched with its new cursor.
 			if (pageParam.after !== "") {
 				const cached =
 					client.getQueryData<

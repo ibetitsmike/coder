@@ -60,7 +60,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 		/>,
 	);
 	const stepList = within(screen.getByRole("list", { name: "Workflow steps" }));
-	return { run, stepList, mappedSteps };
+	return { run, stepList };
 };
 
 describe("ForkWorkflowSteps", () => {

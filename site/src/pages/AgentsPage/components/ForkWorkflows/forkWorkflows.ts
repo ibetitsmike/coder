@@ -13,12 +13,6 @@ export type ForkWorkflowStep = {
 	reused: boolean;
 	error: string;
 	phase: string;
-	/**
-	 * The step's position in the run, when the API reports it; the run detail
-	 * sorts by it. The value regions name steps by their shown position
-	 * instead, so parsed snapshots need no ordinal.
-	 */
-	ordinal?: number;
 	/** The report the step sent, undefined until it reported. */
 	value?: unknown;
 };
@@ -136,8 +130,9 @@ export const forkWorkflowRunDetailSteps = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowStep[] =>
 	run.steps
+		// The API's ordinal is the step's position in the run.
 		.toSorted((left, right) => left.ordinal - right.ordinal)
-		.map((step, index) => ({
+		.map((step) => ({
 			chatId: step.id,
 			title: step.title,
 			status: step.status,
@@ -145,7 +140,6 @@ export const forkWorkflowRunDetailSteps = (
 			error: step.error,
 			phase: step.phase,
 			value: step.value,
-			ordinal: index,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */

@@ -47,12 +47,16 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	// page ends the paging, the button unmounts, so keep focus on the list
 	// instead of dropping it to the body.
 	const hadLoadOlder = useRef(false);
+	// Whether the button owned focus last, tracked through its own events:
+	// the user may have moved focus away during the load, and then the
+	// removal must not pull it back onto the list.
+	const loadOlderHadFocus = useRef(false);
 	useEffect(() => {
 		if (hasOlderRuns) {
 			hadLoadOlder.current = true;
 		} else if (
 			hadLoadOlder.current &&
-			document.activeElement === document.body &&
+			loadOlderHadFocus.current &&
 			listRef.current
 		) {
 			hadLoadOlder.current = false;
@@ -130,16 +134,19 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					variant="subtle"
 					size="sm"
 					className="w-full"
-					// aria-disabled instead of disabled keeps the control
-					// focusable through both a background refetch and a
-					// next-page fetch: browsers drop focus from a disabled
-					// control, and a poll tick would steal it every 5s. The
-					// guarded handler keeps the two fetches from overlapping.
-					// The spinner stays decorative and the accessible name
-					// stays "Load older runs": it is the same control, only
-					// busy; the loading state is what aria-disabled signals.
+					// aria-disabled instead of disabled, because a native
+					// disabled would drop keyboard focus during polling.
 					aria-disabled={disabled || isLoadingOlderRuns || undefined}
 					onClick={disabled || isLoadingOlderRuns ? undefined : onLoadOlderRuns}
+					onFocus={() => {
+						loadOlderHadFocus.current = true;
+					}}
+					// The button can hand focus away on purpose, so a
+					// programmatic focus call records ownership again.
+					onBlur={(event) => {
+						loadOlderHadFocus.current =
+							event.relatedTarget === event.currentTarget;
+					}}
 				>
 					<Spinner size="sm" loading={isLoadingOlderRuns} aria-hidden />
 					Load older runs
