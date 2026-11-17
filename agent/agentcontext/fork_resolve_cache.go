@@ -475,9 +475,10 @@ type watchCoverage struct {
 	// relayed counts the events and errors the relay took from fsnotify,
 	// for tests.
 	relayed atomic.Uint64
-	// added counts the watches Sync added, so revalidateSync knows a Sync
-	// added one.
-	added uint64
+	// adds counts the watches Sync tried to add, so revalidateSync knows
+	// a Sync tried one. An Add that failed because the directory vanished
+	// counts: the directory can come back before the next pass.
+	adds uint64
 	// afterCollect, when set by a test, runs in collectSyncDirs after the
 	// discovery.
 	afterCollect func()
@@ -569,12 +570,12 @@ func (w *Watcher) beginSync(found syncDirs) bool {
 
 // addWatch adds one directory watch for Sync, with w.mu held.
 func (w *Watcher) addWatch(path string) error {
+	w.cover.adds++
 	before, beforeErr := os.Stat(path)
 	err := w.watcher.Add(path)
 	switch {
 	case err == nil:
 		w.cover.gen++
-		w.cover.added++
 		// A path replaced between the stats and the Add would record
 		// the identity of a directory the watch is not on. With no
 		// identity, the next Sync replaces the watch.
@@ -592,31 +593,37 @@ func (w *Watcher) addWatch(path string) error {
 	return err
 }
 
-// watchesAdded returns the number of watches Sync added so far.
-func (w *Watcher) watchesAdded() uint64 {
+// watchAdds returns the number of watches Sync tried to add so far.
+func (w *Watcher) watchAdds() uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.cover.added
+	return w.cover.adds
 }
 
-// revalidateSync runs when Sync returns, after it released w.mu. added is
-// watchesAdded when Sync started. When Sync added a watch, revalidateSync
-// discovers the directories again: one created between the first discovery
-// and the watch on its parent fired no event, and is not watched. It then
-// leaves the watcher uncovered and schedules a change, so the next Sync
-// watches the directory and the next pass reads it. Anything created after
-// this second discovery fires an event on a watch that is in place.
-func (w *Watcher) revalidateSync(roots []ScanRoot, added uint64) {
+// revalidateSync runs when Sync returns, after it released w.mu. adds is
+// watchAdds when Sync started. When Sync tried to add a watch,
+// revalidateSync discovers the directories again: one created between the
+// first discovery and the watch on its parent fired no event, and is not
+// watched, and pack metadata that changed in between can leave the event
+// filter (w.pack) behind. It then installs the new filter, leaves the
+// watcher uncovered and schedules a change, so the next Sync watches the
+// directory and the next pass reads it. Anything created after this second
+// discovery fires an event on a watch that is in place.
+func (w *Watcher) revalidateSync(roots []ScanRoot, adds uint64) {
 	w.mu.Lock()
-	skip := w.closed || w.watcher == nil || w.cover.added == added || w.degraded != "" || w.cover.addFailed
+	skip := w.closed || w.watcher == nil || w.cover.adds == adds || w.degraded != "" || w.cover.addFailed
 	w.mu.Unlock()
 	if skip {
 		return
 	}
 	tracked := trackSymlinkTargets(roots)
-	desired, _ := w.collectDirs(roots)
+	desired, pack := w.collectDirs(roots)
 	_, missed := tracked.stopPass()
 	w.mu.Lock()
+	if !pack.equal(w.pack) {
+		w.pack = pack
+		missed = true
+	}
 	for path := range desired {
 		if _, ok := w.watched[path]; !ok {
 			missed = true

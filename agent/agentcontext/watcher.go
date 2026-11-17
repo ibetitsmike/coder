@@ -139,7 +139,7 @@ func (w *Watcher) Degraded() string {
 // schedule, and the run goroutine are not blocked by a slow
 // filesystem.
 func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
-	defer w.revalidateSync(roots, w.watchesAdded()) // fork: fork_resolve_cache.go
+	defer w.revalidateSync(roots, w.watchAdds()) // fork: fork_resolve_cache.go
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

@@ -1740,10 +1740,19 @@ type packWatchPaths struct {
 	// relevant: the directory holding one also holds Claude Code's
 	// history and session state, which change constantly.
 	settingsFiles map[string]struct{}
+	// catalogFiles holds the marketplace catalogs. A marketplace added
+	// from a local file may name its catalog anything, so the event
+	// filter cannot match it by its basename.
+	catalogFiles map[string]struct{}
 }
 
 func newPackWatchPaths() packWatchPaths {
-	return packWatchPaths{agentDirs: make(map[string]struct{}), settingsFiles: make(map[string]struct{})}
+	return packWatchPaths{agentDirs: make(map[string]struct{}), settingsFiles: make(map[string]struct{}), catalogFiles: make(map[string]struct{})}
+}
+
+// equal reports whether p and o tell the same writes apart.
+func (p packWatchPaths) equal(o packWatchPaths) bool {
+	return maps.Equal(p.agentDirs, o.agentDirs) && maps.Equal(p.settingsFiles, o.settingsFiles) && maps.Equal(p.catalogFiles, o.catalogFiles)
 }
 
 // relevant reports whether a write to path can change the pack rows.
@@ -1755,6 +1764,9 @@ func (p packWatchPaths) relevant(path string) bool {
 		if _, ok := p.agentDirs[filepath.Dir(path)]; ok {
 			return true
 		}
+	}
+	if _, ok := p.catalogFiles[path]; ok {
+		return true
 	}
 	_, ok := p.settingsFiles[path]
 	return ok
@@ -1860,6 +1872,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 				if _, local := known.localRoot(); local {
 					if catalog := known.catalogPath(); catalog != "" {
 						dirs = append(dirs, filepath.Dir(catalog))
+						watch.catalogFiles[catalog] = struct{}{}
 					}
 				}
 			}
@@ -1875,6 +1888,7 @@ func addPackWatchDirs(rootPath string, out map[string]struct{}, watch packWatchP
 			// A marketplace update can change an entry's components.
 			for _, catalog := range claudeMarketplaceFiles(rootPath, pluginsDir, filepath.Base(marketplace)) {
 				dirs = append(dirs, filepath.Dir(catalog))
+				watch.catalogFiles[catalog] = struct{}{}
 			}
 			for _, plugin := range childDirs(marketplace) {
 				out[plugin] = struct{}{}

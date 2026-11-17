@@ -186,6 +186,55 @@ func TestCollectDirsWatchesClaudeLocalMarketplace(t *testing.T) {
 	}
 }
 
+// A marketplace added from a local file, or from git with a catalog path,
+// may name its catalog anything, so a write to it is relevant by its path,
+// not by the marketplace.json base name.
+func TestWatcherEventRelevantClaudeMarketplaceCatalog(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		// record returns the known_marketplaces.json entry of the
+		// marketplace named market, and the path of its catalog.
+		record func(base string) (string, string)
+		// cached creates the marketplace's cache directory. An in-place
+		// local marketplace has none.
+		cached bool
+	}{
+		{name: "LocalFile", record: func(base string) (string, string) {
+			catalog := filepath.Join(base, "local-market", ".claude-plugin", "catalog.json")
+			return fmt.Sprintf(`{"source": {"source": "file", "path": %q}, "installLocation": %q}`, catalog, catalog), catalog
+		}},
+		{name: "GitPath", cached: true, record: func(base string) (string, string) {
+			clone := filepath.Join(base, "clone")
+			return fmt.Sprintf(`{"source": {"source": "github", "repo": "example/market", "path": "catalogs/catalog.json"}, "installLocation": %q}`, clone),
+				filepath.Join(clone, "catalogs", "catalog.json")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plugins := filepath.Join(t.TempDir(), ".claude", "plugins")
+			cache := filepath.Join(plugins, "cache")
+			require.NoError(t, os.MkdirAll(cache, 0o755))
+			if tc.cached {
+				require.NoError(t, os.MkdirAll(filepath.Join(cache, "market"), 0o755))
+			}
+			record, catalog := tc.record(t.TempDir())
+			catalogDir := filepath.Dir(catalog)
+			require.NoError(t, os.MkdirAll(catalogDir, 0o755))
+			require.NoError(t, os.WriteFile(catalog, []byte(`{"name": "market", "plugins": []}`), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(plugins, claudeKnownMarketplacesFile),
+				[]byte(fmt.Sprintf(`{"market": %s}`, record)), 0o600))
+
+			w := &Watcher{}
+			dirs, pack := w.collectDirs([]ScanRoot{{Path: cache}})
+			require.Contains(t, dirs, catalogDir)
+			w.pack = pack
+			require.True(t, w.eventRelevant(fsnotify.Event{Name: catalog, Op: fsnotify.Write}))
+			require.False(t, w.eventRelevant(fsnotify.Event{Name: filepath.Join(catalogDir, "notes.json"), Op: fsnotify.Write}))
+		})
+	}
+}
+
 func TestNestedAgentDirsBounds(t *testing.T) {
 	t.Parallel()
 	container := t.TempDir()

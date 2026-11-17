@@ -1235,28 +1235,61 @@ func TestWatcher_DiscoveryFailureUncovers(t *testing.T) {
 	}
 }
 
-// A directory created between a Sync's discovery and the watch on its
-// parent fires no event. That Sync leaves the watcher uncovered and
-// schedules a change, and the next Sync watches the directory.
+// A directory created or removed between a Sync's discovery and its watch
+// additions, or pack metadata changed there, can leave a directory
+// unwatched or the event filter behind, with no event. That Sync leaves the
+// watcher uncovered and schedules a change, and the next Sync catches up.
 func TestWatcher_SyncRevalidatesAfterAddingWatches(t *testing.T) {
 	t.Parallel()
+	write := func(files map[string]string) func(*testing.T, string) {
+		return func(t *testing.T, ws string) { writePackFiles(t, ws, files) }
+	}
+	manifest := func(agents, skills string) map[string]string {
+		return map[string]string{
+			"plugin.json":    fmt.Sprintf(`{"name": "p", "agents": "./%s", "skills": "./%s"}`, agents, skills),
+			"defs/keep.txt":  "",
+			"extra/keep.txt": "",
+		}
+	}
 	for _, tc := range []struct {
 		name string
 		// before is the root's content before the Sync, nil for a missing
 		// root.
 		before map[string]string
-		// during is what the Sync's discovery misses.
-		during map[string]string
-		// unwatched is the directory the first Sync does not watch,
-		// relative to the root.
-		unwatched string
+		// during runs between the first Sync's discovery and its adds.
+		during func(t *testing.T, ws string)
+		// after runs after the first Sync.
+		after func(t *testing.T, ws string)
+		// watched, relative to the root, is not watched after the first
+		// Sync and is after the next one.
+		watched string
+		// agentDir, relative to the root, is a pack agent directory in
+		// the event filter after the first Sync.
+		agentDir string
 	}{
-		{name: "MissingRoot", during: map[string]string{"AGENTS.md": "v1"}, unwatched: "."},
+		{name: "MissingRoot", during: write(map[string]string{"AGENTS.md": "v1"}), watched: "."},
 		{
-			name:      "NewSkill",
-			before:    map[string]string{"AGENTS.md": "v1"},
-			during:    map[string]string{"skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody"},
-			unwatched: "skills/foo",
+			name:    "NewSkill",
+			before:  map[string]string{"AGENTS.md": "v1"},
+			during:  write(map[string]string{"skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody"}),
+			watched: "skills/foo",
+		},
+		{
+			// The root's Add fails because it is gone, and it comes back
+			// before the pass.
+			name:    "VanishedRoot",
+			before:  map[string]string{"AGENTS.md": "v1"},
+			during:  func(t *testing.T, ws string) { require.NoError(t, os.RemoveAll(ws)) },
+			after:   write(map[string]string{"AGENTS.md": "v2"}),
+			watched: ".",
+		},
+		{
+			// The agent and skill containers swap: the same directories,
+			// another event filter.
+			name:     "PackFilter",
+			before:   manifest("defs", "extra"),
+			during:   write(manifest("extra", "defs")),
+			agentDir: "extra",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1278,38 +1311,50 @@ func TestWatcher_SyncRevalidatesAfterAddingWatches(t *testing.T) {
 			}})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = w.Close() })
-			unwatched := filepath.Join(ws, filepath.FromSlash(tc.unwatched))
 			watching := func() bool {
 				w.mu.Lock()
 				defer w.mu.Unlock()
-				_, ok := w.watched[unwatched]
+				_, ok := w.watched[filepath.Join(ws, filepath.FromSlash(tc.watched))]
 				return ok
 			}
-			created := false
+			ran := false
 			w.mu.Lock()
 			w.cover.afterCollect = func() {
-				if !created {
-					created = true
-					writePackFiles(t, ws, tc.during)
+				if !ran {
+					ran = true
+					tc.during(t, ws)
 				}
 			}
 			w.mu.Unlock()
 
 			w.Sync(ctx, roots)
-			require.True(t, created)
-			require.False(t, watching(), "the discovery missed %s", tc.unwatched)
+			require.True(t, ran)
+			if tc.watched != "" {
+				require.False(t, watching(), "the discovery missed %s", tc.watched)
+			}
+			if tc.agentDir != "" {
+				w.mu.Lock()
+				_, ok := w.pack.agentDirs[filepath.Join(ws, tc.agentDir)]
+				w.mu.Unlock()
+				require.True(t, ok, "the Sync installs the event filter of the second discovery")
+			}
 			_, covered := w.coverage()
-			require.False(t, covered, "the Sync that missed a directory leaves the watcher uncovered")
+			require.False(t, covered, "the Sync that missed a change leaves the watcher uncovered")
+			if tc.after != nil {
+				tc.after(t, ws)
+			}
 			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 			_, ok := cachedFor(m, w, roots)
-			require.False(t, ok, "a pass while the directory is unwatched is not cached")
+			require.False(t, ok, "a pass before the next Sync is not cached")
 			clock.Advance(w.debounce).MustWait(ctx)
 			_ = testutil.TryReceive(ctx, t, changes)
 			_, covered = w.coverage()
 			require.False(t, covered, "the watcher stays uncovered until the next Sync")
 
 			w.Sync(ctx, roots)
-			require.True(t, watching(), "the next Sync watches %s", tc.unwatched)
+			if tc.watched != "" {
+				require.True(t, watching(), "the next Sync watches %s", tc.watched)
+			}
 			_, covered = w.coverage()
 			require.True(t, covered, "the next Sync covers the root")
 			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
