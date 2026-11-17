@@ -97,15 +97,21 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 
 // stopOwnerlessRun stops a running run whose owner is gone. A resume of
 // this process claims the row before it registers the run, so the row can
-// name this process while the registry is still empty. The stop takes the
-// resume lock: under it the registry is current, and a resume cannot
-// claim the row between this claim and the journaled stop. held is the run
-// a resume registered meanwhile, which the caller stops instead. ok is
-// false when the claim found the run ended or owned elsewhere. Claiming the
-// run also fences a late write of the old owner before the stop writes.
+// name this process while the registry is still empty. The stop reserves
+// the run: under the reservation the registry is current, and a resume
+// cannot claim the row between this claim and the journaled stop. held is
+// the run a resume registered meanwhile, which the caller stops instead.
+// ok is false when the claim found the run ended or owned elsewhere.
+// Claiming the run also fences a late write of the old owner before the
+// stop writes.
 func (p *Server) stopOwnerlessRun(ctx context.Context, row forkdb.WorkflowRun) (held *workflowRun, ok bool, err error) {
-	p.workflows.resumeMu.Lock()
-	defer p.workflows.resumeMu.Unlock()
+	release, err := p.workflows.reserveRun(ctx, row.ID)
+	if err != nil {
+		return nil, false, xerrors.Errorf("wait for a resume of the workflow run: %w", err)
+	}
+	// The heartbeat renews the claim while the stop interrupts the steps,
+	// so no sweep hands the run to another process meanwhile.
+	defer release()
 	if run := p.workflows.get(row.ID); run != nil {
 		return run, false, nil
 	}
@@ -116,10 +122,6 @@ func (p *Server) stopOwnerlessRun(ctx context.Context, row forkdb.WorkflowRun) (
 	if !ok {
 		return nil, false, nil
 	}
-	// The heartbeat renews the claim while the stop interrupts the steps,
-	// so no sweep hands the run to another process meanwhile.
-	p.workflows.setClaiming(claimed.ID)
-	defer p.workflows.setClaiming(uuid.Nil)
 	return nil, true, p.stopJournaledRun(ctx, claimed)
 }
 

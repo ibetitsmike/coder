@@ -109,20 +109,48 @@ func (g *workflowRegistry) liveRuns() []*workflowRun {
 	return live
 }
 
-// setClaiming records the run a resume claimed and has not registered yet,
-// or a journal-only stop claimed and has not stopped yet, so the heartbeat
-// renews its row meanwhile. Both hold resumeMu, so at most one run is
-// claiming.
-func (g *workflowRegistry) setClaiming(id uuid.UUID) {
-	g.mu.Lock()
-	g.claiming = id
-	g.mu.Unlock()
+// reserveRun serializes the claim and the rehydration of a resume of run
+// id, and a journal-only stop of it, on this process: both callers of one
+// run would pass the claim, which accepts the runs this process owns. Runs
+// other than id do not wait. While the reservation holds, the heartbeat
+// renews the run's row, so no sweep hands a claimed run to another process
+// before it is registered or stopped. release ends the reservation.
+func (g *workflowRegistry) reserveRun(ctx context.Context, id uuid.UUID) (release func(), err error) {
+	for {
+		g.mu.Lock()
+		held, ok := g.reserved[id]
+		if !ok {
+			if g.reserved == nil {
+				g.reserved = map[uuid.UUID]chan struct{}{}
+			}
+			done := make(chan struct{})
+			g.reserved[id] = done
+			g.mu.Unlock()
+			return func() {
+				g.mu.Lock()
+				delete(g.reserved, id)
+				g.mu.Unlock()
+				close(done)
+			}, nil
+		}
+		g.mu.Unlock()
+		select {
+		case <-held:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
-func (g *workflowRegistry) claimingRun() uuid.UUID {
+// reservedRuns returns the runs reserveRun holds.
+func (g *workflowRegistry) reservedRuns() []uuid.UUID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.claiming
+	ids := make([]uuid.UUID, 0, len(g.reserved))
+	for id := range g.reserved {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // retryTerminalWrite journals the end of a run whose terminal write
@@ -253,12 +281,9 @@ func (p *Server) workflowHeartbeatTick(ctx context.Context) {
 	j := p.workflowJournal()
 	jctx := journalCtx(ctx)
 	runs := p.workflows.liveRuns()
-	ids := make([]uuid.UUID, 0, len(runs)+1)
+	ids := p.workflows.reservedRuns()
 	for _, run := range runs {
 		ids = append(ids, run.id)
-	}
-	if claiming := p.workflows.claimingRun(); claiming != uuid.Nil {
-		ids = append(ids, claiming)
 	}
 	if len(ids) > 0 {
 		kept, err := j.heartbeat(jctx, ids)
