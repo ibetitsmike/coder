@@ -48,7 +48,11 @@ type Querier interface {
 	// Counts the notifications of a chat since a time, for the hourly limit.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
-	// finished. A finished subagent is waiting or error.
+	// finished. A finished subagent is waiting or error. A workflow step child
+	// whose step is reported counts as finished: the workflow is done with it
+	// and admits its next step while the child ends its turn. A user message
+	// after the report, such as a message_agent that resumes the child, starts
+	// new work, so the child counts again. A step's ID is its child chat ID.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
@@ -471,8 +475,12 @@ type Querier interface {
 	// as the purge's cascade. Without the join Postgres may run the two updates
 	// in any order, and a report racing the purge could deadlock. owner_id
 	// fences the write of the engine; the workflow_report tool passes NULL, so a
-	// report reaches the row whoever owns the run.
-	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
+	// report reaches the row whoever owns the run. A reported row keeps its
+	// value against every engine write, and against a later report while the
+	// run is running, because the owner wakes the step on the first report. A
+	// report to an interrupted run replaces it. A write that changes nothing
+	// returns 0 rows.
+	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error)
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)

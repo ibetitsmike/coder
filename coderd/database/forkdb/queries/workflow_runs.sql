@@ -108,7 +108,7 @@ WHERE sqlc.narg('owner_id')::uuid IS NULL
 -- The authorizer of UpdateWorkflowStep reads the step to find its run.
 SELECT * FROM workflow_steps WHERE id = @id;
 
--- name: UpdateWorkflowStep :exec
+-- name: UpdateWorkflowStep :execrows
 -- A reported or failed step stamps finished_at; started_at is set once, at
 -- the insert. The param stays uncast so sqlc ties it to the nullable column
 -- and applies the NullRawMessage override. reused only sets the flag: a
@@ -119,14 +119,18 @@ SELECT * FROM workflow_steps WHERE id = @id;
 -- as the purge's cascade. Without the join Postgres may run the two updates
 -- in any order, and a report racing the purge could deadlock. owner_id
 -- fences the write of the engine; the workflow_report tool passes NULL, so a
--- report reaches the row whoever owns the run.
+-- report reaches the row whoever owns the run. A reported row keeps its
+-- value against every engine write, and against a later report while the
+-- run is running, because the owner wakes the step on the first report. A
+-- report to an interrupted run replaces it. A write that changes nothing
+-- returns 0 rows.
 WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = @id)
         AND (sqlc.narg('owner_id')::uuid IS NULL
             OR (workflow_runs.owner_id = sqlc.narg('owner_id')::uuid AND workflow_runs.status = 'running'))
-    RETURNING workflow_runs.id
+    RETURNING workflow_runs.id, workflow_runs.status
 )
 UPDATE workflow_steps
 SET status = @status, value = @value, error = @error,
@@ -134,7 +138,9 @@ SET status = @status, value = @value, error = @error,
     finished_at = CASE WHEN @status::text IN ('reported', 'failed') THEN now() ELSE NULL END
 FROM run
 WHERE workflow_steps.id = @id
-    AND workflow_steps.run_id = run.id;
+    AND workflow_steps.run_id = run.id
+    AND (workflow_steps.status <> 'reported'
+        OR (sqlc.narg('owner_id')::uuid IS NULL AND run.status <> 'running'));
 
 -- name: GetWorkflowRunsByChat :many
 -- The run list of a chat, newest first, one keyset page. after_created_at

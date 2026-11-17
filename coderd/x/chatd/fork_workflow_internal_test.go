@@ -95,16 +95,43 @@ func (f *forkWorkflowFixture) endTurn(ctx context.Context, t *testing.T, chatID 
 	require.NoError(t, f.ps.Publish(coderdpubsub.ChatStateUpdateChannel(chatID), []byte("{}")))
 }
 
-// report plays a child that calls workflow_report with value.
+// report plays a child that calls workflow_report with value: the tool
+// runs on f.server, the way the child's turn runs it, and the call lands in
+// the child's history before the turn ends.
 func (f *forkWorkflowFixture) report(ctx context.Context, t *testing.T, chatID string, value string) {
 	t.Helper()
+	f.reportOn(ctx, t, f.server, chatID, value)
+}
+
+// reportOn is report with the tool running on server.
+func (f *forkWorkflowFixture) reportOn(ctx context.Context, t *testing.T, server *Server, chatID string, value string) {
+	t.Helper()
 	id := uuid.MustParse(chatID)
+	resp := f.callReport(ctx, t, server, id, value)
 	callID := "call-" + uuid.NewString()
 	f.insert(t, id, database.ChatMessageRoleAssistant,
 		codersdk.ChatMessageToolCall(callID, workflowReportToolName, json.RawMessage(value)))
+	result, err := json.Marshal(resp.Content)
+	require.NoError(t, err)
 	f.insert(t, id, database.ChatMessageRoleTool,
-		codersdk.ChatMessageToolResult(callID, workflowReportToolName, json.RawMessage(`"Value accepted."`), false, false))
+		codersdk.ChatMessageToolResult(callID, workflowReportToolName, result, resp.IsError, false))
 	f.endTurn(ctx, t, id)
+}
+
+// callReport runs the workflow_report tool of the child chat on server,
+// the way the child's turn builds and runs it.
+func (*forkWorkflowFixture) callReport(
+	ctx context.Context, t *testing.T, server *Server, chatID uuid.UUID, value string,
+) fantasy.ToolResponse {
+	t.Helper()
+	child, err := server.db.GetChatByID(ctx, chatID)
+	require.NoError(t, err)
+	tools, err := server.appendWorkflowReportTool(nil, child)
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+	resp, err := tools[0].Run(ctx, fantasy.ToolCall{Input: value})
+	require.NoError(t, err)
+	return resp
 }
 
 // stopWithoutReport plays a child that ends its turn with text only.

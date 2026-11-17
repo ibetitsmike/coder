@@ -172,7 +172,8 @@ func TestUpdateWorkflowStepLocksRunFirst(t *testing.T) {
 
 	updated := make(chan error, 1)
 	go func() {
-		updated <- fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: stepID, Status: "reported"})
+		_, err := fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: stepID, Status: "reported"})
+		updated <- err
 	}()
 	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
 		var waiting int

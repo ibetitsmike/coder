@@ -2484,11 +2484,12 @@ func (mr *MockStoreMockRecorder) UpdateWorkflowRunStatus(ctx, arg any) *gomock.C
 }
 
 // UpdateWorkflowStep mocks base method.
-func (m *MockStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+func (m *MockStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) (int64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpdateWorkflowStep", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // UpdateWorkflowStep indicates an expected call of UpdateWorkflowStep.

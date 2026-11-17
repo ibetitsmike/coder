@@ -61,6 +61,8 @@ func workflowOwnerChannel(owner uuid.UUID) string {
 type workflowOwnerEvent struct {
 	Kind  string    `json:"kind"`
 	RunID uuid.UUID `json:"run_id"`
+	// StepID names the step of a report event.
+	StepID uuid.UUID `json:"step_id,omitempty"`
 }
 
 // workflowOwnership is the owner identity of this process and its
@@ -204,11 +206,18 @@ func (p *Server) forkInitWorkflowJournal(owner uuid.UUID) {
 				return
 			}
 			var event workflowOwnerEvent
-			if json.Unmarshal(msg, &event) != nil || event.Kind != workflowOwnerEventStop {
+			if json.Unmarshal(msg, &event) != nil {
 				return
 			}
-			if run := p.workflows.get(event.RunID); run != nil {
+			run := p.workflows.get(event.RunID)
+			if run == nil {
+				return
+			}
+			switch event.Kind {
+			case workflowOwnerEventStop:
 				run.requestStop()
+			case workflowOwnerEventReport:
+				run.pokeStep(event.StepID)
 			}
 		})
 	if err != nil {

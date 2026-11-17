@@ -1261,22 +1261,21 @@ func (f *forkQuerier) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWork
 // UpdateWorkflowStep authorizes as an update of the step run's chat. A caller
 // with site-wide chat permission skips the authorization reads, which no
 // longer contribute to the decision (fork issue #292). GetWorkflowStep still
-// runs even on the fast path: the UPDATE is a :exec query, so without the
-// pre-read a step deleted between the caller's read and this write would
-// vanish silently and workflowJournal.reportStep would report success on a
-// lost write.
-func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+// runs even on the fast path: a step deleted between the caller's read and
+// this write answers sql.ErrNoRows, while 0 rows means the row kept its
+// report.
+func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) (int64, error) {
 	step, err := f.db.GetWorkflowStep(ctx, arg.ID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	return f.db.UpdateWorkflowStep(ctx, arg)

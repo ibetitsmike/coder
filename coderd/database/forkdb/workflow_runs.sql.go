@@ -646,14 +646,14 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 	return result.RowsAffected()
 }
 
-const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
+const updateWorkflowStep = `-- name: UpdateWorkflowStep :execrows
 WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = $5)
         AND ($6::uuid IS NULL
             OR (workflow_runs.owner_id = $6::uuid AND workflow_runs.status = 'running'))
-    RETURNING workflow_runs.id
+    RETURNING workflow_runs.id, workflow_runs.status
 )
 UPDATE workflow_steps
 SET status = $1, value = $2, error = $3,
@@ -662,6 +662,8 @@ SET status = $1, value = $2, error = $3,
 FROM run
 WHERE workflow_steps.id = $5
     AND workflow_steps.run_id = run.id
+    AND (workflow_steps.status <> 'reported'
+        OR ($6::uuid IS NULL AND run.status <> 'running'))
 `
 
 type UpdateWorkflowStepParams struct {
@@ -683,9 +685,13 @@ type UpdateWorkflowStepParams struct {
 // as the purge's cascade. Without the join Postgres may run the two updates
 // in any order, and a report racing the purge could deadlock. owner_id
 // fences the write of the engine; the workflow_report tool passes NULL, so a
-// report reaches the row whoever owns the run.
-func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
-	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
+// report reaches the row whoever owns the run. A reported row keeps its
+// value against every engine write, and against a later report while the
+// run is running, because the owner wakes the step on the first report. A
+// report to an interrupted run replaces it. A write that changes nothing
+// returns 0 rows.
+func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,
 		arg.Value,
 		arg.Error,
@@ -693,5 +699,8 @@ func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStep
 		arg.ID,
 		arg.OwnerID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
