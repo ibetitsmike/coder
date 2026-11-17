@@ -123,6 +123,19 @@ func TestFireChatProcessWatches(t *testing.T) {
 	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p2", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR c"}))
 	require.False(t, get(lineWatch.ID).FiredAt.Valid)
 
+	// A watch at its output_max_events takes no more lines.
+	limitWatch := insertWatch(3, agentID, "p4", `{"output_pattern": "ERR", "output_max_events": 1}`)
+	require.True(t, takes("p4", wakeup.ID))
+	require.Equal(t, []uuid.UUID{chat.ID}, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p4", FiredAt: t1, OutputAt: t1, Matched: 1, Lines: "ERR x"}))
+	_, err = fdb.MarkChatWakeupWatchDelivered(ctx, forkdb.MarkChatWakeupWatchDeliveredParams{
+		ID: limitWatch.ID, WakeupID: wakeup.ID, Deliveries: 0, Now: t2, SpecPatch: json.RawMessage(`{}`),
+		FiredPayload: get(limitWatch.ID).FiredPayload,
+	})
+	require.NoError(t, err)
+	require.False(t, takes("p4", wakeup.ID))
+	require.Empty(t, fire(forkdb.FireChatProcessWatchesParams{ProcessID: "p4", FiredAt: t2, OutputAt: t2, Matched: 1, Lines: "ERR y"}))
+	require.False(t, get(limitWatch.ID).FiredAt.Valid)
+
 	// An exit fires the watches on its agent only.
 	ended, err := forkdb.ChatProcessExitEnded(forkdb.ChatProcessExit{Code: 3, Tail: "bye\n", At: t2})
 	require.NoError(t, err)
