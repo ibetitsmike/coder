@@ -206,6 +206,17 @@ func forkAuditAgentDefinition(row forkdb.AgentDefinition) any {
 	}{row.Name, row.Description, row.Content, row.Enabled, row.GroupAcl, row.UserAcl}
 }
 
+// forkAuditUserAgentDefinition is the audit view of a personal agent
+// definition. It omits the content, because auditors can read the audit log
+// without being able to read another user's personal skill.
+func forkAuditUserAgentDefinition(row forkdb.AgentDefinition) any {
+	return struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Enabled     bool   `json:"enabled"`
+	}{row.Name, row.Description, row.Enabled}
+}
+
 // readForkOrganizationAgentDefinition reads the organization definition
 // named in the path. Updates read it first so that a caller who
 // cannot read the definition gets 404, and only readers get 403.

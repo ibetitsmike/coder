@@ -92,7 +92,7 @@ func TestForkUserAgentDefinitions(t *testing.T) {
 		_, err = other.CreateForkUserAgentDefinition(ctx, orgID, memberUser.Username, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
 		_ = requireSDKError(t, err, http.StatusForbidden)
 		_, err = other.UpdateForkUserAgentDefinition(ctx, orgID, memberUser.Username, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
-		_ = requireSDKError(t, err, http.StatusNotFound)
+		_ = requireSDKError(t, err, http.StatusForbidden)
 		err = other.DeleteForkUserAgentDefinition(ctx, orgID, memberUser.Username, "reviewer")
 		_ = requireSDKError(t, err, http.StatusForbidden)
 
@@ -456,6 +456,9 @@ func TestForkUserAgentDefinitionsAudit(t *testing.T) {
 	// A request denied before authorization writes no entry.
 	_, err := other.CreateForkUserAgentDefinition(ctx, orgID, memberUser.Username, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
 	_ = requireSDKError(t, err, http.StatusForbidden)
+	// A denied change of another member's definition also writes no entry.
+	_, err = other.UpdateForkUserAgentDefinition(ctx, orgID, memberUser.Username, "missing", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+	_ = requireSDKError(t, err, http.StatusForbidden)
 
 	created, err := member.CreateForkUserAgentDefinition(ctx, orgID, codersdk.Me, codersdk.CreateForkAgentDefinitionRequest{Content: reviewer})
 	require.NoError(t, err)
@@ -475,6 +478,7 @@ func TestForkUserAgentDefinitionsAudit(t *testing.T) {
 		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
 	}
 	require.JSONEq(t, `"Reviews diffs"`, string(entries[0].Changes["description"].New))
+	require.NotContains(t, entries[0].Changes, "content", "a personal prompt is not stored in the audit log")
 	require.JSONEq(t, `true`, string(entries[1].Changes["enabled"].Old))
 	require.JSONEq(t, `false`, string(entries[1].Changes["enabled"].New))
 	require.NotContains(t, entries[1].Changes, "content", "an enabled change does not repeat the prompt")
@@ -482,7 +486,7 @@ func TestForkUserAgentDefinitionsAudit(t *testing.T) {
 	require.Empty(t, entries[2].Changes["name"].New)
 
 	// A failed request writes no entry.
-	_, err = member.UpdateForkUserAgentDefinition(ctx, orgID, codersdk.Me, "reviewer", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
+	_, err = member.UpdateForkUserAgentDefinition(ctx, orgID, codersdk.Me, "missing", codersdk.UpdateForkAgentDefinitionRequest{Enabled: ptr.Ref(true)})
 	_ = requireSDKError(t, err, http.StatusNotFound)
 	err = member.DeleteForkUserAgentDefinition(ctx, orgID, otherUser.Username, "missing")
 	_ = requireSDKError(t, err, http.StatusForbidden)

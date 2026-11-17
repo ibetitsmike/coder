@@ -138,17 +138,16 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
+	if !ok {
+		return
+	}
 	current, err := fdb.GetProjectAgentDefinitionByName(ctx, forkdb.GetProjectAgentDefinitionByNameParams{
 		ProjectID: project.ID,
-		Name:      chi.URLParam(r, "agentDefinition"),
+		Name:      update.Name,
 	})
 	if err != nil {
 		writeForkAgentDefinitionReadError(rw, err)
-		return
-	}
-	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), current.ID, current.Name)
-	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
-	if !ok {
 		return
 	}
 	row, err := fdb.UpdateProjectAgentDefinitionByName(ctx, forkdb.UpdateProjectAgentDefinitionByNameParams{
@@ -162,6 +161,7 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
 	fa.diff(forkAuditAgentDefinition(current), forkAuditAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }

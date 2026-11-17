@@ -6,9 +6,11 @@ package coderd
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -92,7 +94,7 @@ func (api *API) postForkUserAgentDefinition(rw http.ResponseWriter, r *http.Requ
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
-	fa.diff(nil, forkAuditAgentDefinition(row))
+	fa.diff(nil, forkAuditUserAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -154,22 +156,27 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 	}
 	update.OrganizationID = member.OrganizationID
 	update.UserID = member.UserID
+	// A denied read does not end the request: the update below authorizes
+	// the change, so a caller who cannot change the definition of another
+	// user still gets 403 from it and not 404 from this read.
 	current, err := fdb.GetUserAgentDefinitionByName(ctx, forkdb.GetUserAgentDefinitionByNameParams{
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
 		Name:           update.Name,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) && !httpapi.IsUnauthorizedError(err) {
 		writeForkAgentDefinitionReadError(rw, err)
 		return
 	}
-	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), current.ID, current.Name)
 	row, err := fdb.UpdateUserAgentDefinitionByName(ctx, update)
 	if err != nil {
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
-	fa.diff(forkAuditAgentDefinition(current), forkAuditAgentDefinition(row))
+	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
+	if current.ID != (uuid.UUID{}) {
+		fa.diff(forkAuditUserAgentDefinition(current), forkAuditUserAgentDefinition(row))
+	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
 
@@ -202,7 +209,7 @@ func (api *API) deleteForkUserAgentDefinition(rw http.ResponseWriter, r *http.Re
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), deleted.ID, deleted.Name)
-	fa.diff(forkAuditAgentDefinition(deleted), nil)
+	fa.diff(forkAuditUserAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 

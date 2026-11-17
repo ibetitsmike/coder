@@ -1,6 +1,7 @@
 package coderd_test
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -175,23 +176,31 @@ func TestForkPluginPackEnablementAudit(t *testing.T) {
 	require.Equal(t, "demo", entries[0].ResourceName)
 	require.JSONEq(t, `{"project_plugin_pack":false}`, string(entries[0].Changes["enabled"].Old))
 	require.JSONEq(t, `{"project_plugin_pack":true}`, string(entries[0].Changes["enabled"].New))
-	require.JSONEq(t, `{"project_plugin_pack":false}`, string(entries[1].Changes["enabled"].Old))
-	require.JSONEq(t, `{"project_plugin_pack":true}`, string(entries[1].Changes["enabled"].New))
+	require.JSONEq(t, `{"project_plugin_pack":true}`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `{"project_plugin_pack":false}`, string(entries[1].Changes["enabled"].New))
 	for i := range entries {
 		require.Less(t, entries[i].Log.StatusCode, int32(http.StatusMultipleChoices))
+		require.JSONEq(t, fmt.Sprintf(`{"target_id":%q}`, project.ID), string(entries[i].Changes["target_id"].New), "the entry names the project it changed")
 	}
 
 	entries = forkAuditEntries(t, auditor, orgID, "chat_plugin_pack")
 	require.Len(t, entries, 2)
 	require.Equal(t, "demo", entries[0].ResourceName)
-	require.JSONEq(t, `{"chat_plugin_pack":false}`, string(entries[1].Changes["enabled"].Old))
-	require.JSONEq(t, `{"chat_plugin_pack":true}`, string(entries[1].Changes["enabled"].New))
+	require.JSONEq(t, `{"chat_plugin_pack":false}`, string(entries[0].Changes["enabled"].Old))
+	require.JSONEq(t, `{"chat_plugin_pack":true}`, string(entries[0].Changes["enabled"].New))
+	require.JSONEq(t, `{"chat_plugin_pack":true}`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `{"chat_plugin_pack":false}`, string(entries[1].Changes["enabled"].New))
+	for i := range entries {
+		require.JSONEq(t, fmt.Sprintf(`{"target_id":%q}`, chat.ID), string(entries[i].Changes["target_id"].New))
+	}
 
 	entries = forkAuditEntries(t, auditor, orgID, "chat_excluded_plugin_pack")
 	require.Len(t, entries, 2)
 	require.Equal(t, "demo", entries[0].ResourceName)
 	require.JSONEq(t, `{"chat_excluded_plugin_pack":false}`, string(entries[0].Changes["enabled"].Old))
 	require.JSONEq(t, `{"chat_excluded_plugin_pack":true}`, string(entries[0].Changes["enabled"].New))
+	require.JSONEq(t, `{"chat_excluded_plugin_pack":true}`, string(entries[1].Changes["enabled"].Old))
+	require.JSONEq(t, `{"chat_excluded_plugin_pack":false}`, string(entries[1].Changes["enabled"].New))
 
 	// A request that fails after authorization writes no entry.
 	err = member.EnableForkProjectPluginPack(ctx, orgID, project.ID, uuid.New())
