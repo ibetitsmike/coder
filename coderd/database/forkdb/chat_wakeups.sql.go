@@ -74,38 +74,6 @@ func (q *Queries) CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatW
 	return items, nil
 }
 
-const countChatUserNotificationsSince = `-- name: CountChatUserNotificationsSince :one
-SELECT COUNT(DISTINCT (payload, DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')))
-FROM notification_messages
-WHERE user_id = $1::uuid
-    AND notification_template_id = $2::uuid
-    AND payload->'data'->>'chat_id' = $3::text
-    AND created_at >= $4::timestamptz
-`
-
-type CountChatUserNotificationsSinceParams struct {
-	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
-	NotificationTemplateID uuid.UUID `db:"notification_template_id" json:"notification_template_id"`
-	ChatID                 string    `db:"chat_id" json:"chat_id"`
-	Since                  time.Time `db:"since" json:"since"`
-}
-
-// Counts the notifications of one template that were enqueued for a user
-// about a chat. One enqueue stores a row per delivery method, all with the
-// same payload, and the enqueuer's dedupe rejects a second identical payload
-// on the same UTC day, so distinct payloads per UTC day count enqueues.
-func (q *Queries) CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countChatUserNotificationsSince,
-		arg.UserID,
-		arg.NotificationTemplateID,
-		arg.ChatID,
-		arg.Since,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const deleteOldChatWakeupRunCounts = `-- name: DeleteOldChatWakeupRunCounts :execrows
 DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days'
 `

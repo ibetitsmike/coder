@@ -98,13 +98,29 @@ func (f *forkQuerier) GetChatFamilyMessageRecipient(ctx context.Context, arg for
 	return f.db.GetChatFamilyMessageRecipient(ctx, arg)
 }
 
-// CountChatUserNotificationsSince reads notification messages, like
-// GetNotificationMessagesByStatus.
+// CountChatUserNotificationsSince counts the notify_user sends of a chat.
+// The notifier enqueues them, so it reads them as notification messages.
 func (f *forkQuerier) CountChatUserNotificationsSince(ctx context.Context, arg forkdb.CountChatUserNotificationsSinceParams) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceNotificationMessage); err != nil {
 		return 0, err
 	}
 	return f.db.CountChatUserNotificationsSince(ctx, arg)
+}
+
+// InsertChatUserNotification records a notify_user send, which the notifier
+// enqueues as a notification message.
+func (f *forkQuerier) InsertChatUserNotification(ctx context.Context, arg forkdb.InsertChatUserNotificationParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceNotificationMessage); err != nil {
+		return err
+	}
+	return f.db.InsertChatUserNotification(ctx, arg)
+}
+
+func (f *forkQuerier) DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.DeleteOldChatUserNotifications(ctx, limitCount)
 }
 
 // CountLiveSubagentsInFamily authorizes through the family's root chat.

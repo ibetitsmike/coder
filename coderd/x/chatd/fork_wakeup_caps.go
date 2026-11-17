@@ -218,7 +218,8 @@ func (p *Server) pauseCappedWakeup(ctx context.Context, fdb forkdb.Store, chat d
 
 // notifyWakeupPaused tells the chat owner that a wake-up of chat paused for
 // reason. The payload has no dedupe bypass, so the enqueuer sends at most one
-// notification per chat and reason a day, however many wake-ups pause. A
+// notification per chat and reason a day, however many wake-ups pause. A sent
+// or failed notification counts toward the notify_user limit of the chat. A
 // failure only logs: it must not change the outcome of the wake-up.
 func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, finish wakeupFinish) {
 	if p.chatWorker == nil {
@@ -227,8 +228,9 @@ func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, fin
 	reason := finish.reason
 	message := fmt.Sprintf("A wake-up of chat %q is paused: %s.", chat.Title, cmp.Or(finish.pauseText, defaultWakeupCaps.pauseText(reason)))
 	//nolint:gocritic // Background wake-up notifications run as the notifier subject.
-	if _, err := p.chatWorker.opts.NotificationsEnqueuer.EnqueueWithData(
-		dbauthz.AsNotifier(ctx),
+	notifierCtx := dbauthz.AsNotifier(ctx)
+	ids, err := p.chatWorker.opts.NotificationsEnqueuer.EnqueueWithData(
+		notifierCtx,
 		chat.OwnerID,
 		notifications.TemplateCustomNotification,
 		map[string]string{
@@ -240,8 +242,29 @@ func (p *Server) notifyWakeupPaused(ctx context.Context, chat database.Chat, fin
 			"reason":  reason,
 		},
 		"chat_wakeups",
-	); err != nil {
+	)
+	if err != nil {
 		p.logger.Warn(ctx, "failed to notify the owner of a paused chat wake-up",
+			slog.F("chat_id", chat.ID),
+			slog.F("reason", reason),
+			slog.Error(err),
+		)
+	}
+	// A deduped or undeliverable notification enqueues nothing and does not
+	// count. A failed send may have queued some of its deliveries before the
+	// error, so it counts.
+	if err == nil && len(ids) == 0 {
+		return
+	}
+	fdb, err := forkdb.From(p.db)
+	if err == nil {
+		err = fdb.InsertChatUserNotification(notifierCtx, forkdb.InsertChatUserNotificationParams{
+			ChatID:    chat.ID,
+			CreatedAt: p.clock.Now().UTC(),
+		})
+	}
+	if err != nil {
+		p.logger.Warn(ctx, "failed to record the notification of a paused chat wake-up",
 			slog.F("chat_id", chat.ID),
 			slog.F("reason", reason),
 			slog.Error(err),
