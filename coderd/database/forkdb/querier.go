@@ -34,10 +34,7 @@ type Querier interface {
 	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
-	// Counts the notifications of one template that were enqueued for a user
-	// about a chat. One enqueue stores a row per delivery method, all with the
-	// same payload, and the enqueuer's dedupe rejects a second identical payload
-	// on the same UTC day, so distinct payloads per UTC day count enqueues.
+	// Counts the notifications of a chat since a time, for the hourly limit.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
 	// finished. A finished subagent is waiting or error.
@@ -56,6 +53,9 @@ type Querier interface {
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
+	// Deletes at most @limit_count rows older than a day, on the database clock.
+	// The hourly limit never reads them.
+	DeleteOldChatUserNotifications(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes the run counts older than 7 days, on the database clock. The caps
 	// read only the last 24 hours.
 	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
@@ -189,6 +189,9 @@ type Querier interface {
 	InsertChatSecretAnswer(ctx context.Context, arg InsertChatSecretAnswerParams) error
 	InsertChatSubagent(ctx context.Context, arg InsertChatSubagentParams) (ChatSubagent, error)
 	InsertChatSubagentMessage(ctx context.Context, arg InsertChatSubagentMessageParams) error
+	// Records a notify_user call that passed the hourly limit of its chat, or a
+	// wake-up pause notification sent about it.
+	InsertChatUserNotification(ctx context.Context, arg InsertChatUserNotificationParams) error
 	// The organization comes from the chat.
 	InsertChatWakeup(ctx context.Context, arg InsertChatWakeupParams) (ChatWakeup, error)
 	// Returns no row when the run of this occurrence already exists. The chat and
