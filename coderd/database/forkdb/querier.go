@@ -88,6 +88,11 @@ type Querier interface {
 	GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationTokenBudget, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
+	// Returns the newest assistant messages of a chat that the user sees, below
+	// @before_id (0 for no bound), newest first. These are the rows upstream's
+	// latestSubagentAssistantMessage scans for a subagent's report, read a page
+	// at a time instead of the whole history.
+	GetChatReportMessages(ctx context.Context, arg GetChatReportMessagesParams) ([]GetChatReportMessagesRow, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)
@@ -107,6 +112,16 @@ type Querier interface {
 	// Locks the wake-up until the transaction ends, so a delivery that starts in
 	// between skips it.
 	GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID) (ChatWakeup, error)
+	// Returns the descendants of the given chats up to max_depth levels below
+	// them (at most 64) in one statement, with the row
+	// shape of upstream's GetChildChatsByParentIDs, optionally filtered by
+	// archive state (NULL = all, true/false = match). It follows parent_chat_id
+	// level by level as a walk with upstream's query does, so it needs no
+	// root_chat_id: a chat whose family root was deleted, and so lost its
+	// root_chat_id, still reaches its whole subtree. The walk continues only
+	// through chats that match the archive filter. The 64-level cap also stops
+	// it if a cycle ever appears in the hierarchy.
+	GetDescendantChatsByRootIDs(ctx context.Context, arg GetDescendantChatsByRootIDsParams) ([]GetDescendantChatsByRootIDsRow, error)
 	GetExcludedPluginPacksByChatID(ctx context.Context, chatID uuid.UUID) ([]GetExcludedPluginPacksByChatIDRow, error)
 	GetOrganizationAgentDefinitionByName(ctx context.Context, arg GetOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	GetOrganizationAgentDefinitionByNameForUpdate(ctx context.Context, arg GetOrganizationAgentDefinitionByNameForUpdateParams) (AgentDefinition, error)

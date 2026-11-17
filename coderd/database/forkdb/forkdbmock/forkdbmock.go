@@ -597,6 +597,21 @@ func (mr *MockStoreMockRecorder) GetChatPinnedSkillsByChatID(ctx, chatID any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatPinnedSkillsByChatID", reflect.TypeOf((*MockStore)(nil).GetChatPinnedSkillsByChatID), ctx, chatID)
 }
 
+// GetChatReportMessages mocks base method.
+func (m *MockStore) GetChatReportMessages(ctx context.Context, arg forkdb.GetChatReportMessagesParams) ([]forkdb.GetChatReportMessagesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatReportMessages", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetChatReportMessagesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatReportMessages indicates an expected call of GetChatReportMessages.
+func (mr *MockStoreMockRecorder) GetChatReportMessages(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatReportMessages", reflect.TypeOf((*MockStore)(nil).GetChatReportMessages), ctx, arg)
+}
+
 // GetChatSecretAnswersByChatID mocks base method.
 func (m *MockStore) GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]forkdb.ChatSecretAnswer, error) {
 	m.ctrl.T.Helper()
@@ -730,6 +745,21 @@ func (m *MockStore) GetChatWakeupByIDForUpdate(ctx context.Context, id uuid.UUID
 func (mr *MockStoreMockRecorder) GetChatWakeupByIDForUpdate(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWakeupByIDForUpdate", reflect.TypeOf((*MockStore)(nil).GetChatWakeupByIDForUpdate), ctx, id)
+}
+
+// GetDescendantChatsByRootIDs mocks base method.
+func (m *MockStore) GetDescendantChatsByRootIDs(ctx context.Context, arg forkdb.GetDescendantChatsByRootIDsParams) ([]forkdb.GetDescendantChatsByRootIDsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDescendantChatsByRootIDs", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.GetDescendantChatsByRootIDsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDescendantChatsByRootIDs indicates an expected call of GetDescendantChatsByRootIDs.
+func (mr *MockStoreMockRecorder) GetDescendantChatsByRootIDs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDescendantChatsByRootIDs", reflect.TypeOf((*MockStore)(nil).GetDescendantChatsByRootIDs), ctx, arg)
 }
 
 // GetExcludedPluginPacksByChatID mocks base method.
