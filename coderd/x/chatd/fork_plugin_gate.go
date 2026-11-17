@@ -234,6 +234,11 @@ func packRowSourceFile(r database.ChatContextResource) string {
 // newer steps read newer commits.
 const packPathsIdle = time.Hour
 
+// packPathsSweepEvery bounds how often a stored commit sweeps the path
+// cache. A cold replica stores one commit per enabled pack, and a sweep on
+// each store would scan the cache once per pack.
+const packPathsSweepEvery = time.Minute
+
 // packCommitPaths is the file paths of a pack at one commit and when they
 // were last read.
 type packCommitPaths struct {
@@ -302,8 +307,17 @@ func (p *Server) packPaths(ctx context.Context, pack enabledPack) packPathSet {
 
 // sweepPackPaths drops the cached commits that no step read in the last
 // packPathsIdle, and the entries of packs left with none, such as deleted
-// packs. It runs when a new commit is stored.
+// packs. It runs when a new commit is stored, at most once per
+// packPathsSweepEvery.
 func (p *Server) sweepPackPaths(now time.Time) {
+	last := p.forkPacks.pathsSweptAt.Load()
+	if last != 0 && now.Sub(time.Unix(0, last)) < packPathsSweepEvery {
+		return
+	}
+	if !p.forkPacks.pathsSweptAt.CompareAndSwap(last, now.UnixNano()) {
+		// A concurrent store sweeps.
+		return
+	}
 	p.forkPacks.paths.Range(func(key, value any) bool {
 		entry, ok := value.(*packPathsEntry)
 		if !ok {

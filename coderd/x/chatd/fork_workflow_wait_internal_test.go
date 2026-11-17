@@ -101,8 +101,10 @@ func TestWorkflowAwaitStepChildKeepsDeadline(t *testing.T) {
 	db, _ := dbtestutil.NewDB(t)
 	ps := pubsub.NewInMemory()
 	store := &publishOnEveryCheckStore{Store: db, ps: ps}
+	mClock := quartz.NewMock(t)
 	server := newInternalTestServer(t, store, ps, chatprovider.ProviderAPIKeys{},
-		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
+		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}),
+		withInternalTestServerClock(mClock))
 	user, org, model := seedInternalChatDeps(t, db)
 
 	ctx, cancel := context.WithCancel(chatdTestContext(t))
@@ -130,16 +132,26 @@ func TestWorkflowAwaitStepChildKeepsDeadline(t *testing.T) {
 	}
 
 	waited := make(chan error, 1)
-	deadline := time.Now().Add(300 * time.Millisecond)
+	// The deadline comes before the 5 s fallback poll, so the wait timers
+	// are the next clock event.
+	deadline := mClock.Now().Add(time.Second)
 	go func() { waited <- run.awaitStepChild(ctx, child.ID, deadline) }()
 	short := testutil.Context(t, testutil.WaitShort)
+	testutil.Eventually(short, t, func(context.Context) bool {
+		return store.count() > 1
+	}, testutil.IntervalFast, "the state changes restarted the wait")
+	select {
+	case err := <-waited:
+		t.Fatalf("awaitStepChild returned before the step deadline: %v", err)
+	default:
+	}
+	mClock.Advance(time.Second).MustWait(short)
 	select {
 	case err := <-waited:
 		require.ErrorIs(t, err, ErrSubagentWaitTimeout)
 	case <-short.Done():
 		t.Fatal("awaitStepChild kept restarting past the step deadline")
 	}
-	require.Greater(t, store.count(), 1, "the state changes restarted the wait")
 }
 
 // publishOnEveryCheckStore publishes a state change of the armed child on

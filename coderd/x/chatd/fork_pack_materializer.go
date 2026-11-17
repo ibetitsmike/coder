@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,8 @@ type forkPackState struct {
 	// paths maps a pack ID to its *packPathsEntry, the paths of its
 	// commits read in the last packPathsIdle.
 	paths sync.Map
+	// pathsSweptAt is the Unix nanoseconds of the last sweep of paths.
+	pathsSweptAt atomic.Int64
 	// swept holds the agent IDs whose managed pack directories this server
 	// has checked for packs no chat on the workspace enables.
 	swept sync.Map

@@ -428,7 +428,8 @@ func TestMaterializePluginPacks(t *testing.T) {
 // keeps one entry per pack, that the entry keeps a commit while steps read
 // it and drops it once no step read it for packPathsIdle, and that a read of
 // a commit the pack moved past fails closed. The entry of a deleted pack goes
-// once its commits are idle.
+// once its commits are idle. A store sweeps at most once per
+// packPathsSweepEvery.
 func TestPackPathsCacheOnePerPack(t *testing.T) {
 	t.Parallel()
 
@@ -495,6 +496,11 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 			c.lastRead = c.lastRead.Add(-d)
 		}
 	}
+	// ageSweep moves the last sweep back by packPathsSweepEvery, so the next
+	// store sweeps.
+	ageSweep := func() {
+		server.forkPacks.pathsSweptAt.Add(-int64(packPathsSweepEvery))
+	}
 	read := func(pack forkdb.PluginPack, commit string) packPathSet {
 		return server.packPaths(ctx, enabledPack{ID: pack.ID, Name: pack.Name, CommitSHA: commit})
 	}
@@ -517,6 +523,7 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 	// A commit that no step read for packPathsIdle is dropped on the next
 	// read of a new commit. c3 stays because a step read it within the hour.
 	age(pack, packPathsIdle+time.Minute)
+	ageSweep()
 	require.Equal(t, packPathSet{"skills/c3.md": true}, read(pack, "c3"))
 	require.Equal(t, packPathSet{"skills/c4.md": true}, read(pack, "c4"))
 	require.Equal(t, []string{"c3", "c4"}, commits(pack))
@@ -533,11 +540,16 @@ func TestPackPathsCacheOnePerPack(t *testing.T) {
 	require.Equal(t, 2, cached())
 
 	// The entry of a deleted pack goes once its commits are idle and
-	// another pack stores a new commit.
+	// another pack stores a new commit, but not within packPathsSweepEvery
+	// of the last sweep.
 	require.NoError(t, fdb.DeletePluginPackByID(ctx, other.ID))
 	age(other, packPathsIdle+time.Minute)
 	install(pack, "c5", "skills/c5.md")
 	require.Equal(t, packPathSet{"skills/c5.md": true}, read(pack, "c5"))
+	require.Equal(t, 2, cached(), "a store soon after a sweep does not sweep")
+	ageSweep()
+	install(pack, "c6", "skills/c6.md")
+	require.Equal(t, packPathSet{"skills/c6.md": true}, read(pack, "c6"))
 	require.Equal(t, 1, cached(), "the deleted pack's entry is dropped")
-	require.Equal(t, []string{"c3", "c4", "c5"}, commits(pack))
+	require.Equal(t, []string{"c3", "c4", "c5", "c6"}, commits(pack))
 }
