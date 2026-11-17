@@ -36,6 +36,7 @@ type API struct {
 	logger    slog.Logger
 	manager   *manager
 	pathStore *agentgit.PathStore
+	fork      forkProcessEvents
 }
 
 // NewAPI creates a new process API handler.
@@ -60,6 +61,7 @@ func (api *API) Routes() http.Handler {
 	r.Get("/list", api.handleListProcesses)
 	r.Get("/{id}/output", api.handleProcessOutput)
 	r.Post("/{id}/signal", api.handleSignalProcess)
+	api.forkRoutes(r)
 	return r
 }
 
@@ -103,6 +105,7 @@ func (api *API) handleStartProcess(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	api.forkProcessStarted(proc, chat.ID)
 
 	// Notify git watchers after the process finishes so that
 	// file changes made by the command are visible in the scan.

@@ -33,13 +33,11 @@ const (
 	// wake-up, whatever poked it.
 	forkWakerSweepInterval = time.Minute
 	// forkWakerDeliveries bounds the deliveries that run at once, so a slow
-	// read of a background process or a pull request cannot hold up the
-	// others for long.
+	// send cannot hold up the others for long.
 	forkWakerDeliveries = 8
 	// forkWakerBatch is how many due wake-ups one statement lists.
 	forkWakerBatch = 64
-	// wakeupDeliveryTimeout bounds one delivery, including the reads of an
-	// events wake-up.
+	// wakeupDeliveryTimeout bounds one delivery.
 	wakeupDeliveryTimeout = 2 * time.Minute
 )
 
@@ -85,6 +83,13 @@ func (p *Server) forkWaker() *forkWaker {
 		return ps.waker
 	}
 	return nil
+}
+
+// ForkPokeChatWakeups asks the waker of p for a pass over the wake-ups of
+// chatID, after a commit that may have made one due outside chatstate, such
+// as a process watch that a workspace agent fired.
+func (p *Server) ForkPokeChatWakeups(chatID uuid.UUID) {
+	p.forkWaker().poke(chatID)
 }
 
 // forkWaker delivers due wake-ups. A pass lists the due wake-ups of one chat
@@ -199,6 +204,8 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 	}
 	sweep := clock.NewTicker(forkWakerSweepInterval, "chatd", "waker", "sweep")
 	defer sweep.Stop("chatd", "waker", "sweep")
+	processSweep := clock.NewTicker(processSweepInterval, "chatd", "waker", "process-sweep")
+	defer processSweep.Stop("chatd", "waker", "process-sweep")
 	for {
 		k.drain(ctx, fdb)
 		select {
@@ -210,6 +217,8 @@ func (k *forkWaker) run(ctx context.Context, server *Server, store database.Stor
 			k.mu.Lock()
 			k.full = true
 			k.mu.Unlock()
+		case <-processSweep.C:
+			k.sweepProcessWatches(ctx, fdb)
 		}
 	}
 }
@@ -354,7 +363,7 @@ func (k *forkWaker) dispatch(ctx context.Context, fdb forkdb.Store, wakeup forkd
 	k.wg.Go(func() {
 		// The delivery's own time includes the time since the pass started.
 		deliverNow := now.Add(k.clock.Since(start, "chatd", "waker"))
-		deliverCtx, cancel := context.WithTimeout(withWakeupDeadline(ctx, time.Now().Add(wakeupDeliveryTimeout)), wakeupDeliveryTimeout)
+		deliverCtx, cancel := context.WithTimeout(ctx, wakeupDeliveryTimeout)
 		err := k.deliver(deliverCtx, fdb, wakeup, deliverNow)
 		cancel()
 		switch {
@@ -440,22 +449,6 @@ func (k *forkWaker) armTimerLocked(at time.Time) {
 		default:
 		}
 	}, "chatd", "waker", "timer")
-}
-
-type wakeupDeadlineKey struct{}
-
-// withWakeupDeadline records the deadline of a delivery in ctx. The deadline
-// of ctx itself may come from elsewhere, so wakeupReadFits reads this one.
-func withWakeupDeadline(ctx context.Context, deadline time.Time) context.Context {
-	return context.WithValue(ctx, wakeupDeadlineKey{}, deadline)
-}
-
-// wakeupReadFits reports whether the delivery in ctx has time left for a read
-// that may take up to timeout and for what follows it. A ctx without a
-// delivery deadline always has time.
-func wakeupReadFits(ctx context.Context, timeout time.Duration) bool {
-	deadline, ok := ctx.Value(wakeupDeadlineKey{}).(time.Time)
-	return !ok || time.Until(deadline) >= 2*timeout
 }
 
 // deliverWakeupSafely delivers wakeup and turns a panic into an error.
