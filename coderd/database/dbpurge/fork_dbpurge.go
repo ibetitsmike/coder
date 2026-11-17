@@ -13,9 +13,15 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 )
 
-// chatSecretAnswersBatchSize bounds how many expired answers one tick
+// forkPurgeBatchSize bounds how many rows of one fork table one tick
 // deletes.
-const chatSecretAnswersBatchSize = 1000
+const forkPurgeBatchSize = 1000
+
+// forkWorkflowPurgeBatchSize bounds the workflow runs one tick deletes. It
+// is smaller than forkPurgeBatchSize because a run cascades to up to 50
+// steps with values of up to 256 KiB, and a slow delete would roll back the
+// whole purge transaction.
+const forkWorkflowPurgeBatchSize = 100
 
 // chatUserNotificationsBatchSize bounds how many old notify_user records one
 // tick deletes.
@@ -23,7 +29,9 @@ const chatUserNotificationsBatchSize = 1000
 
 // purgeForkInTx MUST BE CALLED WITH A TRANSACTION. It returns how many
 // chat secret answers it purged. It also deletes the wake-up run counts older
-// than 7 days and the notify_user records older than a day.
+// than 7 days, expired plugin link codes, the closed wake-ups and ended
+// workflow runs older than 30 days, and the notify_user records older than a
+// day.
 func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64, error) {
 	ftx, err := forkdb.From(tx)
 	if err != nil {
@@ -33,23 +41,35 @@ func (i *instance) purgeForkInTx(ctx context.Context, tx database.Store) (int64,
 		i.logger.Warn(ctx, "skip fork purge", slog.Error(err))
 		return 0, nil
 	}
-	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, chatSecretAnswersBatchSize)
+	purged, err := ftx.DeleteOldChatSecretAnswers(ctx, forkPurgeBatchSize)
 	if err != nil {
 		return 0, xerrors.Errorf("failed to delete old chat secret answers: %w", err)
 	}
-	counts, err := ftx.DeleteOldChatWakeupRunCounts(ctx)
-	if err != nil {
-		return 0, xerrors.Errorf("failed to delete old chat wake-up run counts: %w", err)
-	}
-	if counts > 0 {
-		i.logger.Debug(ctx, "purged old chat wake-up run counts", slog.F("count", counts))
-	}
-	notified, err := ftx.DeleteOldChatUserNotifications(ctx, chatUserNotificationsBatchSize)
-	if err != nil {
-		return 0, xerrors.Errorf("failed to delete old chat user notifications: %w", err)
-	}
-	if notified > 0 {
-		i.logger.Debug(ctx, "purged old chat user notifications", slog.F("count", notified))
+	for _, purge := range []struct {
+		name string
+		run  func(context.Context) (int64, error)
+	}{
+		{"chat wake-up run counts", ftx.DeleteOldChatWakeupRunCounts},
+		{"plugin link codes", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteExpiredPluginLinkCodes(ctx, forkPurgeBatchSize)
+		}},
+		{"chat wake-ups", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldChatWakeups(ctx, forkPurgeBatchSize)
+		}},
+		{"workflow runs", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldWorkflowRuns(ctx, forkWorkflowPurgeBatchSize)
+		}},
+		{"chat user notifications", func(ctx context.Context) (int64, error) {
+			return ftx.DeleteOldChatUserNotifications(ctx, chatUserNotificationsBatchSize)
+		}},
+	} {
+		count, err := purge.run(ctx)
+		if err != nil {
+			return 0, xerrors.Errorf("failed to delete old %s: %w", purge.name, err)
+		}
+		if count > 0 {
+			i.logger.Debug(ctx, "purged old "+purge.name, slog.F("count", count))
+		}
 	}
 	return purged, nil
 }

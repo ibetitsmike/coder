@@ -258,7 +258,7 @@ func TestWaitForEventsPullRequestTool(t *testing.T) {
 
 	fdb, err := forkdb.From(f.db)
 	require.NoError(t, err)
-	rows, err := fdb.ListChatWakeupsByChatID(ctx, coordinator.ID)
+	rows, err := fdb.ListChatWakeupsByChatID(ctx, forkdb.ListChatWakeupsByChatIDParams{ChatID: coordinator.ID})
 	require.NoError(t, err)
 	require.Len(t, rows, 6, "refused calls create nothing")
 }

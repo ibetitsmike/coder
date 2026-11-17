@@ -83,7 +83,7 @@ func TestLoopCommandSendMessage(t *testing.T) {
 		t.Helper()
 		fdb, err := forkdb.From(f.db)
 		require.NoError(t, err)
-		rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), chat.ID)
+		rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), forkdb.ListChatWakeupsByChatIDParams{ChatID: chat.ID})
 		require.NoError(t, err)
 		return rows
 	}

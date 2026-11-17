@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 const cancelChatWakeupsByChatID = `-- name: CancelChatWakeupsByChatID :many
@@ -82,6 +83,34 @@ DELETE FROM chat_wakeup_run_counts WHERE hour < now() - interval '7 days'
 // read only the last 24 hours.
 func (q *Queries) DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteOldChatWakeupRunCounts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteOldChatWakeups = `-- name: DeleteOldChatWakeups :execrows
+WITH old AS (
+    SELECT id
+    FROM chat_wakeups
+    WHERE status IN ('completed', 'canceled')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT $1::int
+)
+DELETE FROM chat_wakeups
+USING old
+WHERE chat_wakeups.id = old.id
+    AND chat_wakeups.status IN ('completed', 'canceled')
+    AND chat_wakeups.updated_at < now() - interval '30 days'
+`
+
+// Deletes a batch of completed and canceled wake-ups that changed last more
+// than 30 days ago, on the database clock. Their watches cascade; their runs
+// keep counting toward the caps with a NULL wakeup_id. The DELETE repeats the
+// filter, so a wake-up updated while the DELETE waits for its lock stays.
+func (q *Queries) DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldChatWakeups, limitCount)
 	if err != nil {
 		return 0, err
 	}
@@ -326,11 +355,21 @@ func (q *Queries) InsertChatWakeupRun(ctx context.Context, arg InsertChatWakeupR
 }
 
 const listChatWakeupsByChatID = `-- name: ListChatWakeupsByChatID :many
-SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups WHERE chat_id = $1 ORDER BY created_at, id
+SELECT id, chat_id, organization_id, created_by, source, kind, prompt, interval_seconds, cron, timezone, status, status_reason, next_run_at, expires_at, max_runs, run_count, last_run_at, created_at, updated_at FROM chat_wakeups
+WHERE chat_id = $1
+    AND (COALESCE(cardinality($2::chat_wakeup_status[]), 0) = 0 OR status = ANY($2::chat_wakeup_status[]))
+ORDER BY created_at, id
 `
 
-func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error) {
-	rows, err := q.db.QueryContext(ctx, listChatWakeupsByChatID, chatID)
+type ListChatWakeupsByChatIDParams struct {
+	ChatID   uuid.UUID          `db:"chat_id" json:"chat_id"`
+	Statuses []ChatWakeupStatus `db:"statuses" json:"statuses"`
+}
+
+// Lists the wake-ups of the chat whose status is in statuses, or every
+// wake-up when statuses is empty.
+func (q *Queries) ListChatWakeupsByChatID(ctx context.Context, arg ListChatWakeupsByChatIDParams) ([]ChatWakeup, error) {
+	rows, err := q.db.QueryContext(ctx, listChatWakeupsByChatID, arg.ChatID, pq.Array(arg.Statuses))
 	if err != nil {
 		return nil, err
 	}

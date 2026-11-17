@@ -35,8 +35,15 @@ RETURNING *;
 -- name: ListChatWakeupWatchesByWakeupID :many
 SELECT * FROM chat_wakeup_watches WHERE wakeup_id = @wakeup_id::uuid ORDER BY ordinal;
 
+-- Lists the watches of the wake-ups of the chat whose ID is in @wakeup_ids.
+-- The caller passes the wake-ups it listed, so a wake-up that changes status
+-- between the two reads keeps its watches.
 -- name: ListChatWakeupWatchesByChatID :many
-SELECT * FROM chat_wakeup_watches WHERE chat_id = @chat_id::uuid ORDER BY wakeup_id, ordinal;
+SELECT x.*
+FROM chat_wakeup_watches x
+WHERE x.chat_id = @chat_id::uuid
+    AND x.wakeup_id = ANY(@wakeup_ids::uuid[])
+ORDER BY x.wakeup_id, x.ordinal;
 
 -- Lists the watches of the active wake-ups of @chat_id that are not
 -- delivered, so a new watch can leave out what an earlier one still watches.
