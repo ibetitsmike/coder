@@ -7516,7 +7516,7 @@ const docTemplate = `{
         },
         "/api/v2/chats/fork/{chat}/wakeups": {
             "get": {
-                "description": "Returns every wake-up of the chat, oldest first, including\ncompleted and canceled ones.",
+                "description": "Returns the wake-ups of the chat, oldest first. Without\nstatus it returns every wake-up, including completed and\ncanceled ones; with status only those in the listed states.",
                 "produces": [
                     "application/json"
                 ],
@@ -7533,6 +7533,22 @@ const docTemplate = `{
                         "name": "chat",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "enum": [
+                                "active",
+                                "paused",
+                                "completed",
+                                "canceled"
+                            ],
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Statuses to list, comma separated",
+                        "name": "status",
+                        "in": "query"
                     }
                 ],
                 "responses": {

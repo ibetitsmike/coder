@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,9 +91,18 @@ type UpdateChatWakeupRequest struct {
 	Status ChatWakeupStatus `json:"status" enums:"active,paused,canceled"`
 }
 
-// ChatWakeups lists the wake-ups of a chat, oldest first.
-func (c *Client) ChatWakeups(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error) {
-	return requestJSON[[]ChatWakeup](ctx, c, http.MethodGet, fmt.Sprintf("/api/v2/chats/fork/%s/wakeups", chatID), http.StatusOK, nil)
+// ChatWakeups lists the wake-ups of a chat, oldest first. With statuses it
+// lists only the wake-ups in those states.
+func (c *Client) ChatWakeups(ctx context.Context, chatID uuid.UUID, statuses ...ChatWakeupStatus) ([]ChatWakeup, error) {
+	path := fmt.Sprintf("/api/v2/chats/fork/%s/wakeups", chatID)
+	if len(statuses) > 0 {
+		values := make([]string, 0, len(statuses))
+		for _, status := range statuses {
+			values = append(values, string(status))
+		}
+		path += "?" + url.Values{"status": {strings.Join(values, ",")}}.Encode()
+	}
+	return requestJSON[[]ChatWakeup](ctx, c, http.MethodGet, path, http.StatusOK, nil)
 }
 
 // UpdateChatWakeup pauses, resumes or cancels a wake-up of a chat and returns

@@ -16,6 +16,35 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const deleteOldWorkflowRuns = `-- name: DeleteOldWorkflowRuns :execrows
+WITH old AS (
+    SELECT id
+    FROM workflow_runs
+    WHERE status IN ('completed', 'failed', 'stopped', 'interrupted')
+        AND updated_at < now() - interval '30 days'
+    ORDER BY updated_at
+    LIMIT $1::int
+)
+DELETE FROM workflow_runs
+USING old
+WHERE workflow_runs.id = old.id
+    AND workflow_runs.status IN ('completed', 'failed', 'stopped', 'interrupted')
+    AND workflow_runs.updated_at < now() - interval '30 days'
+`
+
+// Deletes a batch of terminal and interrupted runs whose last journal write
+// is older than 30 days, on the database clock. Their steps cascade. A
+// running run stays: a live replica still writes it. The DELETE repeats the
+// filter: a run that a resume or a step report updates while the DELETE
+// waits for its lock is rechecked on its new row, so it stays.
+func (q *Queries) DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOldWorkflowRuns, limitCount)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const failOpenWorkflowStepsOfRun = `-- name: FailOpenWorkflowStepsOfRun :execrows
 UPDATE workflow_steps SET status = 'failed', error = $1, finished_at = now()
 WHERE run_id = $2 AND status IN ('running', 'reminded')
@@ -438,11 +467,19 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 }
 
 const updateWorkflowStep = `-- name: UpdateWorkflowStep :exec
+WITH run AS (
+    UPDATE workflow_runs
+    SET updated_at = now()
+    WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = $5)
+    RETURNING workflow_runs.id
+)
 UPDATE workflow_steps
 SET status = $1, value = $2, error = $3,
-    reused = reused OR $4,
+    reused = workflow_steps.reused OR $4,
     finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
-WHERE id = $5
+FROM run
+WHERE workflow_steps.id = $5
+    AND workflow_steps.run_id = run.id
 `
 
 type UpdateWorkflowStepParams struct {
@@ -456,7 +493,12 @@ type UpdateWorkflowStepParams struct {
 // A reported or failed step stamps finished_at; started_at is set once, at
 // the insert. The param stays uncast so sqlc ties it to the nullable column
 // and applies the NullRawMessage override. reused only sets the flag: a
-// report from a step that a resume reused must not clear it.
+// report from a step that a resume reused must not clear it. The write also
+// stamps the run's updated_at, so a report to an interrupted run restarts the
+// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+// run update, so the run row is locked before the step row, the same order
+// as the purge's cascade. Without the join Postgres may run the two updates
+// in any order, and a report racing the purge could deadlock.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,

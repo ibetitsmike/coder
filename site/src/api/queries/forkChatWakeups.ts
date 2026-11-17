@@ -9,11 +9,21 @@ import type { ChatWakeup, ChatWakeupStatus } from "#/api/typesGenerated";
 export const chatWakeupsKey = (chatId: string) =>
 	["chats", "fork-wakeups", chatId] as const;
 
-/** Query options for a chat's wake-ups, oldest first. */
+/**
+ * The states the wake-ups pill shows. The server filters on them, so a chat
+ * with a long history of completed wake-ups does not send them all.
+ */
+const openChatWakeupStatuses: readonly ChatWakeupStatus[] = [
+	"active",
+	"paused",
+];
+
+/** Query options for a chat's active and paused wake-ups, oldest first. */
 export const chatWakeups = (chatId: string) =>
 	queryOptions({
 		queryKey: chatWakeupsKey(chatId),
-		queryFn: ({ signal }) => getChatWakeups(chatId, signal),
+		queryFn: ({ signal }) =>
+			getChatWakeups(chatId, signal, openChatWakeupStatuses),
 		// Wake-ups have no watch socket, so poll to see worker-made changes.
 		refetchInterval: 30_000,
 		// A revisited chat must read again instead of showing cached

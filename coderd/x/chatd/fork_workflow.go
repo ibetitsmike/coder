@@ -92,7 +92,7 @@ type is "general" or "explore". schema is a JSON Schema dict with "type": "objec
 	`The step must call its workflow_report tool with a value that matches the schema. That value is the step value. Without a schema the value is {"text": "..."}.
 
 Rules: the script has no load(), no clock, no file access and no network. while loops are allowed. Recursion is not allowed. ` +
-	`Limits: script 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB. ` +
+	`Limits: script 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB, step value 256 KiB. ` +
 	`Each step is a child chat of this chat. chatd limits how many sub-agent chats run at the same time. Extra steps wait in a queue.
 
 Resume: a run is journaled in the deployment database, so it survives a restart. ` +
