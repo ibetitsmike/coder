@@ -54,6 +54,10 @@ type PushResponse struct {
 	// rules are pushed only while it is set, because a server that
 	// predates it would inject them on every turn.
 	ForkGlobRules bool
+	// ForkContextCache mirrors the fork-context-cache capability: the
+	// Manager reuses resolve results across reconnects only while it is
+	// set. Servers that predate the capability leave it false.
+	ForkContextCache bool
 }
 
 // Pusher delivers snapshots to coderd. Concrete implementations
@@ -194,6 +198,7 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 	// and an asynchronous settle could publish a generation-zero snapshot
 	// built from the reset defaults.
 	advertise := func(resp *PushResponse, negotiated bool) {
+		m.setContextCache(resp) // fork: fork_resolve_cache.go
 		flipped := false
 		if resp != nil {
 			was := m.packRowsAdvertised.Swap(resp.ForkPluginPacks)
@@ -257,6 +262,7 @@ func (m *Manager) RunPush(ctx context.Context, p Pusher, opts PushOptions) error
 			logger.Warn(ctx, "coderd peer does not implement PushContextState; stopping")
 			// No negotiation can complete against this peer; close the
 			// window so the local snapshot stops carrying probe markers.
+			m.setContextCache(nil) // fork: fork_resolve_cache.go
 			m.negotiating.Store(false)
 			if _, err := m.Resync(ctx); err != nil {
 				logger.Warn(ctx, "resync after unimplemented push failed", slog.Error(err))

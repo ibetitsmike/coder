@@ -321,6 +321,7 @@ func (m *Manager) Close() error {
 	running := m.running
 	close(m.closedCh)
 	m.mu.Unlock()
+	m.resolveCache.close() // fork: fork_resolve_cache.go
 	if running {
 		<-m.runDoneCh
 	}

@@ -6,6 +6,7 @@ package agentcontext
 // stat of the file it reads, so a hit needs no extra syscall.
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -83,15 +84,43 @@ type memoEntry struct {
 	lastUsed time.Time
 }
 
-// fileMemo maps a path to the last body read from it.
+// fileMemo maps a path to the last body read from it. It is on only while
+// a resolve cache that the fork-context-cache capability turned on holds
+// it; while it is off a read always loads and nothing is stored.
 type fileMemo struct {
 	mu        sync.Mutex
 	entries   map[string]*memoEntry
 	bytes     int64
 	lastSweep time.Time
+	// users counts the resolve caches that hold the memo on.
+	users int
+	// gen advances when the last user lets go, so a read that started
+	// before then stores nothing.
+	gen uint64
 }
 
 var resolveMemo = &fileMemo{entries: make(map[string]*memoEntry)}
+
+// acquire holds the memo on.
+func (m *fileMemo) acquire() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users++
+}
+
+// release lets go of the memo. The last release drops every entry.
+func (m *fileMemo) release() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users--
+	if m.users > 0 {
+		return
+	}
+	m.users = 0
+	m.entries = make(map[string]*memoEntry)
+	m.bytes = 0
+	m.gen++
+}
 
 // read returns the body of the regular file at path whose stat is info,
 // calling load only when the memo holds no body for the same stamp. load
@@ -109,6 +138,12 @@ func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, fs.F
 	}
 	now := time.Now()
 	m.mu.Lock()
+	if m.users <= 0 {
+		m.mu.Unlock()
+		data, _, err := load()
+		return data, err
+	}
+	gen := m.gen
 	if e, ok := m.entries[path]; ok && e.stamp == stamp {
 		e.lastUsed = now
 		data := e.data
@@ -128,6 +163,10 @@ func (m *fileMemo) read(path string, info fs.FileInfo, load func() ([]byte, fs.F
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.users <= 0 || m.gen != gen {
+		// The memo went off during the read.
+		return data, nil
+	}
 	if old, ok := m.entries[path]; ok {
 		m.bytes -= memoEntryCost(path, old.data)
 		delete(m.entries, path)
@@ -182,6 +221,16 @@ func readResourceFile(path string, info fs.FileInfo) ([]byte, error) {
 // maxBytes is an error.
 func readOpenFile(path string, maxBytes int64) ([]byte, fs.FileInfo, error) {
 	noteBodyRead(path)
+	data, info, err := readOpenFileBody(path, maxBytes)
+	if err != nil && !errors.Is(err, errFileGrew) {
+		// A grown file fires a write event; other failures can clear
+		// with none.
+		noteReadFailure(path, err)
+	}
+	return data, info, err
+}
+
+func readOpenFileBody(path string, maxBytes int64) ([]byte, fs.FileInfo, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err

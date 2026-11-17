@@ -399,7 +399,7 @@ func (r *Resolver) discoverIn(root ScanRoot, out *[]Resource, seenID map[string]
 // ignored: instruction files and MCP configs are recognized only
 // at a scan root's top level.
 func (r *Resolver) discoverTopLevelFiles(root ScanRoot, out *[]Resource, seenID map[string]int) {
-	entries, err := os.ReadDir(root.Path)
+	entries, err := readDirNoted(root.Path)
 	if err != nil {
 		return
 	}
@@ -741,7 +741,7 @@ func (r *Resolver) readSkillMetaNamed(scanRoot, path string, info fs.FileInfo, u
 // recognized skills-container directory and emits one Skill
 // resource per subdirectory whose SKILL.md parses cleanly.
 func (r *Resolver) emitSkillsFromContainer(container string, root ScanRoot, out *[]Resource, seenID map[string]int) {
-	entries, err := os.ReadDir(container)
+	entries, err := readDirNoted(container)
 	if err != nil {
 		return
 	}
@@ -873,6 +873,7 @@ func resourceID(kind ResourceKind, source string) string {
 func readFileCapped(path string, maxBytes int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		noteReadFailure(path, err) // fork: fork_resolve_cache.go
 		return nil, err
 	}
 	defer f.Close()

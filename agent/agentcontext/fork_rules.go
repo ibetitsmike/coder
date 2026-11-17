@@ -162,7 +162,7 @@ func ruleDirsFor(rootPath string) []string {
 // root's rule directories. Rules without either are ignored.
 func (r *Resolver) emitRules(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	for _, container := range ruleDirsFor(root.Path) {
-		entries, err := os.ReadDir(container)
+		entries, err := readDirNoted(container)
 		if err != nil {
 			continue
 		}

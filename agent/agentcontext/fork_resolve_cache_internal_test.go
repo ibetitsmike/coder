@@ -1,7 +1,8 @@
 package agentcontext
 
 // This file is fork code: it tests that a resolve pass whose capabilities
-// flip while it runs is never cached as a mix of two capability states.
+// flip while it runs is never cached as a mix of two capability states, and
+// that the fork-context-cache capability gates the cache.
 
 import (
 	"context"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,12 +25,14 @@ import (
 	"github.com/coder/quartz"
 )
 
-// advertisedCacheManager returns a Manager with every fork capability on
-// and a running watcher synced on syncRoots.
+// advertisedCacheManager returns a Manager with every fork capability on,
+// the context cache included, and a running watcher synced on syncRoots.
 func advertisedCacheManager(t *testing.T, opts ManagerOptions, syncRoots []ScanRoot) (*Manager, *Watcher) {
 	t.Helper()
 	opts.Logger = testutil.Logger(t)
 	m := NewManager(opts)
+	t.Cleanup(func() { _ = m.Close() })
+	m.resolveCache.setEnabled(true)
 	m.packRowsAdvertised.Store(true)
 	m.packAgentDefinitionsAdvertised.Store(true)
 	m.globRulesAdvertised.Store(true)
@@ -852,7 +856,7 @@ func TestFileMemo_RetargetBetweenStatAndOpenIsNotStored(t *testing.T) {
 	if _, ok := stampOf(statA); !ok {
 		t.Skip("no file identity on this platform, so the memo is off")
 	}
-	memo := &fileMemo{entries: make(map[string]*memoEntry)}
+	memo := &fileMemo{entries: make(map[string]*memoEntry), users: 1}
 	load := func() ([]byte, fs.FileInfo, error) { return readOpenFile(link, 1<<10) }
 
 	require.NoError(t, os.Remove(link))
@@ -941,7 +945,7 @@ func TestFileMemo_EmptyFileCountsAgainstBudget(t *testing.T) {
 	if _, ok := stampOf(info); !ok {
 		t.Skip("no file identity on this platform, so the memo is off")
 	}
-	memo := &fileMemo{entries: make(map[string]*memoEntry)}
+	memo := &fileMemo{entries: make(map[string]*memoEntry), users: 1}
 	data, err := memo.read(path, info, func() ([]byte, fs.FileInfo, error) { return readOpenFile(path, 1<<10) })
 	require.NoError(t, err)
 	require.Empty(t, data)
@@ -951,4 +955,176 @@ func TestFileMemo_EmptyFileCountsAgainstBudget(t *testing.T) {
 
 	memo.forget(path)
 	require.Zero(t, memo.bytes)
+}
+
+// With the context cache off a pass stores nothing, and turning it off drops
+// what it held. Turning it on again starts empty: a result from before the
+// flip is never served, even when nothing else changed.
+func TestResolveCache_FlipDropsResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1"})
+	roots := []ScanRoot{{Path: dir}}
+	m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	_, ok := cachedFor(m, w, roots)
+	require.True(t, ok, "a pass with the cache on is cached")
+
+	require.True(t, m.resolveCache.setEnabled(false))
+	require.Empty(t, m.resolveCache.entries, "turning the cache off drops every result")
+	resolves := m.resolveCache.resolves.Load()
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	require.Equal(t, resolves+1, m.resolveCache.resolves.Load(), "a pass with the cache off resolves")
+	require.Empty(t, m.resolveCache.entries, "a pass with the cache off stores nothing")
+
+	require.True(t, m.resolveCache.setEnabled(true))
+	_, ok = cachedFor(m, w, roots)
+	require.False(t, ok, "the cache starts empty after it turns on")
+	m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+	_, ok = cachedFor(m, w, roots)
+	require.True(t, ok, "a pass after the flip is cached")
+	require.False(t, m.resolveCache.setEnabled(true), "the same value is no flip")
+}
+
+// A pass that started before the cache flipped stores nothing: it may have
+// started from a memo and an entry set that the flip dropped.
+func TestResolvePass_FlipDuringPassIsNotCached(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		flips []bool
+	}{
+		{name: "Off", flips: []bool{false}},
+		{name: "OffAndOn", flips: []bool{false, true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1"})
+			roots := []ScanRoot{{Path: dir}}
+			var armed atomic.Bool
+			var m *Manager
+			m, w := advertisedCacheManager(t, ManagerOptions{
+				MCPCatalog: func() []MCPServerStatus {
+					if armed.CompareAndSwap(true, false) {
+						for _, on := range tc.flips {
+							m.resolveCache.setEnabled(on)
+						}
+					}
+					return nil
+				},
+			}, roots)
+			armed.Store(true)
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.False(t, armed.Load(), "the flip ran during the pass")
+			require.Empty(t, m.resolveCache.entries, "a pass that raced a flip is not cached")
+
+			m.resolveCache.setEnabled(true)
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			_, ok := cachedFor(m, w, roots)
+			require.True(t, ok, "the next pass is cached")
+		})
+	}
+}
+
+// A directory the pass failed to read for a reason other than it being
+// missing, such as EMFILE, can become readable with no event, so the pass is
+// not cached. A missing directory fires an event when it is created.
+func TestResolvePass_ReadDirFailureIsNotCached(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		err    error
+		cached bool
+	}{
+		{name: "EMFILE", err: &fs.PathError{Op: "open", Err: syscall.EMFILE}, cached: false},
+		{name: "EIO", err: &fs.PathError{Op: "readdirent", Err: syscall.EIO}, cached: false},
+		{name: "NotExist", err: &fs.PathError{Op: "open", Err: fs.ErrNotExist}, cached: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writePackFiles(t, dir, map[string]string{
+				"AGENTS.md":                   "v1",
+				".claude/skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody",
+			})
+			container := filepath.Join(dir, ".claude", "skills")
+			readDirFaults.Store(container, tc.err)
+			t.Cleanup(func() { readDirFaults.Delete(container) })
+			roots := []ScanRoot{{Path: dir}}
+			m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+
+			snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.False(t, hasResource(snap, KindSkill, "foo"), "the pass could not list the skills")
+			_, ok := cachedFor(m, w, roots)
+			require.Equal(t, tc.cached, ok)
+
+			readDirFaults.Delete(container)
+			snap, _ = m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			require.True(t, hasResource(snap, KindSkill, "foo"), "the pass after the failure lists the skills")
+			_, ok = cachedFor(m, w, roots)
+			require.True(t, ok, "a pass with no failure is cached")
+		})
+	}
+}
+
+// The file memo stores bodies only while a resolve cache holds it on, and
+// drops them when the last one lets go.
+func TestFileMemo_StoresOnlyWhileHeld(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "AGENTS.md")
+	require.NoError(t, os.WriteFile(path, []byte("body"), 0o600))
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(path, old, old))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	if _, ok := stampOf(info); !ok {
+		t.Skip("no file identity on this platform, so the memo is off")
+	}
+	memo := &fileMemo{entries: make(map[string]*memoEntry)}
+	loads := 0
+	var during func()
+	load := func() ([]byte, fs.FileInfo, error) {
+		loads++
+		if during != nil {
+			during()
+		}
+		return readOpenFile(path, 1<<10)
+	}
+	read := func() {
+		t.Helper()
+		data, err := memo.read(path, info, load)
+		require.NoError(t, err)
+		require.Equal(t, "body", string(data))
+	}
+
+	read()
+	read()
+	require.Equal(t, 2, loads, "an unheld memo loads every time")
+	require.Empty(t, memo.entries)
+
+	memo.acquire()
+	memo.acquire()
+	read()
+	read()
+	require.Equal(t, 3, loads, "a held memo serves the stored body")
+	memo.release()
+	require.Contains(t, memo.entries, path, "the memo stays on while a user holds it")
+	memo.release()
+	require.Empty(t, memo.entries, "the last release drops every body")
+	require.Zero(t, memo.bytes)
+
+	// A read that started before the last release stores nothing, even
+	// when the memo is held again by the time it ends.
+	memo.acquire()
+	during = func() {
+		memo.release()
+		memo.acquire()
+	}
+	read()
+	require.Empty(t, memo.entries, "a read across a release is not stored")
+	during = nil
+	read()
+	require.Contains(t, memo.entries, path)
+	memo.release()
 }

@@ -59,7 +59,7 @@ func agentContainersFor(rootPath string) []string {
 // matching skills.
 func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	for _, container := range agentContainersFor(root.Path) {
-		entries, err := os.ReadDir(container)
+		entries, err := readDirNoted(container)
 		if err != nil {
 			continue
 		}

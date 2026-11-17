@@ -159,6 +159,7 @@ func TestResolve_ReplacedFileIsReread(t *testing.T) {
 	require.NoError(t, err)
 	r := &agentcontext.Resolver{}
 	roots := []agentcontext.ScanRoot{{Path: dir}}
+	agentcontext.HoldResolveMemo(t)
 	require.Equal(t, "aaaa", string(r.Resolve(roots).Resources[0].Payload))
 
 	next := filepath.Join(dir, "next")
@@ -237,18 +238,24 @@ func BenchmarkResolve(b *testing.B) {
 
 // A connection with no file change reuses the resolve of the previous one:
 // the capability probe and the settled snapshot both come from the cache.
+// The server turns the cache on in its first response, so the first
+// connection resolves with the cache off until then.
 func TestRunPush_ReconnectReusesResolve(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name string
 		resp agentcontext.PushResponse
-		// resolves is the total after the first settle: the ready pass,
-		// plus one with the advertised capabilities when they differ.
+		// resolves is the total after the first settle: the ready pass and
+		// the probe with the cache off, then the settle with it on.
 		resolves uint64
+		// reconnected is the total after the reconnects. A probe has the
+		// reset capabilities, so when the server advertises others the
+		// first reconnect resolves the probe once more and caches it.
+		reconnected uint64
 	}{
-		{name: "Unadvertised", resp: agentcontext.PushResponse{Accepted: true}, resolves: 1},
-		{name: "Advertised", resp: agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true, ForkAgentDefinitions: true, ForkGlobRules: true}, resolves: 2},
+		{name: "Unadvertised", resp: agentcontext.PushResponse{Accepted: true, ForkContextCache: true}, resolves: 3, reconnected: 3},
+		{name: "Advertised", resp: agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true, ForkAgentDefinitions: true, ForkGlobRules: true, ForkContextCache: true}, resolves: 3, reconnected: 4},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -294,8 +301,9 @@ func TestRunPush_ReconnectReusesResolve(t *testing.T) {
 			first := connect("push1")
 			require.Equal(t, tc.resolves, agentcontext.ResolveCount(m), "resolves through the first settle")
 			second := connect("push2")
+			require.Equal(t, tc.reconnected, agentcontext.ResolveCount(m), "the first reconnect resolves at most the probe")
 			third := connect("push3")
-			require.Equal(t, tc.resolves, agentcontext.ResolveCount(m), "a reconnect with no file change resolves nothing")
+			require.Equal(t, tc.reconnected, agentcontext.ResolveCount(m), "a reconnect with no file change resolves nothing")
 
 			require.Equal(t, first[0].AggregateHash, second[0].AggregateHash)
 			require.Equal(t, first[0].AggregateHash, third[0].AggregateHash)
@@ -331,10 +339,20 @@ func TestRunPush_ReconnectReusesResolve(t *testing.T) {
 }
 
 // startWatchingManager starts a Manager over dir with its watcher running and
-// waits for the first published snapshot.
+// waits for the first published snapshot. The context cache is on from the
+// start, as after an earlier connection to a server that turned it on.
 func startWatchingManager(t *testing.T, opts agentcontext.ManagerOptions) *agentcontext.Manager {
 	t.Helper()
 	m := newPendingTestManager(t, opts)
+	agentcontext.EnableContextCache(m)
+	runWatching(t, m)
+	return m
+}
+
+// runWatching runs m with its watcher, marks it ready and waits for the
+// first published snapshot.
+func runWatching(t *testing.T, m *agentcontext.Manager) {
+	t.Helper()
 	runCtx, runCancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
 	t.Cleanup(runCancel)
 	go func() { _ = m.Run(runCtx) }()
@@ -343,27 +361,118 @@ func startWatchingManager(t *testing.T, opts agentcontext.ManagerOptions) *agent
 	m.SetReady()
 	require.Eventually(t, func() bool { return m.Snapshot().Version > 0 },
 		testutil.WaitShort, testutil.IntervalFast)
-	return m
 }
 
 // connectOnce runs one push connection until its first settled push and
 // returns the settled pushes. The peer advertises every fork capability, so
-// every connection resets them and resyncs, as against a fork coderd.
+// every connection resets them and resyncs, as against a fork coderd with
+// the fork-context-cache experiment on.
 func connectOnce(t *testing.T, m *agentcontext.Manager, name string) []*agentcontext.PushRequest {
 	t.Helper()
-	p := newFakePusher()
+	return connectWith(t, m, name, cacheResponse(true))
+}
+
+// cacheResponse is the response of a fork coderd that advertises every fork
+// capability, with the context cache on or off.
+func cacheResponse(on bool) agentcontext.PushResponse {
+	return agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true, ForkAgentDefinitions: true, ForkGlobRules: true, ForkContextCache: on}
+}
+
+// connectWith is connectOnce against a peer that answers every push with
+// resp.
+func connectWith(t *testing.T, m *agentcontext.Manager, name string, resp agentcontext.PushResponse) []*agentcontext.PushRequest {
+	t.Helper()
+	p, stop := startPush(t, m, name, resp)
+	settled := waitSettled(t, p, 1)
+	stop()
+	return settled
+}
+
+// startPush starts a push connection against a peer that answers every push
+// with resp. stop ends the connection and waits for it.
+func startPush(t *testing.T, m *agentcontext.Manager, name string, resp agentcontext.PushResponse) (p *fakePusher, stop func()) {
+	t.Helper()
+	p = newFakePusher()
 	p.mu.Lock()
-	p.resp = &agentcontext.PushResponse{Accepted: true, ForkPluginPacks: true, ForkAgentDefinitions: true, ForkGlobRules: true}
+	p.resp = &resp
 	p.mu.Unlock()
 	ctx, cancel := context.WithCancel(testutil.Context(t, testutil.WaitShort))
 	done := make(chan error, 1)
 	go func() {
 		done <- m.RunPush(ctx, p, agentcontext.PushOptions{Logger: testutil.Logger(t).Named(name)})
 	}()
-	settled := waitSettled(t, p, 1)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
-	return settled
+	return p, func() {
+		t.Helper()
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+	}
+}
+
+// Without the fork-context-cache capability every connection resolves, as
+// before the cache: the server did not turn it on.
+func TestRunPush_ContextCacheOffResolvesEveryConnection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "v1")
+	m := newPendingTestManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	runWatching(t, m)
+	for i := range 3 {
+		before := agentcontext.ResolveCount(m)
+		require.Equal(t, "v1", instructionPayload(t, connectWith(t, m, fmt.Sprintf("push%d", i), cacheResponse(false))[0]))
+		require.Greater(t, agentcontext.ResolveCount(m), before, "connection %d resolves", i)
+		require.False(t, agentcontext.ContextCacheOn(m))
+		require.Zero(t, agentcontext.CachedResults(m))
+	}
+}
+
+// A server can turn the cache off and on in the middle of a connection. Off
+// drops every result at once. On starts empty, and the results it caches
+// come from passes that started after it.
+func TestRunPush_ContextCacheFlipsMidConnection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	mustWriteFile(t, path, "v1")
+	m := startWatchingManager(t, agentcontext.ManagerOptions{WorkingDir: func() string { return dir }})
+	connectOnce(t, m, "on")
+	requireCacheHit(t, m)
+
+	// On to off: the response to the push of an edit turns it off.
+	p, stop := startPush(t, m, "flip-off", cacheResponse(true))
+	waitSettled(t, p, 1)
+	require.True(t, agentcontext.ContextCacheOn(m))
+	require.NotZero(t, agentcontext.CachedResults(m))
+	off := cacheResponse(false)
+	p.mu.Lock()
+	p.resp = &off
+	p.mu.Unlock()
+	mustWriteFile(t, path, "v2 is longer")
+	require.Eventually(t, func() bool { return !agentcontext.ContextCacheOn(m) },
+		testutil.WaitShort, testutil.IntervalFast, "the response turns the cache off")
+	require.Zero(t, agentcontext.CachedResults(m), "turning the cache off drops every result")
+	stop()
+	before := agentcontext.ResolveCount(m)
+	require.Equal(t, "v2 is longer", instructionPayload(t, connectWith(t, m, "off", cacheResponse(false))[0]))
+	require.Greater(t, agentcontext.ResolveCount(m), before, "a reconnect with the cache off resolves")
+	require.Zero(t, agentcontext.CachedResults(m))
+
+	// Off to on: the response to the push of an edit turns it on.
+	p, stop = startPush(t, m, "flip-on", cacheResponse(false))
+	waitSettled(t, p, 1)
+	on := cacheResponse(true)
+	p.mu.Lock()
+	p.resp = &on
+	p.mu.Unlock()
+	mustWriteFile(t, path, "v3 is longer still")
+	require.Eventually(t, func() bool { return agentcontext.ContextCacheOn(m) },
+		testutil.WaitShort, testutil.IntervalFast, "the response turns the cache on")
+	stop()
+	// The pass of the edit ran before the cache was on, so the next
+	// connection resolves, and the one after reuses that.
+	before = agentcontext.ResolveCount(m)
+	require.Equal(t, "v3 is longer still", instructionPayload(t, connectOnce(t, m, "on-again")[0]))
+	require.Greater(t, agentcontext.ResolveCount(m), before, "the first connection after the flip resolves")
+	requireCacheHit(t, m)
 }
 
 func instructionPayload(t *testing.T, req *agentcontext.PushRequest) string {

@@ -35,6 +35,17 @@ package agentcontext
 // A cache hit still runs the MCP reconnect, so servers that failed to
 // connect are retried on every new coderd connection as before.
 //
+// A pass that failed to read a file or a directory for a reason other than
+// it being missing, such as EMFILE or an I/O error, is not cached either: no
+// event follows when the failure clears.
+//
+// The cache sits behind the fork-context-cache capability, which coderd
+// sets in its push responses while the experiment of the same name is on.
+// Until a response sets it, and from the response that clears it, every
+// pass resolves in full and the cache and the file memo are neither read
+// nor stored. A flip in either direction drops every cached result, and a
+// pass that started before a flip stores nothing.
+//
 // The tradeoff: a change the watcher misses for a reason not listed above
 // used to show up on the next reconnect, which resolved again. With the
 // cache it shows up on the next watcher event instead.
@@ -42,6 +53,7 @@ package agentcontext
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,6 +107,8 @@ type resolveCacheEntry struct {
 	// with the same key, the one that started later is the one the Manager
 	// published, so its result wins whichever pass finishes last.
 	epoch uint64
+	// flips is resolveCache.flips when the pass started.
+	flips uint64
 	// snap is the resolver's output before the Manager stamped a version
 	// or a negotiation marker on it.
 	snap Snapshot
@@ -115,6 +129,14 @@ type resolveCache struct {
 
 	mu      sync.Mutex
 	entries []resolveCacheEntry
+	// on is the fork-context-cache capability the server last reported.
+	// While it is off no pass reads or stores a result.
+	on bool
+	// flips counts the changes of on, so a pass that started before a
+	// flip stores nothing.
+	flips uint64
+	// closed is set when the Manager closed. The cache stays off then.
+	closed bool
 
 	// afterLockedLookup, when set by a test, runs in publishCached between
 	// its locked lookup and its sequence check.
@@ -125,9 +147,62 @@ func (c *resolveCache) changed() {
 	c.seq.Add(1)
 }
 
+// setEnabled turns the cache on or off and reports whether that changed
+// it. A change drops every result. While a cache is on it holds the file
+// memo on.
+func (c *resolveCache) setEnabled(enable bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	on := enable && !c.closed
+	changed := c.on != on
+	c.on = on
+	if !changed {
+		return false
+	}
+	c.flips++
+	c.entries = nil
+	if c.on {
+		resolveMemo.acquire()
+	} else {
+		resolveMemo.release()
+	}
+	return true
+}
+
+// close turns the cache off for good, when the Manager closes.
+func (c *resolveCache) close() {
+	c.setEnabled(false)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+}
+
+// state reports whether the cache is on and its flip count.
+func (c *resolveCache) state() (on bool, flips uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.on, c.flips
+}
+
+// setContextCache applies the fork-context-cache capability of a push
+// response, nil standing for a peer that sent none. Unlike the other
+// capabilities it carries over to the next connection, so a reconnect can
+// reuse the results; the response to that connection's first push sets it
+// again.
+func (m *Manager) setContextCache(resp *PushResponse) {
+	on := resp != nil && resp.ForkContextCache
+	if m.resolveCache.setEnabled(on) {
+		m.logger.Debug(context.Background(), "server flipped the context-cache advertisement", slog.F("on", on))
+	}
+}
+
 func (c *resolveCache) store(e resolveCacheEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.on || c.flips != e.flips {
+		// The cache is off, or it flipped since the pass started.
+		return
+	}
 	if slices.ContainsFunc(c.entries, func(old resolveCacheEntry) bool {
 		return old.seq > e.seq || old.watchGen > e.watchGen ||
 			(old.epoch > e.epoch && old.caps == e.caps && slices.Equal(old.roots, e.roots))
@@ -149,6 +224,9 @@ func (c *resolveCache) store(e resolveCacheEntry) {
 func (c *resolveCache) lookup(caps resolveCaps, roots []ScanRoot, rootDirs []os.FileInfo, seq, watchGen uint64) (resolveCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.on {
+		return resolveCacheEntry{}, false
+	}
 	for _, e := range c.entries {
 		if e.seq == seq && e.watchGen == watchGen && e.caps == caps && slices.Equal(e.roots, roots) && sameDirs(e.rootDirs, rootDirs) {
 			return e, true
@@ -168,6 +246,10 @@ func (c *resolveCache) reset() {
 // the pass. epoch is the resolve epoch the pass claimed. The returned pack
 // pass feeds the pack MCP publisher.
 func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []ScanRoot, watcher *Watcher, epoch uint64) (Snapshot, *packPass) {
+	on, flips := m.resolveCache.state()
+	if !on {
+		return m.resolveUncached(ctx, resolver, roots)
+	}
 	start := time.Now()
 	watchGen, _ := watcher.coverage()
 	seq := m.resolveCache.seq.Load()
@@ -194,7 +276,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	}
 	followed := trackSymlinkTargets(roots)
 	snap := r.ResolveContext(ctx, roots)
-	links := followed.stop()
+	links, readFailed := followed.stopPass()
 	resolveMemo.sweep(start)
 
 	if ctx.Err() != nil {
@@ -202,7 +284,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 		return snap, pass
 	}
 	genAfter, covered := watcher.coverage()
-	if !covered || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq || !watcher.reportsWritesTo(links) || hasUnreadableFile(snap) {
+	if !covered || mixed || readFailed || genAfter != watchGen || m.resolveCache.seq.Load() != seq || !watcher.reportsWritesTo(links) || hasUnreadableFile(snap) {
 		// This pass read the files as they are now and cannot be cached.
 		// An older entry with the same key can predate a change whose
 		// event has not arrived yet, so it goes too.
@@ -217,8 +299,22 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 		m.resolveCache.reset()
 		return snap, pass
 	}
-	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, epoch: epoch, snap: snap, pass: pass, links: links})
+	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, epoch: epoch, flips: flips, snap: snap, pass: pass, links: links})
 	return snap, pass
+}
+
+// resolveUncached is resolvePass with the cache off: the resolver reads the
+// live capability flags, as it did before the cache, and nothing is
+// stored. It tracks its own symlinks and read failures so they do not make
+// a concurrent cached pass more cautious.
+func (m *Manager) resolveUncached(ctx context.Context, resolver *Resolver, roots []ScanRoot) (Snapshot, *packPass) {
+	m.resolveCache.resolves.Add(1)
+	pass := &packPass{}
+	r := *resolver
+	r.packPass = pass
+	tracked := trackSymlinkTargets(roots)
+	defer tracked.stop()
+	return r.ResolveContext(ctx, roots), pass
 }
 
 // hasUnreadableFile reports whether a pass failed to read a file it found.
@@ -618,6 +714,9 @@ type symlinkTargetSet struct {
 	roots []string
 	// links maps each link to its target.
 	links map[string]string
+	// readFailed is set when the pass failed to read a directory or a file
+	// for a reason other than it being missing.
+	readFailed bool
 }
 
 func trackSymlinkTargets(roots []ScanRoot) *symlinkTargetSet {
@@ -637,10 +736,63 @@ func trackSymlinkTargets(roots []ScanRoot) *symlinkTargetSet {
 }
 
 func (s *symlinkTargetSet) stop() map[string]string {
+	links, _ := s.stopPass()
+	return links
+}
+
+// stopPass is stop that also reports whether the pass failed a read.
+func (s *symlinkTargetSet) stopPass() (map[string]string, bool) {
 	symlinkTargets.mu.Lock()
 	defer symlinkTargets.mu.Unlock()
 	delete(symlinkTargets.active, s)
-	return s.links
+	return s.links, s.readFailed
+}
+
+// readDirNoted is os.ReadDir for a resolve pass. The resolver skips a
+// directory it cannot read, and a failure such as EMFILE or an I/O error
+// can clear with no event the watcher sees, so the failure marks the pass.
+func readDirNoted(dir string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if fault, ok := readDirFaults.Load(filepath.Clean(dir)); ok {
+		if ferr, ok := fault.(error); ok {
+			entries, err = nil, ferr
+		}
+	}
+	if err != nil {
+		noteReadFailure(dir, err)
+	}
+	return entries, err
+}
+
+// readDirFaults maps a directory to the error readDirNoted returns for it,
+// so tests can fail a read in a way chmod cannot: a directory without read
+// permission cannot be watched either. It is empty in production.
+var readDirFaults sync.Map
+
+// noteReadFailure marks the running passes that own path as unable to be
+// cached, unless err says path is missing or not a directory: creating it
+// fires an event in its parent. A path that no running pass owns marks
+// every running pass, as noteOwnedSymlinkTarget does.
+func noteReadFailure(path string, err error) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return
+	}
+	path = filepath.Clean(path)
+	symlinkTargets.mu.Lock()
+	defer symlinkTargets.mu.Unlock()
+	owned := false
+	for set := range symlinkTargets.active {
+		if set.holds(path) {
+			set.readFailed = true
+			owned = true
+		}
+	}
+	if owned {
+		return
+	}
+	for set := range symlinkTargets.active {
+		set.readFailed = true
+	}
 }
 
 // trackUncachedResolve tracks the symlinks of a resolve that is not a

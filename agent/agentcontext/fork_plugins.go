@@ -1183,7 +1183,7 @@ func claudeVersionOrphaned(versionDir string) bool {
 // childDirs returns the paths of dir's immediate subdirectories. Symlinked
 // entries are skipped, like everywhere else in pack discovery.
 func childDirs(dir string) []string {
-	entries, err := os.ReadDir(dir)
+	entries, err := readDirNoted(dir)
 	if err != nil {
 		return nil
 	}
@@ -1452,7 +1452,7 @@ func (r *Resolver) emitPacks(root ScanRoot, out *[]Resource, seenID map[string]i
 func (r *Resolver) emitPackSkills(pack packRoot, root ScanRoot, out *[]Resource, seenID map[string]int) {
 	containers, folders := pack.skillPaths()
 	for _, container := range containers {
-		entries, err := os.ReadDir(container)
+		entries, err := readDirNoted(container)
 		if err != nil {
 			continue
 		}
@@ -1510,7 +1510,7 @@ func (r *Resolver) emitPackAgents(pack packRoot, root ScanRoot, out *[]Resource,
 		return
 	}
 	for _, container := range pack.agentContainers() {
-		entries, err := os.ReadDir(container)
+		entries, err := readDirNoted(container)
 		if err != nil {
 			continue
 		}
