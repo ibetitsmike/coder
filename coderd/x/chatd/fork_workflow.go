@@ -1431,14 +1431,15 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 // suppresses this copy: the re-emit keeps the line count aligned with the
 // baseline, which a plain replay that never prints the failure line would
 // break. A step failed after the baseline was taken logs its line live, the
-// way failStep does.
+// way failStep does. A recovered child may report while the replay runs,
+// so the step fields are read under the lock.
 func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if step.status != stepStatusFailed || step.err == "" {
 		return
 	}
-	r.mu.Lock()
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, step.err))
-	r.mu.Unlock()
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left

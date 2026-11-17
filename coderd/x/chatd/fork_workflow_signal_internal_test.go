@@ -134,6 +134,27 @@ def main(args):
 		assert.JSONEq(t, `[{"text":"first"},{"text":"two"}]`, string(res.Result))
 	})
 
+	// A recovered child can report while the replay passes its journaled
+	// step, so the replay reads the step under the run lock. The race
+	// detector catches an unlocked read.
+	t.Run("ReplayReadsAStepUnderTheLock", func(t *testing.T) {
+		t.Parallel()
+		step := &workflowStep{status: stepStatusRunning, title: "hi"}
+		r := &workflowRun{steps: []*workflowStep{step}}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			r.mu.Lock()
+			step.setReportedLocked(json.RawMessage(`"hi"`))
+			r.mu.Unlock()
+		}()
+		r.failJournaledStep(chatdTestContext(t), step)
+		<-done
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		assert.Equal(t, stepStatusReported, step.status)
+	})
+
 	// A report that the run's step has not been added for yet waits for
 	// the step, which takes it once the run adds it.
 	t.Run("EarlyReportWaitsForItsStep", func(t *testing.T) {

@@ -50,8 +50,9 @@ type Querier interface {
 	// Counts the unarchived subagent chats under @root_chat_id that have not
 	// finished. A finished subagent is waiting or error. A workflow step child
 	// whose step is reported counts as finished: the workflow is done with it
-	// and admits its next step while the child ends its turn. A step's ID is
-	// its child chat ID.
+	// and admits its next step while the child ends its turn. A user message
+	// after the report, such as a message_agent that resumes the child, starts
+	// new work, so the child counts again. A step's ID is its child chat ID.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error

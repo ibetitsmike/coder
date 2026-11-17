@@ -120,17 +120,31 @@ func TestCountLiveSubagentsInFamily(t *testing.T) {
 		ID: runID, ChatID: root.ID, ModelConfigID: modelID, Script: "run()",
 		Args: json.RawMessage(`{}`), Status: "running", OwnerID: owner,
 	}))
-	for _, status := range []string{"running", "reported"} {
-		step := chat(&root, database.ChatStatusRunning, false)
+	step := func(key, status string) database.Chat {
+		c := chat(&root, database.ChatStatusRunning, false)
 		_, err := fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
-			ID: step.ID, RunID: runID, SpecKey: status, Status: status, OwnerID: owner,
+			ID: c.ID, RunID: runID, SpecKey: key, Status: status, OwnerID: owner,
 		})
 		require.NoError(t, err)
+		return c
 	}
+	// userMessage adds a user message to c, offset from the step's start.
+	userMessage := func(c database.Chat, offset time.Duration) {
+		msg := dbgen.ChatMessage(t, db, database.ChatMessage{ChatID: c.ID})
+		_, err := sqlDB.ExecContext(ctx,
+			"UPDATE chat_messages SET created_at = (SELECT started_at FROM workflow_steps WHERE id = $1) + ($2 * INTERVAL '1 second') WHERE id = $3",
+			c.ID, int(offset.Seconds()), msg.ID)
+		require.NoError(t, err)
+	}
+	_ = step("running", "running")
+	// The step prompt comes before the report, so the child stays exempt.
+	userMessage(step("reported", "reported"), -time.Minute)
+	// A message after the report resumed the child, so it counts again.
+	userMessage(step("resumed", "reported"), time.Minute)
 
 	live, err := fdb.CountLiveSubagentsInFamily(ctx, root.ID)
 	require.NoError(t, err)
-	require.EqualValues(t, 5, live)
+	require.EqualValues(t, 6, live)
 }
 
 func TestGetSubagentCapacityCountsAwaitingOnly(t *testing.T) {
