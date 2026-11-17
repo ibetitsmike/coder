@@ -8,11 +8,11 @@ package agentcontext
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // manifestMCPServers is a manifest mcpServers declaration: a config file
@@ -103,8 +103,8 @@ const packCommitMarkerName = ".coder-pack-commit"
 
 // packRevision reads the commit marker of the pack in dir.
 func packRevision(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, packCommitMarkerName))
-	if err != nil {
+	data, ok := readCappedFollowingSymlink(filepath.Join(dir, packCommitMarkerName), maxManifestBytes)
+	if !ok {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
@@ -177,39 +177,48 @@ func mcpFileRel(declared string) string {
 	return containerRelPath(declared, "")
 }
 
-// packMCPSources returns the MCP declarations of the packs under roots in
-// scan-root order, which is the order a server name collision is settled in.
-// Like emitPacks it finds nothing until the server advertises pack rows, so a
+// packPass collects the pack roots one resolve pass walked (emitPacks), so
+// the pack MCP declarations come from the same walk instead of a second one.
+// A pass that ran with pack rows unadvertised records nothing.
+type packPass struct {
+	packs []packRoot
+}
+
+func (p *packPass) record(packs []packRoot) {
+	if p == nil {
+		return
+	}
+	p.packs = append(p.packs, packs...)
+}
+
+// sources returns the MCP declarations of the pass's packs in scan-root
+// order, which is the order a server name collision is settled in. Like
+// emitPacks it finds nothing until the server advertises pack rows, so a
 // deployment without the feature never starts pack servers, and it skips a
 // pack whose manifest path coderd cannot transport. It also skips a managed
 // pack without a commit marker: coderd writes the marker last and empties it
 // once no chat on the workspace enables the pack, so such a pack is
 // incomplete or disabled.
-func (r *Resolver) packMCPSources(roots []ScanRoot) []PackMCPSource {
-	if !r.packRowsAdvertised() {
+func (p *packPass) sources() []PackMCPSource {
+	if p == nil {
 		return nil
 	}
 	seen := make(map[string]struct{})
 	var out []PackMCPSource
-	for _, root := range roots {
-		if root.Path == "" {
+	for _, pack := range p.packs {
+		if _, ok := seen[pack.ManifestPath]; ok || len(pack.ManifestPath) > maxSourcePathBytes {
 			continue
 		}
-		for _, pack := range packRootsFor(root.Path) {
-			if _, ok := seen[pack.ManifestPath]; ok || len(pack.ManifestPath) > maxSourcePathBytes {
-				continue
-			}
-			seen[pack.ManifestPath] = struct{}{}
-			configs := pack.mcpConfigs()
-			if len(configs) == 0 {
-				continue
-			}
-			revision := packRevision(pack.Dir)
-			if revision == "" && isManagedPackManifest(pack.ManifestPath) {
-				continue
-			}
-			out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Revision: revision, Configs: configs})
+		seen[pack.ManifestPath] = struct{}{}
+		configs := pack.mcpConfigs()
+		if len(configs) == 0 {
+			continue
 		}
+		revision := packRevision(pack.Dir)
+		if revision == "" && isManagedPackManifest(pack.ManifestPath) {
+			continue
+		}
+		out = append(out, PackMCPSource{ManifestPath: pack.ManifestPath, Dir: pack.Dir, Claude: pack.Claude, Revision: revision, Configs: configs})
 	}
 	return out
 }
@@ -220,15 +229,31 @@ type packMCPPublisher struct {
 	deliver func([]PackMCPSource)
 	mu      sync.Mutex
 	epoch   uint64
+	// published is the newest epoch passed to publish, whether or not it
+	// delivered.
+	published atomic.Uint64
 }
 
-// publish delivers the declarations under roots after the resolve pass with
+// freshEpoch returns the newest resolve epoch that published. A cached
+// result publishes only while it equals the Manager's resolve epoch, so
+// no fresh pass is between claiming its epoch and publishing.
+func (p *packMCPPublisher) freshEpoch() uint64 {
+	return p.published.Load()
+}
+
+// publish delivers the declarations of pass after the resolve pass with
 // the given epoch published, unless a newer pass already delivered its own,
 // so passes that finish out of order cannot restore a stale pack list. A
 // pass inside a capability negotiation delivers nothing: every connection
 // starts one with pack rows unadvertised, and delivering its empty list
 // would restart every pack server on each reconnect.
-func (p *packMCPPublisher) publish(r *Resolver, roots []ScanRoot, epoch uint64, negotiating bool) {
+func (p *packMCPPublisher) publish(pass *packPass, epoch uint64, negotiating bool) {
+	for {
+		old := p.published.Load()
+		if epoch <= old || p.published.CompareAndSwap(old, epoch) {
+			break
+		}
+	}
 	if p.deliver == nil || negotiating {
 		return
 	}
@@ -238,7 +263,7 @@ func (p *packMCPPublisher) publish(r *Resolver, roots []ScanRoot, epoch uint64, 
 		return
 	}
 	p.epoch = epoch
-	p.deliver(r.packMCPSources(roots))
+	p.deliver(pass.sources())
 }
 
 // gatePackMCPResources drops the resources of pack servers while pack rows

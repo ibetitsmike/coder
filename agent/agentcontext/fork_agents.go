@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -38,16 +37,16 @@ func agentContainersFor(rootPath string) []string {
 		out = append(out, rootPath)
 	}
 	rootResolved := filepath.Clean(rootPath)
-	if resolved, err := filepath.EvalSymlinks(rootResolved); err == nil {
+	if resolved, err := evalSymlinksNoted(rootResolved); err == nil {
 		rootResolved = resolved
 	}
 	for _, rel := range agentContainerRelPaths {
 		container := filepath.Join(rootPath, rel)
-		resolved, err := filepath.EvalSymlinks(container)
+		resolved, err := evalSymlinksNoted(container)
 		if err != nil || !pathHasPrefix(resolved, rootResolved) {
 			continue
 		}
-		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+		if info, err := statNoted(resolved); err == nil && info.IsDir() {
 			out = append(out, container)
 		}
 	}
@@ -59,7 +58,7 @@ func agentContainersFor(rootPath string) []string {
 // matching skills.
 func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]int) {
 	for _, container := range agentContainersFor(root.Path) {
-		entries, err := os.ReadDir(container)
+		entries, err := readDirNoted(container)
 		if err != nil {
 			continue
 		}
@@ -70,7 +69,7 @@ func (r *Resolver) emitAgents(root ScanRoot, out *[]Resource, seenID map[string]
 			path := filepath.Join(container, e.Name())
 			// Lstat so a symlinked definition goes through
 			// resolveReadTarget's scan-root boundary check.
-			info, err := os.Lstat(path)
+			info, err := lstatNoted(path)
 			if err != nil {
 				continue
 			}
@@ -112,7 +111,7 @@ func (r *Resolver) readAgentDefinition(root ScanRoot, path string, info fs.FileI
 		}
 		return res, true
 	}
-	data, err := os.ReadFile(readPath)
+	data, err := readResourceFile(readPath, readInfo)
 	if err != nil {
 		res.Status = StatusUnreadable
 		res.Error = err.Error()
@@ -171,7 +170,7 @@ func addAgentWatchDirs(rootPath string, out map[string]struct{}) {
 		if parent == rootPath {
 			continue
 		}
-		if info, err := os.Stat(parent); err == nil && info.IsDir() {
+		if info, err := statNoted(parent); err == nil && info.IsDir() {
 			out[parent] = struct{}{}
 		}
 	}

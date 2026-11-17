@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -108,6 +109,42 @@ func TestPushContextState(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.True(t, resp.GetAccepted())
+		require.False(t, resp.GetForkContextCache(), "the context cache is off unless the experiment sets it")
+	})
+
+	t.Run("AdvertisesForkContextCache", func(t *testing.T) {
+		t.Parallel()
+
+		// Agents reuse resolve results across reconnects only while the
+		// response sets the flag, which mirrors the experiment.
+		for _, on := range []bool{false, true} {
+			t.Run(fmt.Sprintf("Enabled=%t", on), func(t *testing.T) {
+				t.Parallel()
+				api, dbm := makeAPI(t)
+				api.ForkContextCache = on
+				expectInTx(dbm)
+				dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
+					Return(database.WorkspaceAgentContextSnapshot{}, errNoRows())
+				dbm.EXPECT().UpsertWorkspaceAgentContextSnapshot(gomock.Any(), gomock.Any()).
+					Return(database.WorkspaceAgentContextSnapshot{}, nil)
+				dbm.EXPECT().UpsertWorkspaceAgentContextResource(gomock.Any(), gomock.Any()).
+					Return(database.WorkspaceAgentContextResource{}, nil).Times(1)
+				dbm.EXPECT().DeleteStaleWorkspaceAgentContextResources(gomock.Any(), gomock.Any()).
+					Return(nil)
+
+				resp, err := api.PushContextState(context.Background(), &agentproto.PushContextStateRequest{
+					Version:       1,
+					AggregateHash: []byte{0x01, 0x02, 0x03},
+					Initial:       true,
+					Resources: []*agentproto.ContextResource{
+						instructionResource("/home/coder/AGENTS.md", "hello"),
+					},
+				})
+				require.NoError(t, err)
+				require.True(t, resp.GetAccepted())
+				require.Equal(t, on, resp.GetForkContextCache())
+			})
+		}
 	})
 
 	t.Run("AdvertisesForkPluginPacks", func(t *testing.T) {
@@ -264,6 +301,7 @@ func TestPushContextState(t *testing.T) {
 		api, dbm := makeAPI(t)
 		api.ForkPluginPacks = true
 		api.ForkAgentDefinitions = true
+		api.ForkContextCache = true
 		expectInTx(dbm)
 
 		dbm.EXPECT().GetLatestWorkspaceAgentContextSnapshot(gomock.Any(), agentID).
@@ -281,6 +319,7 @@ func TestPushContextState(t *testing.T) {
 		require.True(t, resp.GetForkPluginPacks(), "a rejected response must still advertise the pack capability")
 		require.True(t, resp.GetForkAgentDefinitions(), "a rejected response must still advertise the definitions capability")
 		require.True(t, resp.GetForkGlobRules(), "a rejected response must still advertise the glob rules capability")
+		require.True(t, resp.GetForkContextCache(), "a rejected response must still advertise the context cache capability")
 	})
 
 	t.Run("NegotiationPushSkipsChatMutation", func(t *testing.T) {
