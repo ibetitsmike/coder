@@ -172,6 +172,9 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		if update.Content.Valid {
 			fa.secret("content")
 		}
+		if update.Description.Valid {
+			fa.change("description", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%q`, row.Description))})
+		}
 		if update.Enabled.Valid {
 			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
 		}
