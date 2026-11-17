@@ -340,6 +340,7 @@ type FakeAgentAPI struct {
 	pushResourcesMonitoringUsageFunc        func(*agentproto.PushResourcesMonitoringUsageRequest) (*agentproto.PushResourcesMonitoringUsageResponse, error)
 
 	contextStatePushes []*agentproto.PushContextStateRequest
+	fork               forkFakeAgentAPI
 }
 
 func (*FakeAgentAPI) UpdateAppStatus(context.Context, *agentproto.UpdateAppStatusRequest) (*agentproto.UpdateAppStatusResponse, error) {

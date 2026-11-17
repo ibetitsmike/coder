@@ -582,6 +582,16 @@ func (f forkQueryMetricsStore) ClaimDuePullRequestWatches(ctx context.Context, a
 	return f.s.ClaimDuePullRequestWatches(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) FireChatProcessWatches(ctx context.Context, arg forkdb.FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "FireChatProcessWatches", time.Now())
+	return f.s.FireChatProcessWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "MarkLostChatProcessWatches", time.Now())
+	return f.s.MarkLostChatProcessWatches(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
 	defer f.observe(ctx, "RecordPullRequestWatchPoll", time.Now())
 	return f.s.RecordPullRequestWatchPoll(ctx, arg)

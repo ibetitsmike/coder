@@ -121,6 +121,7 @@ type Options struct {
 	// without agent definitions never fills its snapshot caps with
 	// rows chatd would drop anyway.
 	ForkAgentDefinitions              bool
+	ForkChatProcessEvents             *ForkChatProcessEvents // fork: see fork_process_events.go
 	ConnectionLogger                  *atomic.Pointer[connectionlog.ConnectionLogger]
 	DerpMapFn                         func() *tailcfg.DERPMap
 	TailnetCoordinator                *atomic.Pointer[tailnet.Coordinator]

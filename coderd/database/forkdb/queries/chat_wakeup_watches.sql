@@ -81,7 +81,9 @@ LIMIT @limit_count::int;
 -- count the caller read: no row means another delivery of the watch won,
 -- or the watch is done. @done marks the watch delivered, and @spec_patch
 -- merges into its spec. A delivery consumes the fired event, so an open
--- watch is not ready again until a new event fires.
+-- watch is not ready again until a new event fires. @fired_payload, when set,
+-- is the payload the caller read: no row means that a later event changed
+-- it.
 -- name: MarkChatWakeupWatchDelivered :one
 UPDATE chat_wakeup_watches
 SET
@@ -95,7 +97,111 @@ WHERE id = @id::uuid
     AND wakeup_id = @wakeup_id::uuid
     AND delivered_at IS NULL
     AND deliveries = @deliveries::int
+    AND (sqlc.narg('fired_payload')::jsonb IS NULL OR fired_payload = sqlc.narg('fired_payload')::jsonb)
 RETURNING *;
+
+-- Fires the open process watches of active wake-ups on process @process_id
+-- of chat @chat_id on agent @agent_id, for an event that the agent reported
+-- or that chatd read from it. @wakeup_id narrows the watches when set. An
+-- event that ends the watch, @ended, is an object with an exit or a lost key,
+-- which merges into the payload. Otherwise the event carries @matched output
+-- lines that matched the pattern of the watch, @lines, which add to the lines
+-- the payload holds until a delivery, keeping the last 16384 characters, and
+-- @last, set on the last report of the agent. Lines fire only a watch with an
+-- output pattern whose message count is below its output_max_events, and
+-- that has not ended. The first event keeps its fired_at. Returns the chats
+-- to poke.
+-- name: FireChatProcessWatches :many
+UPDATE chat_wakeup_watches x
+SET
+    fired_at = COALESCE(x.fired_at, @fired_at::timestamptz),
+    fired_payload = CASE
+        WHEN sqlc.narg('ended')::jsonb IS NOT NULL THEN
+            COALESCE(x.fired_payload, '{}'::jsonb) || sqlc.narg('ended')::jsonb
+        ELSE
+            COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
+                'matched', COALESCE((x.fired_payload->>'matched')::int, 0) + @matched::int,
+                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), @lines::text), 16384),
+                'last', COALESCE((x.fired_payload->>'last')::boolean, false) OR @last::boolean
+            )
+        END
+FROM chat_wakeups w
+WHERE w.id = x.wakeup_id
+    AND w.status = 'active'
+    AND x.kind = 'process'
+    AND x.delivered_at IS NULL
+    AND x.chat_id = @chat_id::uuid
+    AND x.agent_id = @agent_id::uuid
+    AND x.process_id = @process_id::text
+    AND (sqlc.narg('wakeup_id')::uuid IS NULL OR x.wakeup_id = sqlc.narg('wakeup_id')::uuid)
+    AND (
+        sqlc.narg('ended')::jsonb IS NOT NULL
+        OR (
+            COALESCE(x.spec->>'output_pattern', '') <> ''
+            AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+            AND x.fired_payload->'exit' IS NULL
+            AND x.fired_payload->'lost' IS NULL
+        )
+    )
+RETURNING x.chat_id;
+
+-- Fires as lost the open process watches of active wake-ups whose agent can
+-- no longer report the process. With @reason when the agent is not an agent
+-- of the latest build of the chat's workspace, or that build does not start
+-- the workspace, or the chat has no workspace; the time of the loss is when
+-- the latest build was created, or @now without one. With @restarted_reason
+-- when the agent is current but started after the watch was created, which
+-- an agent reports only when its process starts, so it lost the processes
+-- of its earlier run; the time of the loss is when the agent started.
+-- Watches that already ended stay as they are. Returns the chats to poke.
+-- name: MarkLostChatProcessWatches :many
+WITH lost AS (
+    SELECT
+        x.id,
+        CASE WHEN ag.id IS NULL
+            THEN @reason::text
+            ELSE @restarted_reason::text
+        END AS reason,
+        CASE WHEN ag.id IS NULL
+            THEN COALESCE(lb.created_at, @now::timestamptz)
+            ELSE ag.started_at
+        END AS lost_at
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    JOIN chats c ON c.id = x.chat_id
+    LEFT JOIN LATERAL (
+        SELECT b.job_id, b.transition, b.created_at
+        FROM workspace_builds b
+        WHERE b.workspace_id = c.workspace_id
+        ORDER BY b.build_number DESC
+        LIMIT 1
+    ) lb ON true
+    LEFT JOIN LATERAL (
+        SELECT a.id, a.started_at
+        FROM workspace_agents a
+        JOIN workspace_resources r ON r.id = a.resource_id
+        WHERE lb.transition = 'start'
+            AND a.id = x.agent_id
+            AND r.job_id = lb.job_id
+            AND NOT a.deleted
+    ) ag ON true
+    WHERE x.kind = 'process'
+        AND x.delivered_at IS NULL
+        AND w.status = 'active'
+        AND x.fired_payload->'exit' IS NULL
+        AND x.fired_payload->'lost' IS NULL
+        AND (ag.id IS NULL OR ag.started_at > x.created_at)
+)
+UPDATE chat_wakeup_watches x
+SET
+    fired_at = COALESCE(x.fired_at, @now::timestamptz),
+    fired_payload = COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
+        'lost', jsonb_build_object('reason', lost.reason, 'at', lost.lost_at)
+    )
+FROM lost
+WHERE x.id = lost.id
+    AND x.delivered_at IS NULL
+RETURNING x.chat_id;
 
 -- Claims the open pull_request watches that the pull request poller of a
 -- replica reads next: those of active wake-ups of unarchived chats whose

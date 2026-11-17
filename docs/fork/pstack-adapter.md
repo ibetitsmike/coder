@@ -416,23 +416,29 @@ With `process_ids`, `wait_for_events` also watches up to 10 background processes
 Without `child_chat_ids`, the call watches only the processes, and the pull request when it names one.
 For each process, the chat gets one message after the process exits, made of the `prompt`, an empty line, and ``Background process <id> (`<command>`) exited with code <code>.``, or `exited without an exit code (killed by a signal).` for a killed process.
 The message ends with up to the last 40 lines of the process's output, at most 4&nbsp;KiB.
-A process that already exited when you call the tool wakes the chat at the first check after your turn ends.
-When the workspace stops or is rebuilt, or the workspace agent no longer knows the process, the message says ``Lost the watch on background process <id> (`<command>`): <reason>.`` instead.
+A process that already exited when you call the tool wakes the chat right after your turn ends.
+The workspace agent reports the exit to Coder Agents as it happens, and keeps the report until Coder Agents confirms it, so a dropped connection delays the message but doesn't lose it.
+When the workspace agent no longer knows the process at the call, the message says ``Lost the watch on background process <id> (`<command>`): <reason>.`` instead.
+The same message arrives within 5&nbsp;minutes when the workspace stops or is rebuilt, or its agent restarts.
 With `process_output_pattern`, a regular expression in RE2 syntax of up to 1024&nbsp;bytes, the chat also gets a message while a process runs and has printed new complete lines, ending in a newline, that match.
-The first check also matches the lines that the process printed before the call.
+The workspace agent checks the output every second, and its first check also matches the lines that the process printed before the call.
 That message is made of the `prompt`, an empty line, ``Background process <id> (`<command>`) is still running and printed <n> new lines matching `<pattern>`.``, and up to the last 40 of those lines, at most 4&nbsp;KiB.
-`process_output_cooldown_seconds`, from 0 to 86400 and 60 by default, sets how long such a message waits after the wake-up's last message, so it collects the lines printed meanwhile.
+`process_output_cooldown_seconds`, from 0 to 86400 and 60 by default, sets how long the workspace agent waits between two reports of matching lines of one process, so a report collects the lines printed meanwhile.
+The first report goes out at once.
+While the chat is busy, the reports collect, and one message carries their lines, at most the last 16384 characters of them.
+A report holds at most the last 100 matching lines and cuts each one to 4&nbsp;KiB, while its count covers every match.
+Lines that match in the cool-down before the process exits arrive only in the exit message's output.
+After a lost connection, a message can repeat a line, but it doesn't miss one.
 `process_output_max_events`, from 1 to 100 and 10 by default, caps those messages per process, and the exit message still arrives.
 The workspace agent keeps only the first and the last 16&nbsp;KiB of a process's output, and once a process has printed more, matching sees only the kept last 16&nbsp;KiB, so earlier lines can be missed.
 It also cuts a line longer than 2048&nbsp;bytes and ends it with `... [truncated]`, so a match in the cut part doesn't wake the chat.
 The result also holds `processes`, with the `process_id`, `command`, and `output_pattern` of each watched process.
-Coder Agents reads the processes from the workspace agent every 15&nbsp;seconds, or once a minute while the call also waits for a pull request.
-After a failed read of that pull request, the processes wait for the same retry as the pull request.
-A failed read doesn't end the watch, and when every entry that still waits is a process whose read failed, Coder Agents reads again after a minute.
 At `expires_at`, one last check reports the processes that exited by then, and no more matching lines.
-That check can also report an exit in the 15&nbsp;seconds after `expires_at`, but a check that runs later, such as after a busy turn, leaves out exits after `expires_at`.
-Such a late check finds an exit in the workspace agent's list of the chat's processes, which holds 10, running ones first and then the newest, so it also misses an exit before `expires_at` when other processes push the process out of that list.
-The call reads each process before it returns, and fails with `process "<id>" is not a process of this chat: pass the background_process_id that execute returned` when the chat's workspace agent doesn't know it, or with `this chat has no workspace agent: start the process with execute first`.
+That check can also report an exit in the 15&nbsp;seconds after `expires_at`, but a check that runs later, such as after a busy turn, leaves out exits after `expires_at`, by the exit time that the workspace agent reported.
+The call reads each process from the workspace agent before it returns, and fails with `process "<id>" is not a process of this chat: pass the background_process_id that execute returned` when the chat's workspace agent doesn't know it, or with `this chat has no workspace agent: start the process with execute first`.
+A workspace agent too old to report processes fails the call with `the workspace agent of this chat is too old to report process events: restart the workspace to update its agent, or poll the process with schedule_wakeup`.
+After the wake-up is saved, the call registers each watch with the workspace agent.
+When that fails, the result also holds `warning`, which names the processes: their exits still wake the chat when the agent reports them, but an exit before the call and matching output can be missed.
 More than 10 processes fail with `cannot wait for <n> processes at once, the maximum is 10`.
 The call leaves out processes that an earlier call still watches, and fails with `these processes are already watched by wake-up <id>: end your turn to wait for them` when it leaves out all of them.
 `process_output_pattern` without `process_ids` fails with `process_output_pattern requires process_ids`, and the cool-down or the limit without a pattern fails with `process_output_cooldown_seconds and process_output_max_events require process_output_pattern`.
@@ -892,7 +898,8 @@ Checked against fork `main` at `b3c4911b16`, except `fork_agent_tool_policy.go`,
 The family messages entry is checked against fork `main` at `2bf9127b59`.
 The pinned skills entry is checked against fork `main` at `9dbe879138`.
 The `list_agents` lines on `chat_id`, `recursive`, `waiting_for_capacity`, and the children's lists are checked against the change that adds `chat_id` and `recursive` to `list_agents`.
-The skill roots, instruction files, and rules entries, and the wake-ups entry's lines on the `wait_for_events` arguments, the pull request arguments, background processes, and the tool cards are checked against fork `main` at `525bb3d68b`:
+The wake-ups entry's lines on background processes are checked against the change that makes the workspace agent report process events (#295).
+The skill roots, instruction files, and rules entries, and the wake-ups entry's lines on the `wait_for_events` arguments, the pull request arguments, and the tool cards are checked against fork `main` at `525bb3d68b`:
 
 - Subagent types and `spawn_agent` fields: `coderd/x/chatd/subagent_catalog.go:40-46`, `:55-159`.
 - Spawn from a child: root-chat tools only for root chats, `coderd/x/chatd/turn_environment.go:732-741`.
@@ -1068,8 +1075,8 @@ The skill roots, instruction files, and rules entries, and the wake-ups entry's 
   The events, the prompt, the poll and retry times, and the 20-line cap, `coderd/x/chatd/fork_pull_request_events.go:25-55`, and the read at the call with the unknown event and closed errors, `:69-126`.
   What wakes the chat, `:169-181`, without activity after the expiry, `:134-167`, the message without bodies, `:183-223`, one per pull request, `:128-132`, `fork_wait_for_events.go:371-398`, the poll once a minute while it waits, `:401-404`, and the failed reads, `fork_pull_request_events.go:225-252`.
   The read with the chat owner's linked account and its errors, `coderd/fork_chat_pull_requests.go:24-84`, wired in `coderd/coderd.go:977`, only for GitHub, `coderd/externalauth/gitprovider/fork_github_activity.go:85`, `:101-104`, without the owner's own reviews and comments, draft reviews, or older comments, `:140-200`, and the CI state, `:202-295`.
-  Background processes, `fork_wait_for_events.go:43-47`, `coderd/x/chatd/fork_process_events.go:30-54`, with the checks of the output pattern fields, `:62-98`, the read at the call and its errors, `:100-168`, the result, `:56-60`, `fork_wait_for_events.go:238-241`, and the default prompt, `:339-344`.
-  The delivery, `fork_wait_for_events.go:453-492`, the last check at the expiry, `:394-402`, `:558-564`, with the late check's process list, `fork_process_events.go:466-482`, `agent/agentproc/api.go:138-150`, the exit, lost-watch, and matching-lines messages, `fork_process_events.go:287-337`, `:387-417`, `:484-534`, the cool-down and the limit, `:347-379`, the kept output, `:419-464`, `agent/agentproc/headtail.go:12-28`, `:259-303`, and the poll and retry times, `fork_wait_for_events.go:494-499`, `:439-442`, `fork_process_events.go:41-43`, `fork_wakeups.go:28`.
+  Background processes, `fork_wait_for_events.go` (`waitForEventsArgs`, `waitForEventsResult`, the description in `waitForEventsTool`), `coderd/x/chatd/fork_process_events.go`, with the checks of the output pattern fields, `processOutputArgs`, the read at the call and its errors, `processWaitEvents`, the agent too old, `processAgentConn`, and the registration with its `warning`, `registerProcessWatches`.
+  The agent's exit and output reports, `agent/agentproc/fork_process_events.go` (`forkProcessStarted`, `ReportChatProcessEvents`, `forkHandleWatchProcess`, `forkRunOutputWatch`, `forkCutLine`, `forkOutputTail`), sent from `agent/fork_process_events.go`, recorded by `coderd/agentapi/fork_process_events.go` with `FireChatProcessWatches`, `coderd/database/forkdb/queries/chat_wakeup_watches.sql`, the kept output, `agent/agentproc/headtail.go`, the lost watches, `MarkLostChatProcessWatches` and `sweepProcessWatches`, every 5&nbsp;minutes, `processSweepInterval`, and the exit, lost-watch, and matching-lines messages and the last check at the expiry, `processFiredText`, `deliverEventsWakeup`.
   The wake-up routes, only with the experiment, `coderd/fork_chat_routes.go:57-62`, the list, `coderd/fork_chat_wakeups.go:23-61`, and the change, as an update of the chat, with its errors, `:71-167`, `coderd/x/chatd/fork_wakeup_controls.go:20-76`, a pause that keeps the run time and the reasons, `:24-27`, `:78-92`, and a resume, `:94-114`, with the fields, `codersdk/fork_chat_wakeups.go:38-85`.
   The composer pill, only with the experiment, `site/src/pages/AgentsPage/components/ForkComposerSlot.tsx:32-34`, with the open wake-ups and their number, `ForkChatWakeupsPill.tsx:54-132`, each row and its buttons, `:135-150`, `:165-260`, read every 30&nbsp;seconds, `site/src/api/queries/forkChatWakeups.ts:13-22`.
   The tool cards, only with the experiment, `site/src/pages/AgentsPage/components/ChatElements/tools/forkToolRenderers.tsx:29-41`, `:70-84`, the `schedule_wakeup` card, `ForkScheduleWakeupTool.tsx:12-43`, `:53-99`, the `wait_for_events` card, `ForkWaitForEventsTool.tsx:20-64`, `:72-161`, and the `notify_user` card, `ForkNotifyUserTool.tsx:10`, `:17-62`.

@@ -778,7 +778,45 @@ service Agent {
 	rpc ReportBoundaryLogs(ReportBoundaryLogsRequest) returns (ReportBoundaryLogsResponse);
 	rpc UpdateAppStatus(UpdateAppStatusRequest) returns (UpdateAppStatusResponse);
 	rpc PushContextState(PushContextStateRequest) returns (PushContextStateResponse);
+	// Fork: ReportChatProcessEvents reports the exits and the matching
+	// output of the background processes of chats, for the wait_for_events
+	// tool of the fork-chat-wakeups experiment.
+	rpc ReportChatProcessEvents(ReportChatProcessEventsRequest) returns (ReportChatProcessEventsResponse);
 }
+
+// Fork: ReportChatProcessEventsRequest carries events of the background
+// processes that chats started on the agent. The agent sends each event until
+// a call that carries it succeeds.
+message ReportChatProcessEventsRequest {
+	message Event {
+		// Exit tells that the process exited. exit_code is -1 for a process
+		// killed by a signal. output_tail is the end of its output.
+		message Exit {
+			int32 exit_code = 1;
+			string output_tail = 2;
+		}
+		// OutputMatch carries the output lines that matched the pattern of
+		// a watch since its last report. matched counts them; lines may
+		// leave out the oldest. last is set on the final report of the
+		// watch. wakeup_id is the wake-up that registered the watch.
+		message OutputMatch {
+			repeated string lines = 1;
+			int32 matched = 2;
+			bool last = 3;
+			string wakeup_id = 4;
+		}
+		string chat_id = 1;
+		string process_id = 2;
+		oneof kind {
+			Exit exit = 3;
+			OutputMatch output_match = 4;
+		}
+		google.protobuf.Timestamp at = 5;
+	}
+	repeated Event events = 1;
+}
+
+message ReportChatProcessEventsResponse {}
 
 // ACPHarnessBody advertises cached harness metadata without launch configuration.
 message ACPHarnessBody {

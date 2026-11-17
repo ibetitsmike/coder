@@ -450,6 +450,18 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().ClaimDuePullRequestWatches(gomock.Any(), arg).Return(rows, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(rows)
 		},
+		"FireChatProcessWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.FireChatProcessWatchesParams{})
+			chats := []uuid.UUID{uuid.New()}
+			fdb.EXPECT().FireChatProcessWatches(gomock.Any(), arg).Return(chats, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chats)
+		},
+		"MarkLostChatProcessWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.MarkLostChatProcessWatchesParams{})
+			chats := []uuid.UUID{uuid.New()}
+			fdb.EXPECT().MarkLostChatProcessWatches(gomock.Any(), arg).Return(chats, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chats)
+		},
 		"RecordPullRequestWatchPoll": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			wakeup := testutil.Fake(t, faker, forkdb.ChatWakeup{ChatID: chat.ID})

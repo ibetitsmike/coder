@@ -80,16 +80,16 @@ RETURNING *;
 -- nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
 -- is due when its chat would not queue a new message and either its run time
 -- has come or, for an events wake-up before its expiry, it has a child_done
--- watch or a fired pull_request watch in chat_wakeup_ready_watches whose
--- last send did not fail. A failed send waits for the run time that the
--- failure set, so it does not repeat at once, and the other watches wait for
--- their run time, which reads them. The chats that would queue are the busy
--- and paused chats, and the errored chats with a non-empty queue
--- (chatstate's R, I, A, P and E1 states). The wake-ups of archived chats are
--- always due by their run time, so the waker cancels them. chat_id limits
--- the list to the wake-ups of one chat and to those that watch it as a
--- child. The due rows page by (next_run_at, id) after after_run_at and
--- after_id.
+-- watch or a fired pull_request or process watch in
+-- chat_wakeup_ready_watches whose last send did not fail. A failed send
+-- waits for the run time that the failure set, so it does not repeat at
+-- once, and the other watches wait for their run time, which reads them.
+-- The chats that would queue are the busy and paused chats, and the errored
+-- chats with a non-empty queue (chatstate's R, I, A, P and E1 states). The
+-- wake-ups of archived chats are always due by their run time, so the waker
+-- cancels them. chat_id limits the list to the wake-ups of one chat and to
+-- those that watch it as a child. The due rows page by (next_run_at, id)
+-- after after_run_at and after_id.
 -- name: ListDueChatWakeups :many
 WITH candidates AS (
     SELECT cw.id
@@ -103,7 +103,7 @@ WITH candidates AS (
     JOIN chat_wakeups cw ON cw.id = r.wakeup_id
     WHERE cw.kind = 'events'
         AND (cw.expires_at IS NULL OR cw.expires_at > @now::timestamptz)
-        AND r.kind IN ('child_done', 'pull_request')
+        AND r.kind IN ('child_done', 'pull_request', 'process')
         AND r.failed_at IS NULL
         AND (
             sqlc.narg('chat_id')::uuid IS NULL
