@@ -409,14 +409,3 @@ func TestWakerRunsInStartedWorker(t *testing.T) {
 		return f.countPromptMessages(t, second, secondWakeup.Prompt) == 1
 	}, testutil.IntervalFast, "the sweep must deliver the second wake-up")
 }
-
-// A delivery reads a process only when the read and what follows it fit in
-// the time the delivery has left.
-func TestWakeupReadFits(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	require.True(t, wakeupReadFits(ctx, processReadTimeout), "a ctx without a delivery deadline has time")
-	require.True(t, wakeupReadFits(withWakeupDeadline(ctx, time.Now().Add(2*processReadTimeout+time.Minute)), processReadTimeout))
-	require.False(t, wakeupReadFits(withWakeupDeadline(ctx, time.Now().Add(2*processReadTimeout-time.Second)), processReadTimeout))
-	require.LessOrEqual(t, 2*processReadTimeout, wakeupDeliveryTimeout, "a delivery fits a process read")
-}

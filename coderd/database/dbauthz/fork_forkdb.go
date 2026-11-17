@@ -925,6 +925,42 @@ func (f *forkQuerier) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb
 	return f.db.ClaimDuePullRequestWatches(ctx, arg)
 }
 
+// FireChatProcessWatches spans the wake-ups of chats on one agent, so it
+// needs site-wide chat access, like chatd's.
+func (f *forkQuerier) FireChatProcessWatches(ctx context.Context, arg forkdb.FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.FireChatProcessWatches(ctx, arg)
+}
+
+// ChatProcessWatchTakesLines spans the wake-ups of a chat on one agent, so
+// it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return false, err
+	}
+	return f.db.ChatProcessWatchTakesLines(ctx, arg)
+}
+
+// MarkChatProcessWatchesReported spans the wake-ups of chats on one agent,
+// so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return 0, err
+	}
+	return f.db.MarkChatProcessWatchesReported(ctx, arg)
+}
+
+// MarkLostChatProcessWatches spans chats, so it needs site-wide chat access,
+// like chatd's.
+func (f *forkQuerier) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.MarkLostChatProcessWatches(ctx, arg)
+}
+
 func (f *forkQuerier) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
 	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
 		return 0, err

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"github.com/sqlc-dev/pqtype"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
@@ -26,9 +27,9 @@ import (
 )
 
 const (
-	// eventsPollInterval is how often an events wake-up reads the background
-	// processes it watches, which cannot poke the waker, and how soon it runs
-	// again after a failed send.
+	// eventsPollInterval is how soon an events wake-up runs again after a
+	// pass that found nothing to deliver once its expiry passed, and after a
+	// failed send.
 	eventsPollInterval = 15 * time.Second
 
 	wakeupReasonArchived = "archived"
@@ -135,8 +136,10 @@ func (p *Server) finishWakeupSend(ctx context.Context, chat database.Chat, wakeu
 			return err
 		}
 		// A failed message that would end the watch keeps the final poll
-		// after the expiry from leaving its event out.
-		if delivery.watch != nil && delivery.done {
+		// after the expiry from leaving its event out. A failed message for
+		// output lines waits for the retry like one that ends the watch,
+		// instead of making the wake-up due again at once.
+		if delivery.watch != nil && (delivery.done || len(delivery.firedPayload) > 0) {
 			if err := ftx.MarkChatWakeupWatchFailed(ctx, forkdb.MarkChatWakeupWatchFailedParams{
 				ID:       delivery.watch.ID,
 				WakeupID: wakeup.ID,
@@ -185,16 +188,18 @@ func wakeupRunKey(wakeup forkdb.ChatWakeup) string {
 // key that keeps it from being delivered twice, and how a delivery admitted
 // at a given time ends the occurrence. A delivery of an events wake-up also sets
 // watch, the watch it delivers for, done when the message ends the watch,
-// and specPatch, which merges into the spec of the watch. Its run only
-// counts against the caps: the watch row keeps it from being delivered
-// twice.
+// specPatch, which merges into the spec of the watch, and firedPayload,
+// the fired payload of a process watch that the text reports, which a later
+// event must not have changed. Its run only counts against the caps: the
+// watch row keeps it from being delivered twice.
 type wakeupDelivery struct {
-	text      string
-	runKey    string
-	finish    func(admittedAt time.Time) wakeupFinish
-	watch     *forkdb.ChatWakeupWatch
-	done      bool
-	specPatch json.RawMessage
+	text         string
+	runKey       string
+	finish       func(admittedAt time.Time) wakeupFinish
+	watch        *forkdb.ChatWakeupWatch
+	done         bool
+	specPatch    json.RawMessage
+	firedPayload json.RawMessage
 }
 
 // sendWakeupPrompt sends the text of delivery as the chat owner. The delivered
@@ -297,6 +302,9 @@ func admitWakeupDelivery(ctx context.Context, txdb forkdb.Store, wakeup forkdb.C
 		ID:         delivery.watch.ID,
 		WakeupID:   wakeup.ID,
 		Deliveries: delivery.watch.Deliveries,
+		// A process event that fired meanwhile changed the payload, and the
+		// pass that its poke starts reports it with the rest.
+		FiredPayload: pqtype.NullRawMessage{RawMessage: delivery.firedPayload, Valid: len(delivery.firedPayload) > 0},
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return wakeupFinish{}, errWakeupOccurrenceRan

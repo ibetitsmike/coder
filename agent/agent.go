@@ -1129,6 +1129,7 @@ func (a *agent) run() (retErr error) {
 				Logger: a.logger.Named("agentcontext-push"),
 			})
 		})
+	a.forkStartChatProcessEvents(connMan)
 
 	// channels to sync goroutines below
 	//  handle manifest

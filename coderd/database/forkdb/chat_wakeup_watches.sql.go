@@ -16,6 +16,49 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const chatProcessWatchTakesLines = `-- name: ChatProcessWatchTakesLines :one
+SELECT EXISTS (
+    SELECT 1
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    WHERE w.status IN ('active', 'paused')
+        AND x.kind = 'process'
+        AND x.delivered_at IS NULL
+        AND x.chat_id = $1::uuid
+        AND x.agent_id = $2::uuid
+        AND x.process_id = $3::text
+        AND ($4::uuid IS NULL OR x.wakeup_id = $4::uuid)
+        AND COALESCE(x.spec->>'output_pattern', '') <> ''
+        AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+        AND x.fired_payload->'exit' IS NULL
+        AND x.fired_payload->'lost' IS NULL
+)::boolean
+`
+
+type ChatProcessWatchTakesLinesParams struct {
+	ChatID    uuid.UUID     `db:"chat_id" json:"chat_id"`
+	AgentID   uuid.UUID     `db:"agent_id" json:"agent_id"`
+	ProcessID string        `db:"process_id" json:"process_id"`
+	WakeupID  uuid.NullUUID `db:"wakeup_id" json:"wakeup_id"`
+}
+
+// Reports whether an open process watch of an active or paused wake-up on
+// process @process_id of chat @chat_id on agent @agent_id still takes output
+// lines, as FireChatProcessWatches fires them, without the output_at check.
+// @wakeup_id narrows the watches when set. The agent stops its output watch
+// when none does.
+func (q *Queries) ChatProcessWatchTakesLines(ctx context.Context, arg ChatProcessWatchTakesLinesParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, chatProcessWatchTakesLines,
+		arg.ChatID,
+		arg.AgentID,
+		arg.ProcessID,
+		arg.WakeupID,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const claimDuePullRequestWatches = `-- name: ClaimDuePullRequestWatches :many
 WITH due AS (
     SELECT x.id, c.owner_id, w.expires_at
@@ -94,6 +137,104 @@ func (q *Queries) ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePu
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const fireChatProcessWatches = `-- name: FireChatProcessWatches :many
+UPDATE chat_wakeup_watches x
+SET
+    fired_at = COALESCE(x.fired_at, $1::timestamptz),
+    spec = CASE
+        WHEN $2::jsonb IS NOT NULL THEN x.spec
+        ELSE x.spec || jsonb_build_object('output_at', $3::timestamptz)
+        END,
+    fired_payload = CASE
+        WHEN $2::jsonb IS NOT NULL THEN
+            COALESCE(x.fired_payload, '{}'::jsonb) || $2::jsonb
+        ELSE
+            COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
+                'matched', COALESCE((x.fired_payload->>'matched')::int, 0) + $4::int,
+                'lines', right(concat_ws(E'\n', NULLIF(x.fired_payload->>'lines', ''), $5::text), 16384)
+            )
+        END
+FROM chat_wakeups w
+WHERE w.id = x.wakeup_id
+    AND w.status IN ('active', 'paused')
+    AND x.kind = 'process'
+    AND x.delivered_at IS NULL
+    AND x.chat_id = $6::uuid
+    AND x.agent_id = $7::uuid
+    AND x.process_id = $8::text
+    AND ($9::uuid IS NULL OR x.wakeup_id = $9::uuid)
+    AND (
+        $2::jsonb IS NOT NULL
+        OR (
+            COALESCE(x.spec->>'output_pattern', '') <> ''
+            AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+            AND x.fired_payload->'exit' IS NULL
+            AND x.fired_payload->'lost' IS NULL
+            AND COALESCE((x.spec->>'output_at')::timestamptz, '-infinity') < $3::timestamptz
+        )
+    )
+RETURNING x.chat_id
+`
+
+type FireChatProcessWatchesParams struct {
+	FiredAt   time.Time             `db:"fired_at" json:"fired_at"`
+	Ended     pqtype.NullRawMessage `db:"ended" json:"ended"`
+	OutputAt  time.Time             `db:"output_at" json:"output_at"`
+	Matched   int32                 `db:"matched" json:"matched"`
+	Lines     string                `db:"lines" json:"lines"`
+	ChatID    uuid.UUID             `db:"chat_id" json:"chat_id"`
+	AgentID   uuid.UUID             `db:"agent_id" json:"agent_id"`
+	ProcessID string                `db:"process_id" json:"process_id"`
+	WakeupID  uuid.NullUUID         `db:"wakeup_id" json:"wakeup_id"`
+}
+
+// Fires the open process watches of active or paused wake-ups on process
+// @process_id of chat @chat_id on agent @agent_id, for an event that the
+// agent reported or that chatd read from it. The agent drops an event once
+// it is acked, so a paused wake-up keeps it for its resume. @wakeup_id
+// narrows the watches when set. An event that ends the watch, @ended, is an
+// object with an exit or a lost key, which merges into the payload.
+// Otherwise the event carries @matched output lines that matched the
+// pattern of the watch, @lines, which add to the lines the payload holds
+// until a delivery, keeping the last 16384 characters. Lines fire only a
+// watch with an output pattern whose message count is below its
+// output_max_events, and that has not ended. @output_at, the time the agent matched the lines, must be after
+// the output_at in the spec of the watch, which it then replaces, so a
+// report that the agent sends again changes nothing. The first event keeps
+// its fired_at. Returns the chats to poke.
+func (q *Queries) FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, fireChatProcessWatches,
+		arg.FiredAt,
+		arg.Ended,
+		arg.OutputAt,
+		arg.Matched,
+		arg.Lines,
+		arg.ChatID,
+		arg.AgentID,
+		arg.ProcessID,
+		arg.WakeupID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var chat_id uuid.UUID
+		if err := rows.Scan(&chat_id); err != nil {
+			return nil, err
+		}
+		items = append(items, chat_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -448,6 +589,36 @@ func (q *Queries) ListReadyChatWakeupWatches(ctx context.Context, arg ListReadyC
 	return items, nil
 }
 
+const markChatProcessWatchesReported = `-- name: MarkChatProcessWatchesReported :execrows
+UPDATE chat_wakeup_watches x
+SET spec = x.spec || jsonb_build_object('reported_at', $1::timestamptz)
+FROM chat_wakeups w
+WHERE w.id = x.wakeup_id
+    AND w.status IN ('active', 'paused')
+    AND x.kind = 'process'
+    AND x.delivered_at IS NULL
+    AND x.agent_id = $2::uuid
+    AND x.fired_payload->'exit' IS NULL
+    AND x.fired_payload->'lost' IS NULL
+`
+
+type MarkChatProcessWatchesReportedParams struct {
+	ReportedAt time.Time `db:"reported_at" json:"reported_at"`
+	AgentID    uuid.UUID `db:"agent_id" json:"agent_id"`
+}
+
+// Records that agent @agent_id held no event at @reported_at that coderd
+// did not ack: sets reported_at in the spec of its open process
+// watches of active or paused wake-ups that have not ended. The final poll
+// of a wake-up waits for it.
+func (q *Queries) MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markChatProcessWatchesReported, arg.ReportedAt, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markChatWakeupWatchDelivered = `-- name: MarkChatWakeupWatchDelivered :one
 UPDATE chat_wakeup_watches
 SET
@@ -461,16 +632,18 @@ WHERE id = $4::uuid
     AND wakeup_id = $5::uuid
     AND delivered_at IS NULL
     AND deliveries = $6::int
+    AND ($7::jsonb IS NULL OR fired_payload = $7::jsonb)
 RETURNING id, wakeup_id, chat_id, organization_id, kind, ordinal, child_chat_id, agent_id, process_id, pull_request_url, spec, fired_at, fired_payload, delivered_at, deliveries, failed_at, created_at
 `
 
 type MarkChatWakeupWatchDeliveredParams struct {
-	Done       bool            `db:"done" json:"done"`
-	Now        time.Time       `db:"now" json:"now"`
-	SpecPatch  json.RawMessage `db:"spec_patch" json:"spec_patch"`
-	ID         uuid.UUID       `db:"id" json:"id"`
-	WakeupID   uuid.UUID       `db:"wakeup_id" json:"wakeup_id"`
-	Deliveries int32           `db:"deliveries" json:"deliveries"`
+	Done         bool                  `db:"done" json:"done"`
+	Now          time.Time             `db:"now" json:"now"`
+	SpecPatch    json.RawMessage       `db:"spec_patch" json:"spec_patch"`
+	ID           uuid.UUID             `db:"id" json:"id"`
+	WakeupID     uuid.UUID             `db:"wakeup_id" json:"wakeup_id"`
+	Deliveries   int32                 `db:"deliveries" json:"deliveries"`
+	FiredPayload pqtype.NullRawMessage `db:"fired_payload" json:"fired_payload"`
 }
 
 // Records a message that the watch sent. Run it in the transaction that
@@ -478,7 +651,9 @@ type MarkChatWakeupWatchDeliveredParams struct {
 // count the caller read: no row means another delivery of the watch won,
 // or the watch is done. @done marks the watch delivered, and @spec_patch
 // merges into its spec. A delivery consumes the fired event, so an open
-// watch is not ready again until a new event fires.
+// watch is not ready again until a new event fires. @fired_payload, when set,
+// is the payload the caller read: no row means that a later event changed
+// it.
 func (q *Queries) MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChatWakeupWatchDeliveredParams) (ChatWakeupWatch, error) {
 	row := q.db.QueryRowContext(ctx, markChatWakeupWatchDelivered,
 		arg.Done,
@@ -487,6 +662,7 @@ func (q *Queries) MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChat
 		arg.ID,
 		arg.WakeupID,
 		arg.Deliveries,
+		arg.FiredPayload,
 	)
 	var i ChatWakeupWatch
 	err := row.Scan(
@@ -530,6 +706,95 @@ type MarkChatWakeupWatchFailedParams struct {
 func (q *Queries) MarkChatWakeupWatchFailed(ctx context.Context, arg MarkChatWakeupWatchFailedParams) error {
 	_, err := q.db.ExecContext(ctx, markChatWakeupWatchFailed, arg.Now, arg.ID, arg.WakeupID)
 	return err
+}
+
+const markLostChatProcessWatches = `-- name: MarkLostChatProcessWatches :many
+WITH lost AS (
+    SELECT
+        x.id,
+        CASE WHEN ag.id IS NULL
+            THEN $2::text
+            ELSE $3::text
+        END AS reason,
+        CASE WHEN ag.id IS NULL
+            THEN COALESCE(lb.created_at, $1::timestamptz)
+            ELSE ag.started_at
+        END AS lost_at
+    FROM chat_wakeup_watches x
+    JOIN chat_wakeups w ON w.id = x.wakeup_id
+    JOIN chats c ON c.id = x.chat_id
+    LEFT JOIN LATERAL (
+        SELECT b.job_id, b.transition, b.created_at
+        FROM workspace_builds b
+        WHERE b.workspace_id = c.workspace_id
+        ORDER BY b.build_number DESC
+        LIMIT 1
+    ) lb ON true
+    LEFT JOIN LATERAL (
+        SELECT a.id, a.started_at
+        FROM workspace_agents a
+        JOIN workspace_resources r ON r.id = a.resource_id
+        WHERE lb.transition = 'start'
+            AND a.id = x.agent_id
+            AND r.job_id = lb.job_id
+            AND NOT a.deleted
+    ) ag ON true
+    WHERE x.kind = 'process'
+        AND x.delivered_at IS NULL
+        AND w.status IN ('active', 'paused')
+        AND x.fired_payload->'exit' IS NULL
+        AND x.fired_payload->'lost' IS NULL
+        AND (ag.id IS NULL OR ag.started_at > x.created_at)
+)
+UPDATE chat_wakeup_watches x
+SET
+    fired_at = COALESCE(x.fired_at, $1::timestamptz),
+    fired_payload = COALESCE(x.fired_payload, '{}'::jsonb) || jsonb_build_object(
+        'lost', jsonb_build_object('reason', lost.reason, 'at', lost.lost_at)
+    )
+FROM lost
+WHERE x.id = lost.id
+    AND x.delivered_at IS NULL
+RETURNING x.chat_id
+`
+
+type MarkLostChatProcessWatchesParams struct {
+	Now             time.Time `db:"now" json:"now"`
+	Reason          string    `db:"reason" json:"reason"`
+	RestartedReason string    `db:"restarted_reason" json:"restarted_reason"`
+}
+
+// Fires as lost the open process watches of active or paused wake-ups whose
+// agent can no longer report the process. With @reason when the agent is
+// not an agent of the latest build of the chat's workspace, or that build
+// does not start the workspace, or the chat has no workspace; the time of
+// the loss is when the latest build was created, or @now without one. With
+// @restarted_reason when the agent is current but started after the watch
+// was created, which an agent reports only when its process starts, so it
+// lost the processes of its earlier run; the time of the loss is when the
+// agent started. Watches that already ended stay as they are. Returns the
+// chats to poke.
+func (q *Queries) MarkLostChatProcessWatches(ctx context.Context, arg MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, markLostChatProcessWatches, arg.Now, arg.Reason, arg.RestartedReason)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var chat_id uuid.UUID
+		if err := rows.Scan(&chat_id); err != nil {
+			return nil, err
+		}
+		items = append(items, chat_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const recordPullRequestWatchPoll = `-- name: RecordPullRequestWatchPoll :execrows
