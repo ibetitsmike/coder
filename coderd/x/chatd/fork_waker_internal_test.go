@@ -32,8 +32,8 @@ func (w *chatWorker) wakeupOnce(ctx context.Context, now time.Time) {
 // runWakerPass runs one full pass of a new waker of server at now with
 // deliver, or the real delivery when deliver is nil, and waits for its
 // deliveries. Its waker has one slot. Like the loop of a running waker, it
-// then passes over each chat that a delivery poked, including the chats a
-// pass skipped for want of a slot, until none is left.
+// then passes over each chat that a delivery poked or that a pass skipped
+// for want of a slot, until none is left.
 func runWakerPass(ctx context.Context, server *Server, store database.Store, clock quartz.Clock, now time.Time, deliver func(context.Context, forkdb.Store, forkdb.ChatWakeup, time.Time) error) {
 	k := newForkWaker()
 	k.slots = make(chan struct{}, 1)
@@ -54,6 +54,10 @@ func runWakerPass(ctx context.Context, server *Server, store database.Store, clo
 		k.mu.Lock()
 		pending := k.pending
 		k.pending = make(map[uuid.UUID]struct{})
+		for _, chatID := range k.skipOrder {
+			pending[chatID] = struct{}{}
+		}
+		k.skipped, k.skipOrder = make(map[uuid.UUID]struct{}), nil
 		k.mu.Unlock()
 		if len(pending) == 0 {
 			return
@@ -533,28 +537,36 @@ func TestWakerFullSlotsDoNotStallTheLoop(t *testing.T) {
 	}
 }
 
-// A freed slot pokes every skipped chat, but only the first poked chat gets
-// a pass. The others find every slot taken again and are skipped with no
-// query, so a large backlog costs about one query per freed slot.
+// A freed slot goes to the chat that was skipped first. The others stay
+// skipped with no query, so a large backlog costs about one query and one
+// pass per freed slot.
 func TestWakerFreedSlotCostsOneList(t *testing.T) {
 	t.Parallel()
 	const backlog = 20
 	f := newWorkerTestFixture(t)
 	ctx := testutil.Context(t, testutil.WaitLong)
+	var chats []uuid.UUID
 	for i := range forkWakerDeliveries + backlog {
 		chat := f.createWakeupChat(t)
 		wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindDelay})
-		// The first wake-ups are listed first and take every slot.
+		// The wake-ups are listed in this order, and the first ones take
+		// every slot.
 		f.setNextRunAt(t, wakeup.ID, wakeupTestSlot.Add(-time.Duration(forkWakerDeliveries+backlog-i)*time.Second))
+		chats = append(chats, chat.ID)
 	}
 
 	// Every delivery holds its slot until it gets a value from releaseOne
-	// or the test ends. It reports a busy chat, so its end pokes only the
-	// skipped chats and not its own.
+	// or the test ends. It reports a busy chat, so its end does not poke
+	// its own chat.
 	releaseOne := make(chan struct{})
 	var started atomic.Int64
+	var startedMu sync.Mutex
+	var startedChats []uuid.UUID
 	h := f.startWaker(t, func(h *wakerHarness) {
-		h.waker.deliver = func(ctx context.Context, _ forkdb.Store, _ forkdb.ChatWakeup, _ time.Time) error {
+		h.waker.deliver = func(ctx context.Context, _ forkdb.Store, w forkdb.ChatWakeup, _ time.Time) error {
+			startedMu.Lock()
+			startedChats = append(startedChats, w.ChatID)
+			startedMu.Unlock()
 			started.Add(1)
 			select {
 			case <-releaseOne:
@@ -584,6 +596,13 @@ func TestWakerFreedSlotCostsOneList(t *testing.T) {
 		return started.Load() == forkWakerDeliveries+1 && skipped() == backlog-1
 	}, testutil.IntervalFast, "the freed slot must deliver one skipped wake-up and skip the rest again")
 	require.EqualValues(t, 2, h.fdb.lists.Load(), "one freed slot, one more query")
+	startedMu.Lock()
+	defer startedMu.Unlock()
+	require.Equal(t, chats[forkWakerDeliveries], startedChats[forkWakerDeliveries], "the chat skipped first gets the slot")
+	h.waker.mu.Lock()
+	defer h.waker.mu.Unlock()
+	require.Equal(t, chats[forkWakerDeliveries+1:], h.waker.skipOrder, "the others wait in the order they were skipped")
+	require.Empty(t, h.waker.pending, "a freed slot pokes no skipped chat")
 }
 
 // Each change that makes a watched child done delivers the events wake-up
@@ -630,9 +649,17 @@ func TestWakerChildDonePathsDeliver(t *testing.T) {
 				_, expiresAt := childWakeup(t, f, child)
 				return expiresAt
 			},
-			change: func(t *testing.T, f *workerTestFixture, h *wakerHarness, _, _ database.Chat, timerAt time.Time) {
+			change: func(t *testing.T, f *workerTestFixture, h *wakerHarness, _, child database.Chat, timerAt time.Time) {
 				ctx := testutil.Context(t, testutil.WaitLong)
 				h.clock.Advance(timerAt.Sub(h.clock.Now())).MustWait(ctx)
+				// The timer only signals the loop, so wait for the
+				// delivery that completes the child's wake-up.
+				fdb, err := forkdb.From(f.db)
+				require.NoError(t, err)
+				testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+					wakeups, err := fdb.ListChatWakeupsByChatID(ctx, forkdb.ListChatWakeupsByChatIDParams{ChatID: child.ID})
+					return err == nil && len(wakeups) == 1 && wakeups[0].Status == forkdb.ChatWakeupStatusCompleted
+				}, testutil.IntervalFast, "the child's wake-up must complete at its expiry")
 			},
 		},
 		{
