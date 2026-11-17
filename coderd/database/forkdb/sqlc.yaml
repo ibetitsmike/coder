@@ -41,6 +41,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1df66-ebee-7c93-aa87-3edc1f2d8fb0_workflow_phases.up.sql"
       - "../migrations/chatdmig/nodes/01a1e008-494e-723d-8aaf-f0e13a811456_chat_wakeup_ready_watches.up.sql"
       - "../migrations/chatdmig/nodes/01a1e197-0d6a-7ab6-a3a5-c8a54aee0336_chat_wakeup_run_counts.up.sql"
+      - "../migrations/chatdmig/nodes/01a1e3a6-abb4-79d2-8ab8-1669a9415507_workflow_run_detail2.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
@@ -69,6 +70,40 @@ sql:
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
               type: "NullChatStatus"
+          # GetDescendantChatsByRootIDs embeds chats_expanded, so its
+          # columns take the types of database.Chat.
+          - column: "chats_expanded.last_reasoning_effort"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatReasoningEffort"
+          - column: "chats_expanded.mode"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatMode"
+          - column: "chats_expanded.labels"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "StringMap"
+          - column: "chats_expanded.plan_mode"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "NullChatPlanMode"
+          - column: "chats_expanded.client_type"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatClientType"
+          - column: "chats_expanded.user_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
+          - column: "chats_expanded.group_acl"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatACL"
+          - column: "chats_expanded.title_source"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "ChatTitleSource"
           - column: "agent_definitions.group_acl"
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"

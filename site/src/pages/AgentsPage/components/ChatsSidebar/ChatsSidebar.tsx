@@ -254,7 +254,7 @@ export const ChatsSidebar: React.FC<ChatsSidebarProps> = (props) => {
 	};
 
 	return (
-		<div className="relative flex size-full min-h-0 border-r overflow-hidden">
+		<div className="relative flex size-full min-h-0 overflow-hidden sm:border-r">
 			<ChatsPanel
 				chatProjectsEnabled={chatProjectsEnabled}
 				projects={projectsQuery.data ?? []}

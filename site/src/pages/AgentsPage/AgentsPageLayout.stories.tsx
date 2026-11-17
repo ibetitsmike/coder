@@ -520,6 +520,13 @@ export const WithChatList: Story = {
 	},
 };
 
+export const WithChatListOnMobile: Story = {
+	...WithChatList,
+	parameters: {
+		viewport: { defaultViewport: "mobile1" },
+	},
+};
+
 export const ResizableSidebar: Story = {
 	beforeEach: () => {
 		mockChats([

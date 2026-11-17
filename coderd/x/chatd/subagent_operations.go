@@ -637,6 +637,9 @@ func latestSubagentAssistantMessage(
 	store database.Store,
 	chatID uuid.UUID,
 ) (string, error) {
+	if report, ok, err := forkLatestSubagentReport(ctx, store, chatID); ok {
+		return report, err
+	}
 	messages, err := store.GetChatMessagesByChatID(ctx, database.GetChatMessagesByChatIDParams{
 		ChatID:  chatID,
 		AfterID: 0,
