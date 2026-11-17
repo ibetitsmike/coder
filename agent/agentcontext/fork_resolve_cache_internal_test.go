@@ -714,10 +714,12 @@ func TestResolvePass_DirRetargetedDuringPassIsNotCached(t *testing.T) {
 			a, b := filepath.Join(base, "sa"), filepath.Join(base, "sb")
 			writePackFiles(t, a, map[string]string{"foo/SKILL.md": "---\nname: foo\ndescription: in a\n---\n"})
 			writePackFiles(t, b, map[string]string{"foo/SKILL.md": "---\nname: foo\ndescription: in b\n---\n"})
-			// .codex has no watch of its own.
-			link := filepath.Join(ws, ".codex", "skills")
-			require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+			// The container links to a hop in base, which has no watch.
+			container := filepath.Join(ws, ".codex", "skills")
+			link := filepath.Join(base, "hop")
+			require.NoError(t, os.MkdirAll(filepath.Dir(container), 0o755))
 			require.NoError(t, os.Symlink(a, link))
+			require.NoError(t, os.Symlink(link, container))
 			return ws, link, a, b
 		},
 	}} {
@@ -1229,6 +1231,118 @@ func TestWatcher_DiscoveryFailureUncovers(t *testing.T) {
 			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
 			_, ok = cachedFor(m, w, roots)
 			require.True(t, ok, "a pass after that Sync is cached")
+		})
+	}
+}
+
+// A directory created between a Sync's discovery and the watch on its
+// parent fires no event. That Sync leaves the watcher uncovered and
+// schedules a change, and the next Sync watches the directory.
+func TestWatcher_SyncRevalidatesAfterAddingWatches(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		// before is the root's content before the Sync, nil for a missing
+		// root.
+		before map[string]string
+		// during is what the Sync's discovery misses.
+		during map[string]string
+		// unwatched is the directory the first Sync does not watch,
+		// relative to the root.
+		unwatched string
+	}{
+		{name: "MissingRoot", during: map[string]string{"AGENTS.md": "v1"}, unwatched: "."},
+		{
+			name:      "NewSkill",
+			before:    map[string]string{"AGENTS.md": "v1"},
+			during:    map[string]string{"skills/foo/SKILL.md": "---\nname: foo\ndescription: A skill.\n---\nbody"},
+			unwatched: "skills/foo",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := testutil.Context(t, testutil.WaitShort)
+			ws := filepath.Join(t.TempDir(), "ws")
+			if tc.before != nil {
+				writePackFiles(t, ws, tc.before)
+			}
+			roots := []ScanRoot{{Path: ws}}
+			m, _ := advertisedCacheManager(t, ManagerOptions{}, nil)
+			clock := quartz.NewMock(t)
+			changes := make(chan struct{}, 1)
+			w, err := NewWatcher(WatcherOptions{Logger: testutil.Logger(t), Clock: clock, OnChange: func() {
+				select {
+				case changes <- struct{}{}:
+				default:
+				}
+			}})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = w.Close() })
+			unwatched := filepath.Join(ws, filepath.FromSlash(tc.unwatched))
+			watching := func() bool {
+				w.mu.Lock()
+				defer w.mu.Unlock()
+				_, ok := w.watched[unwatched]
+				return ok
+			}
+			created := false
+			w.mu.Lock()
+			w.cover.afterCollect = func() {
+				if !created {
+					created = true
+					writePackFiles(t, ws, tc.during)
+				}
+			}
+			w.mu.Unlock()
+
+			w.Sync(ctx, roots)
+			require.True(t, created)
+			require.False(t, watching(), "the discovery missed %s", tc.unwatched)
+			_, covered := w.coverage()
+			require.False(t, covered, "the Sync that missed a directory leaves the watcher uncovered")
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			_, ok := cachedFor(m, w, roots)
+			require.False(t, ok, "a pass while the directory is unwatched is not cached")
+			clock.Advance(w.debounce).MustWait(ctx)
+			_ = testutil.TryReceive(ctx, t, changes)
+			_, covered = w.coverage()
+			require.False(t, covered, "the watcher stays uncovered until the next Sync")
+
+			w.Sync(ctx, roots)
+			require.True(t, watching(), "the next Sync watches %s", tc.unwatched)
+			_, covered = w.coverage()
+			require.True(t, covered, "the next Sync covers the root")
+			m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+			_, ok = cachedFor(m, w, roots)
+			require.True(t, ok, "a pass after that Sync is cached")
+		})
+	}
+}
+
+// Creating a missing skill container under an existing parent, such as
+// .codex/skills under .codex, fires a change.
+func TestWatcher_FiresOnSkillContainerCreatedUnderExistingParent(t *testing.T) {
+	t.Parallel()
+	for _, parent := range []string{".agents", ".claude", ".codex"} {
+		t.Run(parent, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			require.NoError(t, os.Mkdir(filepath.Join(dir, parent), 0o755))
+			var fires atomic.Int32
+			w, err := NewWatcher(WatcherOptions{
+				Logger:   testutil.Logger(t),
+				Debounce: 10 * time.Millisecond,
+				OnChange: func() { fires.Add(1) },
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = w.Close() })
+			w.Sync(testutil.Context(t, testutil.WaitShort), []ScanRoot{{Path: dir}})
+			require.Zero(t, fires.Load())
+
+			require.NoError(t, os.Mkdir(filepath.Join(dir, parent, "skills"), 0o755))
+			require.Eventually(t, func() bool {
+				return fires.Load() >= 1
+			}, testutil.WaitShort, testutil.IntervalFast, "expected a change when %s/skills is created", parent)
 		})
 	}
 }

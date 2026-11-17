@@ -139,6 +139,7 @@ func (w *Watcher) Degraded() string {
 // schedule, and the run goroutine are not blocked by a slow
 // filesystem.
 func (w *Watcher) Sync(ctx context.Context, roots []ScanRoot) {
+	defer w.revalidateSync(roots, w.watchesAdded()) // fork: fork_resolve_cache.go
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
@@ -360,6 +361,7 @@ func (*Watcher) collectDirs(roots []ScanRoot) (dirs map[string]struct{}, pack pa
 		out[root.Path] = struct{}{}
 		addAgentWatchDirs(root.Path, out)
 		addRuleWatchDirs(root.Path, out)
+		addSkillParentWatchDirs(root.Path, out) // fork: fork_resolve_cache.go
 		// Watch pack roots and their declared containers so
 		// plugin pack changes re-resolve (fork_plugins.go).
 		addPackWatchDirs(root.Path, out, pack)

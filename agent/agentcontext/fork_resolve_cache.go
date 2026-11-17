@@ -475,6 +475,12 @@ type watchCoverage struct {
 	// relayed counts the events and errors the relay took from fsnotify,
 	// for tests.
 	relayed atomic.Uint64
+	// added counts the watches Sync added, so revalidateSync knows a Sync
+	// added one.
+	added uint64
+	// afterCollect, when set by a test, runs in collectSyncDirs after the
+	// discovery.
+	afterCollect func()
 }
 
 // syncDirs is what collectSyncDirs found for beginSync.
@@ -495,6 +501,12 @@ func (w *Watcher) collectSyncDirs(roots []ScanRoot) (map[string]struct{}, packWa
 	tracked := trackSymlinkTargets(roots)
 	desired, pack := w.collectDirs(roots)
 	_, discoveryFailed := tracked.stopPass()
+	w.mu.Lock()
+	hook := w.cover.afterCollect
+	w.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	w.mu.Lock()
 	paths := make([]string, 0, len(w.cover.dirs))
 	for path := range w.cover.dirs {
@@ -562,6 +574,7 @@ func (w *Watcher) addWatch(path string) error {
 	switch {
 	case err == nil:
 		w.cover.gen++
+		w.cover.added++
 		// A path replaced between the stats and the Add would record
 		// the identity of a directory the watch is not on. With no
 		// identity, the next Sync replaces the watch.
@@ -577,6 +590,61 @@ func (w *Watcher) addWatch(path string) error {
 		w.cover.addFailed = true
 	}
 	return err
+}
+
+// watchesAdded returns the number of watches Sync added so far.
+func (w *Watcher) watchesAdded() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.cover.added
+}
+
+// revalidateSync runs when Sync returns, after it released w.mu. added is
+// watchesAdded when Sync started. When Sync added a watch, revalidateSync
+// discovers the directories again: one created between the first discovery
+// and the watch on its parent fired no event, and is not watched. It then
+// leaves the watcher uncovered and schedules a change, so the next Sync
+// watches the directory and the next pass reads it. Anything created after
+// this second discovery fires an event on a watch that is in place.
+func (w *Watcher) revalidateSync(roots []ScanRoot, added uint64) {
+	w.mu.Lock()
+	skip := w.closed || w.watcher == nil || w.cover.added == added || w.degraded != "" || w.cover.addFailed
+	w.mu.Unlock()
+	if skip {
+		return
+	}
+	tracked := trackSymlinkTargets(roots)
+	desired, _ := w.collectDirs(roots)
+	_, missed := tracked.stopPass()
+	w.mu.Lock()
+	for path := range desired {
+		if _, ok := w.watched[path]; !ok {
+			missed = true
+			break
+		}
+	}
+	if missed {
+		w.cover.addFailed = true
+	}
+	w.mu.Unlock()
+	if missed {
+		w.schedule()
+	}
+}
+
+// addSkillParentWatchDirs watches the existing parent, such as .codex, of
+// each skill container under rootPath, so creating a missing container
+// fires an event. collectDirs watches only the containers that exist.
+func addSkillParentWatchDirs(rootPath string, out map[string]struct{}) {
+	for _, rel := range skillContainerRelPaths {
+		parent := filepath.Dir(filepath.Join(rootPath, rel))
+		if parent == rootPath {
+			continue
+		}
+		if info, err := statNoted(parent); err == nil && info.IsDir() {
+			out[parent] = struct{}{}
+		}
+	}
 }
 
 // forgetRemovedWatch drops a watched directory that was removed or renamed.
