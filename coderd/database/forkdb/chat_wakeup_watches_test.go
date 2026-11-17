@@ -250,9 +250,41 @@ func TestChatWakeupWatchRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 1)
 	require.Equal(t, process.ID, all[0].ID)
-	byChat, err := fdb.ListChatWakeupWatchesByChatID(ctx, parent.ID)
+	byChat, err := fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID: parent.ID, WakeupIds: []uuid.UUID{wakeup.ID},
+	})
 	require.NoError(t, err)
 	require.Equal(t, all, byChat)
+
+	// The list reads only the wake-ups the caller names, so the watches of
+	// the wake-ups outside a status filter stay unread.
+	byChat, err = fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{ChatID: parent.ID})
+	require.NoError(t, err)
+	require.Empty(t, byChat)
+
+	// A wake-up that changes status after the caller listed it keeps its
+	// watches.
+	_, err = sqlDB.ExecContext(ctx, "UPDATE chat_wakeups SET status = 'completed', next_run_at = NULL WHERE id = $1", wakeup.ID)
+	require.NoError(t, err)
+	byChat, err = fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID: parent.ID, WakeupIds: []uuid.UUID{wakeup.ID},
+	})
+	require.NoError(t, err)
+	require.Equal(t, all, byChat)
+
+	// A wake-up of another chat lists nothing for this one.
+	other := wakeupTestChat(t, db)
+	otherWakeup := insertEventsWakeup(ctx, t, fdb, other)
+	_, err = fdb.InsertChatWakeupWatch(ctx, forkdb.InsertChatWakeupWatchParams{
+		ID: uuid.New(), WakeupID: otherWakeup.ID, Kind: forkdb.ChatWakeupWatchKindPullRequest,
+		PullRequestUrl: sql.NullString{String: "https://github.com/o/r/pull/2", Valid: true}, Spec: json.RawMessage(`{}`), CreatedAt: dbtime.Now(),
+	})
+	require.NoError(t, err)
+	byChat, err = fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID: parent.ID, WakeupIds: []uuid.UUID{otherWakeup.ID},
+	})
+	require.NoError(t, err)
+	require.Empty(t, byChat)
 }
 
 // TestListReadyChatWakeupWatchesPlan checks that the poll of the whole

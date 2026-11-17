@@ -50,6 +50,9 @@ type Querier interface {
 	DeleteChatPluginPack(ctx context.Context, arg DeleteChatPluginPackParams) error
 	DeleteChatSecretAnswer(ctx context.Context, arg DeleteChatSecretAnswerParams) error
 	DeleteChatSubagentMessagesBefore(ctx context.Context, arg DeleteChatSubagentMessagesBeforeParams) error
+	// Deletes a batch of the link codes past their expiry, on the database clock
+	// that ConsumePluginLinkCode checks. A code nobody entered stays until then.
+	DeleteExpiredPluginLinkCodes(ctx context.Context, limitCount int32) (int64, error)
 	// Deletes a batch of answers past the 24 hour TTL of
 	// GetChatSecretAnswersByChatID, on the same clock.
 	DeleteOldChatSecretAnswers(ctx context.Context, limitCount int32) (int64, error)
@@ -59,6 +62,17 @@ type Querier interface {
 	// Deletes the run counts older than 7 days, on the database clock. The caps
 	// read only the last 24 hours.
 	DeleteOldChatWakeupRunCounts(ctx context.Context) (int64, error)
+	// Deletes a batch of completed and canceled wake-ups that changed last more
+	// than 30 days ago, on the database clock. Their watches cascade; their runs
+	// keep counting toward the caps with a NULL wakeup_id. The DELETE repeats the
+	// filter, so a wake-up updated while the DELETE waits for its lock stays.
+	DeleteOldChatWakeups(ctx context.Context, limitCount int32) (int64, error)
+	// Deletes a batch of terminal and interrupted runs whose last journal write
+	// is older than 30 days, on the database clock. Their steps cascade. A
+	// running run stays: a live replica still writes it. The DELETE repeats the
+	// filter: a run that a resume or a step report updates while the DELETE
+	// waits for its lock is rechecked on its new row, so it stays.
+	DeleteOldWorkflowRuns(ctx context.Context, limitCount int32) (int64, error)
 	DeleteOrganizationAgentDefinitionByName(ctx context.Context, arg DeleteOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	DeletePluginByID(ctx context.Context, id uuid.UUID) error
@@ -239,9 +253,14 @@ type Querier interface {
 	// left out, because the history tool skips them.
 	ListChatHistoryRows(ctx context.Context, chatID uuid.UUID) ([]ListChatHistoryRowsRow, error)
 	ListChatNotes(ctx context.Context, chatID uuid.UUID) ([]ListChatNotesRow, error)
-	ListChatWakeupWatchesByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeupWatch, error)
+	// Lists the watches of the wake-ups of the chat whose ID is in @wakeup_ids.
+	// The caller passes the wake-ups it listed, so a wake-up that changes status
+	// between the two reads keeps its watches.
+	ListChatWakeupWatchesByChatID(ctx context.Context, arg ListChatWakeupWatchesByChatIDParams) ([]ChatWakeupWatch, error)
 	ListChatWakeupWatchesByWakeupID(ctx context.Context, wakeupID uuid.UUID) ([]ChatWakeupWatch, error)
-	ListChatWakeupsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatWakeup, error)
+	// Lists the wake-ups of the chat whose status is in statuses, or every
+	// wake-up when statuses is empty.
+	ListChatWakeupsByChatID(ctx context.Context, arg ListChatWakeupsByChatIDParams) ([]ChatWakeup, error)
 	// Lists the children of @parent_chat_id that wait for events of their own:
 	// they have an open watch on an active wake-up. chat_wakeup_ready_watches
 	// uses the same rule.
@@ -380,7 +399,12 @@ type Querier interface {
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
 	// and applies the NullRawMessage override. reused only sets the flag: a
-	// report from a step that a resume reused must not clear it.
+	// report from a step that a resume reused must not clear it. The write also
+	// stamps the run's updated_at, so a report to an interrupted run restarts the
+	// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+	// run update, so the run row is locked before the step row, the same order
+	// as the purge's cascade. Without the join Postgres may run the two updates
+	// in any order, and a report racing the purge could deadlock.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.

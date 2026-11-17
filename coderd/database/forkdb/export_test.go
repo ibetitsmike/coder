@@ -12,6 +12,13 @@ const ListDueChatWakeupsSQL = listDueChatWakeups
 // ClaimDuePullRequestWatches, so a test can EXPLAIN it.
 const ClaimDuePullRequestWatchesSQL = claimDuePullRequestWatches
 
+// DeleteOldChatWakeupsSQL and DeleteOldWorkflowRunsSQL are the statements of
+// the dbpurge batches, so a test can EXPLAIN them.
+const (
+	DeleteOldChatWakeupsSQL  = deleteOldChatWakeups
+	DeleteOldWorkflowRunsSQL = deleteOldWorkflowRuns
+)
+
 // CountChatUserNotificationsSinceSQL is the statement of
 // CountChatUserNotificationsSince, so a test can EXPLAIN it.
 const CountChatUserNotificationsSinceSQL = countChatUserNotificationsSince

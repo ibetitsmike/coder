@@ -44,7 +44,7 @@ func TestWaitForEventsTool(t *testing.T) {
 	require.NoError(t, err)
 	wakeups := func(chat database.Chat) []forkdb.ChatWakeup {
 		t.Helper()
-		rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), chat.ID)
+		rows, err := fdb.ListChatWakeupsByChatID(testutil.Context(t, testutil.WaitShort), forkdb.ListChatWakeupsByChatIDParams{ChatID: chat.ID})
 		require.NoError(t, err)
 		return rows
 	}

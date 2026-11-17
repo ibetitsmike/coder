@@ -125,7 +125,7 @@ func TestWaitForEventsProcesses(t *testing.T) {
 	require.Empty(t, fake.calls)
 	fdb, err := forkdb.From(f.db)
 	require.NoError(t, err)
-	rows, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
+	rows, err := fdb.ListChatWakeupsByChatID(ctx, forkdb.ListChatWakeupsByChatIDParams{ChatID: chat.ID})
 	require.NoError(t, err)
 	require.Len(t, rows, 3, "refused calls create nothing")
 }

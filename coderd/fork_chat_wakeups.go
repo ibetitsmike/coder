@@ -26,21 +26,37 @@ import (
 // @Produce json
 // @Tags Chats
 // @Param chat path string true "Chat ID" format(uuid)
+// @Param status query []string false "Statuses to list, comma separated" collectionFormat(csv) Enums(active,paused,completed,canceled)
 // @Success 200 {array} codersdk.ChatWakeup
 // @Router /api/v2/chats/fork/{chat}/wakeups [get]
 // @x-apidocgen {"skip": true}
-// @Description Returns every wake-up of the chat, oldest first, including
-// @Description completed and canceled ones.
+// @Description Returns the wake-ups of the chat, oldest first. Without
+// @Description status it returns every wake-up, including completed and
+// @Description canceled ones; with status only those in the listed states.
 func (api *API) getChatWakeups(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chat := httpmw.ChatParam(r)
+
+	parser := httpapi.NewQueryParamParser()
+	statuses := httpapi.ParseCustomList(parser, r.URL.Query(), nil, "status", httpapi.ParseEnum[forkdb.ChatWakeupStatus])
+	parser.ErrorExcessParams(r.URL.Query())
+	if len(parser.Errors) > 0 {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message:     "Invalid query parameters.",
+			Validations: parser.Errors,
+		})
+		return
+	}
 
 	fdb, err := forkdb.From(api.Database)
 	if err != nil {
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	rows, err := fdb.ListChatWakeupsByChatID(ctx, chat.ID)
+	rows, err := fdb.ListChatWakeupsByChatID(ctx, forkdb.ListChatWakeupsByChatIDParams{
+		ChatID:   chat.ID,
+		Statuses: statuses,
+	})
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to list chat wake-ups.",
@@ -48,7 +64,14 @@ func (api *API) getChatWakeups(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, chat.ID)
+	wakeupIDs := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		wakeupIDs = append(wakeupIDs, row.ID)
+	}
+	watchRows, err := fdb.ListChatWakeupWatchesByChatID(ctx, forkdb.ListChatWakeupWatchesByChatIDParams{
+		ChatID:    chat.ID,
+		WakeupIds: wakeupIDs,
+	})
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to list chat wake-up watches.",
