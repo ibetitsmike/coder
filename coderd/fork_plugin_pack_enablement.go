@@ -283,7 +283,6 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 		httpapi.ResourceNotFound(rw)
 		return
 	}
-	fa.target(api.forkAuditOrganization(r.Context(), pack.OrganizationID), pack.ID, pack.Name)
 	if err := write(fdb, packID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httpapi.ResourceNotFound(rw)
@@ -292,8 +291,9 @@ func (api *API) writeForkPluginPackEnablement(rw http.ResponseWriter, r *http.Re
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	// The transition is recorded only after the write succeeded, so a
-	// failed write does not claim a state change.
+	// The target and the transition are recorded only after the write
+	// succeeded, so a failed write leaves no entry at all.
+	fa.target(api.forkAuditOrganization(r.Context(), pack.OrganizationID), pack.ID, pack.Name)
 	fa.change("enabled", forkAuditChange{
 		Old: json.RawMessage(forkAuditEnablement(resource, !enabled)),
 		New: json.RawMessage(forkAuditEnablement(resource, enabled)),
