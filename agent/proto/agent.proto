@@ -756,6 +756,11 @@ message PushContextStateResponse {
 	// instruction files carrying InstructionFileBody.globs only to turns
 	// that touched a matching file.
 	bool fork_glob_rules = 102;
+	// Fork: fork_context_cache advertises that the serving coderd has the
+	// fork-context-cache experiment enabled. While it is false the agent
+	// resolves its context in full on every push and never reads or
+	// stores the resolve cache.
+	bool fork_context_cache = 103;
 }
 
 service Agent {

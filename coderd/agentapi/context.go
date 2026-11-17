@@ -85,6 +85,9 @@ type ContextAPI struct {
 	// excluded, because chatd drops every subagent row and the rows would
 	// only occupy the snapshot caps.
 	ForkAgentDefinitions bool
+	// ForkContextCache mirrors the fork-context-cache experiment: agents
+	// read and store their resolve cache only while a response sets it.
+	ForkContextCache bool
 }
 
 // ContextDirtyMarker hydrates chats from, and marks chats dirty against, a
@@ -305,6 +308,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 			ForkPluginPacks:      a.ForkPluginPacks,
 			ForkAgentDefinitions: a.ForkAgentDefinitions,
 			ForkGlobRules:        true,
+			ForkContextCache:     a.ForkContextCache,
 		}, nil
 	}
 
@@ -326,6 +330,7 @@ func (a *ContextAPI) PushContextState(ctx context.Context, req *agentproto.PushC
 		ForkPluginPacks:      a.ForkPluginPacks,
 		ForkAgentDefinitions: a.ForkAgentDefinitions,
 		ForkGlobRules:        true,
+		ForkContextCache:     a.ForkContextCache,
 	}, nil
 }
 
