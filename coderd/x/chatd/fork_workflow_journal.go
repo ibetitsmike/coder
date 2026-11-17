@@ -512,33 +512,33 @@ func (p *Server) resumeWorkflowRun(
 	// The claim makes the row running and owned by this process before the
 	// script starts, so a crash during the resume leaves the row resumable
 	// once the heartbeat goes stale.
-	p.workflows.resumeMu.Lock()
+	release, err := p.workflows.reserveRun(ctx, row.ID)
+	if err != nil {
+		return nil, xerrors.Errorf("wait for another resume of the workflow run: %w", err)
+	}
 	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
 	if err != nil {
-		p.workflows.resumeMu.Unlock()
+		release()
 		return nil, xerrors.Errorf("claim the workflow run: %w", err)
 	}
 	if !ok {
-		p.workflows.resumeMu.Unlock()
+		release()
 		return p.resumeUnclaimedWorkflowRun(ctx, chat, row.ID)
 	}
 	row = claimed
-	p.workflows.setClaiming(row.ID)
 	run, err := p.rehydrateWorkflowRun(ctx, chat, row)
 	if err != nil {
-		p.workflows.setClaiming(uuid.Nil)
 		// The row stays resumable for a later process that can compile it,
 		// unless another caller of this process resumed the run meanwhile.
 		if p.workflows.get(row.ID) == nil {
 			p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusInterrupted, "resume the run: "+err.Error(), nil,
 				&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 		}
-		p.workflows.resumeMu.Unlock()
+		release()
 		return nil, err
 	}
 	_, added := p.workflows.add(run)
-	p.workflows.setClaiming(uuid.Nil)
-	p.workflows.resumeMu.Unlock()
+	release()
 	if !added {
 		// Another caller resumed the same run first.
 		return p.workflows.get(row.ID), nil

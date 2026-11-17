@@ -313,7 +313,7 @@ func TestForkWorkflowOwnership(t *testing.T) {
 		res := testutil.RequireReceive(ctx, t, done)
 		require.NoError(t, res.err)
 		require.Same(t, res.run, second.workflows.get(run.id))
-		assert.Equal(t, uuid.Nil, second.workflows.claimingRun(), "the registration ends the claim")
+		assert.Empty(t, second.workflows.reservedRuns(), "the registration ends the reservation")
 		assert.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
@@ -551,8 +551,9 @@ def main(args):
 		fdb := forkWorkflowDB(t, f.db)
 
 		// A resume between its claim and its registration: it holds the
-		// resume lock, and the registry does not hold the run yet.
-		f.server.workflows.resumeMu.Lock()
+		// run's reservation, and the registry does not hold the run yet.
+		release, err := f.server.workflows.reserveRun(ctx, run.id)
+		require.NoError(t, err)
 		f.server.workflows.remove(run.id)
 		errc := make(chan error, 1)
 		go func() { errc <- f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id) }()
@@ -562,15 +563,38 @@ def main(args):
 				t.Fatalf("the stop went past the resume: %v", err)
 			default:
 			}
-			return goroutineBlockedOnLockIn("(*Server).stopOwnerlessRun")
+			return goroutineWaitsForReservationIn("(*Server).stopOwnerlessRun")
 		}, testutil.IntervalFast)
 		_, added := f.server.workflows.add(run)
 		require.True(t, added)
-		f.server.workflows.resumeMu.Unlock()
+		release()
 
 		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
 		waitWorkflowDone(ctx, t, run)
 		assert.Equal(t, workflowStatusStopped, run.snapshot().Status, "the stop reached the registered run")
+		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
+	})
+
+	// A journal-only stop of one run does not wait for a resume of another
+	// run on the same process: the reservation is per run.
+	t.Run("ReservationOfOneRunLeavesOthersAlone", func(t *testing.T) {
+		t.Parallel()
+		f := newForkWorkflowFixture(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		other := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		busy := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		run := f.start(ctx, t, other, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		release, err := f.server.workflows.reserveRun(ctx, busy.id)
+		require.NoError(t, err)
+		defer release()
+		f.server.workflows.remove(run.id)
+		errc := make(chan error, 1)
+		go func() { errc <- f.server.ForkStopWorkflowRun(ctx, other.ID, run.id) }()
+		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
 		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
@@ -630,7 +654,7 @@ def main(args):
 
 		close(blocking.release)
 		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
-		assert.Equal(t, uuid.Nil, f.server.workflows.claimingRun(), "the stop ends the claim")
+		assert.Empty(t, f.server.workflows.reservedRuns(), "the stop ends the reservation")
 		assert.Equal(t, workflowStatusStopped, journalRunStatus(ctx, t, fdb, run.id))
 	})
 
@@ -697,13 +721,13 @@ def main(args):
 	})
 }
 
-// goroutineBlockedOnLockIn reports whether a goroutine waits for a mutex
-// inside fn.
-func goroutineBlockedOnLockIn(fn string) bool {
+// goroutineWaitsForReservationIn reports whether a goroutine waits for a
+// run reservation inside fn.
+func goroutineWaitsForReservationIn(fn string) bool {
 	buf := make([]byte, 1<<20)
 	buf = buf[:runtime.Stack(buf, true)]
 	for _, g := range strings.Split(string(buf), "\n\n") {
-		if strings.Contains(g, "sync.(*Mutex).Lock") && strings.Contains(g, fn) {
+		if strings.Contains(g, "[select") && strings.Contains(g, "(*workflowRegistry).reserveRun") && strings.Contains(g, fn) {
 			return true
 		}
 	}

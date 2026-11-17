@@ -321,14 +321,10 @@ type workflowRegistry struct {
 	mu    sync.Mutex
 	runs  map[uuid.UUID]*workflowRun
 	owner workflowOwnership
-	// resumeMu serializes the claim and the rehydration of the resumes of
-	// this process (fork_workflow_journal.go): both callers of one run
-	// would pass the claim, which accepts the runs this process owns.
-	resumeMu sync.Mutex
-	// claiming is the run a resume of this process claimed and still
-	// rehydrates, or a journal-only stop claimed and still stops, uuid.Nil
-	// when none. It is guarded by mu.
-	claiming uuid.UUID
+	// reserved holds the runs that a resume of this process claims and
+	// rehydrates, or a journal-only stop claims and stops. Each channel
+	// closes when its reservation ends. It is guarded by mu.
+	reserved map[uuid.UUID]chan struct{}
 }
 
 func (g *workflowRegistry) get(id uuid.UUID) *workflowRun {
