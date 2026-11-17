@@ -140,3 +140,57 @@ func TestRetentionDeleteRechecksLockedRows(t *testing.T) {
 		require.Equal(t, 1, kept, "%s: the resumed row stays", tc.name)
 	}
 }
+
+// TestUpdateWorkflowStepLocksRunFirst checks that a step update locks its run
+// row before its step row, the order of the purge's cascade from the run to
+// its steps. In the other order a step report that races the purge could
+// deadlock with it.
+func TestUpdateWorkflowStepLocksRunFirst(t *testing.T) {
+	t.Parallel()
+
+	db, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := wakeupTestChat(t, db)
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+
+	runID, stepID := uuid.New(), uuid.New()
+	require.NoError(t, fdb.InsertWorkflowRun(ctx, forkdb.InsertWorkflowRunParams{
+		ID: runID, ChatID: chat.ID, ModelConfigID: chat.LastModelConfigID, Script: "run()", Args: json.RawMessage(`{}`), Status: "interrupted",
+	}))
+	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+		ID: stepID, RunID: runID, SpecKey: "step", Status: "running",
+	}))
+
+	// The purge holds the run row while its cascade reaches the steps.
+	purge, err := sqlDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = purge.Rollback() }()
+	_, err = purge.ExecContext(ctx, `SELECT 1 FROM workflow_runs WHERE id = $1 FOR UPDATE`, runID)
+	require.NoError(t, err)
+
+	updated := make(chan error, 1)
+	go func() {
+		updated <- fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: stepID, Status: "reported"})
+	}()
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		var waiting int
+		err := sqlDB.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'
+				AND query LIKE '%UPDATE workflow_steps%'`).Scan(&waiting)
+		return err == nil && waiting > 0
+	}, testutil.IntervalFast, "the step update waits for the run row")
+
+	// The waiting update holds no lock on the step row yet.
+	probe, err := sqlDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = probe.ExecContext(ctx, `SELECT 1 FROM workflow_steps WHERE id = $1 FOR UPDATE NOWAIT`, stepID)
+	require.NoError(t, err, "the step update locked the step row before the run row")
+	require.NoError(t, probe.Rollback())
+
+	require.NoError(t, purge.Commit())
+	require.NoError(t, testutil.RequireReceive(ctx, t, updated))
+	step, err := fdb.GetWorkflowStep(ctx, stepID)
+	require.NoError(t, err)
+	require.Equal(t, "reported", step.Status)
+}

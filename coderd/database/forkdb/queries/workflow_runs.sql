@@ -58,17 +58,23 @@ SELECT * FROM workflow_steps WHERE id = @id;
 -- and applies the NullRawMessage override. reused only sets the flag: a
 -- report from a step that a resume reused must not clear it. The write also
 -- stamps the run's updated_at, so a report to an interrupted run restarts the
--- run's retention clock in DeleteOldWorkflowRuns.
+-- run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+-- run update, so the run row is locked before the step row, the same order
+-- as the purge's cascade. Without the join Postgres may run the two updates
+-- in any order, and a report racing the purge could deadlock.
 WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = @id)
+    RETURNING workflow_runs.id
 )
 UPDATE workflow_steps
 SET status = @status, value = @value, error = @error,
-    reused = reused OR @reused,
+    reused = workflow_steps.reused OR @reused,
     finished_at = CASE WHEN @status::text IN ('reported', 'failed') THEN now() ELSE NULL END
-WHERE workflow_steps.id = @id;
+FROM run
+WHERE workflow_steps.id = @id
+    AND workflow_steps.run_id = run.id;
 
 -- name: GetWorkflowRunsByChat :many
 -- The run list of a chat, newest first, one keyset page. after_created_at

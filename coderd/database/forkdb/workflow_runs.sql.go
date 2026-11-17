@@ -471,12 +471,15 @@ WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = $5)
+    RETURNING workflow_runs.id
 )
 UPDATE workflow_steps
 SET status = $1, value = $2, error = $3,
-    reused = reused OR $4,
+    reused = workflow_steps.reused OR $4,
     finished_at = CASE WHEN $1::text IN ('reported', 'failed') THEN now() ELSE NULL END
+FROM run
 WHERE workflow_steps.id = $5
+    AND workflow_steps.run_id = run.id
 `
 
 type UpdateWorkflowStepParams struct {
@@ -492,7 +495,10 @@ type UpdateWorkflowStepParams struct {
 // and applies the NullRawMessage override. reused only sets the flag: a
 // report from a step that a resume reused must not clear it. The write also
 // stamps the run's updated_at, so a report to an interrupted run restarts the
-// run's retention clock in DeleteOldWorkflowRuns.
+// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+// run update, so the run row is locked before the step row, the same order
+// as the purge's cascade. Without the join Postgres may run the two updates
+// in any order, and a report racing the purge could deadlock.
 func (q *Queries) UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorkflowStep,
 		arg.Status,

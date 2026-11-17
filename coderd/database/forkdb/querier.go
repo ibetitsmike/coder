@@ -393,7 +393,10 @@ type Querier interface {
 	// and applies the NullRawMessage override. reused only sets the flag: a
 	// report from a step that a resume reused must not clear it. The write also
 	// stamps the run's updated_at, so a report to an interrupted run restarts the
-	// run's retention clock in DeleteOldWorkflowRuns.
+	// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
+	// run update, so the run row is locked before the step row, the same order
+	// as the purge's cascade. Without the join Postgres may run the two updates
+	// in any order, and a report racing the purge could deadlock.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
