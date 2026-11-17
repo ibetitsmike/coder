@@ -88,6 +88,11 @@ type Querier interface {
 	GetChatOrganizationTokenBudget(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationTokenBudget, error)
 	GetChatOrganizationWakeupCaps(ctx context.Context, organizationID uuid.UUID) (ChatOrganizationWakeupCap, error)
 	GetChatPinnedSkillsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatPinnedSkill, error)
+	// Returns the newest assistant messages of a chat that the user sees, below
+	// @before_id (0 for no bound), newest first. These are the rows upstream's
+	// latestSubagentAssistantMessage scans for a subagent's report, read a page
+	// at a time instead of the whole history.
+	GetChatReportMessages(ctx context.Context, arg GetChatReportMessagesParams) ([]GetChatReportMessagesRow, error)
 	// Answers expire after 24 hours; dbpurge deletes them with the same TTL.
 	GetChatSecretAnswersByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatSecretAnswer, error)
 	GetChatSubagentByChatID(ctx context.Context, chatID uuid.UUID) (ChatSubagent, error)

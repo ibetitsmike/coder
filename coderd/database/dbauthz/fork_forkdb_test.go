@@ -549,6 +549,14 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().CountChatFamilyMessagesSince(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
 			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(int64(2))
 		},
+		"GetChatReportMessages": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			arg := forkdb.GetChatReportMessagesParams{ChatID: chat.ID, LimitCount: 1}
+			rows := []forkdb.GetChatReportMessagesRow{{ID: 7, ContentVersion: 1}}
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetChatReportMessages(gomock.Any(), arg).Return(rows, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionRead).Returns(rows)
+		},
 		"DeleteChatFamilyMessagesBefore": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
 			arg := forkdb.DeleteChatFamilyMessagesBeforeParams{OrganizationID: chat.OrganizationID, SenderChatID: chat.ID, Before: dbtime.Now()}
