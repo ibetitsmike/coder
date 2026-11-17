@@ -31,14 +31,15 @@ func TestRetireDescendantQuestion(t *testing.T) {
 	answer := func(callID string) string {
 		return chatstate.QuestionAnswerPrefix + callID + ":\nThe user gave a secret answer."
 	}
-	update := func(t *testing.T, f *testFixture, chatID uuid.UUID, fn func(*chatstate.Tx, database.Store) error) {
+	update := func(t *testing.T, f *testFixture, chatID uuid.UUID, fn func(*chatstate.Tx, database.Store, *chatstate.ChatSnapshot) error) {
 		t.Helper()
 		ctx := testutil.Context(t, testutil.WaitShort)
-		require.NoError(t, chatstate.NewChatMachine(f.DB, f.Pub, chatID).Update(ctx, fn))
+		_, err := chatstate.NewChatMachine(f.DB, f.Pub, chatID).Update(ctx, fn)
+		require.NoError(t, err)
 	}
 	send := func(t *testing.T, f *testFixture, chatID uuid.UUID, text string, behavior chatstate.BusyBehavior) {
 		t.Helper()
-		update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+		update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 			_, err := tx.SendMessage(chatstate.SendMessageInput{
 				Message:      userTextMessage(text, f.User.ID, f.Model.ID),
 				BusyBehavior: behavior,
@@ -78,7 +79,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 					send(t, f, chatID, "use postgres", chatstate.BusyBehaviorQueue)
 				},
 				func(t *testing.T, f *testFixture, chatID uuid.UUID) {
-					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						res, err := tx.FinishTurn(chatstate.FinishTurnInput{})
 						if err == nil && len(res.PromotedMessages) != 1 {
 							err = xerrors.Errorf("promoted %d messages, want 1", len(res.PromotedMessages))
@@ -110,7 +111,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 					send(t, f, chatID, answer("call-other"), chatstate.BusyBehaviorQueue)
 				},
 				func(t *testing.T, f *testFixture, chatID uuid.UUID) {
-					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						_, err := tx.FinishTurn(chatstate.FinishTurnInput{})
 						return err
 					})
@@ -128,7 +129,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 			questions: hidden,
 			steps: []func(*testing.T, *testFixture, uuid.UUID){
 				func(t *testing.T, f *testFixture, chatID uuid.UUID) {
-					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						_, err := tx.ClearContext(chatstate.ClearContextInput{Messages: clearBoundaryMessages(t)})
 						return err
 					})
@@ -145,7 +146,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 					summary := userTextMessage("summary", f.User.ID, f.Model.ID)
 					summary.Visibility = database.ChatMessageVisibilityModel
 					summary.Compressed = true
-					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						_, err := tx.CommitStep(chatstate.CommitStepInput{Messages: []chatstate.Message{summary}})
 						return err
 					})
@@ -161,7 +162,7 @@ func TestRetireDescendantQuestion(t *testing.T) {
 				func(t *testing.T, f *testFixture, chatID uuid.UUID) {
 					note := userTextMessage("note", f.User.ID, f.Model.ID)
 					note.Visibility = database.ChatMessageVisibilityModel
-					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store) error {
+					update(t, f, chatID, func(tx *chatstate.Tx, _ database.Store, _ *chatstate.ChatSnapshot) error {
 						_, err := tx.CommitStep(chatstate.CommitStepInput{Messages: []chatstate.Message{note}})
 						return err
 					})
