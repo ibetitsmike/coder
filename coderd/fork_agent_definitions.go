@@ -189,6 +189,11 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 		}
 	} else if current.ID != (uuid.UUID{}) {
 		fa.diff(forkAuditUserAgentDefinition(current), forkAuditUserAgentDefinition(row))
+		if update.Content.Valid && update.Content.String != current.Content {
+			// The content is not in the audit view, so a changed prompt
+			// records that it changed without its values.
+			fa.secret("content")
+		}
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }

@@ -6,6 +6,8 @@ package coderd
 // project can change them. Everyone else gets 404.
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -146,7 +148,8 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		ProjectID: project.ID,
 		Name:      update.Name,
 	})
-	if err != nil {
+	readDenied := err != nil && httpapi.Is404Error(err)
+	if err != nil && !readDenied {
 		writeForkAgentDefinitionReadError(rw, err)
 		return
 	}
@@ -162,7 +165,24 @@ func (api *API) patchForkProjectAgentDefinition(rw http.ResponseWriter, r *http.
 		return
 	}
 	fa.target(api.forkAuditOrganization(ctx, project.OrganizationID), row.ID, row.Name)
-	fa.diff(forkAuditProjectAgentDefinition(current), forkAuditProjectAgentDefinition(row))
+	if readDenied {
+		// The read was denied but the update is allowed, for example for
+		// an update-only scoped token. The old values are unknown, so the
+		// entry records that the requested fields changed without them.
+		if update.Content.Valid {
+			fa.secret("content")
+		}
+		if update.Enabled.Valid {
+			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
+		}
+	} else {
+		fa.diff(forkAuditProjectAgentDefinition(current), forkAuditProjectAgentDefinition(row))
+		if update.Content.Valid && update.Content.String != current.Content {
+			// The content is not in the audit view, so a changed prompt
+			// records that it changed without its values.
+			fa.secret("content")
+		}
+	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
 
