@@ -4,15 +4,22 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/xerrors"
+
+	"cdr.dev/slog/v3/sloggers/slogtest"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
@@ -77,6 +84,39 @@ func (f *forkWorkflowFixture) peerServer(t *testing.T, clock quartz.Clock) *Serv
 	return newInternalTestServer(t, f.db, f.ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}),
 		withInternalTestServerClock(clock))
+}
+
+// failingStatusStore fails the terminal status writes of runs while fail
+// is set, the way a journal outage fails them.
+type failingStatusStore struct {
+	forkdb.Store
+	fail atomic.Bool
+}
+
+func (s *failingStatusStore) UpdateWorkflowRunStatus(
+	ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams,
+) (int64, error) {
+	if arg.Status != workflowStatusRunning && s.fail.Load() {
+		return 0, xerrors.New("journal outage")
+	}
+	return s.Store.UpdateWorkflowRunStatus(ctx, arg)
+}
+
+// failStatusWrites installs a failingStatusStore as the journal store of
+// server's db. Tests install it before the run starts, while no goroutine
+// reads server.db.
+func failStatusWrites(t *testing.T, server *Server) *failingStatusStore {
+	t.Helper()
+	inner, err := forkdb.From(server.db)
+	require.NoError(t, err)
+	failing := &failingStatusStore{Store: inner}
+	server.db = dbauthz.New(
+		&forkDBSwap{Store: server.db, fdb: failing},
+		rbac.NewStrictCachingAuthorizer(prometheus.NewRegistry()),
+		slogtest.Make(t, &slogtest.Options{IgnoreErrors: true}),
+		nil,
+	)
+	return failing
 }
 
 const ownerNeverReportsScript = `
@@ -300,6 +340,78 @@ func TestForkWorkflowOwnership(t *testing.T) {
 		assert.Equal(t, workflowStatusRunning, row.Status, "the lost owner wrote nothing")
 		assert.Equal(t, other.workflows.owner.id, row.OwnerID.UUID)
 		assert.Empty(t, row.Error)
+	})
+
+	// A run whose terminal write fails keeps its row alive: the heartbeat
+	// renews it and retries the write, so no sweep reopens a run that
+	// already ended.
+	t.Run("TerminalWriteRetries", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		ctx := chatdTestContext(t)
+		failing := failStatusWrites(t, f.server)
+		failing.fail.Store(true)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
+def main(args):
+    return "done"
+`})
+		waitWorkflowDone(ctx, t, run)
+		fdb := forkWorkflowDB(t, f.db)
+		require.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id),
+			"the failed write left the row running")
+
+		// The heartbeat keeps the row fresh while the journal is down, so
+		// another process's sweep leaves it alone.
+		advanceMockClockBy(ctx, t, mock, workflowStaleAfter+workflowHeartbeatInterval)
+		_ = f.peerServer(t, mock)
+		require.Equal(t, workflowStatusRunning, journalRunStatus(ctx, t, fdb, run.id),
+			"the heartbeat keeps the ended run from the sweep")
+
+		failing.fail.Store(false)
+		advanceMockClockBy(ctx, t, mock, workflowHeartbeatInterval)
+		row := journalRow(ctx, t, fdb, run.id)
+		assert.Equal(t, workflowStatusCompleted, row.Status, "the heartbeat retried the terminal write")
+		assert.Equal(t, f.server.workflows.owner.id, row.OwnerID.UUID)
+		assert.Empty(t, f.server.workflows.liveRuns(), "the run stops heartbeating once its end landed")
+	})
+
+	// A stop on the process that held a run another process claimed since
+	// the last heartbeat must not stop the local copy: it confirms the
+	// ownership first and reaches the new owner over pubsub.
+	t.Run("StopOnALostRunReachesTheNewOwner", func(t *testing.T) {
+		t.Parallel()
+		f, mock := newForkWorkflowFixtureWithClock(t)
+		ctx := chatdTestContext(t)
+		parent := f.parentStatus(ctx, t, database.ChatStatusRunning)
+		run := f.start(ctx, t, parent, runWorkflowArgs{Script: ownerNeverReportsScript})
+		f.steps(ctx, t, run, 1)
+		fdb := forkWorkflowDB(t, f.db)
+
+		ageWorkflowHeartbeats(t, f.server)
+		other := f.peerServer(t, mock)
+		require.Equal(t, workflowStatusInterrupted, journalRunStatus(ctx, t, fdb, run.id))
+		resumed, err := other.startWorkflowRun(ctx, parent, f.model.ID,
+			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
+		require.NoError(t, err)
+		f.steps(ctx, t, resumed, 1)
+
+		poll := mock.Trap().NewTicker("chatd", "workflow_stop_poll")
+		defer poll.Close()
+		errc := make(chan error, 1)
+		go func() { errc <- f.server.ForkStopWorkflowRun(ctx, parent.ID, run.id) }()
+		poll.MustWait(ctx).MustRelease(ctx)
+
+		waitWorkflowDone(ctx, t, resumed)
+		assert.Equal(t, workflowStatusStopped, resumed.snapshot().Status)
+		row := journalRow(ctx, t, fdb, run.id)
+		assert.Equal(t, workflowStatusStopped, row.Status)
+		assert.Equal(t, other.workflows.owner.id, row.OwnerID.UUID, "the new owner journaled the stop")
+
+		mock.Advance(workflowStopPollInterval).MustWait(ctx)
+		require.NoError(t, testutil.RequireReceive(ctx, t, errc))
+		waitWorkflowDone(ctx, t, run)
+		assert.Nil(t, f.server.workflows.get(run.id), "the old copy left the registry as lost")
 	})
 
 	// Close releases the runs the process owns: they read interrupted at

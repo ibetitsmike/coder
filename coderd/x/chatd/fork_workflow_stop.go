@@ -50,17 +50,11 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 		if run.parent.ID != chatID {
 			return ErrForkWorkflowRunNotFound
 		}
-		if !run.requestStop() {
-			return ErrForkWorkflowRunTerminal
+		if err := p.stopHeldRun(ctx, run); !errors.Is(err, errWorkflowRunLost) {
+			return err
 		}
-		// The script goroutine journals the stopped status, fails the open
-		// steps and interrupts their children as it unwinds. Wait briefly,
-		// so the API answers a snapshot that already says stopped.
-		select {
-		case <-run.done:
-		case <-p.clock.NewTimer(workflowStopTimeout, "chatd", "workflow_stop").C:
-		}
-		return nil
+		// Another process took the run since this one last renewed its
+		// heartbeat. The journal names the new owner.
 	}
 
 	// The registry does not hold the run: either it ended (the journal says
@@ -100,6 +94,33 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 		return ErrForkWorkflowRunTerminal
 	}
 	return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
+}
+
+// stopHeldRun stops a run of the registry. It confirms the ownership of a
+// live run first: a run that another process claimed since the last
+// heartbeat returns errWorkflowRunLost, and the caller stops it through
+// the journal and its new owner.
+func (p *Server) stopHeldRun(ctx context.Context, run *workflowRun) error {
+	run.mu.Lock()
+	live := run.result == nil && !run.lost
+	run.mu.Unlock()
+	if live && !run.confirmOwnership(ctx) && !run.isLost() {
+		return xerrors.New("confirm the ownership of the workflow run: the journal could not be read")
+	}
+	if run.isLost() {
+		return errWorkflowRunLost
+	}
+	if !run.requestStop() {
+		return ErrForkWorkflowRunTerminal
+	}
+	// The script goroutine journals the stopped status, fails the open
+	// steps and interrupts their children as it unwinds. Wait briefly,
+	// so the API answers a snapshot that already says stopped.
+	select {
+	case <-run.done:
+	case <-p.clock.NewTimer(workflowStopTimeout, "chatd", "workflow_stop").C:
+	}
+	return nil
 }
 
 // stopJournaledRun stops a run that this replica claimed from a dead owner.

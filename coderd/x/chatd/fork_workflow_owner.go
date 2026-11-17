@@ -86,7 +86,9 @@ func (e *workflowRunElsewhereError) Error() string {
 	return "another chatd process runs the workflow run " + e.result.RunID
 }
 
-// liveRuns returns the runs whose script this process still executes.
+// liveRuns returns the runs whose script this process still executes, and
+// the ended runs whose terminal journal write is still pending: their rows
+// stay running until the write lands.
 func (g *workflowRegistry) liveRuns() []*workflowRun {
 	g.mu.Lock()
 	runs := make([]*workflowRun, 0, len(g.runs))
@@ -97,12 +99,33 @@ func (g *workflowRegistry) liveRuns() []*workflowRun {
 	live := runs[:0]
 	for _, run := range runs {
 		run.mu.Lock()
-		if run.result == nil && !run.lost {
+		if (run.result == nil && !run.lost) || run.terminalPending {
 			live = append(live, run)
 		}
 		run.mu.Unlock()
 	}
 	return live
+}
+
+// retryTerminalWrite journals the end of a run whose terminal write
+// failed. A fenced write clears the flag too: the row belongs to another
+// process now.
+func (r *workflowRun) retryTerminalWrite(ctx context.Context) {
+	r.mu.Lock()
+	if !r.terminalPending {
+		r.mu.Unlock()
+		return
+	}
+	res := *r.result
+	r.mu.Unlock()
+	_, err := r.p.workflowJournal().writeRunStatus(ctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
+	if err != nil {
+		r.p.logger.Warn(ctx, "journal the end of a workflow run", slog.F("workflow_id", r.id), slog.Error(err))
+		return
+	}
+	r.mu.Lock()
+	r.terminalPending = false
+	r.mu.Unlock()
 }
 
 // removeRun drops run from the registry unless another run took its place.
@@ -184,6 +207,11 @@ func (p *Server) forkCloseWorkflowJournal() {
 	//nolint:gocritic // The release runs after the server context ended.
 	ctx, stop := context.WithTimeout(dbauthz.AsSystemRestricted(context.Background()), workflowReleaseTimeout)
 	defer stop()
+	// A run that ended but could not journal it gets one more try: the
+	// release would leave it open for a resume to execute again.
+	for _, run := range p.workflows.liveRuns() {
+		run.retryTerminalWrite(ctx)
+	}
 	n, err := p.workflowJournal().releaseRuns(ctx)
 	if err != nil {
 		p.logger.Warn(ctx, "release workflow runs", slog.Error(err))
@@ -214,8 +242,10 @@ func (p *Server) workflowHeartbeatTick(ctx context.Context) {
 			}
 			for _, run := range runs {
 				if _, ok := owned[run.id]; !ok {
-					run.recheckOwnership(jctx)
+					_, _ = run.recheckOwnership(jctx)
+					continue
 				}
+				run.retryTerminalWrite(jctx)
 			}
 		}
 	}
@@ -230,31 +260,48 @@ func (p *Server) workflowHeartbeatTick(ctx context.Context) {
 }
 
 // confirmOwnership renews the heartbeat of one run and reports whether this
-// process still owns it. A failed read assumes ownership, the way the run
-// behaved before owners existed.
+// process still owns it. A failed read answers false without marking the
+// run lost: the caller skips work that would touch child chats another
+// owner may hold by now.
 func (r *workflowRun) confirmOwnership(ctx context.Context) bool {
 	kept, err := r.p.workflowJournal().heartbeat(journalCtx(ctx), []uuid.UUID{r.id})
-	if err != nil || len(kept) == 1 {
+	if err != nil {
+		return false
+	}
+	if len(kept) == 1 {
 		return true
 	}
-	return r.recheckOwnership(journalCtx(ctx))
+	owned, err := r.recheckOwnership(journalCtx(ctx))
+	return err == nil && owned
 }
 
 // recheckOwnership reads the row of a run that the heartbeat missed. The
 // run is lost when another process owns it or a sweep interrupted it. A
 // terminal row of this owner is the run's own end, which landed before the
 // result did.
-func (r *workflowRun) recheckOwnership(ctx context.Context) bool {
+func (r *workflowRun) recheckOwnership(ctx context.Context) (bool, error) {
 	row, found, err := r.p.workflowJournal().getRun(ctx, r.id)
-	if err != nil || !found {
-		return true
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return true, nil
 	}
 	if row.OwnerID.Valid && row.OwnerID.UUID == r.p.workflows.owner.id &&
 		row.Status != workflowStatusInterrupted {
-		return true
+		if row.Status != workflowStatusRunning {
+			// The terminal write landed after all.
+			r.mu.Lock()
+			r.terminalPending = false
+			r.mu.Unlock()
+		}
+		return true, nil
 	}
 	r.markLost()
-	return false
+	r.mu.Lock()
+	r.terminalPending = false
+	r.mu.Unlock()
+	return false, nil
 }
 
 // markLost cancels the script of a run that another process took over or

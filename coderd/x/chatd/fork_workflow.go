@@ -321,6 +321,10 @@ type workflowRegistry struct {
 	mu    sync.Mutex
 	runs  map[uuid.UUID]*workflowRun
 	owner workflowOwnership
+	// resumeMu serializes the claim and the rehydration of the resumes of
+	// this process (fork_workflow_journal.go): both callers of one run
+	// would pass the claim, which accepts the runs this process owns.
+	resumeMu sync.Mutex
 }
 
 func (g *workflowRegistry) get(id uuid.UUID) *workflowRun {
@@ -453,6 +457,10 @@ type workflowRun struct {
 	// interrupted (fork_workflow_owner.go). Its script is canceled, and
 	// finish ends it without a journal write or an end message.
 	lost bool
+	// terminalPending marks a run whose terminal journal write failed. The
+	// heartbeat keeps its row alive and retries the write
+	// (fork_workflow_owner.go). mu guards the field.
+	terminalPending bool
 }
 
 func (p *Server) startWorkflowRun(
@@ -709,15 +717,22 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	}
 	// finish runs on the script goroutine, so the phase state it snapshots
 	// cannot change while the write starts: phase() runs on this goroutine.
-	// A fenced write means another process owns the run now.
-	if r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot()) {
+	// A fenced write means another process owns the run now. A failed
+	// write leaves the row running: the heartbeat keeps it alive and
+	// retries the write, so a sweep cannot reopen a run that ended.
+	fenced, err := r.p.workflowJournal().writeRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
+	if fenced {
 		r.markLost()
 		r.finishLost()
 		return
 	}
+	if err != nil {
+		r.p.logger.Warn(ctx, "journal the end of a workflow run", slog.F("workflow_id", r.id), slog.Error(err))
+	}
 
 	r.mu.Lock()
 	r.result = &res
+	r.terminalPending = err != nil && jctx.Err() == nil
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()

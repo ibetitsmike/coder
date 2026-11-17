@@ -127,17 +127,29 @@ func (j workflowJournal) updateRunStatus(
 	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
 	phases *workflowPhases,
 ) (fenced bool) {
+	fenced, err := j.writeRunStatus(ctx, id, status, errText, result, phases)
+	if err != nil {
+		j.warn(ctx, "journal workflow run status", id, err)
+	}
+	return fenced
+}
+
+// writeRunStatus is updateRunStatus with the error of a failed write, for
+// the terminal write of a run, which the heartbeat retries
+// (fork_workflow_owner.go).
+func (j workflowJournal) writeRunStatus(
+	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
+	phases *workflowPhases,
+) (fenced bool, err error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
-		j.warn(ctx, "open workflow journal store", id, err)
-		return false
+		return false, xerrors.Errorf("open workflow journal store: %w", err)
 	}
 	var raw json.RawMessage
 	if result != nil {
 		data, marshalErr := json.Marshal(result)
 		if marshalErr != nil {
-			j.warn(ctx, "marshal workflow run result", id, marshalErr)
-			return false
+			return false, xerrors.Errorf("marshal workflow run result: %w", marshalErr)
 		}
 		raw = data
 	}
@@ -154,10 +166,9 @@ func (j workflowJournal) updateRunStatus(
 	}
 	rows, err := fdb.UpdateWorkflowRunStatus(journalCtx(ctx), params)
 	if err != nil {
-		j.warn(ctx, "journal workflow run status", id, err)
-		return false
+		return false, err
 	}
-	return rows == 0
+	return rows == 0, nil
 }
 
 // updateRunPhases journals the phase state of a live run, best effort like
@@ -501,11 +512,14 @@ func (p *Server) resumeWorkflowRun(
 	// The claim makes the row running and owned by this process before the
 	// script starts, so a crash during the resume leaves the row resumable
 	// once the heartbeat goes stale.
+	p.workflows.resumeMu.Lock()
 	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
 	if err != nil {
+		p.workflows.resumeMu.Unlock()
 		return nil, xerrors.Errorf("claim the workflow run: %w", err)
 	}
 	if !ok {
+		p.workflows.resumeMu.Unlock()
 		return p.resumeUnclaimedWorkflowRun(ctx, chat, row.ID)
 	}
 	row = claimed
@@ -517,9 +531,12 @@ func (p *Server) resumeWorkflowRun(
 			p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusInterrupted, "resume the run: "+err.Error(), nil,
 				&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 		}
+		p.workflows.resumeMu.Unlock()
 		return nil, err
 	}
-	if _, added := p.workflows.add(run); !added {
+	_, added := p.workflows.add(run)
+	p.workflows.resumeMu.Unlock()
+	if !added {
 		// Another caller resumed the same run first.
 		return p.workflows.get(row.ID), nil
 	}
