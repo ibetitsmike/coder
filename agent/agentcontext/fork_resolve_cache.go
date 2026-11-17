@@ -202,7 +202,7 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 		return snap, pass
 	}
 	genAfter, covered := watcher.coverage()
-	if !covered || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq || !watcher.reportsWritesTo(links) {
+	if !covered || mixed || genAfter != watchGen || m.resolveCache.seq.Load() != seq || !watcher.reportsWritesTo(links) || hasUnreadableFile(snap) {
 		// This pass read the files as they are now and cannot be cached.
 		// An older entry with the same key can predate a change whose
 		// event has not arrived yet, so it goes too.
@@ -219,6 +219,22 @@ func (m *Manager) resolvePass(ctx context.Context, resolver *Resolver, roots []S
 	}
 	m.resolveCache.store(resolveCacheEntry{caps: caps, roots: slices.Clone(roots), rootDirs: rootDirs, seq: seq, watchGen: watchGen, epoch: epoch, snap: snap, pass: pass, links: links})
 	return snap, pass
+}
+
+// hasUnreadableFile reports whether a pass failed to read a file it found.
+// The failure can be transient, such as EMFILE or an I/O error on a network
+// filesystem, and no event follows when it clears, so such a pass is not
+// cached and the next connection reads again. MCP servers that failed to
+// connect are left out: the MCP reconnect before a hit retries them.
+func hasUnreadableFile(snap Snapshot) bool {
+	for _, resources := range [][]Resource{snap.Resources, snap.ScopedRules} {
+		for _, r := range resources {
+			if r.Status == StatusUnreadable && r.Kind != KindMCPServer && r.Kind != KindACPHarness {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resyncCached is Resync for the push loop: it republishes a cached result
@@ -298,10 +314,13 @@ func (m *Manager) publishCached(ctx context.Context) (Snapshot, bool) {
 		hook()
 	}
 	// A change signal after the loads above leaves the old entry in place
-	// until a pass replaces it. A capability change bumps no sequence, so
-	// the capabilities are compared again right before the negotiation
-	// state is read.
-	if !ok || entry.pass != found.pass || m.resolveCache.seq.Load() != seq || m.resolveCaps() != caps {
+	// until a pass replaces it, and an event the watcher scheduled has not
+	// signaled yet. A capability change bumps no sequence, so the
+	// capabilities are compared again right before the negotiation state
+	// is read. Watcher.mu nests inside m.mu: the watcher never takes m.mu.
+	genNow, coveredNow := watcher.coverage()
+	if !ok || entry.pass != found.pass || m.resolveCache.seq.Load() != seq || m.resolveCaps() != caps ||
+		!coveredNow || genNow != watchGen {
 		m.mu.Unlock()
 		return Snapshot{}, false
 	}

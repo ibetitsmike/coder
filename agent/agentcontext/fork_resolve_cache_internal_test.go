@@ -283,6 +283,78 @@ func TestPublishCached_MissesAfterCapabilityChange(t *testing.T) {
 	require.False(t, published.Load(), "a publish that raced a capability change")
 }
 
+// An event that the watcher scheduled after publishCached read the watch
+// generation stops the publish, though its debounce has not signaled yet.
+func TestPublishCached_MissesAfterScheduledEvent(t *testing.T) {
+	t.Parallel()
+	m, w, roots := readyCacheManager(t, t.TempDir(), ManagerOptions{})
+	ctx := testutil.Context(t, testutil.WaitShort)
+	var scheduled atomic.Bool
+	m.resolveCache.afterLockedLookup = func() {
+		if _, ok := cachedFor(m, w, roots); ok && scheduled.CompareAndSwap(false, true) {
+			w.schedule()
+		}
+	}
+	var published atomic.Bool
+	require.Eventually(t, func() bool {
+		if _, ok := m.publishCached(ctx); ok && scheduled.Load() {
+			published.Store(true)
+		}
+		if !scheduled.Load() {
+			// Events under the home directory can keep a pass from caching.
+			_, _ = m.Resync(ctx)
+		}
+		return scheduled.Load()
+	}, testutil.WaitShort, testutil.IntervalFast)
+	require.False(t, published.Load(), "a publish that raced a scheduled event")
+}
+
+// A pass that could not read a file it found is not cached: the failure can
+// be transient and no event follows when it clears. An MCP server that
+// failed to connect does not stop caching, since the reconnect before a hit
+// retries it.
+func TestResolvePass_UnreadableFileIsNotCached(t *testing.T) {
+	t.Parallel()
+	t.Run("File", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("file permissions are not POSIX modes on Windows")
+		}
+		if os.Geteuid() == 0 {
+			t.Skip("root reads files without read permission")
+		}
+		dir := t.TempDir()
+		writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1", "CLAUDE.md": "v1"})
+		require.NoError(t, os.Chmod(filepath.Join(dir, "AGENTS.md"), 0))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "AGENTS.md"), 0o600) })
+		roots := []ScanRoot{{Path: dir}}
+		m, w := advertisedCacheManager(t, ManagerOptions{}, roots)
+		snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+		require.True(t, slices.ContainsFunc(snap.Resources, func(r Resource) bool {
+			return r.Status == StatusUnreadable && filepath.Base(r.Source) == "AGENTS.md"
+		}), "the pass reports AGENTS.md unreadable")
+		_, ok := cachedFor(m, w, roots)
+		require.False(t, ok, "a pass with an unreadable file is not cached")
+	})
+	t.Run("MCPServer", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writePackFiles(t, dir, map[string]string{"AGENTS.md": "v1"})
+		roots := []ScanRoot{{Path: dir}}
+		m, w := advertisedCacheManager(t, ManagerOptions{
+			MCPCatalog: func() []MCPServerStatus {
+				return []MCPServerStatus{{Name: "down", Err: "connection refused"}}
+			},
+		}, roots)
+		snap, _ := m.resolvePass(context.Background(), m.resolver, roots, w, 0)
+		require.True(t, slices.ContainsFunc(snap.Resources, func(r Resource) bool {
+			return r.Kind == KindMCPServer && r.Status == StatusUnreadable
+		}), "the pass reports the server unreadable")
+		_, ok := cachedFor(m, w, roots)
+		require.True(t, ok, "a failed MCP server does not stop caching")
+	})
+}
+
 // A completed pass that cannot be cached read the files as they are now, so
 // an older entry for the same state goes: here AGENTS.md became a link
 // whose target the watcher drops writes to, and no change signal reached
