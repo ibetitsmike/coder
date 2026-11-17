@@ -465,6 +465,7 @@ func TestWakeupAdmissionRaces(t *testing.T) {
 				Content:       content.RawMessage,
 				ModelConfigID: uuid.NullUUID{UUID: f.model.ID, Valid: true},
 				CreatedBy:     chat.OwnerID,
+				BusyBehavior:  database.ChatBusyBehaviorQueue,
 			})
 			assert.NoError(t, err)
 			_, _ = rw.Write([]byte(`{}`))

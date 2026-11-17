@@ -367,7 +367,8 @@ func TestSecretQuestionRefusesSubagentMessage(t *testing.T) {
 	// A decline must not delete the value that a queued report delivers.
 	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call ` + callID + `:\nThe user gave a secret answer."}]`),
-		CreatedBy: child.OwnerID,
+		CreatedBy:    child.OwnerID,
+		BusyBehavior: database.ChatBusyBehaviorQueue,
 	})
 	require.NoError(t, err)
 	require.ErrorIs(t, send(WithSecretAnswerDecline(ctx, callID)), ErrSecretAnswerQueued)
@@ -424,7 +425,8 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	// question, and the message would answer it without the value.
 	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"queued"}]`),
-		CreatedBy: child.OwnerID,
+		CreatedBy:    child.OwnerID,
+		BusyBehavior: database.ChatBusyBehaviorQueue,
 	})
 	require.NoError(t, err)
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_queued", Input: secretInput})
@@ -450,7 +452,8 @@ func TestDescendantSecretQuestion(t *testing.T) {
 	// answer that question.
 	_, err = f.db.InsertChatQueuedMessageWithCreator(ctx, database.InsertChatQueuedMessageWithCreatorParams{
 		ChatID: child.ID, Content: json.RawMessage(`[{"type":"text","text":"Answer to ask_user_question call call_on:\nThe user gave a secret answer."}]`),
-		CreatedBy: child.OwnerID,
+		CreatedBy:    child.OwnerID,
+		BusyBehavior: database.ChatBusyBehaviorQueue,
 	})
 	require.NoError(t, err)
 	resp, err = on.Run(ctx, fantasy.ToolCall{ID: "call_ordinary", Input: descendantQuestionInput})
