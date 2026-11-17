@@ -188,12 +188,17 @@ func TestDeleteOldWorkflowRuns(t *testing.T) {
 		// A live replica still writes a running run, however old.
 		{"old_running", "running", now.Add(-31 * 24 * time.Hour)},
 		{"recent_completed", "completed", now.Add(-29 * 24 * time.Hour)},
+		// A step report to an interrupted run restarts its retention clock.
+		{"reported_interrupted", "interrupted", now.Add(-31 * 24 * time.Hour)},
 	}
-	var oldRunID uuid.UUID
+	var oldRunID, reportedRunID uuid.UUID
 	for _, run := range runs {
 		id := uuid.New()
-		if run.script == "old_completed" {
+		switch run.script {
+		case "old_completed":
 			oldRunID = id
+		case "reported_interrupted":
+			reportedRunID = id
 		}
 		require.NoError(t, fdb.InsertWorkflowRun(ctx, forkdb.InsertWorkflowRunParams{
 			ID: id, ChatID: chat.ID, ModelConfigID: model.ID, Script: run.script, Args: json.RawMessage(`{}`), Status: run.status,
@@ -204,6 +209,13 @@ func TestDeleteOldWorkflowRuns(t *testing.T) {
 	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
 		ID: uuid.New(), RunID: oldRunID, SpecKey: "step", Status: "reported",
 	}))
+	reportedStepID := uuid.New()
+	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+		ID: reportedStepID, RunID: reportedRunID, SpecKey: "step", Status: "running",
+	}))
+	require.NoError(t, fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{
+		ID: reportedStepID, Status: "reported",
+	}))
 
 	done := awaitDoTick(ctx, t, clk)
 	closer := dbpurge.New(ctx, logger, db, &codersdk.DeploymentValues{}, prometheus.NewRegistry(), dbpurge.WithClock(clk))
@@ -211,7 +223,7 @@ func TestDeleteOldWorkflowRuns(t *testing.T) {
 	<-done
 
 	scripts := queryForkStrings(ctx, t, sqlDB, `SELECT script FROM workflow_runs WHERE chat_id = $1 ORDER BY script`, chat.ID)
-	require.Equal(t, []string{"old_running", "recent_completed"}, scripts,
+	require.Equal(t, []string{"old_running", "recent_completed", "reported_interrupted"}, scripts,
 		"the purge deletes the ended and interrupted runs older than 30 days")
 	steps := queryForkStrings(ctx, t, sqlDB, `SELECT spec_key FROM workflow_steps WHERE run_id = $1`, oldRunID)
 	require.Empty(t, steps, "the steps of a purged run cascade")
