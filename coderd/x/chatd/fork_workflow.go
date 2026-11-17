@@ -273,8 +273,9 @@ func (serialWorkflowTool) SerialToolCalls() bool { return true }
 // checkWorkflowArgsSize bounds the args input at maxWorkflowArgsBytes, the
 // script cap, for an inline and a named run alike. rawArgs is args as the
 // caller sent them; a call that skips the tool decode, such as a test,
-// marshals the Go value instead. A resumed run replays the journaled args,
-// which passed this check when it started.
+// marshals the Go value instead. Fresh runs only: a journal row belongs to
+// a run that already passed this check when it started, so a legacy row
+// written by an older version replays its args unexamined.
 func checkWorkflowArgsSize(args runWorkflowArgs) error {
 	data := args.rawArgs
 	if len(data) == 0 && args.Args != nil {
@@ -502,9 +503,6 @@ func (p *Server) startWorkflowRun(
 	if len(args.Script) > maxScriptBytes {
 		return nil, xerrors.Errorf("the script is %d bytes; at most %d bytes are allowed", len(args.Script), maxScriptBytes)
 	}
-	if err := checkWorkflowArgsSize(args); err != nil {
-		return nil, err
-	}
 	runID := workflowRunID(callID)
 	if strings.TrimSpace(args.ResumeRunID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(args.ResumeRunID))
@@ -539,6 +537,13 @@ func (p *Server) startWorkflowRun(
 			return nil, xerrors.New("the run belongs to another chat")
 		}
 		return p.resumeWorkflowRun(ctx, chat, row)
+	}
+	// Only a fresh run reads new args, so the cap sits after the journal
+	// lookup: a journaled run replays the args it holds, which passed the
+	// cap when it started, and a legacy row from an older version replays
+	// unexamined instead of failing an otherwise resumable run.
+	if err := checkWorkflowArgsSize(args); err != nil {
+		return nil, err
 	}
 	if name := strings.TrimSpace(args.Name); name != "" {
 		if args.Script != "" {
